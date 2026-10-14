@@ -9,10 +9,15 @@ is also read, for imported CC-plugin commands).
 
 This module is framework-internal and is never registered on the `ava.*`
 namespace; the expansion machinery is an implementation detail. The web Composer sends the
-raw `/<name> <free text>` a human typed; `expand_command` rewrites it (here, in
+raw `/<name> <free text>` a human typed; `expand_command` rewrites it (in
 the agent's claim node, before the message is wrapped for the model) into the
 final prompt. The model only ever sees that expanded string. The gateway reuses
 `discover_commands` to feed the `/`-autocomplete.
+
+The module never reads the installed skills itself: every function that needs them takes the
+`Skill` list as an argument, and `CommandCatalog` binds one source of that list (the process's
+`ava.skills.names`, handed over by the composition root) to `discover` and `expand`. The agent's
+claim node receives the catalog through `AvaContext.commands`.
 
 **One send is one message.** A caller may invoke several commands at once
 (`/recap the week /compact`), and the whole chain expands *inside that single
@@ -32,7 +37,7 @@ that is the prompt's meaning playing out, not a case for the mechanism to
 predict, intercept, or warn about.
 
 Commands are also sendable **agent-to-agent**: any chat inbound runs through
-`expand_command` in the receiver's claim node (`agent/graph/claim/node.py`), so
+`CommandCatalog.expand` in the receiver's claim node (`agent/graph/claim/node.py`), so
 `ava.agents.send_message(peer, "/demo:brainstorming …")` (or
 `spawn(prompt=…)`) delivers a *named, described* intent — a command is an
 addressable prompt function, not just a human UI macro. Peers discover the
@@ -43,8 +48,8 @@ message ("Agent 5:" for peers; the bare "[ts]" header for the user).
 
 Namespace: the composer identifier mirrors the skill namespace tree
 (`ava/skills/__init__.py`) — bare for built-ins, `plugin:name` for a plugin's, `a:b:name`
-for deeper folder nesting (`:`-joined, like `skills.identifier`). A skill-as-command's name is
-`skills.identifier(skill)` and its `skill_target` is `skills.target(skill)`.
+for deeper folder nesting (`:`-joined, like `tree.identifier`). A skill-as-command's name is
+`identifier(skill)` and its `skill_target` is `target(skill)`.
 
 Discovery sources (later overrides earlier on name collision):
   0. every active skill, as `/[ns.]<skill>`      — skill-as-command (lowest)
@@ -55,8 +60,8 @@ Discovery sources (later overrides earlier on name collision):
   5. `<skill-dir>/commands/<name>.md`            — skill-carried (under the
                                                    carrying skill's namespace path)
 
-Sources 5 and 0 walk the *active* skill set (`ava.skills.names()`), inheriting
-its install-registry gating. Source 0 gives every skill a same-named
+Sources 5 and 0 walk the *active* skill set the caller passes (`ava.skills.names()` in the
+processes that serve commands), inheriting its install-registry gating. Source 0 gives every skill a same-named
 `/`-command for free; an explicit command file overrides it.
 
 A skill-as-command expands *differently* from a prompt-template command: rather
@@ -68,15 +73,17 @@ truth, references and all.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, TypedDict
 
-from ava import skills
 from base.config import settings
 from base.host.runtime_interpreter import external_plugin_read_root
 from base.log import logger
 from base.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
 from base.packages.skills.names import display_name, match_key
+from base.packages.skills.tree import Skill, identifier, target
 from base.paths import ava_home, repo_plugins_dir, repo_root
 
 
@@ -128,7 +135,7 @@ class Command(TypedDict):
     skill_target: str | None
 
 
-def command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
+def command_dirs(skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
     """`(commands_dir, base_namespace)` pairs in override order (see module
     docstring). `base_namespace` is `()` for built-ins / overlay, `(plugin,)` for a
     plugin's bundled dir, and the carrying skill's full namespace path for a
@@ -144,7 +151,7 @@ def command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
                 for p in sorted(base.iterdir())
                 if p.is_dir() and not p.name.startswith((".", "_"))
             )
-    for sk in skills.names():
+    for sk in skills:
         dirs.append((Path(sk["path"]) / "commands", (*sk["namespace"], sk["name"])))
     return dirs
 
@@ -173,7 +180,7 @@ def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
         # Canonical display spelling: dash for every segment (a plugin's
         # namespace is its directory name — `ava_fleet`, a Python package dir —
         # and the skill tree may hold legacy underscore folders), and `:`
-        # between segments, exactly like skills.identifier() renders
+        # between segments, exactly like tree.identifier() renders
         # skill-as-commands (`ava-memory:consolidation`, `web-ai:deep-research`). Inbound
         # matching still folds either spelling (split_commands -> match_key),
         # so nothing breaks.
@@ -190,7 +197,7 @@ def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     return out
 
 
-def skill_commands() -> dict[str, Command]:
+def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
     """Every active skill as a same-named command (source 0, lowest priority).
 
     The command name is the skill's `:`-identifier (e.g. `demo:brainstorming`);
@@ -198,19 +205,19 @@ def skill_commands() -> dict[str, Command]:
     it into a load-and-follow instruction rather than inlining a body.
     """
     out: dict[str, Command] = {}
-    for sk in skills.names():
-        ident = skills.identifier(sk)
+    for sk in skills:
+        ident = identifier(sk)
         out[ident] = {
             "name": ident,
             "description": sk["description"],
             "instruction_hint": "",
             "body": "",
-            "skill_target": skills.target(sk),
+            "skill_target": target(sk),
         }
     return out
 
 
-def discover_commands() -> list[Command]:
+def discover_commands(skills: Sequence[Skill]) -> list[Command]:
     """All composer commands across every source, deduped by name (later
     source wins) and sorted by name. Skill-as-commands (source 0) seed the map
     first, so an explicit command file overrides a same-named skill.
@@ -218,8 +225,8 @@ def discover_commands() -> list[Command]:
     Empty when the command module is disabled (settings.agent.commands_enabled)."""
     if not _commands_enabled():
         return []
-    out: dict[str, Command] = skill_commands()
-    for d, base_ns in command_dirs():
+    out: dict[str, Command] = skill_commands(skills)
+    for d, base_ns in command_dirs(skills):
         out.update(scan_dir(d, base_ns))
     return [out[name] for name in sorted(out)]
 
@@ -241,7 +248,7 @@ class Invocation(NamedTuple):
 _INVOCATION = re.compile(r"(?:\A|(?<=\s))/(\S+)")
 
 
-def split_commands(content: str) -> list[Invocation] | None:
+def split_commands(content: str, commands: Sequence[Command]) -> list[Invocation] | None:
     """Split a raw `/`-message into the chain of commands it invokes.
 
     A message enters command parsing only when it *starts* with a known command
@@ -257,7 +264,7 @@ def split_commands(content: str) -> list[Invocation] | None:
     # Match through the dash/underscore/colon fold so every spelling of a
     # command name resolves (`/demo.brainstorming` and `/demo:brainstorming`
     # both hit the `demo:brainstorming` command).
-    catalog = {match_key(c["name"]): c for c in discover_commands()}
+    catalog = {match_key(c["name"]): c for c in commands}
     hits = [
         (m.start(), m.group(1), catalog[match_key(m.group(1))])
         for m in _INVOCATION.finditer(content)
@@ -293,9 +300,9 @@ def _expand_one(inv: Invocation) -> str:
     return out
 
 
-def expand_command(content: str) -> str:
+def expand_command(content: str, commands: Sequence[Command]) -> str:
     """Rewrite a raw `/<name> <free text>` composer message into the prompt the
-    model sees.
+    model sees, given the `commands` that are registered.
 
     One message may invoke several commands (`/recap the week /compact`).
     Each is expanded exactly as it would be alone — in the order typed, with
@@ -304,14 +311,33 @@ def expand_command(content: str) -> str:
     refused: what two prompts mean together is for the agent reading them to
     work out.
 
-    Leaves the text untouched when the command module is disabled
-    (settings.agent.commands_enabled), when it isn't a `/`-command, or when the
-    leading name doesn't match a known command (so a stray leading slash is
-    harmless).
+    Leaves the text untouched when it isn't a `/`-command, or when the leading
+    name doesn't match a known command (so a stray leading slash is harmless).
     """
-    if not _commands_enabled() or not content.startswith("/"):
+    if not content.startswith("/"):
         return content
-    chain = split_commands(content)
+    chain = split_commands(content, commands)
     if chain is None:
         return content
     return "\n\n".join(_expand_one(inv) for inv in chain)
+
+
+@dataclass(frozen=True)
+class CommandCatalog:
+    """The composer commands one process serves, over the installed skills its `skills` returns.
+
+    A composition root builds it (`CommandCatalog(skills=ava.skills.names)`) and hands it to
+    whoever lists or expands commands; `discover` and `expand` read the skill list and the command
+    files afresh on each call. Both are empty and pass-through when the command module is
+    disabled (`settings.agent.commands_enabled`).
+    """
+
+    skills: Callable[[], Sequence[Skill]]
+
+    def discover(self) -> list[Command]:
+        """All composer commands, deduped by name and sorted; see `discover_commands`."""
+        return discover_commands(self.skills())
+
+    def expand(self, content: str) -> str:
+        """The prompt a raw composer message expands to; see `expand_command`."""
+        return expand_command(content, self.discover())

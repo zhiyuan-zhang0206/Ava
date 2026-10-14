@@ -520,7 +520,8 @@ def test_install_claude_code_plugin_commands_surface(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    from ava.skills.composer_commands import discover_commands
+    from ava import skills
+    from base.packages.composer_commands import CommandCatalog
 
     # commands-only plugin: no skills/agents/mcp, just commands/
     url = _make_claude_code_plugin_repo(
@@ -539,9 +540,8 @@ def test_install_claude_code_plugin_commands_surface(
 
     # commands/ copied verbatim into the overlay
     assert (unit_home / "plugins" / "pr-toolkit" / "commands" / "deploy.md").is_file()
-    # discover_commands surfaces it namespaced under the plugin in the canonical
-    # `:`-joined form (same display rule as skill identifiers): /pr-toolkit:deploy
-    cmds = {c["name"]: c for c in discover_commands()}
+    # surfaced namespaced under the plugin in the `:`-joined form skill identifiers use
+    cmds = {c["name"]: c for c in CommandCatalog(skills=skills.names).discover()}
     assert "pr-toolkit:deploy" in cmds
     assert cmds["pr-toolkit:deploy"]["description"] == "Deploy the thing"
     assert cmds["pr-toolkit:deploy"]["instruction_hint"] == "env"

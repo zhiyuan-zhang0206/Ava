@@ -31,13 +31,18 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 
 
 @pytest.fixture
 def gate_ctx(database: Database, event_bus: EventBus) -> AvaContext:
     return AvaContext(
-        db=database, bus=event_bus, catalog=build_model_catalog(), clock_factory=Clock.from_settings
+        db=database,
+        bus=event_bus,
+        catalog=build_model_catalog(),
+        clock_factory=Clock.from_settings,
+        commands=CommandCatalog(skills=list),
     )
 
 

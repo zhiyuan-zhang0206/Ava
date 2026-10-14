@@ -25,6 +25,13 @@ existing authority.
 Configuration upgrades reconcile the declared schema in memory before the image is
 rewritten; retired fields follow the schema merge's existing removal rule.
 
+`composer_commands.py` owns the composer `/name` commands: where their files live, the
+merged and sorted catalog, and how a message expands. It reads no installed skills itself; every
+function takes the `Skill` list (`skills/tree.py`) as an argument and `CommandCatalog` binds one
+source of it, handed over by the composition root (`ava.skills.names` in the agent host, the
+gateway and the ops runner). The agent's claim node receives the catalog through
+`AvaContext.commands`.
+
 ## Documented components
 
 - [[base/packages/extensions/docs/install_registry/install_registry.ava.okf.md]] — Install Registry (`installed.json`).

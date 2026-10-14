@@ -27,6 +27,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import AgentRuntime
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -109,6 +110,7 @@ async def make_host(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=catalog,
+        commands=CommandCatalog(skills=list),
     )
     monkeypatch.setattr(
         host,

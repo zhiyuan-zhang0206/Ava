@@ -24,6 +24,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
@@ -64,6 +65,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
+        commands=CommandCatalog(skills=list),
     )
 
     assert await host.pending_inbound_wakes() == [agent]
@@ -133,6 +135,7 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
+        commands=CommandCatalog(skills=list),
     )
     host._owner = incarnation.owner
     scheduler = TurnScheduler(host.run_turn)
@@ -195,6 +198,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
+        commands=CommandCatalog(skills=list),
     )
     if boundary == "same_owner":
         host._owner = incarnation.owner
@@ -248,6 +252,7 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
+        commands=CommandCatalog(skills=list),
     )
     with subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE

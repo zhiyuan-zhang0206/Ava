@@ -40,6 +40,7 @@ from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
@@ -523,6 +524,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
+            commands=CommandCatalog(skills=list),
         )
     )
     invocation = asyncio.create_task(
@@ -665,6 +667,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
+            commands=CommandCatalog(skills=list),
         )
     )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)

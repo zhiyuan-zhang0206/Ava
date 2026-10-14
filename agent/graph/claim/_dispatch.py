@@ -177,6 +177,7 @@ async def _handle_chat(
             envelope_inputs=EnvelopeReadInputs(
                 ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
             ),
+            expand_command=ctx.require_commands().expand,
         )
     )
     st.committed_chat_ids.append(item.id)

@@ -11,6 +11,12 @@ exports = ["model_catalog.py", "plugin_config"]
 "test_update_disk_images.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
+"test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.ava_home" = 1
+"test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.command_dirs" = 6
+"test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.external_plugin_read_root" = 1
+"test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.repo_plugins_dir" = 1
+"test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.repo_root" = 1
+"test_composer_commands.py#monkeypatch.setattr base.packages.composer_commands.settings.agent.commands_enabled" = 2
 "test_preloaded_skills_paths.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 1
 "test_update_disk_images.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_update_disk_images.py#monkeypatch.setattr base.paths.plugins_dir" = 1

@@ -30,6 +30,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.composer_commands import CommandCatalog
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import force_terminate_transaction
@@ -63,6 +64,7 @@ def _observed_host(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     patch.setattr(host, "_runtime_for", AsyncMock(return_value=Mock(llm=None)))
     original = host._run_turn
@@ -198,6 +200,7 @@ async def _prove_successor_ignores_old_cancel(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     patch.setattr(replacement, "_runtime_for", AsyncMock(return_value=Mock()))
     scheduler = TurnScheduler(replacement.run_turn)
@@ -363,6 +366,7 @@ async def test_idle_force_only_original_live_host_can_observe(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     assert (
         await hosted.admit_hosted_runtime(
@@ -411,6 +415,7 @@ async def test_a_force_its_original_host_never_observed_is_not_settled_by_a_succ
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     assert (
         await hosted.admit_hosted_runtime(

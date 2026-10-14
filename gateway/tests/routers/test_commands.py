@@ -7,9 +7,28 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from ava.skills import composer_commands as ava_commands
+from base.packages.composer_commands import Command, CommandCatalog
 from gateway.app import app
 from ops.cluster import rpc as cluster_rpc
+
+
+def _one_command(
+    name: str, description: str, hint: str, body: str
+) -> Callable[[CommandCatalog], list[Command]]:
+    """A `CommandCatalog.discover` that lists one command, body included."""
+
+    def discover(_catalog: CommandCatalog) -> list[Command]:
+        return [
+            {
+                "name": name,
+                "description": description,
+                "instruction_hint": hint,
+                "body": body,
+                "skill_target": None,
+            }
+        ]
+
+    return discover
 
 
 def _agent_pool(machine: str | None) -> MagicMock:
@@ -28,12 +47,12 @@ def _runner_failed() -> cluster_rpc.ClusterOpFailed:
 
 
 def test_endpoint_returns_command_metadata(monkeypatch: pytest.MonkeyPatch):
-    # discover_commands yields full Commands (with body); the endpoint must
+    # CommandCatalog.discover yields full Commands (with body); the endpoint must
     # strip the body and serve only what the dropdown needs.
     monkeypatch.setattr(
-        ava_commands,
-        "discover_commands",
-        lambda: [{"name": "recap", "description": "d", "instruction_hint": "h", "body": "b"}],
+        CommandCatalog,
+        "discover",
+        _one_command("recap", "d", "h", "b"),
     )
     with TestClient(app) as client:
         resp = client.get("/api/commands")
@@ -80,9 +99,9 @@ def test_endpoint_agent_view_unavailable_falls_back_locally(
 ):
     """A down or version-skewed runner leaves autocomplete usable from the local list."""
     monkeypatch.setattr(
-        ava_commands,
-        "discover_commands",
-        lambda: [{"name": "local", "description": "d", "instruction_hint": "h", "body": "b"}],
+        CommandCatalog,
+        "discover",
+        _one_command("local", "d", "h", "b"),
     )
 
     async def _unavailable(*_args: object, **_kwargs: object) -> NoReturn:
@@ -99,9 +118,9 @@ def test_endpoint_agent_view_unavailable_falls_back_locally(
 def test_endpoint_agent_view_missing_agent_falls_back_locally(monkeypatch: pytest.MonkeyPatch):
     """A missing agents_meta row takes the same backward-compatible fallback."""
     monkeypatch.setattr(
-        ava_commands,
-        "discover_commands",
-        lambda: [{"name": "local", "description": "d", "instruction_hint": "h", "body": "b"}],
+        CommandCatalog,
+        "discover",
+        _one_command("local", "d", "h", "b"),
     )
     with TestClient(app) as client, monkeypatch.context() as patch:
         patch.setattr(app.state, "db_pool", _agent_pool(None))

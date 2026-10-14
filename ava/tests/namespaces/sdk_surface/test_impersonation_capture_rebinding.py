@@ -33,6 +33,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.packages.skills.tree import Skill
 from base.telemetry import Event
 
 
@@ -139,7 +140,7 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
     )
     gate = capture.LocalCaptureGate(participant)
     (tmp_path / "SKILL.md").write_text("# Capture test\n")
-    skill = ava.skills.Skill(
+    skill = Skill(
         name="capture_test",
         description="test",
         path=str(tmp_path),

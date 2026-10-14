@@ -62,6 +62,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
+from ava import skills as ava_skills
 from ava.boot import process_clients
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
@@ -89,6 +90,7 @@ from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
+from base.packages.composer_commands import CommandCatalog
 from base.sessions.helper_chain_guard import parent_chain_intact
 
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -606,6 +608,7 @@ async def run(
             policy=host_policy(config),
             clients=clients,
             extensions=installation.registry,
+            commands=CommandCatalog(skills=ava_skills.names),
             plugin_configs=installation.configs,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no

@@ -36,6 +36,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.pin_agent import exec_context, pin_agent
 
@@ -67,6 +68,7 @@ def gate_ctx(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(config.view, domain), field)
         ),
+        commands=CommandCatalog(skills=list),
     )
 
 

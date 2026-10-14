@@ -20,6 +20,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 
@@ -81,6 +82,7 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     # The original host has stopped renewing; admission uses its ordinary ownership fence.
     db_conn.execute(

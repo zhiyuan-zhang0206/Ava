@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from ava import skills
-from ava.skills import composer_commands
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
 from ava.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_enabled
 from ava.tests.skills._skills_helpers import write_skill
+from base.packages.composer_commands import CommandCatalog
 
 pytestmark = pytest.mark.usefixtures("unit_home")
 
@@ -27,7 +27,7 @@ def test_the_catalog_merges_built_ins_user_commands_and_skills(
     _user_command(unit_home, "ship", "---\ndescription: ship it\n---\nShip the release.\n")
     write_skill(fake_skills_dir, "goal", "name: goal\ndescription: set a goal")
 
-    by_name = {c["name"]: c for c in composer_commands.discover_commands()}
+    by_name = {c["name"]: c for c in CommandCatalog(skills=skills.names).discover()}
 
     assert {"recap", "compact", "ship", "goal"} <= set(by_name)
     assert by_name["ship"] == {
@@ -48,7 +48,7 @@ def test_a_user_command_file_overrides_the_skill_of_the_same_name(
     write_skill(fake_skills_dir, "goal", "name: goal\ndescription: set a goal")
     _user_command(unit_home, "goal", "My own goal prompt.\n")
 
-    by_name = {c["name"]: c for c in composer_commands.discover_commands()}
+    by_name = {c["name"]: c for c in CommandCatalog(skills=skills.names).discover()}
 
     assert by_name["goal"]["skill_target"] is None
     assert by_name["goal"]["body"] == "My own goal prompt."
@@ -61,16 +61,18 @@ def test_a_message_expands_the_way_each_kind_of_command_does(
     write_skill(fake_skills_dir, "goal", "name: goal\ndescription: set a goal")
     assert [s["name"] for s in skills.names()] == ["goal"]
 
-    assert composer_commands.expand_command("/ship now") == (
+    assert CommandCatalog(skills=skills.names).expand("/ship now") == (
         "Command /ship:\nShip the release.\nAdditional message: now"
     )
-    assert composer_commands.expand_command("/goal write the plan") == (
+    assert CommandCatalog(skills=skills.names).expand("/goal write the plan") == (
         "/goal invokes the goal skill. Load it with ava.help(ava.skills.goal) and follow it for "
         "this task.\nAdditional message: write the plan"
     )
-    assert composer_commands.expand_command("/ship /goal") == (
+    assert CommandCatalog(skills=skills.names).expand("/ship /goal") == (
         "Command /ship:\nShip the release.\n\n"
         "/goal invokes the goal skill. Load it with ava.help(ava.skills.goal) and follow it for "
         "this task."
     )
-    assert composer_commands.expand_command("just chatting /ship") == "just chatting /ship"
+    assert (
+        CommandCatalog(skills=skills.names).expand("just chatting /ship") == "just chatting /ship"
+    )
