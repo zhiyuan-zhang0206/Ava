@@ -16,6 +16,7 @@ from ava.gateway_client import spawn, transport
 from ava.sdk_surface import agent_identity
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import router as agent_router
@@ -23,7 +24,6 @@ from gateway.app import app
 from gateway.tests.lifecycle.creation.test_guarded_creation import PATH, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 

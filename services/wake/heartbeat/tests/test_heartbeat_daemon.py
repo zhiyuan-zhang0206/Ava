@@ -17,6 +17,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -29,7 +30,6 @@ from services.wake.heartbeat.tests.heartbeat_support import (
     make_idle,
 )
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:

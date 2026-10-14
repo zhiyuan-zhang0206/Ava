@@ -20,10 +20,10 @@ import pytest
 
 import ava.mcps.config as mcp_cfg_mod
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.packages.plugins import enable_config, mcp_enabled
 from ops.inventory import inventory_read_op, inventory_write_op
 from ops.rpc_schemas import FieldWriteResult
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # ---------------------------------------------------------------------------
 # Helpers

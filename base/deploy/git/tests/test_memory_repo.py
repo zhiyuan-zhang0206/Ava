@@ -13,9 +13,9 @@ from collections.abc import Sequence
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.deploy.git import memory_repo
 from base.paths import gateway_memory_dir
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_branch_name_gateway_tracks_main(*, machine_identity: MachineIdentity) -> None:

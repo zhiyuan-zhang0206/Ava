@@ -1,8 +1,7 @@
-exports = ["config_authority.py", "generation.py", "identity.py", "model_owner.py", "sdk.py", "workspace.py"]
+exports = ["config_authority.py", "generation.py", "model_owner.py", "sdk.py", "workspace.py"]
 
 [uses]
-"sdk.py" = ["identity.py"]
-"tests" = ["identity.py", "sdk.py"]
+"tests" = ["sdk.py"]
 
 [debt.first-party-patch]
 "gateway.py#monkeypatch.setattr gateway.app.app.state.gateway_process_input" = 1

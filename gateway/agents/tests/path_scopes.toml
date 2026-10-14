@@ -3,7 +3,7 @@
 "base.paths.tests.homes" = [
     ".",
 ]
-"tests.fixtures.unit.identity" = [
+"base.cluster.machine.tests.identity" = [
     ".",
 ]
 "tests.fixtures.unit.sdk" = [

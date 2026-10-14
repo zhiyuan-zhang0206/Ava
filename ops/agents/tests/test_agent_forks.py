@@ -13,6 +13,7 @@ import base.db
 from base.agents.inbox import insert
 from base.api_contracts.agent_contract import ForkCheckpointNotFound
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -25,7 +26,6 @@ from ops.agents.tests.test_agents_internals import (
     insert_checkpoint,
     spawn_agent,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestSpawnFork:

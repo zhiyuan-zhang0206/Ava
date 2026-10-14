@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.runtime.host_support import (
@@ -22,7 +23,6 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     wired as wired,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class _Drive(Protocol):

@@ -16,6 +16,7 @@ from base.agents.birth.spawn import create_agent_row
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -24,7 +25,6 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str, int | None] | None:

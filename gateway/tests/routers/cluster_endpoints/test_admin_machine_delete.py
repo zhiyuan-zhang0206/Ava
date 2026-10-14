@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from psycopg.rows import TupleRow
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -32,7 +33,6 @@ from tests.components.gateway.test_cluster_endpoints import (
     seed_drain_owner,
     seed_in_progress_task,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _existing_row(cur: psycopg.Cursor) -> TupleRow:

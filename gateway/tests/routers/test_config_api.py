@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config, settings
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
@@ -33,7 +34,6 @@ from gateway.app import app
 from gateway.routers.configuration import runtime as config_router
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_get_config_serializes_required_fields():

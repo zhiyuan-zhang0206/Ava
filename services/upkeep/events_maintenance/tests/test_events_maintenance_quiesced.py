@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
@@ -20,7 +21,6 @@ from services.upkeep.events_maintenance.tests.slices import (
     events_maintenance_config,
     events_maintenance_db,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _Loop = Callable[..., Coroutine[Any, Any, None]]
 

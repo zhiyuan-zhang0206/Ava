@@ -23,6 +23,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -33,7 +34,6 @@ from services.wake.heartbeat.daemon import (
     reconcile_checkin_outcomes,
     select_idle_agents_needing_heartbeat,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # Explicit threshold so the assertions do not ride on the configured default.
 _THRESHOLD_S = 300.0

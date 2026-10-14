@@ -11,11 +11,11 @@ from base.agents.birth.creation_identity import creation_request_hash
 from base.agents.birth.transaction import insert_agent_birth
 from base.agents.incarnation.resources import IncarnationResources, ResourceBirth, decode_resources
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_resource_birth_rolls_back_with_its_agent(

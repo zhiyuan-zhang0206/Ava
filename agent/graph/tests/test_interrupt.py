@@ -26,6 +26,7 @@ from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
 # windows vs flake; the poll-interval tests are serial (flaky-marked) because
@@ -42,7 +43,6 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _TIMEOUT_S = 5.0
 

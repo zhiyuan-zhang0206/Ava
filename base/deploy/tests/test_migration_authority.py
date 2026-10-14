@@ -27,10 +27,10 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.deploy.schema import migration_layout
 from base.deploy.schema.migrations import MigrationAuthorityMismatch, apply_pending_migrations
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # This host is the gateway of the DB under test in the "matching" cases.
 _GATEWAY = ("gateway-host", "/Users/ava/.ava")

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from base.agents.birth.creation_identity import creation_request_hash
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from gateway.agents import creation as agent_creation
 from gateway.agents.creation import scoped_creation_key
@@ -18,7 +19,6 @@ from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.mcp_calls import tool_call, tool_result
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 PATH = "/api/keyed/v1/agents"

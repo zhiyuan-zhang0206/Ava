@@ -19,6 +19,7 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -37,7 +38,6 @@ from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading imp
 from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import alerts as alerts
 from tests.components.agent.test_maintenance import WHEN, maintenance_agent
 from tests.components.agent.test_maintenance import isolate as isolate
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def _failed_turn(

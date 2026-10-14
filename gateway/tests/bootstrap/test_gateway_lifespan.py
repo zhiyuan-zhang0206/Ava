@@ -10,9 +10,9 @@ import pytest
 from fastapi import FastAPI
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway import app as gateway_app
 from tests.fixtures.gateway_config import gateway_test_process
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

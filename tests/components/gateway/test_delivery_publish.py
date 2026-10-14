@@ -17,13 +17,13 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 import ops.lifecycle.delivery as agents_delivery
 from base.api_contracts.agent_contract import AgentStatus
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 from ops.lifecycle.delivery import deliver_chat_inbound
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _sync_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:

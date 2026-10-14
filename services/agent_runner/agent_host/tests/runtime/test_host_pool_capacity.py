@@ -18,6 +18,7 @@ from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -28,7 +29,6 @@ from tests.components.cli.test_pgbouncer_wire import (
     pgbouncer_available,
     pgbouncer_in_front,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 pytestmark = pytest.mark.skipif(
     not pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"

@@ -10,6 +10,7 @@ from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -21,7 +22,6 @@ from services.wake.heartbeat.daemon import (
     select_idle_agents_needing_heartbeat,
     send_heartbeat_checkin,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

@@ -23,10 +23,10 @@ from psycopg_pool import PoolTimeout
 
 import gateway.app as gateway_app
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths import ava_home
 from gateway.app import app
 from gateway.cluster.process_boot import LOADED_IMAGE
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _health() -> dict[str, object]:

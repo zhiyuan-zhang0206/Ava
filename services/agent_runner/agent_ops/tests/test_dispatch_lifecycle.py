@@ -12,13 +12,13 @@ from psycopg_pool import ConnectionPool
 from base.agents.messages.inbound import WakeTriggerKind
 from base.api_contracts.agent_contract import TerminateResult
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_daemon import stub_pool
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.asyncio

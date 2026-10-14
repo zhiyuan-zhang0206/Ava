@@ -26,6 +26,7 @@ import pytest
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -41,7 +42,6 @@ from tests.components.services.daemon_shutdown_test_support import (
     KILL_SLACK_S,
     spawn_child,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _note_pidfile_removed(events: list[str], _path: object) -> None:

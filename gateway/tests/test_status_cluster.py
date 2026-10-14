@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 import gateway.app as gateway_app
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from gateway.app import app
 from gateway.cluster import roster_probe
@@ -26,7 +27,6 @@ from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
 from ops.cluster import rpc as cluster_rpc
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _OPS_URL = "http://runner-a:18121"
 

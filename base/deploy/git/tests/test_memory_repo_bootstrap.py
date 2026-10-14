@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.deploy.git import memory_repo
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_status_last_fetch_renders_cluster_zone(

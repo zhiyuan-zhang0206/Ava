@@ -4,7 +4,7 @@ import pytest
 
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import MachineIdentity
-from tests.fixtures.unit.identity import machine_identity as machine_identity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("kind", list(InboundKind))

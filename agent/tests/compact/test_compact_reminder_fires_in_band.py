@@ -39,6 +39,7 @@ from base.agents.context import AvaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -48,7 +49,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_compact_reminder_fires_in_band(

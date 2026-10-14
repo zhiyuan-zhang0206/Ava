@@ -15,6 +15,7 @@ from base.agents.inbox.native_cancel import accept_native_cancel, observe_native
 from base.agents.inbox.native_restart import accept_native_restart, native_restart_progress
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -25,7 +26,6 @@ from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries
     blocked_host,
 )
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("first", ["cancel", "restart"])

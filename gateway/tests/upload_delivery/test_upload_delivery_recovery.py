@@ -21,12 +21,12 @@ from base.agents.upload_delivery.models import (
     current_unit,
 )
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import seed_agent
 from gateway.upload_delivery.worker import UploadRecovery
 from ops import upload_delivery as receiver
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 SECRET = "delivered-upload-test-secret"  # noqa: S105 -- isolated credential
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}

@@ -28,6 +28,7 @@ from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
@@ -45,7 +46,6 @@ from services.agent_runner.agent_host.tests.host_policy import configured_machin
 from tests.factories.maintenance import WHEN, maintenance_agent
 from tests.factories.maintenance import isolate as isolate
 from tests.factories.maintenance import maintenance_agent as _agent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_successor_cannot_sign_original_host_final_cleanup(

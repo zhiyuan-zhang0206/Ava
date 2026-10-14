@@ -21,6 +21,7 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -32,7 +33,6 @@ from services.agent_runner.agent_host.invocation import native_work as work_owne
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.managed_work import managed_work
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @dataclass

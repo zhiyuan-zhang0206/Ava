@@ -13,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
@@ -24,7 +25,6 @@ from services.agent_runner.agent_host.scheduling.pending_wakes import held_maint
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
 from tests.factories.maintenance import maintenance_agent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class Alerts:

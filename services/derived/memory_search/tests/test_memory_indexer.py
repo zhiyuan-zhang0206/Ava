@@ -26,6 +26,7 @@ import numpy as np
 import pytest
 
 from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.daemon import health
 from base.daemon.health import Liveness
@@ -44,7 +45,6 @@ from services.derived.memory_indexer.tests.fake_provider import (
     FakeProvider,
 )
 from services.derived.memory_search.tests.store_backend import StoreBackend
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def liveness_timeout() -> float:

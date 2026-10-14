@@ -27,8 +27,8 @@ from websockets.sync.server import Server, ServerConnection, unix_serve
 from base.agents.impersonation import host_transport as codex_app_server
 from base.agents.impersonation.terminal_notices import send_ended_notice
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database, create_agent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 

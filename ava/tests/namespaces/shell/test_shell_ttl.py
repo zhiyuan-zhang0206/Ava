@@ -10,9 +10,9 @@ import pytest
 import ava
 from base import telemetry
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.paths import ava_home
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 pytestmark = [
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),

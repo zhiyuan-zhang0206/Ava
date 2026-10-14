@@ -14,13 +14,13 @@ from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_replacement_host_admission_ends_the_takeover_without_respawning_its_relay(

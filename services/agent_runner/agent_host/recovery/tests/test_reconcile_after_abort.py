@@ -20,6 +20,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.startup import consume_claimed_inbounds
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -31,7 +32,6 @@ from services.agent_runner.agent_host import settlement as settlement_mod
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import admit as _admit
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def claimed_row(

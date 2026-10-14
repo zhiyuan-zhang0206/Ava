@@ -13,6 +13,7 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartRequest,
 )
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -24,7 +25,6 @@ from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_host.tests.managed_work import managed_work
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_request_identity import pool as pool
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_merged_effort_refusal_has_no_restart_or_config_effects(

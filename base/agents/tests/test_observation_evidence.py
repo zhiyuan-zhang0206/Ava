@@ -15,12 +15,12 @@ from base.agents.observation.roster import AgentCard, select_roster
 from base.agents.observation.snapshot import select_one
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("probe_age", [None, 0, 600])

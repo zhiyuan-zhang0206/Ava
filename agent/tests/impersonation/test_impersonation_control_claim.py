@@ -9,12 +9,12 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import impersonation
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_control_claim_leaves_cancel_for_external_or_resumed_native(

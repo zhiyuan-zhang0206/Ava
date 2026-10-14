@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import CopyProof, ReceiveRequest
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.host.db_authority.unit import UnitIdentity
@@ -33,7 +34,6 @@ from ops import upload_delivery as receiver
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("stage", ["before", "after"])

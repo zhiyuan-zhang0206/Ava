@@ -8,6 +8,7 @@ import pytest
 import ava
 from ava.agents import AgentNotFound
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from gateway.tests.agents.sdk_support import (
@@ -15,7 +16,6 @@ from gateway.tests.agents.sdk_support import (
 )
 from gateway.tests.agents.sdk_support import spawn_agent
 from tests.fixtures.pin_agent import pin_agent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestSendSystemNote:
