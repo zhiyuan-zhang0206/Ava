@@ -345,7 +345,7 @@ def test_module_property_provenance_does_not_grant_dynamic_children(tmp_path: Pa
         (
             "ava.memory.search",
             "ava_builtins.plugins.ava_memory.sdk",
-            "_search",
+            "search_unwrapped",
             Availability.PLUGIN,
         ),
         (

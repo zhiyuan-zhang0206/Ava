@@ -8,8 +8,3 @@ exports = ["metrics.py"]
 "tests" = ["agent_runtime.py", "default_config.py", "inherit.py", "notes.py", "plugin.py", "pool_ops.py", "sdk.py", "services.py", "template", "written_notes.py"]
 "write_checks.py" = ["template"]
 "written_notes.py" = ["agent_runtime.py", "sdk.py"]
-
-[debt.private-name]
-"tests/test_memory.py -> sdk.py#_search" = 1
-"tests/test_validation_ava_memory.py -> sdk.py#_search" = 2
-"written_notes.py -> sdk.py#_pool_root" = 1

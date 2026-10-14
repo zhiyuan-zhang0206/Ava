@@ -42,7 +42,7 @@ operation identities.
 
 The immutable request contains effective validated inputs, before appending a
 note timestamp or resolving a null parent into the current root id. Omitted,
-`_UNSET` and null scalar values mean unchanged under the existing SDK contract.
+`UNSET_FIELD` and null scalar values mean unchanged under the existing SDK contract.
 `parent_id=None` remains an explicit move under the root, and `note=""` remains
 a real append. The same scope/key with different effective fields raises
 `ValueError` identifying a different task update.

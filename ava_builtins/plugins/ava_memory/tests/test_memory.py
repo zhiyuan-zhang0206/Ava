@@ -172,9 +172,9 @@ def test_search_forwards_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_search_rejects_non_number_timeout() -> None:
     """A non-numeric `timeout` fails loud at the SDK boundary — the public
-    path's coerce, not the wire (the fixture wrapper bypasses `_search`'s
-    validation, so exercise `_search` directly)."""
-    from ava_builtins.plugins.ava_memory.sdk import _search as sdk_search
+    path's coerce, not the wire (the fixture wrapper bypasses `search_unwrapped`'s
+    validation, so exercise `search_unwrapped` directly)."""
+    from ava_builtins.plugins.ava_memory.sdk import search_unwrapped as sdk_search
 
     with pytest.raises(TypeError, match="timeout must be"):
         sdk_search("q", timeout="fast")  # type: ignore[arg-type]

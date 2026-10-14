@@ -66,7 +66,7 @@ def test_lease_expiring_during_operation_lock_wait_cannot_write(
                 owner, False, lease=ExternalLease(actor, validate, lambda: None)
             )
             context = AvaContext(identity=identity, clients=clients)
-            task_registry._create(
+            task_registry.create_in_context(
                 context, "stale", "work", parent=root_task_id, operation_key="wait"
             )
         finally:
