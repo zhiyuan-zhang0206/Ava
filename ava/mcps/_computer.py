@@ -149,8 +149,8 @@ async def connect_computer_direct(
     empty (the socket is the whole connection; nothing to close beyond the
     session's own writer), kept for interface parity with the stdio path."""
     if sock is None:
-        from base.paths import computer_mcp_socket
+        from base.paths import ava_home, computer_mcp_socket
 
-        sock = str(computer_mcp_socket())
+        sock = str(computer_mcp_socket(ava_home()))
     reader, writer = await dial_computer_mcp(sock)
     return ComputerLineSession(reader, writer, sock=sock), AsyncExitStack()

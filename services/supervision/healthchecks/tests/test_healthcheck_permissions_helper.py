@@ -272,7 +272,7 @@ def test_connected_helper_peer_must_be_root_native_parent(
     def _fake_peer_pid(_sock: socket.socket) -> int:
         return 30
 
-    monkeypatch.setattr(root_client, "root_process", lambda: root)
+    monkeypatch.setattr(root_client, "root_process", lambda **_kwargs: root)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc.psutil, "Process", _fake_process)
     monkeypatch.setattr(hc.OwnedProcess, "capture", _fake_capture)
     monkeypatch.setattr(root_control_client, "peer_pid", _fake_peer_pid)

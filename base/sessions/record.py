@@ -33,7 +33,7 @@ def record_path(name: str) -> Path:
     it atomically."""
     import base.paths
 
-    return base.paths.run_dir() / "sessions" / f"{name}.json"
+    return base.paths.run_dir(base.paths.ava_home()) / "sessions" / f"{name}.json"
 
 
 @dataclass(frozen=True)

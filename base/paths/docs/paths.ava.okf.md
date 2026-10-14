@@ -19,9 +19,12 @@ comes from `base.paths.home.resolve_ava_home` (env `AVA_HOME`, default
 root of a process calls it once and passes the result down.
 
 A helper takes one of two forms. The **pure form** `H(home)` (`traces_dir`, `skills_dir`,
-`mcps_dir`, `install_registry_path`, `running_sha_path`, `launch_failures_path`) derives a
-path from the home it is handed: it reads no environment and creates nothing, so a test
-hands in `tmp_path` and the code that writes the directory creates it. The zero-argument
+`mcps_dir`, `install_registry_path`, `running_sha_path`, `launch_failures_path`, the run
+tree — `run_dir`, `exec_run_dir`, `root_run_dir`, `root_manifests_path`, the chrome, computer,
+permissions-helper, insights and MCP-daemon sockets, `insights_pidfile` — `quarantined_exec_requests_dir`
+and the `otel_collector_*` paths) derives a path from the home it is handed: it reads no
+environment and creates nothing, so a test hands in `tmp_path` and the process that binds a
+socket, takes a lock or writes a file creates the directory. The zero-argument
 helpers that remain read `AVA_HOME` and `mkdir(parents=True, exist_ok=True)` on first
 access; each is replaced by its pure form together with its callers.
 

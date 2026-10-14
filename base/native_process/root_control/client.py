@@ -82,11 +82,11 @@ def validate_status_peer(raw: bytes, peer: OwnedProcess) -> None:
         raise RootClientError("root status does not name the exact native IPC peer")
 
 
-def root_process(*, timeout: float = 2.0) -> OwnedProcess | None:
-    """Read the root's captured native birth; IPC failure remains unknown."""
+def root_process(*, home: Path, timeout: float = 2.0) -> OwnedProcess | None:
+    """Read the captured native birth of the root of `home`; IPC failure remains unknown."""
     from base.paths import root_run_dir
 
-    response = RootClient(root_run_dir() / "ava-root.sock", timeout=timeout).status()
+    response = RootClient(root_run_dir(home) / "ava-root.sock", timeout=timeout).status()
     raw = response.get("result")
     if response["ok"] is not True or not isinstance(raw, dict):
         raise RootClientError("root refused its native status")
@@ -95,15 +95,15 @@ def root_process(*, timeout: float = 2.0) -> OwnedProcess | None:
     return root if root.live() else None
 
 
-def owned_process(unit_id: str, *, timeout: float = 2.0) -> OwnedProcess | None:
-    """Read one captured generation and verify its live root ancestry.
+def owned_process(unit_id: str, *, home: Path, timeout: float = 2.0) -> OwnedProcess | None:
+    """Read one captured generation of the root of `home` and verify its live root ancestry.
 
     Unknown transport or birth evidence raises. An absent/stopped unit or a
     positively dead/reused birth returns None; no current PID occupant is adopted.
     """
     from base.paths import root_run_dir
 
-    response = RootClient(root_run_dir() / "ava-root.sock", timeout=timeout).status()
+    response = RootClient(root_run_dir(home) / "ava-root.sock", timeout=timeout).status()
     raw = response.get("result")
     if response["ok"] is not True or not isinstance(raw, dict):
         raise RootClientError("root refused its native status")

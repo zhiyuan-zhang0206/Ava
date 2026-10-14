@@ -37,7 +37,6 @@ exports = ["context_inputs.py"]
 "test_converge_firewall.py#monkeypatch.setattr base.host.system.macos_firewall.render_manifest_status" = 1
 "test_converge_firewall.py#monkeypatch.setattr base.host.system.macos_firewall.stale_manifest_rules" = 3
 "test_converge_firewall.py#monkeypatch.setattr base.host.system.macos_firewall.sudo_grant_installed" = 1
-"test_converge_firewall.py#monkeypatch.setattr base.paths.otel_collector_binary" = 2
 "test_converge_firewall.py#monkeypatch.setattr cli.commands._repo.roles_or_none" = 1
 "test_converge_firewall.py#monkeypatch.setattr cli.commands.converge.firewall.audit_this_host" = 2
 "test_converge_firewall.py#monkeypatch.setattr cli.commands.converge.firewall.serving_binaries" = 1

@@ -9,6 +9,7 @@ import pytest
 
 from base.cluster.machine import MachineRole
 from base.config import settings
+from base.paths import otel_collector_config
 from services.supervision.ava_root.manifest import ManifestError, load_manifests
 from services.supervision.ava_root.supervisor import SupervisorConfig
 from services.supervision.ava_root_glue import manifests as gen
@@ -34,9 +35,9 @@ def _declared_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(roster, "ava_home", lambda: tmp_path)
     # A launch manifest follows converge's plugin configuration initialization.
     update_all_disk_images()
-    collector = tmp_path / "collector.yaml"
+    collector = otel_collector_config(tmp_path)
+    collector.parent.mkdir(parents=True)
     collector.write_text("receivers: {}")
-    monkeypatch.setattr(roster, "otel_collector_config", lambda: collector)
     for name in BACKENDS:
         for path in service_input_paths(tmp_path, name):
             if path.name == "config":

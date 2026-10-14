@@ -32,6 +32,7 @@ from base.host.system import macos_firewall as fw
 from base.host.system.hostport import Host
 from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
+from base.paths import otel_collector_binary
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
@@ -77,7 +78,9 @@ def test_step_is_registered_in_converge_for_both_capabilities() -> None:
     assert step.host_global is False
 
 
-def test_runner_audits_only_the_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_audits_only_the_interpreter(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """An agent-runner holds no local data plane, so its daemons need no audit."""
     monkeypatch.setattr(
         cfw, "serving_binaries", cfw.serving_binaries
@@ -85,21 +88,22 @@ def test_runner_audits_only_the_interpreter(monkeypatch: pytest.MonkeyPatch) -> 
     from base.cluster.dataplane import pg_tools
 
     monkeypatch.setattr(pg_tools, "pg_tool", lambda name: pytest.fail(f"resolved pg tool {name}"))  # pyright: ignore[reportUnknownArgumentType]
-    assert cfw.serving_binaries(frozenset({"agent-runner"})) == (Path(sys.executable),)
+    assert cfw.serving_binaries(frozenset({"agent-runner"}), home=tmp_path) == (
+        Path(sys.executable),
+    )
 
 
 def test_gateway_audits_the_data_plane_too(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Postgres and the remote OTLP receiver bind this gateway's off-box address."""
-    from base import paths
     from base.cluster.dataplane import pg_tools
 
     pg = tmp_path / "postgres"
     pg.write_text("#!/bin/sh\n")
-    otelcol = tmp_path / "otelcol-contrib"
+    otelcol = otel_collector_binary(tmp_path)
+    otelcol.parent.mkdir(parents=True)
     otelcol.write_text("#!/bin/sh\n")
     monkeypatch.setattr(pg_tools, "pg_tool", lambda _name: pg)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(paths, "otel_collector_binary", lambda: otelcol)
-    assert cfw.serving_binaries(frozenset({"gateway"})) == (
+    assert cfw.serving_binaries(frozenset({"gateway"}), home=tmp_path) == (
         Path(sys.executable),
         pg,
         otelcol,
@@ -114,14 +118,11 @@ def test_nonexistent_resolved_paths_are_dropped(
     Auditing that phantom path would manufacture a permanent "missing rule" on
     every host without brew, so only paths that exist are audited.
     """
-    from base import paths
     from base.cluster.dataplane import pg_tools
 
     monkeypatch.setattr(pg_tools, "pg_tool", lambda name: tmp_path / "nope" / name)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        paths, "otel_collector_binary", lambda: tmp_path / "nope" / "otelcol-contrib"
-    )
-    assert cfw.serving_binaries(frozenset({"gateway"})) == (Path(sys.executable),)
+    # No collector under this home: its binary path resolves to nothing that exists.
+    assert cfw.serving_binaries(frozenset({"gateway"}), home=tmp_path) == (Path(sys.executable),)
 
 
 # --- reporting -------------------------------------------------------------

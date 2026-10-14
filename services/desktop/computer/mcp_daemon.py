@@ -29,20 +29,11 @@ Module map: `screen.py` owns capture and coordinate translation;
 and per-tool execution; `errors.py` owns the shared tool error. This module
 keeps the daemon lifecycle, serialization, screen ownership, and auditing.
 
-Wire protocol (JSON line per request, mirrors `services/desktop/browser/protocol`):
-  Request:  {"id": 1, "method": "ping"}
-            {"id": 2, "method": "call_tool", "tool": "click", "args": {...}, "agent_id": 42}
-  Response: {"id": 1, "ok": true,  "result": "pong"}
-            {"id": 2, "ok": true,  "result": {"content": [{"type": "text", "text": "..."}], "isError": false}}
-            # call_tool result: an MCP CallToolResult dump — the tool's plain
-            # dict rides as one JSON text block (the contract both the
-            # per-agent wrapper and the direct dial validate against)
-            {"id": 2, "ok": false, "error": "message"}
-
-The per-agent bridge (`services/desktop/computer/mcp_wrapper.py`) and the MCP daemon's
-direct dial (`ava/mcps/_computer.py`) speak this protocol; `agent_id` is stamped
-by the bridge from the calling agent's identity and rides into the audit
-stream, where it is likewise self-reported by the agent's own process.
+Wire types and request/response examples live in `protocol.py`. The per-agent
+bridge (`services/desktop/computer/mcp_wrapper.py`) and the MCP daemon's direct
+dial (`ava/mcps/_computer.py`) speak that protocol; `agent_id` is stamped by the
+bridge from the calling agent's identity and rides into the audit stream, where
+it is likewise self-reported by the agent's own process.
 
 Coordinate contract: every tool coordinate is in PHYSICAL pixels — the same
 space as the `snapshot` PNG, so a caller can click exactly where it saw a
@@ -380,7 +371,7 @@ class ComputerMcpDaemon:
     ) -> None:
         self._db = db
         self._helper = helper
-        self._sock = sock or str(computer_mcp_socket())
+        self._sock = sock or str(computer_mcp_socket(ava_home()))
         # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
         # Scroll without x/y reads the actual native cursor.
         self._pointer: tuple[float, float] | None = None
@@ -727,6 +718,7 @@ async def run(
     config = computer_use_config()
     daemon = ComputerMcpDaemon(config, database(), sock, helper=helper)
     path = Path(daemon._sock)
+    path.parent.mkdir(parents=True, exist_ok=True)
     if await socket_in_use(path):
         logger.error(
             "[computer-mcp] socket {} is already served by a live daemon — "

@@ -36,7 +36,6 @@
 "test_browser_mcp_daemon_stop.py#monkeypatch.setattr services.desktop.browser.mcp_daemon.AgentTabGroups.cancel_pending" = 1
 "test_browser_mcp_daemon_stop.py#monkeypatch.setattr services.desktop.browser.mcp_daemon.GatewaySession.refresh_loop" = 1
 "test_browser_mcp_daemon_stop.py#monkeypatch.setattr services.desktop.browser.mcp_daemon.GatewaySession.spawn_inject" = 1
-"test_browser_mcp_daemon_stop.py#monkeypatch.setattr services.desktop.browser.mcp_daemon.chrome_mcp_socket" = 1
 "test_browser_mcp_daemon_stop.py#monkeypatch.setattr services.desktop.browser.mcp_daemon.create_upstream" = 1
 "test_browser_mcp_daemon_stop.py#monkeypatch.setattr services.desktop.browser.mcp_daemon.socket_in_use" = 1
 "test_browser_mcp_daemon_stop.py#monkeypatch.setattr services.desktop.browser.mcp_daemon.stop_on_signals" = 1

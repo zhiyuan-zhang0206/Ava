@@ -29,7 +29,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
-from base.paths import insights_socket
+from base.paths import ava_home, insights_socket
 from gateway.agents.eval_guard import deny_isolated_result_read
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineContext,
@@ -56,7 +56,7 @@ def build_client() -> httpx.AsyncClient:
     lifespan creates and closes it, handlers reach it as `request.app.state.insights_client`."""
     return httpx.AsyncClient(
         transport=httpx.AsyncHTTPTransport(
-            uds=str(insights_socket()), limits=httpx.Limits(max_connections=32)
+            uds=str(insights_socket(ava_home())), limits=httpx.Limits(max_connections=32)
         ),
         base_url="http://insights",
         timeout=_TIMEOUT,

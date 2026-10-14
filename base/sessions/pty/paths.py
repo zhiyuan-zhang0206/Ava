@@ -54,9 +54,9 @@ def service_socket_path(run: Path | None = None) -> Path:
     creates the directory owner-only (`fallback_dir`).
     """
     if run is None:
-        from base.paths import run_dir
+        from base.paths import ava_home, run_dir
 
-        run = run_dir()
+        run = run_dir(ava_home())
     natural = run / "pty-sessions.sock"
     if len(str(natural)) <= SUN_PATH_MAX:
         return natural
@@ -71,16 +71,16 @@ def fallback_dir() -> Path:
 
 def lock_path() -> Path:
     """The service's instance lock (``run/pty-sessions.lock``), held while it runs."""
-    from base.paths import run_dir
+    from base.paths import ava_home, run_dir
 
-    return run_dir() / "pty-sessions.lock"
+    return run_dir(ava_home()) / "pty-sessions.lock"
 
 
 def ledger_path() -> Path:
     """The service's own ledger of live shell identities (``run/pty-sessions.json``)."""
-    from base.paths import run_dir
+    from base.paths import ava_home, run_dir
 
-    return run_dir() / "pty-sessions.json"
+    return run_dir(ava_home()) / "pty-sessions.json"
 
 
 def transcript_path(name: str) -> Path:

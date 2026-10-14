@@ -27,6 +27,7 @@ from base.agents.incarnation.tests.test_resources import (
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.paths import exec_run_dir
 
 
 @pytest.fixture(autouse=True)
@@ -96,7 +97,7 @@ async def test_malformed_never_downgrades_to_legacy(
 
 
 def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection, tmp_path: Path, database: Database
 ) -> None:
     from agent.tests.execution.test_exec_owner_entry import (
         _start,
@@ -106,8 +107,11 @@ def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
     from base.agents.incarnation import exec_owner_recovery
 
     target = _admitted(db_conn)
-    context = exec_owner_context(tmp_path, target.agent_id)
-    directory = tmp_path / str(target.agent_id) / "domains" / str(context.allocation.request)
+    home = tmp_path / "home"
+    exec_dir = exec_run_dir(home)
+    exec_dir.mkdir(parents=True)
+    context = exec_owner_context(exec_dir, target.agent_id)
+    directory = exec_dir / str(target.agent_id) / "domains" / str(context.allocation.request)
     directory.mkdir(parents=True)
     request = directory / context.request_path.name
     context.request_path.rename(request)
@@ -120,7 +124,6 @@ def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
             "result_path": directory / "result.json",
         }
     )
-    monkeypatch.setattr(exec_owner_recovery, "exec_run_dir", lambda: tmp_path)
     with db_conn.transaction():
         register_exec(db_conn, target, context.allocation)
     proc = _start(directory, context)
@@ -134,21 +137,27 @@ def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
         receipt = directory / "owner.closed"
         withheld = directory / "withheld.closed"
         receipt.rename(withheld)
-        exec_owner_recovery.recover_local_resources(database, target.agent_id, "resource-test")
+        exec_owner_recovery.recover_local_resources(
+            database, target.agent_id, "resource-test", home=home
+        )
         row = db_conn.execute(
             "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
         ).fetchone()
         assert row is not None and str(context.allocation.request) in row[0]["requests"]
         db_conn.commit()
         withheld.rename(receipt)
-        exec_owner_recovery.recover_local_resources(database, target.agent_id, "resource-test")
+        exec_owner_recovery.recover_local_resources(
+            database, target.agent_id, "resource-test", home=home
+        )
         row = db_conn.execute(
             "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
         ).fetchone()
         assert row is not None and row[0]["requests"] == {}
         # Replaying the same exact observation is a no-op, not a new admission.
         db_conn.commit()
-        exec_owner_recovery.recover_local_resources(database, target.agent_id, "resource-test")
+        exec_owner_recovery.recover_local_resources(
+            database, target.agent_id, "resource-test", home=home
+        )
     finally:
         if proc.poll() is None:
             proc.kill()

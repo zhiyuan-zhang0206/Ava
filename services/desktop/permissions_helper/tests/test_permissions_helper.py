@@ -158,7 +158,10 @@ def test_unreachable_socket_raises() -> None:
 def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
     from base import paths
 
-    assert paths.permissions_helper_socket(9999).name == "permissions-helper.9999.sock"
+    assert (
+        paths.permissions_helper_socket(paths.ava_home(), 9999).name
+        == "permissions-helper.9999.sock"
+    )
 
 
 def test_permissions_helper_app_dir_is_stable_under_ava_home(
@@ -698,7 +701,8 @@ def install_env(
                     "EnvironmentVariables": {
                         "AVA_PERMISSIONS_HELPER_SOCKET": str(socket_path),
                         "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(
-                            lifecycle.base.paths.root_run_dir() / "seed.json"
+                            lifecycle.base.paths.root_run_dir(lifecycle.base.paths.ava_home())
+                            / "seed.json"
                         ),
                     },
                     "RunAtLoad": True,

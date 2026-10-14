@@ -29,7 +29,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from base.config import ConfigBoot
-from base.paths import chrome_mcp_socket
+from base.paths import ava_home, chrome_mcp_socket
 from services.desktop.browser.mcp_socket_bridge import (
     ReconnectingLink,
     SocketLink,
@@ -117,7 +117,7 @@ def main() -> None:
     config.boot()
     asyncio.run(
         _serve(
-            socket_path=chrome_mcp_socket(config.view.services.browser_cdp_port),
+            socket_path=chrome_mcp_socket(ava_home(), config.view.services.browser_cdp_port),
             timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
         )
     )

@@ -11,7 +11,7 @@ from base.config import ConfigBoot, get_field, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.host.env.health_ports import health_port
 from base.host.env.registry import health_port_env_aliases
-from base.paths import run_dir
+from base.paths import ava_home, run_dir
 
 
 def test_every_health_daemon_has_an_endpoint_from_its_setting_and_the_run_dir() -> None:
@@ -19,7 +19,7 @@ def test_every_health_daemon_has_an_endpoint_from_its_setting_and_the_run_dir() 
     assert {e.name for e in table} == set(health_port_env_aliases())
     for endpoint in table:
         assert endpoint.health_port == int(get_field(f"{endpoint.name}_health_port"))
-        assert endpoint.pidfile == run_dir() / f"{endpoint.name}.pid"
+        assert endpoint.pidfile == run_dir(ava_home()) / f"{endpoint.name}.pid"
 
 
 def test_a_port_override_reaches_the_row_and_only_that_row(monkeypatch: pytest.MonkeyPatch) -> None:

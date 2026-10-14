@@ -102,14 +102,16 @@ def _verify_closed_receipt(
 
 
 def _completed_allocations(
-    agent_id: int, target: RuntimeIncarnation, state: IncarnationResources
+    agent_id: int, target: RuntimeIncarnation, state: IncarnationResources, *, home: Path
 ) -> list[ExecAllocation]:
     """Exec allocations whose owner process ended and left a matching close receipt."""
     completed: list[ExecAllocation] = []
     for allocation in state.requests.values():
         if allocation.owner_process is None or not process_ended(allocation.owner_process):
             continue
-        directory = (exec_run_dir() / str(agent_id) / "domains" / str(allocation.request)).resolve()
+        directory = (
+            exec_run_dir(home) / str(agent_id) / "domains" / str(allocation.request)
+        ).resolve()
         if _verify_closed_receipt(target, allocation, directory):
             completed.append(allocation)
     return completed
@@ -130,12 +132,12 @@ def _settle_frozen_terminate(
         )
 
 
-def recover_local_resources(db: Database, agent_id: int, machine: str) -> None:
+def recover_local_resources(db: Database, agent_id: int, machine: str, *, home: Path) -> None:
     loaded = _load_recoverable(db, agent_id, machine)
     if loaded is None:
         return
     raw_resources, state, target = loaded
-    completed = _completed_allocations(agent_id, target, state)
+    completed = _completed_allocations(agent_id, target, state, home=home)
     host_ended = state.host_process is not None and process_ended(state.host_process)
     with db.write_transaction() as conn:
         current = conn.execute(

@@ -181,7 +181,7 @@ def test_collector_config_bytes_change_the_live_unit_generation(
 
     config = tmp_path / "collector.yaml"
     config.write_text("receivers: {otlp: {}}\n")
-    monkeypatch.setattr(roster, "otel_collector_config", lambda: config)
+    monkeypatch.setattr(roster, "otel_collector_config", lambda _home: config)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(plugin_services, "plugin_services", tuple)
     collector = next(s for s in roster.build_services() if s.session == "otel-collector")
     before = driver.tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
@@ -200,7 +200,7 @@ def test_obsolete_custody_records_do_not_block_an_absent_root(
     directory = tmp_path / "custody"
     directory.mkdir()
     (directory / "gateway.json").write_text("unknown")
-    monkeypatch.setattr(base_paths, "root_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(base_paths, "root_run_dir", lambda _home: tmp_path)  # pyright: ignore[reportUnknownArgumentType]
     driver.require_root_absent()
 
 
@@ -364,8 +364,8 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
         snapshot["units"].append({"id": "agent-host", "state": "running"})
     published = tmp_path / "manifests.json"
     published.write_text("old generation")
-    monkeypatch.setattr(base_paths, "root_run_dir", lambda: tmp_path)
-    monkeypatch.setattr(base_paths, "root_manifests_path", lambda: published)
+    monkeypatch.setattr(base_paths, "root_run_dir", lambda _home: tmp_path)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(base_paths, "root_manifests_path", lambda _home: published)  # pyright: ignore[reportUnknownArgumentType]
 
     def tree(*_args: object, **_kwargs: object) -> dict[str, object]:
         return manifest

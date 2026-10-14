@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -17,7 +18,6 @@ from psycopg_pool import ConnectionPool
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.db import Database
 from base.lm.catalog import ModelCatalog
-from base.paths import ava_home
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import history as run_timeline_history
 from services.derived.insights.run_timeline import router as run_timeline_router
@@ -28,6 +28,7 @@ def build_app(
     pool: ConnectionPool[Any],
     config: InsightsConfig,
     *,
+    home: Path,
     catalog: ModelCatalog,
     timeline_inputs: TimelineReadInputs,
     default_model_reader: Callable[[], str],
@@ -35,6 +36,7 @@ def build_app(
     """The app over `db` (checkpoint and audit reads), `pool` (short row lookups) and `config`.
 
     The caller owns both and closes them after the app has stopped serving.
+    `home` identifies the daemon that owns the socket and pidfile for the health probe.
     `timeline_inputs` supplies the same live rendering policy to history derivation and messages.
     """
     app = FastAPI(title="ava-insights", docs_url=None, redoc_url=None, openapi_url=None)
@@ -52,6 +54,6 @@ def build_app(
     @app.get("/healthz")
     async def healthz() -> dict[str, object]:
         """Identity for the supervisor's probe: which service, which home, which process."""
-        return {"name": "insights", "pid": os.getpid(), "home": str(ava_home())}
+        return {"name": "insights", "pid": os.getpid(), "home": str(home)}
 
     return app

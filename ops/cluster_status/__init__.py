@@ -492,9 +492,10 @@ def _paused_reason(
 def _supervisor_online() -> bool | None:
     """An observed native root is online; unavailable inspection stays unknown."""
     from base.native_process.root_control.client import RootClientError, root_process
+    from base.paths import ava_home
 
     try:
-        return root_process() is not None
+        return root_process(home=ava_home()) is not None
     except (RootClientError, RuntimeError):
         return None
 

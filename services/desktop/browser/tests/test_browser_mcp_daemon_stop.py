@@ -36,6 +36,8 @@ from typing import Any, cast
 import psutil
 import pytest
 
+from base.paths import chrome_mcp_socket
+
 
 # The daemon's Unix socket lives under $AVA_HOME/run; pytest's tmp_path on
 # macOS sits under /private/var/folders/... and breaks the 104-byte AF_UNIX
@@ -367,9 +369,6 @@ async def _run_with_fakes(
     import services.desktop.browser.mcp_daemon as daemon_mod
     from services.desktop.browser.mcp_daemon import run
 
-    sock = home / "chrome-mcp.1.sock"
-    monkeypatch.setattr(daemon_mod, "chrome_mcp_socket", lambda _port: sock)  # pyright: ignore[reportUnknownArgumentType]
-
     async def socket_free(_path: Path) -> bool:
         return False
 
@@ -414,7 +413,9 @@ async def _run_with_fakes(
     monkeypatch.setattr(daemon_mod.GatewaySession, "refresh_loop", never)
     monkeypatch.setattr(daemon_mod.GatewaySession, "spawn_inject", no_inject)
 
-    task = asyncio.create_task(run(browser_cdp_port=9222, connect_timeout_reader=lambda: 60.0))
+    task = asyncio.create_task(
+        run(home=home, browser_cdp_port=9222, connect_timeout_reader=lambda: 60.0)
+    )
     await asyncio.sleep(0.3)  # let run() connect and start the watchdog/reaper
     return task, stack
 
@@ -437,7 +438,7 @@ def test_cancelled_session_task_never_skips_cleanup(
         stop.set()  # SIGTERM equivalent
         await asyncio.wait_for(task, timeout=20)
         assert stack.closed, "upstream stack must be closed after the task ended"
-        assert not (home / "chrome-mcp.1.sock").exists(), "socket must be unlinked"
+        assert not chrome_mcp_socket(home, 9222).exists(), "socket must be unlinked"
 
     asyncio.run(scenario())
     assert daemon_mod  # module imported for the monkeypatch lifetime
@@ -457,7 +458,7 @@ def test_wedged_cleanup_await_is_bounded(
         stop.set()
         await asyncio.wait_for(task, timeout=30)
         assert time.monotonic() - start < 20, "wedged stack close must be bounded"
-        assert not (home / "chrome-mcp.1.sock").exists()
+        assert not chrome_mcp_socket(home, 9222).exists()
 
     asyncio.run(scenario())
 

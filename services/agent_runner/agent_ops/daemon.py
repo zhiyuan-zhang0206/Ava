@@ -585,7 +585,7 @@ async def serve_ops_daemon(
     active_ops: ActiveOps = {}
     requests: maintenance_activity.RequestTokens = set()
     workers: maintenance_activity.WorkerFutures = set()
-    runtime_dir = paths.run_dir()
+    runtime_dir = paths.run_dir(paths.ava_home())
     if boot.is_running(config, runtime=runtime_dir):
         _log.info(
             "ava-ops pidfile %s indicates another instance is alive — exiting",

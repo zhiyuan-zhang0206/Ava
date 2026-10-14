@@ -99,7 +99,6 @@ def test_a_fresh_interpreter_with_no_variable_resolves_to_dot_ava(tmp_path: Path
 _CONSUMERS: list[tuple[str, Callable[[], Path], str]] = [
     ("paths.ava_home", paths.ava_home, ""),
     ("paths.logs_dir", paths.logs_dir, "logs"),
-    ("paths.run_dir", paths.run_dir, "run"),
     ("dotenv_file.env_file_path", dotenv_file.env_file_path, ".env"),
     ("bootstrap snapshot", bootstrap.snapshot_path, "run/bootstrap-snapshot.json"),
     ("config path-field default", unit_home, ""),

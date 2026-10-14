@@ -17,10 +17,10 @@ from pathlib import Path
 import psutil
 import pytest
 
-from base import paths
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.native_process.root_control.client import owned_process
+from base.paths import root_run_dir
 from services.entrypoints.gate.tests.test_gate import FakeApp, FakeGateway, Servers, gate_request
 from services.entrypoints.gate.tests.test_gate import servers as servers
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
@@ -48,7 +48,7 @@ async def test_gate_native_child_readiness_restart_and_stop(
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
     monkeypatch.setattr(settings.services, "frontend_healthcheck_url", f"http://127.0.0.1:{port}")
-    monkeypatch.setattr(paths, "root_run_dir", lambda: short_tmp)
+    run_dir = root_run_dir(short_tmp)
     spec = next(spec for spec in build_services() if spec.session == "gate")
     assert spec.identity_probe is not None
     assert spec.capabilities == frozenset({"gateway"})
@@ -61,24 +61,24 @@ async def test_gate_native_child_readiness_restart_and_stop(
         (("AVA_TELEMETRY_OTLP_ENABLED", "false"),),
     )
     owner = Supervisor(
-        UnitRegistry([unit]), run_dir=short_tmp, config=SupervisorConfig(stop_timeout_s=3)
+        UnitRegistry([unit]), run_dir=run_dir, config=SupervisorConfig(stop_timeout_s=3)
     )
-    server = ControlServer(short_tmp / "ava-root.sock", owner.dispatch)
+    server = ControlServer(run_dir / "ava-root.sock", owner.dispatch)
     await server.start()
     try:
         await owner.start()
         await _ready(spec.identity_probe)
-        original = await asyncio.to_thread(owned_process, "gate")
+        original = await asyncio.to_thread(owned_process, "gate", home=short_tmp)
         assert original is not None
         assert psutil.Process(original.pid).ppid() == psutil.Process().pid
         await owner.restart("gate")
         await _ready(spec.identity_probe)
-        replacement = await asyncio.to_thread(owned_process, "gate")
+        replacement = await asyncio.to_thread(owned_process, "gate", home=short_tmp)
         assert replacement is not None and replacement != original
         assert not original.live()
         await owner.down("gate")
         assert not replacement.live()
-        assert not (short_tmp / "custody").exists()
+        assert not (run_dir / "custody").exists()
         result = await asyncio.to_thread(spec.identity_probe)
         assert result.verdict.value == "down", result.detail
         # A bare listener without a Gate protocol response cannot prove readiness.

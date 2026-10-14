@@ -13,7 +13,7 @@ A gateway-side daemon (`ServiceSpec.capabilities=GATEWAY`; no port and no fixed-
 
 ## Shape
 - `daemon.py` — pidfile, the socket and the uvicorn server. Composition root: owns one `ConfigBoot` and passes its live clock/timestamp readers to the app. Its entry captures one `LoadedCommit`, shared by logging and `CodeVersion`. One `ProcessDbGate` admits both logging and service database handles, built from this configuration owner's current dial slice. Unknown capture stays unknown; pidfile, pool, socket and bounded shutdown ordering are unchanged.
-- `app.py` — `build_app(db, pool, config, *, catalog, timeline_inputs, default_model_reader)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `config`, `catalog`, `timeline_inputs`, `default_model_reader`, `run_timeline_views`). Mount new routers here.
+- `app.py` — `build_app(db, pool, config, *, home, catalog, timeline_inputs, default_model_reader)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `config`, `catalog`, `timeline_inputs`, `default_model_reader`, `run_timeline_views`). Its `/healthz` reports the same explicit `home` that `run` uses for the socket and pidfile. Mount new routers here.
 - `config.py` — the settings slice (`InsightsConfig`).
 - `run_timeline/` — the per-agent reads behind the agent view, see [[run_timeline.ava.okf.md|run timeline reads]].
 

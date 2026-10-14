@@ -3,6 +3,7 @@
 import json
 import logging
 import socket
+from pathlib import Path
 
 from base.paths import computer_mcp_socket
 from services.desktop.computer.protocol import Request, Response
@@ -12,12 +13,12 @@ _log = logging.getLogger("services.supervision.healthchecks.computer_mcp")
 _TIMEOUT_S = 5.0
 
 
-def _probe() -> bool:
-    """True when the daemon answers a lock-free ping over its socket."""
+def _probe(home: Path) -> bool:
+    """True when the daemon of `home` answers a lock-free ping over its socket."""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(_TIMEOUT_S)
     try:
-        sock.connect(str(computer_mcp_socket()))
+        sock.connect(str(computer_mcp_socket(home)))
         req: Request = {"id": 0, "method": "ping", "agent_id": None}
         sock.sendall((json.dumps(req) + "\n").encode())
         buf = b""
@@ -32,8 +33,8 @@ def _probe() -> bool:
         sock.close()
 
 
-def is_alive() -> bool:
-    """True when the daemon answers a ping; ANY probe failure means "not alive".
+def is_alive(home: Path) -> bool:
+    """True when the daemon of `home` answers a ping; ANY probe failure means "not alive".
 
     Same contract as the browser-mcp healthcheck: a bool, not an exception, so
     the watchdog can act on it. The service is gated out where AF_UNIX is
@@ -42,7 +43,7 @@ def is_alive() -> bool:
     act on — instead of to no answer at all.
     """
     try:
-        return _probe()
+        return _probe(home)
     except (OSError, json.JSONDecodeError):
         return False
     except Exception:

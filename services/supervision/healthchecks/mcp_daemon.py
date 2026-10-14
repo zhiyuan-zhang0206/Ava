@@ -3,6 +3,7 @@
 import json
 import logging
 import socket
+from pathlib import Path
 
 from base.paths import mcp_daemon_shared_socket
 
@@ -11,12 +12,12 @@ _log = logging.getLogger("services.supervision.healthchecks.mcp_daemon")
 _TIMEOUT_S = 5.0
 
 
-def mcp_daemon_probe() -> bool:
-    """True when the daemon answers a lock-free ping over its socket."""
+def mcp_daemon_probe(home: Path) -> bool:
+    """True when the daemon of `home` answers a lock-free ping over its socket."""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(_TIMEOUT_S)
     try:
-        sock.connect(str(mcp_daemon_shared_socket()))
+        sock.connect(str(mcp_daemon_shared_socket(home)))
         req = {"id": 0, "method": "ping"}
         sock.sendall((json.dumps(req) + "\n").encode())
         buf = b""
@@ -31,14 +32,14 @@ def mcp_daemon_probe() -> bool:
         sock.close()
 
 
-def is_alive() -> bool:
-    """True when the daemon answers a ping; ANY probe failure means "not alive".
+def is_alive(home: Path) -> bool:
+    """True when the daemon of `home` answers a ping; ANY probe failure means "not alive".
 
     The broad except below makes an unforeseen probe failure degrade to a verdict
     the watchdog can act on.
     """
     try:
-        return mcp_daemon_probe()
+        return mcp_daemon_probe(home)
     except (OSError, json.JSONDecodeError):
         return False
     except Exception:

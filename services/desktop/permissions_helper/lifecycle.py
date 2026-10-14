@@ -25,7 +25,7 @@ from base.config import settings
 from base.host.permissions_helper.client import HelperFactory
 from base.host.proc import run_bounded
 from base.log import logger
-from base.paths import logs_dir, permissions_helper_socket
+from base.paths import ava_home, logs_dir, permissions_helper_socket
 from services.desktop.permissions_helper import hardened_runtime
 from services.desktop.permissions_helper.build_state import (
     BUILD_STATE_NAME,
@@ -668,7 +668,9 @@ def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory, timers:
         "ProgramArguments": [str(exe)],
         "EnvironmentVariables": {
             "AVA_PERMISSIONS_HELPER_SOCKET": str(helper_socket()),
-            "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(base.paths.root_run_dir() / "seed.json"),
+            "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(
+                base.paths.root_run_dir(base.paths.ava_home()) / "seed.json"
+            ),
         },
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
@@ -690,7 +692,9 @@ def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory, timers:
             "this home's helper from outside its process tree before activating the replacement"
         )
     if not loaded:
-        base.paths.root_run_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
+        base.paths.root_run_dir(base.paths.ava_home()).mkdir(
+            mode=0o700, parents=True, exist_ok=True
+        )
         clear_helper_stop_intent(base.paths.ava_home())
         path.write_bytes(new_bytes)
         run_tool(["launchctl", "bootstrap", launchd_domain(), str(path)])
@@ -703,7 +707,7 @@ def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory, timers:
 
 def helper_socket() -> Path:
     """This cluster's permissions-helper socket, from its configured helper port."""
-    return permissions_helper_socket(settings.services.permissions_helper_port)
+    return permissions_helper_socket(ava_home(), settings.services.permissions_helper_port)
 
 
 def helper_answers_ping(helper: HelperFactory, timers: Timers) -> bool:
@@ -731,7 +735,7 @@ def helper_answers_ping(helper: HelperFactory, timers: Timers) -> bool:
 
 def _require_usable_socket_paths() -> None:
     """Refuse impossible macOS IPC names before signing or registering jobs."""
-    paths = (helper_socket(), base.paths.root_run_dir() / "ava-root.sock")
+    paths = (helper_socket(), base.paths.root_run_dir(base.paths.ava_home()) / "ava-root.sock")
     for path in paths:
         # Darwin sockaddr_un.sun_path has 104 bytes, including the terminating NUL.
         if len(os.fsencode(path)) >= 104:

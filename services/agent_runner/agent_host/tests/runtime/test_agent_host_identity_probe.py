@@ -23,6 +23,7 @@ async def test_actual_stats_route_matches_configured_port_home_pid_and_owner(
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text(str(os.getpid()))
     host, scheduler = MagicMock(), MagicMock()
     host.runtime_owner = uuid4()

@@ -109,9 +109,10 @@ def build_services() -> tuple[ServiceSpec, ...]:
     from services.entrypoints.gate.daemon import app_port, entry_port
     from services.supervision.healthchecks.gate import probe as probe_gate
     from services.supervision.healthchecks.otel_collector import probe_collector
-    from services.supervision.healthchecks.protocol_probe import probe as probe_protocol_service
+    from services.supervision.healthchecks.protocol_probe import probe as probe_protocol
     from services.supervision.healthchecks.redis_bridge import probe_relay
 
+    probe_protocol_service = partial(probe_protocol, home=ava_home())
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
     _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command()
@@ -415,9 +416,13 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             session="otel-collector",
             cmd=shlex.join(
-                [str(otel_collector_binary()), "--config", str(otel_collector_config())]
+                [
+                    str(otel_collector_binary(ava_home())),
+                    "--config",
+                    str(otel_collector_config(ava_home())),
+                ]
             ),
-            config_inputs=(otel_collector_config(),),
+            config_inputs=(otel_collector_config(ava_home()),),
             capabilities=BOTH,
             requires_db=False,
             # The healthcheck POSTs a valid empty ExportTraceServiceRequest; bare TCP is insufficient.

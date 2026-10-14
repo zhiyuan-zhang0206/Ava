@@ -57,7 +57,7 @@ def state_path() -> Path:
 def lock_path() -> Path:
     import base.paths
 
-    return base.paths.run_dir() / "deploy-pause-owner.lock"
+    return base.paths.run_dir(base.paths.ava_home()) / "deploy-pause-owner.lock"
 
 
 def _read_unlocked(path: Path) -> PauseOwnerSnapshot:

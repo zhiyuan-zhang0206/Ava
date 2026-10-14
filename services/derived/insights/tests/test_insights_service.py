@@ -35,6 +35,7 @@ from base.db.config import DbConfig
 from base.lm.catalog import ModelCatalog
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import insights_pidfile, insights_socket
 from services.derived.insights import daemon
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
@@ -48,12 +49,16 @@ _TIMELINE_INPUTS = TimelineReadInputs(
 
 
 def _app(
-    *, model_catalog: ModelCatalog, timeline_inputs: TimelineReadInputs = _TIMELINE_INPUTS
+    *,
+    home: Path,
+    model_catalog: ModelCatalog,
+    timeline_inputs: TimelineReadInputs = _TIMELINE_INPUTS,
 ) -> Any:
     return build_app(
         cast(Database, object()),
         cast(ConnectionPool[Any], object()),
         _CONFIG,
+        home=home,
         catalog=model_catalog,
         default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
         timeline_inputs=timeline_inputs,
@@ -61,9 +66,9 @@ def _app(
 
 
 def test_the_app_serves_the_run_timeline_routes_at_their_public_paths(
-    *, model_catalog: ModelCatalog
+    tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    paths = set(_app(model_catalog=model_catalog).openapi()["paths"])
+    paths = set(_app(home=tmp_path, model_catalog=model_catalog).openapi()["paths"])
     assert {
         "/api/agents/{agent_id}/run-timeline",
         "/api/agents/{agent_id}/run-timeline/messages",
@@ -71,14 +76,19 @@ def test_the_app_serves_the_run_timeline_routes_at_their_public_paths(
     } <= paths
 
 
-def test_healthz_names_the_service_home_and_process(*, model_catalog: ModelCatalog) -> None:
-    body = TestClient(_app(model_catalog=model_catalog)).get("/healthz").json()
+def test_healthz_names_the_service_home_and_process(
+    tmp_path: Path, *, model_catalog: ModelCatalog
+) -> None:
+    body = TestClient(_app(home=tmp_path, model_catalog=model_catalog)).get("/healthz").json()
     assert body["name"] == "insights"
     assert isinstance(body["pid"], int)
+    assert body["home"] == str(tmp_path)
 
 
-def test_a_route_validates_before_it_reads_anything(*, model_catalog: ModelCatalog) -> None:
-    client = TestClient(_app(model_catalog=model_catalog))
+def test_a_route_validates_before_it_reads_anything(
+    tmp_path: Path, *, model_catalog: ModelCatalog
+) -> None:
+    client = TestClient(_app(home=tmp_path, model_catalog=model_catalog))
     # The state holds no database: only a request rejected at the boundary can answer.
     assert client.get("/api/agents/1/run-timeline/messages?start=3&end=1").status_code == 422
     assert client.get("/api/agents/1/run-timeline/messages?start=-1&end=1").status_code == 422
@@ -104,6 +114,17 @@ def test_the_socket_is_owner_only_and_replaces_a_predecessors_leftover(short_dir
         sock.close()
 
 
+def test_the_binder_creates_the_directory_of_its_socket(short_dir: Path) -> None:
+    """The path helpers derive paths and create nothing: the process that binds owns the directory."""
+    path = insights_socket(short_dir)
+    assert not path.parent.exists()
+    sock = bind_socket(path)
+    try:
+        assert path.parent == short_dir / "run" and path.exists()
+    finally:
+        sock.close()
+
+
 def test_the_app_answers_over_the_bound_socket(
     short_dir: Path, *, model_catalog: ModelCatalog
 ) -> None:
@@ -111,7 +132,7 @@ def test_the_app_answers_over_the_bound_socket(
     sock: socket.socket = bind_socket(path)
     server = uvicorn.Server(
         uvicorn.Config(
-            _app(model_catalog=model_catalog),
+            _app(home=short_dir, model_catalog=model_catalog),
             log_level="warning",
             access_log=False,
             log_config=None,
@@ -182,12 +203,12 @@ def _compact_history(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
 
 def test_apps_keep_their_rendering_policy_and_cache_separate_and_live(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
     loads = _compact_history(monkeypatch)
     hidden, shown = RenderingPolicy(enabled=False), RenderingPolicy(enabled=True)
-    first = _app(model_catalog=model_catalog, timeline_inputs=hidden.inputs)
-    second = _app(model_catalog=model_catalog, timeline_inputs=shown.inputs)
+    first = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=hidden.inputs)
+    second = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=shown.inputs)
     assert first.state.timeline_inputs is hidden.inputs
     assert second.state.timeline_inputs is shown.inputs
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
@@ -212,13 +233,15 @@ def test_apps_keep_their_rendering_policy_and_cache_separate_and_live(
 
 
 def test_a_rendering_error_propagates_and_does_not_cache_a_failed_view(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
     loads = _compact_history(monkeypatch)
     policy = RenderingPolicy(enabled=False)
     failure = ValueError("invalid rendering policy")
     policy.error = failure
-    client = TestClient(_app(model_catalog=model_catalog, timeline_inputs=policy.inputs))
+    client = TestClient(
+        _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=policy.inputs)
+    )
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
     with pytest.raises(ValueError) as caught:
         client.get(path)
@@ -261,7 +284,7 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
     class Store:
         def pool(self, *, max_size: int) -> Any:
             assert max_size == 4
-            assert (short_dir / "insights.pid").exists()
+            assert insights_pidfile(short_dir).exists()
             return pool
 
     db = Store()
@@ -274,13 +297,17 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
             for sock in sockets:
                 sock.close()
 
-    monkeypatch.setattr(daemon, "insights_pidfile", lambda: short_dir / "insights.pid")
-    monkeypatch.setattr(daemon, "insights_socket", lambda: short_dir / "insights.sock")
     monkeypatch.setattr(daemon, "build_model_catalog", lambda: model_catalog)
     monkeypatch.setattr(daemon.uvicorn, "Server", Server)
-    await daemon.run(config=boot, database=lambda: cast(Database, db))
+    await daemon.run(home=short_dir, config=boot, database=lambda: cast(Database, db))
 
     assert len(apps) == 1
+    assert short_dir != Path(os.environ["AVA_HOME"])
+    assert TestClient(apps[0]).get("/healthz").json() == {
+        "name": "insights",
+        "pid": os.getpid(),
+        "home": str(short_dir),
+    }
     assert apps[0].state.config.run_timeline_message_text_max == 37
     model_reader = apps[0].state.default_model_reader
     boot.set_field("llm_model", "first-process-model")
@@ -299,8 +326,8 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
         "[2026-10-10 12:00:00]"
     )
     assert closed == [True]
-    assert not (short_dir / "insights.pid").exists()
-    assert not (short_dir / "insights.sock").exists()
+    assert not insights_pidfile(short_dir).exists()
+    assert not insights_socket(short_dir).exists()
 
 
 def _assert_gate_matches_image(
@@ -369,7 +396,7 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
         assert inputs["machine_reader"]() == "insights-entry"
         factories[0]()
 
-    async def work(*, config: ConfigBoot, database: Callable[[], Database]) -> None:
+    async def work(*, home: Path, config: ConfigBoot, database: Callable[[], Database]) -> None:
         stages.append("run")
         assert config is boot
         assert database is factories[0]
