@@ -1,0 +1,4 @@
+exports = ["event_capture.py"]
+
+[uses]
+"test_event_capture.py" = ["event_capture.py"]

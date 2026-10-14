@@ -30,6 +30,7 @@ from base.agents.history.hierarchy.group_store import (
 )
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.telemetry.tests.capture.event_capture import EmittedEvents
 
 AGENT = 7
 
@@ -134,8 +135,9 @@ def _small_step(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
-    seen: dict = {"asked": [], "emitted": [], "reply": lambda _nodes: []}
+def _seams(monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents) -> dict:
+    _ = emitted_events  # the consumer's events go to the capture pipeline, not to a sink failure
+    seen: dict = {"asked": [], "reply": lambda _nodes: []}
     monkeypatch.setattr(
         gc, "group_model", lambda *_a, **_k: ("deepseek-flash", ModelOverrides.from_pins(None))
     )
@@ -155,7 +157,6 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
         return seen["reply"](nodes)
 
     monkeypatch.setattr(gc, "generate", generate)
-    monkeypatch.setattr(gc.telemetry, "emit", lambda _k, name, **_kw: seen["emitted"].append(name))
     return seen
 
 
@@ -261,7 +262,7 @@ async def test_closing_a_level_can_make_the_next_level_due(
 
 
 async def test_a_failed_check_emits_an_event_records_calls_and_waits_for_five_more(
-    aops_pool: AsyncConnectionPool, _seams: dict
+    aops_pool: AsyncConnectionPool, _seams: dict, emitted_events: EmittedEvents
 ) -> None:
     await _fill(aops_pool, 5)
 
@@ -270,7 +271,7 @@ async def test_a_failed_check_emits_an_event_records_calls_and_waits_for_five_mo
 
     _seams["reply"] = boom
     await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(), AGENT, inputs=read_inputs())
-    assert _seams["emitted"] == ["understanding_group_failed"]
+    assert emitted_events.names() == ["understanding_group_failed"]
     assert await load_last_checked(aops_pool, AGENT, 1) == 5
     assert await _parents(aops_pool) == []
     async with aops_pool.connection() as conn, conn.cursor() as cur:

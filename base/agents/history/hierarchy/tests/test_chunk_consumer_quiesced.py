@@ -13,10 +13,11 @@ from base.agents.history.hierarchy import chunk_consumer as loop
 from base.agents.history.hierarchy.tests.consumer_helpers import read_inputs
 from base.config import settings
 from base.lm.catalog import ModelCatalog
+from base.telemetry.tests.capture.event_capture import EmittedEvents
 
 
 async def test_the_forever_loop_claims_nothing_while_the_host_is_quiesced(
-    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
 ) -> None:
     """A held unit's stop window is database-quiet; claiming resumes once it lifts."""
     claims = 0
@@ -43,7 +44,6 @@ async def test_the_forever_loop_claims_nothing_while_the_host_is_quiesced(
     monkeypatch.setattr(loop, "claim_job", claim_job)
     monkeypatch.setattr(loop, "claim_rebuild", claim_rebuild)
     monkeypatch.setattr(loop, "backlog", backlog)
-    monkeypatch.setattr(loop.telemetry, "emit", MagicMock())
     task = asyncio.create_task(
         loop.understanding_loop_forever(
             MagicMock(),
