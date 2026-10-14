@@ -237,6 +237,26 @@ class UnderstandingGroupFailed(TypedDict):
     error: str
 
 
+class UnderstandingCallRecordFailed(TypedDict):
+    """`understanding_call_record_failed` payload — the audit rows of an understanding
+    call (a chunk job, or a grouping check with `job_id` 0) could not be written. The
+    node or group the call produced is kept; only the call record is lost."""
+
+    agent_id: int
+    job_id: int
+    error: str
+
+
+class UnderstandingRebuildFailed(TypedDict):
+    """`understanding_rebuild_failed` payload — a rebuild of an agent's leaves failed on its
+    last allowed attempt and was closed as failed; the leaves stay as they were."""
+
+    agent_id: int
+    rebuild_id: int
+    attempts: int
+    error: str
+
+
 class UnderstandingLeafOutOfOrder(TypedDict):
     """`understanding_leaf_out_of_order` payload — a level-1 node landed before one that already
     has a parent. Nothing repairs it automatically: the agent's upper levels need a manual build."""
@@ -368,6 +388,20 @@ EVENTS: dict[str, EventSpec] = {
         payload=UnderstandingGroupFailed,
         tier="anomaly",
         site="base/agents/history/hierarchy/group_consumer.py:_check_level",
+    ),
+    "understanding_call_record_failed": telemetry_event(
+        "understanding_call_record_failed",
+        "the audit rows of an understanding call could not be written; the node or group is kept and only the call record is lost",
+        payload=UnderstandingCallRecordFailed,
+        tier="anomaly",
+        site="base/agents/history/hierarchy/chunks.py:write_chunk_calls",
+    ),
+    "understanding_rebuild_failed": telemetry_event(
+        "understanding_rebuild_failed",
+        "an understanding rebuild failed on its last allowed attempt and was closed as failed",
+        payload=UnderstandingRebuildFailed,
+        tier="anomaly",
+        site="base/agents/history/hierarchy/chunk_consumer.py:_process_rebuild",
     ),
     "understanding_leaf_out_of_order": telemetry_event(
         "understanding_leaf_out_of_order",

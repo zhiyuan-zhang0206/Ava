@@ -43,7 +43,6 @@ exports = ["capture"]
 "test_tracing.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_endpoint" = 1
 "test_tracing.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 13
 "test_tracing.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.production_identity" = 3
-"test_tracing.py#monkeypatch.setattr base.telemetry.trace_mirror.traces_dir" = 10
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.COLLECTOR_RETRY_INTERVAL_S" = 1
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.INIT_RESOLVED_TIMEOUT_S" = 1
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.cluster_label" = 1

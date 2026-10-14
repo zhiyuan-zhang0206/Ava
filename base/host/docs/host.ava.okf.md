@@ -19,6 +19,16 @@ helpers. HTTPX uses its installed import behavior and public entry points.
 - [[base/host/env/docs/registry.ava.okf.md]] — Environment declarations and boot/child projections.
 - [[base/host/docs/runtime_interpreter.ava.okf.md]] — Loaded-runtime interpreter binding.
 
+`base/host/system/hostport.py` is the port to this machine. A component that starts a process,
+looks up a program or branches on the platform takes a required `host: Host` with four fields:
+`run` (`proc.run_bounded`, whose timeout bounds the whole process tree), `which`
+(`shutil.which`), `platform` (`Platform`: `system` as `linux` or `darwin`, `machine`,
+`executable`) and `uid`. The composition root builds it with `Host.system()`; a test builds the
+`Host` it wants with `base.host.tests.fake_commands.FakeCommands` as `run`, which records each
+argv, answers from a script routed by argv prefix and refuses an unscripted command. A test that
+needs a real process uses `Host.system()`. The four fields are the whole port; a new capability
+is a reviewed addition, not a field that appears on its own.
+
 `base/host/net/resilience.py` owns immutable `Policy` parameters and the shared
 `retry` / `aretry` executors, including backoff, jitter, classification and
 idempotency gates. Bootstrap fetches use this owner. Provider and Redis-listener

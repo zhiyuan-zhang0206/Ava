@@ -43,7 +43,6 @@ import httpx
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from base.paths import traces_dir
 
 _WATERMARK_NAME = ".ship-watermark.json"
 # The standard OTLP/HTTP trace path — what Tempo's OTLP receiver listens on.
@@ -119,8 +118,8 @@ def _file_day(path: Path) -> date:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).date()
 
 
-def load_watermark() -> dict[str, int]:
-    path = traces_dir() / _WATERMARK_NAME
+def load_watermark(*, traces_dir: Path) -> dict[str, int]:
+    path = traces_dir / _WATERMARK_NAME
     if not path.exists():
         return {}
     marks: dict[str, int] = json.loads(path.read_text(encoding="utf-8"))
@@ -131,12 +130,12 @@ def load_watermark() -> dict[str, int]:
     return {
         name: off
         for name, off in marks.items()
-        if (traces_dir() / name).exists() or (traces_dir() / f"{name}.gz").exists()
+        if (traces_dir / name).exists() or (traces_dir / f"{name}.gz").exists()
     }
 
 
-def _save_watermark(marks: dict[str, int]) -> None:
-    path = traces_dir() / _WATERMARK_NAME
+def _save_watermark(marks: dict[str, int], *, traces_dir: Path) -> None:
+    path = traces_dir / _WATERMARK_NAME
     path.write_text(json.dumps(marks, indent=2, sort_keys=True), encoding="utf-8")
 
 
@@ -198,6 +197,7 @@ def _ship_files(
     target: ShipTarget | None,
     windowed: bool,
     dry_run: bool,
+    traces_dir: Path,
 ) -> tuple[int, int, int]:
     """Ship one file list; return (total_lines, total_spans, shipped_files).
 
@@ -260,7 +260,7 @@ def _ship_files(
                     # skips. Windowed re-imports are idempotent, so skip the bump.
                     if not windowed:
                         marks[wm_key] = offset
-                        _save_watermark(marks)
+                        _save_watermark(marks, traces_dir=traces_dir)
             if file_lines:
                 shipped_files += 1
                 total_lines += file_lines
@@ -270,7 +270,12 @@ def _ship_files(
 
 
 def cmd_trace_ship(
-    *, since: str | None, until: str | None, dry_run: bool, machine: MachineIdentity
+    *,
+    since: str | None,
+    until: str | None,
+    dry_run: bool,
+    machine: MachineIdentity,
+    traces_dir: Path,
 ) -> int:
     """Ship the local trace mirror toward Tempo over the role-correct transport.
 
@@ -290,13 +295,13 @@ def cmd_trace_ship(
     # Active `spans.jsonl` + rotated `spans-<ts>-(size|time).jsonl` + gzipped
     # old segments (`*.jsonl.gz` — the agent-side compression pass; read
     # transparently in `_ship_files`); oldest first, the active file last.
-    files = sorted(traces_dir().glob("spans*.jsonl*"), key=mirror_sort_key)
+    files = sorted(traces_dir.glob("spans*.jsonl*"), key=mirror_sort_key)
     if windowed:
         files = [p for p in files if lo <= _file_day(p) <= hi]
 
-    marks = load_watermark()
+    marks = load_watermark(traces_dir=traces_dir)
     total_lines, total_spans, shipped_files = _ship_files(
-        files, marks, target=target, windowed=windowed, dry_run=dry_run
+        files, marks, target=target, windowed=windowed, dry_run=dry_run, traces_dir=traces_dir
     )
 
     verb = "would ship" if dry_run else "shipped"

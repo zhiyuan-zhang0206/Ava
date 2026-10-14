@@ -772,4 +772,6 @@ async def write_chunk_calls(
                 },
             )
         except Exception:
-            logger.opt(exception=True).warning("understanding call-record event not emitted")
+            logger.opt(exception=True).warning(
+                "event understanding_call_record_failed not emitted for job {job}", job=job.id
+            )

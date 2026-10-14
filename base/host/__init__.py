@@ -1,7 +1,7 @@
 """This machine's substrate: OS integration, process and filesystem primitives, converge.
 
 Sub-packages: ``system`` (the PlatformBackend facade, OS job registrations,
-capability probes, native scheduler observation) and ``converge`` (host
+capability probes, native scheduler observation, the ``Host`` port) and ``converge`` (host
 converge helpers).
 
 Top-level modules: ``proc`` (process liveness, force-kill and bounded
