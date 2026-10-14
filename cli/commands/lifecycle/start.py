@@ -302,7 +302,11 @@ def _admit_start(
     roster = _roster_for(state.roles, selection, publish=False, machine=command.machine)
     try:
         state.live = _root_driver_commands.admit_live_start(
-            roster, state.repo, state.roles, reconcile=selection.persist_services
+            roster,
+            state.repo,
+            state.roles,
+            reconcile=selection.persist_services,
+            helper=command.helper,
         )
         if not state.live:
             rc = prepare_cold_start(
@@ -489,6 +493,7 @@ def cmd_start_body(
         roles,
         reconcile=persist_services,
         retained_children=state.retained_children,
+        helper=command.helper,
         runtime=runtime,
         honor_restart_budget=boot_attempt,
     )

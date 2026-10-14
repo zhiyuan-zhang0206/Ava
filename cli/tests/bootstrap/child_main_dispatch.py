@@ -161,7 +161,7 @@ def _init_and_start_settings_free() -> None:
         return 0
 
     start_intent.run_start_command = start
-    start_intent.complete_start = lambda: calls.append("boot-complete")
+    start_intent.complete_start = lambda **_kw: calls.append("boot-complete")
     start_intent.release_serving = lambda: calls.append("clear-serving")
     assert main.main(["start"]) == 1 and not home.exists()  # nothing to start yet, and nothing made
     assert (

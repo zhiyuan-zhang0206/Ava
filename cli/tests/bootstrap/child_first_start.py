@@ -29,7 +29,7 @@ checkout.mkdir()
 start_intent.checkout = lambda: checkout
 cluster.port_free = lambda _port: True
 start_intent.run_start_command = start
-start_intent.complete_start = lambda: None
+start_intent.complete_start = lambda **_kw: None
 assert (
     main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]) == 0
 )

@@ -16,6 +16,7 @@ import pytest
 from dotenv import dotenv_values
 
 from base import cluster
+from base.host.permissions_helper.client import HelperFactory
 from base.native_process.os_platform import file_lock
 from base.paths import ava_home
 from cli import init_intent, start_intent
@@ -664,7 +665,12 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
         return result
 
     monkeypatch.setattr(start, "cmd_start", runtime)
-    monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
+
+    def publish_pid(*, helper: HelperFactory) -> None:
+        del helper
+        calls.append("publish PID")
+
+    monkeypatch.setattr(root_driver, "complete_boot_start", publish_pid)
     prepare_init_identity(_single_box())
     assert (
         start_intent.run_start(
@@ -700,7 +706,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     monkeypatch.setattr(start, "cmd_start", ready)
     monkeypatch.setattr(start_serving, "clear_serving", lambda: calls.append("cleared"))
 
-    def fail() -> None:
+    def fail(**_kw: object) -> None:
         raise RuntimeError("manager refused native custody")
 
     monkeypatch.setattr(root_driver, "complete_boot_start", fail)

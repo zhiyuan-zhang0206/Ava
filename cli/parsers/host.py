@@ -54,6 +54,7 @@ def _h_stop(
         database_factory=args.database_factory,
         producer=args.producer,
         machine=args.runtime.machine,
+        helper=args.runtime.helper,
     )
 
 

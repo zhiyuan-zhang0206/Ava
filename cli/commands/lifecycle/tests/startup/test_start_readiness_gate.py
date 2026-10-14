@@ -287,7 +287,7 @@ def test_failed_launch_never_becomes_serving(
     monkeypatch.setattr(
         _root_driver_commands,
         "complete_boot_start",
-        lambda: pytest.fail("not ready for boot handoff"),
+        _ignoring_args(lambda: pytest.fail("not ready for boot handoff")),
     )
 
     def failed(roster: tuple[ServiceSpec, ...], *_a: object, **_kw: object) -> LaunchOutcome:
@@ -488,7 +488,9 @@ def test_internal_start_leaves_boot_publication_to_public_dispatch(
         _ignoring_args(lambda: _probe_commands.ServiceProbe(ready, "root", "probe")),
     )
     monkeypatch.setattr(
-        root_driver, "complete_boot_start", lambda: pytest.fail("public dispatch owns publication")
+        root_driver,
+        "complete_boot_start",
+        _ignoring_args(lambda: pytest.fail("public dispatch owns publication")),
     )
     assert _start_commands.cmd_start(
         retained_children=[],

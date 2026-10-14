@@ -19,6 +19,7 @@ from base.deploy.lifecycle.status_journal import begin, finish, phase, status_pa
 from base.deploy.maintenance import admission
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
+from base.host.permissions_helper.client import HelperFactory
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
@@ -141,12 +142,14 @@ def stop_plan(
     return roles, selected, preserved
 
 
-def services_phase_action(*, preserved: frozenset[str], deadline: float) -> Callable[[], object]:
+def services_phase_action(
+    *, preserved: frozenset[str], deadline: float, helper: HelperFactory
+) -> Callable[[], object]:
     """Stop services through their root owner, preserving explicitly retained units."""
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
     return lambda: _root_driver_commands.stop_root_service_tree(
-        preserve=preserved, timeout_s=remaining(deadline)
+        preserve=preserved, timeout_s=remaining(deadline), helper=helper
     )
 
 
@@ -180,10 +183,13 @@ def _stop_initialization(
     clients: list[str],
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
+    helper: HelperFactory,
 ) -> None:
     """Close a proven pre-application attempt through the existing native owners."""
     _timed_phase(
-        phases, "services", services_phase_action(preserved=frozenset(), deadline=deadline)
+        phases,
+        "services",
+        services_phase_action(preserved=frozenset(), deadline=deadline, helper=helper),
     )
     if not keep_browser:
         _timed_phase(phases, "browser", lambda: stop_browser(deadline))
@@ -239,6 +245,7 @@ def _drain_and_stop(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
+    helper: HelperFactory,
 ) -> None:
     """Drain the agents, then stop the selected resources; each phase is timed into `phases`."""
     _timed_phase(
@@ -272,7 +279,9 @@ def _drain_and_stop(
     _timed_phase(
         phases,
         "services",
-        services_phase_action(preserved=preserved | {SERVICE_UNIT}, deadline=deadline),
+        services_phase_action(
+            preserved=preserved | {SERVICE_UNIT}, deadline=deadline, helper=helper
+        ),
     )
     if not keep_browser and "browser" not in preserved:
         _timed_phase(phases, "browser", lambda: stop_browser(deadline))
@@ -293,7 +302,7 @@ def _drain_and_stop(
         _timed_phase(
             phases,
             "pty-sessions",
-            services_phase_action(preserved=preserved, deadline=deadline),
+            services_phase_action(preserved=preserved, deadline=deadline, helper=helper),
         )
     if teardown_extras:
         _timed_phase(phases, "extras", lambda: stop_extras(deadline))
@@ -326,6 +335,7 @@ def stop(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
+    helper: HelperFactory,
 ) -> int:
     """Drain via normal restart, then stop selected resources.
 
@@ -368,6 +378,7 @@ def stop(
                 clients=clients,
                 retained_children=retained_children,
                 producer=producer,
+                helper=helper,
             )
             return finish_stop(owns_journal=owns_journal, notes=notes, clients=clients)
         _drain_and_stop(
@@ -385,6 +396,7 @@ def stop(
             database_factory=database_factory,
             producer=producer,
             machine=machine,
+            helper=helper,
         )
     except (RuntimeError, TimeoutError, OSError, subprocess.TimeoutExpired) as exc:
         report_incomplete(exc, phases, owns_journal=owns_journal)
