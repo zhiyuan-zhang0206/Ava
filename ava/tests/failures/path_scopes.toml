@@ -1,3 +1,4 @@
 "tests.path_scoped.ava_tests" = [
+    "test_seed_guard.py",
     "test_self_compact_publish.py",
 ]

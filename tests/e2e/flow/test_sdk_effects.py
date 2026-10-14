@@ -17,7 +17,7 @@ import psutil
 import pytest
 
 from base.paths import ava_home
-from tests.components.base.poll_until import poll_until
+from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import chat_and_wait
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record

@@ -33,7 +33,7 @@ import pytest
 from base.config import settings
 from base.db import Database
 from base.paths import workspace_dir
-from tests.components.base.poll_until import poll_until
+from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import (
     chat_and_wait,
     checkpoint_values,

@@ -6,7 +6,6 @@ exports = ["fakes.py", "live_agents.py"]
 
 [debt.first-party-patch]
 "fakes.py#monkeypatch.setattr base.db.Database" = 1
-"test_connect_helpers.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "test_connect_helpers.py#monkeypatch.setattr base.db.code_version_gate.has_log_sink" = 1
 "test_connect_helpers.py#monkeypatch.setattr base.db.code_version_gate.time" = 1
 "test_connect_helpers.py#monkeypatch.setattr base.db.connections.ConnectionPool" = 1

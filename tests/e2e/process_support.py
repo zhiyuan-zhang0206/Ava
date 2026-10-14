@@ -19,6 +19,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.deploy.lifecycle.tests.serving_entrypoint import inject_fixture_gate
 from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty import client as pty_client
 from tests.e2e._credentials import current_credentials
@@ -731,32 +732,6 @@ def sweep_stale_e2e_processes(
     return len(groups) + len(singles)
 
 
-def fixture_entrypoint() -> None:
-    """Direct-process E2E serving injection, deliberately excluding root custody.
-
-    This test-only module is explicitly selected by conftest; no environment
-    flag or product entry point can bypass the real native birth gate.
-    """
-    import runpy
-
-    from base.deploy.lifecycle import start_serving
-
-    gate, module, *arguments = sys.argv[1:]
-    path = Path(gate)
-
-    def fixture_is_serving() -> bool:
-        return path.is_file()
-
-    @contextmanager
-    def fixture_recovery() -> Generator[bool]:
-        yield fixture_is_serving()
-
-    start_serving.is_serving = fixture_is_serving
-    start_serving.recovery_permitted = fixture_recovery
-    sys.argv = [module, *arguments]
-    runpy.run_module(module, run_name="__main__", alter_sys=True)
-
-
 @pytest.fixture
 def pty_sessions_proc() -> Iterator[None]:
     """The machine's pty-sessions service, which holds every agent shell a scenario opens.
@@ -789,6 +764,20 @@ def pty_sessions_proc() -> Iterator[None]:
                     ) from None
                 time.sleep(0.1)
         yield
+
+
+def fixture_entrypoint() -> None:
+    """Direct-process E2E serving injection, deliberately excluding root custody.
+
+    This test-only module is explicitly selected by conftest; no environment
+    flag or product entry point can bypass the real native birth gate.
+    """
+    import runpy
+
+    gate, module, *arguments = sys.argv[1:]
+    inject_fixture_gate(Path(gate))
+    sys.argv = [module, *arguments]
+    runpy.run_module(module, run_name="__main__", alter_sys=True)
 
 
 if __name__ == "__main__":

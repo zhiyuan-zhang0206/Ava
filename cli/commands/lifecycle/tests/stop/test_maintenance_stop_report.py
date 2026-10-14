@@ -23,6 +23,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle import status_journal
+from base.deploy.tests.maintenance_factory import WHEN
 from base.native_process import ownership
 from base.native_process.ownership import OwnedProcess
 from base.sessions.posixproc import process_group_has_live_members
@@ -43,7 +44,6 @@ from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop.stop_support import written as written
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.components.agent.test_maintenance import WHEN
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = [

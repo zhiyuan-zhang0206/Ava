@@ -32,6 +32,9 @@ import pytest
 from base.cluster import ownership, port_preflight
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_shells import output_until, type_line
 from tests.factories.secret_argv import (
     SECRET,
     SECRET_VALUES,
@@ -40,9 +43,6 @@ from tests.factories.secret_argv import (
 )
 from tests.factories.secret_argv import secret_env as secret_env
 from tests.factories.secret_argv import secrets_in_creator_env as secrets_in_creator_env
-from tests.path_scoped.pty_service import PtyServiceProcess
-from tests.path_scoped.pty_service import pty_service as pty_service
-from tests.path_scoped.pty_shells import output_until, type_line
 
 # The pid the faked reparent helper reports. Every launch below drives the REAL
 # `posixproc.new_session` (only `subprocess.run` is faked), and that function

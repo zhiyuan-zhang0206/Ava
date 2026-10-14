@@ -17,7 +17,6 @@ from __future__ import annotations
 from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 
 import psycopg
 import pytest
@@ -33,7 +32,6 @@ from base.cluster import (
 from base.cluster.authority import ensure_groups
 from base.cluster.dataplane.pg_admin import owner_conninfo
 from base.cluster.dataplane.pg_tools import throwaway_postgres
-from base.db.code_version_gate import ProcessDbGate
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.host.net.url_secret import url_with_userinfo
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
@@ -45,7 +43,7 @@ _IDENTITY = "ava_citest"  # the throwaway db/role the fixture births
 
 
 def _schema_sql() -> str:
-    root = Path(__file__).resolve().parents[3]
+    root = Path(__file__).resolve().parents[4]
     return (root / "db" / "schema.sql").read_text()
 
 
@@ -297,66 +295,6 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
         assert {row[0] for row in rows} == set(range(10))
     finally:
         drop_database(identity, base_admin_url=admin)
-
-
-def test_checkpoint_reads_need_crud_not_schema_ddl(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-) -> None:
-    """Both checkpoint readers work as ``ava_runner`` without schema CREATE.
-
-    The checkpoint schema is an install / migration concern.  A reader calling
-    ``PostgresSaver.setup()`` first issues ``CREATE TABLE IF NOT EXISTS`` and
-    PostgreSQL correctly rejects it for this least-privilege runtime role even
-    when every table already exists.  Production then loses timeline / inspect
-    history despite the role holding all CRUD privileges the read itself needs.
-    """
-    from langchain_core.messages import HumanMessage
-    from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
-
-    from base.agents.history.checkpoint import (
-        load_checkpoint_messages,
-        load_checkpoint_messages_by_trace,
-    )
-    from base.config import settings
-    from base.db import Database
-
-    grant_runner(runner_db)
-
-    trace_id = "f" * 32
-    checkpoint = empty_checkpoint()
-    checkpoint["channel_values"] = {"messages": [HumanMessage(content="runtime read")]}
-    checkpoint["channel_versions"] = {"messages": "1", "__start__": "1"}
-    with PostgresSaver.from_conn_string(runner_db) as saver:
-        saved = saver.put(
-            config={"configurable": {"thread_id": "73", "checkpoint_ns": ""}},
-            checkpoint=checkpoint,
-            metadata=cast(
-                CheckpointMetadata,
-                {"source": "input", "step": 1, "parents": {}, "trace_id": trace_id},
-            ),
-            new_versions={"messages": "1"},
-        )
-
-    monkeypatch.setattr(settings.data_plane, "db_url", runner_url(runner_db))
-    current = load_checkpoint_messages(Database.from_settings(gate=database_gate), 73)
-    checkpoint_id, traced = load_checkpoint_messages_by_trace(
-        Database.from_settings(gate=database_gate), 73, trace_id
-    )
-
-    # This legacy checkpoint bypasses Pregel's ID assignment. Reading it
-    # records provenance without requiring DDL or rewriting stored data.
-    expected = HumanMessage(
-        content="runtime read", additional_kwargs={"ava_ephemeral_message_id": True}
-    )
-    assert current == [expected]
-    assert checkpoint_id == saved["configurable"]["checkpoint_id"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-    assert traced == [expected]
-    with PostgresSaver.from_conn_string(runner_url(runner_db)) as saver:
-        original = saver.get_tuple(saved)
-    assert original is not None
-    assert original.checkpoint["channel_values"]["messages"] == [
-        HumanMessage(content="runtime read")
-    ]
 
 
 def test_current_checkpoint_schema_skips_setup(

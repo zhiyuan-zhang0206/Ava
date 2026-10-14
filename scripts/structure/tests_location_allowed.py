@@ -80,17 +80,9 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "integration",
         "one guard over every launch path (cli, schedule manager, sdk) for secrets on a command line: spans ava, base, cli, services.wake.schedule_manager, no one of which may import all the others",
     ),
-    "tests/components/base/test_poll_until.py": (
-        "contract",
-        "tests the harness's poll_until helper, tests/components/base/poll_until.py",
-    ),
     "tests/components/base/test_proc_contract.py": (
         "contract",
         "scans the git-driving modules of the whole tree for subprocess.run timeouts",
-    ),
-    "tests/components/base/test_runner_role.py": (
-        "contract",
-        "asserts the ava_runner capability matrix declared in db/schema.sql",
     ),
     "tests/components/base/test_scan_contract.py": (
         "contract",

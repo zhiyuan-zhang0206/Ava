@@ -14,7 +14,7 @@
     "test_build_with_extensions.py",
     "test_interrupt.py",
 ]
-"tests.fixtures.unit.config_authority" = [
+"base.config.tests.config_authority" = [
     "test_interrupt.py",
 ]
 "base.log.tests.log_records" = [

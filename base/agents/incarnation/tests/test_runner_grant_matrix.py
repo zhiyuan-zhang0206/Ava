@@ -15,7 +15,7 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartRequest,
 )
 from base.agents.incarnation.native_work_models import NativeWorkTarget
-from tests.components.base.test_runner_role import (
+from base.agents.incarnation.tests.test_runner_role import (
     assert_alert_writes_denied,
     exercise_impersonation_entry_grants,
     exercise_pause_grants,
@@ -26,7 +26,7 @@ from tests.components.base.test_runner_role import (
     identity_url,
     runner_url,
 )
-from tests.components.base.test_runner_role import (
+from base.agents.incarnation.tests.test_runner_role import (
     runner_db as runner_db,
 )
 
