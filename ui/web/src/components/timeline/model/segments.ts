@@ -6,7 +6,6 @@ import { groupIntoTurns, type TimelineGroup } from "./runs";
 export interface RenderGroup {
   readonly group: TimelineGroup;
   readonly indexOffset: number;
-  readonly dividerRank: number | null;
   readonly rank: number;
 }
 
@@ -20,7 +19,6 @@ export function groupTimelineSegments(
   items: readonly BackendTimelineItem[],
   rankAt: (item: BackendTimelineItem, index: number) => number =
     (item) => parseItemIdParts(item.item_id)?.rank ?? 0,
-  hasPriorSegment = false,
 ): RenderGroup[] {
   const result: RenderGroup[] = [];
   let start = 0;
@@ -51,22 +49,14 @@ export function groupTimelineSegments(
       liveIndex: null,
     });
     for (const group of prefixGroups) {
-      result.push({ group, indexOffset: start, dividerRank: null, rank });
+      result.push({ group, indexOffset: start, rank });
     }
     for (const group of summaryGroups) {
-      result.push({ group, indexOffset: start + summaryIndex, dividerRank: null, rank });
+      result.push({ group, indexOffset: start + summaryIndex, rank });
     }
-    rawGroups.forEach((group, groupIndex) => {
-      let divider: number | null = null;
-      if (rank > 0 && groupIndex === 0) {
-        // A historical segment's raw items follow its compact summary.
-        divider = rank;
-      } else if (rank === 0 && groupIndex === 0 && (result.length > 0 || hasPriorSegment)) {
-        // The current segment follows retained history.
-        divider = 0;
-      }
-      result.push({ group, indexOffset: start + rawStart, dividerRank: divider, rank });
-    });
+    for (const group of rawGroups) {
+      result.push({ group, indexOffset: start + rawStart, rank });
+    }
     start = end;
   }
   return result;

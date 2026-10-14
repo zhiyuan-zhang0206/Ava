@@ -37,15 +37,12 @@
 //    sticky, force-scroll paths (send / switch / button) request a stick.
 //    Key design: the controller identifies our own programmatic scrolls
 //    by position echo, so user intent is never inferred from timing.
-// 2. **scrollToBottomRequest**: the store's single force-scroll signal,
-//    bumped on agent switch (inside switchThread, in the
-//    same set() that installs the new thread's items) AND on send
-//    (requestScrollToBottom). One useLayoutEffect honors it: pin to bottom
-//    + re-stick. Switching chats is a re-initialization and sending always
-//    shows the latest, so the view starts at the latest message regardless
-//    of prior scroll state. This is the single owner of the force-scroll
-//    trigger — it replaced the former parent-owned scrollToken prop + a
-//    duplicate activeThreadId effect that double-pinned on switch.
+// 2. **Reading bookmarks and explicit send**: each page/agent keeps its last
+//    visible item and expansion choices. Returning restores that bookmark and
+//    holds it while the tail refreshes; the bottom button shows that read's
+//    activity. A first visit defaults to the newest message. Only send bumps
+//    the store's force-scroll counter; clicking the bottom button resumes
+//    following directly.
 // 3. **Content expand/collapse**: every item renders a MessageCard — a colored
 //    left-border container with a CardHeader (icon + title/summary + timestamp +
 //    chevron) that toggles the body below it. Default expanded state is per-kind:
@@ -91,7 +88,7 @@ import {
   isAtBottom,
 } from "@/lib/layout/sticky";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
-import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
+import { readScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
@@ -102,11 +99,15 @@ import { ConnectionNotice } from "@/components/notifications/connection-notice";
 import { CompactingBlock } from "./model/compacting-block";
 import { LiveClockGate } from "./model/reasoning-clock";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
+import { rememberTimelinePosition, readTimelineExpansion, rememberTimelineExpansion, watchReadingNavigation } from "./model/reading-position";
+import { materializeBeforeAnchor } from "./model/materialize-prefix";
 import { classifyItem } from "./model/runs";
 import { groupTimelineSegments } from "./model/segments";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
+import { useStickyHeaderMotion } from "./model/use-sticky-header-motion";
+import { useOlderHistoryPull } from "./model/use-older-history-pull";
 import { applySavedTimelineScroll, useTimelineWindow, useTimelineWindowLimits } from "./model/use-timeline-window";
-import { CompactHistoryDivider, LoadOlderSpinner, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
+import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
 
@@ -116,9 +117,7 @@ interface Props {
   /** Identity of the timeline thread / active agent. A change means a new
    *  conversation is displayed, so all per-item and per-turn pins are dropped. */
   threadKey?: string;
-  /** History-entry memory key (router.bfcacheId) for the reader's scroll
-   *  position: a back/forward re-entry of a kept history entry restores it
-   *  instead of re-pinning to the bottom (see lib/scroll-memory.ts). */
+  /** Page-entry plus agent identity for the reading bookmark and expansions. */
   scrollMemoryKey?: string;
   // Streaming-code flag: pass true when the last item is an agent_code
   // that is still streaming, so PythonCode shows a cursor
@@ -142,6 +141,7 @@ interface Props {
   // nothing cached yet. Drives a centered spinner instead of a blank pane so a
   // cold switch doesn't flash empty then pop the whole column in at once.
   loading?: boolean;
+  loadingNew?: boolean;
   /** Conversation-column cap. The scroll surface is full-bleed (user ruling
    *  2026-08-06 — scrollbar at the pane edge, gutters scrollable); the item
    *  column itself stays capped and centered inside it. Falsy = full width. */
@@ -166,6 +166,7 @@ export const TimelineView = memo(function TimelineView({
   onLoadOlder,
   retainedItemsMax = 250,
   loading = false,
+  loadingNew = false,
   maxWidthCss,
 }: Props) {
   const t = useTranslations("timeline");
@@ -211,14 +212,16 @@ export const TimelineView = memo(function TimelineView({
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const historySpaceRef = useRef<HTMLDivElement>(null);
   // Back/forward scroll restoration (lib/scroll-memory.ts): the position
   // saved under this history entry, read once at mount and held until the
   // restore effect lands it -- or a user-commanded force-scroll supersedes
   // it. Nothing renders from it, so it lives in a ref.
   const pendingRestoreRef = useRef<SavedScroll | null>(scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
   // The child layout pass precedes useTimeline's parent selection effect.
-  // Reserve a saved position until the mount's switch bump has been scheduled;
-  // a later commit or ResizeObserver pass restores once the target fits.
+  // Hold the bookmark until the selected rows and their geometry can restore
+  // it; a later commit or ResizeObserver pass retries partial layout.
+  const holdRestoredPositionRef = useRef(!!pendingRestoreRef.current && !pendingRestoreRef.current.followBottom);
   const initialRestorePassRef = useRef(true);
   // The first post-mount attempt marks the end of mount-owned requests.
   const restoreRequestRef = useRef<number | null>(null);
@@ -244,6 +247,13 @@ export const TimelineView = memo(function TimelineView({
         ? { entryKey: scrollMemoryKey, contentKey: threadKey }
         : null;
   });
+  // Save before the pull hook's cleanup removes its native reserve.
+  useLayoutEffect(() => () => {
+    const mem = scrollMemoryRef.current;
+    const viewport = viewportRef.current;
+    if (mem && viewport && !pendingRestoreRef.current) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey);
+  }, []);
+
   // Pending anchor for scroll-position preservation on prepend. Captured at
   // the moment a load-older fetch is triggered (the topmost node the prepend
   // can displace that the user is actually reading — see the capture in the
@@ -269,9 +279,9 @@ export const TimelineView = memo(function TimelineView({
   // button hidden until the user scrolls away.
   const [atBottom, setAtBottom] = useState(true);
   const stuckRafRef = useRef<number | null>(null);
-  // The ids of the pinned headers: one owner for all surfaces — a work block's
-  // header or a top-level message card's (level 1, one line under the HeaderBar)
-  // and the child card pinned nested under an expanded work block's header
+  // Only work blocks pin at level 1 below HeaderBar. Their expanded detail
+  // cards pin at level 2; human messages and agent replies stay in flow.
+  // Track the child card pinned under an expanded work block's header
   // (level 2, task #3215).
   const [activeStuckHeaderId, setActiveStuckHeaderId] = useState<string | null>(null);
   const [activeStuckChildId, setActiveStuckChildId] = useState<string | null>(null);
@@ -282,10 +292,14 @@ export const TimelineView = memo(function TimelineView({
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
       null;
     if (!viewport) return;
-    const { topId, childId } = findClosestStuckHeaderId(viewport, BAR_HEIGHT_PX);
+    const { topId, childId } = wrapperRef.current?.dataset.fastScrolling === "true"
+      ? { topId: null, childId: null }
+      : findClosestStuckHeaderId(viewport, BAR_HEIGHT_PX);
     setActiveStuckHeaderId((prev) => (prev === topId ? prev : topId));
     setActiveStuckChildId((prev) => (prev === childId ? prev : childId));
   }, []);
+
+  const trackHeaderScrollMotion = useStickyHeaderMotion(wrapperRef, threadKey, updateStuckHeader);
 
   // Pointer-aware sticky thresholds: touch keeps the wide bounce-tolerant
   // bottom zone; mouse/trackpad gets a tight one so a small scroll-up to
@@ -309,7 +323,7 @@ export const TimelineView = memo(function TimelineView({
   const [controller] = useState<StickyController>(() =>
     createStickyController(stickyThresholds),
   );
-  const isFollowing = useCallback(() => controller.isSticky(), [controller]);
+  const isFollowing = useCallback(() => !holdRestoredPositionRef.current && controller.isSticky(), [controller]);
   const canonicalItemsRef = useRef(canonicalItems);
   const retainedItemsMaxRef = useRef(retainedItemsMax);
   // A measured runaway reached 857 rendered items / 44k attached nodes,
@@ -317,7 +331,7 @@ export const TimelineView = memo(function TimelineView({
   // long session needs a few hundred, so the default is 250 rather than 100
   // or 1000. Only a bottom follower can safely release the oldest rows.
   const trimFollowing = useCallback(() => {
-    if (!controller.isSticky()) return;
+    if (!controller.isSticky() || holdRestoredPositionRef.current) return;
     const store = useTimelineStore.getState();
     if (store.items !== canonicalItemsRef.current) return;
     if (store.compactBuffer || store.items.length <= retainedItemsMaxRef.current) return;
@@ -347,6 +361,10 @@ export const TimelineView = memo(function TimelineView({
   const measureAtBottom = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    if (holdRestoredPositionRef.current) {
+      setAtBottom(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1);
+      return;
+    }
     setAtBottom(
       isAtBottom(
         {
@@ -362,7 +380,7 @@ export const TimelineView = memo(function TimelineView({
   // Pin the viewport to the bottom and report the performed scroll back to
   // the controller (post-write snapshot, so the browser-clamped actual
   // scrollTop becomes the controller's baseline). `freshRun` marks the
-  // user-commanded force pins (send / agent switch) — see the force-scroll
+  // user-commanded force pins (initial visit / send) — see the force-scroll
   // effect below and lib/sticky.ts.
   const pinToBottom = useCallback(
     (viewport: HTMLElement, freshRun = false) => {
@@ -443,16 +461,13 @@ export const TimelineView = memo(function TimelineView({
   }, []);
 
   const coldFillRef = useRef({ pages: 0, open: true, inFlight: false, sawLoading: false });
-  const upwardGestureRef = useRef({ lastAt: 0, pages: 0 });
   // A landing's compensation write (scrollByDelta) echoes back as a scroll
   // event the controller classifies "down", though it is no user motion. The
   // scroll handler consumes this mark on the next event so the echo cannot
-  // reset the paging budget — with a reset after every landing, the
-  // three-page cap could never bind.
+  // be mistaken for user motion by restoration or header speed tracking.
   const prependEchoRef = useRef(false);
   useLayoutEffect(() => {
     coldFillRef.current = { pages: 0, open: true, inFlight: false, sawLoading: false };
-    upwardGestureRef.current = { lastAt: 0, pages: 0 };
     prependEchoRef.current = false;
   }, [threadKey]);
   useEffect(() => {
@@ -473,22 +488,22 @@ export const TimelineView = memo(function TimelineView({
     return true;
   }, [captureAnchor]);
 
-  const maybeLoadOlderAtTop = useCallback((userScrolledUp: boolean) => {
-    const viewport = viewportRef.current;
-    if (!userScrolledUp || !viewport || viewport.scrollTop > 0 || controller.isSticky()) return;
-    const gesture = upwardGestureRef.current;
-    const now = Date.now();
-    if (now - gesture.lastAt > 750) gesture.pages = 0; // a paused burst refills
-    gesture.lastAt = now; // a continuously arriving pull stays capped until it pauses
-    if (gesture.pages >= 3) return; // one sustained gesture cannot walk unbounded history
-    if (loadOneOlderPage()) gesture.pages += 1;
-  }, [controller, loadOneOlderPage]);
+  const canPullOlder = useCallback(() =>
+    hasMoreOlderRef.current && !loadingOlderRef.current && !!loadOlderRef.current && pendingAnchorRef.current === null,
+  []);
+  const closeColdFill = useCallback(() => { coldFillRef.current.open = false; }, []);
+  const {
+    prepare: prepareHistoryPull, contentHeight: historyContentHeight, offset: olderPullOffset, progress: olderPullProgress, returning: olderPullReturning,
+    isActive: historyPullActive, finishLoad: finishHistoryPull, onScroll: pullScroll, onScrollEnd: pullScrollEnd,
+    onWheel: pullWheel, onTouchStart: pullTouchStart, onTouchMove: pullTouchMove,
+    onTouchEnd: pullTouchEnd, onTouchCancel: cancelPullTouch,
+  } = useOlderHistoryPull(threadKey, historySpaceRef, contentRef, canPullOlder, loadOneOlderPage, closeColdFill);
 
   const maybeColdFill = useCallback(() => {
     const fill = coldFillRef.current;
     const viewport = viewportRef.current;
     if (!fill.open || !viewport || viewport.clientHeight <= 0 || itemsRef.current.length === 0) return;
-    if (viewport.scrollHeight > viewport.clientHeight || fill.pages >= 2) {
+    if (historyContentHeight(viewport) > viewport.clientHeight || fill.pages >= 2) {
       fill.open = false;
       return;
     }
@@ -497,7 +512,7 @@ export const TimelineView = memo(function TimelineView({
       fill.inFlight = true;
       fill.pages += 1;
     }
-  }, [loadOneOlderPage]);
+  }, [loadOneOlderPage, historyContentHeight]);
 
   useLayoutEffect(() => {
     if (loadingOlder && !prevLoadingOlderRef.current && pendingAnchorRef.current === null) {
@@ -520,10 +535,12 @@ export const TimelineView = memo(function TimelineView({
       if (threadKey === undefined) return; // conversation not identified yet
       if (saved.contentKey !== threadKey) {
         pendingRestoreRef.current = null; // other content now -- position is stale
+        holdRestoredPositionRef.current = false;
         return;
       }
       if (!applySavedTimelineScroll(viewport, saved, compactBuffer, canonicalItemsRef.current)) {
         restoreRequestRef.current ??= useTimelineStore.getState().scrollToBottomRequest;
+        controller.notifyRestored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
         return;
       }
       controller.notifyRestored({
@@ -545,40 +562,26 @@ export const TimelineView = memo(function TimelineView({
       scrollHeight: viewport.scrollHeight,
       clientHeight: viewport.clientHeight,
     });
-    // Only an upward movement classified by the sticky controller can page.
-    // Pin/prepend echoes and layout clamps therefore cannot start a chain.
+    // Position changes alone never request history: inertia, scrollbar moves,
+    // layout clamps and prepend echoes all stop at the same boundary.
     const onScroll = () => {
-      const direction = controller.handleScroll(snapshot());
+      const boundaryCorrection = pullScroll(viewport);
+      if (historyPullActive()) { updateStuckHeader(); return; }
+      const direction = holdRestoredPositionRef.current && !pendingRestoreRef.current ? "none" : controller.handleScroll(snapshot());
       if (direction === "up") coldFillRef.current.open = false;
-      // One landing, one echo: consume the mark on this event so only a
-      // genuine downward move (not the prepend echo below it) ends the burst.
-      const isPrependEcho = prependEchoRef.current;
+      // Consume the landing echo without treating compensation as reading motion.
+      const isPrependEcho = prependEchoRef.current || boundaryCorrection;
       prependEchoRef.current = false;
-      if (direction !== "none" && !isPrependEcho) pendingRestoreRef.current = null;
-      if (direction === "down" && !isPrependEcho) upwardGestureRef.current.pages = 0;
+      trackHeaderScrollMotion(viewport, isPrependEcho);
+      if (direction !== "none" && !isPrependEcho) {
+        if (pendingRestoreRef.current) holdRestoredPositionRef.current = true;
+        pendingRestoreRef.current = null;
+      }
       measureAtBottom();
-      maybeLoadOlderAtTop(direction === "up");
       trimFollowing();
       const mem = scrollMemoryRef.current;
       if (mem && !pendingRestoreRef.current) {
-        // The reader's position for this history entry; the sticky flag rides
-        // along so a follower returns following instead of frozen at a stale
-        // offset.
-        const rect = viewport.getBoundingClientRect();
-        const anchorNode = [...viewport.querySelectorAll<HTMLElement>(
-          ".timeline-item[data-item-id], [data-turn-expanded='false'][data-item-id]",
-        )].find((node) => {
-          const box = node.getBoundingClientRect();
-          return box.bottom > rect.top && box.top < rect.bottom;
-        });
-        saveScrollMemory(mem.entryKey, {
-          contentKey: mem.contentKey,
-          scrollTop: viewport.scrollTop,
-          anchor: anchorNode?.dataset.itemId
-            ? { itemId: anchorNode.dataset.itemId, rank: Number(anchorNode.dataset.displayRank ?? 0), viewportTop: anchorNode.getBoundingClientRect().top - rect.top }
-            : undefined,
-          followBottom: controller.isSticky(),
-        });
+        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey);
       }
       stuckRafRef.current ??= requestAnimationFrame(() => {
         stuckRafRef.current = null;
@@ -586,6 +589,9 @@ export const TimelineView = memo(function TimelineView({
       });
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
+    const onScrollEnd = (event: Event) => { if (event.target === viewport) pullScrollEnd(); };
+    viewport.addEventListener("scrollend", onScrollEnd);
+    const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => { holdRestoredPositionRef.current = false; });
 
     // Wheel intent — an early "stop following" signal for mouse/trackpad
     // (a notch can arrive before the position moves) and the resting-finger
@@ -594,24 +600,33 @@ export const TimelineView = memo(function TimelineView({
     // into a run, which is what a scrollbar drag (no wheel at all) depends
     // on. Touch devices never fire wheel.
     const onWheel = (e: WheelEvent) => {
-      controller.handleWheel(e.deltaY, snapshot());
-      if (!controller.isSticky()) pendingRestoreRef.current = null;
+      if (!e.ctrlKey && e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) holdRestoredPositionRef.current = false;
+      if (!e.ctrlKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) controller.handleWheel(e.deltaY, snapshot());
+      if (e.deltaY !== 0 && !controller.isSticky() && !isAtBottom(snapshot(), stickyThresholds)) pendingRestoreRef.current = null;
+      pullWheel(e, viewport);
     };
-    viewport.addEventListener("wheel", onWheel, { passive: true });
+    viewport.addEventListener("wheel", onWheel, { passive: false });
 
-    // Touch start/end feed the sticky controller only; older history loads
-    // automatically.
-    const onTouchStart = () => {
+    const onTouchStart = (e: TouchEvent) => {
+      holdRestoredPositionRef.current = false;
       controller.handleTouchStart();
+      pullTouchStart(e, viewport);
     };
+    const onTouchMove = (e: TouchEvent) => { pullTouchMove(e, viewport); };
 
     const onTouchEnd = () => {
       controller.handleTouchEnd(snapshot());
+      pullTouchEnd();
+    };
+    const onTouchCancel = () => {
+      controller.handleTouchEnd(snapshot());
+      cancelPullTouch();
     };
 
     viewport.addEventListener("touchstart", onTouchStart, { passive: true });
+    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
     viewport.addEventListener("touchend", onTouchEnd, { passive: true });
-    viewport.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    viewport.addEventListener("touchcancel", onTouchCancel, { passive: true });
 
     // ResizeObserver callbacks run after layout and before paint.
     const ro = new ResizeObserver(() => {
@@ -619,8 +634,9 @@ export const TimelineView = memo(function TimelineView({
       // (the mount's commit can render a zero-height surface); land a pending
       // restore here, before handleLayoutChange can pin, so the reader never
       // sees the bottom first.
+      prepareHistoryPull(viewport);
       applyPendingRestore(viewport);
-      if (controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
+      if (!historyPullActive() && !holdRestoredPositionRef.current && controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
       measureAtBottom();
       maybeColdFill();
       trimFollowing();
@@ -630,47 +646,37 @@ export const TimelineView = memo(function TimelineView({
 
     return () => {
       viewport.removeEventListener("scroll", onScroll);
+      viewport.removeEventListener("scrollend", onScrollEnd);
+      stopWatchingReadingInput();
       viewport.removeEventListener("wheel", onWheel);
       viewport.removeEventListener("touchstart", onTouchStart);
+      viewport.removeEventListener("touchmove", onTouchMove);
       viewport.removeEventListener("touchend", onTouchEnd);
-      viewport.removeEventListener("touchcancel", onTouchEnd);
+      viewport.removeEventListener("touchcancel", onTouchCancel);
       ro.disconnect();
     };
-  }, [applyPendingRestore, controller, measureAtBottom, maybeLoadOlderAtTop, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader]);
+  }, [applyPendingRestore, controller, stickyThresholds, measureAtBottom, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader, trackHeaderScrollMotion, prepareHistoryPull, historyPullActive, pullScroll, pullScrollEnd, pullWheel, pullTouchStart, pullTouchMove, pullTouchEnd, cancelPullTouch]);
 
-  // The SINGLE force-scroll trigger. The store bumps scrollToBottomRequest on
-  // exactly the two moments a scroll-to-bottom is unconditional — agent switch
-  // (inside switchThread) and send (requestScrollToBottom) —
-  // and this effect honors it: pin to the bottom + re-stick (pinToBottom sets
-  // sticky via notifyPinnedToBottom). This replaces the former dual trigger
-  // (parent-owned scrollToken effect + a separate activeThreadId effect), which
-  // double-pinned on switch and could pin before the new items were in the DOM.
-  //
-  // The switch bump rides in the SAME store set() that installs the new
-  // thread's items, so on a hot-cache switch this layout effect runs with the
-  // full new thread already committed and pins to its true bottom. On a
-  // cold-cache switch it pins the empty viewport now; the items arrive via
-  // React Query and the latched sticky flag + ResizeObserver pull the viewport
-  // down as they lay out — no second trigger needed.
-  //
-  // Also drops any pending load-older anchor. item_id is per-thread sequential
-  // ("2.0", "3.0", …), not globally unique, so a fetch triggered just before a
-  // switch (or a send) would otherwise survive into the new thread's render
-  // and — since this effect runs first (declared above the prepend-
-  // compensation effect, same commit, same React layout-effect ordering) —
-  // clearing it here always wins the race: the anchor is gone before that
-  // effect's DOM query can accidentally match an unrelated node sharing the
-  // stale id and yank the just-pinned bottom away.
+
+
+  // A new view defaults to the bottom unless it has a bookmark. Afterwards
+  // only an explicit send supersedes restoration. The request identity also
+  // prevents StrictMode re-attachment from replaying the initial pin.
   const scrollToBottomRequest = useTimelineStore((s) => s.scrollToBottomRequest);
+  const lastForceRequest = useRef<{ request: number; thread: string | undefined } | null>(null);
   useLayoutEffect(() => {
+    if (lastForceRequest.current?.request === scrollToBottomRequest && lastForceRequest.current.thread === threadKey) return;
+    lastForceRequest.current = { request: scrollToBottomRequest, thread: threadKey };
     pendingAnchorRef.current = null;
+    if (pendingRestoreRef.current?.contentKey !== threadKey) pendingRestoreRef.current = null;
     // Mount selection yields until the saved position can land. After a
-    // post-mount restore attempt, a new send/selection request supersedes an
+    // post-mount restore attempt, a new send request supersedes an
     // unreachable target instead of waiting for shortened content to grow.
     if (pendingRestoreRef.current) {
       if (restoreRequestRef.current === null || restoreRequestRef.current === scrollToBottomRequest) return;
       pendingRestoreRef.current = null;
     }
+    holdRestoredPositionRef.current = false;
     // We are about to force the viewport to the bottom, so hide the button
     // immediately rather than waiting for the post-scroll measurement.
     setAtBottom(true);
@@ -679,19 +685,19 @@ export const TimelineView = memo(function TimelineView({
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
       null;
     if (!viewport) return;
-    // A user-commanded force-scroll (send / agent switch): pin with a
+    // An initial visit or user-commanded send: pin with a
     // FRESH run — the reader's earlier departure is spent, so a
     // post-command twitch (trackpad nudge, momentum tail) cannot re-trigger
     // the stale run and silently release following while the awaited reply
     // streams in (user report 2026-09-19).
     pinToBottom(viewport, true);
-  }, [scrollToBottomRequest, pinToBottom]);
+  }, [scrollToBottomRequest, pinToBottom, threadKey]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current ??
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
-    applyPendingRestore(viewport);
     initialRestorePassRef.current = false;
+    applyPendingRestore(viewport);
   });
 
   // Streamed-growth auto-scroll lives in the ResizeObserver above — any
@@ -810,34 +816,18 @@ export const TimelineView = memo(function TimelineView({
     // anchor stops moving. Only rows above the anchor are forced — rows
     // below it cannot move it, and forcing the whole list (hundreds of
     // items, a ~90k px prompt card) would defeat the content-visibility
-    // purpose every landing. Restoring `auto` afterwards is safe:
-    // contain-intrinsic-size: auto remembers the rendered real height, so the
-    // restored rows do not shrink back to the 80px estimate. All of this runs
-    // in a layout effect (before paint) so the user never sees the
-    // temporarily-rendered content.
+    // purpose every landing. Keep successfully measured rows visible:
+    // switching them straight back to `auto` can restore the 80px estimate,
+    // even after a synchronous measurement. On a real checkpoint this
+    // shrank the prefix by 378px after compensation. The bounded DOM window
+    // releases those rows as the reader moves through a long conversation.
+    // Only an abandoned landing restores the previous visibility styles.
     const anchorNode = findNode();
     if (!anchorNode) {
       pendingAnchorRef.current = null; // anchor gone (thread switch) — abandon
       return;
     }
-    const cvSaved: { el: HTMLElement; cv: string }[] = [];
-    let anchorTop = anchorNode.getBoundingClientRect().top;
-    for (;;) {
-      let forcedAny = false;
-      for (const el of viewport.querySelectorAll<HTMLElement>('.timeline-item')) {
-        if (el === anchorNode || el.contains(anchorNode)) break;
-        if (el.style.contentVisibility === 'visible') continue;
-        const r = el.getBoundingClientRect();
-        if (r.top >= anchorTop) break; // at/below the anchor — the above-set is complete
-        cvSaved.push({ el, cv: el.style.contentVisibility });
-        el.style.contentVisibility = 'visible';
-        forcedAny = true;
-      }
-      if (!forcedAny) break;
-      const nextTop = anchorNode.getBoundingClientRect().top;
-      if (nextTop === anchorTop) break;
-      anchorTop = nextTop;
-    }
+    const cvSaved = materializeBeforeAnchor(viewport, anchorNode);
     void viewport.getBoundingClientRect(); // force synchronous layout
     const node = findNode();
     if (!node) {
@@ -846,12 +836,12 @@ export const TimelineView = memo(function TimelineView({
       return;
     }
     const delta = node.getBoundingClientRect().top + viewport.scrollTop - anchor.docTop;
-    for (const { el, cv } of cvSaved) el.style.contentVisibility = cv;
     // A prepend always pushes the anchor DOWN (new content lands above it), so
     // a zero/negative delta means the content above was replaced or removed —
     // a compact reset / snapshot truncation, not a landing. Scrolling by that
     // delta would jump the viewport; abandon the anchor instead.
     if (delta <= 0) {
+      for (const { el, cv } of cvSaved) el.style.contentVisibility = cv;
       pendingAnchorRef.current = null;
       return;
     }
@@ -862,7 +852,7 @@ export const TimelineView = memo(function TimelineView({
   // A load cycle that ends WITHOUT a landing must not leave the capture
   // pending — a failed fetch (or one that returned nothing) would otherwise
   // hang the anchor forever, and the pendingAnchorRef gate in
-  // maybeLoadOlderAtTop would block every future auto-load: the reader's
+  // loadOneOlderPage would block every future pull: the reader's
   // paging would die silently until a thread switch (QA #3031). Ordering is
   // load-bearing: this effect is declared AFTER the landing effect, so on a
   // commit carrying a landing the landing runs first (compensating and
@@ -870,11 +860,17 @@ export const TimelineView = memo(function TimelineView({
   // the anchor still pending means no landing is coming.
   const prevLoadingOlderReleaseRef = useRef(loadingOlder);
   useLayoutEffect(() => {
-    if (prevLoadingOlderReleaseRef.current && !loadingOlder && pendingAnchorRef.current !== null) {
-      pendingAnchorRef.current = null; // fetch ended without a landing — release the gate
+    if (prevLoadingOlderReleaseRef.current && !loadingOlder) {
+      pendingAnchorRef.current = null; // also release a failed/empty request
+      const wasPulling = historyPullActive();
+      finishHistoryPull();
+      const viewport = viewportRef.current;
+      if (wasPulling && viewport) controller.notifyRestored({
+        scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight,
+      });
     }
     prevLoadingOlderReleaseRef.current = loadingOlder;
-  }, [loadingOlder]);
+  }, [loadingOlder, finishHistoryPull, historyPullActive, controller]);
 
   // Single Details mode — governs default expanded state for every block
   // across all message kinds (All / Last / None).
@@ -909,7 +905,7 @@ export const TimelineView = memo(function TimelineView({
   // afterwards and clicks appeared dead — #510.)
 
   const [turnOverrides, setTurnOverrides] = useState<ReadonlyMap<string, boolean>>(
-    () => new Map(),
+    () => readTimelineExpansion(scrollMemoryKey, effectiveDetailsMode)?.turns ?? new Map(),
   );
   const toggleTurn = useCallback((id: string, currentlyExpanded: boolean) => {
     setTurnOverrides((prev) => {
@@ -923,7 +919,7 @@ export const TimelineView = memo(function TimelineView({
   // to the opposite of its detailsMode-driven default. A Set of overridden
   // item ids — membership means "opposite of the current default".
   const [overrides, setOverrides] = useState<ReadonlySet<string>>(
-    () => new Set(),
+    () => readTimelineExpansion(scrollMemoryKey, effectiveDetailsMode)?.items ?? new Set(),
   );
   const toggleExpanded = useCallback(
     (id: string, _kind: BackendTimelineItem["kind"]) => {
@@ -945,8 +941,8 @@ export const TimelineView = memo(function TimelineView({
   const [prevDetailsMode, setPrevDetailsMode] = useState(effectiveDetailsMode);
   if (prevDetailsMode !== effectiveDetailsMode) {
     setPrevDetailsMode(effectiveDetailsMode);
-    setOverrides(new Set());
-    setTurnOverrides(new Map());
+    setOverrides(readTimelineExpansion(scrollMemoryKey, effectiveDetailsMode)?.items ?? new Set());
+    setTurnOverrides(readTimelineExpansion(scrollMemoryKey, effectiveDetailsMode)?.turns ?? new Map());
     setActiveStuckHeaderId(null);
     setActiveStuckChildId(null);
   }
@@ -983,22 +979,17 @@ export const TimelineView = memo(function TimelineView({
     updateStuckHeader();
   }, [updateStuckHeader, turnOverrides, overrides, effectiveDetailsMode, items]);
 
-  useEffect(() => {
-    return () => {
-      if (stuckRafRef.current !== null) {
-        cancelAnimationFrame(stuckRafRef.current);
-        stuckRafRef.current = null;
-      }
-    };
+  useEffect(() => () => {
+    if (stuckRafRef.current !== null) cancelAnimationFrame(stuckRafRef.current);
+    stuckRafRef.current = null;
   }, []);
 
+  useLayoutEffect(() => {
+    if (!detailsModeLoading) rememberTimelineExpansion(scrollMemoryKey, { mode: effectiveDetailsMode, items: overrides, turns: turnOverrides });
+  }, [scrollMemoryKey, effectiveDetailsMode, detailsModeLoading, overrides, turnOverrides]);
+
   // Find the index of the last agent_chat — fork button attaches only there
-  const lastAgentChatIdx = (() => {
-    for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i].kind === "agent_chat") return i;
-    }
-    return -1;
-  })();
+  const lastAgentChatIdx = items.findLastIndex((item) => item.kind === "agent_chat");
 
   // One rendered row for the item at its global `index`. Shared verbatim by the
   // ungrouped path and the expanded TurnBlock body, so turn-collapse never changes
@@ -1026,18 +1017,15 @@ export const TimelineView = memo(function TimelineView({
       return (
         <TimelineRow
           key={renderKey}
-          timelineSource={source}
-          displayRank={rank}
+          timelineSource={source} displayRank={rank}
           item={item}
           config={null}
           streaming={streaming}
           expanded={false}
           showActions={false}
-          stickyHeader={false}
           isStuck={false}
           onToggle={toggleExpanded}
-          onFork={null}
-          forkPending={false}
+          onFork={null} forkPending={false}
         />
       );
     }
@@ -1067,24 +1055,18 @@ export const TimelineView = memo(function TimelineView({
     return (
       <TimelineRow
         key={renderKey}
-        timelineSource={source}
-        displayRank={rank}
+        timelineSource={source} displayRank={rank}
         item={item}
         config={config}
         streaming={streaming}
         expanded={expanded}
         showActions={showActions}
-        // A primary item is always a top-level card (it breaks turns), so its
-        // header pins below the HeaderBar; a secondary item is always a work-
-        // block child, whose header pins nested under the turn's (task #3215).
+        // Human/agent primary titles stay in flow. Work-block detail headers
+        // retain their nested pin under the turn header.
         // The stuck id can only match while the row is expanded (see
         // TimelineRow's data-card-sticky gate) — the level sets which id applies.
-        stickyHeader={isPrimary ? "top" : "nested"}
-        isStuck={
-          isPrimary
-            ? activeStuckHeaderId === item.item_id
-            : activeStuckChildId === item.item_id
-        }
+        stickyHeader={isPrimary ? false : "nested"}
+        isStuck={!isPrimary && activeStuckChildId === item.item_id}
         onToggle={toggleExpanded}
         onFork={isForkRow ? onFork ?? null : null}
         forkPending={isForkRow ? forkPending ?? false : false}
@@ -1106,7 +1088,7 @@ export const TimelineView = memo(function TimelineView({
       bufferedItems,
       (_item, index) => compactBuffer.rows[index].rank,
     ).map((entry) => ({ ...entry, source: "buffer" as const }));
-    const current = groupTimelineSegments(currentItems, undefined, buffered.length > 0)
+    const current = groupTimelineSegments(currentItems)
       .map((entry) => ({
         ...entry,
         indexOffset: entry.indexOffset + bufferedItems.length,
@@ -1142,7 +1124,7 @@ export const TimelineView = memo(function TimelineView({
         : entry.group.items.map((item) => item.item_id),
       estimatedHeight: (entry.group.kind === "turn" && virtualRows
         ? 60 + virtualRows.length * 92
-        : entry.group.kind === "turn" ? 56 : 80) + (entry.dividerRank === null ? 0 : 32),
+        : entry.group.kind === "turn" ? 56 : 80),
       expandedRows: virtualRows,
     })), [groupEntries]);
   const compactPinnedId = compactPin && (() => {
@@ -1184,15 +1166,17 @@ export const TimelineView = memo(function TimelineView({
     // downward motion, so the ride survives; on arrival dist < bottomZone
     // confirms the stick. Growth mid-ride pins instantly (the controller
     // is already sticky) — same behavior as before.
-    pendingAnchorRef.current = null;
+    pendingAnchorRef.current = null; pendingRestoreRef.current = null;
+    holdRestoredPositionRef.current = false;
     controller.requestStick();
     setAtBottom(true);
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
   }, [controller]);
 
   return (
-    <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
-      <LoadOlderSpinner loadingOlder={loadingOlder} />
+    <div ref={wrapperRef} className={cn("relative group/timeline", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
+      <LoadOlderSpinner loadingOlder={loadingOlder} pullProgress={olderPullProgress} pullOffset={olderPullOffset} returning={olderPullReturning} />
+      {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={loadOneOlderPage} /> : null}
       <ColdLoadSpinner show={loading && items.length === 0} />
       {/* overflow-anchor: none disables Chrome scroll anchoring on the timeline
           viewport. Scroll anchoring silently adjusts scrollTop to keep the
@@ -1210,6 +1194,9 @@ export const TimelineView = memo(function TimelineView({
         className="h-full text-[13px] leading-relaxed"
         viewportClassName="[overflow-anchor:none] overscroll-y-contain"
       >
+        {/* Prepared native pull range. Idle scrolling stops below this reserve;
+            only a fresh physical gesture reveals it. Its height stays fixed. */}
+        <div ref={historySpaceRef} data-history-pull-space aria-hidden="true" />
         {/* BAR_CLEAR_TOP_PADDING_CLASS (52px) clears the floating
             HeaderBar (h-11, lib/layout.ts) — 52px = 44px bar + 8px clearance,
             derived from BAR_HEIGHT_PX so a bar-height change can't silently
@@ -1265,8 +1252,7 @@ export const TimelineView = memo(function TimelineView({
                     onToggle={toggleTurn}
                     turnActive={turnActive && isLastTurn}
                     isStuck={activeStuckHeaderId === turnId}
-                    timelineSource={entry.source}
-                    displayRank={entry.rank}
+                    timelineSource={entry.source} displayRank={entry.rank}
                   >
                     {runExpanded ? (
                       virtualRows ? (
@@ -1290,17 +1276,9 @@ export const TimelineView = memo(function TimelineView({
                   </TurnBlock>
                 );
               })();
-              const content = (
-                <>
-                  {entry.dividerRank === null ? null : (
-                    <CompactHistoryDivider rank={entry.dividerRank} />
-                  )}
-                  {renderedGroup}
-                </>
-              );
               return (
-                <div key={virtualKey} data-virtual-group={virtualKey} className={entry.dividerRank === null ? undefined : "space-y-3"}>
-                  {content}
+                <div key={virtualKey} data-virtual-group={virtualKey}>
+                  {renderedGroup}
                 </div>
               );
             })}
@@ -1312,7 +1290,7 @@ export const TimelineView = memo(function TimelineView({
           <div ref={endRef} />
         </div>
       </ScrollArea>
-      <ScrollToBottomButton atBottom={atBottom} onClick={handleScrollToBottom} />
+      <ScrollToBottomButton atBottom={atBottom} refreshing={loadingNew} onClick={handleScrollToBottom} />
     </div>
   );
 });

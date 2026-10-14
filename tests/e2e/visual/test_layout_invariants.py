@@ -567,7 +567,7 @@ def _assert_sticky_sealed(
 
 @pytest.mark.parametrize("width", [390, 1280])
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_pinned_message_seal(
+def test_pinned_work_detail_seal(
     width: int, theme: str, playwright_browser: Browser, frontend_target: str
 ) -> None:
     context = new_context(playwright_browser, width)
@@ -584,12 +584,18 @@ def test_pinned_message_seal(
         page.evaluate(
             "theme => document.documentElement.classList.toggle('dark', theme === 'dark')", theme
         )
-        row = page.locator('[data-item-id="1.2"]')
+        turn = page.locator("[data-turn-expanded]").first
+        turn_toggle = turn.locator('[data-testid="turn-toggle"]')
+        if turn_toggle.get_attribute("aria-expanded") == "false":
+            turn_toggle.click()
+        row = page.locator('.timeline-item[data-item-id="0.0"]')
         expect(row).to_be_visible()
-        header_selector = '[data-item-id="1.2"] [data-testid="card-toggle"]'
+        header_selector = '.timeline-item[data-item-id="0.0"] [data-testid="card-toggle"]'
         header = page.locator(header_selector)
         if header.get_attribute("aria-expanded") == "false":
             header.click()
+        # A detail needs enough body height for its sticky header to stay in range.
+        row.locator("pre").evaluate("el => { el.style.minHeight = '1200px'; }")
         row.evaluate("""el => {
           const viewport = el.closest('[data-radix-scroll-area-viewport]');
           viewport.scrollTop += el.getBoundingClientRect().top
@@ -601,7 +607,18 @@ def test_pinned_message_seal(
         resting = _assert_sticky_sealed(page, header_selector)
         bar = page.locator('[data-testid="timeline-surface"] header').bounding_box()
         assert bar is not None
-        assert abs(resting["top"] - (bar["y"] + bar["height"])) < 0.5
+        turn_box = turn_toggle.bounding_box()
+        assert turn_box is not None
+        assert abs(turn_box["y"] - (bar["y"] + bar["height"])) < 0.5
+        assert abs(resting["top"] - (turn_box["y"] + turn_box["height"])) < 0.5
+        for item_id in ("1.1", "1.2"):
+            primary = page.locator(
+                f'.timeline-item[data-item-id="{item_id}"] [data-testid="card-toggle"]'
+            )
+            assert primary.evaluate("el => getComputedStyle(el).position") not in (
+                "sticky",
+                "fixed",
+            )
         header.hover()
         _wait_for_pane_settled(page, header_selector)
         assert _assert_sticky_sealed(page, header_selector, hovered=True) == resting, (

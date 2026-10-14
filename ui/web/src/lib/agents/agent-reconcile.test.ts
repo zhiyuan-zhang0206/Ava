@@ -166,3 +166,44 @@ describe("composed conversation reconcile", () => {
     expect(api.getConversationSnapshot).not.toHaveBeenCalled();
   });
 });
+
+
+describe("reconcile activity for the latest-messages indicator", () => {
+  it("stays active across a queued, running and trailing read, then settles", async () => {
+    const first = deferred<ConversationSnapshotResponse>();
+    const second = deferred<ConversationSnapshotResponse>();
+    vi.mocked(api.getConversationSnapshot).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const activity: boolean[] = [];
+    const unwatch = reconcile.watch(() => activity.push(reconcile.isRefreshing(42)));
+    const detach = reconcile.subscribe(42);
+    expect(reconcile.isRefreshing(42)).toBe(false);
+    reconcile.request(42);
+    expect(reconcile.isRefreshing(42)).toBe(true);
+    expect(reconcile.isRefreshing(43)).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    reconcile.request(42);
+    first.resolve(snapshot("fresh"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reconcile.isRefreshing(42)).toBe(true);
+    expect(activity.every(Boolean)).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    second.resolve(snapshot("new"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reconcile.isRefreshing(42)).toBe(false);
+    detach(); unwatch();
+  });
+  it.each(["abort", "detach"])("clears immediately on %s even if the transport ignores cancellation", async (mode) => {
+    const pending = deferred<ConversationSnapshotResponse>();
+    vi.mocked(api.getConversationSnapshot).mockReturnValue(pending.promise);
+    const detach = reconcile.subscribe(42);
+    reconcile.request(42);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reconcile.isRefreshing(42)).toBe(true);
+    if (mode === "abort") reconcile.abort(42); else detach();
+    expect(reconcile.isRefreshing(42)).toBe(false);
+    pending.resolve(snapshot("old"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reconcile.isRefreshing(42)).toBe(false);
+    if (mode === "abort") detach();
+  });
+});

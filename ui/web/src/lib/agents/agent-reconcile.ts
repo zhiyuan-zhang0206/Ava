@@ -29,7 +29,7 @@
 
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 import { api } from "../transport/api";
 import { useDocumentVisible } from "../layout/use-document-visible";
@@ -53,6 +53,9 @@ interface Reconcile {
 }
 
 export interface AgentReconcile {
+  /** Observe the existing coordinator's queued/running lifecycle. */
+  watch: (listener: () => void) => () => void;
+  isRefreshing(agentId: number | null): boolean;
   /** Attach one conversation reader for `agentId`; returns its detach.
    *  Detaching the last reader abandons in-flight and queued work. */
   subscribe(agentId: number): () => void;
@@ -66,6 +69,8 @@ export interface AgentReconcile {
 
 export function createAgentReconcile(client: QueryClient): AgentReconcile {
   const entries = new Map<number, Reconcile>();
+  const watchers = new Set<() => void>();
+  const publish = () => { for (const listener of watchers) listener(); };
 
   const keysFor = (agentId: number): QueryKey[] => [
     ["timeline", agentId],
@@ -83,6 +88,7 @@ export function createAgentReconcile(client: QueryClient): AgentReconcile {
 
   const schedule = (agentId: number, entry: Reconcile, delay: number): void => {
     entry.timer = setTimeout(() => { void run(agentId, entry); }, delay);
+    publish();
   };
 
   const run = async (agentId: number, entry: Reconcile): Promise<void> => {
@@ -96,6 +102,7 @@ export function createAgentReconcile(client: QueryClient): AgentReconcile {
     entry.dirty = false;
     const controller = new AbortController();
     entry.controller = controller;
+    publish();
     // Baselines for the ordering guard: any data identity that replaces these
     // while the read is in flight is newer than its snapshot (identity, not a
     // timestamp — two writes inside one millisecond must not conflate).
@@ -129,10 +136,16 @@ export function createAgentReconcile(client: QueryClient): AgentReconcile {
         entry.dirty = false;
         schedule(agentId, entry, RETRY_MS);
       }
+      publish();
     }
   };
 
   return {
+    watch(listener) { watchers.add(listener); return () => { watchers.delete(listener); }; },
+    isRefreshing(agentId) {
+      const entry = agentId === null ? undefined : entries.get(agentId);
+      return !!entry && (entry.timer !== null || entry.controller !== null);
+    },
     subscribe(agentId: number): () => void {
       let entry = entries.get(agentId);
       if (entry === undefined) {
@@ -153,6 +166,7 @@ export function createAgentReconcile(client: QueryClient): AgentReconcile {
         }
         current.controller?.abort();
         entries.delete(agentId);
+        publish();
       };
     },
 
@@ -177,6 +191,7 @@ export function createAgentReconcile(client: QueryClient): AgentReconcile {
       entry.dirty = false;
       entry.controller?.abort();
       entry.controller = null;
+      publish();
     },
   };
 }
@@ -200,9 +215,13 @@ function coordinatorFor(client: QueryClient): AgentReconcile {
 export function useAgentReconcile(agentId: number | null): {
   requestReconcile: () => void;
   abortReconcile: () => void;
+  isReconciling: boolean;
 } {
   const client = useQueryClient();
   const isVisible = useDocumentVisible();
+  const coordinator = coordinatorFor(client);
+  const refreshing = useCallback(() => coordinator.isRefreshing(agentId), [coordinator, agentId]);
+  const isReconciling = useSyncExternalStore(coordinator.watch, refreshing, () => false);
 
   useEffect(() => {
     if (agentId === null || !isVisible) return;
@@ -219,5 +238,5 @@ export function useAgentReconcile(agentId: number | null): {
     coordinatorFor(client).abort(agentId);
   }, [client, agentId]);
 
-  return { requestReconcile, abortReconcile };
+  return { requestReconcile, abortReconcile, isReconciling };
 }
