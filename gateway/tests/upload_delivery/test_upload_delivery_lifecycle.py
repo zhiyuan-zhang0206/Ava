@@ -18,6 +18,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.telemetry.tests.capture.event_capture import capturing_events
 from gateway.app import app
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import post, proof_for, request_for
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
@@ -208,29 +209,25 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
         calls.append(1)
         raise OSError("receiver unreachable")
 
-    emitted: list[tuple[str, dict[str, Any]]] = []
-
-    def record(_category: str, name: str, *, attributes: dict[str, Any]) -> None:
-        emitted.append((name, attributes))
-
     monkeypatch.setattr(worker.UploadRecovery, "copy_proof", unreachable)
-    monkeypatch.setattr(worker.telemetry, "emit", record)
     recovery = worker.UploadRecovery(
         app.state.db_pool, app.state.db, app.state.bus, machine=machine_identity
     )
-    for attempt in range(1, source.MAX_COPY_ATTEMPTS + 1):
-        with app.state.db_pool.connection() as conn:
-            conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
-        await recovery.round()
-        status = source.status(app.state.db_pool, agent, batch_id)
-        assert status.attempts == attempt
-        assert status.state == ("hold" if attempt == source.MAX_COPY_ATTEMPTS else "pending")
-    assert emitted == [
-        (
-            "upload_delivery_held",
-            {"agent_id": agent, "batch_id": batch_id, "reason": "OSError"},
-        )
-    ]
+    # Bound here, not as a fixture: the gateway of `uploaded_agent` binds its own pipeline first.
+    with capturing_events() as emitted_events:
+        for attempt in range(1, source.MAX_COPY_ATTEMPTS + 1):
+            with app.state.db_pool.connection() as conn:
+                conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
+            await recovery.round()
+            status = source.status(app.state.db_pool, agent, batch_id)
+            assert status.attempts == attempt
+            assert status.state == ("hold" if attempt == source.MAX_COPY_ATTEMPTS else "pending")
+        assert [(event.event_name, event.attributes) for event in emitted_events] == [
+            (
+                "upload_delivery_held",
+                {"agent_id": agent, "batch_id": batch_id, "reason": "OSError"},
+            )
+        ]
     # Held means held: no later round copies it again.
     with app.state.db_pool.connection() as conn:
         conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")

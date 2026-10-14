@@ -12,7 +12,6 @@ import pytest
 import yaml
 
 import base.config as base_config
-from base import telemetry
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -22,9 +21,11 @@ from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_h
 from base.native_process.os_platform import Platform
 from base.packages import dashboard_supply
 from base.sessions.tests.refuse_helper import refuse_helper
-from base.telemetry import EventPipeline
+from base.telemetry import DrainStatus, Event, EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.observability import lgtm_native
 from cli.commands.observability.tests.lgtm_inputs import darwin_host as darwin_host
 from cli.commands.observability.tests.lgtm_inputs import verifying_host
@@ -553,13 +554,13 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+    emitted_events: EmittedEvents,
 ) -> None:
     repo = tmp_path / "repo"
     (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
     native = tmp_path / "native"
     lgtm_native.render_provisioning(
-        repo, native, database_factory=operator_database, producer=operator_pipeline
+        repo, native, database_factory=operator_database, producer=emitted_events.producer
     )
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
     before = dest.read_text(encoding="utf-8")
@@ -568,30 +569,27 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
         raise RuntimeError("render exploded")
 
     monkeypatch.setattr(dashboard_supply, "render_dashboard_json", broken_render)
-    emitted: list[tuple[object, ...]] = []
+    emitted_events.clear()  # the first render above reported nothing; only the failing one is judged
 
-    def record_emit(*args: object, **kwargs: object) -> None:
-        emitted.append((*args, kwargs))
-
-    monkeypatch.setattr(telemetry, "emit", record_emit)
-
-    lgtm_native.render_provisioning(
-        repo, native, database_factory=operator_database, producer=operator_pipeline
-    )
+    written: list[Event] = []
+    pipeline = EventPipeline(writer=written.extend)
+    try:
+        lgtm_native.render_provisioning(
+            repo, native, database_factory=operator_database, producer=lambda: pipeline
+        )
+    finally:
+        assert pipeline.stop().status is DrainStatus.COMPLETED
 
     assert dest.read_text(encoding="utf-8") == before
-    assert emitted == [
-        (
-            "telemetry",
-            "lgtm_dashboard_render_failed",
-            {
-                "producer": operator_pipeline,
-                "level": "warning",
-                "source": "converge",
-                "attributes": {"error": "render exploded"},
-            },
-        )
-    ]
+    assert len(emitted_events) == 0
+    [event] = written
+    assert (event.category, event.event_name, event.level, event.source) == (
+        "telemetry",
+        "lgtm_dashboard_render_failed",
+        "warning",
+        "converge",
+    )
+    assert event.attributes == {"error": "render exploded"}
     err = capsys.readouterr().err
     assert "keeping the previous file" in err
 

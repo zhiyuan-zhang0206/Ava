@@ -7,22 +7,16 @@ from typing import Any, cast
 
 import pytest
 
-from base import telemetry
 from base.host.system import boot_policy
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli import start_intent
 from cli.parsers import build_parser
 
 
-@pytest.fixture()
-def emitted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, Any]]]:
-    rows: list[tuple[str, str, dict[str, Any]]] = []
-
-    def emit(category: str, event_name: str, **kwargs: Any) -> None:
-        rows.append((category, event_name, kwargs))
-
-    monkeypatch.setattr(telemetry, "emit", emit)
+@pytest.fixture(autouse=True)
+def _boot_time(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(boot_policy.psutil, "boot_time", lambda: 1_000_000.0)
-    return rows
 
 
 def _boot(home: Path, code: int) -> int:
@@ -38,19 +32,19 @@ def test_the_parser_marks_a_boot_start_only_when_asked() -> None:
 @pytest.mark.parametrize("macos", [True, False])
 def test_failed_attempts_before_the_budget_keep_their_exit_code(
     tmp_path: Path,
-    emitted: list[tuple[str, str, dict[str, Any]]],
+    emitted_events: EmittedEvents,
     monkeypatch: pytest.MonkeyPatch,
     macos: bool,
 ) -> None:
     monkeypatch.setattr(boot_policy, "is_macos", lambda: macos)
     codes = [_boot(tmp_path, 75) for _ in range(boot_policy.BOOT_MAX_ATTEMPTS - 1)]
     assert codes == [75] * (boot_policy.BOOT_MAX_ATTEMPTS - 1)
-    assert emitted == []
+    assert len(emitted_events) == 0
 
 
 def test_the_attempt_that_spends_the_budget_alerts_and_stops_launchd(
     tmp_path: Path,
-    emitted: list[tuple[str, str, dict[str, Any]]],
+    emitted_events: EmittedEvents,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -58,27 +52,27 @@ def test_the_attempt_that_spends_the_budget_alerts_and_stops_launchd(
     for _ in range(boot_policy.BOOT_MAX_ATTEMPTS - 1):
         assert _boot(tmp_path, 75) == 75
     assert _boot(tmp_path, 75) == 0  # launchd retries every nonzero exit
-    ((category, name, kwargs),) = emitted
-    assert (category, name) == ("telemetry", "boot_retries_exhausted")
-    assert kwargs["level"] == "error"
-    assert kwargs["attributes"] == {"attempts": boot_policy.BOOT_MAX_ATTEMPTS, "exit_code": 75}
+    (event,) = emitted_events
+    assert (event.category, event.event_name) == ("telemetry", "boot_retries_exhausted")
+    assert event.level == "error"
+    assert event.attributes == {"attempts": boot_policy.BOOT_MAX_ATTEMPTS, "exit_code": 75}
     assert "not retrying" in capsys.readouterr().err
 
 
 def test_on_linux_the_spending_attempt_still_fails_for_systemd(
     tmp_path: Path,
-    emitted: list[tuple[str, str, dict[str, Any]]],
+    emitted_events: EmittedEvents,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(boot_policy, "is_macos", lambda: False)
     codes = [_boot(tmp_path, 75) for _ in range(boot_policy.BOOT_MAX_ATTEMPTS)]
     assert codes[-1] == 75
-    assert len(emitted) == 1
+    assert len(emitted_events) == 1
 
 
 def test_a_start_after_the_budget_still_runs_and_success_clears_the_count(
     tmp_path: Path,
-    emitted: list[tuple[str, str, dict[str, Any]]],
+    emitted_events: EmittedEvents,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The count only decides what a failure asks for; a restarted boot job gets a real attempt."""

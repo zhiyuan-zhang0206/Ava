@@ -38,7 +38,6 @@
 "test_plugins_verify.py#monkeypatch.setattr ava.sdk_surface.extensions.load_extensions" = 1
 "test_plugins_verify.py#monkeypatch.setattr base.paths.plugins_dir" = 1
 "test_plugins_verify.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
-"test_plugins_verify.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_skill_update.py#monkeypatch.setattr base.paths.home.default_home" = 1
 "test_skills_sync.py#monkeypatch.setattr base.paths.home.default_home" = 2
 

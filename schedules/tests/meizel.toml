@@ -19,7 +19,6 @@
 
 [debt.first-party-patch]
 "test_c9_daily_report.py#monkeypatch.setattr base.config.settings.general.timezone" = 2
-"test_c9_daily_report.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_catchup.py#monkeypatch.setattr ava.sdk_surface.process_context.loaded_code_image" = 1
 "test_catchup.py#monkeypatch.setattr base.config.settings.general.timezone" = 2
 "test_catchup.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
@@ -31,7 +30,6 @@
 "test_debt_sweep_daily.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
 "test_debt_sweep_daily.py#monkeypatch.setattr base.db.connect" = 1
 "test_debt_sweep_daily.py#monkeypatch.setattr base.db.pool" = 1
-"test_debt_sweep_daily.py#monkeypatch.setattr base.telemetry.emit" = 2
 "test_debt_sweep_daily.py#monkeypatch.setattr schedules.entry.Database" = 1
 "test_dev_ci_metrics.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
 "test_runner_composition.py#monkeypatch.setattr ava.sdk_surface.process_context.bind_context" = 2

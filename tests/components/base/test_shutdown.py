@@ -11,6 +11,7 @@ import pytest
 
 from base.daemon import shutdown
 from base.host import exit_codes as hard_exit_module
+from base.log.tests.log_records import LogRecords
 from base.sessions.tests.poll_until import poll_until
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
@@ -100,34 +101,25 @@ def test_hard_exit_reports_a_failed_step_on_stderr_and_still_exits(
     assert "sink close failed" in err
 
 
-def test_shutdown_line_logs_a_registered_event(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_shutdown_line_logs_a_registered_event(loguru_records: LogRecords) -> None:
     """The stop line carries the daemon name as `service=` and derives a
     registered event."""
     from base.events import EVENTS
 
-    calls: list[dict[str, object]] = []
-
-    class _Capture:
-        def info(self, message: str, **kwargs: object) -> None:
-            calls.append({"message": message, **kwargs})
-
     previous = signal.getsignal(signal.SIGTERM)
     try:
-        monkeypatch.setattr(shutdown, "logger", _Capture())
         shutdown.install_graceful_shutdown("pg-backup")
         with pytest.raises(KeyboardInterrupt):
             signal.raise_signal(signal.SIGTERM)
     finally:
         signal.signal(signal.SIGTERM, previous)
-    assert len(calls) == 1
-    call = calls[0]
-    assert call["message"] == "[{service}] received {sig}, shutting down"
-    assert call["service"] == "pg-backup"
-    assert call["sig"] == "SIGTERM"
-    assert "label" not in call
-    assert (call.get("event") or "log") in EVENTS
+    assert loguru_records.messages() == ["[pg-backup] received SIGTERM, shutting down"]
+    assert loguru_records[0]["level"].name == "INFO"
+    extra = loguru_records[0]["extra"]
+    assert extra["service"] == "pg-backup"
+    assert extra["sig"] == "SIGTERM"
+    assert "label" not in extra
+    assert (extra.get("event") or "log") in EVENTS
 
 
 # The child imports the ops daemon, so it lives with that daemon's tests.

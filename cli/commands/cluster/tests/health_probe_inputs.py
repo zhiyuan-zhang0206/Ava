@@ -15,6 +15,8 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.host.system.hostport import Host
+from base.telemetry.tests.capture.event_capture import EmittedEvents, FollowedAttributes
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.cluster import health as cluster_health
 from cli.commands.converge.redis_bridge import RedisBridgeStatus
 from cli.database.runtime import CommandRuntime
@@ -164,33 +166,22 @@ def provider_guard_healthy(
 
 
 @pytest.fixture(autouse=True)
-def ran() -> list[dict[str, object]]:
+def ran(emitted_events: EmittedEvents) -> FollowedAttributes:
     """The attributes of every `health_probe_ran` heartbeat the probe emits."""
-    return []
+    return emitted_events.following("health_probe_ran")
 
 
 @pytest.fixture(autouse=True)
 def signals(
-    monkeypatch: pytest.MonkeyPatch, ran: list[dict[str, object]]
-) -> list[dict[str, object]]:
-    """Capture the attributes of every `health_probe_failing` event the probe emits
-    (heartbeats go to `ran`).
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+) -> Generator[FollowedAttributes]:
+    """The attributes of every `health_probe_failing` event the probe emits (heartbeats are `ran`).
 
-    Autouse so no test reaches the real event pipeline."""
-    emitted: list[dict[str, object]] = []
-
-    def _emit(category: str, event_name: str, **kwargs: object) -> None:
-        assert category == "telemetry"
-        attributes = kwargs["attributes"]
-        assert isinstance(attributes, dict)
-        if event_name == "health_probe_ran":
-            assert "level" not in kwargs  # info
-            ran.append(dict(attributes))  # pyright: ignore[reportUnknownArgumentType]
-            return
-        assert event_name == "health_probe_failing"
-        assert kwargs["level"] == "warning"
-        emitted.append(dict(attributes))  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(cluster_health.telemetry, "emit", _emit)
+    Autouse so no test reaches the real event pipeline. After the test, every event that was
+    emitted must be one of the two the probe declares, with the declared category and level."""
     monkeypatch.setattr(cluster_health.telemetry, "init_telemetry", _no_init)
-    return emitted
+    yield emitted_events.following("health_probe_failing")
+    for event in emitted_events:
+        assert event.category == "telemetry"
+        assert event.event_name in {"health_probe_ran", "health_probe_failing"}
+        assert event.level == ("info" if event.event_name == "health_probe_ran" else "warning")

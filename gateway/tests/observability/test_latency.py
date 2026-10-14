@@ -9,11 +9,12 @@ its raw URL.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.app import app
 from gateway.http.middleware import latency
 
@@ -88,20 +89,12 @@ def test_record_folds_unmatched_routes_beyond_cap() -> None:
 # ── aggregate emission ─────────────────────────────────────────────────────
 
 
-def test_emit_bucket_computes_stats(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        latency.telemetry,
-        "emit",
-        lambda category, event_name, **kwargs: captured.update(  # pyright: ignore[reportUnknownArgumentType]
-            category=category, event_name=event_name, **kwargs
-        ),
-    )
+def test_emit_bucket_computes_stats(emitted_events: EmittedEvents) -> None:
     latency.emit_bucket("/api/health", [10.0, 20.0, 30.0])
-    assert captured["category"] == "telemetry"
-    assert captured["event_name"] == "gateway_latency"
-    attrs = captured["attributes"]
-    assert attrs == {
+    [event] = emitted_events
+    assert event.category == "telemetry"
+    assert event.event_name == "gateway_latency"
+    assert event.attributes == {
         "route": "/api/health",
         "route_class": "fast",
         "p50_ms": 20.0,
@@ -112,15 +105,10 @@ def test_emit_bucket_computes_stats(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
-def test_emit_bucket_distinguishes_tail_percentiles(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
-
-    def fake_emit(_category: str, _event_name: str, **kwargs: Any) -> None:
-        captured.update(kwargs["attributes"])
-
-    monkeypatch.setattr(latency.telemetry, "emit", fake_emit)
+def test_emit_bucket_distinguishes_tail_percentiles(emitted_events: EmittedEvents) -> None:
     latency.emit_bucket("/api/health", [float(i) for i in range(1, 101)])
 
+    [captured] = emitted_events.attributes("gateway_latency")
     assert captured["p95_ms"] == 95.0
     assert captured["p99_ms"] == 99.0
     assert captured["max_ms"] == 100.0
@@ -150,16 +138,9 @@ def test_route_classification_matches_alert_eligibility(route: str, expected_cla
     assert latency.classify_route(route) == expected_class
 
 
-def test_emit_bucket_empty_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
-    called = False
-
-    def _fail(*args: Any, **kwargs: Any) -> None:
-        nonlocal called
-        called = True
-
-    monkeypatch.setattr(latency.telemetry, "emit", _fail)
+def test_emit_bucket_empty_is_noop(emitted_events: EmittedEvents) -> None:
     latency.emit_bucket("/api/health", [])
-    assert not called
+    assert emitted_events.names() == []
 
 
 # ── middleware through the real app ────────────────────────────────────────

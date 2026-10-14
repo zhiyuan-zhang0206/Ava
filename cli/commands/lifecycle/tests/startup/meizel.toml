@@ -97,7 +97,6 @@ exports = ["test_start_readiness_gate.py"]
 "test_start_readiness_preflight.py#monkeypatch.setattr cli.commands.lifecycle._start_readiness_preflight.scan_non_regular_nodes" = 1
 "test_start_readiness_preflight.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_tree_roster" = 1
 "test_start_readiness_preflight.py#monkeypatch.setattr cli.commands.probe.occupied_health_ports" = 1
-"test_start_unready_signal.py#monkeypatch.setattr base.telemetry.emit" = 1
 
 [debt.stdlib-patch]
 "test_commands_start.py#monkeypatch.setattr subprocess.run" = 1

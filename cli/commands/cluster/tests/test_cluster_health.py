@@ -17,6 +17,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db.tests.fakes import patch_database
+from base.telemetry.tests.capture.event_capture import FollowedAttributes
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import (
     Probe,
@@ -32,6 +33,7 @@ from cli.commands.cluster.tests.health_probe_inputs import (
 from cli.commands.cluster.tests.health_probe_inputs import (
     config_boot_environment as config_boot_environment,
 )
+from cli.commands.cluster.tests.health_probe_inputs import emitted_events as emitted_events
 from cli.commands.cluster.tests.health_probe_inputs import (
     probe as probe,
 )
@@ -236,8 +238,8 @@ def test_every_run_emits_the_heartbeat_healthy_or_not(
     all_checks_pass: None,
     isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    signals: list[dict[str, object]],
-    ran: list[dict[str, object]],
+    signals: FollowedAttributes,
+    ran: FollowedAttributes,
 ) -> None:
     """`health_probe_ran` is the probe's dead-man heartbeat: one per run on every
     path, carrying the unhealthy-check count; the failing event is separate."""
@@ -261,7 +263,7 @@ def test_a_refused_checkout_emits_no_heartbeat(
     probe: Probe,
     isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    ran: list[dict[str, object]],
+    ran: FollowedAttributes,
 ) -> None:
     """A wrong-checkout refusal (exit 2) never observed the cluster, so it is not a run."""
     import base.paths
@@ -283,7 +285,7 @@ def test_service_probe_failure_emits_the_alert_only_signal(
     all_checks_pass: None,
     isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
 ) -> None:
     """A dead selected service fails the probe and emits its failing check."""
     monkeypatch.setattr(
@@ -308,7 +310,7 @@ def test_disk_over_watermark_fails_and_signals(
     all_checks_pass: None,
     isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
 ) -> None:
     """A data volume over the 90% watermark fails the probe (exit 1) and emits
     the `disk_usage` signal; rolling back code frees no disk space (the
@@ -331,7 +333,7 @@ def test_wal_archiving_failure_signals_with_its_message(
     all_checks_pass: None,
     isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
 ) -> None:
     """A broken archiver fails the probe like the disk check does."""
     failure = "WAL archiving: the archiver is failing"
@@ -415,7 +417,7 @@ def test_source_tree_failure_signals(
     all_checks_pass: None,
     isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
 ) -> None:
     """A tampered prod source tree fails the probe (exit 1) and emits the
     `source_tree` signal; rolling back code does not undo an on-disk edit (the
@@ -473,7 +475,7 @@ def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
     all_checks_pass: None,
     isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
 ) -> None:
     """The probe fires every few minutes; a persistent outage emits the signal on
     every run (a Grafana `for:` needs continuous samples), a healthy run emits
@@ -496,7 +498,7 @@ def test_signal_names_the_failed_check(
     all_checks_pass: None,
     isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
 ) -> None:
     """A changed failure reason is a different check, grouped separately by Grafana;
     a check that starts failing adds its own signal without silencing the others."""
@@ -591,7 +593,7 @@ def test_dark_gate_fails_the_probe_without_arming_rollback(
     monkeypatch: pytest.MonkeyPatch,
     all_checks_pass: None,
     isolated_cluster_home: Path,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
 ) -> None:
     """The boundary this check was placed for: a dark entry port signals and exits 1.
     The 2026-08-01 cause was a converge step that failed to reinstall the launchd
@@ -646,7 +648,7 @@ def test_redis_bridge_failure_signals_without_arming_rollback(
     monkeypatch: pytest.MonkeyPatch,
     all_checks_pass: None,
     isolated_cluster_home: Path,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
 ) -> None:
     failure = "Redis bridge 10.64.0.7:6380 failed authenticated PING (connection refused)"
     monkeypatch.setattr(
@@ -665,7 +667,7 @@ def test_resurrect_audit_rows_do_not_make_the_probe_unhealthy(
     probe: Probe,
     all_checks_pass: None,
     isolated_cluster_home: Path,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
 ) -> None:
     """The probe no longer counts `resurrect` audit events: after the automatic
     crash resurrection was removed they only record explicit resurrects and new

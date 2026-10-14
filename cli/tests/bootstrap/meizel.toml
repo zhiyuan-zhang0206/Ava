@@ -66,7 +66,6 @@ exports = ["child_first_start.py", "child_main_dispatch.py", "child_telemetry_ex
 "test_redis_binary_selection.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
 "test_start_boot_attempts.py#monkeypatch.setattr base.host.system.boot_policy.is_macos" = 4
 "test_start_boot_attempts.py#monkeypatch.setattr base.host.system.boot_policy.psutil.boot_time" = 1
-"test_start_boot_attempts.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_start_boot_attempts.py#monkeypatch.setattr cli.start_intent._home" = 1
 "test_start_boot_attempts.py#monkeypatch.setattr cli.start_intent._run_boot_attempt" = 1
 "test_start_boot_attempts.py#monkeypatch.setattr cli.start_intent.start_once" = 1

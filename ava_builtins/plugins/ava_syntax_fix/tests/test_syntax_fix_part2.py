@@ -26,6 +26,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.log.tests.log_records import LogRecords
 
 # --- _fix_chinese_punctuation ---
 
@@ -154,14 +155,12 @@ class TestSyntaxFixEvents:
         assert ev["fixes"], "deterministic fixes must be listed"
         assert "chinese_punct" in ",".join(ev["fixes"])  # pyright: ignore[reportUnknownArgumentType]
 
-    async def test_rough_fix_event_logger_payload_shape(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_rough_fix_event_logger_payload_shape(self, loguru_records: LogRecords):
         """The real emit path: a loguru record with event='syntax_fix' whose
         extra carries fix_type / before / fixes — the shape the event's
         `attributes` stores."""
         from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
 
-        captured: dict = {}
-        monkeypatch.setattr(_plugin.logger, "info", lambda _msg, **kw: captured.update(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         _plugin.emit_syntax_fix_event(
             fix_type="rough",
             before="print(1\uff0c2)",
@@ -169,7 +168,9 @@ class TestSyntaxFixEvents:
             fixes=["chinese_punct(1)"],
             note="deterministic fixes applied",
         )
-        assert captured["event"] == "syntax_fix"
+        [record] = loguru_records.events("syntax_fix")
+        assert record["level"].name == "INFO"
+        captured = record["extra"]
         assert captured["fix_type"] == "rough"
         assert captured["before"] == "print(1\uff0c2)"
         assert captured["fixes"] == ["chinese_punct(1)"]

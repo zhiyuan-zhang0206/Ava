@@ -15,9 +15,11 @@ from pathlib import Path
 import pytest
 
 from ava.sdk_surface import extensions
-from base import paths, telemetry
+from base import paths
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
 
 _PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
@@ -133,23 +135,17 @@ def test_a_disabled_broken_plugin_is_never_imported(capsys: pytest.CaptureFixtur
 
 
 def test_nothing_is_emitted_while_verifying_and_the_canonical_reporter_is_unchanged(
-    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     """Read-only: no `plugin_load_failed` telemetry from a verify; a later canonical report still emits."""
-    emitted: list[tuple[object, ...]] = []
-
-    def record(*args: object, **_kwargs: object) -> None:
-        emitted.append(args)
-
-    monkeypatch.setattr(telemetry, "emit", record)
     _plugin("old_hooks", "raise RuntimeError('boom')\n")
     _enable("old_hooks")
 
     assert cmd_plugins_verify() == 1
-    assert emitted == []
+    assert len(emitted_events) == 0
 
     load_report.report_plugin_load_failure("elsewhere", RuntimeError("later"))
-    assert [args[1] for args in emitted] == ["plugin_load_failed"]
+    assert emitted_events.names() == ["plugin_load_failed"]
 
 
 def test_a_loader_crash_is_a_tool_error_not_a_red(

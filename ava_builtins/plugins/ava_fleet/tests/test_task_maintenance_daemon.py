@@ -28,10 +28,11 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
 from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import run_reminders
-from base import telemetry
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 _DAY_S = 86400.0
 
@@ -60,16 +61,11 @@ def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     return calls
 
 
-@pytest.fixture
-def emitted_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, Any]]]:
-    """Capture maintenance telemetry without starting an event pipeline."""
-    events: list[tuple[str, str, dict[str, Any]]] = []
-
-    def _capture(category: str, event_name: str, **kwargs: Any) -> None:
-        events.append((category, event_name, kwargs))
-
-    monkeypatch.setattr(telemetry, "emit", _capture)
-    return events
+def _maintenance_events(
+    events: EmittedEvents,
+) -> list[tuple[str, str, str, int | None, str, dict[str, Any]]]:
+    """What the maintenance daemon emitted: category, name, level, agent, source and attributes."""
+    return [(e.category, e.event_name, e.level, e.agent_id, e.source, e.attributes) for e in events]
 
 
 def _make_agent(db: psycopg.Connection, *, status: str = "running") -> int:
@@ -210,7 +206,7 @@ class TestRemind:
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         deliver: list[tuple[int, str]],
-        emitted_events: list[tuple[str, str, dict[str, Any]]],
+        emitted_events: EmittedEvents,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -223,15 +219,14 @@ class TestRemind:
         assert "Task reminders — you have 1 overdue task(s)." in message
         assert "report your current status and advance the next step" in message
         assert f"#{tid}" in message
-        assert emitted_events == [
+        assert _maintenance_events(emitted_events) == [
             (
                 "telemetry",
                 "task_reminder_digest",
-                {
-                    "agent_id": owner,
-                    "source": "system",
-                    "attributes": {"owner_id": owner, "task_count": 1, "task_ids": [tid]},
-                },
+                "info",
+                owner,
+                "system",
+                {"owner_id": owner, "task_count": 1, "task_ids": [tid]},
             )
         ]
         row = _task_row(db_conn, tid)

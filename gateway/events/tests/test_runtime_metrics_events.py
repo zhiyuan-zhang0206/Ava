@@ -11,6 +11,8 @@ from fastapi import Request
 
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.events import sse
 from gateway.http.middleware import runtime_metrics
 
@@ -49,8 +51,8 @@ class _RedisClient:
 def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
     monkeypatch: pytest.MonkeyPatch,
     mode: Literal["filtered", "throttled"],
+    emitted_events: EmittedEvents,
 ) -> None:
-    emitted: list[dict[str, Any]] = []
 
     def open_redis(_url: str, **_kw: object) -> _RedisClient:
         return _RedisClient()
@@ -62,12 +64,8 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
 
     monkeypatch.setattr(sse, "retry_auth_failures_async", pass_through)
 
-    def capture_emit(_category: str, _event_name: str, *, attributes: dict[str, Any]) -> None:
-        emitted.append(attributes)
-
-    monkeypatch.setattr(runtime_metrics.telemetry, "emit", capture_emit)
     runtime_metrics.initialize_sse_metrics()
-    emitted.clear()
+    emitted_events.clear()
 
     async def run_stream() -> None:
         request = cast(Request, _Request())
@@ -83,7 +81,7 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
 
     asyncio.run(run_stream())
 
-    assert emitted == [
+    assert [event.attributes for event in emitted_events] == [
         {"mode": mode, "active_connections": 1, "opened": 1},
         {"mode": mode, "active_connections": 0, "closed": 1},
     ]
