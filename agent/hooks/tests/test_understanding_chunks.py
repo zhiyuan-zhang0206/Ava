@@ -19,6 +19,7 @@ from base.agents.history.hierarchy.chunks import Chunk
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.packages.plugin_providers import build_model_catalog
+from base.telemetry.tests.capture.event_capture import EmittedEvents
 
 
 def _read_agent(field: str):
@@ -441,34 +442,27 @@ def _checkpoint_clock(monkeypatch: pytest.MonkeyPatch, seconds: list[int | None]
 
 
 async def test_the_boundary_waits_for_a_checkpoint_as_new_as_the_states_last_message(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
 ) -> None:
     """The graph persists a super-step's checkpoint asynchronously, so the newest row can be one
     step behind the state when a compaction stamps its boundary: the stamp waits for it."""
     polls = _checkpoint_clock(monkeypatch, [5, 9, 20])  # the last message is from second 10
-    emitted: list[str] = []
-    monkeypatch.setattr(uc.telemetry, "emit", lambda _k, name, **_kw: emitted.append(name))
     await uc.await_snapshot(
         MagicMock(), _State([*_request(3), _stamped(10)]), 3, read_agent=_read_agent
     )
-    assert len(polls) == 3 and emitted == []
+    assert len(polls) == 3 and emitted_events.names() == []
 
 
 async def test_a_snapshot_that_never_catches_up_is_stamped_anyway_with_an_event(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
 ) -> None:
     _checkpoint_clock(monkeypatch, [5])
     monkeypatch.setattr(uc, "SNAPSHOT_WAIT_SECONDS", 0.0)
-    events: list[tuple[str, dict[str, Any] | None]] = []
-    monkeypatch.setattr(
-        uc.telemetry, "emit", lambda _k, name, attributes=None: events.append((name, attributes))
-    )
     await uc.await_snapshot(
         MagicMock(), _State([*_request(3), _stamped(10)]), 3, read_agent=_read_agent
     )
-    assert [e[0] for e in events] == ["understanding_snapshot_lag"]
-    attrs = events[0][1]
-    assert attrs is not None and attrs["agent_id"] == 3
+    assert emitted_events.names() == ["understanding_snapshot_lag"]
+    assert emitted_events.attributes("understanding_snapshot_lag")[0]["agent_id"] == 3
 
 
 def _inbound_picked_up(pickup: str, created: str) -> HumanMessage:
@@ -500,17 +494,15 @@ async def test_an_inbound_last_message_is_compared_by_the_time_the_model_read_it
     ids=["no timestamp", "no timezone", "unparsable"],
 )
 async def test_a_last_message_without_a_usable_time_is_not_waved_through_or_an_error(
-    monkeypatch: pytest.MonkeyPatch, stamp: str | None
+    monkeypatch: pytest.MonkeyPatch, stamp: str | None, emitted_events: EmittedEvents
 ) -> None:
     """Old messages have no timezone (or no stamp at all): the check cannot pass, so it is the
     timeout path at once: no exception, the boundary is stamped, the lag event says so."""
     polls = _checkpoint_clock(monkeypatch, [99])
-    events: list[str] = []
-    monkeypatch.setattr(uc.telemetry, "emit", lambda _k, name, **_kw: events.append(name))
     kwargs = {} if stamp is None else {"ava_created_at": stamp}
     last = HumanMessage(content="old", id="old", additional_kwargs=kwargs)
     await uc.await_snapshot(MagicMock(), _State([*_request(3), last]), 3, read_agent=_read_agent)
-    assert events == ["understanding_snapshot_lag"] and polls == []
+    assert emitted_events.names() == ["understanding_snapshot_lag"] and polls == []
 
 
 async def test_nothing_is_read_when_understanding_is_off_or_there_is_nothing_to_compare(
