@@ -117,8 +117,13 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
       if (!row) throw new Error('no visible reading anchor');
       return { id: row.dataset.itemId, viewportOffsetPx: row.getBoundingClientRect().top - viewportTop };
     }""")
+    # The DOM-window contract also supports keyboard paging. Arrival alone
+    # no longer fetches; native pull/release is covered by the anchor scenario.
+    history_button = page.get_by_test_id("load-older-keyboard")
+    history_button.focus()
+    history_button.press("Enter")
     page.wait_for_timeout(1500)
-    assert older_requests, "a parked reader did not request older history"
+    assert older_requests, "keyboard paging did not request older history"
     assert (
         page.evaluate(
             "document.querySelector('[role=log]')?.closest('[data-slot=scroll-area-viewport]')?.scrollHeight"
