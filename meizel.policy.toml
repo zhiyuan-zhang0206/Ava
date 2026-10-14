@@ -17,6 +17,7 @@
 "ava_builtins/plugins/ava_syntax_fix/tests/syntax_fix/test_fix_nested_triple_quote.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_part2.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+"ava_builtins/tests/test_watcher_wake_delivery.py" = "executes skill reference scripts up to a marker assignment"
 "base/agents/sdk/tests/test_sdk_telemetry.py" = "wraps builtins.__import__ so one import raises"
 "base/lm/factory.py" = "imports the module named by AVA_LLM_OVERRIDE"
 "base/packages/dashboard_supply.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
@@ -41,7 +42,6 @@
 "services/wake/schedule_manager/engine.py" = "runs schedule scripts (the one materialized from the database under $AVA_HOME/schedules, and the built-in templates in schedules/); run content, not a dependency"
 "tests/ci/test_structure_codegen.py" = "executes the selector script embedded in the CI workflow"
 "tests/e2e/fakes/child_budget_writer.py" = "executes the generated scenario program passed on its command line"
-"tests/skills/test_watcher_wake_delivery.py" = "executes skill reference scripts up to a marker assignment"
 
 [loads]
 "ava/impersonation/attachment.py" = ["agent/extensions"]
@@ -54,6 +54,7 @@
 "ava_builtins/skills/tests/test_sms.py" = ["ava_builtins/skills"]
 "ava_builtins/skills/tests/test_telegram_send_file.py" = ["ava_builtins/skills"]
 "ava_builtins/skills/tests/test_youtube_feed.py" = ["ava_builtins/skills"]
+"ava_builtins/tests/test_watcher_wake_delivery.py" = ["ava_builtins/skills"]
 "base/events/loader.py" = ["base/events/declarations"]
 "base/events/tests/test_declarations_layout.py" = ["base/events/declarations"]
 "cli/tests/bootstrap/_logging_entry_child.py" = ["services/agent_runner/agent_ops"]
@@ -74,7 +75,6 @@
 "tests/e2e/process_support.py" = ["services/agent_runner"]
 "tests/fixtures/path_scopes.py" = ["tests/path_scoped"]
 "tests/skills/test_inspect_a_trace_fetch.py" = [".agents/skills/inspect-a-trace/scripts"]
-"tests/skills/test_watcher_wake_delivery.py" = ["ava_builtins/skills"]
 "tests/ui/test_android_overlay.py" = ["ui/app/android"]
 
 [default-arguments]

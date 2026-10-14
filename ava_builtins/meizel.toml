@@ -1,1 +1,4 @@
 exports = ["plugins", "skills"]
+
+[uses]
+"tests" = ["skills"]
