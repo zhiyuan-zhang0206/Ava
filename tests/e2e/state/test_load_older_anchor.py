@@ -199,7 +199,7 @@ def _pull_history_page(page: Page, before_requests: list[str]) -> bool:
     """Arrival alone is quiet; a fresh native wheel pull loads one older page."""
     count = len(before_requests)
     page.evaluate(_SCROLL_UP_JS)
-    page.wait_for_function("window.__tl.arrivalEnded", timeout=15_000)
+    page.wait_for_function("() => window.__tl.arrivalEnded", timeout=15_000)
     assert len(before_requests) == count, "arriving at the top loaded history without a pull"
     if page.get_by_test_id("load-older-keyboard").count() == 0:
         return False

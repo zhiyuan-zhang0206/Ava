@@ -44,8 +44,10 @@ export function useOlderHistoryPull(
   const clearSpace = useCallback(() => {
     const space = spaceRef.current;
     const current = gesture.current;
+    const top = current.viewport?.scrollTop ?? 0;
     if (space) { space.style.transition = ""; space.style.height = "0px"; }
     if (contentRef.current) contentRef.current.style.minHeight = current.minHeight;
+    if (current.viewport) current.viewport.scrollTop = Math.max(0, top - PULL_SPACE_PX);
   }, [spaceRef, contentRef]);
 
   const prepare = useCallback((viewport: HTMLElement) => {
@@ -56,27 +58,27 @@ export function useOlderHistoryPull(
     // Empty/exhausted views need no artificial scroll range. Once prepared,
     // keep it fixed through a request and its final history landing.
     if (!current.viewport && !latest.current.canLoad()) return;
-    if (!current.viewport) current.minHeight = content.style.minHeight;
+    const creating = !current.viewport;
+    if (creating) current.minHeight = content.style.minHeight;
     current.viewport = viewport;
     // Prepare before hit-testing the first wheel. Adding range from inside
     // that wheel loses its default scroll: Chrome already chose its target.
     content.style.minHeight = `${viewport.clientHeight}px`;
     space.style.height = `${PULL_SPACE_PX}px`;
+    // Late history availability must not move a parked reader or Compact anchor.
+    if (creating) viewport.scrollTop += PULL_SPACE_PX;
     if (current.phase === "idle" && viewport.scrollTop < PULL_SPACE_PX) viewport.scrollTop = PULL_SPACE_PX;
   }, [spaceRef, contentRef]);
 
+  useLayoutEffect(() => {
+    gesture.current = freshGesture();
+    return clearSpace;
+  }, [threadKey, clearSpace]);
   useLayoutEffect(() => {
     latest.current = { canLoad, loadPage, onUpwardIntent };
     const viewport = spaceRef.current?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
     if (viewport) prepare(viewport);
   });
-
-  useLayoutEffect(() => {
-    gesture.current = freshGesture();
-    const viewport = spaceRef.current?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
-    if (viewport) prepare(viewport);
-    return clearSpace;
-  }, [threadKey, clearSpace, prepare, spaceRef]);
 
   const returnSpace = useCallback(() => {
     const current = gesture.current;
