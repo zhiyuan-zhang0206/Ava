@@ -1,13 +1,14 @@
 """Cross-domain stop budget for the backup scheduler's wedged executor."""
 
+import sys
 from pathlib import Path
 
-from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
-from tests.components.services.daemon_shutdown_test_support import (
+from base.host.tests.daemon_shutdown import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
     spawn_child,
 )
+from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 
 
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
@@ -15,7 +16,11 @@ def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
     # The exit bound only matters relative to the stop budget it protects:
     # assert the relationship, not just the number.
     assert EXIT_BOUND_S + KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
-    child = spawn_child(tmp_path, module="services.backup.scheduler.daemon", label="pg-backup")
+    child = spawn_child(
+        tmp_path,
+        command=[sys.executable, "-m", "services.backup.scheduler.tests.child_shutdown"],
+        label="pg-backup",
+    )
     try:
         child.terminate()
         child.wait_bounded_exit(what="wedged executor job")

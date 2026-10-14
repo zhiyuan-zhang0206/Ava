@@ -2,20 +2,21 @@
 
 The daemon must exit within a small bound of SIGTERM even with a
 default-executor job mid-flight: the hard exit skips the executor join that
-stalls ``asyncio.run``'s close (task #4224 — see ``daemon_shutdown_test_support``
+stalls ``asyncio.run``'s close (task #4224 — see ``daemon_shutdown``
 for the harness and ``base.host.exit_codes.hard_exit`` for the mechanism).
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
-from tests.components.services.daemon_shutdown_test_support import (
+from base.host.tests.daemon_shutdown import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
     spawn_child,
 )
+from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 
 
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
@@ -23,7 +24,15 @@ def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
     # The exit bound only matters relative to the stop budget it protects:
     # assert the relationship, not just the number.
     assert EXIT_BOUND_S + KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
-    child = spawn_child(tmp_path, module="services.entrypoints.im_bridge.daemon", label="im_bridge")
+    child = spawn_child(
+        tmp_path,
+        command=[
+            sys.executable,
+            "-m",
+            "services.entrypoints.im_bridge.tests.shutdown.child_shutdown",
+        ],
+        label="im_bridge",
+    )
     try:
         child.terminate()
         child.wait_bounded_exit(what="wedged executor job")

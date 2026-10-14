@@ -1,6 +1,7 @@
 exports = ["slices.py"]
 
 [uses]
+"test_daemon_shutdown.py" = ["child_shutdown.py"]
 "test_labeler_backoff.py" = ["slices.py"]
 "test_labeler_failure_boundary.py" = ["slices.py"]
 "test_labeler_validity.py" = ["slices.py"]

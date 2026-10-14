@@ -22,8 +22,11 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
+from services.agent_runner.agent_host.tests.lifecycle.resurrection.resurrection_support import (
+    status,
+    terminated,
+)
 from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
-from tests.components.ops.resurrection_support import status, terminated
 
 
 def test_reassigned_task_refuses_delayed_home_wake(

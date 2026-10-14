@@ -15,6 +15,7 @@ import pytest
 
 from base.config import ConfigBoot
 from base.db import Database
+from base.host.tests.daemon_shutdown import Child
 from base.native_process.loaded_commit import LoadedCommit
 from services.entrypoints.im_bridge import daemon
 from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
@@ -23,7 +24,6 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     PatchingAdapter,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
-from tests.components.services.daemon_shutdown_test_support import Child
 
 
 def run_blocked_ws_child(markers_path: Path, *, responsive: bool = True) -> None:
