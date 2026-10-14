@@ -163,14 +163,13 @@ def stub_everywhere(
     `respawn_service`). Nothing is imported to find them — only modules the run
     already loaded are touched.
 
-    **This is not the same job as reaching a name through its owning module**
-    (`base.cluster.session_name(...)` — see the rule in
-    `docs/conventions/python-conventions.md`). That convention stops a *new* frozen
-    alias from being created, so the owner is the only surface and a reader can move
-    modules without taking its patch out of reach. It can only apply to code this
-    repo writes. This helper covers the aliases that already exist and cannot be
-    converted away: third-party modules and existing direct imports may retain a
-    function object. The alias scan reads module `__dict__`s only —
+    **This is not a pattern for a new test.** A test does not patch what it wants to control:
+    the code under test takes it as a parameter (see "The one allowed form per kind of
+    dependency" and "Existing patches" in `docs/conventions/python-conventions.md`). This
+    helper serves two jobs that remain: the host guards below, which refuse a host effect
+    everywhere it could be reached, and the patches that are still recorded debt, where an
+    alias is already frozen because a third-party module or an existing direct import
+    retains a function object. The alias scan reads module `__dict__`s only —
     it must not probe `__getattr__` (PEP 562), which can execute arbitrary
     code with side effects (task #3950)."""
     real = getattr(module, name)

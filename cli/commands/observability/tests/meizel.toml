@@ -93,8 +93,6 @@
 "test_trace_ship.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 4
 "test_trace_ship.py#monkeypatch.setattr base.config.settings.observability.telemetry_tempo_endpoint" = 2
 "test_trace_ship.py#monkeypatch.setattr base.host.db_authority.unit.load_unit_capability" = 1
-"test_trace_ship.py#monkeypatch.setattr base.telemetry.trace_mirror.traces_dir" = 2
-"test_trace_ship.py#monkeypatch.setattr cli.commands.observability.trace.traces_dir" = 11
 
 [debt.stdlib-patch]
 "test_atomic_writer_contracts.py#monkeypatch.setattr os.fsync" = 4

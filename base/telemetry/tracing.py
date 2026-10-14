@@ -461,7 +461,7 @@ def _arm_tracing(
                     "trace recording enabled",
                     event="trace",
                     endpoint=endpoint,
-                    mirror_dir=str(traces_dir()),
+                    mirror_dir=str(traces_dir(home)),
                 )
                 _state["collector_offline_reported"] = False
                 _state["initialized"] = True
@@ -629,15 +629,17 @@ def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
     # then retention (days), then the hard directory cap. When the disk is
     # already over the watermark this is exactly the pass that frees space —
     # skipping it there would let an over-watermark disk stay full.
-    gzip_old_mirror()
-    prune_old_mirror(settings.observability.trace_retention_days)
-    enforce_dir_cap(settings.observability.trace_max_dir_mb)
+    mirror_dir = traces_dir(home)
+    mirror_dir.mkdir(parents=True, exist_ok=True)
+    gzip_old_mirror(traces_dir=mirror_dir)
+    prune_old_mirror(settings.observability.trace_retention_days, traces_dir=mirror_dir)
+    enforce_dir_cap(settings.observability.trace_max_dir_mb, traces_dir=mirror_dir)
 
     # Disk-watermark guard: if the data disk is over its watermark, skip
     # recording entirely (auto-degrade) instead of letting the mirror grow
     # the disk toward full. Logged as a warning event so the degradation is
     # visible; a later agent start re-checks.
-    usage = disk_usage()
+    usage = disk_usage(traces_dir=mirror_dir)
     if usage is not None and usage[0] > settings.observability.trace_disk_watermark:
         # Auto-degrade: skip recording so the mirror can never fill the disk.
         # The loguru events sink lands this in the unified event stream

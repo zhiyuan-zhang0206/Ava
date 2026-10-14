@@ -75,13 +75,17 @@ SOURCES: dict[str, SourceDescriptor] = {
     # Official docs: Gemini Models API. `flash(-lite)?` keeps the numbered Flash-Lite
     # line in the family: upstream publishes `gemini-<version>-flash-lite` ids beside
     # the pro/flash ones, and without `-lite` they fell through to other_ids and never
-    # reached the report. The registered `gemini-flash-lite-latest` alias deliberately
+    # reached the report. `argon` does the same for Gemini 4's flagship line, whose id
+    # is `gemini-<version>-argon` rather than `-pro`/`-flash`: with `pro|flash` alone,
+    # `gemini-4-argon` fell through to other_ids, so the line was untracked and the
+    # model's own registration was never announced as a candidate. The registered
+    # `gemini-flash-lite-latest` alias deliberately
     # stays outside the numbered pattern — it carries no version, so nothing here can
     # detect when upstream re-resolves it (it tracked 3.5 at registration, checked
     # 2026-09-10); a newly numbered flash-lite id surfacing as a candidate is the cue
     # to re-verify the alias facts by hand.
-    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash)(-lite)?(-preview)?$"),
-                               re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash(-lite)?)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash(-lite)?)(-preview)?$")),
+    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash(-lite)?|argon)(-preview)?$"),
+                               re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash(-lite)?|argon)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash(-lite)?|argon)(-preview)?$")),
     # Official docs: xAI Models API.
     "grok": SourceDescriptor("grok", "https://api.x.ai", "/v1/models", "Authorization", "XAI_API_KEY", "openai", re.compile(r"^grok-\d+\.\d+$"),
                              re.compile(r"^(?P<series>grok)-\d+\.\d+$"), re.compile(r"^grok-(?P<version>\d+\.\d+)$")),

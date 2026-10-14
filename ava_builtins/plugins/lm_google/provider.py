@@ -267,6 +267,28 @@ PROVIDER = ProviderContribution(
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
         ),
+        "gemini-4-argon": ModelSpec(
+            provider="gemini",
+            spawnable=True,
+            # Unified input+output window: the model page, the DeepMind model
+            # card, and the live /v1beta/models probe (inputTokenLimit) agree on
+            # 1,048,576 (checked 2026-10-14).
+            context_window=1_048_576,
+            # DeepMind model card: "The knowledge cutoff for Gemini 4 is March
+            # 2026" (checked 2026-10-14).
+            knowledge_cutoff="2026-03",
+            # The thinking guide lists low/medium/high with a `medium` default;
+            # `minimal` 400s ("Thinking level MINIMAL is not supported for this
+            # model", verified live 2026-10-14) — the same no-minimal class as
+            # 3.8 Flash and 3.1 Pro.
+            effort_levels=("low", "medium", "high"),
+            tuning=ModelTuning(
+                # Documented default thinking_level (thinking guide, checked
+                # 2026-10-14).
+                reasoning_effort="medium",
+            ),
+            media_types=frozenset({"image", "pdf", "audio", "video"}),
+        ),
     },
     pricing={
         "gemini-3.8-flash": PriceRates(
@@ -412,6 +434,47 @@ PROVIDER = ProviderContribution(
                             cache_miss="4.0",
                             cache_hit="0.4",
                             output="18.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "gemini-4-argon": PriceRates(
+            cache_miss=2.0,
+            cache_hit=0.10,
+            output=10.0,
+            source_url="https://ai.google.dev/gemini-api/docs/pricing",
+            source_checked_at="2026-10-14",
+            vendor="google",
+            # Google publishes calendar dates without a timezone; the promo
+            # ends "through November 30, 2026" and the increase starts
+            # December 1, so it is activated at the earliest global occurrence
+            # of 2026-12-01 (UTC+14) to avoid underestimating cost — the same
+            # boundary convention as the 3.8/3.7 Flash increases.
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2026-11-30T10:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="2.0",
+                            cache_hit="0.10",
+                            output="10.0",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-11-30T10:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="4.0",
+                            cache_hit="0.20",
+                            output="20.0",
                         ),
                     ),
                 ),
