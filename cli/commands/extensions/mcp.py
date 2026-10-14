@@ -647,7 +647,7 @@ def cmd_mcp_install(
         if detected is None:
             return 1
         name, auto_spec = detected
-        dest = paths.mcps_dir() / name
+        dest = paths.mcps_dir(paths.ava_home()) / name
         if _install_name_conflict(name, dest):
             return 1
 
@@ -690,7 +690,7 @@ def cmd_mcp_uninstall(name: str) -> int:
             file=sys.stderr,
         )
         return 1
-    dest = paths.mcps_dir() / name
+    dest = paths.mcps_dir(paths.ava_home()) / name
     if dest.exists():
         shutil.rmtree(dest)
     install_registry.deregister(name)
@@ -718,7 +718,7 @@ def cmd_mcp_upgrade(name: str) -> int:
         print(f"[ava mcp upgrade] '{name}' has no recorded source.", file=sys.stderr)
         return 1
 
-    dest = paths.mcps_dir() / name
+    dest = paths.mcps_dir(paths.ava_home()) / name
     if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
             f"[ava mcp upgrade] note: '{name}' was modified locally; "

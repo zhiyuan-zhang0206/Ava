@@ -89,11 +89,15 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
         calls.append("schema-check")
         return 0
 
-    def adopt(*, database_factory: Callable[[], Any], machine_name: Callable[[], str]) -> None:
+    def adopt(
+        *, database_factory: Callable[[], Any], machine_name: Callable[[], str], skills_root: Path
+    ) -> None:
         assert callable(machine_name)
+        assert skills_root.name == "skills"
         calls.append("adopt")
 
-    def record_materialize(*, database_factory: Callable[[], Any]) -> None:
+    def record_materialize(*, database_factory: Callable[[], Any], skills_root: Path) -> None:
+        assert skills_root.name == "skills"
         calls.append("materialize")
 
     monkeypatch.setattr(converge_host, "converge_host", skip_converge)
@@ -154,8 +158,9 @@ def test_standalone_converge_materializes_too() -> None:
     expects the machine to end up caught up."""
     from cli.commands.lifecycle.converge_host import cmd_converge
 
-    assert "materialize_cluster_extensions(database_factory=database_factory)" in inspect.getsource(
-        cmd_converge
+    assert (
+        "materialize_cluster_extensions(database_factory=database_factory, skills_root=skills_root)"
+        in inspect.getsource(cmd_converge)
     )
 
 
@@ -206,7 +211,7 @@ def test_standalone_converge_adopts_too() -> None:
     restarting it, and a machine holding un-adopted installs is not correct."""
     from cli.commands.lifecycle.converge_host import cmd_converge
 
-    assert (
-        "adopt_local_extensions(database_factory=database_factory, machine_name=command.machine.name)"
-        in inspect.getsource(cmd_converge)
-    )
+    source = inspect.getsource(cmd_converge)
+    assert "adopt_local_extensions(" in source
+    assert "machine_name=command.machine.name" in source
+    assert "skills_root=skills_root" in source

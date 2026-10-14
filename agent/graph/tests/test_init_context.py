@@ -40,7 +40,7 @@ from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
 )
-from base.paths import skills_dir
+from base.paths import ava_home, skills_dir
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -313,7 +313,7 @@ async def test_established_head_records_what_the_capability_index_lists(
     scan, so the same act has to record what that snapshot covered — otherwise
     nothing downstream can tell that a skill installed later is missing from it.
     """
-    d = skills_dir()
+    d = skills_dir(ava_home())
     (d / "alpha").mkdir(parents=True)
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
@@ -349,7 +349,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     """
     from agent.graph.hooks.framework import framework_hooks
 
-    d = skills_dir()
+    d = skills_dir(ava_home())
     (d / "alpha").mkdir(parents=True)
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
@@ -407,7 +407,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     from agent.hooks import make_hook_runner
     from base.lm.context_budget import ContextBudget
 
-    d = skills_dir()
+    d = skills_dir(ava_home())
     (d / "alpha").mkdir(parents=True)
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"

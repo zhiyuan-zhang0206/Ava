@@ -596,11 +596,17 @@ def cmd_converge(
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
     # a CONVERGE_STEPS entry would not have on the `ava start` path.
+    from base.paths import ava_home, skills_dir
     from cli.commands.extensions.materialize import (
         adopt_local_extensions,
         materialize_cluster_extensions,
     )
 
-    adopt_local_extensions(database_factory=database_factory, machine_name=command.machine.name)
-    materialize_cluster_extensions(database_factory=database_factory)
+    skills_root = skills_dir(ava_home())
+    adopt_local_extensions(
+        database_factory=database_factory,
+        machine_name=command.machine.name,
+        skills_root=skills_root,
+    )
+    materialize_cluster_extensions(database_factory=database_factory, skills_root=skills_root)
     return 0

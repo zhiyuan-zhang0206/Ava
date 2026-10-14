@@ -19,7 +19,7 @@ from gateway.extensions.skills import get_skills
 
 def _mk_skill(name: str, body: str = "# skill\n") -> Path:
     """Create `$AVA_HOME/skills/<name>/SKILL.md` and return the skill dir."""
-    d = paths.skills_dir() / name
+    d = paths.skills_dir(paths.ava_home()) / name
     d.mkdir(parents=True, exist_ok=True)
     (d / "SKILL.md").write_text(body, encoding="utf-8")
     return d
@@ -93,7 +93,7 @@ def test_non_skill_rows_and_missing_dir_excluded(unit_home: Path) -> None:
 
 
 def test_empty_when_no_load_dir(unit_home: Path) -> None:
-    assert not paths.skills_dir().exists()
+    assert not paths.skills_dir(paths.ava_home()).exists()
     assert get_skills().skills == []
 
 

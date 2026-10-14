@@ -40,7 +40,7 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.extensions import install_registry
-from base.paths import skills_dir
+from base.paths import ava_home, skills_dir
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     """Scenario 2b: a skill the fork's config added (source never had it) rides
     the fork inbound payload and lands as a full-body note at the TAIL — after
     the fork marker and the on_fork notes, never inside the cached prefix."""
-    load_dir = skills_dir()
+    load_dir = skills_dir(ava_home())
     load_dir.mkdir()
     extra = load_dir / "extra"
     extra.mkdir()
