@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import ownership_preflight as _ownership
 from cli.commands.converge.spec import ConvergeCtx
@@ -41,6 +42,7 @@ def _ctx(
         database_factory=operator_database,
         producer=producer,
         machine=command_runtime.machine,
+        helper=refuse_helper,
     )
 
 

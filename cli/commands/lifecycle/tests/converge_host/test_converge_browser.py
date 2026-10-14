@@ -11,6 +11,7 @@ import cli.commands.lifecycle.converge_host as cv
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -33,6 +34,7 @@ def _ctx(
         database_factory=operator_database,
         producer=producer,
         machine=command_runtime.machine,
+        helper=refuse_helper,
     )
 
 
@@ -232,6 +234,7 @@ def test_context_read_failure_keeps_the_original_error(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        helper=refuse_helper,
     )
     with pytest.raises(RuntimeError) as caught:
         cv.ensure_browser(ctx)
