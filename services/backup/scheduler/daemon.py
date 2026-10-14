@@ -20,14 +20,13 @@ import logging
 import os
 import signal
 import sys
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from datetime import time as clock_time
 from pathlib import Path
 
 from base import telemetry
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, Timers, clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -74,7 +73,7 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 class BackupState:
     """Scheduler state, owned by its event-loop thread and read by `/healthz`."""
 
-    started_at: float = field(default_factory=time.monotonic)
+    started_at: float
     running: bool = False
     last_attempt: float | None = None
     last_success: float | None = None
@@ -114,29 +113,30 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
-def backup_components(state: BackupState) -> list[dict[str, object]]:
+def backup_components(state: BackupState, *, clock: Clock) -> list[dict[str, object]]:
     """Report scheduler progress; a running dump is healthy until it returns.
 
     `run_backup` has its own one-hour bound. A just-booted cluster gets one
     schedule-plus-slack interval before it is judged overdue, preserving the
     first-run catch-up behaviour without declaring a new service unhealthy.
     """
+    wall_time = clock.now().timestamp()
     if state.running:
         status = OK
-        started_at = state.last_attempt if state.last_attempt is not None else time.time()
-        progress = f"running {time.time() - started_at:.0f}s"
+        started_at = state.last_attempt if state.last_attempt is not None else wall_time
+        progress = f"running {wall_time - started_at:.0f}s"
         detail = None
     elif state.last_error is not None:
         status = OK
         progress = "idle"
         detail = f"last dump failed: {state.detail}; next attempt at the next backup hour"
     elif state.last_success is not None:
-        age_s = time.time() - state.last_success
+        age_s = wall_time - state.last_success
         status = OK if age_s <= BACKUP_STALE_AFTER_S else DEGRADED
         progress = "idle"
         detail = None if status == OK else f"last successful backup {age_s:.0f}s ago"
     else:
-        age_s = time.monotonic() - state.started_at
+        age_s = clock.monotonic() - state.started_at
         status = OK if age_s <= BACKUP_STALE_AFTER_S else DEGRADED
         progress = "idle"
         detail = None if status == OK else f"no successful backup within {age_s:.0f}s of start"
@@ -147,29 +147,25 @@ def backup_components(state: BackupState) -> list[dict[str, object]]:
         last_success=state.last_success,
         progress=progress,
         detail=detail,
-        now=time.time() if state.last_success is not None else None,
+        now=wall_time if state.last_success is not None else None,
     )
     if state.last_error is not None:
         record["last_error"] = state.last_error
     return [record]
 
 
-async def sleep_in_chunks(seconds: float) -> None:
+async def sleep_in_chunks(seconds: float, *, timers: Timers) -> None:
     """Sleep in bounded chunks so SIGTERM reaches the scheduler promptly."""
     remaining = seconds
     while remaining > 0:
         chunk = min(remaining, _SLEEP_CHUNK_S)
-        await asyncio.sleep(chunk)
+        await timers.asleep(chunk)
         remaining -= chunk
 
 
-async def sleep_until_next_backup_hour(now: datetime, *, config: ConfigBoot) -> None:
-    """Sleep until the next configured backup hour on the cluster clock."""
-    local_now = now.astimezone(
-        cluster_tz(
-            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
-        )
-    )
+def seconds_until_next_backup_hour(now: datetime, *, config: ConfigBoot, clock: Clock) -> float:
+    """Seconds from `now` to the next configured backup hour on the cluster clock."""
+    local_now = now.astimezone(cluster_tz(clock_factory=lambda: clock))
     backup_hour = config.view.services.backup_hour
     next_date = local_now.date()
     target = datetime.combine(next_date, clock_time(hour=backup_hour), tzinfo=local_now.tzinfo)
@@ -179,16 +175,16 @@ async def sleep_until_next_backup_hour(now: datetime, *, config: ConfigBoot) -> 
             clock_time(hour=backup_hour),
             tzinfo=local_now.tzinfo,
         )
-    await sleep_in_chunks((target.astimezone(UTC) - now).total_seconds())
+    return (target.astimezone(UTC) - now).total_seconds()
 
 
-async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot) -> None:
+async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot, clock: Clock) -> None:
     """Run one weekly local restore proof without re-running the daily dump."""
     try:
         if not local_dump_restore_due(
             now,
             last_success=load_local_dump_restore_success(),
-            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+            clock_factory=lambda: clock,
             hour_reader=lambda: config.view.services.backup_hour,
         ):
             return
@@ -206,18 +202,20 @@ async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot) -> No
         _log.exception("[pg-backup] local restore drill failed")
 
 
-async def backup_loop(state: BackupState, *, config: ConfigBoot) -> None:
+async def backup_loop(state: BackupState, *, config: ConfigBoot, clock: Clock) -> None:
     """Run due dumps; a failed dump is reported and not attempted again before the next backup hour."""
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
     # quiesce-exempt: pg_dump dials the direct URL read-only, not the pool; a held pause must not stop backups
     while True:
-        now = datetime.now(UTC)
+        now = clock.now()
         if not is_due(
             now,
-            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+            clock_factory=lambda: clock,
             hour_reader=lambda: config.view.services.backup_hour,
         ):
-            await sleep_until_next_backup_hour(now, config=config)
+            await sleep_in_chunks(
+                seconds_until_next_backup_hour(now, config=config, clock=clock), timers=clock
+            )
             continue
 
         state.record_attempt(now)
@@ -225,7 +223,7 @@ async def backup_loop(state: BackupState, *, config: ConfigBoot) -> None:
         try:
             await run_job("dump", now=now, config=config)
             state.record_success(now)
-            await run_due_local_dump_restore(now, config=config)
+            await run_due_local_dump_restore(now, config=config, clock=clock)
         except Exception as exc:
             state.record_error(str(exc))
             telemetry.emit(
@@ -237,10 +235,12 @@ async def backup_loop(state: BackupState, *, config: ConfigBoot) -> None:
             _log.exception("[pg-backup] dump failed; next attempt at the next backup hour")
         finally:
             state.running = False
-        await sleep_until_next_backup_hour(datetime.now(UTC), config=config)
+        await sleep_in_chunks(
+            seconds_until_next_backup_hour(clock.now(), config=config, clock=clock), timers=clock
+        )
 
 
-async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path) -> None:
+async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: Clock) -> None:
     """Own the pidfile and health server for the backup scheduler."""
     if _is_running(config, runtime=runtime):
         _log.info(
@@ -250,17 +250,17 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path) -> None
         sys.exit(1)
 
     write_pidfile(config, runtime=runtime)
-    state = BackupState()
+    state = BackupState(started_at=clock.monotonic())
     endpoint = _endpoint(config, runtime=runtime)
     health = await start_health_server(
         "pg_backup",
         endpoint.health_port,
-        components=lambda: backup_components(state),
+        components=lambda: backup_components(state, clock=clock),
         image=image,
     )
     _log.info("[pg-backup] healthz listening on :%s", endpoint.health_port)
     try:
-        await backup_loop(state, config=config)
+        await backup_loop(state, config=config, clock=clock)
     finally:
         await stop_health_server(health)
         _remove_pidfile(config, runtime=runtime)
@@ -301,7 +301,14 @@ def main() -> None:
     # teardown is skipped by the hard exit.
     runner = asyncio.Runner()
     try:
-        runner.run(run(config=config, image=image, runtime=process_home / "run"))
+        runner.run(
+            run(
+                config=config,
+                image=image,
+                runtime=process_home / "run",
+                clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[pg-backup] interrupted, shutting down")

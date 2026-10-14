@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.deploy.schema import migrations
@@ -50,8 +51,9 @@ def test_scheduler_shares_captured_image_with_health_and_lazy_log_database(
     monkeypatch.setattr(migrations, "assert_schema_current", schema)
     monkeypatch.setattr(code_version, "first_parent_count", count)
 
-    async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path) -> None:
+    async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: Clock) -> None:
         assert image is capture.return_value
+        assert clock.timezone == config.view.general.timezone
         roots.append(config)
         schema_urls.append(config.view.data_plane.db_url)
         config.view.data_plane.db_url = "postgresql://scheduler-owner.invalid/live"
@@ -167,7 +169,12 @@ async def test_scheduler_health_uses_entry_image_and_preserves_loop_failure(
     monkeypatch.setattr(daemon, "backup_loop", AsyncMock(side_effect=failure))
 
     with pytest.raises(RuntimeError) as raised:
-        await daemon.run(config=config, image=image, runtime=Path("run"))
+        await daemon.run(
+            config=config,
+            image=image,
+            runtime=Path("run"),
+            clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
+        )
 
     assert raised.value is failure
     assert start.call_args.kwargs["image"] is image

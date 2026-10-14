@@ -68,6 +68,7 @@ from ava.sdk_surface.installation import Installation
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
 from base.agents.observation.turn_progress import TurnProgress
+from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -491,7 +492,7 @@ def _is_running() -> bool:
 
 
 def boot_handles(
-    db: Database, config: ConfigBoot
+    db: Database, config: ConfigBoot, *, timers: Timers
 ) -> tuple[
     AsyncConnectionPool[psycopg.AsyncConnection],
     AsyncConnectionPool[psycopg.AsyncConnection],
@@ -505,7 +506,7 @@ def boot_handles(
             events_channel=config.view.data_plane.events_channel,
         )
     )
-    return build_shared_pool(db), build_control_pool(db), bus, db
+    return build_shared_pool(db, timers=timers), build_control_pool(db, timers=timers), bus, db
 
 
 async def _dispatch_host(
@@ -550,6 +551,7 @@ async def run(
     database: Callable[[], Database],
     machine: MachineIdentity,
     home: Path,
+    timers: Timers,
     clients: ClientSet | None = None,
     on_clients_owned: Callable[[], None] | None = None,
 ) -> None:
@@ -568,7 +570,7 @@ async def run(
         land_cluster_extensions,
     )
 
-    workload_pool, control_pool, bus, db = boot_handles(database(), config)
+    workload_pool, control_pool, bus, db = boot_handles(database(), config, timers=timers)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[Exception | None] | None = None
     beat_tasks: asyncio.TaskGroup | None = None
@@ -729,6 +731,7 @@ def main() -> None:
                 database=database,
                 machine=machine,
                 home=home,
+                timers=SYSTEM_TIMERS,
                 clients=clients,
                 on_clients_owned=hand_off_clients,
             )

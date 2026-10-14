@@ -18,6 +18,7 @@ import services.agent_runner.agent_host.host as agent_host_host
 from ava.sdk_surface.installation import Installation
 from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
+from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -121,10 +122,12 @@ def exercise_unfinished_main() -> None:
         database: Callable[[], Database],
         machine: MachineIdentity,
         home: Path,
+        timers: Timers,
         clients: ClientSet,
         on_clients_owned: Callable[[], None],
     ) -> None:
         assert home == Path(os.environ["AVA_HOME"])
+        assert timers is SYSTEM_TIMERS
         on_clients_owned()
         host = AgentHost(
             policy=configured_policy(),
