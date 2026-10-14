@@ -9,7 +9,6 @@ exports = ["components", "e2e", "factories", "fixtures", "path_scoped", "scripts
 "harness" = ["_asyncio_stall_probe.py", "_os_jobs.py", "components", "e2e", "fixtures"]
 "integration" = ["fixtures", "path_scoped"]
 "path_scoped" = ["fixtures"]
-"scripts" = ["fixtures"]
 "skills" = ["fixtures"]
 "ui" = ["e2e"]
 

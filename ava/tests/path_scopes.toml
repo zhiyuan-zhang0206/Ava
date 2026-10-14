@@ -16,7 +16,7 @@
     "test_core.py",
     "test_security.py",
 ]
-"tests.fixtures.unit.config_authority" = [
+"base.config.tests.config_authority" = [
     "test_attachment_transport.py",
     "test_core.py",
     "test_security.py",

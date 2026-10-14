@@ -1,4 +1,7 @@
-exports = ["configuration.py"]
+exports = ["config_authority.py", "configuration.py", "served_gateway_home.py"]
+
+[uses]
+"conftest.py" = ["config_authority.py"]
 
 [debt.env-patch]
 "configuration.py#patch.dict os.environ" = 1
@@ -20,6 +23,7 @@ exports = ["configuration.py"]
 "test_unit_home.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
 
 [debt.first-party-patch]
+"served_gateway_home.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config._full.build" = 2
 "test_config_boot_owner.py#monkeypatch.setattr base.config._lite.BUILD_WAIT_TIMEOUT_SECONDS" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config._lite.load_ava_env" = 1
