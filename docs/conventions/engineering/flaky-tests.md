@@ -91,7 +91,8 @@ the rule belongs in merge-queue tooling rather than a repository lint.
 ## 3. Redirect resources; never inherit ambient host state
 
 **Rule.** Test isolation comes from redirecting the value a process reads, then
-patching any durable-state read that must not inherit a worker's shared home.
+passing in as a parameter any durable-state source that must not inherit a worker's
+shared home.
 
 **Signature.** A result depends on process environment left by an earlier test,
 a marker under worker-shared `$AVA_HOME`, a real host service such as launchd,
@@ -113,8 +114,9 @@ health-probe plist, restarting the cluster.
 
 **Correct form.** Let the suite's root plugins (`tests/fixtures/env_bootstrap.py`,
 `tests/fixtures/provisioning.py`) redirect `$AVA_HOME`, database,
-Redis, registry, ports, and session home. Patch durable-marker reads in the
-fixture owning the test, rather than inheriting worker state. Do not use a
+Redis, registry, ports, and session home. Give the component under test the location
+of its durable marker as a parameter (a path under `tmp_path`), rather than inheriting
+worker state. Do not use a
 non-root, session-scoped fixture to mutate process globals. The OS scheduler
 cannot be redirected: keep `AVA_OS_JOBS_ENABLED=false`, and never run a
 non-pytest script that imports `gateway.app` from a worktree.
