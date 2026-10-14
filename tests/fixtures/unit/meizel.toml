@@ -1,4 +1,4 @@
-exports = ["model_owner.py", "sdk.py", "workspace.py"]
+exports = ["gateway.py", "model_owner.py", "sdk.py", "workspace.py"]
 
 [uses]
 "tests" = ["sdk.py"]
