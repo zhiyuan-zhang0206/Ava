@@ -743,12 +743,12 @@ def main() -> None:
                 on_clients_owned=hand_off_clients,
             )
         )
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as interrupted:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         host_log.info("[agent-host] interrupted, shutting down")
         # Explicit task drain reaches run's health/turn/pool/pidfile cleanup
         # without joining default-executor workers.
-        failures = cancel_and_drain(runner)
+        failures = cancel_and_drain(runner, interrupted_by=interrupted)
         if failures:
             host_log.error("[agent-host] async shutdown failed: %r", failures)
             code = 1

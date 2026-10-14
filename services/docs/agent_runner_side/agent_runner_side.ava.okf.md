@@ -47,6 +47,12 @@ recovery. Command, input and programming errors end the heartbeat and become
 visible at join. This changes neither the scheduler's drain budget nor the
 process's finite shutdown path.
 
+The agent-host main passes its captured stop exception to the shared
+`cancel_and_drain` owner. If an internal TaskGroup replays that same interrupt,
+the existing task join continues through asynchronous cleanup before hard exit;
+a distinct control event or unknown loop error still escapes. Ordinary cleanup
+failures remain reported errors with exit status 1.
+
 The durable host scan only wakes agents; it never cancels a running turn. A turn
 that stops making progress is aborted by the in-graph stall guard
 (`stall_guard.py`, driven by the monotonic turn-progress clock), not by the
