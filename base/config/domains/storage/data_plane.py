@@ -16,7 +16,11 @@ from pydantic import Field, field_validator, model_validator
 from base.config.base import EnvSettings, unit_home
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.predicates import is_ipv4_literal, is_loopback_host
-from base.host.net.url_secret import url_host, url_with_host, url_with_query_param
+from base.host.net.url_secret import (
+    names_foreign_host,
+    url_with_host,
+    url_with_query_param,
+)
 
 
 def self_machine_host() -> str:
@@ -585,8 +589,4 @@ class DataPlaneSettings(EnvSettings):
         local instance is then only half the story, so local management is skipped
         wholesale rather than half-applied.
         """
-        for url in (self.db_url, self.redis_url):
-            host = url_host(url)
-            if host and not is_loopback_host(host):
-                return True
-        return False
+        return names_foreign_host(self.db_url, self.redis_url)

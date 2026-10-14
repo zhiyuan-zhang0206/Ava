@@ -34,3 +34,15 @@ def test_configured_redis_port_reads_only_the_url_port(
 ) -> None:
     monkeypatch.setattr(settings.data_plane, "redis_url", url)
     assert ownership.configured_redis_port() == port
+
+
+@pytest.mark.parametrize(
+    ("url", "port"),
+    [
+        ("redis://127.0.0.1:6380/0", 6380),
+        ("redis://ava:runtime-pw@10.0.0.9:6391/2", 6391),
+        ("redis://127.0.0.1/0", None),
+    ],
+)
+def test_redis_port_of_reads_only_the_url_port(url: str, port: int | None) -> None:
+    assert ownership.redis_port_of(url) == port
