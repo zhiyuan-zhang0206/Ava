@@ -11,6 +11,7 @@ from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
 from ava.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_enabled
 from ava.tests.skills._skills_helpers import write_skill
 from base.packages.extensions import install_registry
+from base.packages.skills.tree import SkillNameCollision, identifier, target
 
 # Every test runs in a per-test unit home whose `skills/` does not exist by
 # default, so the real ~/.agents/skills/ never leaks into a scan; the
@@ -245,7 +246,7 @@ def test_auto_promote_names_only_emits_root_not_duplicate(
     child — no `ava_fleet.ava_fleet` in the flat listing."""
     _redundant_skill_structure(fake_skills_dir)
 
-    by_id = {skills_mod.identifier(s): s for s in skills_mod.names()}
+    by_id = {identifier(s): s for s in skills_mod.names()}
     assert "ava-fleet" in by_id  # bare root skill
     assert by_id["ava-fleet"]["namespace"] == ()
     # The child should NOT appear as a separate entry
@@ -308,7 +309,7 @@ def test_auto_promote_deep_nesting(fake_skills_dir: Path) -> None:
     assert b_node.b.name == "b"
 
     # names: root `a.b` present, child `a.b.b` absent
-    by_id = {skills_mod.identifier(s): s for s in skills_mod.names()}
+    by_id = {identifier(s): s for s in skills_mod.names()}
     assert "a:b" in by_id
     assert "a:b:b" not in by_id
     assert "a:b:c" in by_id
@@ -345,8 +346,8 @@ def test_dash_dir_renders_dash_identifier_and_underscore_target(fake_skills_dir:
         fake_skills_dir, "write-a-pr-description", "name: write-a-pr-description\ndescription: d"
     )
     (skill,) = skills_mod.names()
-    assert skills_mod.identifier(skill) == "write-a-pr-description"
-    assert skills_mod.target(skill) == "write_a_pr_description"
+    assert identifier(skill) == "write-a-pr-description"
+    assert target(skill) == "write_a_pr_description"
     assert skills_mod.write_a_pr_description.name == "write-a-pr-description"
 
 
@@ -356,8 +357,8 @@ def test_legacy_underscore_dir_still_loads_and_displays_dash(fake_skills_dir: Pa
     resolving under the Python path, and presents the canonical dash name."""
     write_skill(fake_skills_dir, "page_ocr", "name: page_ocr\ndescription: read page")
     (skill,) = skills_mod.names()
-    assert skills_mod.identifier(skill) == "page-ocr"
-    assert skills_mod.target(skill) == "page_ocr"
+    assert identifier(skill) == "page-ocr"
+    assert target(skill) == "page_ocr"
     assert skills_mod.page_ocr.name == "page_ocr"  # raw frontmatter preserved
 
 
@@ -367,8 +368,8 @@ def test_legacy_underscore_namespace_dir_still_loads(fake_skills_dir: Path) -> N
     (fake_skills_dir / "web_ai").mkdir()
     write_skill(fake_skills_dir / "web_ai", "console", "name: console\ndescription: d")
     (skill,) = skills_mod.names()
-    assert skills_mod.identifier(skill) == "web-ai:console"
-    assert skills_mod.target(skill) == "web_ai.console"
+    assert identifier(skill) == "web-ai:console"
+    assert target(skill) == "web_ai.console"
     assert skills_mod.web_ai.console.name == "console"
 
 
@@ -381,7 +382,7 @@ def test_registry_gate_matches_across_the_dash_underscore_fold(
     converge."""
     write_skill(fake_skills_dir, "ava-goal", "name: ava-goal\ndescription: d")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"ava-goal"})
-    assert [skills_mod.identifier(s) for s in skills_mod.names()] == ["ava-goal"]
+    assert [identifier(s) for s in skills_mod.names()] == ["ava-goal"]
 
 
 def test_registry_gate_still_hides_an_unlisted_skill(
@@ -398,7 +399,7 @@ def test_colliding_dash_and_underscore_dirs_are_refused(fake_skills_dir: Path) -
     hold one, so the loader refuses rather than silently dropping a skill."""
     write_skill(fake_skills_dir, "foo-bar", "name: foo-bar\ndescription: dash one")
     write_skill(fake_skills_dir, "foo_bar", "name: foo_bar\ndescription: underscore one")
-    with pytest.raises(skills_mod.SkillNameCollision) as e:
+    with pytest.raises(SkillNameCollision) as e:
         skills_mod.names()
     assert "foo_bar" in str(e.value)
 
@@ -409,7 +410,7 @@ def test_colliding_namespace_folders_are_refused(fake_skills_dir: Path) -> None:
     (fake_skills_dir / "web_ai").mkdir()
     write_skill(fake_skills_dir / "web-ai", "console", "name: console\ndescription: a")
     write_skill(fake_skills_dir / "web_ai", "media", "name: media\ndescription: b")
-    with pytest.raises(skills_mod.SkillNameCollision):
+    with pytest.raises(SkillNameCollision):
         skills_mod.names()
 
 
@@ -519,4 +520,4 @@ def test_namespaced_subskill_folds_against_its_leaf_dir(
     write_skill(fake_skills_dir / "web_ai", "console", "name: console\ndescription: d")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"web_ai"})
     (skill,) = skills_mod.names()
-    assert skills_mod.identifier(skill) == "web-ai:console"
+    assert identifier(skill) == "web-ai:console"

@@ -27,6 +27,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host import host as host_owner
 from services.agent_runner.agent_host import invocation as invocation_owner
 from services.agent_runner.agent_host.invocation import native_work as work_owner
@@ -137,6 +138,7 @@ async def test_original_invocation_stops_once_after_database_fault(
             bus=EventBus.from_settings(),
             db=database,
             catalog=model_catalog,
+            commands=CommandCatalog(skills=list),
         )
         ctx = AvaContext(
             ops_pool=aops_pool,
@@ -147,6 +149,7 @@ async def test_original_invocation_stops_once_after_database_fault(
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
             machine=machine_identity,
+            commands=CommandCatalog(skills=list),
         )
         faults = install_faults(monkeypatch, agent, site)
         running = asyncio.create_task(

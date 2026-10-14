@@ -15,6 +15,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
@@ -88,6 +89,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     # Exercise the owned work task itself. ``run_turn`` deliberately shields
     # this inner task from scheduler cancellation; injecting cancellation at
@@ -144,6 +146,7 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
 
     async def forbidden_runtime(_agent_id: int, _fingerprint: str, _model: str) -> None:

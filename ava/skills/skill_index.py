@@ -11,10 +11,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from ava.skills.skill_model import NS, Leaf, Skill, claim, descend, flatten
 from base.log import logger
 from base.packages.skills.index import SkillFile, SkillIndex
 from base.packages.skills.names import SkillIdentity, match_key
+from base.packages.skills.tree import NS, Leaf, Skill, claim, descend, flatten
 
 __all__ = ["SkillIndexBuilder", "scan_tree", "skills_in"]
 

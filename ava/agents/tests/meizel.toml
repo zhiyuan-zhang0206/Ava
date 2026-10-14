@@ -2,7 +2,7 @@
 "test_adversarial_eval_schedule.py" = "imports a built-in schedule template from schedules/ to test it; schedule scripts are run content, core does not depend on them"
 
 [debt.first-party-patch]
-"test_agents_commands.py#monkeypatch.setattr ava.skills.composer_commands.discover_commands" = 1
+"test_agents_commands.py#monkeypatch.setattr base.packages.composer_commands.CommandCatalog.discover" = 1
 
 [debt.unresolved-patch]
 "test_adversarial_eval_schedule.py#monkeypatch.setattr mod.ava.agents.get_last_message" = 1

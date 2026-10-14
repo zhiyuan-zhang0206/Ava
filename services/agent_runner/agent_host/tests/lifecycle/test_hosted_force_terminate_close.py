@@ -39,6 +39,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -64,6 +65,7 @@ def _host(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
 
 

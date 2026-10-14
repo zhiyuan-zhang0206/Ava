@@ -41,6 +41,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.composer_commands import CommandCatalog
 from cli.commands.tests.maintenance_cluster import start_cluster_through_ready_gate
 from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.host import AgentHost
@@ -68,6 +69,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     incarnation = await admit_hosted_runtime(
         aops_pool,
@@ -103,6 +105,7 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     await successor.run_turn(agent)
     current = admission.snapshot()
@@ -241,6 +244,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     assert (
         await admit_hosted_runtime(
@@ -276,6 +280,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     ctx = AvaContext(
         ops_pool=aops_pool,
@@ -286,6 +291,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,
+        commands=CommandCatalog(skills=list),
     )
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(runtime, "validate_model_config", MagicMock())
@@ -337,6 +343,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     incarnation = await admit_hosted_runtime(
         aops_pool,
@@ -478,6 +485,7 @@ def _host_driving_invoke_until_done(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
 
@@ -555,6 +563,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         identity=AgentIdentity(agent_id=agent, owns_loop=True),
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,
+        commands=CommandCatalog(skills=list),
     )
     monkeypatch.setattr(runtime, "validate_model_config", MagicMock())
     host = _host_driving_invoke_until_done(

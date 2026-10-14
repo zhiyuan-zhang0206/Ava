@@ -31,6 +31,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
@@ -190,6 +191,7 @@ async def blocked_host(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     ctx = AvaContext(
         machine=machine,
@@ -200,5 +202,6 @@ async def blocked_host(
         bus=EventBus.from_settings(),
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,
+        commands=CommandCatalog(skills=list),
     )
     return graph, saver, host, ctx

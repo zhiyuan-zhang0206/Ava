@@ -33,6 +33,7 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.host.net import http_dial
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.packages.composer_commands import CommandCatalog
 from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
 from gateway.tests.agents.gateway_auth import without_credentials
@@ -97,6 +98,7 @@ async def _claimed_text(
         item,
         read_security_enabled=lambda: settings.agent.security_scan_enabled,
         envelope_inputs=_ENVELOPE_INPUTS,
+        expand_command=CommandCatalog(skills=list).expand,
     )
     content = message.model_dump()["content"]
     assert isinstance(content, str)

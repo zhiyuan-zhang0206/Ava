@@ -2,16 +2,14 @@
 
 import pytest
 
-from ava.skills import composer_commands
+from base.packages.composer_commands import Command, CommandCatalog
 
 
 def test_agents_commands_lists_name_desc_hint_no_body(monkeypatch: pytest.MonkeyPatch):
     from ava import agents
 
-    monkeypatch.setattr(
-        composer_commands,
-        "discover_commands",
-        lambda: [
+    def discover(_catalog: CommandCatalog) -> list[Command]:
+        return [
             {
                 "name": "recap",
                 "description": "recap it",
@@ -19,8 +17,9 @@ def test_agents_commands_lists_name_desc_hint_no_body(monkeypatch: pytest.Monkey
                 "body": "SECRET BODY",
                 "skill_target": None,
             }
-        ],
-    )
+        ]
+
+    monkeypatch.setattr(CommandCatalog, "discover", discover)
     out = agents.commands()
     assert len(out) == 1
     info = out[0]

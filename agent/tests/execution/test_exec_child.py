@@ -378,8 +378,8 @@ def _assert_foreign_targets_render_builtin_help(outputs: dict[str, Any]) -> None
 
 def test_help_is_ava_target_accepts_only_agent_visible_sdk_objects() -> None:
     from ava.sdk_surface.help import is_ava_target
-    from ava.skills.skill_model import NS
     from ava.skills.skill_proxies import Namespace
+    from base.packages.skills.tree import NS
 
     def foreign_function() -> None:
         return None

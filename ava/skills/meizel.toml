@@ -1,8 +1,4 @@
-exports = ["composer_commands.py", "skill_index.py", "skill_model.py", "skill_proxies.py"]
+exports = ["skill_index.py", "skill_proxies.py"]
 
 [uses]
-"__init__.py" = ["skill_index.py", "skill_model.py", "skill_proxies.py"]
-"composer_commands.py" = ["__init__.py"]
-"skill_index.py" = ["skill_model.py"]
-"skill_proxies.py" = ["skill_model.py"]
-"tests" = ["composer_commands.py"]
+"__init__.py" = ["skill_index.py", "skill_proxies.py"]
