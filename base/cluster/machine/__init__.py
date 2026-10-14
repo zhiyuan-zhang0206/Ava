@@ -15,12 +15,14 @@ helpers validate the existing client credential policy independently of identity
 
 import enum
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from typing import Literal
 
 from base.host.env.dotenv_boot import launcher_context
 from base.host.net.auth import bearer_header, delivered_token, require_cluster_secret
 
 __all__ = [
+    "GatewayAccess",
     "GatewayApiBaseMissing",
     "GatewayApiTokenMissing",
     "MachineIdentity",
@@ -34,7 +36,6 @@ __all__ = [
     "gateway_api_base",
     "gateway_auth_headers",
     "gateway_bearer",
-    "resolve_gateway_api_base",
     "resolve_gateway_bearer",
     "roles_from_flags",
     "validate_machine_name",
@@ -230,28 +231,21 @@ def _normalize_gateway_url(value: str) -> str | None:
     return value.rstrip("/") if value else None
 
 
-def gateway_api_base() -> str:
+def gateway_api_base(gateway_url: str) -> str:
     """Base URL this unit uses to call the gateway over HTTP.
 
     One role-blind resolver for every client-side caller (the agent SDK, the
     monitor wrapper, the runner, the watchdog, and dev bootstrap): the configured
-    gateway address, `AVA_GATEWAY_URL`, else raise. A gateway-capable host resolves
-    the *same* configured address as any other caller — on a single box that address is the
-    box's own reachable address, so its agent-runner half dials its gateway half
-    the same way a remote runner would. No localhost shortcut: single-box and
-    split deployments share one path.
+    gateway address (`AVA_GATEWAY_URL`), normalized, else raise. A gateway-capable host
+    resolves the *same* configured address as any other caller — on a single box that
+    address is the box's own reachable address, so its agent-runner half dials its
+    gateway half the same way a remote runner would. No localhost shortcut: single-box
+    and split deployments share one path.
 
     Raises:
-        GatewayApiBaseMissing: gateway_url unset.
+        GatewayApiBaseMissing: `gateway_url` is unset.
     """
-    from base.config import settings
-
-    return resolve_gateway_api_base(settings.gateway.gateway_url)
-
-
-def resolve_gateway_api_base(value: str) -> str:
-    """Validate an explicitly owned gateway URL with the canonical resolver rules."""
-    url = _normalize_gateway_url(value)
+    url = _normalize_gateway_url(gateway_url)
     if url is None:
         raise GatewayApiBaseMissing(
             "gateway_url unset — `ava start` writes it on an agent-runner; "
@@ -261,13 +255,27 @@ def resolve_gateway_api_base(value: str) -> str:
     return url
 
 
+@dataclass(frozen=True)
+class GatewayAccess:
+    """What a client needs to reach and authenticate to the gateway API.
+
+    Built once by the composition root from its own configuration (`gateway_access_from_boot`);
+    the cluster secret never reaches a repr. `remote_plane`: the data plane is remote-managed
+    (keeps no write generations, so no machine API token is issued; see `gateway_bearer`).
+    """
+
+    gateway_url: str
+    cluster_secret: str = field(repr=False)
+    remote_plane: bool
+
+
 # Launcher profiles whose processes present the machine API token and never the
 # human secret: the launcher delivers one to every agent host and runner service
 # (`cli.commands.data_plane.bringup.api_delivery`), exec children inherit it.
 _TOKEN_ONLY_PROFILES = frozenset({"agent", "runner"})
 
 
-def gateway_bearer() -> str:
+def gateway_bearer(access: GatewayAccess) -> str:
     """The bearer this process presents to the gateway API.
 
     The machine API token of the active write generation first: delivered by
@@ -285,13 +293,11 @@ def gateway_bearer() -> str:
             `AVA_API_TOKEN`, or the process holds neither a token nor the
             human secret (the API always authenticates).
     """
-    from base.config import settings
-
     return resolve_gateway_bearer(
         token_reader=delivered_token,
-        secret_reader=lambda: settings.data_plane.cluster_secret,
+        secret_reader=lambda: access.cluster_secret,
         profile_reader=launcher_context,
-        no_tokens_reader=_plane_delivers_no_tokens,
+        no_tokens_reader=lambda: _plane_delivers_no_tokens(access),
     )
 
 
@@ -326,21 +332,20 @@ def resolve_gateway_bearer(
     return secret
 
 
-def _plane_delivers_no_tokens() -> bool:
+def _plane_delivers_no_tokens(access: GatewayAccess) -> bool:
     """Whether this unit is a gateway home on a remote-managed data plane.
 
     The one case where `api_delivery` hands out no token although the API is
     authenticated: the plane keeps no write generations to issue one from.
     """
-    from base.config import settings
     from base.host.env.bootstrap import config_source_is_local
 
-    return config_source_is_local() and settings.data_plane.is_remote
+    return config_source_is_local() and access.remote_plane
 
 
-def daemon_acceptance() -> frozenset[str]:
+def daemon_acceptance(access: GatewayAccess) -> frozenset[str]:
     """SHA-256 digests of the bearers a gateway-side daemon's authenticated endpoint accepts.
-    The acceptor's half of `gateway_bearer()`: the daemons that
+    The acceptor's half of `gateway_bearer(access)`: the daemons that
     take calls from the gateway (the ops server, im_bridge's `/send`) accept machine API tokens,
     never the human cluster secret.
 
@@ -351,13 +356,12 @@ def daemon_acceptance() -> frozenset[str]:
     generation's two tokens (none while no generation is active: fail closed).
 
     The one place the human secret is still accepted is a remote-managed data plane
-    (`settings.data_plane.is_remote`): it keeps no write generations and issues no token, so
+    (`access.remote_plane`): it keeps no write generations and issues no token, so
     its gateway-local services present, and its daemons accept, the human secret. That branch
     is the exception to "outside the gateway, the CLI and the root, no component holds the
     cluster secret" (docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md); the live
     deployment's data plane is local, and this branch only runs when `is_remote`.
     """
-    from base.config import settings
     from base.host.db_authority.api import acceptance, token_digest
     from base.host.db_authority.unit import load_unit_capability
     from base.paths import ava_home
@@ -367,24 +371,24 @@ def daemon_acceptance() -> frozenset[str]:
     if capability is not None:
         api = capability.api
         return frozenset({api.gateway, token_digest(api.token)})
-    secret = require_cluster_secret(settings.data_plane.cluster_secret, where=f"home {home}")
-    if settings.data_plane.is_remote:
+    secret = require_cluster_secret(access.cluster_secret, where=f"home {home}")
+    if access.remote_plane:
         return frozenset({token_digest(secret)})
     return frozenset(acceptance(home).values())
 
 
-def gateway_auth_headers() -> dict[str, str]:
+def gateway_auth_headers(access: GatewayAccess) -> dict[str, str]:
     """Auth headers a client presents to the cluster's authenticated surfaces.
 
-    The Bearer paired with `gateway_api_base` for every client-side call to an
+    The Bearer paired with `gateway_api_base(access.gateway_url)` for every client-side call to an
     authenticated gateway route (`/api/cluster/*`, `/api/agents/*`,
     `/api/config`, `/api/memory/*`, ...) and with the gateway's `/ops` dials:
-    `gateway_bearer()`.
+    `gateway_bearer(access)`.
 
     Raises:
         GatewayApiTokenMissing: see `gateway_bearer`.
     """
-    return bearer_header(gateway_bearer())
+    return bearer_header(gateway_bearer(access))
 
 
 def _parse_roles(value: str) -> MachineRoles:

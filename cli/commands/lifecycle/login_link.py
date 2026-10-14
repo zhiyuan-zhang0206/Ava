@@ -50,11 +50,13 @@ def _issue_ticket(secret: str) -> str:
         ValueError: the gateway answered without a ticket.
     """
     from base.cluster.machine import gateway_api_base
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.auth import bearer_header
     from base.host.net.http_dial import post as dial_post
 
+    access = gateway_access_from_settings()  # ambient: C
     response = dial_post(
-        f"{gateway_api_base()}/api/auth/login-ticket",
+        f"{gateway_api_base(access.gateway_url)}/api/auth/login-ticket",
         headers=bearer_header(secret),
         timeout=_TIMEOUT_S,
     )

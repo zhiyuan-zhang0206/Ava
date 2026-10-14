@@ -19,8 +19,10 @@ _TIMEOUT_S = 15.0
 
 def _gateway_base() -> str:
     from base.cluster.machine import gateway_api_base
+    from base.cluster.machine.ambient import gateway_access_from_settings
 
-    return gateway_api_base()
+    access = gateway_access_from_settings()  # ambient: C
+    return gateway_api_base(access.gateway_url)
 
 
 # ── list ──
@@ -29,10 +31,12 @@ def _gateway_base() -> str:
 def cmd_presets_ls() -> int:
     """`ava presets ls` — list all presets (id / name / label / description)."""
     from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
     url = f"{_gateway_base()}/api/presets"
-    resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    access = gateway_access_from_settings()  # ambient: C
+    resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
     resp.raise_for_status()
     rows = resp.json()
 
@@ -58,6 +62,7 @@ def cmd_presets_get(identifier: str) -> int:
     Tries name match first (list + filter), then integer id. Prints the full
     preset including its config JSON."""
     from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
     # Try numeric id first — fast path
@@ -65,9 +70,10 @@ def cmd_presets_get(identifier: str) -> int:
     with contextlib.suppress(ValueError):
         preset_id = int(identifier)
 
+    access = gateway_access_from_settings()  # ambient: C
     if preset_id is not None:
         url = f"{_gateway_base()}/api/presets/{preset_id}"
-        resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+        resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
         if resp.status_code == 404:
             print(f"preset {preset_id} not found", file=sys.stderr)
             return 1
@@ -76,7 +82,7 @@ def cmd_presets_get(identifier: str) -> int:
     else:
         # Name lookup — list then filter
         list_url = f"{_gateway_base()}/api/presets"
-        resp = dial_get(list_url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+        resp = dial_get(list_url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
         resp.raise_for_status()
         rows = resp.json()
         match = next((r for r in rows if r["name"] == identifier), None)
@@ -100,6 +106,7 @@ def cmd_presets_create(
 
     from base.api_contracts.idempotency import keyed_headers
     from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
     config: dict[str, object] = {}
@@ -119,11 +126,12 @@ def cmd_presets_create(
         body["description"] = description
 
     url = f"{_gateway_base()}/api/presets"
+    access = gateway_access_from_settings()  # ambient: C
     resp = dial_post(
         url,
         json=body,
         timeout=_TIMEOUT_S,
-        headers={**gateway_auth_headers(), **keyed_headers(str(uuid4()))},
+        headers={**gateway_auth_headers(access), **keyed_headers(str(uuid4()))},
     )
     if resp.status_code == 409:
         print(f"preset named {name!r} already exists", file=sys.stderr)
@@ -152,6 +160,7 @@ def cmd_presets_update(
     Partial update — only the fields passed change. At least one of --name / --label /
     --description / --config must be given."""
     from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import patch as dial_patch
 
     # Resolve identifier to id
@@ -185,7 +194,8 @@ def cmd_presets_update(
         return 1
 
     url = f"{_gateway_base()}/api/presets/{preset_id}"
-    resp = dial_patch(url, json=body, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    access = gateway_access_from_settings()  # ambient: C
+    resp = dial_patch(url, json=body, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
     if resp.status_code == 404:
         print(f"preset {preset_id} not found", file=sys.stderr)
         return 1
@@ -212,6 +222,7 @@ def cmd_presets_delete(identifier: str, *, force: bool = False) -> int:
     spawned from this preset — they carry a snapshot of their config at spawn
     time and are independent of the preset thereafter."""
     from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import delete as dial_delete
 
     preset_id = _resolve_id(identifier)
@@ -225,7 +236,8 @@ def cmd_presets_delete(identifier: str, *, force: bool = False) -> int:
             return 0
 
     url = f"{_gateway_base()}/api/presets/{preset_id}"
-    resp = dial_delete(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    access = gateway_access_from_settings()  # ambient: C
+    resp = dial_delete(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
     if resp.status_code == 404:
         print(f"preset {preset_id} not found", file=sys.stderr)
         return 1
@@ -241,6 +253,7 @@ def _resolve_id(identifier: str) -> int | None:
     """Resolve a name-or-id string to a numeric preset id. Returns None + prints
     to stderr on lookup failure."""
     from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
     with contextlib.suppress(ValueError):
@@ -248,7 +261,8 @@ def _resolve_id(identifier: str) -> int | None:
 
     # Name lookup
     url = f"{_gateway_base()}/api/presets"
-    resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    access = gateway_access_from_settings()  # ambient: C
+    resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
     resp.raise_for_status()
     rows = resp.json()
     match = next((r for r in rows if r["name"] == identifier), None)

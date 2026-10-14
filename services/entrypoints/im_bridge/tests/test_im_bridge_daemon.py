@@ -19,6 +19,10 @@ from typing import Any, cast
 import pytest
 
 import services.entrypoints.im_bridge.core as im_bridge_core
+from base.cluster.machine.tests.gateway_stubs import (
+    daemon_acceptance_stub,
+    gateway_auth_headers_stub,
+)
 from base.config import ConfigBoot, get_field, settings
 from base.daemon.health import Liveness
 from base.db import Database
@@ -97,7 +101,9 @@ def test_run_wires_the_liveness_task(
         return _FakeServer()
 
     # /send accepts the machine API tokens of the write generation, never the human secret.
-    monkeypatch.setattr(daemon, "daemon_acceptance", lambda: frozenset({"digest-of-a-token"}))
+    monkeypatch.setattr(
+        daemon, "daemon_acceptance", daemon_acceptance_stub(frozenset({"digest-of-a-token"}))
+    )
 
     def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
         return False
@@ -267,7 +273,9 @@ def test_a_built_slice_carries_the_live_value_of_every_field(
 def test_the_gateway_client_gets_the_gateway_url_and_bearer_from_the_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(daemon, "gateway_auth_headers", lambda: {"Authorization": "Bearer t"})
+    monkeypatch.setattr(
+        daemon, "gateway_auth_headers", gateway_auth_headers_stub({"Authorization": "Bearer t"})
+    )
     client = daemon.gateway_client(daemon.im_bridge_config())
     assert client._base == settings.gateway.gateway_url.rstrip("/")
     assert client._headers() == {"Authorization": "Bearer t"}

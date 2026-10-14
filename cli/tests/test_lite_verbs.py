@@ -130,8 +130,7 @@ def test_lite_cli_uses_its_local_runner_api_token(
     capability_token: str | None,
     expected: str | None,
 ) -> None:
-    from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
-    from base.config import settings
+    from base.cluster.machine import GatewayAccess, GatewayApiTokenMissing, gateway_auth_headers
     from base.host.db_authority import unit
     from base.host.db_authority.model import AuthorityRefusedError
 
@@ -145,7 +144,6 @@ def test_lite_cli_uses_its_local_runner_api_token(
         monkeypatch.delenv("AVA_API_TOKEN", raising=False)
     else:
         monkeypatch.setenv("AVA_API_TOKEN", explicit)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
 
     def consume(home: Path) -> types.SimpleNamespace:
@@ -159,7 +157,11 @@ def test_lite_cli_uses_its_local_runner_api_token(
 
     def handler(_args: types.SimpleNamespace) -> int:
         try:
-            seen.append(gateway_auth_headers())
+            seen.append(
+                gateway_auth_headers(
+                    GatewayAccess(gateway_url="http://gw", cluster_secret="", remote_plane=False)
+                )
+            )
         except GatewayApiTokenMissing:
             seen.append({})  # no token and no secret: nothing to present, and it says so
         return 0

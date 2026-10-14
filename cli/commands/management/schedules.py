@@ -36,14 +36,18 @@ _TIMEOUT_S = 15.0
 
 def _gateway_base() -> str:
     from base.cluster.machine import gateway_api_base
+    from base.cluster.machine.ambient import gateway_access_from_settings
 
-    return gateway_api_base()
+    access = gateway_access_from_settings()  # ambient: C
+    return gateway_api_base(access.gateway_url)
 
 
 def _headers() -> dict[str, str]:
     from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
 
-    return gateway_auth_headers()
+    access = gateway_access_from_settings()  # ambient: C
+    return gateway_auth_headers(access)
 
 
 def _mutation_headers() -> dict[str, str]:

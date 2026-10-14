@@ -11,6 +11,7 @@ def cmd_agents_timeline(agent_id: int, limit: int | None = None, before: str | N
     Without ``limit`` the request omits it and the gateway applies its
     configured default window (display.timeline_default_limit)."""
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get
 
     params: dict[str, int | str] = {}
@@ -18,10 +19,11 @@ def cmd_agents_timeline(agent_id: int, limit: int | None = None, before: str | N
         params["limit"] = limit
     if before is not None:
         params["before"] = before
+    access = gateway_access_from_settings()  # ambient: C
     response = get(
-        f"{gateway_api_base()}/api/agents/{agent_id}/timeline",
+        f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/timeline",
         params=params,
-        headers=gateway_auth_headers(),
+        headers=gateway_auth_headers(access),
         timeout=30.0,
     )
     response.raise_for_status()

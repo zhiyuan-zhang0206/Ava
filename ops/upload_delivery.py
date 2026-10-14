@@ -19,6 +19,7 @@ from base.agents.upload_delivery.paths import (
     agent_upload_dir,
 )
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.db.transaction import write_transaction
 from base.host.net.http_dial import get as http_get
 
@@ -79,6 +80,7 @@ def receive(pool: ConnectionPool, request: ReceiveRequest, *, local_machine: str
     # Fetch only absent objects; a conflicting present final is never overwritten.
     deadline = time.monotonic() + 120.0
     contents: list[bytes] = []
+    access = gateway_access_from_settings()  # ambient: O
     for item in manifest.objects:
         path = storage.object_path(directory, manifest, item)
         if path.exists() or path.is_symlink():
@@ -86,13 +88,15 @@ def receive(pool: ConnectionPool, request: ReceiveRequest, *, local_machine: str
             contents.append(path.read_bytes())
         else:
             url = (
-                f"{gateway_api_base().rstrip('/')}/api/keyed/v1/agents/{manifest.agent_id}"
+                f"{gateway_api_base(access.gateway_url).rstrip('/')}/api/keyed/v1/agents/{manifest.agent_id}"
                 f"/uploads/{manifest.batch_id}/objects/{item.ordinal}"
             )
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("immutable upload copy exhausted its bounded network round")
-            response = http_get(url, headers=gateway_auth_headers(), timeout=min(30.0, remaining))
+            response = http_get(
+                url, headers=gateway_auth_headers(access), timeout=min(30.0, remaining)
+            )
             response.raise_for_status()
             contents.append(response.content)
     storage.publish(directory, manifest, contents)

@@ -1,9 +1,9 @@
 """Compose lazy machine fields from the startup owner's explicit configuration."""
 
-from base.cluster.machine import MachineIdentity, roles_from_flags
+from base.cluster.machine import GatewayAccess, MachineIdentity, roles_from_flags
 from base.config import ConfigBoot
 
-__all__ = ["machine_from_boot"]
+__all__ = ["gateway_access_from_boot", "machine_from_boot"]
 
 
 def machine_from_boot(config: ConfigBoot) -> MachineIdentity:
@@ -23,4 +23,16 @@ def machine_from_boot(config: ConfigBoot) -> MachineIdentity:
         ),
         host=lambda: config.view.general.machine_host,
         description=lambda: config.view.general.machine_description,
+    )
+
+
+def gateway_access_from_boot(config: ConfigBoot) -> GatewayAccess:
+    """How to reach and authenticate to the gateway, from this root's configuration.
+
+    Reads the three fields now; a root builds it where it first dials the gateway."""
+    view = config.view
+    return GatewayAccess(
+        gateway_url=view.gateway.gateway_url,
+        cluster_secret=view.data_plane.cluster_secret,
+        remote_plane=view.data_plane.is_remote,
     )

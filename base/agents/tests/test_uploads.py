@@ -14,6 +14,7 @@ import pytest
 from base.agents.messages.inbound_images import image_mime_for, parse_upload_url
 from base.agents.upload_delivery import paths
 from base.cluster import machine
+from base.cluster.machine.tests.gateway_stubs import gateway_api_base_stub
 
 
 class TestParseUploadUrl:
@@ -105,7 +106,9 @@ class TestFetchUploadB64:
             return _FakeResp(raw)
 
         monkeypatch.setattr(http_dial, "get", _fake_get)
-        monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw.test:8000")
+        monkeypatch.setattr(
+            machine, "gateway_api_base", gateway_api_base_stub("http://gw.test:8000")
+        )
         from base.config import settings
 
         monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
@@ -128,7 +131,9 @@ class TestFetchUploadB64:
         from base.host.net import http_dial
 
         monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: _FakeResp(b"", status=404))  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw.test:8000")
+        monkeypatch.setattr(
+            machine, "gateway_api_base", gateway_api_base_stub("http://gw.test:8000")
+        )
         with pytest.raises(OSError, match="404"):
             paths.fetch_upload_b64(7, "gone.png")
 

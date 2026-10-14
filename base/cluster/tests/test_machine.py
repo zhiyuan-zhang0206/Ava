@@ -15,6 +15,7 @@ import pytest
 
 from base.cluster import machine as _machine
 from base.cluster.machine import (
+    GatewayAccess,
     GatewayApiTokenMissing,
     MachineIdentity,
     MachineNameMissing,
@@ -24,8 +25,11 @@ from base.cluster.machine import (
     gateway_auth_headers,
     roles_from_flags,
 )
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.ambient import gateway_access_from_settings
+from base.cluster.machine.boot import gateway_access_from_boot, machine_from_boot
 from base.config import ConfigBoot, settings
+
+_SECRET = "cluster-" + "s" * 24
 
 
 def test_owned_identity_reads_fields_independently_and_caches_absence() -> None:
@@ -198,13 +202,12 @@ def test_identity_files_in_the_home_are_not_read(
 ) -> None:
     """The home's `.env` is the only identity source: the `machine_*`, `gateway_url`
     and `memory_remote` files older homes kept are not read by any resolver."""
-    from base.cluster.machine import GatewayApiBaseMissing, MachineNameMissing
+    from base.cluster.machine import MachineNameMissing
 
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     machine_config.set_field("machine_name", "")
     machine_config.set_field("machine_host", "")
     machine_config.set_field("machine_description", "")
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
     (tmp_path / "machine_name").write_text("from-file")
     (tmp_path / "machine_host").write_text("10.0.0.2")
     (tmp_path / "machine_description").write_text("from-file")
@@ -217,8 +220,6 @@ def test_identity_files_in_the_home_are_not_read(
         machine_identity.name()
     with pytest.raises(MachineRoleMissing):
         machine_identity.role()
-    with pytest.raises(GatewayApiBaseMissing):
-        _machine.gateway_api_base()
     assert machine_identity.description() is None
     assert machine_identity.host() == "localhost"
 
@@ -289,35 +290,25 @@ def test_machine_description_none_when_empty(
     assert machine_identity.description() is None
 
 
-def test_gateway_api_base_resolves_configured_url_role_blind(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot
+@pytest.mark.parametrize(
+    ("configured", "resolved"),
+    [
+        ("http://gw.vpn:8000/", "http://gw.vpn:8000"),
+        ("https://ava.example.com", "https://ava.example.com"),
+    ],
+)
+def test_gateway_api_base_resolves_the_configured_url_role_blind(
+    configured: str, resolved: str
 ) -> None:
     # Rung 0.A / §2 rule 4: a gateway-capable host resolves the SAME configured
-    # gateway_url as any other caller — no localhost shortcut, role is not read.
-    machine_config.set_field("machine_serve_gateway", True)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw.vpn:8000/")
-    assert _machine.gateway_api_base() == "http://gw.vpn:8000"
+    # gateway_url as any other caller — no localhost shortcut, and the role is not an input.
+    assert _machine.gateway_api_base(configured) == resolved
 
 
-def test_gateway_api_base_agent_runner_uses_gateway_url(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot
-) -> None:
-    machine_config.set_field("machine_serve_agent_runner", True)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "https://ava.example.com")
-    assert _machine.gateway_api_base() == "https://ava.example.com"
-
-
-def test_gateway_api_base_unset_raises_regardless_of_role(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot
-) -> None:
-    # unset raises GatewayApiBaseMissing for every capability set —
-    # gateway_api_base() is role-blind, so the serve flags do not change it.
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    for serve_gateway, serve_agent_runner in ((True, False), (False, True), (True, True)):
-        machine_config.set_field("machine_serve_gateway", serve_gateway)
-        machine_config.set_field("machine_serve_agent_runner", serve_agent_runner)
-        with pytest.raises(_machine.GatewayApiBaseMissing):
-            _machine.gateway_api_base()
+@pytest.mark.parametrize("configured", ["", "   "])
+def test_gateway_api_base_unset_raises(configured: str) -> None:
+    with pytest.raises(_machine.GatewayApiBaseMissing):
+        _machine.gateway_api_base(configured)
 
 
 def test_owned_identity_set_overrides_resolution(
@@ -420,15 +411,45 @@ def test_format_capabilities_station_labels() -> None:
     assert format_capabilities(False, False) == "none"
 
 
-def test_gateway_auth_headers_present_when_secret_set(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_auth_headers_present_when_secret_set() -> None:
     """When secret is set, includes Bearer — every /api/cluster/* client call relies on it for gateway auth."""
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cr3t")
-    assert gateway_auth_headers() == {"Authorization": "Bearer s3cr3t"}
+    access = GatewayAccess(gateway_url="http://gw", cluster_secret=_SECRET, remote_plane=False)
+    assert gateway_auth_headers(access) == {"Authorization": f"Bearer {_SECRET}"}
 
 
 def test_gateway_auth_headers_raise_when_no_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     """The API always authenticates: no token and no secret is an error, not an empty header."""
     monkeypatch.delenv("AVA_API_TOKEN", raising=False)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+    access = GatewayAccess(gateway_url="http://gw", cluster_secret="", remote_plane=False)
     with pytest.raises(GatewayApiTokenMissing):
-        gateway_auth_headers()
+        gateway_auth_headers(access)
+
+
+def test_gateway_access_from_boot_reads_the_roots_own_configuration(
+    machine_config: ConfigBoot,
+) -> None:
+    machine_config.set_field("gateway_url", "http://gw.vpn:8000")
+    machine_config.set_field("cluster_secret", _SECRET)
+    machine_config.set_field("db_url", "postgresql://ava:pw@127.0.0.1:5432/ava")
+    machine_config.set_field("redis_url", "redis://ava:pw@127.0.0.1:6379/0")
+
+    access = gateway_access_from_boot(machine_config)
+
+    assert access == GatewayAccess(
+        gateway_url="http://gw.vpn:8000", cluster_secret=_SECRET, remote_plane=False
+    )
+    assert _SECRET not in repr(access)
+
+
+def test_a_foreign_database_host_makes_the_plane_remote(machine_config: ConfigBoot) -> None:
+    machine_config.set_field("db_url", "postgresql://ava:pw@db.example.net:5432/ava")
+
+    assert gateway_access_from_boot(machine_config).remote_plane is True
+
+
+def test_the_ambient_access_describes_the_process_settings() -> None:
+    access = gateway_access_from_settings()
+
+    assert access.gateway_url == settings.gateway.gateway_url
+    assert access.cluster_secret == settings.data_plane.cluster_secret
+    assert access.remote_plane is settings.data_plane.is_remote
