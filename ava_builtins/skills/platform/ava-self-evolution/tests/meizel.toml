@@ -1,0 +1,22 @@
+[debt.env-patch]
+"test_self_evolution_collect.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
+"test_self_evolution_collect_auth.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
+"test_self_evolution_collect_auth.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
+"test_self_evolution_collect_auth.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+
+[debt.first-party-patch]
+"test_self_evolution_collect.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_self_evolution_collect_auth.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+
+[debt.stdlib-patch]
+"test_self_evolution_daily_scan.py#monkeypatch.setattr sys.argv" = 2
+
+[debt.unresolved-patch]
+"test_self_evolution_collect.py#monkeypatch.setattr collect_mod._transcript" = 3
+"test_self_evolution_collect.py#monkeypatch.setattr collect_mod.httpx.Client" = 1
+"test_self_evolution_collect.py#monkeypatch.setattr record_mod.load_checkpoint_messages_full" = 1
+"test_self_evolution_collect_auth.py#monkeypatch.setattr collect_mod.httpx.Client" = 1
+"test_self_evolution_daily_scan.py#monkeypatch.setattr daily_scan.ava_home" = 1
+"test_self_evolution_daily_scan.py#monkeypatch.setattr daily_scan.collect" = 1
+"test_self_evolution_daily_scan.py#monkeypatch.setattr ds.scan" = 2
+"test_self_evolution_record.py#monkeypatch.setattr record._transcript" = 2

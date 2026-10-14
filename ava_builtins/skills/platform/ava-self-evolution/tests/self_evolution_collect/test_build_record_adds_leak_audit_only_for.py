@@ -8,17 +8,13 @@ from typing import Any
 import psycopg
 import pytest
 
-from ava_builtins.skills.tests.test_self_evolution_collect import build_minimal_record
-from ava_builtins.skills.tests.test_self_evolution_collect import (
-    test_fetch_exhausted_diagnostics_are_bounded as test_fetch_exhausted_diagnostics_are_bounded,
-)
 from base.db import Database
 from base.db.tests.fakes import patch_database
 from tests.skills import load_skill_script
 
 
 def test_build_record_adds_leak_audit_only_for_eval_collection(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database
+    collect_mod: Any, tmp_path: Path, database: Database
 ) -> None:
     """Weekly collection remains unchanged; eval collection records invalidating reads."""
     paths = collect_mod.LeakPaths(
@@ -27,11 +23,14 @@ def test_build_record_adds_leak_audit_only_for_eval_collection(
         workspaces_root=str(tmp_path / "workspaces"),
         agent_workspace=str(tmp_path / "workspaces" / "1"),
     )
-    weekly = build_minimal_record(
-        collect_mod,
-        monkeypatch,
-        [("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],
+    weekly = collect_mod.build_record(
         database=database,
+        agent_id=1,
+        week="2026-W99",
+        events=[("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],
+        log_events=[],
+        inbounds=[],
+        meta=("user", "completed", "done"),
     )
     audited = collect_mod.build_record(
         database=database,
