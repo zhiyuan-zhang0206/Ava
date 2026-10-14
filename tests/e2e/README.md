@@ -80,7 +80,11 @@ its public `cursor` counts consumed turns, while chunk conversion stays internal
 `tests.e2e.fakes.scenario_recording` owns `RecordingModel`, `model_inputs`,
 `reset_record`, `scratch_root`, `exec_call` and `say`. Recording scenarios write
 model inputs to session-specific JSONL, allowing test processes to inspect the
-messages received by agent processes and filter calls by agent identity.
+messages received by agent processes and filter calls by agent identity. That
+record is appended from the agent process while the test process polls it, so
+`model_inputs` reads newline-terminated lines only: a torn tail is an append in
+flight (skipped, seen on the next poll), while a terminated line that fails to
+parse stays an error.
 
 `ScriptedFakeChatModel` emits the entire message in a single chunk — does not simulate character-level
 streaming. If future tests need scenarios like "streaming cancellation mid-way", extend the fake to support
