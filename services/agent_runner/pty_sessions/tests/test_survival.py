@@ -26,12 +26,12 @@ from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.paths import ledger_path
+from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.pty_service import REPO, PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import new, output_until, type_line, wait_for
 from services.agent_runner.pty_sessions import ledger
-from tests.path_scoped import pty_jobs as jobs
 
 _CHILD = Path(__file__).with_name("child_pty_clients.py")
 

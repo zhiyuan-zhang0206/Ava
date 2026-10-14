@@ -1,6 +1,7 @@
-exports = ["job_wait.py", "pty_service.py", "pty_shells.py"]
+exports = ["job_wait.py", "pty_jobs.py", "pty_reaper.py", "pty_service.py", "pty_shells.py"]
 
 [uses]
+"pty_jobs.py" = ["pty_shells.py"]
 "test_pty_job_wait.py" = ["job_wait.py"]
 
 [debt.env-patch]

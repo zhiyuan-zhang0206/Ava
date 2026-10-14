@@ -17,11 +17,11 @@ import pytest
 
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client
+from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.sessions.record import SessionRecord
 from services.agent_runner.pty_sessions import session as session_module
 from services.agent_runner.pty_sessions.service import PtyService
 from services.agent_runner.pty_sessions.session import PtySession
-from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
 MakeSession = Callable[[str, int], PtySession]
 
