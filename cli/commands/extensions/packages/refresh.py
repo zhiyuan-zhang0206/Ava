@@ -128,7 +128,7 @@ class Pass:
         self.from_job = from_job
         self.now = now
         self.repo = repo or paths.repo_root()
-        self.skills_dir = paths.skills_dir()
+        self.skills_dir = paths.skills_dir(paths.ava_home())
         self.registry: install_registry.Registry | None = None
         self.deltas: dict[str, _Delta] = {}
         self.channel: install_registry.ChannelState | None = None

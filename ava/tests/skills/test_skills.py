@@ -18,7 +18,7 @@ from ava.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_
 from ava.tests.skills._skills_helpers import write_skill
 from base.packages.extensions import install_registry
 from base.packages.skills.tree import identifier, target
-from base.paths import skills_dir
+from base.paths import ava_home, skills_dir
 
 # Every test runs in a per-test unit home whose `skills/` does not exist by
 # default, so the real ~/.agents/skills/ never leaks into a scan; the
@@ -53,7 +53,7 @@ def test_clean_skill_still_mounts(fake_skills_dir: Path) -> None:
 
 def test_names_empty_when_no_dir() -> None:
     """skills directory does not exist → returns empty list, does not raise."""
-    assert not skills_dir().exists()
+    assert not skills_dir(ava_home()).exists()
     assert skills_mod.names() == []
 
 
