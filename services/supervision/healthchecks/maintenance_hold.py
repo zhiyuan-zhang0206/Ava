@@ -42,8 +42,8 @@ class _Overdue:
 class MaintenanceHoldWatch:
     """The `maintenance-hold` diagnostic: a probe and its once-per-hold reporter.
 
-    The monitor runs `probe` and then `report` on one worker slot, so the
-    sample `report` acts on is the one `probe` just took.
+    The monitor runs `probe` and then `report` inside one bounded worker pass, so
+    the sample `report` acts on is the one `probe` just took.
     """
 
     def __init__(self, *, alert_after_s: float, clock: Callable[[], float] = time.time) -> None:
