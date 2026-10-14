@@ -22,7 +22,7 @@ code themselves. The `before_exec` hook (see
 [`demos/permission-hooks/`](demos/permission-hooks)) can intercept and warn on
 dangerous patterns before they run, but it is a **mitigation layer, not a
 security boundary**: it lowers the rate of a bad command executing, it does
-not close off the possibility (see the module docstring in `ava/security.py`).
+not close off the possibility (see the module docstring in `base/agents/messages/injection_scan.py`).
 
 Third-party **skills** are the one ingestion path with a gate of its own, for the
 same reason: a skill is text an agent is instructed to follow, so a malicious one

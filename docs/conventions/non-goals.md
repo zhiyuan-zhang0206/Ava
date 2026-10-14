@@ -52,7 +52,7 @@ first and ask "what changed that made it worth doing".
   `execute_code` runs the agent's generated Python in the agent process on the
   host — no seccomp, no gVisor, no per-call sandbox around any single agent's
   turn. The `before_exec` hook (`demos/permission-hooks/`) is a pattern-matching
-  mitigation, not a boundary (see the `ava/security.py` docstring). Isolation is
+  mitigation, not a boundary (see the `base/agents/messages/injection_scan.py` docstring). Isolation is
   a deployment decision — a dedicated OS user, machine, or VM per cluster — not
   a runtime property Ava enforces around the code it executes. This is
   deliberate, not debt, for the same reason auth is not (see "Auth /
