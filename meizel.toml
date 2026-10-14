@@ -244,16 +244,15 @@ frontend = ["ui"]
 "tests/scripts/test_rotate_cluster_secret.py -> services/backup/dump.py" = 7
 "tests/scripts/test_test_selector_contract.py -> scripts/ci/test_selector.py" = 3
 "tests/scripts/test_update_model_pricing_contract.py -> scripts/model_registry/update_model_pricing.py" = 16
-"tests/skills/test_impersonation_launch.py -> ava_builtins/skills" = 1
-"tests/skills/test_impersonation_launch.py -> cli/commands/agents/impersonation_adapters.py" = 1
 "tests/skills/test_watcher_wake_delivery.py -> ava_builtins/skills" = 1
-"tests/skills/use_other_agents/test_coding_session_resume.py -> ava_builtins/skills" = 1
 
 [debt.not-exported]
 "base/config/tests/test_config_authority.py -> cli/main.py" = 1
 
 [debt.private-module]
 "agent/tests/impersonation/test_impersonation_transport_integration.py -> base/agents/impersonation/_store.py" = 2
+"ava_builtins/skills/platform/ava-guide/external-agents/tests/test_coding_session_resume.py -> ava/shell/coding_tools/_claude_checks.py" = 9
+"ava_builtins/skills/platform/ava-guide/external-agents/tests/test_coding_session_resume.py -> ava/shell/coding_tools/_common.py" = 3
 "conftest.py -> tests/_asyncio_stall_probe.py" = 1
 "gateway/tests/agents/test_external_agent_source.py -> agent/graph/claim/_chat_inbound.py" = 1
 "services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_child_boundary.py" = 1
@@ -267,8 +266,6 @@ frontend = ["ui"]
 "services/agent_runner/agent_host/tests/native_cancel/test_interrupt.py -> agent/graph/exec/_result.py" = 1
 "services/agent_runner/agent_host/tests/native_cancel/test_interrupt.py -> agent/graph/exec/_subprocess.py" = 1
 "tests/e2e/lifecycle/test_force_expire_impersonation.py -> base/agents/impersonation/_store.py" = 1
-"tests/skills/use_other_agents/test_coding_session_resume.py -> ava/shell/coding_tools/_claude_checks.py" = 9
-"tests/skills/use_other_agents/test_coding_session_resume.py -> ava/shell/coding_tools/_common.py" = 3
 
 [debt.private-name]
 "agent/extensions/tests/test_lazy_plugin_load.py -> ava/__init__.py#_some_private" = 1

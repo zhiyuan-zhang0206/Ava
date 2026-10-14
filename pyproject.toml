@@ -631,6 +631,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "ava_builtins/skills/platform/ava-guide/external-agents/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "ava_builtins/skills/platform/ava-self-evolution/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
