@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
+import httpx
 import psutil
 import pytest
 
@@ -639,3 +641,118 @@ def test_unknown_monitor_failure_exits_and_preserves_cleanup_refusal(
         finally:
             if child is not None:
                 _kill_quietly(child)
+
+
+def _serving_port(run_dir: Path, unit_id: str) -> int | None:
+    log = run_dir / "logs" / unit_id / "output.log"
+    match = re.search(r"Serving HTTP on .* port (\d+)", log.read_text()) if log.exists() else None
+    return int(match[1]) if match else None
+
+
+def _assert_serving_siblings(run_dir: Path) -> None:
+    for unit_id in ("gateway", "frontend"):
+        port = _serving_port(run_dir, unit_id)
+        assert port is not None
+        response = httpx.get(f"http://127.0.0.1:{port}/reply", timeout=1, trust_env=False)
+        assert response.status_code == 200 and response.text == "still serving"
+
+
+def _status_births(result: dict[str, object]) -> dict[str, tuple[object, ...]]:
+    root = cast("dict[str, object]", result["root"])
+    units = cast("list[dict[str, object]]", result["units"])
+    return {
+        name: (entry["pid"], entry["create_time"], entry["starttime"])
+        for name, entry in [("root", root), *((str(unit["id"]), unit) for unit in units)]
+    }
+
+
+def _assert_refused_generation(current: dict[str, object]) -> None:
+    failed = next(
+        unit
+        for unit in cast("list[dict[str, object]]", current["units"])
+        if unit["id"] == "agent-host"
+    )
+    assert failed["intent"] == "running" and failed["restart_count"] == 0
+    assert cast("dict[str, object]", failed["restart_failed"])["stage"] == "down"
+    retained = psutil.Process(cast(int, failed["pid"]))
+    assert retained.create_time() == failed["create_time"]
+    assert retained.status() != psutil.STATUS_ZOMBIE, "automatic recovery killed the child"
+
+
+def _assert_budget_and_observation(run_dir: Path, current: dict[str, object]) -> None:
+    health = cast("dict[str, dict[str, object]]", current["health"])
+    assert health["agent-host"]["restart_attempts"] == 3
+    assert health["agent-host"]["restart_limit_reached"] is True
+    assert health["agent-host"]["last_verdict"] == "down"
+    for unit_id in ("gateway", "frontend"):
+        assert len((run_dir / f"{unit_id}-probes").read_text().splitlines()) >= 5
+        assert health[unit_id]["last_verdict"] == "alive"
+
+
+def test_health_stop_refusal_preserves_root_and_serving_siblings(short_tmp: Path) -> None:
+    """Real root/children and HTTP representatives; no gateway application is booted."""
+    run_dir, ready, release = short_tmp / "run", short_tmp / "ready", short_tmp / "release"
+    child_script = Path(__file__).with_name("child_unit.py")
+    units: list[dict[str, object]] = [
+        {
+            "id": "agent-host",
+            "exec": [sys.executable, str(child_script), "restart_down", str(ready), str(release)],
+            "restart": "always",
+            "stop_timeout_s": 0.1,
+        }
+    ]
+    (short_tmp / "reply").write_text("still serving")
+    for unit_id in ("gateway", "frontend"):
+        units.append(
+            {
+                "id": unit_id,
+                "restart": "always",
+                "exec": [
+                    sys.executable,
+                    "-u",
+                    "-m",
+                    "http.server",
+                    "0",
+                    "--bind",
+                    "127.0.0.1",
+                    "--directory",
+                    str(short_tmp),
+                ],
+            }
+        )
+    manifests = _write_manifests(short_tmp, units)
+    with _daemon(run_dir, manifests, wiring=_wiring("wiring_refused_health")) as (proc, log):
+        client = _wait_ready(run_dir, proc, log)
+        try:
+            _wait_for(ready.exists, "child did not install its TERM handler")
+            _wait_for(
+                lambda: all(_serving_port(run_dir, name) for name in ("gateway", "frontend")),
+                "representative services did not start",
+            )
+            _assert_serving_siblings(run_dir)
+            initial = cast("dict[str, object]", client.status().get("result"))
+            (run_dir / "fail-health").touch()
+            _wait_for(
+                lambda: (
+                    proc.poll() is not None
+                    or _read_log(log).count("failure state restart_failed") >= 5
+                ),
+                "health rounds stopped after a unit refused TERM",
+            )
+            assert proc.poll() is None, _read_log(log)
+            current = cast("dict[str, object]", client.status().get("result"))
+            assert _status_births(current) == _status_births(initial)
+            _assert_refused_generation(current)
+            _assert_budget_and_observation(run_dir, current)
+            _assert_serving_siblings(run_dir)
+            release.touch()
+            _wait_for(
+                lambda: _units_of(client.status())[0]["state"] == "stopped",
+                "refused generation was not reaped after release",
+            )
+            assert client.restart("agent-host")["ok"]
+            repaired = _units_of(client.status())[0]
+            assert repaired["restart_failed"] is None and repaired["state"] == "running"
+        finally:
+            release.touch()
+    assert proc.returncode == 0, _read_log(log)

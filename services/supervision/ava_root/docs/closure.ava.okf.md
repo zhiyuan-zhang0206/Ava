@@ -23,8 +23,18 @@ Root waits for its existing child watcher within the manifest's
 `stop_timeout_s`, or `SupervisorConfig.stop_timeout_s` (10 seconds) when absent.
 The service roster derives declared windows from each service's own stop ceiling
 plus `STOP_MARGIN_S` in `services/supervision/ava_root_glue/manifests.py`.
-A live child that exceeds its window raises a concrete failure. Only explicit
-force permits KILL, after that window, with a second bounded child wait.
+A live child that exceeds its window raises `UnitStopTimeoutError`, a
+`RuntimeError` identifying the unit, PID and window. Only explicit force permits
+KILL, after that window, with a second bounded child wait.
+
+During an automatic health replacement, that timeout remains the unit's recorded
+`restart_failed.down` state. Health consumes only this typed refusal (including
+grouped refusals), keeps the spent restart attempt and continues observing other
+units. The original generation stays owned; no replacement starts while its stop
+is refused. Exhausting the existing finite restart budget leaves observation and
+failure reporting active. Unknown errors, including leaves of a mixed exception
+group, and cancellation still propagate to root. Explicit stop, restart and
+daemon shutdown continue to report refusals to their callers.
 
 The watcher reaps the direct child, publishes its exit and drops that generation.
 An unexpected exit is eligible for the existing health scheduler's replacement;

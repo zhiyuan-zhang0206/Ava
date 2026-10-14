@@ -17,6 +17,10 @@ from base.native_process.root_control.ipc import UnitState
 from services.supervision.ava_root.unit_records import Generation, UnitRuntime
 
 
+class UnitStopTimeoutError(RuntimeError):
+    """The retained direct child did not exit within its bounded stop window."""
+
+
 @dataclass(frozen=True, slots=True)
 class SupervisorConfig:
     """Timing policy for the supervisor (test-tunable)."""
@@ -60,7 +64,7 @@ class StoppingMixin:
                 self._signal_owned(identity, force=True)
                 if await self._wait_exit(generation, window):
                     return
-            raise RuntimeError(
+            raise UnitStopTimeoutError(
                 f"unit {runtime.manifest.id} did not stop within its {window:g}s window "
                 f"(pid {generation.proc.pid})"
             )
