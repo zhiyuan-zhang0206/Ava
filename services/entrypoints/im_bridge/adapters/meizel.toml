@@ -1,4 +1,4 @@
-exports = ["feishu.py", "feishu_ws_proxy.py", "telegram.py", "weixin.py", "weixin_login.py"]
+exports = ["feishu.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py", "telegram.py", "weixin.py", "weixin_login.py"]
 
 [uses]
 "feishu.py" = ["feishu_inbound.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py"]
