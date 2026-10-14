@@ -271,10 +271,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests the scripts of the .agents/skills/inspect-a-trace skill",
     ),
-    "tests/skills/test_watcher_wake_delivery.py": (
-        "contract",
-        "tests the reference watcher scripts of the ava_builtins skills",
-    ),
     "tests/harness/test_asyncio_stall_probe.py": (
         "contract",
         "tests the CI stall probe, tests/_asyncio_stall_probe.py",
