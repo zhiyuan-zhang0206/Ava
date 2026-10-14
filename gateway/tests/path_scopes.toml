@@ -8,7 +8,7 @@
 "base.packages.tests.model_catalog" = [
     "test_agents_endpoints.py",
 ]
-"tests.fixtures.unit.config_authority" = [
+"base.config.tests.config_authority" = [
     "test_agent_inspect.py",
     "test_agents_endpoints.py",
     "test_error_envelope.py",

@@ -1,4 +1,4 @@
-exports = ["event_grants.py", "monitor.py", "tests"]
+exports = ["event_grants.py", "groups.py", "monitor.py", "roles.py", "tests"]
 
 [uses]
 "__init__.py" = ["groups.py", "invariant.py", "monitor.py", "roles.py"]
@@ -6,4 +6,4 @@ exports = ["event_grants.py", "monitor.py", "tests"]
 "invariant.py" = ["catalog.py", "groups.py", "monitor.py", "roles.py"]
 "monitor.py" = ["catalog.py"]
 "roles.py" = ["catalog.py"]
-"tests" = ["__init__.py", "groups.py", "roles.py"]
+"tests" = ["__init__.py"]

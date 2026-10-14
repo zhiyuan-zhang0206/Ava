@@ -12,7 +12,7 @@ import pytest
 
 from base.lm.pricing import cost_usd
 from base.packages.plugin_providers import build_model_catalog
-from tests.components.base.poll_until import poll_until
+from base.sessions.tests.poll_until import poll_until
 from tests.e2e.fakes.scenarios import budget_handoff
 
 _WRITER = Path(__file__).with_name("child_budget_writer.py")

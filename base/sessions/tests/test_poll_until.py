@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.components.base.poll_until import poll_until, poll_until_async
+from base.sessions.tests.poll_until import poll_until, poll_until_async
 
 
 def test_poll_until_returns_when_condition_is_immediately_true() -> None:

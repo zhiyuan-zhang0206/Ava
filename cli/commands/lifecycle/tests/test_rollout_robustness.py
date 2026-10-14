@@ -36,6 +36,8 @@ from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance.state import MaintenancePhase
 from base.deploy.state import host_deploy_state
+from base.deploy.tests.maintenance_factory import WHEN, maintenance_agent
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.telemetry import EventPipeline
@@ -43,8 +45,6 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause
 from ops.cluster_status import pause
-from tests.factories.maintenance import WHEN, maintenance_agent
-from tests.factories.maintenance import isolate as isolate
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

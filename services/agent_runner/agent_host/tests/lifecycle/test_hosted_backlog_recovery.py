@@ -24,6 +24,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -31,7 +32,6 @@ from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import 
 from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import (
     checkpoint_graph as _graph,
 )
-from tests.components.base.poll_until import poll_until_async
 
 
 async def test_pending_scan_classifies_lifecycle_work_and_lease(

@@ -4,7 +4,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from tests.path_scoped.db_authority_tests import AuthorityCluster
+from base.deploy.tests.db_authority_tests import AuthorityCluster
 
 
 @pytest.mark.parametrize(

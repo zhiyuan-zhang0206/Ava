@@ -1,7 +1,8 @@
-exports = ["serving_root.py"]
+exports = ["serving_entrypoint.py", "serving_root.py"]
 
 [uses]
 "conftest.py" = ["serving_root.py"]
+"test_start_serving.py" = ["serving_entrypoint.py"]
 
 [debt.env-patch]
 "test_status_journal.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
@@ -15,7 +16,3 @@ exports = ["serving_root.py"]
 "test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.recovery_permitted" = 1
 "test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
 "test_status_journal.py#monkeypatch.setattr base.deploy.lifecycle.status_journal.journal_path" = 1
-
-[debt.stdlib-patch]
-"test_start_serving.py#monkeypatch.setattr runpy.run_module" = 1
-"test_start_serving.py#monkeypatch.setattr sys.argv" = 1

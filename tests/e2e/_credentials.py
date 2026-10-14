@@ -5,7 +5,7 @@ way a started cluster does, with the same stores and none of the launcher's cust
 
 - the e2e home gets a cluster secret (`AVA_CLUSTER_SECRET`, declared in its `.env`
   like every cluster-scope key) and an active write generation in its private ledger
-  (`tests.fixtures.unit.generation.seed_active_generation`, the ledger `ava start`
+  (`base.host.db_authority.tests.generation.seed_active_generation`, the ledger `ava start`
   births at first start);
 - the test process carries the generation marker (`AVA_DB_GENERATION`, the one a launcher
   delivers beside the login), which tells the boot pass of every process descending from
@@ -34,9 +34,9 @@ import pytest
 from playwright.sync_api import Browser, BrowserContext
 
 from base.config import settings
+from base.host.db_authority.tests.generation import seed_active_generation
 from base.host.net.auth import API_TOKEN_ENV, bearer_header
 from tests.e2e._ports import GATEWAY_URL
-from tests.fixtures.unit.generation import seed_active_generation
 
 __all__ = [
     "E2ECredentials",

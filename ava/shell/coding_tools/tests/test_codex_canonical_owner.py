@@ -22,9 +22,9 @@ from ava.shell import sessions
 from ava.shell.coding_tools import _common, codex
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from tests.fixtures.pin_agent import pin_agent
-from tests.path_scoped.pty_service import PtyServiceProcess
-from tests.path_scoped.pty_service import pty_service as pty_service
 
 _SKILL_DIR = (
     Path(__file__).parents[4]

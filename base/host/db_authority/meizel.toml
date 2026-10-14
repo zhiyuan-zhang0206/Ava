@@ -1,4 +1,4 @@
-exports = ["api.py", "delivery.py", "ledger.py", "model.py", "unit.py"]
+exports = ["api.py", "delivery.py", "ledger.py", "model.py", "tests", "unit.py"]
 
 [uses]
 "api.py" = ["delivery.py", "ledger.py", "model.py"]

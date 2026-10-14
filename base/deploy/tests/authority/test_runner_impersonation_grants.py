@@ -1,6 +1,6 @@
 """The runner holds no UPDATE on agents; impersonation session allocation goes through
 a SECURITY DEFINER function. The runner matrix itself lives in
-tests/components/base/test_runner_role.py."""
+base/agents/incarnation/tests/test_runner_role.py."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from psycopg import sql
 
 from base.cluster.authority import ensure_groups
-from tests.path_scoped.db_authority_tests import AuthorityCluster
+from base.deploy.tests.db_authority_tests import AuthorityCluster
 
 
 def _open_lease(conn: psycopg.Connection, agent_id: int) -> tuple[object, ...] | None:

@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from base.sessions.pty.paths import service_socket_path
-from tests.path_scoped.pty_service import FakePtyService
+from base.sessions.pty.tests.pty_service import FakePtyService
 
 
 def _run_guard(target: Path) -> subprocess.CompletedProcess[str]:
