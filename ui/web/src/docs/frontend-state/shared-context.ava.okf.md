@@ -21,10 +21,11 @@ context opens as a full-screen reading view with a return-to-messages control.
 reads `to_user.html` (default) or `to_user.md` (`to_user_format=markdown`) directly;
 there is no publication registry or database content copy. The runner profile
 includes the agent config domain because ops resolves `to_user_format`, with
-stored agent pins taking precedence over the cluster default. One shallow watchfiles
-watcher in each ops process broadcasts `to_user_changed`, on a thread of its
-own, so a watcher rebuild over every workspace cannot hold the ops loop that
-answers `/healthz` and its stop signal (task #5129). The global fold repairs
+stored agent pins taking precedence over the cluster default. One shallow
+user-context snapshot scanner in each ops process polls numeric workspace roots
+and their immediate `to_user.html` / `to_user.md` targets on a worker thread and
+broadcasts `to_user_changed`, avoiding per-workspace native watch registration
+(task #5129). The global fold repairs
 that agent's query and includes the family in reconnect repair. Atomic replacement,
 creation and deletion all invalidate. A missing or empty document does not open
 a desktop panel; notices and an explicit Inspector selection still can.

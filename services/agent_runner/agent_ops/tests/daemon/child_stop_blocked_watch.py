@@ -1,18 +1,18 @@
-"""Child entry for the stop-under-a-blocked-watcher test (task #5129).
+"""Child entry for the stop-under-a-blocked-worker test (task #5129).
 
 Usage: `child_stop_blocked_watch.py <home> <port> <ready> <blocked> <draining>
-<clean> <block-s> <held-s>`
+<clean> <held-s>`
 
 Runs the ops daemon's real stop path (via `child_graceful_stop.run_ops_runner_entry`)
-with the user-context watcher stuck in its own setup for <block-s> — the shape
-that owned the loop for minutes on 2026-10-14 — plus one unrelated
-default-executor thread that never finishes. The daemon must answer `/healthz`
-while that setup blocks, and a stop's SIGTERM, retried while the drain is held
-open for <held-s>, must still end the process inside its stop window.
+with `watch_to_user` active alongside a default-executor thread that never
+finishes and a drain leg held open for <held-s>. The daemon must answer
+`/healthz` while that worker thread blocks, and a stop's SIGTERM, retried while
+the drain is held open for <held-s>, must still end the process inside its stop
+window instead of hanging in interpreter teardown joining the blocked thread.
 
 Markers: <ready> once the health server answers, <blocked> inside the blocked
-setup, <draining> once the drain is inside its held leg, <clean> once cleanup
-reached the serving body.
+worker thread, <draining> once the drain is inside its held leg, <clean> once
+cleanup reached the serving body.
 """
 
 from __future__ import annotations
@@ -21,10 +21,7 @@ import asyncio
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator
 from pathlib import Path
-
-from watchfiles import Change
 
 from base.daemon.health import start_health_server
 from base.events.live.bus import EventBus, EventBusConfig
@@ -33,18 +30,10 @@ from services.agent_runner.agent_ops.tests.child_graceful_stop import run_ops_ru
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 
 
-def _blocked_watch(
-    blocked: Path, block_s: float
-) -> Callable[..., Iterator[set[tuple[Change, str]]]]:
-    """A watch source whose setup cost is a sleep on the thread that pays it."""
-
-    def watch_source(*paths: Path, **_kwargs: object) -> Iterator[set[tuple[Change, str]]]:
-        blocked.write_text("blocked")
-        time.sleep(block_s)
-        yield {(Change.modified, str(paths[0] / "7" / "to_user.html"))}
-        threading.Event().wait()  # then a live watch round that never ends
-
-    return watch_source
+def _blocked_worker(blocked: Path) -> None:
+    """Occupy a default-executor thread that interpreter teardown would wait on."""
+    blocked.write_text("blocked")
+    threading.Event().wait()
 
 
 async def _held_cleanup(draining: Path, seconds: float) -> None:
@@ -69,7 +58,7 @@ def main(argv: list[str]) -> None:
         Path(argv[4]),
         Path(argv[5]),
     )
-    block_s, held_s = float(argv[6]), float(argv[7])
+    held_s = float(argv[6])
 
     async def run() -> None:
         workspaces = home / "workspaces"
@@ -81,10 +70,8 @@ def main(argv: list[str]) -> None:
         )
         try:
             async with server, asyncio.TaskGroup() as group:
-                group.create_task(
-                    watch_to_user(workspaces, bus, watch_source=_blocked_watch(blocked, block_s))
-                )
-                group.create_task(asyncio.to_thread(threading.Event().wait))  # never finishes
+                group.create_task(watch_to_user(workspaces, bus))
+                group.create_task(asyncio.to_thread(_blocked_worker, blocked))
                 group.create_task(_held_cleanup(draining, held_s))
                 ready.write_text("ready")
                 await asyncio.Event().wait()
