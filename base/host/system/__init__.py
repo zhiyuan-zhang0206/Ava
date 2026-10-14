@@ -6,5 +6,6 @@ that owns the application root), ``cron`` (the health-probe cron line),
 ``logs_job``,
 ``packages_job``, ``pr_flow_job`` and ``walg_job`` (recurring OS jobs), with
 ``boot_policy`` stating the boot retry policy once. ``probes`` holds the host
-capability probes.
+capability probes, and ``hostport`` the ``Host`` port (run a command, find a program,
+platform facts) that components take instead of calling ``subprocess`` and ``sys``.
 """
