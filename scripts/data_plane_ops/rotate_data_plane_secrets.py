@@ -139,7 +139,7 @@ def build_state(scope: str = "both") -> RotationState:
         new_redis_password=mint_secret() if scope in {"runner", "both"} else old_runtime,
         redis_port=record.ports["redis"],
         redis_host=url_host(settings.data_plane.redis_url),
-        redis_user=redis_identity(),
+        redis_user=redis_identity(settings.data_plane.redis_url),
     )
 
 

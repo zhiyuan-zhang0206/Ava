@@ -100,7 +100,10 @@ class ArchiverState:
 @contextmanager
 def admin_connection() -> Generator[psycopg.Connection[Any]]:
     """The home's administrator over its owner-only socket, bound to its postmaster."""
-    authority = pg_admin.local_owner_authority()
+    from base.config import settings
+
+    data_plane = settings.data_plane  # ambient: S
+    authority = pg_admin.local_owner_authority(data_plane.db_url, remote_plane=data_plane.is_remote)
     with pg_admin.connect(
         authority.admin_url,
         expected_data_dir=authority.data_dir,

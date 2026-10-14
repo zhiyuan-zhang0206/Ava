@@ -114,7 +114,7 @@ def ensure_gateway_data_plane(
         pg_port=rec.ports["postgres"],
         redis_port=rec.ports["redis"],
         redis_password=redis_password_from_env(),
-        redis_user=redis_identity(),
+        redis_user=redis_identity(config.redis_url),
         retained_children=retained_children,
         machine=machine,
     )
@@ -235,7 +235,7 @@ def prepare_gateway_schema(config: DataPlaneConfig) -> None:
     if rec is None:
         raise RuntimeError("initialization lost its port reservation")
     admin_url = instance.pg_admin_url(rec.ports["postgres"])
-    identity = cluster.db_identity()
+    identity = cluster.db_identity(config.db_url)
     created = cluster.provision_database(
         identity,
         base_admin_url=admin_url,
@@ -274,7 +274,7 @@ def prepare_memory_vectors(config: DataPlaneConfig, *, database_factory: Databas
         with database_factory().connect(direct=True) as conn:
             prepare_table(conn, dim)
         return
-    with local_owner_authority().session() as conn:
+    with local_owner_authority(config.db_url, remote_plane=config.is_remote).session() as conn:
         prepare_table(conn, dim)
 
 
@@ -428,11 +428,10 @@ def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) 
     """Birth: groups, monitor, ledger, generation 0."""
     from functools import partial
 
-    from base import cluster
     from base.cluster import authority
     from base.host.db_authority import delivery, ledger, model
 
-    owner = cluster.db_identity()
+    owner = database  # the database and its schema owner share one identifier
     groups = model.Groups(gateway=model.GATEWAY_GROUP, runner=model.RUNNER_GROUP)
     authority.ensure_groups(conn, owner=owner, database=database, groups=groups)
     authority.ensure_monitor(conn, database=database)
@@ -450,17 +449,16 @@ def _admitted_generation(
 ) -> Generation:
     """Ordinary start: re-grant after migrations, converge the monitor, then the
     invariant holds."""
-    from base import cluster
     from base.cluster import authority
     from base.host.db_authority import ledger
 
     ledger = ledger.load_ledger(home)
     if ledger is None:
         raise RuntimeError(legacy_home_refusal(home))
-    if ledger.owner != cluster.db_identity():
+    if ledger.owner != database:
         raise RuntimeError(
             f"the database authority ledger records owner {ledger.owner!r}, but AVA_DB_URL "
-            f"names database {cluster.db_identity()!r}"
+            f"names database {database!r}"
         )
     if ledger.active is None:
         raise RuntimeError(
@@ -514,7 +512,7 @@ def complete_gateway_data_plane(
         rec = cluster.get_record(ava_home())
         if rec is None:
             raise RuntimeError("start lost its port reservation")
-        database = cluster.db_identity()
+        database = cluster.db_identity(config.db_url)
         endpoint = db_endpoint()
         if refresh_schema:
             cluster.ensure_pgvector_extension(

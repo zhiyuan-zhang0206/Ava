@@ -64,7 +64,7 @@ def cmd_migrations_apply(
         # A locally owned plane migrates as the administrator acting as the
         # schema owner over the home's own socket: objects stay owner-owned and
         # the owner's own login is never used.
-        authority = pg_admin.local_owner_authority()
+        authority = pg_admin.local_owner_authority(settings.data_plane.db_url, remote_plane=False)
         with authority.session() as conn:
             done = _apply(conn, machine_name=machine_name)
         cluster.assert_checkpoint_schema_current(
