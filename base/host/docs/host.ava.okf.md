@@ -29,6 +29,15 @@ argv, answers from a script routed by argv prefix and refuses an unscripted comm
 needs a real process uses `Host.system()`. The four fields are the whole port; a new capability
 is a reviewed addition, not a field that appears on its own.
 
+`base/host/atomic_io.py` publishes a file by writing a sibling temporary file, syncing it,
+renaming it over the target and, when asked, syncing the directory. The three calls whose failure
+a test must cause are the fields of `Fs` (`replace`, `fsync`, `fchmod`), and an `AtomicWriter`
+runs every write through one. `write_text_atomic`, `write_bytes_atomic` and `fsync_parent` are the
+writer over `SYSTEM_FS`; every component calls them. The module's own tests build
+`AtomicWriter(Fs(...))` with the failure they need (a failed replace keeps the old content, a
+failed file sync never commits, a failed directory sync leaves the new content committed); other
+components' tests use real files and patch none of these calls.
+
 `base/host/net/resilience.py` owns immutable `Policy` parameters and the shared
 `retry` / `aretry` executors, including backoff, jitter, classification and
 idempotency gates. Bootstrap fetches use this owner. Provider and Redis-listener
