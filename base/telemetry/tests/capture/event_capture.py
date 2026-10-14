@@ -8,7 +8,7 @@ land in a real `EventPipeline` whose `writer` is a list.
 
 from __future__ import annotations
 
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -37,6 +37,12 @@ class EmittedEvents:
         result = self._pipeline.sync(_SETTLE_TIMEOUT_S)
         assert result.status is DrainStatus.COMPLETED, f"event pipeline did not settle: {result}"
         return list(self._captured)
+
+    @property
+    def producer(self) -> Callable[[], EventPipeline]:
+        """The capture pipeline as a `producer`, for code that is handed one (`producer=...`) instead
+        of reading the process pipeline: the events it emits land here too."""
+        return lambda: self._pipeline
 
     def __iter__(self) -> Iterator[Event]:
         return iter(self._settled())

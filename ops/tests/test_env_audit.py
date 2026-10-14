@@ -13,12 +13,12 @@ from typing import cast
 
 import pytest
 
-from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config as runtime_config
 from base.host.env import dotenv_file
-from base.telemetry import Event
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops import env_audit as audit
 from ops.env_audit import (
     EnvWriteAudit,
@@ -390,18 +390,17 @@ def test_write_fields_withholds_sensitive_values(audit_home: Path) -> None:
 
 
 def test_env_write_event_carries_actor_without_values(
-    audit_home: Path, monkeypatch: pytest.MonkeyPatch
+    audit_home: Path, emitted_events: EmittedEvents
 ) -> None:
     """The value-free event stream also gains the initiating actor."""
-    captured: list[Event] = []
-    monkeypatch.setattr(telemetry, "emit_prepared", captured.append)
     runtime_config.write_fields(
         {"llm_model": "m3"},
         set(),
         audit=EnvWriteAudit(site="test", actor="user_session:administrator"),
     )
 
-    assert captured and captured[0].event_name == "env_write"
+    captured = emitted_events.named("env_write")
+    assert captured
     payload = captured[0].attributes
     assert payload["actor"] == "user_session:administrator"
     assert "m3" not in json.dumps(payload)

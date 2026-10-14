@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -11,13 +12,14 @@ from unittest.mock import Mock
 
 import pytest
 
-import base.log as base_log
 from base import telemetry
 from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import DaemonProbe
 from base.host import proc
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import process_logging
@@ -33,18 +35,26 @@ from services.supervision.ava_root_glue.diagnostics import (
 )
 
 
-class _EventLog:
-    """Structured log calls captured as their field dictionaries."""
+class _Events:
+    """The structured log calls so far, as their field dictionaries (read from `loguru_records`).
 
-    def __init__(self, records: list[dict[str, object]]) -> None:
+    Only records logged with an `event=` field count: the diagnostics' own signals, not the
+    incidental lines other code logs while a round runs."""
+
+    def __init__(self, records: LogRecords) -> None:
         self._records = records
 
-    def info(self, *_args: object, **fields: object) -> None:
-        self._records.append(fields)
+    def _fields(self) -> list[dict[str, object]]:
+        return [dict(r["extra"]) for r in self._records if "event" in r["extra"]]
 
-    warning = info
-    error = info
-    log = info
+    def __iter__(self) -> Iterator[dict[str, object]]:
+        return iter(self._fields())
+
+    def __getitem__(self, index: int) -> dict[str, object]:
+        return self._fields()[index]
+
+    def clear(self) -> None:
+        self._records.clear()
 
 
 def _unused_database() -> NoReturn:
@@ -56,12 +66,10 @@ def _no_op(**_kwargs: object) -> None:
 
 
 @pytest.fixture
-def events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
-    records: list[dict[str, object]] = []
+def events(monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords) -> _Events:
     monkeypatch.setattr(process_logging, "init_gateway_process", _no_op)
     monkeypatch.setattr(telemetry, "sync", _no_op)
-    monkeypatch.setattr(base_log, "logger", _EventLog(records))
-    return records
+    return _Events(loguru_records)
 
 
 def _entry(snapshot: dict[str, object], key: str) -> dict[str, object]:
@@ -109,7 +117,7 @@ async def test_probe_bug_is_unknown_evidence() -> None:
 
 
 async def test_slow_diagnostic_cannot_block_peer_or_duplicate_itself(
-    events: list[dict[str, object]],
+    events: _Events,
 ) -> None:
     release = Event()
     calls = 0
@@ -142,7 +150,7 @@ async def test_slow_diagnostic_cannot_block_peer_or_duplicate_itself(
 
 
 async def test_unknown_never_resolves_station_alert_but_extends_the_streak(
-    events: list[dict[str, object]],
+    events: _Events,
 ) -> None:
     current = DaemonProbe.down("canary failed")
     reported: list[DaemonProbe] = []
@@ -171,7 +179,7 @@ async def test_unknown_never_resolves_station_alert_but_extends_the_streak(
 
 
 async def test_every_failing_sample_reports_and_recovery_reports_once(
-    events: list[dict[str, object]],
+    events: _Events,
 ) -> None:
     current = DaemonProbe.unavailable("host stalled")
     monitor = DiagnosticMonitor([Diagnostic("canary", lambda: current, interval_s=0.001)])
@@ -226,7 +234,7 @@ class _Health(HealthMonitor):
 
 
 async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
-    events: list[dict[str, object]], *, machine_identity: MachineIdentity
+    events: _Events, *, machine_identity: MachineIdentity
 ) -> None:
     health = _Health()
     diagnostics = DiagnosticMonitor([Diagnostic("failed", lambda: DaemonProbe.down("failed"))])
@@ -252,7 +260,7 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
 
 
 async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
-    events: list[dict[str, object]], *, machine_identity: MachineIdentity
+    events: _Events, *, machine_identity: MachineIdentity
 ) -> None:
     async with asyncio.TaskGroup() as tasks:
         health = _Health()
@@ -283,7 +291,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
     sha: str | None,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    events: list[dict[str, object]],
+    events: _Events,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -390,7 +398,7 @@ def test_helper_diagnostics_are_macos_only(
 @pytest.mark.parametrize("role", ["gateway", "agent-runner"])
 def test_every_root_watches_its_maintenance_hold_with_the_configured_age(
     monkeypatch: pytest.MonkeyPatch,
-    events: list[dict[str, object]],
+    events: _Events,
     tmp_path: Path,
     role: str,
     *,
@@ -477,7 +485,7 @@ def test_redis_acl_uses_runtime_ping_without_native_custody(
 
 def test_each_root_roster_owns_its_helper_episode_reporter(
     monkeypatch: pytest.MonkeyPatch,
-    events: list[dict[str, object]],
+    events: _Events,
     *,
     machine_identity: MachineIdentity,
 ) -> None:

@@ -64,7 +64,6 @@
 "test_pgbouncer.py#monkeypatch.setattr base.cluster.port_preflight.listener_addrs" = 3
 "test_vendored_binaries.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.PGVECTOR_ARTIFACTS" = 1
 "test_vendored_binaries.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.download" = 4
-"test_vendored_binaries.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.logger.warning" = 1
 "test_walg_binary.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.download" = 3
 "test_walg_binary.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.platform.machine" = 2
 "test_walg_binary.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.platform.system" = 2

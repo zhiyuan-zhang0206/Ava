@@ -26,7 +26,6 @@ exports = ["admission_fixture.py", "cancel_fixture.py"]
 "test_exec_node_timeout.py#monkeypatch.setattr base.config.settings.sandbox.exec_timeout_seconds" = 1
 "test_exec_output.py#monkeypatch.setattr agent.graph.exec.output.OVERFLOW_KEEP" = 1
 "test_exec_output.py#monkeypatch.setattr agent.graph.exec.output.overflow_dir" = 2
-"test_exec_output_cap.py#monkeypatch.setattr agent.graph.exec.output.logger.info" = 1
 "test_exec_output_cap.py#monkeypatch.setattr agent.graph.exec.output.overflow_dir" = 1
 "test_exec_output_crop.py#monkeypatch.setattr agent.graph.exec.output.overflow_dir" = 1
 "test_exec_process.py#monkeypatch.setattr agent.graph.exec._process.asyncio.to_thread" = 1

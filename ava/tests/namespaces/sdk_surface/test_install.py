@@ -33,7 +33,6 @@ from ava.sdk_surface.plugins import (
 from ava.sdk_surface.sdk_disable import DisabledSDKModule
 from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
-from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.packages.plugin_config_images import PluginConfigChangedError
 from base.packages.plugins import flags, load_report
 from base.packages.plugins.extensions import (
@@ -44,11 +43,12 @@ from base.packages.plugins.extensions import (
     SdkWrap,
 )
 from base.packages.plugins.plugin_errors import DuplicateRegistration
-from base.telemetry import EventPipeline
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 
 @pytest.fixture(autouse=True)
-def _surface(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _surface(monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents) -> Iterator[None]:
     """Start from no installation and bare callables, and leave no installation behind."""
     assert installed() is None
 
@@ -57,7 +57,7 @@ def _surface(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     prior = ava.context
-    clients = ClientSet(pipeline_factory=lambda: EventPipeline(writer=lambda _events: None))
+    clients = ClientSet(pipeline_factory=emitted_events.producer)
     with patch.dict(os.environ):
         process_context.bind_context(replace(prior, clients=clients))
         try:
@@ -380,14 +380,8 @@ def test_a_namespace_disabled_by_the_sdk_disable_sentinel_refuses_the_plugin(
 
 
 def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
-    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
-    calls: list[str] = []
-
-    def emit(fn: str, *_args: Any, **_kwargs: Any) -> None:
-        calls.append(fn)
-
-    monkeypatch.setattr(sdk_usage_telemetry, "emit", emit)
     original_read = ava.files.read
     registry = _registry(
         (
@@ -409,7 +403,8 @@ def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
     assert not metering.is_recorder(ping.__wrapped__)  # ... with the plugin's layer under it
     assert metering.is_recorder(ava.files.read)
     assert ping() == "w(pong)"
-    assert calls == ["install_ns.ping"]  # one count per agent call, not one per layer
+    # one count per agent call, not one per layer
+    assert [event.attributes["fn"] for event in emitted_events] == ["install_ns.ping"]
 
     install.uninstall()
 

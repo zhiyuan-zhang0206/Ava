@@ -14,6 +14,8 @@ from base.agents.impersonation import manifest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import PermissionsHelperError
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 
 from ... import mcp_daemon as daemon_mod
 from ... import screen as screen_mod
@@ -368,13 +370,12 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     """A failing session-envelope emit (contract mismatch, FK hiccup) must not
     fail the action nor stay silent — it warns (task #1136)."""
-    warnings: list[str] = []
-    monkeypatch.setattr(daemon_mod.logger, "warning", lambda msg: warnings.append(str(msg)))  # pyright: ignore[reportUnknownArgumentType]
     log: list[dict[str, Any]] = []
 
     def _stage(_db: object, event: Any) -> None:
@@ -394,7 +395,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     resp = await call(d, "click", {"x": 1, "y": 2, "task_id": 42})
     assert resp["ok"] is True  # the action itself executed
-    assert any("task-session event failed" in w for w in warnings)
+    assert any("task-session event failed" in w for w in loguru_records.messages("WARNING"))
     # the computer_action row still landed (the envelope is auxiliary)
     assert [e["event_type"] for e in log] == ["computer_action"]
 

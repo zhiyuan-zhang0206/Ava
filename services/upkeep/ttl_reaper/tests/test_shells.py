@@ -20,6 +20,8 @@ from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops.rpc_schemas import ShellKillResult
 from services.upkeep.ttl_reaper import shells
 from services.upkeep.ttl_reaper.shells import claim_shell_row_still_expired, reap_expired_shells
@@ -168,6 +170,7 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -192,12 +195,6 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
         )
 
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _capture_emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr(shells.telemetry, "emit", _capture_emit)
     reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == [(aid, 8)]
@@ -208,8 +205,8 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
     assert _system_inbounds(db_conn, aid) == []
     # The synthetic verdict is spelled ``machine_absent`` — distinct from the
     # live-host ``absent`` (session already ended) it must not masquerade as.
-    assert emitted and emitted[-1][0][1] == "shell_ttl_expired"
-    assert emitted[-1][1]["attributes"] == {
+    assert emitted_events.names()[-1:] == ["shell_ttl_expired"]
+    assert emitted_events.attributes("shell_ttl_expired")[-1] == {
         "agent_id": aid,
         "session_id": 8,
         "mode": "machine_absent",
@@ -572,6 +569,7 @@ async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     payload: dict[str, object],
+    emitted_events: EmittedEvents,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -587,17 +585,11 @@ async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
     ) -> dict[str, object]:
         return payload
 
-    emitted: list[str] = []
-
-    def emit(_kind: str, event: str, **_kwargs: object) -> None:
-        emitted.append(event)
-
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", dispatch)
-    monkeypatch.setattr(shells.telemetry, "emit", emit)
     assert await _reap(reaper_pool, database_gate=database_gate) == []
     assert db_conn.execute(
         "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s", (aid,)
     ).fetchall() == [(3,)]
     assert _system_inbounds(db_conn, aid) == []
-    assert "shell_ttl_expired" not in emitted
+    assert "shell_ttl_expired" not in emitted_events.names()
     assert "returned" in caplog.text

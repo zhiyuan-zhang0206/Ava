@@ -22,7 +22,8 @@ from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
-from base.telemetry import Event
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops.lifecycle import termination
 from ops.rpc_schemas import TerminateAgentRequest
 
@@ -284,12 +285,10 @@ class TestKillAllShellSessions:
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        emitted_events: EmittedEvents,
     ) -> None:
         from ops import lifecycle
         from ops.rpc_schemas.terminate import ShellSessionsKill
-
-        events: list[Event] = []
-        monkeypatch.setattr(termination.telemetry, "emit_prepared", events.append)
 
         resp = await lifecycle.terminate_agent_op(
             database,
@@ -305,6 +304,7 @@ class TestKillAllShellSessions:
         )
         assert kills == []  # the last step still runs; its sessions stay up until exit
         assert _terminate_payloads(db_conn, running_agent_id) == [{"kill_all_shell_sessions": True}]
+        events = list(emitted_events)
         assert [event.attributes for event in events] == [
             {"inbound_id": events[0].attributes["inbound_id"], "kill_all_shell_sessions": True}
         ]

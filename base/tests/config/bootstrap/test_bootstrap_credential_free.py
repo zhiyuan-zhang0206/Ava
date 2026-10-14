@@ -17,8 +17,10 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from base import config, log
+from base import config
 from base.config.service_read import ConfigAuthority
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 
 _RUNNER_PW = "runner-secret-token"
 _DB_URL = "postgresql://ava@127.0.0.1:5433/ava"
@@ -97,19 +99,20 @@ def test_remote_plane_strips_the_provider_password(
 
 @pytest.mark.parametrize("missing_url", [None, ""])
 def test_missing_url_refuses_before_boot_time_fallback(
-    monkeypatch: pytest.MonkeyPatch, missing_url: str | None, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    missing_url: str | None,
+    tmp_path: Path,
+    loguru_records: LogRecords,
 ) -> None:
     snapshot = {"AVA_RUNNER_DB_PASSWORD": "new-private-password"}
     if missing_url is not None:
         snapshot["AVA_DB_URL"] = missing_url
     read = Mock(return_value=snapshot)
-    warning = Mock()
 
     def read_snapshot(_owner: ConfigAuthority) -> dict[str, str]:
         return read()
 
     monkeypatch.setattr(ConfigAuthority, "read_env_aliases", read_snapshot)
-    monkeypatch.setattr(log.logger, "warning", warning)
     with pytest.raises(ValueError, match="AVA_DB_URL is missing") as caught:
         config.bootstrap_config_values(
             ConfigAuthority(config.settings, config.settings, tmp_path / ".env"),
@@ -117,7 +120,7 @@ def test_missing_url_refuses_before_boot_time_fallback(
             plugin_cluster_config="",
         )
     read.assert_called_once_with()
-    warning.assert_not_called()
+    assert loguru_records.messages("WARNING") == []
     assert "new-private-password" not in str(caught.value)
 
 

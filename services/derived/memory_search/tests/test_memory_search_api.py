@@ -13,6 +13,8 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.derived.memory_search.app import build_app
 from services.derived.memory_search.store import MemoryStore
 
@@ -272,23 +274,14 @@ def test_stats_after_upsert(tmp_path: Path) -> None:
         assert client.get("/stats").json()["rows"] == 1
 
 
-def test_emit_memory_search_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_memory_search_stats(emitted_events: EmittedEvents) -> None:
     """The 60s flusher's emit step: one `memory_search_stats` telemetry
     event; `last_save_seconds` rides along only once a save has happened."""
     import services.derived.memory_search.app as app_module
 
-    emitted: list[tuple[str, str, dict[str, object]]] = []
-
-    def _fake_emit(
-        category: str, event_name: str, *, attributes: dict[str, object] | None = None
-    ) -> None:
-        emitted.append((category, event_name, attributes or {}))
-
-    monkeypatch.setattr(app_module.telemetry, "emit", _fake_emit)
-
     app_module.emit_memory_search_stats(5, None)
     app_module.emit_memory_search_stats(5, 0.25)
-    assert emitted == [
+    assert [(event.category, event.event_name, event.attributes) for event in emitted_events] == [
         ("telemetry", "memory_search_stats", {"rows": 5}),
         ("telemetry", "memory_search_stats", {"rows": 5, "last_save_seconds": 0.25}),
     ]

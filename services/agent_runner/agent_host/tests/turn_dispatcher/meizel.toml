@@ -7,6 +7,4 @@ exports = ["helpers.py"]
 [debt.first-party-patch]
 "test_scan_and_slots.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
 "test_scan_and_slots.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S" = 1
-"test_subscription_recovery.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.logger.error" = 1
-"test_subscription_recovery.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.logger.warning" = 1
 "test_task_retention.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S" = 1

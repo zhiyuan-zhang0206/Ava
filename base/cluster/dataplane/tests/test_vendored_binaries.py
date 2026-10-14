@@ -23,6 +23,7 @@ import pytest
 
 from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane import runtime_binaries as rb
+from base.log.tests.log_records import LogRecords
 
 
 @pytest.fixture()
@@ -148,22 +149,20 @@ def test_download_gives_up_after_bounded_retries(
 
 
 def test_download_preserves_transient_warning_and_final_error(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], loguru_records: LogRecords
 ) -> None:
     url = "https://repo1.invalid/x.jar"
     errors: list[urllib.error.URLError | _FakeResponse] = [
         urllib.error.URLError(f"reset {i}") for i in range(1, 5)
     ]
     calls = _patch_urlopen(monkeypatch, errors.copy())
-    warnings: list[str] = []
-    monkeypatch.setattr(rb.logger, "warning", warnings.append)
 
     with pytest.raises(RuntimeError) as caught:
         rb.download(url)
 
     assert calls == [url] * 4
     assert retry_waits == [2, 4, 8]
-    assert warnings == [
+    assert loguru_records.messages("WARNING") == [
         f"[runtime] transient error fetching {url} (<urlopen error reset {i}>); "
         f"retry {i}/3 in {2**i}s"
         for i in range(1, 4)

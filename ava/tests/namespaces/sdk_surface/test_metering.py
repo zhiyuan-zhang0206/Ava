@@ -26,6 +26,7 @@ from ava.sdk_surface import install, metering, process_context
 from ava.sdk_surface.installation import Installation
 from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
@@ -37,6 +38,8 @@ from base.packages.plugins.extensions import (
     SdkMember,
     SdkWrap,
 )
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 
 @contextlib.contextmanager
@@ -52,6 +55,12 @@ def _execution_tally() -> Generator[SdkCallTally, None, None]:
             process_context.unbind_context()
         else:
             process_context.bind_context(previous)
+
+
+def _capturing_clients(events: EmittedEvents) -> ClientSet:
+    """Clients whose event pipeline is the capture: a recorder that reads the bound context's
+    pipeline (not the process one) emits into `events`."""
+    return ClientSet(pipeline_factory=events.producer)
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
@@ -435,21 +444,20 @@ async def test_recorder_rejects_invalid_sampling_before_the_original_call(
 
 
 def test_borrowed_identity_is_stamped_on_external_sdk_events(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    monkeypatch: pytest.MonkeyPatch,
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    emitted_events: EmittedEvents,
 ) -> None:
-    from base import telemetry
     from base.agents.sdk import call_policy
-
-    rows: list[dict[str, Any]] = []
-
-    def capture(*_args: Any, **kwargs: Any) -> None:
-        rows.append(kwargs)
 
     def validate() -> int:
         pytest.fail("observational telemetry must not validate the lease")
 
-    pin_agent(42, lease=ExternalLease(agent_id=99, validate=validate, config=lambda: None))
-    monkeypatch.setattr(telemetry, "emit", capture)
+    pin_agent(
+        42,
+        lease=ExternalLease(agent_id=99, validate=validate, config=lambda: None),
+        clients=_capturing_clients(emitted_events),
+    )
 
     def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
         return call_policy.SamplingPolicy()
@@ -457,8 +465,9 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     wrapped = metering.make_recorder(lambda: "ok", "files.read", sampling_owner)
     assert wrapped() == "ok"
-    assert rows[0]["agent_id"] == 99
-    assert rows[0]["source"] == "agent:99"
+    [event] = emitted_events
+    assert event.agent_id == 99
+    assert event.source == "agent:99"
 
 
 @pytest.mark.asyncio
@@ -559,15 +568,15 @@ async def test_invalid_identity_snapshot_prevents_sdk_body(
 
 
 async def test_awaited_calls_retain_their_entry_identity(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    monkeypatch: pytest.MonkeyPatch,
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    emitted_events: EmittedEvents,
 ) -> None:
     """A later attachment cannot relabel an already-admitted async SDK call."""
     import asyncio
 
-    from base import telemetry
     from base.agents.sdk import call_policy
 
-    rows: list[dict[str, Any]] = []
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -575,11 +584,6 @@ async def test_awaited_calls_retain_their_entry_identity(
         return call_policy.SamplingPolicy()
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-
-    def capture(*_args: Any, **kwargs: Any) -> None:
-        rows.append(kwargs)
-
-    monkeypatch.setattr(telemetry, "emit", capture)
 
     async def held() -> None:
         entered.set()
@@ -591,13 +595,13 @@ async def test_awaited_calls_retain_their_entry_identity(
     second_machine = MachineIdentity(
         name=lambda: "second", role=frozenset, host=lambda: "", description=lambda: None
     )
-    pin_agent(41, machine=first_machine)
+    pin_agent(41, machine=first_machine, clients=_capturing_clients(emitted_events))
     first_tally = SdkCallTally()
     process_context.bind_context(replace(ava.context, sdk_calls=first_tally))
     first = asyncio.create_task(metering.make_recorder(held, "probe.held", sampling_owner)())
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
-        pin_agent(42, machine=second_machine)
+        pin_agent(42, machine=second_machine, clients=_capturing_clients(emitted_events))
         second_tally = SdkCallTally()
         process_context.bind_context(replace(ava.context, sdk_calls=second_tally))
         metering.make_recorder(lambda: None, "probe.next", sampling_owner)()
@@ -606,10 +610,10 @@ async def test_awaited_calls_retain_their_entry_identity(
     finally:
         release.set()
         await first
-    assert [row["machine_reader"]() for row in rows] == ["second", "first"]
+    assert [event.machine for event in emitted_events] == ["second", "first"]
     assert first_tally.snapshot() == {"probe.held": 1}
     assert second_tally.snapshot() == {"probe.next": 1}
-    assert [(row["attributes"]["fn"], row["agent_id"], row["source"]) for row in rows] == [
+    assert [(event.attributes["fn"], event.agent_id, event.source) for event in emitted_events] == [
         ("probe.next", 42, "agent:42"),
         ("probe.held", 41, "agent:41"),
     ]

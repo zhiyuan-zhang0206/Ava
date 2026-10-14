@@ -22,6 +22,8 @@ from typing import cast
 
 import pytest
 
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from services.supervision.ava_root import selfcheck as selfcheck_mod
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.selfcheck import (
@@ -32,28 +34,22 @@ from services.supervision.ava_root.supervisor import Supervisor
 
 
 class _Recorder:
-    """Stands in for base.log.logger; records every structured call."""
+    """The structured log calls so far, as their field dictionaries (read from `loguru_records`)."""
 
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
+    def __init__(self, records: LogRecords) -> None:
+        self._records = records
 
-    def warning(self, message: str, **extra: object) -> None:
-        self.calls.append({"message": message, **extra})
-
-    def info(self, message: str, **extra: object) -> None:
-        self.calls.append({"message": message, **extra})
+    @property
+    def calls(self) -> list[dict[str, object]]:
+        return [{"message": r["message"], **r["extra"]} for r in self._records]
 
     def events(self, name: str) -> list[dict[str, object]]:
         return [c for c in self.calls if c.get("event") == name]
 
 
 @pytest.fixture
-def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    import base.log as base_log
-
-    rec = _Recorder()
-    monkeypatch.setattr(base_log, "logger", rec)
-    return rec
+def recorder(loguru_records: LogRecords) -> _Recorder:
+    return _Recorder(loguru_records)
 
 
 class _StubHost:

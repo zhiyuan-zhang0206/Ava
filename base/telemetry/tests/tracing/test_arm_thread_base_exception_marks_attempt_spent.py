@@ -9,6 +9,8 @@ import httpx
 import pytest
 
 from base import config
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
 from base.telemetry.tests.test_tracing import (
@@ -21,6 +23,7 @@ from base.telemetry.tests.test_tracing import (
     spans_received,
     under_watermark,
     wait_init_resolved,
+    warned_fields,
 )
 from base.telemetry.tests.test_tracing import (
     collector_up as collector_up,
@@ -72,7 +75,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
 
 
 def test_timeout_then_late_arm_recording_comes_up_midlife(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
 ) -> None:
     """Timeout -> late-completion contract: the bounded wait gives up and the
     first turn proceeds WITHOUT recording, but a slow (not hung) arm that
@@ -94,12 +97,6 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
     from base.telemetry.tracing import ensure_init_resolved
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
-    warnings: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _capture_warning(*a: object, **kw: object) -> None:
-        warnings.append((a, kw))
-
-    monkeypatch.setattr(tracing_mod.logger, "warning", _capture_warning)
 
     initialize_tracing(machine=machine_identity(), home=tmp_path)
     assert entered.wait(timeout=5.0), "arm thread must reach Traceloop.init"
@@ -107,8 +104,9 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
     # The arm is still in flight: the bounded wait gives up (one warning),
     # recording stays off for now...
     ensure_init_resolved()
-    assert len(warnings) == 1
-    assert warnings[0][1]["action"] == "init_resolved_timeout"
+    warned = warned_fields(loguru_records)
+    assert len(warned) == 1
+    assert warned[0]["action"] == "init_resolved_timeout"
     assert tracing_mod._state["timeout_reported"] is True
     assert tracing_mod._state["initialized"] is False
 
@@ -119,7 +117,7 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
 
     # ...and later calls skip the wait entirely, so the span opens for real.
     ensure_init_resolved()
-    assert len(warnings) == 1
+    assert len(warned_fields(loguru_records)) == 1
     entered_spans: list[str] = []
     with turn_span(name="t", session_id="s", turn=1):
         entered_spans.append("open")

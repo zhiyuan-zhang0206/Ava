@@ -15,6 +15,8 @@ from base.agents.inbox.chat_delivery import (
 )
 from base.db import Database, create_agent
 from base.db.transaction import write_transaction
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 
 def counts(conn: psycopg.Connection, agent_id: int) -> tuple[int, int]:
@@ -41,12 +43,10 @@ def write(
 
 
 def test_caller_rollback_removes_chat_audit_and_other_business_write(
-    db_conn: psycopg.Connection, database: Database, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, database: Database, emitted_events: EmittedEvents
 ) -> None:
     agent_id, sender = create_agent(db_conn), create_agent(db_conn)
     original_label = db_conn.execute("SELECT label FROM agents WHERE id=%s", (agent_id,)).fetchone()
-    emitted: list[telemetry.Event] = []
-    monkeypatch.setattr(telemetry, "emit_prepared", emitted.append)
 
     with (
         database.pool(min_size=1, max_size=2) as pool,
@@ -58,7 +58,7 @@ def test_caller_rollback_removes_chat_audit_and_other_business_write(
         assert receipt.inserted and event is not None
         assert counts(conn, agent_id) == (1, 1)
         assert counts(db_conn, agent_id) == (0, 0)
-        assert emitted == []
+        assert len(emitted_events) == 0
         raise RuntimeError("domain receipt refused")
 
     assert counts(db_conn, agent_id) == (0, 0)
@@ -66,7 +66,7 @@ def test_caller_rollback_removes_chat_audit_and_other_business_write(
         db_conn.execute("SELECT label FROM agents WHERE id=%s", (agent_id,)).fetchone()
         == original_label
     )
-    assert emitted == []
+    assert len(emitted_events) == 0
 
 
 def test_caller_commit_makes_chat_and_audit_visible_together(

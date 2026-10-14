@@ -31,6 +31,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
 from base.paths import ava_home
+from base.telemetry.tests.capture.event_capture import EmittedEvents
 
 
 @pytest.fixture
@@ -488,13 +489,13 @@ class TestPauseHeartbeat:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         bad: float,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
+        emitted_events: EmittedEvents,
     ) -> None:
         """Invalid duration must not write or emit a heartbeat pause event."""
         pin_agent(
@@ -505,19 +506,11 @@ class TestPauseHeartbeat:
                 machine=machine_identity,
             )
         )
-        from base import telemetry
-
-        def _unexpected_emit(_category: str, event_name: str, **_kwargs: object) -> None:
-            if event_name != "sdk_call":
-                pytest.fail(f"invalid duration emitted {event_name}")
-
-        monkeypatch.setattr(
-            telemetry,
-            "emit",
-            _unexpected_emit,
-        )
+        emitted_events.clear()  # spawning the agent above emitted its own events
         with pytest.raises(ValueError, match=r"greater than 0|at most"):
             ava.self.pause_heartbeat(bad)
+        unexpected = [name for name in emitted_events.names() if name != "sdk_call"]
+        assert unexpected == [], f"invalid duration emitted {unexpected}"
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT heartbeat_paused_until FROM agents_meta WHERE id = %s",

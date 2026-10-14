@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,11 +11,13 @@ import pytest
 from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources
 from base.packages.tests.model_catalog import AddModels
 from base.sessions.tests.poll_until import poll_until_async
-from services.agent_runner.agent_host import dispatcher, settlement
+from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.runtime import config_fingerprint
@@ -27,17 +30,24 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
 )
 
 
+def _logged(records: LogRecords, level: str) -> list[tuple[str, dict[str, Any]]]:
+    """(event, structured fields) of every record logged at `level` with an `event=` field."""
+    return [
+        (r["extra"]["event"], r["extra"])
+        for r in records
+        if r["level"].name == level and "event" in r["extra"]
+    ]
+
+
 class TestRejectedModelConfig:
     async def test_an_unknown_model_is_rejected_before_the_runtime_build(
-        self, wired: Build, monkeypatch: pytest.MonkeyPatch
+        self, wired: Build, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         """The real registry rejects an unknown model without a provider key."""
-        import services.agent_runner.agent_host.host as host_mod
         import services.agent_runner.agent_host.runtime as runtime_mod
 
         monkeypatch.setattr(runtime_mod, "validate_model_config", validate_model_config)
         boot_calls: list[int] = []
-        error_events: list[str] = []
 
         async def _record_boot(
             agent_id: int, llm_model: str, *_: object, **_kwargs: object
@@ -45,11 +55,7 @@ class TestRejectedModelConfig:
             boot_calls.append(agent_id)
             return Model(llm_model), None
 
-        def _record_error(_message: str, *, event: str, **_details: object) -> None:
-            error_events.append(event)
-
         monkeypatch.setattr(runtime_mod, "boot_agent_scope", _record_boot)
-        monkeypatch.setattr(host_mod.logger, "error", _record_error)
         host, graph, _ = wired({1: Row(overlay={"llm_model": "fable"})})
 
         await asyncio.wait_for(host.run_turn(1), 2)
@@ -59,7 +65,7 @@ class TestRejectedModelConfig:
         assert host.stats.config_rejected == 1
         assert host.stats.as_payload()["config_rejected"] == 1
         assert host.stats.turns_started == 0
-        assert error_events == ["host_config_rejected"]
+        assert [event for event, _ in _logged(loguru_records, "ERROR")] == ["host_config_rejected"]
 
     async def test_a_fixed_model_config_builds_on_the_next_wake(
         self, wired: Build, monkeypatch: pytest.MonkeyPatch
@@ -101,22 +107,15 @@ class TestRejectedModelConfig:
         assert validated_models == ["fable", "gpt-5.6-sol"]
 
     async def test_the_same_rejected_config_logs_once_per_config_state(
-        self, wired: Build, monkeypatch: pytest.MonkeyPatch
+        self, wired: Build, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         """Repeated pending wakes stay quiet until the stored config changes."""
-        import services.agent_runner.agent_host.host as host_mod
         import services.agent_runner.agent_host.runtime as runtime_mod
-
-        error_events: list[str] = []
 
         def _reject_model(*, model: str, catalog: ModelCatalog, llm_override: str) -> None:
             raise ValueError(f"unknown model '{model}'")
 
-        def _record_error(_message: str, *, event: str, **_details: object) -> None:
-            error_events.append(event)
-
         monkeypatch.setattr(runtime_mod, "validate_model_config", _reject_model)
-        monkeypatch.setattr(host_mod.logger, "error", _record_error)
         rows = {1: Row(overlay={"llm_model": "fable"})}
         host, _, _ = wired(rows)
 
@@ -126,7 +125,10 @@ class TestRejectedModelConfig:
         await asyncio.wait_for(host.run_turn(1), 2)
 
         assert host.stats.config_rejected == 3
-        assert error_events == ["host_config_rejected", "host_config_rejected"]
+        assert [event for event, _ in _logged(loguru_records, "ERROR")] == [
+            "host_config_rejected",
+            "host_config_rejected",
+        ]
 
 
 class TestNormalizedModelConfig:
@@ -162,23 +164,13 @@ class TestNormalizedModelConfig:
         monkeypatch.setattr(settlement, "reconcile_inbounds_after_turn", AsyncMock())
 
     async def test_a_withdrawn_birth_pin_is_normalized_before_the_turn_binds_it(
-        self,
-        wired: Build,
-        monkeypatch: pytest.MonkeyPatch,
-        withdrawn_model: tuple[str, ModelCatalog],
+        self, wired: Build, withdrawn_model: tuple[str, ModelCatalog], loguru_records: LogRecords
     ) -> None:
         """A birth_config pin on a withdrawn model resolves to its
         registered fallback — the same resolution build_chat_model applies only
         at the final build."""
         model, catalog = withdrawn_model
-        import services.agent_runner.agent_host.host as host_mod
 
-        warnings: list[tuple[str, dict[str, object]]] = []
-
-        def _record_warning(_message: str, *, event: str, **details: object) -> None:
-            warnings.append((event, details))
-
-        monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
         host, graph, _ = wired({1: Row(birth={"llm_model": model})}, catalog=catalog)
 
         await asyncio.wait_for(host.run_turn(1), 2)
@@ -188,27 +180,18 @@ class TestNormalizedModelConfig:
         assert host.stats.config_normalized == 1
         # The once-per-state warning carries the agent and both ids, so a usage
         # row attributed to the withdrawn pin can be reconciled against it.
+        warnings = _logged(loguru_records, "WARNING")
         assert [event for event, _ in warnings] == ["host_config_normalized"]
         assert warnings[0][1]["agent_id"] == 1
         assert warnings[0][1]["requested"] == model
         assert warnings[0][1]["resolved"] == "deepseek-flash"
 
     async def test_a_withdrawn_pin_normalizes_and_an_available_pin_is_untouched(
-        self,
-        wired: Build,
-        monkeypatch: pytest.MonkeyPatch,
-        withdrawn_model: tuple[str, ModelCatalog],
+        self, wired: Build, withdrawn_model: tuple[str, ModelCatalog], loguru_records: LogRecords
     ) -> None:
         """A withdrawn pin resolves; an available model passes through."""
         model, catalog = withdrawn_model
-        import services.agent_runner.agent_host.host as host_mod
 
-        warnings: list[str] = []
-
-        def _record_warning(_message: str, *, event: str, **_details: object) -> None:
-            warnings.append(event)
-
-        monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
         rows = {
             1: Row(overlay={"llm_model": model}),
             2: Row(overlay={"llm_model": "gemini-3.7-flash"}),
@@ -223,25 +206,17 @@ class TestNormalizedModelConfig:
             "gemini-3.7-flash",
         ]
         assert host.stats.config_normalized == 1
-        assert warnings == ["host_config_normalized"]
+        assert [event for event, _ in _logged(loguru_records, "WARNING")] == [
+            "host_config_normalized"
+        ]
 
     async def test_the_normalization_warns_once_per_stored_config_state(
-        self,
-        wired: Build,
-        monkeypatch: pytest.MonkeyPatch,
-        withdrawn_model: tuple[str, ModelCatalog],
+        self, wired: Build, withdrawn_model: tuple[str, ModelCatalog], loguru_records: LogRecords
     ) -> None:
         """Repeated wakes on the same stale pin stay quiet until the stored
         config changes; the counter still sees every normalized wake."""
         model, catalog = withdrawn_model
-        import services.agent_runner.agent_host.host as host_mod
 
-        warnings: list[str] = []
-
-        def _record_warning(_message: str, *, event: str, **_details: object) -> None:
-            warnings.append(event)
-
-        monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
         rows = {1: Row(overlay={"llm_model": model})}
         host, graph, _ = wired(rows, catalog=catalog)
 
@@ -250,7 +225,9 @@ class TestNormalizedModelConfig:
         rows[1] = Row(overlay={"llm_model": "deepseek-flash"})
         await asyncio.wait_for(host.run_turn(1), 2)
 
-        assert warnings == ["host_config_normalized"]
+        assert [event for event, _ in _logged(loguru_records, "WARNING")] == [
+            "host_config_normalized"
+        ]
         assert host.stats.config_normalized == 2
         assert [observation.model for observation in graph.observations] == ["deepseek-flash"] * 3
 
@@ -440,14 +417,10 @@ class TestBounds:
 
 class TestSchedulerIntegration:
     async def test_crash_event_carries_the_hosts_turn_config_fingerprint(
-        self, wired: Build, monkeypatch: pytest.MonkeyPatch
+        self, wired: Build, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         overlay: dict[str, object] = {"llm_model": "broken-model-config"}
         host, _, _ = wired({1: Row(overlay=overlay)})
-        records: list[dict[str, object]] = []
-
-        def _capture(_msg: str, **kw: object) -> None:
-            records.append(kw)
 
         async def _explode(
             _agent_id: int,
@@ -459,7 +432,6 @@ class TestSchedulerIntegration:
         ) -> None:
             raise ValueError("runtime build failed")
 
-        monkeypatch.setattr(dispatcher.logger, "exception", _capture)
         monkeypatch.setattr(host, "_runtime_for", _explode)
         sched = TurnScheduler(host.run_turn, config_fingerprint=host.turn_fingerprints.get)
 
@@ -467,7 +439,12 @@ class TestSchedulerIntegration:
         for _ in range(8):
             await asyncio.sleep(0)
 
-        report = next(r for r in records if r.get("event") == "host_turn_crashed")
+        [record] = loguru_records.events("host_turn_crashed")
+        assert record["level"].name == "ERROR"
+        assert record["exception"] is not None
+        assert record["exception"].type is ValueError
+        assert record["exception"].traceback is not None
+        report = record["extra"]
         assert report["exception_type"] == "ValueError"
         assert report["config_fingerprint"] == config_fingerprint(overlay, None)
 

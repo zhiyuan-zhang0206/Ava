@@ -20,6 +20,8 @@ from base import paths
 from base.lm.catalog import ModelCatalog
 from base.packages import plugin_providers
 from base.packages.plugins.enable_config import write_local
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 # Every dotted name `load_extensions` can register a plugin module under.
 _PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
@@ -355,30 +357,8 @@ def _make_external_plugin_with(name: str, body: str) -> None:
     _write_manifest(plugin_dir)
 
 
-def _capture_plugin_load_events(
-    monkeypatch: pytest.MonkeyPatch,
-) -> list[tuple[str, dict[str, object]]]:
-    """Route base.telemetry.emit into a list of (event_name, attributes)."""
-    import base.telemetry
-
-    events: list[tuple[str, dict[str, object]]] = []
-
-    def fake_emit(
-        category: str,
-        event_name: str,
-        *,
-        level: str = "info",
-        attributes: dict[str, object] | None = None,
-        **kw: object,
-    ) -> None:
-        events.append((event_name, attributes or {}))
-
-    monkeypatch.setattr(base.telemetry, "emit", fake_emit)
-    return events
-
-
 def test_broken_external_plugin_skipped_and_others_load(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict]
+    loguru_records: list[dict], emitted_events: EmittedEvents
 ) -> None:
     """Fail-soft contract: a plugin whose plugin.py raises at import is skipped
     with a loud warning; the load proceeds; other plugins load.
@@ -393,8 +373,6 @@ def test_broken_external_plugin_skipped_and_others_load(
 
     from ava.sdk_surface import extensions as _loader
 
-    events = _capture_plugin_load_events(monkeypatch)
-
     _loader.load_extensions()  # must not raise
 
     # the healthy plugin loaded
@@ -406,7 +384,7 @@ def test_broken_external_plugin_skipped_and_others_load(
         "ava_ledger" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )
     # loud: a plugin_load_failed event carrying the plugin + the exception
-    attrs = [a for n, a in events if n == "plugin_load_failed"]
+    attrs = emitted_events.attributes("plugin_load_failed")
     assert [a["plugin"] for a in attrs] == ["ava_ledger"]
     # the missing sibling surfaces as an ImportError-family exception
     error = str(attrs[0]["error"])
@@ -467,9 +445,7 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
     assert sys.modules["plugins.ava_ledger"].__path__ == [str(pdir)]
 
 
-def test_dangling_config_entry_reported_and_skipped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_dangling_config_entry_reported_and_skipped(emitted_events: EmittedEvents) -> None:
     """A config entry whose plugin directory is gone (interrupted upgrade,
     manual rm) must not block the plugin load: reported through the canonical
     fail-soft reporter (loguru ERROR + `plugin_load_failed` event), treated as
@@ -482,20 +458,18 @@ def test_dangling_config_entry_reported_and_skipped(
 
     from ava.sdk_surface import extensions as _loader
 
-    events = _capture_plugin_load_events(monkeypatch)
-
     loaded = _loader.load_extensions()  # must not raise
 
     assert "plugins.audit.plugin" in sys.modules
     assert missing not in loaded.config.plugins
-    attrs = [a for n, a in events if n == "plugin_load_failed"]
+    attrs = emitted_events.attributes("plugin_load_failed")
     assert [a["plugin"] for a in attrs] == [missing, missing]
     assert all(str(a["error"]).startswith("DanglingPlugin: ") for a in attrs)
     assert all(missing in str(a["error"]) for a in attrs)
 
     reloaded = _loader.load_extensions()
     assert missing not in reloaded.config.plugins
-    repeated = [a for n, a in events if n == "plugin_load_failed"]
+    repeated = emitted_events.attributes("plugin_load_failed")
     assert [a["plugin"] for a in repeated] == [missing] * 4
     assert all(str(a["error"]).startswith("DanglingPlugin: ") for a in repeated)
     assert all(missing in str(a["error"]) for a in repeated)

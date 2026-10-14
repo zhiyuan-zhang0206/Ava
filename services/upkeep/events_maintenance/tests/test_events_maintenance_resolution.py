@@ -11,6 +11,8 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import ConfigBoot
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.upkeep.events_maintenance import resolution
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 
@@ -94,14 +96,9 @@ def _fresh(conn: psycopg.Connection[Any]) -> None:
     record_maintenance_event(conn, level="info", event_name="heartbeat", minutes_ago=0.1)
 
 
-def capture_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, object]]]:
-    emitted: list[tuple[str, str, dict[str, object]]] = []
-
-    def emit(category: str, event_name: str, **kwargs: object) -> None:
-        emitted.append((category, event_name, cast(dict[str, object], kwargs["attributes"])))
-
-    monkeypatch.setattr(resolution.telemetry, "emit", emit)
-    return emitted
+def _triples(events: EmittedEvents) -> list[tuple[str, str, dict[str, Any]]]:
+    """(category, event_name, attributes) of every event emitted so far."""
+    return [(event.category, event.event_name, event.attributes) for event in events]
 
 
 def record_maintenance_event(
@@ -222,7 +219,10 @@ def test_matching_dismissal_prefers_the_exact_process_row_over_the_wildcard() ->
 
 
 def test_unresolved_math_excludes_active_classes(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     dismissed_warning = event_class(event_name="dismissed-warning")
     dismissed_error = event_class(level="error", event_name="dismissed-error")
@@ -238,7 +238,6 @@ def test_unresolved_math_excludes_active_classes(
     }
 
     monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst={}))
-    emitted = capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, Pool(db_conn)),
@@ -247,6 +246,7 @@ def test_unresolved_math_excludes_active_classes(
     )
 
     assert result == resolution.ResolutionResult(2, 4, reopened=0, auto_dismissed=0)
+    emitted = _triples(emitted_events)
     assert emitted == [
         (
             "telemetry",
@@ -263,7 +263,10 @@ def test_unresolved_math_excludes_active_classes(
 
 
 def test_burst_reopens_only_above_the_configured_threshold(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     hit = event_class(event_name="hit")
     below = event_class(event_name="below")
@@ -272,7 +275,6 @@ def test_burst_reopens_only_above_the_configured_threshold(
     counts = {hit: 6, below: 5}
 
     monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
-    emitted = capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, Pool(db_conn)),
@@ -281,6 +283,7 @@ def test_burst_reopens_only_above_the_configured_threshold(
     )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
+    emitted = _triples(emitted_events)
     assert emitted[0] == (
         "telemetry",
         "warning_reopened",
@@ -306,9 +309,11 @@ def test_burst_reopens_only_above_the_configured_threshold(
 
 
 def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
-    emitted = capture_events(monkeypatch)
     pool = cast(ConnectionPool, Pool(db_conn))
 
     # The newest recorded event is an hour old: an empty window may only mean a stalled writer.
@@ -320,6 +325,7 @@ def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
         cadence=resolution.AutoDismissCadence(),
     )
     assert result is None
+    emitted = _triples(emitted_events)
     assert emitted == []
 
     def boom(*_args: object, **_kwargs: object) -> dict[resolution.EventClass, int]:
@@ -330,13 +336,12 @@ def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
         pool, events_maintenance_config(process_config), cadence=resolution.AutoDismissCadence()
     )
     assert result is None
-    assert emitted == []
+    assert len(emitted_events) == 0
 
 
 def test_an_empty_window_over_a_current_record_emits_zero_gauges(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], emitted_events: EmittedEvents
 ) -> None:
-    emitted = capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, Pool(db_conn)),
@@ -345,6 +350,7 @@ def test_an_empty_window_over_a_current_record_emits_zero_gauges(
     )
 
     assert result == resolution.ResolutionResult(0, 0, reopened=0, auto_dismissed=0)
+    emitted = _triples(emitted_events)
     assert [name for _category, name, _attrs in emitted] == ["resolution_status"]
 
 
@@ -372,14 +378,16 @@ def test_auto_dismiss_picks_the_classes_present_in_every_six_hour_slice(
 
 
 def test_auto_dismiss_is_off_by_default(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     stable = event_class(event_name="stable-warning")
 
     monkeypatch.setattr(
         resolution, "class_counts", _fake_counts(unresolved={stable: 1}, burst={stable: 1})
     )
-    emitted = capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, Pool(db_conn)),
@@ -391,6 +399,7 @@ def test_auto_dismiss_is_off_by_default(
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM event_dismissals")
         assert cur.fetchone() == (0,)
+    emitted = _triples(emitted_events)
     assert [event_name for _category, event_name, _attrs in emitted] == ["resolution_status"]
 
 
@@ -429,7 +438,10 @@ def test_level_splits_empty_and_unknown_levels() -> None:
 
 
 def test_daemon_emits_dismissed_gauges_alongside_unresolved(
-    process_config: ConfigBoot, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     """resolution_status carries the dismissed counts so Grafana can render
     the total / resolved / net trio (task #1935)."""
@@ -438,7 +450,6 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
     counts = {dismissed: 4, event_class(event_name="kept"): 1}
 
     monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst={}))
-    emitted = capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, Pool(db_conn)),
@@ -447,6 +458,7 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
     )
 
     assert result == resolution.ResolutionResult(1, 0, reopened=0, auto_dismissed=0)
+    emitted = _triples(emitted_events)
     status_event = next(
         (category, name, attrs) for category, name, attrs in emitted if name == "resolution_status"
     )
@@ -477,7 +489,10 @@ def test_process_scopes_dismissal_matching() -> None:
 
 
 def test_exact_dismissal_reopens_only_on_its_own_process_burst(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     """Its own process's burst reopens an exact dismissal; a different
     process's burst of the same base must not (task #4329 B5)."""
@@ -489,7 +504,6 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
     counts = {host_class: 6, bridge_class: 2}
 
     monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
-    emitted = capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, Pool(db_conn)),
@@ -498,6 +512,7 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
     )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
+    emitted = _triples(emitted_events)
     assert emitted[0][1] == "warning_reopened"
     assert emitted[0][2]["process"] == "agent_host"
     with db_conn.cursor() as cur:
@@ -509,7 +524,10 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
 
 
 def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     """A wildcard (process="") dismissal — every pre-dimension row's scope —
     watches the summed ten-minute count across processes."""
@@ -518,7 +536,6 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
     counts = {event_class(process="agent_host"): 4, event_class(process="im_bridge"): 2}
 
     monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
-    emitted = capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, Pool(db_conn)),
@@ -528,6 +545,7 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
 
     # 4 + 2 = 6 > 5: the base-wide burst trips the wildcard row's safety valve.
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
+    emitted = _triples(emitted_events)
     assert emitted[0][2]["process"] == ""
     assert emitted[0][2]["triggered_by_count"] == 6
 
@@ -564,7 +582,10 @@ def test_category_agnostic_matching_keeps_the_process_rules() -> None:
 
 
 def test_burst_valve_watches_the_base_across_the_category_split(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     """A wildcard row stored from log-era life reopens on the telemetry burst
     of its base (task #4964)."""
@@ -573,7 +594,6 @@ def test_burst_valve_watches_the_base_across_the_category_split(
     counts = {event_class(category="telemetry", event_name="sse_drop"): 6}
 
     monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
-    emitted = capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, Pool(db_conn)),
@@ -582,12 +602,16 @@ def test_burst_valve_watches_the_base_across_the_category_split(
     )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
+    emitted = _triples(emitted_events)
     assert emitted[0][1] == "warning_reopened"
     assert emitted[0][2]["triggered_by_count"] == 6
 
 
 def test_exact_burst_valve_watches_its_process_across_the_category_split(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    process_config: ConfigBoot,
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     """An exact row stored from log-era life reopens on its own process's
     telemetry burst — and not on another process's (task #4964)."""
@@ -600,7 +624,6 @@ def test_exact_burst_valve_watches_its_process_across_the_category_split(
     }
 
     monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
-    emitted = capture_events(monkeypatch)
 
     result = resolution.run_resolution_slice(
         cast(ConnectionPool, Pool(db_conn)),
@@ -609,4 +632,5 @@ def test_exact_burst_valve_watches_its_process_across_the_category_split(
     )
 
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
+    emitted = _triples(emitted_events)
     assert emitted[0][2]["process"] == "agent_host"

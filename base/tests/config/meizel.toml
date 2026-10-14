@@ -34,7 +34,6 @@
 [debt.first-party-patch]
 "test_cluster_tz.py#monkeypatch.setattr base.config.settings.general" = 2
 "test_config_env_values.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 12
-"test_config_env_values.py#monkeypatch.setattr base.log.logger" = 1
 "test_config_lifecycle.py#assignment base.config.config_registry.DOMAIN_MODELS" = 2
 "test_config_profiles.py#monkeypatch.setattr base.config.config_registry.DOMAIN_MODELS" = 2
 "test_config_profiles.py#monkeypatch.setattr base.config.settings" = 3
@@ -46,8 +45,6 @@
 "test_paths.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_runner_db_url_projection.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 5
 "test_runner_db_url_projection.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 5
-"test_runner_db_url_projection.py#monkeypatch.setattr base.log.logger.debug" = 1
-"test_runner_db_url_projection.py#monkeypatch.setattr base.log.logger.warning" = 1
 
 [debt.stdlib-patch]
 "test_cluster_tz.py#monkeypatch.setattr os.path.realpath" = 4

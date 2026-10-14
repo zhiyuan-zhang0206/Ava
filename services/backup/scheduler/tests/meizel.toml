@@ -21,7 +21,6 @@
 "test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.record_local_dump_restore_success" = 2
 "test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.run_due_local_dump_restore" = 1
 "test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.run_job" = 6
-"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.telemetry.emit" = 3
 "test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.worker.os.link" = 2
 "test_operation_worker.py#monkeypatch.setattr services.backup.scheduler.worker.ava_home" = 1
 "test_operation_worker.py#monkeypatch.setattr services.backup.scheduler.worker.commit_scheduled_backup" = 1

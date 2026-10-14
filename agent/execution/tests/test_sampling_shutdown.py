@@ -10,7 +10,7 @@ from agent.execution import child
 from agent.graph.exec.protocol import ResultPayload
 from ava.sdk_surface import install
 from ava.tests.fixtures.pin_agent import pin_agent
-from base.agents.sdk import call_policy, telemetry
+from base.agents.sdk import call_policy
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
 
 
@@ -35,6 +35,9 @@ def _assert_outcome(
         assert payload.exc_msg == "sampling reader bug"
 
 
+@pytest.mark.usefixtures(
+    "emitted_events"
+)  # the SDK's real emit runs; its events are not asserted here
 @pytest.mark.parametrize("outcome", ["blocked", "body_failure", "refresh_failure"])
 def test_run_code_collects_sampling_at_its_result_boundary(
     monkeypatch: pytest.MonkeyPatch, outcome: str
@@ -59,10 +62,6 @@ def test_run_code_collects_sampling_at_its_result_boundary(
         if outcome == "body_failure":
             raise body_error
 
-    def emit(*_args: object, **_kwargs: object) -> None:
-        pass
-
-    monkeypatch.setattr(telemetry, "emit", emit)
     real_stop = sampling.stop
     monkeypatch.setattr(sampling, "stop", lambda: real_stop(0.02))
     install.uninstall()

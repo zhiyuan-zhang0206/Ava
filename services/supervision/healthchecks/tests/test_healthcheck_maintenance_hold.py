@@ -11,6 +11,8 @@ import pytest
 
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from services.supervision.healthchecks.maintenance_hold import MaintenanceHoldWatch
 
 ACQUIRED = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
@@ -19,27 +21,22 @@ EVENT = "maintenance_hold_overdue"
 
 
 class _Recorder:
-    """Stands in for base.log.logger; records every structured call."""
+    """The structured log calls so far, as their field dictionaries (read from `loguru_records`)."""
 
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def error(self, message: str, **extra: object) -> None:
-        self.calls.append({"message": message, **extra})
-
-    warning = error
+    def __init__(self, records: LogRecords) -> None:
+        self._records = records
 
     def events(self) -> list[dict[str, object]]:
-        return [call for call in self.calls if call.get("event") == EVENT]
+        return [
+            {"message": r["message"], **r["extra"]}
+            for r in self._records
+            if r["extra"].get("event") == EVENT
+        ]
 
 
 @pytest.fixture
-def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    import base.log as base_log
-
-    recorded = _Recorder()
-    monkeypatch.setattr(base_log, "logger", recorded)
-    return recorded
+def recorder(loguru_records: LogRecords) -> _Recorder:
+    return _Recorder(loguru_records)
 
 
 @pytest.fixture(autouse=True)

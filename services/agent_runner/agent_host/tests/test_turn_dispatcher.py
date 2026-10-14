@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import (
     TurnScheduler,
@@ -31,6 +34,11 @@ from services.agent_runner.agent_host.tests.turn_dispatcher.helpers import (
     aclose_without_hanging,
     settle,
 )
+
+
+def _logged_fields(records: LogRecords, level: str) -> list[dict[str, Any]]:
+    """The structured fields of every record logged at `level` so far."""
+    return [r["extra"] for r in records if r["level"].name == level]
 
 
 class TestBasicDispatch:
@@ -177,14 +185,8 @@ class TestWakeRace:
 
 class TestFailureIsolation:
     async def test_crash_event_carries_exception_type_and_config_fingerprint(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, loguru_records: LogRecords
     ) -> None:
-        records: list[dict[str, object]] = []
-
-        def _capture(_msg: str, **kw: object) -> None:
-            records.append(kw)
-
-        monkeypatch.setattr(dispatcher.logger, "exception", _capture)
 
         async def boom(_agent_id: int) -> None:
             raise ValueError("turn exploded")
@@ -195,19 +197,18 @@ class TestFailureIsolation:
         sched.wake(7)
         await settle()
 
-        report = next(r for r in records if r.get("event") == "host_turn_crashed")
+        [record] = loguru_records.events("host_turn_crashed")
+        assert record["level"].name == "ERROR"
+        assert record["exception"] is not None
+        assert record["exception"].type is ValueError
+        assert record["exception"].traceback is not None
+        report = record["extra"]
         assert report["exception_type"] == "ValueError"
         assert report["config_fingerprint"] == "stored-config-fingerprint"
 
     async def test_crash_event_omits_unavailable_config_fingerprint(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, loguru_records: LogRecords
     ) -> None:
-        records: list[dict[str, object]] = []
-
-        def _capture(_msg: str, **kw: object) -> None:
-            records.append(kw)
-
-        monkeypatch.setattr(dispatcher.logger, "exception", _capture)
 
         async def boom(_agent_id: int) -> None:
             raise ValueError("turn exploded")
@@ -216,7 +217,12 @@ class TestFailureIsolation:
         sched.wake(7)
         await settle()
 
-        report = next(r for r in records if r.get("event") == "host_turn_crashed")
+        [record] = loguru_records.events("host_turn_crashed")
+        assert record["level"].name == "ERROR"
+        assert record["exception"] is not None
+        assert record["exception"].type is ValueError
+        assert record["exception"].traceback is not None
+        report = record["extra"]
         assert report["exception_type"] == "ValueError"
         assert "config_fingerprint" not in report
 
@@ -291,18 +297,12 @@ class TestUncancellableTurn:
         assert sched.active_agents == frozenset(), "aclose must not leave the registry populated"
 
     async def test_the_straggler_is_named_in_the_event_river(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         """ "Is anything wedged right now" must be answerable without reading
         logs, so the report carries the agent id and how long the cancel was
         pending as event fields."""
         monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
-        records: list[dict[str, object]] = []
-
-        def _capture(_msg: str, **kw: object) -> None:
-            records.append(kw)
-
-        monkeypatch.setattr(dispatcher.logger, "error", _capture)
         turn = StuckTurn()
         sched = TurnScheduler(turn)
         sched.wake(31)
@@ -310,23 +310,21 @@ class TestUncancellableTurn:
 
         assert await aclose_without_hanging(sched, turn), "aclose never returned"
 
-        reports = [r for r in records if r.get("event") == "host_turn_uncancellable"]
+        reports = [
+            r
+            for r in _logged_fields(loguru_records, "ERROR")
+            if r.get("event") == "host_turn_uncancellable"
+        ]
         assert len(reports) == 1, "exactly one report per stuck agent"
         assert reports[0]["agent_id"] == 31
         assert isinstance(reports[0]["waited_s"], float)
 
     async def test_a_turn_that_unwinds_cleanly_reports_nothing(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         """The ordinary case must stay silent, or the report is noise nobody
         reads by the time it matters."""
         monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
-        records: list[dict[str, object]] = []
-
-        def _capture(_msg: str, **kw: object) -> None:
-            records.append(kw)
-
-        monkeypatch.setattr(dispatcher.logger, "error", _capture)
 
         rec = Recorder()
         rec.gate(7)
@@ -335,10 +333,14 @@ class TestUncancellableTurn:
         await settle()
         await asyncio.wait_for(sched.aclose(), 5)
 
-        assert [r for r in records if r.get("event") == "host_turn_uncancellable"] == []
+        assert [
+            r
+            for r in _logged_fields(loguru_records, "ERROR")
+            if r.get("event") == "host_turn_uncancellable"
+        ] == []
 
     async def test_the_report_carries_the_real_activity_clock(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         """A wedge report has to answer "how long has this agent actually been
         silent", or a slow shutdown and a genuine wedge look identical.
@@ -349,12 +351,6 @@ class TestUncancellableTurn:
         turns where the question is real (issue #183).
         """
         monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
-        records: list[dict[str, object]] = []
-
-        def _capture(_msg: str, **kw: object) -> None:
-            records.append(kw)
-
-        monkeypatch.setattr(dispatcher.logger, "error", _capture)
         silent_since = datetime.now(UTC) - timedelta(minutes=20)
 
         async def _clock(_agent_id: int) -> datetime:
@@ -367,25 +363,23 @@ class TestUncancellableTurn:
 
         assert await aclose_without_hanging(sched, turn), "aclose never returned"
 
-        report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
+        report = next(
+            r
+            for r in _logged_fields(loguru_records, "ERROR")
+            if r.get("event") == "host_turn_uncancellable"
+        )
         assert report["last_active_at"] == silent_since.isoformat()
         idle_s = report["idle_s"]
         assert isinstance(idle_s, float)
         assert idle_s > 1000, "a 20-minute-silent agent must not read as freshly active"
 
     async def test_a_failing_clock_read_still_reports_the_wedge(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         """The clock is an enrichment; the agent id and pending duration are the
         part that cannot be reconstructed later. A DB that is unreachable — quite
         possibly what the turn is stuck on — must not cost the whole report."""
         monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
-        records: list[dict[str, object]] = []
-
-        def _capture(_msg: str, **kw: object) -> None:
-            records.append(kw)
-
-        monkeypatch.setattr(dispatcher.logger, "error", _capture)
 
         async def _broken_clock(_agent_id: int) -> datetime:
             raise RuntimeError("db unreachable")
@@ -397,30 +391,24 @@ class TestUncancellableTurn:
 
         assert await aclose_without_hanging(sched, turn), "aclose never returned"
 
-        report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
+        report = next(
+            r
+            for r in _logged_fields(loguru_records, "ERROR")
+            if r.get("event") == "host_turn_uncancellable"
+        )
         assert report["agent_id"] == 9
         assert isinstance(report["waited_s"], float)
         assert report["last_active_at"] is None, "an unreadable clock reports as absent"
         assert report["idle_s"] is None
 
     async def test_a_hanging_clock_read_does_not_delay_shutdown(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         """Same reasoning one step further: a clock read that never returns is
         the shutdown-hang this whole class exists to prevent, reintroduced
         through the diagnostic. It is bounded too."""
         monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
         monkeypatch.setattr(dispatcher, "CLOCK_READ_TIMEOUT_S", 0.05)
-        records: list[dict[str, object]] = []
-
-        def _capture(_msg: str, **kw: object) -> None:
-            records.append(kw)
-
-        def _swallow(_msg: str, **_kw: object) -> None:
-            """The clock-read failure warning; not what this test is asserting."""
-
-        monkeypatch.setattr(dispatcher.logger, "error", _capture)
-        monkeypatch.setattr(dispatcher.logger, "warning", _swallow)
 
         async def _hanging_clock(_agent_id: int) -> datetime:
             await asyncio.sleep(3600)
@@ -433,6 +421,10 @@ class TestUncancellableTurn:
 
         assert await aclose_without_hanging(sched, turn), "a hanging clock read blocked shutdown"
 
-        report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
+        report = next(
+            r
+            for r in _logged_fields(loguru_records, "ERROR")
+            if r.get("event") == "host_turn_uncancellable"
+        )
         assert report["agent_id"] == 12
         assert report["last_active_at"] is None

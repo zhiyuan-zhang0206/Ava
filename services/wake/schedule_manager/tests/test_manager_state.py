@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import psycopg
 import pytest
@@ -15,6 +15,8 @@ import services.wake.schedule_manager.manager as sm
 from base.cluster import session_name
 from base.config import settings
 from base.deploy.lifecycle import start_serving
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 
 class _FakeBackend:
@@ -161,25 +163,19 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    emitted_events: EmittedEvents,
 ) -> None:
     backend, _launched = fake_session
     sid = _insert(db_conn, "stalled-error")
     _set_status(db_conn, sid, "error")
-    emitted: list[tuple[str, dict[str, object]]] = []
-
-    def capture_emit(_category: object, event_name: str, **kwargs: Any) -> None:
-        emitted.append((event_name, cast(dict[str, object], kwargs["attributes"])))
-
-    monkeypatch.setattr(sm.telemetry, "emit", capture_emit)
     manager = sm.ScheduleManager(pool)
 
     with caplog.at_level(logging.WARNING, logger=sm.__name__):
         manager.reconcile()  # first sessionless observation starts the clock
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S - 5)
         manager.reconcile()
-        assert emitted == []
+        assert len(emitted_events) == 0
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
         manager.reconcile()
         manager.reconcile()  # one alert per outage
@@ -192,6 +188,7 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
         manager.reconcile()
 
+    emitted = [(event.event_name, event.attributes) for event in emitted_events]
     assert [(name, attrs["schedule_id"], attrs["status"]) for name, attrs in emitted] == [
         ("schedule_stalled", sid, "error"),
         ("schedule_stalled", sid, "error"),
@@ -204,49 +201,37 @@ def test_the_stall_alert_clock_and_flag_survive_a_restart(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
-    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     """A restarted service neither restarts the two-hour clock nor alerts again for
     an outage it already alerted on: both live on the row."""
     _backend, _launched = fake_session
     sid = _insert(db_conn, "stall-restart")
     _set_status(db_conn, sid, "error")
-    emitted: list[str] = []
-
-    def capture_emit(_category: object, event_name: str, **_kwargs: Any) -> None:
-        emitted.append(event_name)
-
-    monkeypatch.setattr(sm.telemetry, "emit", capture_emit)
 
     sm.ScheduleManager(pool).reconcile()
     _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
     sm.ScheduleManager(pool).reconcile()  # a fresh process meets an aged outage
-    assert emitted == ["schedule_stalled"]
+    assert emitted_events.names() == ["schedule_stalled"]
     sm.ScheduleManager(pool).reconcile()  # and another fresh process stays quiet
-    assert emitted == ["schedule_stalled"]
+    assert emitted_events.names() == ["schedule_stalled"]
 
 
 def test_completed_and_disabled_schedules_do_not_stall_alert(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
-    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
     completed = _insert(db_conn, "completed-no-alert")
     _set_status(db_conn, completed, "completed")
     disabled = _insert(db_conn, "disabled-no-alert", enabled=False)
     for sid in (completed, disabled):
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)  # a leftover outage
-    emitted: list[str] = []
-
-    def capture_emit(_category: object, event_name: str, **_kwargs: Any) -> None:
-        emitted.append(event_name)
-
-    monkeypatch.setattr(sm.telemetry, "emit", capture_emit)
 
     sm.ScheduleManager(pool).reconcile()
 
-    assert emitted == []
+    assert len(emitted_events) == 0
     cleared = db_conn.execute(
         "SELECT count(*) FROM schedules WHERE not_live_since IS NULL AND stall_alerted_at IS NULL "
         "AND id = ANY(%s)",

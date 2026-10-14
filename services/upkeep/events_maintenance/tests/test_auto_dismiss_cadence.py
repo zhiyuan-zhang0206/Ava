@@ -12,11 +12,11 @@ from psycopg_pool import ConnectionPool
 
 from base.config import ConfigBoot
 from base.daemon.loop_health import LoopProgress
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.upkeep.events_maintenance import daemon, resolution
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 from services.upkeep.events_maintenance.tests.test_events_maintenance_resolution import (
     Pool,
-    capture_events,
     event_class,
     record_maintenance_event,
 )
@@ -52,6 +52,7 @@ def _history(connection: psycopg.Connection[Any]) -> datetime:
     return datetime.now(UTC)
 
 
+@pytest.mark.usefixtures("emitted_events")
 def test_fetch_failure_retries_but_write_failure_consumes_the_day(
     process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -62,7 +63,6 @@ def test_fetch_failure_retries_but_write_failure_consumes_the_day(
     cadence = resolution.AutoDismissCadence()
     connection = _ScanConnection(db_conn)
     pool = cast(ConnectionPool, Pool(cast(Any, connection)))
-    capture_events(monkeypatch)
     connection.fail_fetch = True
     assert resolution.run_resolution_slice(pool, config, cadence=cadence, now=now) is None
     assert cadence.due(now)
@@ -85,6 +85,7 @@ def test_fetch_failure_retries_but_write_failure_consumes_the_day(
     assert not cadence.due(tomorrow)
 
 
+@pytest.mark.usefixtures("emitted_events")
 async def test_each_resolution_loop_owns_a_fresh_daily_scan(
     process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -94,7 +95,6 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
     config = events_maintenance_config(
         process_config, events_auto_dismiss_enabled=True, events_auto_dismiss_days=1
     )
-    capture_events(monkeypatch)
     monkeypatch.setattr(daemon.admission, "quiesced", lambda: False)
     passes = 0
 

@@ -24,6 +24,8 @@ from base.config import ConfigBoot, settings
 from base.daemon import health, health_schema
 from base.daemon.tests.health_support import unknown_image
 from base.native_process.os_platform import LockTimeoutError
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.backup.scheduler import daemon
 
 
@@ -267,7 +269,7 @@ def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
 ) -> None:
     config = ConfigBoot()
     probe = ManualTimers(wall_start=_at())
@@ -277,7 +279,6 @@ def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
     timers = _StopAfterSleeping(budget=until_next_hour, wall_start=_at())
     state = daemon.BackupState(started_at=timers.monotonic())
     ran: list[str] = []
-    emitted: list[tuple[str, str, dict[str, object]]] = []
 
     monkeypatch.setattr(daemon, "is_due", _always_due)
 
@@ -285,11 +286,7 @@ def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
         ran.append(kind)
         raise RuntimeError("temporary failure")
 
-    def record_emit(category: str, event_name: str, **kwargs: object) -> None:
-        emitted.append((category, event_name, kwargs))
-
     monkeypatch.setattr(daemon, "run_job", fail)
-    monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(daemon.backup_loop(state, config=config, clock=_clock(timers)))
@@ -298,13 +295,13 @@ def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
     assert sum(timers.sleeps) == until_next_hour
     assert state.running is False
     assert state.last_error == "temporary failure"
-    assert emitted == [
-        (
-            "telemetry",
-            "backup_dump_failed",
-            {"level": "error", "attributes": {"detail": "temporary failure"}},
-        )
-    ]
+    [event] = emitted_events
+    assert (event.category, event.event_name, event.level) == (
+        "telemetry",
+        "backup_dump_failed",
+        "error",
+    )
+    assert event.attributes == {"detail": "temporary failure"}
 
 
 def test_failed_dump_does_not_make_healthz_ask_the_supervisor_for_a_restart() -> None:
@@ -361,10 +358,9 @@ async def test_due_local_restore_drill_runs_after_a_successful_dump(
 
 @pytest.mark.asyncio
 async def test_due_local_restore_drill_reports_failure_without_publishing_success(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
 ) -> None:
     now = datetime(2026, 8, 30, 3, tzinfo=UTC)
-    emitted: list[tuple[object, ...]] = []
 
     monkeypatch.setattr(daemon, "load_local_dump_restore_success", lambda: None)
 
@@ -377,13 +373,9 @@ async def test_due_local_restore_drill_reports_failure_without_publishing_succes
     def unexpected_success(_now: datetime) -> None:
         pytest.fail("failed restore must not publish success")
 
-    def record_emit(category: str, event_name: str, **kwargs: object) -> None:
-        emitted.append((category, event_name, kwargs))
-
     monkeypatch.setattr(daemon, "local_dump_restore_due", due)
     monkeypatch.setattr(daemon, "run_job", fail_restore)
     monkeypatch.setattr(daemon, "record_local_dump_restore_success", unexpected_success)
-    monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
     await daemon.run_due_local_dump_restore(
         now,
@@ -391,30 +383,23 @@ async def test_due_local_restore_drill_reports_failure_without_publishing_succes
         clock=Clock(ClockConfig("UTC", "UTC", False), timers=ManualTimers()),
     )
 
-    assert emitted == [
-        (
-            "telemetry",
-            "recovery_drill_failed",
-            {
-                "level": "error",
-                "attributes": {"drill": "logical_dump", "detail": "scratch restore failed"},
-            },
-        )
-    ]
+    [event] = emitted_events
+    assert (event.category, event.event_name, event.level) == (
+        "telemetry",
+        "recovery_drill_failed",
+        "error",
+    )
+    assert event.attributes == {"drill": "logical_dump", "detail": "scratch restore failed"}
 
 
 @pytest.mark.asyncio
 async def test_invalid_local_restore_marker_reports_failure_without_running_restore(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
 ) -> None:
     now = datetime(2026, 8, 30, 3, tzinfo=UTC)
-    emitted: list[tuple[object, ...]] = []
 
     def invalid_marker() -> None:
         raise RuntimeError("logical restore drill success marker is invalid")
-
-    def record_emit(category: str, event_name: str, **kwargs: object) -> None:
-        emitted.append((category, event_name, kwargs))
 
     monkeypatch.setattr(daemon, "load_local_dump_restore_success", invalid_marker)
     monkeypatch.setattr(
@@ -422,7 +407,6 @@ async def test_invalid_local_restore_marker_reports_failure_without_running_rest
         "run_job",
         lambda: pytest.fail("invalid marker must not run the restore"),
     )
-    monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
     await daemon.run_due_local_dump_restore(
         now,
@@ -430,19 +414,16 @@ async def test_invalid_local_restore_marker_reports_failure_without_running_rest
         clock=Clock(ClockConfig("UTC", "UTC", False), timers=ManualTimers()),
     )
 
-    assert emitted == [
-        (
-            "telemetry",
-            "recovery_drill_failed",
-            {
-                "level": "error",
-                "attributes": {
-                    "drill": "logical_dump",
-                    "detail": "logical restore drill success marker is invalid",
-                },
-            },
-        )
-    ]
+    [event] = emitted_events
+    assert (event.category, event.event_name, event.level) == (
+        "telemetry",
+        "recovery_drill_failed",
+        "error",
+    )
+    assert event.attributes == {
+        "drill": "logical_dump",
+        "detail": "logical restore drill success marker is invalid",
+    }
 
 
 def _staged_dump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, str]:

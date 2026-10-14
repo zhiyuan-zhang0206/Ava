@@ -18,6 +18,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.tests.impersonation.support import (
     accept_controller,
@@ -602,12 +604,12 @@ def test_abort_lease_leaves_the_automatic_end_note_to_the_resume_chain(
 def test_relay_liveness_alert_logs_only_for_stale_active_leases(
     redis_url: str,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    loguru_records: LogRecords,
 ) -> None:
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     accept_controller(
@@ -616,27 +618,27 @@ def test_relay_liveness_alert_logs_only_for_stale_active_leases(
         database_gate=database_gate,
         local_machine=machine_identity.name(),
     )
-    errors: list[tuple[str, object]] = []
 
-    class FakeLogger:
-        def error(self, message: str, **fields: object) -> None:
-            errors.append((message, fields))
+    def wake_errors() -> list[str]:
+        return [
+            r["message"]
+            for r in loguru_records
+            if r["name"] == wake.__name__ and r["level"].name == "ERROR"
+        ]
 
-        def exception(self, message: str, **fields: object) -> None:
-            errors.append((message, fields))
-
-    monkeypatch.setattr(wake, "logger", FakeLogger())
+    loguru_records.clear()  # accepting the controller above already woke the agent once
     wake.relay_liveness_alert(database, owner.agent_id)
+    errors = wake_errors()
     assert len(errors) == 1
-    assert "relay heartbeat is stale" in errors[0][0]
+    assert "relay heartbeat is stale" in errors[0]
     # A fresh heartbeat suppresses the alert.
     db_conn.execute(
         "UPDATE agent_impersonations SET relay_heartbeat_at=clock_timestamp() WHERE agent_id=%s",
         (owner.agent_id,),
     )
     db_conn.commit()
-    errors.clear()
+    loguru_records.clear()
     wake.relay_liveness_alert(database, owner.agent_id)
-    assert errors == []
+    assert wake_errors() == []
     wake.relay_liveness_alert(database, owner.agent_id + 1)
-    assert errors == []
+    assert wake_errors() == []

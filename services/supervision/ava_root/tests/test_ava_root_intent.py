@@ -17,6 +17,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from services.supervision.ava_root import intent_store
 from services.supervision.ava_root.inputs import InputSeal
 from services.supervision.ava_root.intent_store import (
@@ -36,28 +38,22 @@ _SLEEP_FOREVER = ("sleep",)
 
 
 class _Recorder:
-    """Stands in for base.log.logger; records every structured event call."""
+    """The structured log calls so far, as their field dictionaries (read from `loguru_records`)."""
 
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
+    def __init__(self, records: LogRecords) -> None:
+        self._records = records
 
-    def info(self, message: str, **extra: object) -> None:
-        self.calls.append({"message": message, **extra})
-
-    def warning(self, message: str, **extra: object) -> None:
-        self.calls.append({"message": message, **extra})
+    @property
+    def calls(self) -> list[dict[str, object]]:
+        return [{"message": r["message"], **r["extra"]} for r in self._records]
 
     def events(self, name: str) -> list[dict[str, object]]:
-        return [call for call in self.calls if call.get("event") == name]
+        return [c for c in self.calls if c.get("event") == name]
 
 
 @pytest.fixture
-def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    import base.log as base_log
-
-    rec = _Recorder()
-    monkeypatch.setattr(base_log, "logger", rec)
-    return rec
+def recorder(loguru_records: LogRecords) -> _Recorder:
+    return _Recorder(loguru_records)
 
 
 def _unit(

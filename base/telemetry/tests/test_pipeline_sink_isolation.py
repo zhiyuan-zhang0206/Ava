@@ -12,11 +12,16 @@ from base.telemetry import pipeline_build
 from base.telemetry.delivery import reporting
 from base.telemetry.metrics import observed_metrics as metrics
 from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 
 def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database: Database,
+    emitted_events: EmittedEvents,
 ) -> None:
     metrics.project_events(database, [])
     monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
@@ -24,8 +29,6 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     diagnostic = Mock()
     monkeypatch.setattr(pipeline_build, "report_no_pipeline", diagnostic)
     monkeypatch.setattr(reporting, "report_no_pipeline", diagnostic)
-    emitted = Mock(side_effect=AssertionError("diagnostics must bypass emitter"))
-    monkeypatch.setattr(telemetry, "emit", emitted)
     exported = Mock()
     monkeypatch.setattr(telemetry_otlp.OtlpBackend, "export_batch", exported)
     event = telemetry.Event(
@@ -57,4 +60,4 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         str(telemetry.event_row(event)["id"]) in next(tmp_path.glob("events-*.jsonl")).read_text()
     )
     diagnostic.assert_called_once()
-    emitted.assert_not_called()
+    assert len(emitted_events) == 0, "diagnostics must bypass the emitter"

@@ -7,5 +7,4 @@
 [debt.first-party-patch]
 "test_bootstrap_credential_free.py#monkeypatch.setattr base.config.service_read.ConfigAuthority.read_env_aliases" = 1
 "test_bootstrap_credential_free.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
-"test_bootstrap_credential_free.py#monkeypatch.setattr base.log.logger.warning" = 1
 "test_impersonation_config.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
