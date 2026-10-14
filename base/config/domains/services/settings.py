@@ -369,6 +369,42 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
         },
     )
 
+    im_push_health_channels: Annotated[list[str], NoDecode] = Field(
+        default=["telegram", "feishu"],
+        alias="AVA_IM_PUSH_HEALTH_CHANNELS",
+        description=(
+            "IM channels that get a periodic push-health sample for the leg-level "
+            "staleness signal (task #4935): the two polling legs. weixin is omitted "
+            "on purpose -- a weixin stall is the iLink context_token expiry, already "
+            "its own signal (im_push_failed). Add a channel when a new polling leg "
+            "needs staleness detection. Parses like AVA_IM_DISABLED_ADAPTERS."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    im_push_health_interval_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        alias="AVA_IM_PUSH_HEALTH_INTERVAL_SECONDS",
+        description=(
+            "Sampling interval (seconds) of the per-leg im_push_health event (task "
+            "#4935). 60 bounds event-stream noise at one line per leg per minute "
+            "while staying well inside the alert rule's 15-minute staleness "
+            "threshold -- tens of fresh samples per alert window."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     ops_concurrency: int = Field(
         default=8,
         alias="AVA_OPS_CONCURRENCY",
@@ -396,14 +432,15 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
                 return [float(x.strip()) for x in v.split(",") if x.strip()]
         return v
 
-    @field_validator("im_disabled_adapters", mode="before")
+    @field_validator("im_disabled_adapters", "im_push_health_channels", mode="before")
     @classmethod
     def _parse_str_list(cls, v: object) -> object:
-        """AVA_IM_DISABLED_ADAPTERS arrives as a raw string (NoDecode).
-        Accept a JSON array ("[\"weixin\", \"feishu\"]"), a comma-separated
-        list ("weixin,feishu"), or an empty value -> [] (Task #855; P0 fix:
-        without this validator any env value raised ValidationError and the
-        settings load crashed every runner)."""
+        """String-list env values arrive as raw strings (NoDecode):
+        AVA_IM_DISABLED_ADAPTERS and AVA_IM_PUSH_HEALTH_CHANNELS. Accept a JSON
+        array ("[\"weixin\", \"feishu\"]"), a comma-separated list
+        ("weixin,feishu"), or an empty value -> [] (Task #855; P0 fix: without
+        this validator any env value raised ValidationError and the settings
+        load crashed every runner)."""
         if isinstance(v, str):
             s = v.strip()
             if not s:

@@ -1,5 +1,6 @@
-exports = ["store.py", "types.py", "worker.py"]
+exports = ["health.py", "store.py", "types.py", "worker.py"]
 
 [uses]
+"health.py" = ["store.py"]
 "store.py" = ["types.py"]
 "worker.py" = ["store.py", "types.py"]

@@ -1,6 +1,7 @@
 """IM intents share atomic acceptance with their timeline or notice producer."""
 
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -494,6 +495,24 @@ class IMOutboxStore:
                     (Jsonb(accounts),),
                 ).fetchall()
             )
+
+    def push_health_snapshot(
+        self, channels: Sequence[str]
+    ) -> dict[str, tuple[int, datetime | None]]:
+        """Per-channel outbox health for the periodic push_health sample (task #4935):
+        waiting pushes (``queued``+``sending``) and the newest delivered push time.
+        Channels with no rows at all are absent from the result."""
+
+        if not channels:
+            return {}
+        with self._pool().connection() as conn:
+            rows = conn.execute(
+                "SELECT channel, count(*) FILTER (WHERE status IN ('queued','sending')), "
+                "max(completed_at) FILTER (WHERE status = 'sent') "
+                "FROM im_bridge_outbound_intents WHERE channel = ANY(%s) GROUP BY channel",
+                (list(channels),),
+            ).fetchall()
+            return {channel: (int(pending), last_ok) for channel, pending, last_ok in rows}
 
     def claim(self, stream: tuple[str, str, str]) -> tuple[int, UUID, OutboundIntent] | None:
         """Atomically start one queued intent; never steal an unresolved attempt.

@@ -49,6 +49,7 @@ from services.entrypoints.im_bridge.config import (
     TelegramCredentialsConfig,
 )
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
+from services.entrypoints.im_bridge.outbound.health import push_health_loop
 from services.entrypoints.im_bridge.types import NETWORK_ERRORS
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -114,6 +115,8 @@ def im_bridge_config() -> ImBridgeConfig:
         im_bridge_replay_messages=settings.services.im_bridge_replay_messages,
         im_bridge_notice_reply_window_seconds=settings.services.im_bridge_notice_reply_window_seconds,
         im_bridge_notice_open_limit=settings.services.im_bridge_notice_open_limit,
+        im_push_health_channels=tuple(settings.services.im_push_health_channels),
+        im_push_health_interval_seconds=settings.services.im_push_health_interval_seconds,
         notices_open_default_limit=settings.display.notices_open_default_limit,
     )
 
@@ -365,6 +368,7 @@ async def run(
                 await core.restore_subscriptions()
                 loops.create_task(liveness_loop(liveness))
                 loops.create_task(notice_loop(core))
+                loops.create_task(push_health_loop(core.outbound_store, config))
                 await asyncio.gather(*(a.start(loops) for a in adapters))
                 if adapters:
                     loops.create_task(timeline_outbound_loop(core, alerts))
