@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import psutil
 import pytest
 
 import base.host.permissions_helper.client as permissions_helper_client
 import base.paths as base_paths
 import cli.commands.lifecycle.start_generation as lifecycle_start_generation
 from base.daemon.health import DaemonProbe
+from base.native_process.ownership import OwnedProcess
+from base.sessions.tests.refuse_helper import refuse_helper
+from base.sessions.tests.scripted_helper import ScriptedHelper, serve
 from cli.commands.data_plane import bringup
 from cli.commands.lifecycle import root_driver as driver
 from services.supervision.roster import plugin_services
@@ -136,26 +141,25 @@ def test_mac_helper_protocol_refuses_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(driver, "helper_spawn_committed", lambda: True)
-    monkeypatch.setattr(driver, "helper_wire_ok", lambda: False)
+    silent = ScriptedHelper(ping=permissions_helper_client.PermissionsHelperError("no socket"))
     with pytest.raises(RuntimeError, match="root_stop_intent_v1"):
         driver.bring_up_root(
-            tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=[]
+            tmp_path,
+            tmp_path,
+            tmp_path / "manifest",
+            object(),
+            {},
+            retained_children=[],
+            helper=serve(silent),
         )
 
 
 @pytest.mark.parametrize("missing", ["root_stop_intent_v1", "helper_shutdown_v1", None])
-def test_helper_admission_requires_normal_retirement_protocol(
-    monkeypatch: pytest.MonkeyPatch, missing: str | None
-) -> None:
+def test_helper_admission_requires_normal_retirement_protocol(missing: str | None) -> None:
     capabilities = {"root_stop_intent_v1": True, "helper_shutdown_v1": True}
     if missing is not None:
         del capabilities[missing]
-    monkeypatch.setattr(
-        permissions_helper_client.PermissionsHelperClient,
-        "ping",
-        lambda _self: capabilities,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert driver.helper_wire_ok() is (missing is None)
+    assert driver.helper_wire_ok(serve(ScriptedHelper(ping=capabilities))) is (missing is None)
 
 
 def test_collector_config_bytes_change_the_live_unit_generation(
@@ -249,17 +253,18 @@ def test_helper_seed_is_durable_before_wire_start(
 
     monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
 
-    def seed(
-        _self: client.PermissionsHelperClient, config: client.RootSeedConfig
-    ) -> client.RootStatus:
+    def seed(config: client.RootSeedConfig) -> client.RootStatus:
         path = tmp_path / "seed.json"
         assert json.loads(path.read_text()) == config
         assert path.stat().st_mode & 0o777 == 0o600
         return {"state": "running", "seeded": True, "restarts": 0, "stop_requested": False}
 
-    monkeypatch.setattr(client.PermissionsHelperClient, "seed_root", seed)
     driver.seed_via_helper(
-        tmp_path, tmp_path, tmp_path / "manifests.json", {"AVA_HOME": str(tmp_path)}
+        tmp_path,
+        tmp_path,
+        tmp_path / "manifests.json",
+        {"AVA_HOME": str(tmp_path)},
+        helper=serve(ScriptedHelper(seed_root=seed)),
     )
 
 
@@ -269,20 +274,19 @@ def test_stop_without_root_ipc_cancels_pending_helper_restart(
     from base.host.permissions_helper import client
 
     monkeypatch.setattr(driver, "helper_spawn_committed", lambda: True)
-    monkeypatch.setattr(driver, "helper_wire_ok", lambda: True)
     monkeypatch.setattr(driver, "require_root_absent", lambda: None)
     calls: list[str] = []
 
-    def keeper(_self: client.PermissionsHelperClient) -> client.RootStatus:
-        return {"state": "backoff", "seeded": True, "restarts": 1, "stop_requested": False}
-
-    def stop(_self: client.PermissionsHelperClient) -> client.RootStatus:
+    def stop() -> client.RootStatus:
         calls.append("durable stop")
         return {"state": "stopped", "seeded": True, "restarts": 1, "stop_requested": True}
 
-    monkeypatch.setattr(client.PermissionsHelperClient, "root_status", keeper)
-    monkeypatch.setattr(client.PermissionsHelperClient, "stop_root", stop)
-    driver.stop_dormant_helper_root(float("inf"))
+    helper = ScriptedHelper(
+        ping={"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True},
+        root_status={"state": "backoff", "seeded": True, "restarts": 1, "stop_requested": False},
+        stop_root=stop,
+    )
+    driver.stop_dormant_helper_root(float("inf"), helper=serve(helper))
     assert calls == ["durable stop"]
 
 
@@ -308,18 +312,20 @@ def test_linux_root_launch_never_consults_a_helper(
         spawned.append(run_dir)
         return SimpleNamespace(pid=123)
 
-    def helper() -> bool:
-        raise AssertionError("Linux root must not consult a helper")
-
     def await_status(_client: object, _run_dir: Path, **_kwargs: object) -> dict[str, Any]:
         return status()
 
     monkeypatch.setattr(driver, "spawn_direct", spawn)
-    monkeypatch.setattr(driver, "helper_wire_ok", helper)
     monkeypatch.setattr(driver, "await_root_status", await_status)
     assert (
         driver.bring_up_root(
-            tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=children
+            tmp_path,
+            tmp_path,
+            tmp_path / "manifest",
+            object(),
+            {},
+            retained_children=children,
+            helper=refuse_helper,
         )
         == status()
     )
@@ -353,12 +359,6 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     def snapshot_now(_client: object) -> dict[str, Any]:
         return snapshot
 
-    def owned(_status: object) -> None:
-        pass
-
-    def no_stop(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("no stop")
-
     def source_identity(_repo: Path) -> str:
         return "a" * 64
 
@@ -367,19 +367,37 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     monkeypatch.setattr(driver, "tree_manifest", tree)
     monkeypatch.setattr(driver, "root_client", object)
     monkeypatch.setattr(driver, "root_status", snapshot_now)
-    monkeypatch.setattr(driver, "require_root_owner", owned)
-    monkeypatch.setattr(driver, "stop_root_process", no_stop)
+    # The recorded root is this process and its helper is the parent, so the real custody
+    # check passes on macOS (elsewhere it stops at the liveness check) and only the
+    # generation comparison can refuse.
+    me = OwnedProcess.capture(psutil.Process())
+    snapshot["root"] = {"pid": me.pid, "create_time": me.birth, "starttime": me.starttime}
+    helper = ScriptedHelper(
+        ping={
+            "pong": True,
+            "root_stop_intent_v1": True,
+            "helper_shutdown_v1": True,
+            "pid": os.getppid(),
+        },
+        root_status={"pid": me.pid, "run_dir": str(tmp_path)},
+    )
     result = driver.ensure_root_service_tree(
-        requested, tmp_path, roles=frozenset({"gateway"}), reconcile=True, retained_children=[]
+        requested,
+        tmp_path,
+        roles=frozenset({"gateway"}),
+        reconcile=True,
+        retained_children=[],
+        helper=serve(helper),
     )
     assert result.failed
     assert published.read_text() == "old generation"
+    assert not {"stop_root", "seed_root"} & set(helper.calls)  # a refused generation never signals
 
 
 def test_mac_boot_tail_does_not_read_or_notify(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(driver.sys, "platform", "darwin")
     monkeypatch.setattr(driver, "root_client", lambda: pytest.fail("no root read"))
-    driver.complete_boot_start()
+    driver.complete_boot_start(helper=refuse_helper)
 
 
 def test_root_launch_digest_controls_reuse(tmp_path: Path) -> None:
@@ -519,19 +537,18 @@ def test_unusable_helper_socket_requires_positive_native_absence(
 
     monkeypatch.setattr(driver, "helper_spawn_committed", lambda: True)
 
-    def unavailable(_self: client.PermissionsHelperClient) -> client.RootStatus:
-        raise client.PermissionsHelperError("AF_UNIX path too long")
-
     def query(_target: str, _deadline: float) -> str | None:
         return "state = spawn scheduled" if loaded else None
 
-    monkeypatch.setattr(client.PermissionsHelperClient, "root_status", unavailable)
     monkeypatch.setattr(launchd_job, "retirement_query", query)
+    unavailable = serve(
+        ScriptedHelper(root_status=client.PermissionsHelperError("AF_UNIX path too long"))
+    )
     if loaded:
         with pytest.raises(RuntimeError, match="custody is unavailable"):
-            driver.stop_dormant_helper_root(float("inf"))
+            driver.stop_dormant_helper_root(float("inf"), helper=unavailable)
     else:
-        driver.stop_dormant_helper_root(float("inf"))
+        driver.stop_dormant_helper_root(float("inf"), helper=unavailable)
 
 
 def test_plugin_birth_config_is_part_of_the_existing_unit_generation(
@@ -627,8 +644,6 @@ def test_a_boot_attempt_still_brings_up_a_unit_with_budget_left(
 def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from base.host.permissions_helper import client
-
     monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
     exited = {
         "state": "exited",
@@ -638,11 +653,11 @@ def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
         "last_exit": {"kind": "crash", "code": 1, "at": 0.0},
     }
 
-    def seed_root(_self: object, _config: object) -> dict[str, Any]:
-        return exited
-
-    monkeypatch.setattr(client.PermissionsHelperClient, "seed_root", seed_root)
     with pytest.raises(driver.RootDriverError, match="stopped restarting"):
         driver.seed_via_helper(
-            tmp_path, tmp_path, tmp_path / "manifests.json", {"AVA_HOME": str(tmp_path)}
+            tmp_path,
+            tmp_path,
+            tmp_path / "manifests.json",
+            {"AVA_HOME": str(tmp_path)},
+            helper=serve(ScriptedHelper(seed_root=exited)),
         )

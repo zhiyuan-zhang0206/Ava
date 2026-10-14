@@ -14,8 +14,9 @@ from base.cluster import session_name
 from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
+from base.host.permissions_helper.client import HelperFactory
 from base.log import logger
-from base.sessions.helperproc import helper_client
+from base.sessions.helperproc import HELPER_PROTOCOLS, helper_spawn_committed, helper_wire_ok
 from cli.commands.probe import ReadinessWait
 from cli.start_runtime import StartRuntime
 from services.supervision.roster import service_spec
@@ -25,7 +26,6 @@ _ROOT_SOCKET_NAME = "ava-root.sock"
 _ROOT_STDOUT_LOG = "root.stdout.log"
 _ROOT_STDERR_LOG = "root.stderr.log"
 _WIRING_REF = "services.supervision.ava_root_glue.glue:build_wiring"
-_HELPER_PROTOCOLS = ("root_stop_intent_v1", "helper_shutdown_v1")
 
 # Root binds IPC after spawning its units.
 _ROOT_READY_TIMEOUT_S = 30.0
@@ -39,7 +39,7 @@ class RootDriverError(RuntimeError):
     """The root-driven tree could not be brought up, reconciled or stopped."""
 
 
-def complete_boot_start() -> None:
+def complete_boot_start(*, helper: HelperFactory) -> None:
     """Hand Linux systemd the verified root after ordinary readiness succeeds."""
     if sys.platform != "linux":
         return
@@ -53,7 +53,7 @@ def complete_boot_start() -> None:
     snapshot = root_status(root_client())
     if snapshot is None:
         raise RootDriverError("cannot hand systemd an unobservable root")
-    require_root_owner(snapshot)
+    require_root_owner(snapshot, helper=helper)
     publish_root_ready(home, native_identity(snapshot["root"]))
 
 
@@ -144,24 +144,7 @@ def _call_ok(response: dict[str, Any], what: str) -> None:
         raise RootDriverError(f"{what} failed: {response.get('code')}: {response.get('error')}")
 
 
-def helper_spawn_committed() -> bool:
-    """macOS service ancestry is mandatory, independent of a runtime switch."""
-    return sys.platform == "darwin"
-
-
-def helper_wire_ok() -> bool:
-    """Whether the permission helper answers on this cluster's socket."""
-    from base.host.permissions_helper.client import PermissionsHelperError
-
-    try:
-        ping = helper_client().ping()
-    except (PermissionsHelperError, OSError):
-        # Socket absent / refused / timed out / helper error reply: not answering.
-        return False
-    return all(ping.get(capability) is True for capability in _HELPER_PROTOCOLS)
-
-
-def require_root_owner(status: dict[str, Any]) -> None:
+def require_root_owner(status: dict[str, Any], *, helper: HelperFactory) -> None:
     """Bind every reused or stopped root to its required live native parent."""
     import psutil
 
@@ -174,19 +157,19 @@ def require_root_owner(status: dict[str, Any]) -> None:
         raise RootDriverError("recorded root native birth is no longer live")
     if not helper_spawn_committed():
         return
-    ping = helper_client().ping()
-    if not all(ping.get(capability) is True for capability in _HELPER_PROTOCOLS):
-        raise RootDriverError(f"required helper lacks lifecycle protocols: {_HELPER_PROTOCOLS}")
+    ping = helper().ping()
+    if not all(ping.get(capability) is True for capability in HELPER_PROTOCOLS):
+        raise RootDriverError(f"required helper lacks lifecycle protocols: {HELPER_PROTOCOLS}")
     helper_pid = ping.get("pid")
     if isinstance(helper_pid, bool) or not isinstance(helper_pid, int) or helper_pid <= 1:
         raise RootDriverError("required helper omitted its native process")
-    helper = OwnedProcess.capture(psutil.Process(helper_pid))
-    keeper = helper_client().root_status()
+    helper_process = OwnedProcess.capture(psutil.Process(helper_pid))
+    keeper = helper().root_status()
     if (
         keeper.get("pid") != root.pid
         or keeper.get("run_dir") != str(root_run_dir())
-        or psutil.Process(root.pid).ppid() != helper.pid
-        or not helper.live()
+        or psutil.Process(root.pid).ppid() != helper_process.pid
+        or not helper_process.live()
         or not root.live()
     ):
         raise RootDriverError("root is outside this home's signed-helper custody")
@@ -303,6 +286,8 @@ def seed_via_helper(
     manifests: Path,
     env: dict[str, str],
     runtime: StartRuntime | None = None,
+    *,
+    helper: HelperFactory,
 ) -> None:
     """Seed the root keeper and wait for it to report the root `running`."""
     from base.host.permissions_helper.client import RootSeedConfig
@@ -319,7 +304,7 @@ def seed_via_helper(
             "env": env,
         }
         write_text_atomic(run_dir / "seed.json", json.dumps(seed), mode=0o600, sync_parent=True)
-        wire = helper_client().seed_root(seed)
+        wire = helper().seed_root(seed)
     except Exception as exc:
         raise RootDriverError(f"root_seed over the helper failed: {exc}") from exc
     deadline = time.monotonic() + _ROOT_READY_TIMEOUT_S
@@ -341,7 +326,7 @@ def seed_via_helper(
             raise RootDriverError(f"the root keeper rejected the seed: {seed_error}")
         poll_sleep(_READY_POLL_INTERVAL_S)
         try:
-            wire = helper_client().root_status()
+            wire = helper().root_status()
         except Exception as exc:
             raise RootDriverError(f"root_status over the helper failed: {exc}") from exc
     raise RootDriverError(
@@ -359,16 +344,17 @@ def bring_up_root(
     runtime: StartRuntime | None = None,
     *,
     retained_children: list[subprocess.Popen[bytes]],
+    helper: HelperFactory,
 ) -> dict[str, Any]:
     """Start through the required platform owner; never change ownership on failure."""
     if helper_spawn_committed():
-        if not helper_wire_ok():
+        if not helper_wire_ok(helper):
             raise RootDriverError(
-                f"the macOS helper is unreachable or lacks {_HELPER_PROTOCOLS}; prepare and "
+                f"the macOS helper is unreachable or lacks {HELPER_PROTOCOLS}; prepare and "
                 "activate a reviewed signed helper supporting durable root stop before "
                 "starting services. Refusing direct spawning outside the permission ancestry"
             )
-        seed_via_helper(run_dir, repo, manifests, env, runtime)
+        seed_via_helper(run_dir, repo, manifests, env, runtime, helper=helper)
         return await_root_status(client, run_dir)
     proc = spawn_direct(run_dir, repo, manifests, env, runtime, retained_children=retained_children)
     print(f"  + ava-root spawned directly (pid {proc.pid})")
@@ -392,15 +378,15 @@ def changed_units(manifest: dict[str, object], status: dict[str, Any]) -> set[st
 
 
 def stop_root_process(
-    run_dir: Path, client: Any, status: dict[str, Any], *, timeout_s: float
+    run_dir: Path, client: Any, status: dict[str, Any], *, timeout_s: float, helper: HelperFactory
 ) -> None:
     """Stop through the keeper on macOS, or SIGTERM; await native root exit."""
     from base.native_process.root_control.client import native_identity
 
-    require_root_owner(status)
+    require_root_owner(status, helper=helper)
     identity = native_identity(status["root"])
     if helper_spawn_committed():
-        if not helper_wire_ok():
+        if not helper_wire_ok(helper):
             raise RootDriverError(
                 "the required macOS helper is unreachable — refusing to "
                 "signal a helper-seeded root directly (the keeper would restart it); stop it "
@@ -408,7 +394,7 @@ def stop_root_process(
             )
 
         try:
-            reply = helper_client().stop_root()
+            reply = helper().stop_root()
         except Exception as exc:
             raise RootDriverError(f"root_stop over the helper failed: {exc}") from exc
         if reply.get("stop_requested") is not True:
@@ -504,6 +490,7 @@ def admit_live_start(
     roles: MachineRoles,
     *,
     reconcile: bool,
+    helper: HelperFactory,
 ) -> bool:
     """Observe before any converge/schema write; reuse only identical inputs."""
     from cli.commands.lifecycle.start_generation import launch_digest
@@ -512,7 +499,7 @@ def admit_live_start(
     if status is None:
         require_root_absent()
         return False
-    require_root_owner(status)
+    require_root_owner(status, helper=helper)
     manifest = tree_manifest(roster, repo, roles=roles)
     from base.paths import ava_home
 
@@ -528,6 +515,7 @@ def ensure_root_service_tree(
     roles: MachineRoles,
     reconcile: bool,
     retained_children: list[subprocess.Popen[bytes]],
+    helper: HelperFactory,
     runtime: StartRuntime | None = None,
     honor_restart_budget: bool = False,
 ) -> LaunchOutcome:
@@ -548,7 +536,7 @@ def ensure_root_service_tree(
     try:
         status = root_status(client)
         if status is not None:
-            require_root_owner(status)
+            require_root_owner(status, helper=helper)
             require_same_generation(manifest, status, roster, reconcile=reconcile)
         units = root_units(status) if status is not None else {}
         for spec in roster:
@@ -563,9 +551,16 @@ def ensure_root_service_tree(
             require_root_absent()
             write_manifest(manifests, manifest)
             status = bring_up_root(
-                run_dir, repo, manifests, client, env, runtime, retained_children=retained_children
+                run_dir,
+                repo,
+                manifests,
+                client,
+                env,
+                runtime,
+                retained_children=retained_children,
+                helper=helper,
             )
-            require_root_owner(status)
+            require_root_owner(status, helper=helper)
             require_same_generation(manifest, status, roster, reconcile=reconcile)
         status = reconcile_units(roster, client, status, honor_restart_budget=honor_restart_budget)
     except RootDriverError as exc:
@@ -588,6 +583,7 @@ def launch_service_tree(
     *,
     reconcile: bool,
     retained_children: list[subprocess.Popen[bytes]],
+    helper: HelperFactory,
     runtime: StartRuntime | None = None,
     honor_restart_budget: bool = False,
 ) -> LaunchOutcome:
@@ -598,6 +594,7 @@ def launch_service_tree(
         roles=roles,
         reconcile=reconcile,
         retained_children=retained_children,
+        helper=helper,
         runtime=runtime,
         honor_restart_budget=honor_restart_budget,
     )
@@ -718,7 +715,7 @@ def root_tree_selection() -> dict[str, str]:
     return {session_name(unit_id): unit_id for unit_id in root_units(status)}
 
 
-def stop_dormant_helper_root(deadline: float) -> None:
+def stop_dormant_helper_root(deadline: float, *, helper: HelperFactory) -> None:
     """Revoke a pending keeper restart even when no root IPC is serving."""
     if not helper_spawn_committed():
         return
@@ -730,7 +727,7 @@ def stop_dormant_helper_root(deadline: float) -> None:
     )
 
     try:
-        keeper = helper_client().root_status()
+        keeper = helper().root_status()
     except PermissionsHelperError as exc:
         target = f"{helper_job_domain()}/{helper_job_label()}"
         if retirement_query(target, deadline) is None:
@@ -742,7 +739,7 @@ def stop_dormant_helper_root(deadline: float) -> None:
         return
     if keeper.get("pid") is not None or keeper["state"] == "conflict":
         raise RootDriverError("helper owns a root without usable IPC; custody requires recovery")
-    if not helper_wire_ok() or helper_client().stop_root().get("stop_requested") is not True:
+    if not helper_wire_ok(helper) or helper().stop_root().get("stop_requested") is not True:
         raise RootDriverError("helper did not persist stop of its dormant root")
     require_root_absent()
 
@@ -752,6 +749,7 @@ def stop_root_service_tree(
     preserve: frozenset[str],
     timeout_s: float = _ROOT_STOP_TIMEOUT_S,
     force: bool = False,
+    helper: HelperFactory,
 ) -> None:
     """Stop the root-owned tree — everything, or only the units not preserved.
 
@@ -767,11 +765,11 @@ def stop_root_service_tree(
     status = root_status(client)
     if status is None:
         require_root_absent()
-        stop_dormant_helper_root(deadline)
+        stop_dormant_helper_root(deadline, helper=helper)
         print("  ava-root: no live owner or retained service custody")
         return
     units = root_units(status)
-    require_root_owner(status)
+    require_root_owner(status, helper=helper)
     preserved = set(units) & preserve
     stop_ids = sorted(set(units) - preserved)
     if not stop_ids and preserved:
@@ -789,6 +787,10 @@ def stop_root_service_tree(
         return
     print(f"  ava-root: stopping the whole tree ({len(stop_ids)} unit(s)) and the root")
     stop_root_process(
-        root_run_dir(), client, status, timeout_s=max(0.0, deadline - time.monotonic())
+        root_run_dir(),
+        client,
+        status,
+        timeout_s=max(0.0, deadline - time.monotonic()),
+        helper=helper,
     )
     print("  ✓ ava-root stopped (tree down, root exited)")

@@ -12,6 +12,7 @@ import pytest
 
 from base.deploy.release.start_inputs import configuration_digest
 from base.host.runtime_interpreter import source_digest
+from base.sessions.tests.refuse_helper import refuse_helper
 from cli.commands.lifecycle.start_generation import launch_digest
 
 
@@ -120,7 +121,9 @@ def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(driver, "require_root_absent", unknown)
     with pytest.raises(RuntimeError, match="retained child custody"):
-        driver.admit_live_start((), Path("/unread-source"), frozenset({"gateway"}), reconcile=True)
+        driver.admit_live_start(
+            (), Path("/unread-source"), frozenset({"gateway"}), reconcile=True, helper=refuse_helper
+        )
 
 
 def test_loaded_source_identity_is_explicit_and_changes_with_source(
