@@ -16,7 +16,10 @@ Each converge operation creates one lazy `ConfigBoot` and passes it through the
 required `ConvergeCtx.config` field. Its required `producer` borrows the entry's
 same lazy event-pipeline owner; LGTM render failures use that writer without
 constructing another pipeline. Its required `database_factory` borrows the
-entry's operator owner across all selected steps. Host capability steps and OS
+entry's operator owner across all selected steps. Its required `helper` is the
+invocation's `CommandRuntime.helper` factory: the screen-capture, Accessibility and
+helper bring-up steps call it only on a macOS host that can run a helper, and a
+test that does not mean to reach one passes `refuse_helper`. Host capability steps and OS
 job registrations read that owner's live view
 at each existing step boundary, including browser, permission helpers, memory,
 transfer, GitHub PR checks, the package refresh cadence and WAL-G schedule.

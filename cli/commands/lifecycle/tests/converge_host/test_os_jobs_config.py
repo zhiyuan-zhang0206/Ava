@@ -10,6 +10,7 @@ from base.cluster.derive import production_identity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.os_jobs import (
     ensure_cluster_autostart,
@@ -82,6 +83,7 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=machine_from_boot(owner),
+        helper=refuse_helper,
     )
     readers: list[Callable[[], bool]] = []
     ticks: list[Callable[[], int]] = []
@@ -171,6 +173,7 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=machine_from_boot(owner),
+        helper=refuse_helper,
     )
     monkeypatch.setattr(cron, "is_macos", lambda: platform == "macos")
     monkeypatch.setattr(cron, "is_linux", lambda: platform != "macos")

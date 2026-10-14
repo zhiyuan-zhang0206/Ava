@@ -11,13 +11,17 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 import psutil
 
-from base.host.permissions_helper.client import PermissionsHelperClient
+from base.host.permissions_helper.client import (
+    HelperFactory,
+    PermissionsHelperClient,
+    PermissionsHelperError,
+)
 from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
@@ -25,6 +29,8 @@ from base.paths import logs_dir, permissions_helper_socket, run_dir
 from base.sessions.protocol import SessionBackend
 from base.sessions.record import SessionRecord
 
+# What a helper must answer `ping` with before the lifecycle trusts it with a root's custody.
+HELPER_PROTOCOLS = ("root_stop_intent_v1", "helper_shutdown_v1")
 _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 _CREATE_TIME_TOLERANCE_S = 2.0
 _DEAD_CHILD_SENTINEL = -1.0
@@ -101,6 +107,21 @@ def helper_client() -> PermissionsHelperClient:
     )
 
 
+def helper_spawn_committed() -> bool:
+    """macOS service ancestry is mandatory, independent of a runtime switch."""
+    return sys.platform == "darwin"
+
+
+def helper_wire_ok(helper: HelperFactory) -> bool:
+    """Whether the permission helper answers on this cluster's socket."""
+    try:
+        ping = helper().ping()
+    except (PermissionsHelperError, OSError):
+        # Socket absent / refused / timed out / helper error reply: not answering.
+        return False
+    return all(ping.get(capability) is True for capability in HELPER_PROTOCOLS)
+
+
 def spawn_via_helper(
     client: PermissionsHelperClient,
     name: str,
@@ -149,7 +170,7 @@ def _wait_until_dead(process: psutil.Process, timeout: float) -> bool:
 class HelperProcSessionBackend(SessionBackend):
     """Named sessions whose processes are direct children of the macOS helper."""
 
-    def __init__(self, client_factory: Callable[[], PermissionsHelperClient]) -> None:
+    def __init__(self, client_factory: HelperFactory) -> None:
         # A factory, not a client: only a spawn dials the helper, and a process that merely
         # lists sessions (the gateway) must not read the helper port to build one.
         self._client_factory = client_factory

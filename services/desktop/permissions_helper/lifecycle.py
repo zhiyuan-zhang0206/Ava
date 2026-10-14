@@ -22,6 +22,7 @@ from pathlib import Path
 
 import base.paths
 from base.config import settings
+from base.host.permissions_helper.client import HelperFactory
 from base.host.proc import run_bounded
 from base.log import logger
 from base.paths import logs_dir, permissions_helper_socket
@@ -654,7 +655,7 @@ def refuse_foreign_label_jobs() -> None:
         )
 
 
-def install_and_load(app: Path, *, rebuilt: bool) -> None:
+def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory) -> None:
     """Write the LaunchAgent plist and ensure launchd is running this binary.
 
     A loaded helper is only observed. Replacement requires an external stop
@@ -693,7 +694,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
         clear_helper_stop_intent(base.paths.ava_home())
         path.write_bytes(new_bytes)
         run_tool(["launchctl", "bootstrap", launchd_domain(), str(path)])
-    if not helper_answers_ping():
+    if not helper_answers_ping(helper):
         raise PermissionsHelperBuildError(
             "permissions helper is unresponsive; custody is unknown. Diagnose the native job "
             "externally; start will not bootout or kickstart its possible ancestor"
@@ -705,13 +706,12 @@ def helper_socket() -> Path:
     return permissions_helper_socket(settings.services.permissions_helper_port)
 
 
-def helper_answers_ping() -> bool:
+def helper_answers_ping(helper: HelperFactory) -> bool:
     from base.host.permissions_helper import client
-    from base.sessions.helperproc import helper_client
 
     for attempt in range(_HELPER_PING_ATTEMPTS):
         try:
-            reply = helper_client().ping()
+            reply = helper().ping()
         except (client.PermissionsHelperError, OSError, ValueError):
             reply = None
         if reply is not None and reply.get("pong") is True:
@@ -740,9 +740,9 @@ def _require_usable_socket_paths() -> None:
             )
 
 
-def converge() -> None:
+def converge(*, helper: HelperFactory) -> None:
     """Idempotent full bring-up: cert, build+sign, load. Raises on any failure."""
     _require_usable_socket_paths()
     ensure_signing_cert()
     app, rebuilt = build_and_sign(destination=settings.services.permissions_helper_artifact_dir)
-    install_and_load(app, rebuilt=rebuilt)
+    install_and_load(app, rebuilt=rebuilt, helper=helper)

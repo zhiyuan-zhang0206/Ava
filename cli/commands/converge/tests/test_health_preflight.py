@@ -15,6 +15,7 @@ import pytest
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineRoles
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import health_preflight as _hp
 from cli.commands.converge.spec import ConvergeCtx
@@ -46,6 +47,7 @@ def _preflight_ctx(
         database_factory=operator_database,
         producer=producer,
         machine=command_runtime.machine,
+        helper=refuse_helper,
     )
 
 
@@ -386,6 +388,7 @@ def _git_repo(
         database_factory=operator_database,
         producer=producer,
         machine=command_runtime.machine,
+        helper=refuse_helper,
     )
     return ctx, head, first
 
@@ -453,6 +456,7 @@ def test_checkout_worktree_skipped(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        helper=refuse_helper,
     )
     (wt / "stray.txt").write_text("dirty\n")
 

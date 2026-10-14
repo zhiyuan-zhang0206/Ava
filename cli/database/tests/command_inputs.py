@@ -6,6 +6,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
+from base.sessions.tests.refuse_helper import refuse_helper
 from cli.database.runtime import CommandRuntime
 
 __all__ = ["command_config_machine", "command_machine", "command_runtime"]
@@ -15,7 +16,7 @@ __all__ = ["command_config_machine", "command_machine", "command_runtime"]
 def command_runtime() -> CommandRuntime:
     """Own function-local config overlays and identity caches for this invocation."""
     config = snapshot_process_config()
-    return CommandRuntime(config=config, machine=machine_from_boot(config))
+    return CommandRuntime(config=config, machine=machine_from_boot(config), helper=refuse_helper)
 
 
 @pytest.fixture

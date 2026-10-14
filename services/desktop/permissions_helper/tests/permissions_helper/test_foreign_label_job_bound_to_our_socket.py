@@ -9,6 +9,8 @@ import pytest
 
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperClient
+from base.sessions.tests.refuse_helper import refuse_helper
+from base.sessions.tests.scripted_helper import ScriptedHelper, serve
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_helper as fake_helper,
 )
@@ -102,7 +104,7 @@ def test_long_mac_ipc_path_refuses_before_signing_or_native_jobs(
         lifecycle, "ensure_signing_cert", lambda: pytest.fail("must refuse before signing")
     )
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="shorter cluster home"):
-        lifecycle.converge()
+        lifecycle.converge(helper=refuse_helper)
 
 
 def test_overlong_socket_is_typed_unavailability() -> None:
@@ -111,14 +113,10 @@ def test_overlong_socket_is_typed_unavailability() -> None:
 
 
 @pytest.mark.parametrize("capability", ["root_stop_intent_v1", "helper_shutdown_v1"])
-def test_helper_ping_refuses_missing_stop_capability(
-    monkeypatch: pytest.MonkeyPatch, capability: str
-) -> None:
-    from base.host.permissions_helper import client
+def test_helper_ping_refuses_missing_stop_capability(capability: str) -> None:
     from services.desktop.permissions_helper import lifecycle
 
     reply = {"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True}
     reply.pop(capability)
-    monkeypatch.setattr(client.PermissionsHelperClient, "ping", lambda _self: reply)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="upgrade its signed artifact"):
-        lifecycle.helper_answers_ping()
+        lifecycle.helper_answers_ping(serve(ScriptedHelper(ping=reply)))

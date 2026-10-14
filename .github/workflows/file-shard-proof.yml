@@ -32,21 +32,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p tmp
-          timeout --kill-after=15s 4m uv run python -u - <<'PY' 2>&1 | tee tmp/file-plan-collection.log
-          from scripts.ci.collection_tracebacks import periodic_tracebacks
-
-          with open("tmp/file-plan-stacks.log", "w") as stacks:
-              with periodic_tracebacks(stacks):
-                  import pytest
-
-                  raise SystemExit(pytest.main([
-                      "-c", "pyproject.toml", "--rootdir=.", "--collect-only", "-qq",
-                      "--ignore=tests/e2e", "-m", "not flaky", "--omit-static-tests",
-                      "-o", "junit_family=xunit1", "-o", "faulthandler_timeout=300",
-                      "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=16",
-                      "--file-shard-plan=tmp/file-plan.json",
-                  ]))
-          PY
+          timeout --kill-after=15s 4m uv run python -u -m scripts.ci.pull_requests.plan_file_shards \
+            --count 16 --plan tmp/file-plan.json --stacks tmp/file-plan-stacks.log \
+            2>&1 | tee tmp/file-plan-collection.log
       - name: Publish planning diagnostics, including failed collection
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

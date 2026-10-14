@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from base.sessions.tests.refuse_helper import refuse_helper
 from cli.commands.lifecycle import root_driver as driver
 from cli.commands.lifecycle.tests.test_root_driver import (
     status,
@@ -74,18 +75,14 @@ def test_signals_reject_reuse_inside_legacy_birth_tolerance(
     def legacy_match(_self: OwnedProcess, _process: object) -> bool:
         return True  # Both births fit the retired +/- 2 second compatibility window.
 
-    def owned(_status: object) -> None:
-        pass
-
     monkeypatch.setattr(psutil, "Process", process)
     monkeypatch.setattr(OwnedProcess, "live", live)
     monkeypatch.setattr(OwnedProcess, "capture", staticmethod(capture))
     monkeypatch.setattr(OwnedProcess, "birth_matches", legacy_match)
-    monkeypatch.setattr(driver, "require_root_owner", owned)
     monkeypatch.setattr(driver, "helper_spawn_committed", lambda: False)
     with pytest.raises(RuntimeError, match="identity changed"):
         snapshot = {"root": {"pid": old.pid, "create_time": old.birth, "starttime": old.starttime}}
-        driver.stop_root_process(tmp_path, object(), snapshot, timeout_s=0)
+        driver.stop_root_process(tmp_path, object(), snapshot, timeout_s=0, helper=refuse_helper)
     assert signals == []
 
 
@@ -126,11 +123,10 @@ def test_root_signals_use_start_ticks_when_wall_birth_moves(
     monkeypatch.setattr(psutil, "Process", process)
     monkeypatch.setattr(OwnedProcess, "capture", staticmethod(capture))
     monkeypatch.setattr(OwnedProcess, "live", live)
-    monkeypatch.setattr(driver, "require_root_owner", ignore)
     monkeypatch.setattr(driver, "helper_spawn_committed", lambda: False)
     monkeypatch.setattr(driver, "root_status", ignore)
     snapshot = {"root": {"pid": captured.pid, "create_time": captured.birth, "starttime": 100}}
-    driver.stop_root_process(tmp_path, object(), snapshot, timeout_s=1)
+    driver.stop_root_process(tmp_path, object(), snapshot, timeout_s=1, helper=refuse_helper)
     assert signals == ["term"]
 
 
@@ -158,7 +154,13 @@ def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(
     children: list[subprocess.Popen[bytes]] = []
     try:
         driver.bring_up_root(
-            tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=children
+            tmp_path,
+            tmp_path,
+            tmp_path / "manifest",
+            object(),
+            {},
+            retained_children=children,
+            helper=refuse_helper,
         )
     except driver.RootDriverError:
         assert readiness_fails

@@ -9,6 +9,9 @@ from pathlib import Path
 import pytest
 
 from base import paths
+from base.host.permissions_helper.client import HelperFactory
+from base.sessions.tests.refuse_helper import refuse_helper
+from base.sessions.tests.scripted_helper import ScriptedHelper, serve
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     TEST_CERT_SHA1,
     fake_tools,
@@ -527,17 +530,16 @@ def test_helper_ping_settles_until_cold_start_answers(
     ]
     sleeps: list[float] = []
 
-    def ping(_self: client.PermissionsHelperClient) -> dict[str, object]:
+    def ping() -> dict[str, object]:
         reply = replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
         assert isinstance(reply, dict)
         return reply
 
-    monkeypatch.setattr(client.PermissionsHelperClient, "ping", ping)
     monkeypatch.setattr(time, "sleep", sleeps.append)
 
-    assert lifecycle.helper_answers_ping()
+    assert lifecycle.helper_answers_ping(serve(ScriptedHelper(ping=ping)))
     assert sleeps == [0.5, 0.5, 0.5]
 
 
@@ -553,7 +555,7 @@ def test_loaded_helper_changes_refuse_before_any_mutation(
     path = lifecycle.plist_path()
     before = path.read_bytes() if path.exists() else None
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="stop and unregister"):
-        lifecycle.install_and_load(app, rebuilt=not changed)
+        lifecycle.install_and_load(app, rebuilt=not changed, helper=refuse_helper)
     assert (path.read_bytes() if path.exists() else None) == before
     assert run_calls == probe_calls == []
 
@@ -564,32 +566,33 @@ def test_unresponsive_loaded_helper_keeps_unknown_custody(
     from services.desktop.permissions_helper import lifecycle
 
     app, run_calls, probe_calls = install_env(monkeypatch, tmp_path, loaded=True)
-    monkeypatch.setattr(lifecycle, "helper_answers_ping", lambda: False)
+
+    def unanswered(_helper: HelperFactory) -> bool:
+        return False
+
+    monkeypatch.setattr(lifecycle, "helper_answers_ping", unanswered)
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="custody is unknown"):
-        lifecycle.install_and_load(app, rebuilt=False)
+        lifecycle.install_and_load(app, rebuilt=False, helper=refuse_helper)
     assert run_calls == probe_calls == []
 
 
 def test_unloaded_helper_bootstraps_and_must_answer_ping(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from base.host.permissions_helper import client
     from services.desktop.permissions_helper import lifecycle
 
     app, run_calls, _ = install_env(monkeypatch, tmp_path, loaded=False, matching_plist=False)
-    monkeypatch.setattr(
-        client.PermissionsHelperClient,
-        "ping",
-        lambda _self: {  # pyright: ignore[reportUnknownArgumentType]
+    helper = ScriptedHelper(
+        ping={
             "pong": True,
             "preflight_screen": True,
             "ax_trusted": True,
             "root_stop_intent_v1": True,
             "helper_shutdown_v1": True,
-        },
+        }
     )
 
-    lifecycle.install_and_load(app, rebuilt=False)
+    lifecycle.install_and_load(app, rebuilt=False, helper=serve(helper))
 
     assert ["launchctl", "bootstrap", "gui/501", str(lifecycle.plist_path())] in run_calls
     plist = plistlib.loads(lifecycle.plist_path().read_bytes())
@@ -604,16 +607,18 @@ def test_helper_start_clears_shutdown_intent_only_after_native_job_absence(
     from services.desktop.permissions_helper import lifecycle
 
     app, commands, _ = install_env(monkeypatch, tmp_path, loaded=loaded)
-    monkeypatch.setattr(lifecycle, "helper_answers_ping", lambda: True)
+    helper = serve(
+        ScriptedHelper(ping={"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True})
+    )
     marker = tmp_path / "run" / "ava-root" / "helper-stopped"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_bytes(b"stopped\n")
     marker.chmod(0o600)
     if loaded:
         with pytest.raises(lifecycle.PermissionsHelperBuildError, match="retirement is incomplete"):
-            lifecycle.install_and_load(app, rebuilt=False)
+            lifecycle.install_and_load(app, rebuilt=False, helper=helper)
         assert marker.read_bytes() == b"stopped\n" and commands == []
     else:
-        lifecycle.install_and_load(app, rebuilt=False)
+        lifecycle.install_and_load(app, rebuilt=False, helper=helper)
         assert not marker.exists()
         assert [cmd[1] for cmd in commands] == ["bootstrap"]

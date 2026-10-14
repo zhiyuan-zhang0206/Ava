@@ -34,6 +34,7 @@ from typing import cast
 
 import psutil
 
+from base.host.permissions_helper.client import HelperAtSocket
 from base.host.proc import run_bounded
 from base.native_process.ownership import OwnedProcess, capture_tree, leader_owns_pids
 
@@ -189,9 +190,9 @@ def retirement_plist(path: Path, home: Path, socket_path: Path) -> tuple[bytes, 
     return original, argv[0]
 
 
-def retirement_owner(state: str, socket_path: Path, executable: str) -> OwnedProcess:
-    from base.host.permissions_helper.client import PermissionsHelperClient
-
+def retirement_owner(
+    state: str, socket_path: Path, executable: str, *, connect: HelperAtSocket
+) -> OwnedProcess:
     match = re.search(r"^\s*pid = (\d+)\s*$", state, re.MULTILINE)
     if match is None:
         raise RuntimeError("loaded helper lacks a native owner; retirement requires reconciliation")
@@ -203,21 +204,21 @@ def retirement_owner(state: str, socket_path: Path, executable: str) -> OwnedPro
         raise RuntimeError("loaded helper executable does not match its home job")
     if leader_owns_pids(owner, {os.getpid()}):
         raise RuntimeError("cannot unregister the caller's permissions-helper ancestor")
-    reply = PermissionsHelperClient(socket_path).ping()
+    reply = connect(socket_path).ping()
     if (
         reply.get("pid") != owner.pid
         or reply.get("root_stop_intent_v1") is not True
         or reply.get("helper_shutdown_v1") is not True
     ):
         raise RuntimeError("helper socket does not prove this native job and stop protocol")
-    _require_empty_helper(owner, socket_path)
+    _require_empty_helper(owner, socket_path, connect=connect)
     return owner
 
 
-def _require_empty_helper(owner: OwnedProcess, socket_path: Path) -> None:
-    from base.host.permissions_helper.client import PermissionsHelperClient
-
-    client = PermissionsHelperClient(socket_path)
+def _require_empty_helper(
+    owner: OwnedProcess, socket_path: Path, *, connect: HelperAtSocket
+) -> None:
+    client = connect(socket_path)
     root = client.root_status()
     stopped = root["state"] == "stopped" and root["stop_requested"] is True
     unseeded = root["state"] == "unseeded" and root["seeded"] is False
@@ -228,7 +229,12 @@ def _require_empty_helper(owner: OwnedProcess, socket_path: Path) -> None:
 
 
 def unregister_helper(
-    home: Path, *, helper_port: int, timeout_s: float = 30.0, force: bool = False
+    home: Path,
+    *,
+    helper_port: int,
+    connect: HelperAtSocket,
+    timeout_s: float = 30.0,
+    force: bool = False,
 ) -> None:
     """Retire only this home's stopped helper; uncertainty retains its registry slot.
 
@@ -247,17 +253,19 @@ def unregister_helper(
     run_dir = home / "run" / "ava-root"
     run_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_s
-    original = None if force else _request_helper_shutdown(home, helper_port, deadline)
+    original = None if force else _request_helper_shutdown(home, helper_port, deadline, connect)
     lock_fd = acquire_instance_lock(run_dir)
     try:
-        _unregister_stopped_helper(home, helper_port, deadline, force=force, expected=original)
+        _unregister_stopped_helper(
+            home, helper_port, deadline, force=force, expected=original, connect=connect
+        )
     finally:
         release_instance_lock(lock_fd)
 
 
-def _request_helper_shutdown(home: Path, port: int, deadline: float) -> bytes | None:
-    from base.host.permissions_helper.client import PermissionsHelperClient
-
+def _request_helper_shutdown(
+    home: Path, port: int, deadline: float, connect: HelperAtSocket
+) -> bytes | None:
     target = f"{helper_job_domain()}/{helper_job_label(home)}"
     state = retirement_query(target, deadline)
     if state is None:
@@ -268,10 +276,10 @@ def _request_helper_shutdown(home: Path, port: int, deadline: float) -> bytes | 
     if _job_pid(state) is None:
         _require_idle_job(state, home)
         return original
-    owner = retirement_owner(state, socket_path, executable)
+    owner = retirement_owner(state, socket_path, executable, connect=connect)
     if path.is_symlink() or path.read_bytes() != original:
         raise RuntimeError("helper definition changed before shutdown")
-    reply = PermissionsHelperClient(socket_path).shutdown_helper(home / "run" / "ava-root")
+    reply = connect(socket_path).shutdown_helper(home / "run" / "ava-root")
     if reply != {"stopping": True, "pid": owner.pid, "run_dir": str(home / "run" / "ava-root")}:
         raise RuntimeError("helper shutdown did not acknowledge exact-home native custody")
     wait_retirement_owner(owner, deadline)
@@ -296,7 +304,13 @@ def _require_idle_job(state: str, home: Path) -> None:
 
 
 def _unregister_stopped_helper(
-    home: Path, port: int, deadline: float, *, force: bool, expected: bytes | None
+    home: Path,
+    port: int,
+    deadline: float,
+    *,
+    force: bool,
+    expected: bytes | None,
+    connect: HelperAtSocket,
 ) -> None:
     target = f"{helper_job_domain()}/{helper_job_label(home)}"
     path = helper_job_plist_path(home)
@@ -320,7 +334,7 @@ def _unregister_stopped_helper(
     if _job_pid(state) is not None:
         if not force:
             raise RuntimeError("helper retirement still has a native owner; custody retained")
-        owner = retirement_owner(state, socket_path, executable)
+        owner = retirement_owner(state, socket_path, executable, connect=connect)
         latest = retirement_query(target, deadline)
         latest_pid = _job_pid(latest)
         if path.is_symlink() or path.read_bytes() != original or latest_pid != owner.pid:

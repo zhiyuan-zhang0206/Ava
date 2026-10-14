@@ -150,7 +150,7 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
         raise RuntimeError(f"macOS root supervision cannot start: {reason}")
     from services.desktop.permissions_helper import converge
 
-    converge()
+    converge(helper=ctx.helper)
 
 
 def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
@@ -238,9 +238,7 @@ def ensure_screen_capture(ctx: ConvergeCtx) -> None:
         clear_status()
         return
 
-    from base.sessions.helperproc import helper_client
-
-    status = helper_client().check_screen_capture()
+    status = ctx.helper().check_screen_capture()
     if status.available:
         # Drop any stale "unavailable" file so a fixed host does not fire a
         # false notification on the next agent startup.
@@ -267,9 +265,7 @@ def ensure_accessibility(ctx: ConvergeCtx) -> None:
         clear_accessibility_status()
         return
 
-    from base.sessions.helperproc import helper_client
-
-    status = helper_client().check_accessibility()
+    status = ctx.helper().check_accessibility()
     if status.available:
         clear_accessibility_status()
         return
@@ -517,6 +513,7 @@ def converge_host(
         database_factory=database_factory,
         services=selected,
         producer=producer,
+        helper=command.helper,
     )
 
     # Host-global steps belong to the host's prod install (the default home

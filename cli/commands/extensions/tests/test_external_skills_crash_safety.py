@@ -15,6 +15,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills as bridge
@@ -62,6 +63,7 @@ def _world(
             database_factory=operator_database,
             producer=producer,
             machine=machine,
+            helper=refuse_helper,
         ),
     )
 

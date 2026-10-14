@@ -37,6 +37,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.paths import ava_home
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli import parsers, preflight, start_identity, start_intent
 from cli.commands.lifecycle import stop
@@ -314,6 +315,7 @@ def _cold_report(
         database_factory=args.database_factory,
         producer=args.producer,
         services=frozenset({"prometheus"}),
+        helper=refuse_helper,
     )
     lgtm_native.ensure_lgtm_native_step(context)
     return 0

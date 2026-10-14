@@ -1,4 +1,4 @@
-exports = ["accounting.py", "commands.py", "pr_flow_export.py", "runs_export.py", "status.py"]
+exports = ["accounting.py", "classify_paths.py", "commands.py", "pr_flow_export.py", "runs_export.py", "status.py"]
 
 [uses]
 "commands.py" = ["accounting.py", "diagnose.py", "monitor.py", "owner_operations.py", "status.py"]

@@ -37,6 +37,7 @@ from services.derived.memory_indexer.backends.base import (
     MemorySearchBackend,
     content_hash,
 )
+from services.derived.memory_indexer.config import MemoryIndexerConfig
 from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.tests.fake_provider import (
@@ -137,6 +138,7 @@ def test_process_paths_embeds_new_files(
         provider,
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert provider.embed_batch_count == 1
     meta = store_backend.all_meta()
@@ -161,6 +163,7 @@ def test_process_paths_skips_unchanged_hash(
         provider,
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert provider.embed_batch_count == 1
 
@@ -170,6 +173,7 @@ def test_process_paths_skips_unchanged_hash(
         provider,
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert provider.embed_batch_count == 1  # hash unchanged, no re-embed
 
@@ -189,7 +193,12 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
 
     first = FakeProvider()
     daemon.process_paths(
-        store_backend, {f.resolve()}, first, Liveness(liveness_timeout()), machine=machine_identity
+        store_backend,
+        {f.resolve()},
+        first,
+        Liveness(liveness_timeout()),
+        machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert first.embed_batch_count == 1
 
@@ -203,6 +212,7 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
         switched,
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert switched.embed_batch_count == 1  # re-embedded despite unchanged hash
     meta = switched_backend.all_meta()
@@ -223,6 +233,7 @@ def test_process_paths_deletes_missing_files(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert store_backend.all_meta() == {}
 
@@ -294,6 +305,7 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert store_backend.all_meta() == {}
 
@@ -326,7 +338,11 @@ def test_cold_start_reconcile_prunes_foreign_rows(
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
 
     daemon.reconcile(
-        backend, FakeProvider(), Liveness(liveness_timeout()), machine=machine_identity
+        backend,
+        FakeProvider(),
+        Liveness(liveness_timeout()),
+        machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     meta = store_backend.all_meta()
     assert str(foreign.resolve()) not in meta
@@ -362,7 +378,11 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
     switched = FakeProvider(fingerprint="other:provider")
     switched_backend = store_backend.reopen("other:provider")
     daemon.reconcile(
-        switched_backend, switched, Liveness(liveness_timeout()), machine=machine_identity
+        switched_backend,
+        switched,
+        Liveness(liveness_timeout()),
+        machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     # The row was re-embedded with the new fingerprint.
     meta = switched_backend.all_meta()
@@ -439,9 +459,9 @@ def test_process_paths_beats_per_embed_batch(
     monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
     liveness = Liveness(liveness_timeout())
     batch_duration = 100.0
-    monkeypatch.setattr(daemon, "BATCH_SIZE", 2)
+    indexer_config = MemoryIndexerConfig(batch_size=2)
     paths: set[Path] = set()
-    for i in range(10 * daemon.BATCH_SIZE):
+    for i in range(10 * indexer_config.batch_size):
         note = tmp_path / f"note-{i:03d}.md"
         note.write_text(f"content {i}", encoding="utf-8")
         paths.add(note.resolve())
@@ -456,7 +476,9 @@ def test_process_paths_beats_per_embed_batch(
 
     backend = _RecordingBackend()
     provider = SlowProvider()
-    daemon.process_paths(backend, paths, provider, liveness, machine=machine_identity)
+    daemon.process_paths(
+        backend, paths, provider, liveness, machine=machine_identity, config=indexer_config
+    )
 
     assert now > liveness_timeout()
     assert provider.embed_batch_count == 10
@@ -496,7 +518,7 @@ def test_process_paths_beats_during_commit(
                 raise EmbeddingAPIError("last batch failed")
             return super().embed_batch(texts)
 
-    monkeypatch.setattr(daemon, "BATCH_SIZE", 1)
+    indexer_config = MemoryIndexerConfig(batch_size=1)
     paths = {tmp_path / name for name in ("a.md", "b.md")}
     for path in paths:
         path.write_text("body")
@@ -504,10 +526,14 @@ def test_process_paths_beats_during_commit(
     provider = SlowFinalProvider()
     if fail_last_batch:
         with pytest.raises(EmbeddingAPIError, match="last batch failed"):
-            daemon.process_paths(backend, paths, provider, liveness, machine=machine_identity)
+            daemon.process_paths(
+                backend, paths, provider, liveness, machine=machine_identity, config=indexer_config
+            )
         assert set(backend.all_meta()) == {str(tmp_path / "a.md")}
     else:
-        daemon.process_paths(backend, paths, provider, liveness, machine=machine_identity)
+        daemon.process_paths(
+            backend, paths, provider, liveness, machine=machine_identity, config=indexer_config
+        )
         assert set(backend.all_meta()) == {str(path) for path in paths}
     assert backend.calls == ["delete_stale_rows", "upsert_many"]
 
@@ -530,7 +556,9 @@ def test_process_paths_beats_per_delete(
     paths = {tmp_path / f"deleted-{i}.md" for i in range(400)}
     backend.rows = {(str(path), "body", 0): (0.0, "old", FINGERPRINT) for path in paths}
     provider = FakeProvider()
-    daemon.process_paths(backend, paths, provider, liveness, machine=machine_identity)
+    daemon.process_paths(
+        backend, paths, provider, liveness, machine=machine_identity, config=MemoryIndexerConfig()
+    )
     assert now > liveness_timeout()
     assert backend.all_meta() == {}
     assert backend.calls == ["delete"] * len(paths)
@@ -605,7 +633,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
         return root
 
     monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
-    monkeypatch.setattr(daemon, "RECONCILE_CHUNK_PATHS", 2)  # 7 files -> 4 chunks
+    indexer_config = MemoryIndexerConfig(reconcile_chunk_paths=2)  # 7 files -> 4 chunks
 
     chunk_sizes: list[int] = []
     visited: list[str] = []
@@ -617,6 +645,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
         liveness: Liveness,
         *,
         machine: MachineIdentity,
+        config: MemoryIndexerConfig,
     ) -> None:
         assert machine is machine_identity
         chunk_sizes.append(len(paths))
@@ -628,7 +657,10 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
     liveness = Liveness(0.4)
     started = time.monotonic()
     assert (
-        daemon.reconcile(store_backend, FakeProvider(), liveness, machine=machine_identity) is True
+        daemon.reconcile(
+            store_backend, FakeProvider(), liveness, machine=machine_identity, config=indexer_config
+        )
+        is True
     )
     elapsed = time.monotonic() - started
 

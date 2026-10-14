@@ -17,7 +17,10 @@ from pathlib import Path
 import pytest
 
 from base import paths
+from base.host.permissions_helper.client import HelperAtSocket
 from base.native_process.ownership import OwnedProcess
+from base.sessions.tests.refuse_helper import refuse_connect
+from base.sessions.tests.scripted_helper import ScriptedHelper, scripted_at
 from services.desktop.permissions_helper import lifecycle
 from services.desktop.permissions_helper.tests.support import stopped_helper_plist
 
@@ -270,7 +273,7 @@ def test_helper_retirement_unknown_job_never_removes_definition(
 
     monkeypatch.setattr(jobs, "retirement_command", unknown)
     with pytest.raises(RuntimeError, match="cannot inspect"):
-        jobs.unregister_helper(home, helper_port=23456)
+        jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect)
     assert path.read_bytes() == b"retained definition"
 
 
@@ -283,7 +286,10 @@ def test_helper_retirement_rejects_caller_ancestry_before_wire_or_signal(tmp_pat
 
     with pytest.raises(RuntimeError, match="ancestor"):
         jobs.retirement_owner(
-            f"pid = {os.getpid()}\n", tmp_path / "no-socket", psutil.Process().exe()
+            f"pid = {os.getpid()}\n",
+            tmp_path / "no-socket",
+            psutil.Process().exe(),
+            connect=refuse_connect,
         )
 
 
@@ -348,12 +354,12 @@ def test_retained_definition_after_completed_stop_requires_exact_absence(
             if conflict == "live-socket":
                 listener.listen()
             if conflict is None:
-                jobs.unregister_helper(home, helper_port=23456)
-                jobs.unregister_helper(home, helper_port=23456)
+                jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect)
+                jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect)
                 assert not path.exists() and len(reads) == 5
             else:
                 with pytest.raises(RuntimeError):
-                    jobs.unregister_helper(home, helper_port=23456)
+                    jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect)
                 assert path.exists()
         assert neighbor.read_bytes() == b"neighbor"
 
@@ -377,7 +383,7 @@ def test_helper_socket_inspection_error_retains_definition(
 
     monkeypatch.setattr(jobs, "retirement_query", absent)
     with pytest.raises(RuntimeError, match="socket absence"):
-        jobs.unregister_helper(home, helper_port=23456)
+        jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect)
     assert path.read_bytes() == original
 
 
@@ -473,13 +479,13 @@ def test_idle_shutdown_retry_requires_native_success_and_retained_intent(
 
     monkeypatch.setattr(jobs, "retirement_command", command)
     if fault is None:
-        jobs.unregister_helper(home, helper_port=23456)
-        jobs.unregister_helper(home, helper_port=23456)
+        jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect)
+        jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect)
         assert not path.exists() and marker.exists()
         assert sum(args[0] == "bootout" for args in commands) == 1
     else:
         with pytest.raises(RuntimeError):
-            jobs.unregister_helper(home, helper_port=23456)
+            jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect)
         assert path.read_bytes() == original
         assert all(args[0] == "print" for args in commands)
 
@@ -501,15 +507,16 @@ def test_unproven_shutdown_never_boots_out_native_job(
     requested = [False]
     commands: list[list[str]] = []
 
-    def capture(_state: str, _socket: Path, _executable: str) -> OwnedProcess:
+    def capture(
+        _state: str, _socket: Path, _executable: str, *, connect: HelperAtSocket
+    ) -> OwnedProcess:
+        del connect
         return owner
 
     def wait(_owner: OwnedProcess, _deadline: float) -> None:
         pass
 
-    def shutdown(
-        _self: client.PermissionsHelperClient, run_dir: Path
-    ) -> client.HelperShutdownResult:
+    def shutdown(run_dir: Path) -> client.HelperShutdownResult:
         requested[0] = True
         if fault != "missing-intent":
             marker = run_dir / "helper-stopped"
@@ -538,9 +545,10 @@ def test_unproven_shutdown_never_boots_out_native_job(
     monkeypatch.setattr(jobs, "retirement_owner", capture)
     monkeypatch.setattr(jobs, "wait_retirement_owner", wait)
     monkeypatch.setattr(jobs, "retirement_command", command)
-    monkeypatch.setattr(client.PermissionsHelperClient, "shutdown_helper", shutdown)
     with pytest.raises(RuntimeError):
-        jobs.unregister_helper(home, helper_port=23456)
+        jobs.unregister_helper(
+            home, helper_port=23456, connect=scripted_at(ScriptedHelper(shutdown_helper=shutdown))
+        )
     assert requested[0] and path.read_bytes() == original
     assert all(args[0] == "print" for args in commands)
 
@@ -664,7 +672,10 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     alive = [True]
     owner = OwnedProcess(321, 100.0, None)
 
-    def capture(_state: str, _socket: Path, _executable: str) -> OwnedProcess:
+    def capture(
+        _state: str, _socket: Path, _executable: str, *, connect: HelperAtSocket
+    ) -> OwnedProcess:
+        del connect
         return owner
 
     monkeypatch.setattr(jobs, "retirement_owner", capture)
@@ -673,9 +684,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
 
     from base.host.permissions_helper import client
 
-    def shutdown(
-        _self: client.PermissionsHelperClient, run_dir: Path
-    ) -> client.HelperShutdownResult:
+    def shutdown(run_dir: Path) -> client.HelperShutdownResult:
         assert run_dir == home / "run" / "ava-root"
         marker = run_dir / "helper-stopped"
         marker.write_bytes(b"stopped\n")
@@ -686,7 +695,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     def wait(captured: OwnedProcess, _deadline: float) -> None:
         assert captured == owner and not alive[0]
 
-    monkeypatch.setattr(client.PermissionsHelperClient, "shutdown_helper", shutdown)
+    connect = scripted_at(ScriptedHelper(shutdown_helper=shutdown))
     monkeypatch.setattr(jobs, "wait_retirement_owner", wait)
 
     def command(args: list[str], _deadline: float) -> subprocess.CompletedProcess[bytes]:
@@ -705,9 +714,9 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
 
     monkeypatch.setattr(jobs, "retirement_command", command)
     # Ordinary stop, then the shared destroy boundary, then a cleanup retry.
-    jobs.unregister_helper(home, helper_port=23456)
-    jobs.unregister_helper(home, helper_port=23456)
-    jobs.unregister_helper(home, helper_port=23456)
+    jobs.unregister_helper(home, helper_port=23456, connect=connect)
+    jobs.unregister_helper(home, helper_port=23456, connect=connect)
+    jobs.unregister_helper(home, helper_port=23456, connect=connect)
     assert not path.exists()
     assert neighbor.read_bytes() == b"neighbor authority"
     expected = f"{jobs.helper_job_domain()}/{jobs.helper_job_label(home)}"

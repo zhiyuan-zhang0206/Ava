@@ -15,6 +15,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.cluster.ports import new_home_ports
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import redis_bridge as bridge
 from cli.commands.converge.spec import ConvergeCtx
@@ -140,6 +141,7 @@ def test_converge_retires_the_standalone_launchd_job_and_installed_copy(
         machine=command_runtime.machine,
         database_factory=operator_database,
         producer=operator_pipeline,
+        helper=refuse_helper,
     )
 
     bridge.retire_launchd_redis_bridge(ctx)
@@ -323,7 +325,9 @@ def test_probe_uses_each_owners_live_url_and_recorded_port(
     command_runtime: CommandRuntime,
 ) -> None:
     second_config = snapshot_process_config()
-    second = CommandRuntime(config=second_config, machine=machine_from_boot(second_config))
+    second = CommandRuntime(
+        config=second_config, machine=machine_from_boot(second_config), helper=refuse_helper
+    )
     urls: list[str] = []
     closed: list[str] = []
 

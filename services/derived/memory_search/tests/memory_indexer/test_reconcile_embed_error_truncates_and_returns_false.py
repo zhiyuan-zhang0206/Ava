@@ -18,6 +18,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.daemon.health import Liveness
 from services.derived.memory_indexer import chunking, daemon
 from services.derived.memory_indexer.backends.base import content_hash
+from services.derived.memory_indexer.config import MemoryIndexerConfig
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.tests.fake_provider import DIM, FINGERPRINT, FakeProvider
 from services.derived.memory_search.tests.store_backend import StoreBackend
@@ -65,7 +66,7 @@ def test_reconcile_embed_error_truncates_and_returns_false(
         return root
 
     monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
-    monkeypatch.setattr(daemon, "RECONCILE_CHUNK_PATHS", 2)  # 6 files -> 3 chunks
+    indexer_config = MemoryIndexerConfig(reconcile_chunk_paths=2)  # 6 files -> 3 chunks
 
     calls: list[int] = []
 
@@ -76,6 +77,7 @@ def test_reconcile_embed_error_truncates_and_returns_false(
         liveness: Liveness,
         *,
         machine: MachineIdentity,
+        config: MemoryIndexerConfig,
     ) -> None:
         calls.append(len(paths))
         raise EmbeddingAPIError("embed boom")
@@ -85,7 +87,13 @@ def test_reconcile_embed_error_truncates_and_returns_false(
     liveness = Liveness(600.0)
     with caplog.at_level(logging.ERROR, logger="services.derived.memory_indexer.daemon"):
         assert (
-            daemon.reconcile(store_backend, FakeProvider(), liveness, machine=machine_identity)
+            daemon.reconcile(
+                store_backend,
+                FakeProvider(),
+                liveness,
+                machine=machine_identity,
+                config=indexer_config,
+            )
             is False
         )
 
@@ -191,6 +199,7 @@ def test_process_paths_indexes_desc_and_body_chunks(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert str(f.resolve()) in store_backend.all_meta()
     kinds = sorted(store_backend.rows(f))
@@ -215,6 +224,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
 
@@ -225,6 +235,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
@@ -247,6 +258,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
@@ -257,6 +269,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
@@ -279,6 +292,7 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
@@ -289,13 +303,14 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == set()
     assert backend.all_meta() == {}
 
 
 def test_process_paths_calls_upsert_many_once_across_embed_batches(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     class _RecordingBackend(StoreBackend):
         def __init__(self) -> None:
@@ -312,7 +327,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
     first.write_text("---\ndescription: first description\n---\nfirst body", encoding="utf-8")
     second = tmp_path / "second.md"
     second.write_text("second body", encoding="utf-8")
-    monkeypatch.setattr(daemon, "BATCH_SIZE", 2)
+    indexer_config = MemoryIndexerConfig(batch_size=2)
     backend = _RecordingBackend()
 
     daemon.process_paths(
@@ -321,6 +336,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=indexer_config,
     )
 
     assert len(backend.calls) == 1
@@ -329,7 +345,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
 
 
 def test_partial_embedding_failure_keeps_old_rows_intact(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """A file whose embedding fails part way keeps its previous rows whole —
     all-old is the recoverable consistent state; the hash stays mismatching so
@@ -354,7 +370,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
 
     note = tmp_path / "note.md"
     note.write_text("---\ndescription: description\n---\nbody", encoding="utf-8")
-    monkeypatch.setattr(daemon, "BATCH_SIZE", 1)
+    indexer_config = MemoryIndexerConfig(batch_size=1)
     backend = _RecordingBackend()
     daemon.process_paths(
         backend,
@@ -362,6 +378,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
         FakeProvider(),
         Liveness(liveness_timeout()),
         machine=machine_identity,
+        config=indexer_config,
     )
     old_meta = backend.all_meta()
 
@@ -374,6 +391,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
             _FailSecondBatchProvider(),
             Liveness(liveness_timeout()),
             machine=machine_identity,
+            config=indexer_config,
         )
 
     # Nothing was written for the partially-embedded file; the old rows stand.
@@ -383,7 +401,6 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
 
 def test_complete_file_still_commits_when_another_fails(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
     *,
     machine_identity: MachineIdentity,
@@ -397,7 +414,7 @@ def test_complete_file_still_commits_when_another_fails(
                 raise EmbeddingAPIError("third batch failed")
             return super().embed_batch(texts)
 
-    monkeypatch.setattr(daemon, "BATCH_SIZE", 1)
+    indexer_config = MemoryIndexerConfig(batch_size=1)
     backend = store_backend
     complete = tmp_path / "complete.md"
     complete.write_text("complete body", encoding="utf-8")
@@ -411,6 +428,7 @@ def test_complete_file_still_commits_when_another_fails(
             _FailOnSecondFileProvider(),
             Liveness(liveness_timeout()),
             machine=machine_identity,
+            config=indexer_config,
         )
 
     meta = backend.all_meta()
@@ -431,7 +449,12 @@ async def test_failed_drain_batch_stays_incomplete_until_a_new_file_event(
     file = tmp_path / "failed.md"
     file.write_text("old content")
     daemon.process_paths(
-        store_backend, {file.resolve()}, FakeProvider(), Liveness(600), machine=machine_identity
+        store_backend,
+        {file.resolve()},
+        FakeProvider(),
+        Liveness(600),
+        machine=machine_identity,
+        config=MemoryIndexerConfig(),
     )
     old_meta = store_backend.all_meta()[str(file.resolve())]
     file.write_text("new content")
@@ -457,6 +480,11 @@ async def test_failed_drain_batch_stays_incomplete_until_a_new_file_event(
     monkeypatch.setattr(daemon.asyncio, "sleep", poll)
     with pytest.raises(asyncio.CancelledError):
         await daemon.drain_loop(
-            store_backend, dirty, Liveness(600), FailingOnce(), machine=machine_identity
+            store_backend,
+            dirty,
+            Liveness(600),
+            FailingOnce(),
+            machine=machine_identity,
+            config=MemoryIndexerConfig(),
         )
     assert store_backend.all_meta()[str(file.resolve())][1] == content_hash("new content")

@@ -13,7 +13,9 @@ from base.cluster.machine import MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.host.converge import accessibility, screen_capture
+from base.host.permissions_helper.client import HelperFactory
 from base.host.system import probes
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
@@ -58,6 +60,7 @@ def converge_context(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
+    helper: HelperFactory = refuse_helper,
 ) -> converge_host.ConvergeCtx:
     config = ConfigBoot()
     machine = machine_from_boot(config)
@@ -71,6 +74,7 @@ def converge_context(
         machine=machine,
         database_factory=operator_database,
         producer=producer,
+        helper=helper,
     )
 
 

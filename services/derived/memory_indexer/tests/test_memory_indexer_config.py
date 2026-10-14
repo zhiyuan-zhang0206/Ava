@@ -1,6 +1,8 @@
-"""The indexer root binds required provider and backend inputs to one boot owner."""
+"""The indexer root binds required provider and backend inputs to one boot owner; its tuning is validated."""
 
 from __future__ import annotations
+
+from typing import Any
 
 import httpx
 import pytest
@@ -10,8 +12,33 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from services.derived.memory_indexer import daemon
-from services.derived.memory_indexer.config import MemoryIndexerInputs
+from services.derived.memory_indexer.config import MemoryIndexerConfig, MemoryIndexerInputs
 from services.derived.memory_indexer.tests.fake_provider import FakeProvider
+
+
+def test_tuning_defaults_are_the_production_values() -> None:
+    tuning = MemoryIndexerConfig()
+    assert (tuning.loop_interval_s, tuning.reconcile_chunk_paths, tuning.batch_size) == (
+        1.0,
+        64,
+        32,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("loop_interval_s", 0.0),
+        ("loop_interval_s", -1.0),
+        ("reconcile_chunk_paths", 0),
+        ("batch_size", 0),
+        ("batch_size", -1),
+    ],
+)
+def test_tuning_rejects_values_that_would_stall_or_skip_work(field: str, value: float) -> None:
+    overrides: dict[str, Any] = {field: value}
+    with pytest.raises(ValueError, match=field):
+        MemoryIndexerConfig(**overrides)
 
 
 def test_inputs_are_cold_and_owned() -> None:
