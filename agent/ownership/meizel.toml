@@ -5,4 +5,4 @@ exports = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py", "hosted_completio
 "hosted.py" = ["hosted_claim.py", "hosted_cleanup.py", "lifecycle_intent.py"]
 "lifecycle_intent.py" = ["inbound.py"]
 "native_cancel.py" = ["inbound.py"]
-"tests" = ["corpse_reap.py", "hosted.py", "hosted_completion.py", "lifecycle_intent.py"]
+"tests" = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py", "hosted_completion.py", "lifecycle_intent.py"]
