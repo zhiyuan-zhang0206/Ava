@@ -217,6 +217,7 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
     catalog = build_model_catalog()
 
     gemini_models = {
+        "gemini-4-argon",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
@@ -225,6 +226,7 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
     }
     assert gemini_models <= catalog.models.keys()
     assert set(catalog.supported_models["gemini"]) == {
+        "gemini-4-argon",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",

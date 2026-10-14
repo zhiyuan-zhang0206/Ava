@@ -243,6 +243,29 @@ def test_gemini_flash_lite_latest_registry_facts(*, model_catalog: ModelCatalog)
     )
 
 
+def test_gemini_4_argon_registry_facts(*, model_catalog: ModelCatalog) -> None:
+    """Argon is Google's GA flagship (model page, DeepMind model card, and the
+    live /v1beta/models probe, checked 2026-10-14): one 1M-token window across
+    input and output, a March 2026 cutoff, low/medium/high thinking with a
+    `medium` default, and the 3.x multimodal matrix."""
+    spec = model_catalog.models["gemini-4-argon"]
+    assert spec.provider == "gemini"
+    assert spec.spawnable
+    assert spec.context_window == 1_048_576
+    assert spec.knowledge_cutoff == "2026-03"
+    assert spec.effort_levels == ("low", "medium", "high")
+    assert spec.media_types == frozenset({"image", "pdf", "audio", "video"})
+    assert (
+        resolve_setting(
+            "reasoning_effort",
+            model="gemini-4-argon",
+            models=model_catalog.models,
+            explicit=get_field("reasoning_effort"),
+        )
+        == "medium"
+    )
+
+
 def test_superseded_chain_validation_rejects_self_link(*, model_catalog: ModelCatalog) -> None:
     """The chain guard refuses a model that names itself as its
     own replacement (would hide it from the picker with nothing to show)."""
@@ -465,6 +488,7 @@ def test_image_media_types_match_the_verified_model_matrix(*, model_catalog: Mod
         "claude-opus-5-5-fast",
         "claude-fable-5",
         "claude-fable-5-1",
+        "gemini-4-argon",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
