@@ -15,6 +15,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
@@ -57,6 +59,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
 
     assert status == "completed"
@@ -103,6 +106,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     second = await daemon.dispatch_idempotent(
         "spawn-launch",
@@ -117,6 +121,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
 
     assert first == ("completed", {"id": 777})
@@ -155,6 +160,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         calls["n"] = calls.get("n", 0) + 1
@@ -177,6 +183,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     )
     await started.wait()
@@ -193,6 +200,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     first = await owner
 
@@ -231,6 +239,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         calls["n"] = calls.get("n", 0) + 1
@@ -253,6 +262,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     )
     await started.wait()
@@ -269,6 +279,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     await owner
 
@@ -307,6 +318,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     await daemon.dispatch_idempotent(
         "spawn-launch",
@@ -321,6 +333,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
 
     assert calls["n"] == 2
@@ -371,6 +384,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     second = await daemon.dispatch_idempotent(
         "lifecycle",
@@ -385,6 +399,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
 
     assert first[0] == "failed"

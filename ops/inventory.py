@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from base.cluster.machine import MachineIdentity
+from base.host.system.hostport import Host
 from base.packages.plugins import enable_config, mcp_enabled
 from ops.rpc_schemas import (
     FieldWriteResult,
@@ -57,7 +58,7 @@ def _assert_agent_runner(*, local_machine: MachineIdentity) -> None:
         )
 
 
-def inventory_read_op(*, local_machine: MachineIdentity) -> InventoryReadResult:
+def inventory_read_op(*, local_machine: MachineIdentity, host: Host) -> InventoryReadResult:
     """Read this host's plugin + MCP enable inventory, each with metadata.
 
     Returns an InventoryReadResult with:
@@ -92,7 +93,7 @@ def inventory_read_op(*, local_machine: MachineIdentity) -> InventoryReadResult:
     overlay = mcp_enabled.read_enabled()
     mcp_servers: dict[str, InventoryReadItem] = {}
     for name, spec in merged.items():
-        ok, reason = server_capability(spec)
+        ok, reason = server_capability(spec, host=host)
         mcp_servers[name] = InventoryReadItem(
             enabled=overlay.get(name, True),
             can_enable=ok,
@@ -108,7 +109,11 @@ def inventory_read_op(*, local_machine: MachineIdentity) -> InventoryReadResult:
 
 
 def inventory_write_op(
-    plugins: dict[str, bool], mcp_servers: dict[str, bool], *, local_machine: MachineIdentity
+    plugins: dict[str, bool],
+    mcp_servers: dict[str, bool],
+    *,
+    local_machine: MachineIdentity,
+    host: Host,
 ) -> InventoryWriteOpResult:
     """Validate and atomically apply a set of plugin + MCP enable toggles.
 
@@ -142,7 +147,7 @@ def inventory_write_op(
                 ok=False, reason="not a known MCP server on this host"
             )
         elif want_enabled:
-            ok, reason = server_capability(merged[name])
+            ok, reason = server_capability(merged[name], host=host)
             mcp_results[name] = FieldWriteResult(ok=ok, reason=reason)
         else:
             mcp_results[name] = FieldWriteResult(ok=True, reason=None)

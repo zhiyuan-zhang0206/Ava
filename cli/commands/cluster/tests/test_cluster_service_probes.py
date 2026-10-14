@@ -10,6 +10,8 @@ import pytest
 import base.deploy.lifecycle.service_selection as lifecycle_service_selection
 import services.supervision.roster.spec as roster_spec
 from base.cluster.machine import MachineIdentity
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import (
     config_boot_environment as config_boot_environment,
@@ -52,7 +54,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_services_for_capabilities_annotated(
-        _roles: object, *, machine: MachineIdentity
+        _roles: object, *, machine: MachineIdentity, host: Host
     ) -> tuple[tuple[ServiceSpec, str | None], ...]:
         assert isinstance(machine, MachineIdentity)
         return (  # pyright: ignore[reportUnknownArgumentType]
@@ -74,7 +76,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
 
     monkeypatch.setattr(_probe_commands, "probe_service", _probe)
 
-    assert cluster_health.service_probes(machine=command_runtime.machine) == [
+    assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == [
         "frontend",
         "browser-mcp",
     ]
@@ -118,7 +120,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
 
     monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
-    assert cluster_health.service_probes(machine=command_runtime.machine) == []
+    assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == []
     assert "otel-collector" not in recorded_sessions
 
 
@@ -160,7 +162,7 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
 
     monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
-    assert cluster_health.service_probes(machine=command_runtime.machine) == []
+    assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == []
     assert "otel-collector" in recorded_sessions
 
 
@@ -202,7 +204,7 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
 
     monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
-    assert cluster_health.service_probes(machine=command_runtime.machine) == []
+    assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == []
     assert "otel-collector" in recorded_sessions
 
 
@@ -225,7 +227,7 @@ def test_service_probes_carry_the_failing_fact(
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_services_for_capabilities_annotated(
-        _roles: object, *, machine: MachineIdentity
+        _roles: object, *, machine: MachineIdentity, host: Host
     ) -> tuple[tuple[ServiceSpec, str | None], ...]:
         assert isinstance(machine, MachineIdentity)
         return ((spec, None),)
@@ -243,7 +245,7 @@ def test_service_probes_carry_the_failing_fact(
         ),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert cluster_health.service_probes(machine=command_runtime.machine) == [
+    assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == [
         "ops (home='/home/ava/.ava' != '/u/.ava')"
     ]
 
@@ -260,7 +262,7 @@ def test_service_probes_unknown_roster_is_unhealthy(
     import cli.commands._repo as _repo_commands
 
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
-    assert cluster_health.service_probes(machine=command_runtime.machine) == [
+    assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == [
         "service roster unavailable"
     ]
 
@@ -286,7 +288,7 @@ def test_service_probes_respect_durable_service_intent(
     excluded = _service_spec.ServiceSpec("frontend", "unused", frozenset({"gateway"}), False)
 
     def roster(
-        _roles: object, *, machine: MachineIdentity
+        _roles: object, *, machine: MachineIdentity, host: Host
     ) -> tuple[tuple[_service_spec.ServiceSpec, None], ...]:
         assert machine is command_runtime.machine
         return ((wanted, None), (excluded, None))
@@ -303,7 +305,7 @@ def test_service_probes_respect_durable_service_intent(
         "read_selection",
         lambda: service_selection.ServiceSelection(mode, frozenset(names)),
     )
-    assert cluster_health.service_probes(machine=command_runtime.machine) == []
+    assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == []
 
 
 def test_service_probes_unreadable_selection_is_unhealthy(
@@ -320,6 +322,6 @@ def test_service_probes_unreadable_selection_is_unhealthy(
 
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(lifecycle_service_selection, "read_selection", unreadable)
-    assert cluster_health.service_probes(machine=command_runtime.machine) == [
+    assert cluster_health.service_probes(machine=command_runtime.machine, host=fake_host()) == [
         "service selection unavailable (corrupt selection)"
     ]

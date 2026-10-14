@@ -25,30 +25,28 @@ These probes never read Settings: a caller that has them passes the configured
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
-import sys
 from pathlib import Path
+
+from base.host.system.hostport import Host
 
 MACOS_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 _LINUX_CHROME_NAMES = ("google-chrome", "google-chrome-stable")
 NPX_INCAPABILITY_REASON = "no npx (install Node.js for chrome-devtools-mcp)"
 
 
-def platform_chrome_binary() -> str | None:
+def platform_chrome_binary(*, host: Host) -> str | None:
     """Resolve a platform-default Chrome binary without reading Settings."""
-    if sys.platform == "darwin":
+    if host.platform.system == "darwin":
         return MACOS_CHROME if Path(MACOS_CHROME).exists() else None
-    if sys.platform.startswith("linux"):
-        for name in _LINUX_CHROME_NAMES:
-            found = shutil.which(name)
-            if found:
-                return found
-        return None
-    return None  # other: unsupported
+    for name in _LINUX_CHROME_NAMES:
+        found = host.which(name)
+        if found:
+            return found
+    return None
 
 
-def resolve_chrome_binary(configured_chrome: str | None) -> str | None:
+def resolve_chrome_binary(configured_chrome: str | None, *, host: Host) -> str | None:
     """Resolve a Chrome binary path for this host, or None if none is found.
 
     Resolution order:
@@ -59,10 +57,10 @@ def resolve_chrome_binary(configured_chrome: str | None) -> str | None:
     """
     if configured_chrome:
         return configured_chrome
-    return platform_chrome_binary()
+    return platform_chrome_binary(host=host)
 
 
-def default_chrome_user_data_dir() -> Path | None:
+def default_chrome_user_data_dir(*, host: Host) -> Path | None:
     """The user's *daily* Chrome user-data dir for this host, or None.
 
     This is the top-level Chrome data dir (it holds ``Default/``, ``Profile N/``,
@@ -71,21 +69,18 @@ def default_chrome_user_data_dir() -> Path | None:
     used by the browser profile's explicit import of the operator's logged-in
     Chrome state.
 
-    Returns None when the platform has no known location or the
-    dir simply does not exist (Chrome never installed / never launched) — the
-    caller degrades to a fresh empty profile, which is environment detection, not
+    Returns None when the dir does not exist (Chrome never installed / never
+    launched) — the caller degrades to a fresh empty profile, which is environment detection, not
     a swallowed error.
     """
-    if sys.platform == "darwin":
+    if host.platform.system == "darwin":
         path = Path.home() / "Library" / "Application Support" / "Google" / "Chrome"
-    elif sys.platform.startswith("linux"):
-        path = Path.home() / ".config" / "google-chrome"
     else:
-        return None
+        path = Path.home() / ".config" / "google-chrome"
     return path if path.is_dir() else None
 
 
-def display_available() -> bool:
+def display_available(*, host: Host) -> bool:
     """Return True if a window server a headed browser can use is reachable.
 
     macOS: always True. Known limitation: a headless macOS server (SSH-only, no
@@ -95,14 +90,11 @@ def display_available() -> bool:
     Linux: ``$DISPLAY`` (X11) or ``$WAYLAND_DISPLAY`` must be set and non-empty
     (a headless server has neither).
 
-    Any other platform: False (fail-safe -- never assume a display on a host we
-    cannot confirm has one).
+    ``Platform`` admits only macOS and Linux, so there is no other case.
     """
-    if sys.platform == "darwin":
+    if host.platform.system == "darwin":
         return True
-    if sys.platform.startswith("linux"):
-        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    return False
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
 # Both GUI-session probes below run local launchctl/stat calls; the bound only
@@ -110,18 +102,13 @@ def display_available() -> bool:
 _GUI_PROBE_TIMEOUT_S = 5.0
 
 
-def bounded_stdout(argv: list[str]) -> str | None:
+def bounded_stdout(argv: list[str], *, host: Host) -> str | None:
     """Run a fixed read-only query, bounded; return its stripped stdout or None.
 
     None is "no answer" — a missing binary, a timeout, a non-zero exit, or
-    empty output — never evidence about the fact being probed. ``base.host.proc``
-    is imported lazily because this module must stay importable without
-    ``base.config`` (the converge-time callers depend on that) and
-    ``base.host.proc`` reaches it through ``base.paths``."""
-    from base.host.proc import run_bounded
-
+    empty output — never evidence about the fact being probed."""
     try:
-        completed = run_bounded(argv, timeout=_GUI_PROBE_TIMEOUT_S, capture_output=True, text=True)
+        completed = host.run(argv, timeout=_GUI_PROBE_TIMEOUT_S, capture_output=True, text=True)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     if completed.returncode != 0:
@@ -129,7 +116,7 @@ def bounded_stdout(argv: list[str]) -> str | None:
     return str(completed.stdout or "").strip() or None
 
 
-def gui_session_domain() -> str | None:
+def gui_session_domain(*, host: Host) -> str | None:
     """This process chain's launchd management domain (macOS), or None.
 
     ``Aqua`` means the chain runs inside the user's GUI login session and can
@@ -138,23 +125,23 @@ def gui_session_domain() -> str | None:
     spawning chain — no in-place relaunch can move it, only launchd can cross
     domains. None off macOS, and None when the answer is unavailable — never
     evidence either way."""
-    if sys.platform != "darwin":
+    if host.platform.system != "darwin":
         return None
-    return bounded_stdout(["/bin/launchctl", "managername"])
+    return bounded_stdout(["/bin/launchctl", "managername"], host=host)
 
 
-def gui_login_user() -> str | None:
+def gui_login_user(*, host: Host) -> str | None:
     """The account owning the GUI console session (macOS), or None.
 
     ``/dev/console`` belongs to the user physically attached to the GUI — the
     same check ``services.desktop.browser.macos_readiness`` runs before trusting a
     GUI-domain verdict. None off macOS and when the answer is unavailable."""
-    if sys.platform != "darwin":
+    if host.platform.system != "darwin":
         return None
-    return bounded_stdout(["/usr/bin/stat", "-f%Su", "/dev/console"])
+    return bounded_stdout(["/usr/bin/stat", "-f%Su", "/dev/console"], host=host)
 
 
-def browser_incapability(configured_chrome: str | None) -> str | None:
+def browser_incapability(configured_chrome: str | None, *, host: Host) -> str | None:
     """Return why this host cannot run a headed Chrome, or None if it can.
 
     The single source of truth for the three-prong capability check (display +
@@ -167,16 +154,16 @@ def browser_incapability(configured_chrome: str | None) -> str | None:
     ``services.desktop.browser.daemon.assert_browser_capable()`` (the raising preflight)
     both derive from this, so the capability logic lives in exactly one place.
     """
-    if not display_available():
+    if not display_available(host=host):
         return "no display (headless server)"
-    if resolve_chrome_binary(configured_chrome) is None:
+    if resolve_chrome_binary(configured_chrome, host=host) is None:
         return "no Chrome (install it or set AVA_CHROME_BINARY)"
-    if shutil.which("npx") is None:
+    if host.which("npx") is None:
         return NPX_INCAPABILITY_REASON
     return None
 
 
-def browser_deps_incapability() -> str | None:
+def browser_deps_incapability(*, host: Host) -> str | None:
     """Settings-free capability check for converge-time use.
 
     Same three prongs, same order, same reason strings as
@@ -184,26 +171,26 @@ def browser_deps_incapability() -> str | None:
     may run on a fresh host before Settings can be built, so it cannot read the
     override. Callers that have Settings use ``browser_incapability()``.
     """
-    if not display_available():
+    if not display_available(host=host):
         return "no display (headless server)"
-    if platform_chrome_binary() is None:
+    if platform_chrome_binary(host=host) is None:
         return "no Chrome (install it or set AVA_CHROME_BINARY)"
-    if shutil.which("npx") is None:
+    if host.which("npx") is None:
         return NPX_INCAPABILITY_REASON
     return None
 
 
-def browser_capable(configured_chrome: str | None) -> bool:
+def browser_capable(configured_chrome: str | None, *, host: Host) -> bool:
     """Return True if this host can run a headed Chrome (display + binary + npx).
 
     Thin bool wrapper over ``browser_incapability()`` for the gates that only
     need yes/no (the service roster's start decision, the host-config validator).
     Callers that want to show or log *why* call ``browser_incapability()``.
     """
-    return browser_incapability(configured_chrome) is None
+    return browser_incapability(configured_chrome, host=host) is None
 
 
-def permissions_helper_incapability() -> str | None:
+def permissions_helper_incapability(*, host: Host) -> str | None:
     """Return why this host cannot run the permissions helper, or None if it can.
 
     The single source of truth for the capability check. macOS needs the Swift
@@ -214,17 +201,17 @@ def permissions_helper_incapability() -> str | None:
     ``permissions_helper_capable()`` (the bool gate) derives from this, so the
     capability logic lives in exactly one place.
     """
-    if sys.platform == "darwin":
-        if shutil.which("swiftc") is None:
+    if host.platform.system == "darwin":
+        if host.which("swiftc") is None:
             return "no swiftc (install the Xcode command line tools)"
-        if shutil.which("codesign") is None:
+        if host.which("codesign") is None:
             return "no codesign (install the Xcode command line tools)"
-        if not display_available():
+        if not display_available(host=host):
             return "no display (the permissions helper drives an on-screen desktop)"
         return None
     return "macOS only (permissions helper drives the desktop)"
 
 
-def permissions_helper_capable() -> bool:
+def permissions_helper_capable(*, host: Host) -> bool:
     """Return True if this host can build, sign, and run the permissions helper."""
-    return permissions_helper_incapability() is None
+    return permissions_helper_incapability(host=host) is None

@@ -17,6 +17,7 @@ from typing import Any
 
 from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.permissions_helper.client import HelperFactory
+from base.host.system.hostport import Host
 from base.native_process.os_platform import file_lock
 from base.paths.home import home_checkout_error, resolve_ava_home
 from base.paths.private_dir import ensure_private_dir
@@ -56,11 +57,11 @@ def run_start_command(**kwargs: Any) -> int:
     return cmd_start(**kwargs)
 
 
-def complete_start(*, helper: HelperFactory) -> None:
+def complete_start(*, helper: HelperFactory, host: Host) -> None:
     """Report the root boot complete (lazy import, as above)."""
     from cli.commands.lifecycle.root_driver import complete_boot_start
 
-    complete_boot_start(helper=helper)
+    complete_boot_start(helper=helper, host=host)
 
 
 def release_serving() -> None:
@@ -176,7 +177,7 @@ def start_once(
             )
             if result == 0:
                 try:
-                    complete_start(helper=args.runtime.helper)
+                    complete_start(helper=args.runtime.helper, host=args.runtime.host)
                 except (RuntimeError, OSError, TimeoutError):
                     release_serving()
                     raise

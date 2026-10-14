@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import types
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -10,22 +9,50 @@ import pytest
 
 from base.host.system import cron
 from base.host.system import logs_job as job
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import (
+    DARWIN_ARM64,
+    LINUX_X86,
+    FakeCommands,
+    Reply,
+    fake_host,
+)
+from base.host.system.tests.fake_crontab import FakeCrontab
+
+_UID = 501
+
+
+def _ava(*, host: Host) -> str:
+    return "/work tree/.venv/bin/ava"
+
+
+def _path(*, host: Host) -> str:
+    return "/work tree/.venv/bin:/usr/bin"
+
+
+def _launchctl(**replies: Reply) -> tuple[FakeCommands, Host]:
+    """A macOS host whose launchctl verbs answer as given (default: success)."""
+    commands = FakeCommands()
+    for verb, reply in replies.items():
+        commands.on(["launchctl", verb], reply, repeat=True)
+    commands.on("launchctl", Reply(), repeat=True)
+    return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
+
+
+def _linux(crontab: FakeCrontab) -> Host:
+    return fake_host(crontab, platform=LINUX_X86, programs={"crontab": "/usr/bin/crontab"})
 
 
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
+    monkeypatch.setattr(cron, "ava_binary_path", _ava)
     monkeypatch.setattr(cron, "job_home", lambda: "/home/u/.ava")
-    monkeypatch.setattr(cron, "launchd_path_env", lambda: "/work tree/.venv/bin:/usr/bin")
-
-
-def _ok() -> types.SimpleNamespace:
-    return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(cron, "launchd_path_env", _path)
 
 
 def test_launchd_plist_runs_rotate_then_retention_daily() -> None:
-    content = job.launchd_plist_content()
+    content = job.launchd_plist_content(host=fake_host(platform=DARWIN_ARM64))
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
     values = [element.text for element in root.findall("./dict/array/string")]
     command = values[2]
@@ -42,168 +69,110 @@ def test_launchd_plist_runs_rotate_then_retention_daily() -> None:
     assert "/home/u/.ava/logs/logs-maintenance.out.log" in content
 
 
-def test_macos_reregistration_rewrites_and_reloads_idempotently(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[list[str]] = []
+def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
+    commands, host = _launchctl()
 
-    def run(argv: list[str], **_kwargs: object) -> types.SimpleNamespace:
-        calls.append(argv)
-        return _ok()
-
-    monkeypatch.setattr(cron.subprocess, "run", run)
-
-    assert job.register_macos() == 0
+    assert job.register_macos(host=host) == 0
     plist = job.launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
-    assert job.register_macos() == 0
+    assert job.register_macos(host=host) == 0
 
     assert plist.read_text(encoding="utf-8") == first
-    assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootstrap"]
+    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap", "bootout", "bootstrap"]
 
 
-def test_macos_unregister_removes_only_its_own_job(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_macos_unregister_removes_only_its_own_job() -> None:
     target = job.launchd_plist_path()
     target.parent.mkdir(parents=True)
     target.write_text("<target-plist/>", encoding="utf-8")
     other = target.parent / "com.ava.packages-refresh.plist"
     other.write_text("<other-plist/>", encoding="utf-8")
-    calls: list[list[str]] = []
+    commands, host = _launchctl()
 
-    def run(argv: list[str], **_kwargs: object) -> types.SimpleNamespace:
-        calls.append(argv)
-        return _ok()
-
-    monkeypatch.setattr(cron.subprocess, "run", run)
-
-    assert job.unregister_macos() == 0
+    assert job.unregister_macos(host=host) == 0
 
     assert not target.exists()
     assert other.read_bytes() == b"<other-plist/>"
-    assert calls == [["launchctl", "bootout", f"gui/{cron.os.getuid()}/com.ava.logs-maintenance"]]
+    assert commands.argvs == [("launchctl", "bootout", f"gui/{_UID}/com.ava.logs-maintenance")]
 
 
-def test_linux_registration_replaces_only_its_own_lines(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_linux_registration_replaces_only_its_own_lines() -> None:
     other = "*/15 * * * * /x/ava packages refresh --from-job  # ava-packages-refresh"
     old = "35 4 * * * /old/ava logs retention  # ava-logs-maintenance"
-    written: dict[str, str] = {}
+    crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
-    def which(_name: str) -> str:
-        return "/usr/bin/crontab"
-
-    monkeypatch.setattr(cron.shutil, "which", which)
-
-    def run(argv: list[str], **kwargs: object) -> types.SimpleNamespace:
-        if argv == ["crontab", "-l"]:
-            return types.SimpleNamespace(
-                returncode=0, stdout=f"{other}\n\n{old}\n{old}\n", stderr=""
-            )
-        written["body"] = str(kwargs["input"])
-        return _ok()
-
-    monkeypatch.setattr(cron.subprocess, "run", run)
-
-    assert job.register_linux() == 0
-    assert other in written["body"]
-    assert f"{other}\n\n" in written["body"]
-    assert old not in written["body"]
-    assert written["body"].count("# ava-logs-maintenance") == 1
-    assert "40 4 * * *" in written["body"]
-    assert "logs rotate" in written["body"] and "logs retention" in written["body"]
+    assert job.register_linux(host=_linux(crontab)) == 0
+    body = crontab.writes[-1]
+    assert other in body
+    assert f"{other}\n\n" in body
+    assert old not in body
+    assert body.count("# ava-logs-maintenance") == 1
+    assert "40 4 * * *" in body
+    assert "logs rotate" in body and "logs retention" in body
 
 
-def test_linux_crontab_failures_and_empty_table(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    def missing(_name: str) -> None:
-        return None
-
-    def available(_name: str) -> str:
-        return "/usr/bin/crontab"
-
-    monkeypatch.setattr(cron.shutil, "which", missing)
-    assert job.register_linux() == 1
+def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[str]) -> None:
+    assert job.register_linux(host=fake_host(platform=LINUX_X86)) == 1
     assert capsys.readouterr().err == (
         "  * logs maintenance: crontab not installed; daily rotation and "
         "retention cannot be registered\n"
     )
 
-    monkeypatch.setattr(cron.shutil, "which", available)
-    writes: list[str] = []
-    read = types.SimpleNamespace(returncode=1, stdout="stale", stderr="permission denied")
-    write_failure = False
-
-    def run(argv: list[str], **kwargs: object) -> types.SimpleNamespace:
-        if argv == ["crontab", "-l"]:
-            return read
-        if write_failure:
-            return types.SimpleNamespace(returncode=1, stderr="write denied")
-        writes.append(str(kwargs["input"]))
-        read.stdout = str(kwargs["input"])
-        return _ok()
-
-    monkeypatch.setattr(cron.subprocess, "run", run)
-    assert job.register_linux() == 1
-    assert writes == []
+    crontab = FakeCrontab("stale")
+    crontab.read_returncode = 1
+    crontab.read_stderr = "permission denied"
+    host = _linux(crontab)
+    assert job.register_linux(host=host) == 1
+    assert crontab.writes == []
     assert capsys.readouterr().err == (
         "  * crontab -l failed (permission denied); "
         "skipping logs-maintenance registration to avoid clobbering the crontab\n"
     )
 
-    read.stderr = "no crontab for user"
-    assert job.register_linux() == 0
+    crontab.read_stderr = "no crontab for user"
+    assert job.register_linux(host=host) == 0
     assert (
-        len(writes),
-        writes[0].startswith("40 4 * * * "),
-        writes[0].endswith("  # ava-logs-maintenance\n"),
-        writes[0].count("\n"),
+        len(crontab.writes),
+        crontab.writes[0].startswith("40 4 * * * "),
+        crontab.writes[0].endswith("  # ava-logs-maintenance\n"),
+        crontab.writes[0].count("\n"),
     ) == (1, True, True, 1)
 
-    read.returncode = 0
-    read.stdout = writes[0]
+    crontab.read_returncode = 0
     assert (
-        job.unregister_linux(),
-        writes[-1],
-        job.unregister_linux(),
-        len(writes),
+        job.unregister_linux(host=host),
+        crontab.writes[-1],
+        job.unregister_linux(host=host),
+        len(crontab.writes),
     ) == (0, "\n", 0, 2)
 
-    read.stdout = writes[0]
-    write_failure = True
-    assert job.register_linux() == 1
+    crontab.table = crontab.writes[0]
+    crontab.write_failure = "write denied"
+    assert job.register_linux(host=host) == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
-    assert job.unregister_linux() == 1
-    assert len(writes) == 2
+    assert job.unregister_linux(host=host) == 1
+    assert len(crontab.writes) == 2
 
 
 def test_macos_bootstrap_failure_and_repeated_unregister(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[list[str]] = []
     errors: list[tuple[object, ...]] = []
-
-    def run(argv: list[str], **_kwargs: object) -> types.SimpleNamespace:
-        calls.append(argv)
-        return types.SimpleNamespace(returncode=1 if argv[1] == "bootstrap" else 0, stderr="denied")
 
     def record_error(*args: object) -> None:
         errors.append(args)
 
-    monkeypatch.setattr(cron.subprocess, "run", run)
+    commands, host = _launchctl(bootstrap=Reply(stderr="denied", returncode=1))
     monkeypatch.setattr(job.logger, "error", record_error)
-    assert job.register_macos() == 1
-    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
+    assert job.register_macos(host=host) == 1
+    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
     assert errors == [
         ("launchctl bootstrap failed for {}: {}", "com.ava.logs-maintenance", "denied")
     ]
 
     plist = job.launchd_plist_path()
     assert plist.exists()
-    assert job.unregister_macos() == 0
-    assert job.unregister_macos() == 0
+    assert job.unregister_macos(host=host) == 0
+    assert job.unregister_macos(host=host) == 0
     assert not plist.exists()
-    assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]
+    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap", "bootout", "bootout"]

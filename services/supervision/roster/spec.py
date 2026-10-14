@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
+from base.host.system.hostport import Host
 from base.host.system.probes import (
     browser_incapability,
     permissions_helper_incapability,
@@ -52,7 +53,7 @@ from services.supervision.roster.service_spec import (
 )
 
 
-def _computer_mcp_gate_reason() -> str | None:
+def _computer_mcp_gate_reason(*, host: Host) -> str | None:
     """Why the computer-mcp service is gated out, or None when it should run.
 
     Platform gate only: the daemon needs the permissions helper (the single
@@ -62,8 +63,8 @@ def _computer_mcp_gate_reason() -> str | None:
     """
     if not settings.services.permissions_helper_enabled:
         return "disabled (AVA_PERMISSIONS_HELPER_ENABLED off)"
-    if permissions_helper_incapability() is not None:
-        return permissions_helper_incapability()
+    if permissions_helper_incapability(host=host) is not None:
+        return permissions_helper_incapability(host=host)
     return None
 
 
@@ -144,21 +145,21 @@ def _flag_gate_reason(session: str) -> str | None:
     return None
 
 
-def _browser_family_gate_reason() -> str | None:
+def _browser_family_gate_reason(*, host: Host) -> str | None:
     if not settings.services.browser_enabled:
         return "disabled (AVA_BROWSER_ENABLED off)"
     return browser_incapability(
-        settings.services.chrome_binary
+        settings.services.chrome_binary, host=host
     )  # display / Chrome / npx, or None when capable
 
 
-def _core_gate_reason(session: str, *, machine: MachineIdentity) -> str | None:
+def _core_gate_reason(session: str, *, machine: MachineIdentity, host: Host) -> str | None:
     """The session-name-keyed half of `gate_reason` — every core service
     without its own plugin-registered ``gate``."""
     if session in ("browser", "browser-mcp"):
-        return _browser_family_gate_reason()
+        return _browser_family_gate_reason(host=host)
     if session == "computer-mcp":
-        return _computer_mcp_gate_reason()
+        return _computer_mcp_gate_reason(host=host)
     if session in {"loki", "prometheus", "grafana"}:
         from services.supervision.healthchecks.lgtm import is_lgtm_host
 
@@ -182,7 +183,7 @@ def _plugin_gate_reason(spec: ServiceSpec) -> str | None:
     return reason
 
 
-def gate_reason(spec: ServiceSpec, *, machine: MachineIdentity) -> str | None:
+def gate_reason(spec: ServiceSpec, *, machine: MachineIdentity, host: Host) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
     path (drops it), ``ava start`` (logs it), and ``ava status`` (shows it) stay
@@ -200,13 +201,11 @@ def gate_reason(spec: ServiceSpec, *, machine: MachineIdentity) -> str | None:
                 "gate for {} failed; roster evaluation aborted", spec.session
             )
             raise
-    return _core_gate_reason(spec.session, machine=machine)
+    return _core_gate_reason(spec.session, machine=machine, host=host)
 
 
 def services_for_capabilities_annotated(
-    roles: MachineRoles,
-    *,
-    machine: MachineIdentity,
+    roles: MachineRoles, *, machine: MachineIdentity, host: Host
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
     """The union of services this host's capability set runs, each paired with its
     gate reason (None = will start, a string = gated out + why).
@@ -224,19 +223,21 @@ def services_for_capabilities_annotated(
     them.
     """
     return tuple(
-        (s, gate_reason(s, machine=machine)) for s in build_services() if s.capabilities & roles
+        (s, gate_reason(s, machine=machine, host=host))
+        for s in build_services()
+        if s.capabilities & roles
     )
 
 
 def services_for_capabilities(
-    roles: MachineRoles, *, machine: MachineIdentity
+    roles: MachineRoles, *, machine: MachineIdentity, host: Host
 ) -> tuple[ServiceSpec, ...]:
     """The start roster: the capability-union services that will actually launch
     (config/capability-gated ones dropped). ``services_for_capabilities_annotated``
     is the diagnostic view that keeps the gated-out services + their reason."""
     return tuple(
         s
-        for s, reason in services_for_capabilities_annotated(roles, machine=machine)
+        for s, reason in services_for_capabilities_annotated(roles, machine=machine, host=host)
         if reason is None
     )
 
@@ -254,11 +255,12 @@ class Spec:
 
     roles: MachineRoles
     machine: MachineIdentity
+    host: Host
 
     def services(self) -> tuple[ServiceSpec, ...]:
         """The start roster for this host's capabilities (gated-out dropped)."""
-        return services_for_capabilities(self.roles, machine=self.machine)
+        return services_for_capabilities(self.roles, machine=self.machine, host=self.host)
 
     def services_annotated(self) -> tuple[tuple[ServiceSpec, str | None], ...]:
         """The diagnostic roster — every capability-matched service + its gate reason."""
-        return services_for_capabilities_annotated(self.roles, machine=self.machine)
+        return services_for_capabilities_annotated(self.roles, machine=self.machine, host=self.host)

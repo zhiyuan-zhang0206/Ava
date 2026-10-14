@@ -4,38 +4,39 @@ from __future__ import annotations
 
 import ast
 import inspect
-from types import SimpleNamespace
 
 import pytest
 
 from base.host.converge import browser_deps
 from base.host.system import probes
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_host
+from base.native_process.os_platform import Platform
+
+
+def _install_node_here(*, host: Host) -> str:
+    return "install-node-here"
 
 
 @pytest.mark.parametrize(
     ("platform", "expected_tool"),
     [
-        ("darwin", "brew"),
-        ("linux", "apt-get"),
-        ("freebsd", "nodejs.org"),
+        (DARWIN_ARM64, "brew"),
+        (LINUX_X86, "apt-get"),
     ],
 )
 def test_node_install_command_names_the_platform_installer(
-    monkeypatch: pytest.MonkeyPatch, platform: str, expected_tool: str
+    platform: Platform, expected_tool: str
 ) -> None:
     """A missing npx warning gives this host a copy-pasteable repair command."""
-    monkeypatch.setattr(browser_deps, "sys", SimpleNamespace(platform=platform))
-    command = browser_deps.node_install_command()
+    command = browser_deps.node_install_command(host=fake_host(platform=platform))
     assert command
     assert expected_tool in command
 
 
-def test_node_install_command_explains_the_macos_keg_only_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_node_install_command_explains_the_macos_keg_only_fallback() -> None:
     """Mac operators get a command that leaves npx on PATH after install."""
-    monkeypatch.setattr(browser_deps, "sys", SimpleNamespace(platform="darwin"))
-    assert browser_deps.node_install_command() == (
+    assert browser_deps.node_install_command(host=fake_host(platform=DARWIN_ARM64)) == (
         "brew install node  (or: brew install node@22 && brew link --force node@22)"
     )
 
@@ -44,8 +45,8 @@ def test_browser_deps_warning_names_the_npx_reason_and_platform_fix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The warning tells the operator both why ava-browser is skipped and how to fix it."""
-    monkeypatch.setattr(browser_deps, "node_install_command", lambda: "install-node-here")
-    warning = browser_deps.browser_deps_warning(probes.NPX_INCAPABILITY_REASON)
+    monkeypatch.setattr(browser_deps, "node_install_command", _install_node_here)
+    warning = browser_deps.browser_deps_warning(probes.NPX_INCAPABILITY_REASON, host=fake_host())
     assert probes.NPX_INCAPABILITY_REASON in warning
     assert "install-node-here" in warning
     assert "ava-browser will not run on this host until this is fixed" in warning
@@ -55,8 +56,8 @@ def test_browser_deps_warning_explains_that_a_missing_display_needs_no_install(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A display-less host must not receive a Node repair instruction."""
-    monkeypatch.setattr(browser_deps, "node_install_command", lambda: "install-node-here")
-    warning = browser_deps.browser_deps_warning("no display (headless server)")
+    monkeypatch.setattr(browser_deps, "node_install_command", _install_node_here)
+    warning = browser_deps.browser_deps_warning("no display (headless server)", host=fake_host())
     assert "install-node-here" not in warning
     assert "nothing to" in warning
     assert "install for ava-browser" in warning
@@ -66,8 +67,10 @@ def test_browser_deps_warning_explains_how_to_repair_missing_chrome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Chrome is the missing prong, so its repair—not Node's—must lead the box."""
-    monkeypatch.setattr(browser_deps, "node_install_command", lambda: "install-node-here")
-    warning = browser_deps.browser_deps_warning("no Chrome (install it or set AVA_CHROME_BINARY)")
+    monkeypatch.setattr(browser_deps, "node_install_command", _install_node_here)
+    warning = browser_deps.browser_deps_warning(
+        "no Chrome (install it or set AVA_CHROME_BINARY)", host=fake_host()
+    )
     assert "install-node-here" not in warning
     assert "Install Google Chrome" in warning
     assert "AVA_CHROME_BINARY" in warning

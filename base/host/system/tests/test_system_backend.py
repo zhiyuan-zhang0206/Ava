@@ -12,6 +12,8 @@ from base.host.system.backend import (
     PlatformBackend,
     get_backend,
 )
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import LINUX_X86, fake_host
 
 
 def test_get_backend_returns_correct_type() -> None:
@@ -56,24 +58,27 @@ def test_venv_python_path() -> None:
 def test_linux_autostart_has_one_native_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
-    def install() -> list[str]:
+    def install(*, host: Host) -> list[str]:
         calls.append("install")
         return []
 
-    def uninstall() -> list[str]:
+    def uninstall(*, host: Host) -> list[str]:
         calls.append("uninstall")
         return []
 
     monkeypatch.setattr(autostart, "install", install)
     monkeypatch.setattr(autostart, "uninstall", uninstall)
-    autostart.register_linux()
-    autostart.unregister_linux()
+    autostart.register_linux(host=fake_host(platform=LINUX_X86))
+    autostart.unregister_linux(host=fake_host(platform=LINUX_X86))
     assert calls == ["install", "uninstall"]
 
 
 def test_linux_autostart_propagates_unavailable_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.host.system import boot_unit
 
-    monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
+    def no_systemd(*, host: Host) -> bool:
+        return False
+
+    monkeypatch.setattr(boot_unit, "systemd_running", no_systemd)
     with pytest.raises(RuntimeError, match="systemd"):
-        autostart.register_linux()
+        autostart.register_linux(host=fake_host(platform=LINUX_X86))

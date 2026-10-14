@@ -9,6 +9,7 @@ import psycopg
 import pytest
 from fastapi import FastAPI
 
+from base.host.system.hostport import Host
 from gateway import app as gateway_app
 
 
@@ -16,7 +17,11 @@ async def test_lifespan_waits_for_cancelled_request_sql_before_pool_close(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     del db_conn
-    monkeypatch.setattr(gateway_app, "register_os_cron", lambda: None)
+
+    def fake_register_os_cron(*, host: Host, enabled_reader: Callable[[], bool]) -> None:
+        return None
+
+    monkeypatch.setattr(gateway_app, "register_os_cron", fake_register_os_cron)
     app = FastAPI()
     ready = asyncio.Event()
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
@@ -77,7 +82,11 @@ async def test_native_sql_error_does_not_cancel_gateway_service(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     del db_conn
-    monkeypatch.setattr(gateway_app, "register_os_cron", lambda: None)
+
+    def fake_register_os_cron(*, host: Host, enabled_reader: Callable[[], bool]) -> None:
+        return None
+
+    monkeypatch.setattr(gateway_app, "register_os_cron", fake_register_os_cron)
     app = FastAPI()
     ready, stop = asyncio.Event(), asyncio.Event()
     loop = asyncio.get_running_loop()

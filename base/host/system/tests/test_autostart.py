@@ -25,16 +25,26 @@ import pytest
 
 from base.host.system import autostart, cron
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, fake_host
+
+
+def _local_ava(*, host: Host) -> str:
+    return "/Users/x/.local/bin/ava"
+
+
+def _brew_path(*, host: Host) -> str:
+    return "/opt/homebrew/bin:/usr/bin"
 
 
 @pytest.fixture(autouse=True)
 def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    monkeypatch.setattr(autostart, "ava_binary_path", lambda: "/Users/x/.local/bin/ava")
+    monkeypatch.setattr(autostart, "ava_binary_path", _local_ava)
 
 
 def test_plist_runs_ava_start_at_load() -> None:
-    xml = autostart.autostart_plist_content()
+    xml = autostart.autostart_plist_content(host=fake_host())
     assert "<string>com.ava.autostart</string>" in xml
     assert "<key>RunAtLoad</key>" in xml and "<true/>" in xml
     # ProgramArguments == `ava start --boot` — no name flag exists (path-only).
@@ -48,8 +58,8 @@ def test_plist_embeds_a_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
     Homebrew's bin, which is what made a bare `ava start` fail to find its tools at
     boot. The PATH composition itself is `base.host.system.cron.launchd_path_env`
     (shared with the watchdog probe's plist) and is unit-tested there."""
-    monkeypatch.setattr(cron, "launchd_path_env", lambda: "/opt/homebrew/bin:/usr/bin")
-    xml = autostart.autostart_plist_content()
+    monkeypatch.setattr(cron, "launchd_path_env", _brew_path)
+    xml = autostart.autostart_plist_content(host=fake_host())
     assert "<key>PATH</key>" in xml
     assert "/opt/homebrew/bin" in xml
 
@@ -58,15 +68,14 @@ def test_register_macos_writes_plist_but_never_bootstraps(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    called: list = []
-    monkeypatch.setattr(autostart.subprocess, "run", lambda *a, **_k: called.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    rc = autostart.register_macos()
+    commands = FakeCommands()  # no command scripted: any launchctl call fails the test
+    rc = autostart.register_macos(host=fake_host(commands, platform=DARWIN_ARM64))
     assert rc == 0
     plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.autostart.plist"
     assert plist.exists()
     # The whole point: registration must not launchctl-bootstrap (would recurse
-    # RunAtLoad -> a second `ava start`). No subprocess at all is issued.
-    assert called == []
+    # RunAtLoad -> a second `ava start`). No command at all is issued.
+    assert commands.argvs == []
 
 
 def test_register_macos_idempotent_no_rewrite(
@@ -75,9 +84,10 @@ def test_register_macos_idempotent_no_rewrite(
     capsys,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    autostart.register_macos()
+    host = fake_host(platform=DARWIN_ARM64)
+    autostart.register_macos(host=host)
     capsys.readouterr()  # drop first-write output  # pyright: ignore[reportUnknownMemberType]
-    rc = autostart.register_macos()  # second call, identical content
+    rc = autostart.register_macos(host=host)  # second call, identical content
     assert rc == 0
     assert (
         "wrote" not in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -98,7 +108,7 @@ def test_the_job_retries_on_macos_only_while_it_fails() -> None:
     once it succeeds. Getting this key backwards (or passing a bare
     `KeepAlive: true`) would respawn `ava start` forever, including after a
     deliberate `ava stop`."""
-    xml = autostart.autostart_plist_content()
+    xml = autostart.autostart_plist_content(host=fake_host())
     assert "<key>KeepAlive</key>" in xml
     keep_alive = xml.split("<key>KeepAlive</key>", 1)[1].split("</dict>", 1)[0]
     assert "<key>SuccessfulExit</key>" in keep_alive
@@ -109,6 +119,6 @@ def test_the_job_retries_on_macos_only_while_it_fails() -> None:
 def test_the_job_retries_on_macos_at_the_shared_interval() -> None:
     """ThrottleInterval overrides launchd's 10s respawn floor; without it a
     failing start would be retried six times a minute."""
-    xml = autostart.autostart_plist_content()
+    xml = autostart.autostart_plist_content(host=fake_host())
     assert "<key>ThrottleInterval</key>" in xml
     assert f"<integer>{BOOT_RETRY_INTERVAL_S}</integer>" in xml

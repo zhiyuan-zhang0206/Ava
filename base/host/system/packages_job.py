@@ -21,6 +21,7 @@ from xml.sax.saxutils import escape
 from loguru import logger
 
 import base.host.system.cron
+from base.host.system.hostport import Host
 
 _CRON_MARKER = "# ava-packages-refresh"
 
@@ -36,8 +37,8 @@ def _log_file() -> Path:
     return Path(base.host.system.cron.job_home()) / "logs" / "packages-refresh.log"
 
 
-def _shell_command() -> str:
-    ava = shlex.quote(base.host.system.cron.ava_binary_path())
+def _shell_command(*, host: Host) -> str:
+    ava = shlex.quote(base.host.system.cron.ava_binary_path(host=host))
     return f"{ava} packages refresh --from-job"
 
 
@@ -45,7 +46,7 @@ def _tick_seconds(*, tick_reader: Callable[[], int]) -> int:
     return tick_reader()
 
 
-def launchd_plist_content(*, tick_reader: Callable[[], int]) -> str:
+def launchd_plist_content(*, tick_reader: Callable[[], int], host: Host) -> str:
     log_file = _log_file()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -58,9 +59,9 @@ def launchd_plist_content(*, tick_reader: Callable[[], int]) -> str:
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>{escape(_shell_command())}</string>
+        <string>{escape(_shell_command(host=host))}</string>
     </array>
-{base.host.system.cron.launchd_env_block()}
+{base.host.system.cron.launchd_env_block(host=host)}
     <key>StartInterval</key>
     <integer>{_tick_seconds(tick_reader=tick_reader)}</integer>
     <key>RunAtLoad</key>
@@ -74,16 +75,18 @@ def launchd_plist_content(*, tick_reader: Callable[[], int]) -> str:
 """
 
 
-def register_macos(*, tick_reader: Callable[[], int]) -> int:
+def register_macos(*, tick_reader: Callable[[], int], host: Host) -> int:
     """Rewrite and reload the refresh LaunchAgent."""
     label = _LABEL
     plist_path = launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(launchd_plist_content(tick_reader=tick_reader), encoding="utf-8")
+    plist_path.write_text(
+        launchd_plist_content(tick_reader=tick_reader, host=host), encoding="utf-8"
+    )
 
-    if base.host.system.cron.reload_launchd_job(label, plist_path) != 0:
+    if base.host.system.cron.reload_launchd_job(label, plist_path, host=host) != 0:
         return 1
     logger.info(
         "launchd job '{}' loaded (every {}s)", label, _tick_seconds(tick_reader=tick_reader)
@@ -91,12 +94,12 @@ def register_macos(*, tick_reader: Callable[[], int]) -> int:
     return 0
 
 
-def unregister_macos() -> int:
-    base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path())
+def unregister_macos(*, host: Host) -> int:
+    base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path(), host=host)
     return 0
 
 
-def register_linux(*, tick_reader: Callable[[], int]) -> int:
+def register_linux(*, tick_reader: Callable[[], int], host: Host) -> int:
     """Replace the refresh line in the user crontab.
 
     Lines are matched by the marker as a substring.
@@ -106,6 +109,7 @@ def register_linux(*, tick_reader: Callable[[], int]) -> int:
         "pass cannot be registered",
         missing_returncode=1,
         missing_stream=sys.stderr,
+        host=host,
     )
     if missing_rc is not None:
         return missing_rc
@@ -116,7 +120,7 @@ def register_linux(*, tick_reader: Callable[[], int]) -> int:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     entry = (
         f"*/{minutes} * * * * {base.host.system.cron.cron_env_prefix()}"
-        f"/bin/sh -c {shlex.quote(_shell_command())} "
+        f"/bin/sh -c {shlex.quote(_shell_command(host=host))} "
         f">> {shlex.quote(str(log_file))} 2>&1  {marker}"
     )
     if base.host.system.cron.replace_crontab_entry(
@@ -124,15 +128,16 @@ def register_linux(*, tick_reader: Callable[[], int]) -> int:
         entry,
         skip_phrase="packages-refresh registration",
         update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
+        host=host,
     ):
         return 1
     logger.info("crontab packages-refresh entry added ({})", marker)
     return 0
 
 
-def unregister_linux() -> int:
+def unregister_linux(*, host: Host) -> int:
     return base.host.system.cron.remove_crontab_entry(
-        _CRON_MARKER, write_failure_rc=1, on_removed=None
+        _CRON_MARKER, write_failure_rc=1, on_removed=None, host=host
     )
 
 
@@ -141,6 +146,7 @@ def register_packages_job(
     enabled_reader: Callable[[], bool],
     refresh_enabled_reader: Callable[[], bool],
     tick_reader: Callable[[], int],
+    host: Host,
 ) -> None:
     """Register the recurring refresh pass (idempotent).
 
@@ -164,14 +170,19 @@ def register_packages_job(
         return
     base.host.system.cron.register_platform_job(
         "packages-refresh",
-        macos=lambda: register_macos(tick_reader=tick_reader),
-        linux=lambda: register_linux(tick_reader=tick_reader),
+        macos=lambda: register_macos(tick_reader=tick_reader, host=host),
+        linux=lambda: register_linux(tick_reader=tick_reader, host=host),
+        host=host,
     )
 
 
-def unregister_packages_job() -> None:
+def unregister_packages_job(*, host: Host) -> None:
     """Remove the recurring refresh pass; safe when none is registered, and a no-op
     outside the default home."""
     if not base.host.system.cron.owns_os_jobs("packages refresh"):
         return
-    base.host.system.cron.unregister_platform_job(macos=unregister_macos, linux=unregister_linux)
+    base.host.system.cron.unregister_platform_job(
+        macos=lambda: unregister_macos(host=host),
+        linux=lambda: unregister_linux(host=host),
+        host=host,
+    )

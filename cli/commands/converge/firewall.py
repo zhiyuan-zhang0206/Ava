@@ -32,6 +32,7 @@ from pathlib import Path
 
 from base.cluster.machine import MachineIdentity, MachineNameMissing
 from base.host.system import macos_firewall as fw
+from base.host.system.hostport import Host
 from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
 from cli.commands.converge.spec import ConvergeCtx
 
@@ -79,7 +80,9 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
     return tuple(p for p in candidates if p.exists())
 
 
-def audit_this_host(roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
+def audit_this_host(
+    roles: frozenset[str], *, machine: MachineIdentity, host: Host
+) -> FirewallAudit:
     """Audit this host's own serving binaries. The one entry point every caller shares.
 
     Converge calls it to report proactively; `ava firewall status` / `sync` call
@@ -92,7 +95,7 @@ def audit_this_host(roles: frozenset[str], *, machine: MachineIdentity) -> Firew
         return FirewallAudit(
             FirewallVerdict.ALLOWED, "no serving binary resolved on this host to audit"
         )
-    return audit_allowlist(required, machine_host=machine.host())
+    return audit_allowlist(required, machine_host=machine.host(), host=host)
 
 
 def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
@@ -110,7 +113,7 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
     install, unit not yet configured) is treated as no capabilities and audits
     the interpreter alone.
     """
-    audit = audit_this_host(frozenset(ctx.roles or ()), machine=ctx.machine)
+    audit = audit_this_host(frozenset(ctx.roles or ()), machine=ctx.machine, host=ctx.host)
     if audit.verdict is FirewallVerdict.UNREADABLE:
         # Not the defect, and not provably not-the-defect either. Say so once
         # rather than claiming a clean bill of health this step did not establish.
@@ -119,7 +122,7 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
     if audit.verdict not in (FirewallVerdict.ALLOWED, FirewallVerdict.RULES_MISSING):
         return  # not macOS / loopback-only / firewall off — nothing to converge
 
-    rules = fw.allowlisted_paths()
+    rules = fw.allowlisted_paths(host=ctx.host)
     if rules is None:
         print(
             f"  ! firewall: could not read the allow list from {fw.SOCKETFILTERFW}",
@@ -131,16 +134,18 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
     # running interpreter through the launch helpers (catching a venv the globs
     # do not name), the manifest carries the whole declarative whitelist.
     required = {p.resolve() for p in audit.missing}
-    required.update(fw.manifest_paths(machine_name=configured_machine_name(ctx.machine)))
+    required.update(
+        fw.manifest_paths(machine_name=configured_machine_name(ctx.machine), host=ctx.host)
+    )
     required = tuple(sorted(required, key=str))
 
     # Prune before adding: a stale rule still holds its bundle identifier, and
     # macOS 15's ALF daemon silently ignores an --add whose identifier already
     # has a rule (see base.host.system.macos_firewall). Removing the stale rule first lets
     # the replacement version's rule persist in the same pass.
-    pruned = fw.prune_stale_rules(rules)
+    pruned = fw.prune_stale_rules(rules, host=ctx.host)
     if pruned.removed:
-        refreshed = fw.allowlisted_paths()
+        refreshed = fw.allowlisted_paths(host=ctx.host)
         if refreshed is not None:
             rules = refreshed
         print(
@@ -148,7 +153,7 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
             file=sys.stderr,
         )
 
-    repair = fw.repair_allowlist(required, rules=rules)
+    repair = fw.repair_allowlist(required, rules=rules, host=ctx.host)
 
     if repair.allowed:
         print(

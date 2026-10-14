@@ -33,6 +33,7 @@ from ava.mcps.tests.test_daemon import (
 from ava.mcps.tests.test_daemon import (
     short_socket_path as short_socket_path,
 )
+from base.host.system.tests.fake_commands import fake_host
 
 
 async def test_handle_client_agent_id_none_without_identity(
@@ -55,11 +56,7 @@ async def test_handle_client_agent_id_none_without_identity(
     }
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
 
     [resp] = writer.responses()
     assert resp["ok"] is True

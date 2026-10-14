@@ -14,6 +14,7 @@ from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
+from base.host.system.tests.fake_commands import fake_host
 from base.packages import plugin_config_admin as plugin_config
 from base.packages import plugin_config_images
 from base.packages.plugin_config_images import PluginConfigOwner
@@ -56,6 +57,7 @@ def write_request(
         local=False,
         authority=config_authority,
         local_machine=local_machine,
+        host=fake_host(),
     )
 
 

@@ -19,6 +19,7 @@ from base.agents.to_user import ToUserReadRequest
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from ops import host_config, inventory
 from ops.cluster import operations as cluster
@@ -58,6 +59,7 @@ def dispatch_sync(
     authority: ConfigAuthority,
     image: LoadedCommit,
     local_machine: MachineIdentity,
+    host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Run synchronous ops on the daemon's worker pool, never the event loop.
 
@@ -84,7 +86,7 @@ def dispatch_sync(
             ).model_dump(mode="json")
         case "config_read":
             return OpStatus.COMPLETED, host_config.config_read_op(
-                authority=authority, local_machine=local_machine.name()
+                authority=authority, local_machine=local_machine.name(), host=host
             ).model_dump(mode="json")
         case "config_audit_read":
             ca = ConfigAuditReadPayload.model_validate(payload)
@@ -101,16 +103,17 @@ def dispatch_sync(
                     actor=cw.actor,
                     trace_id=cw.trace_id,
                     local_machine=local_machine.name(),
+                    host=host,
                 ).model_dump(mode="json")
         case "inventory_read":
             return OpStatus.COMPLETED, inventory.inventory_read_op(
-                local_machine=local_machine
+                local_machine=local_machine, host=host
             ).model_dump(mode="json")
         case "inventory_write":
             iw = InventoryWritePayload.model_validate(payload)
             with _state_write_lock:
                 return OpStatus.COMPLETED, inventory.inventory_write_op(
-                    iw.plugins, iw.mcp_servers, local_machine=local_machine
+                    iw.plugins, iw.mcp_servers, local_machine=local_machine, host=host
                 ).model_dump(mode="json")
         case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
             return OpStatus.COMPLETED, _agent_arm(kind, payload, pool)

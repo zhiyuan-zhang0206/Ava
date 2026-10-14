@@ -42,8 +42,6 @@ what actually covers it.
 
 from __future__ import annotations
 
-import os
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -61,16 +59,20 @@ from base.host.system.cron import (
     skip_os_job,
     unregister_platform_job,
 )
+from base.host.system.hostport import Host
 from base.paths import ava_home
 
 _LABEL = f"{LAUNCHD_LABEL_PREFIX}.autostart"
+_LAUNCHCTL_TIMEOUT_S = (
+    30.0  # launchctl answers at once; the bound only keeps a wedged launchd from stalling
+)
 
 
 def _autostart_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
-def autostart_plist_content() -> str:
+def autostart_plist_content(*, host: Host) -> str:
     """The LaunchAgent plist: run `ava start --boot` at load, and keep re-running
     it while it fails, up to the boot attempt budget.
 
@@ -88,7 +90,7 @@ def autostart_plist_content() -> str:
     reconciliation preserves healthy units on subsequent boot attempts.
     """
     label = _LABEL
-    ava = ava_binary_path()
+    ava = ava_binary_path(host=host)
     log_file = ava_home() / "logs" / "autostart.log"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -103,7 +105,7 @@ def autostart_plist_content() -> str:
         <string>start</string>
         <string>--boot</string>
     </array>
-{launchd_env_block()}
+{launchd_env_block(host=host)}
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -122,12 +124,12 @@ def autostart_plist_content() -> str:
 """
 
 
-def register_macos() -> int:
+def register_macos(*, host: Host) -> int:
     """Write (or update) the autostart LaunchAgent plist. Idempotent: rewrites
     only when the content changed, and never bootstraps (see module docstring)."""
     plist_path = _autostart_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
-    content = autostart_plist_content()
+    content = autostart_plist_content(host=host)
     if plist_path.exists() and plist_path.read_text() == content:
         return 0  # already current -- nothing to do, no reload
     plist_path.write_text(content)
@@ -135,18 +137,18 @@ def register_macos() -> int:
     logger.info("Wrote autostart plist to {}", plist_path)
     print(  # noqa: T201
         f"  . '{label}' loads on next login/reboot; enable now with: "
-        f"launchctl bootstrap gui/{os.getuid()} {plist_path}"
+        f"launchctl bootstrap gui/{host.uid} {plist_path}"
     )
     return 0
 
 
-def _unregister_macos() -> int:
+def _unregister_macos(*, host: Host) -> int:
     plist_path = _autostart_plist_path()
     label = _LABEL
-    subprocess.run(  # noqa: S603
-        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+    host.run(
+        ["launchctl", "bootout", f"gui/{host.uid}/{label}"],
         capture_output=True,
-        check=False,
+        timeout=_LAUNCHCTL_TIMEOUT_S,
     )
     if plist_path.exists():
         plist_path.unlink()
@@ -154,17 +156,17 @@ def _unregister_macos() -> int:
     return 0
 
 
-def register_linux() -> int:
-    install()
+def register_linux(*, host: Host) -> int:
+    install(host=host)
     return 0
 
 
-def unregister_linux() -> int:
-    uninstall()
+def unregister_linux(*, host: Host) -> int:
+    uninstall(host=host)
     return 0
 
 
-def register_autostart(*, enabled_reader: Callable[[], bool]) -> None:
+def register_autostart(*, enabled_reader: Callable[[], bool], host: Host) -> None:
     """Register the host's boot-time autostart job.
 
     Platform-aware: dispatches to the macOS plist or the Linux boot unit.
@@ -181,10 +183,15 @@ def register_autostart(*, enabled_reader: Callable[[], bool]) -> None:
         return
     if not owns_os_jobs("autostart"):
         return
-    register_platform_job("autostart", macos=register_macos, linux=register_linux)
+    register_platform_job(
+        "autostart",
+        macos=lambda: register_macos(host=host),
+        linux=lambda: register_linux(host=host),
+        host=host,
+    )
 
 
-def unregister_autostart() -> None:
+def unregister_autostart(*, host: Host) -> None:
     """Remove the host's boot job (systemd / launchd).
 
     Safe when none is registered, and a no-op when this process's home is not the
@@ -192,4 +199,8 @@ def unregister_autostart() -> None:
     """
     if not owns_os_jobs("autostart"):
         return
-    unregister_platform_job(macos=_unregister_macos, linux=unregister_linux)
+    unregister_platform_job(
+        macos=lambda: _unregister_macos(host=host),
+        linux=lambda: unregister_linux(host=host),
+        host=host,
+    )

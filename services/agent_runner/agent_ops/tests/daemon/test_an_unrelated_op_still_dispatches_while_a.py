@@ -15,6 +15,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops import host_config, inventory
@@ -42,7 +44,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     started = threading.Event()
     release = threading.Event()
 
-    def _wedged(*, local_machine: MachineIdentity) -> object:
+    def _wedged(*, local_machine: MachineIdentity, host: Host) -> object:
         del local_machine
         started.set()
         release.wait(timeout=30)
@@ -78,6 +80,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     )
     await asyncio.to_thread(started.wait, 10)
@@ -94,6 +97,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert (status, result) == ("completed", {"ready": True})
 
@@ -155,6 +159,7 @@ async def test_two_config_writes_cannot_interleave(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         ),
         daemon._dispatch(
             "config_write",
@@ -168,6 +173,7 @@ async def test_two_config_writes_cannot_interleave(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         ),
         daemon._dispatch(
             "inventory_write",
@@ -181,6 +187,7 @@ async def test_two_config_writes_cannot_interleave(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         ),
     )
 
@@ -211,6 +218,7 @@ async def test_config_write_op_receives_actor_and_trace(
         return _Result()
 
     dispatch_pool: ConnectionPool = stub_pool()
+    host = fake_host()
     monkeypatch.setattr(host_config, "config_write_op", _capture)
     status, _ = await daemon._dispatch(
         "config_write",
@@ -224,6 +232,7 @@ async def test_config_write_op_receives_actor_and_trace(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=host,
     )
     assert status == "completed"
     assert captured == {
@@ -231,6 +240,7 @@ async def test_config_write_op_receives_actor_and_trace(
         "local": False,
         "actor": "user_session:administrator",
         "trace_id": "trace-9",
+        "host": host,
     }
 
 
@@ -270,6 +280,7 @@ async def test_config_audit_read_op_receives_last(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert captured == {"last": 7}
@@ -299,6 +310,7 @@ async def test_config_audit_read_rejects_out_of_range_last(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "failed"
     assert "last" in str(result["error"])
@@ -327,7 +339,7 @@ async def test_op_arms_do_not_run_on_the_default_executor(
     dispatch_pool: ConnectionPool = stub_pool()
     seen: list[str] = []
 
-    def _note_thread(*, authority: ConfigAuthority, local_machine: str) -> object:
+    def _note_thread(*, authority: ConfigAuthority, local_machine: str, host: Host) -> object:
         del local_machine
         seen.append(threading.current_thread().name)
 
@@ -351,6 +363,7 @@ async def test_op_arms_do_not_run_on_the_default_executor(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
 
     assert seen and seen[0].startswith("ava-ops-arm"), f"arm ran on {seen!r}"

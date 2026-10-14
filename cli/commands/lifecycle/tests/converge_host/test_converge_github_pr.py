@@ -15,7 +15,7 @@ from base.cluster.machine import MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system.hostport import Host
-from base.host.tests.fake_commands import FakeCommands, Reply, fake_host
+from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime

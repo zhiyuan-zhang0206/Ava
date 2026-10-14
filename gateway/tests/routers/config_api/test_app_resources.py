@@ -14,6 +14,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugin_config_admin import panel_metadata
 from gateway.routers.configuration import runtime
 from ops.cluster import rpc
@@ -33,6 +34,7 @@ def clients(
     for index, app in enumerate(apps):
         app.include_router(runtime.router)
         app.state.machine = machine_identity
+        app.state.host = fake_host()
         app.state.db = MagicMock(spec=Database)
         app.state.db_pool = MagicMock()
         cursor = app.state.db_pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value

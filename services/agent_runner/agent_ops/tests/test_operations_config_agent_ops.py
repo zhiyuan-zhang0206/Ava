@@ -13,6 +13,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops import host_config
@@ -36,7 +38,9 @@ async def test_dispatch_config_read_calls_config_read_op(
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     captured: list[bool] = []
 
-    def _fake_config_read(*, authority: ConfigAuthority, local_machine: str) -> ConfigReadResult:
+    def _fake_config_read(
+        *, authority: ConfigAuthority, local_machine: str, host: Host
+    ) -> ConfigReadResult:
         del local_machine
         captured.append(True)
         return ConfigReadResult(machine="x", host_fields={}, raw_overrides={})
@@ -54,6 +58,7 @@ async def test_dispatch_config_read_calls_config_read_op(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     # _dispatch serializes the result model to a JSON dict for the wire.
@@ -87,6 +92,7 @@ async def test_dispatch_config_write_passes_overrides(
         trace_id: str | None = None,
         authority: ConfigAuthority,
         local_machine: str,
+        host: Host,
     ) -> ConfigWriteOpResult:
         del local_machine
         captured["overrides"] = overrides
@@ -108,6 +114,7 @@ async def test_dispatch_config_write_passes_overrides(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}
@@ -146,6 +153,7 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )  # no 'overrides' key
     assert status == "failed"
     assert "overrides" in str(result["error"])

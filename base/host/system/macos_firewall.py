@@ -69,9 +69,7 @@ absence is observable, and a rule that exists but says *Block* is observable too
 
 from __future__ import annotations
 
-import platform
 import re
-import shutil
 import socket
 import subprocess
 import time
@@ -79,7 +77,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from base.host.proc import run_bounded
+from base.host.system.hostport import Host
 
 SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 
@@ -156,7 +154,7 @@ class FirewallAudit:
         )
 
 
-def query(*args: str) -> str | None:
+def query(*args: str, host: Host) -> str | None:
     """Run one read-only `socketfilterfw` query. None when it cannot be asked.
 
     Every failure mode collapses to None on purpose: this module's callers report
@@ -164,29 +162,25 @@ def query(*args: str) -> str | None:
     them regardless of whether the tool is absent (a non-macOS host, or a macOS
     that moved it), refused to run, or hung.
     """
-    if shutil.which(SOCKETFILTERFW) is None and not Path(SOCKETFILTERFW).is_file():
+    if host.which(SOCKETFILTERFW) is None and not Path(SOCKETFILTERFW).is_file():
         return None
     try:
-        proc = subprocess.run(  # noqa: S603 — fixed system tool at an absolute path, literal args
-            [SOCKETFILTERFW, *args],
-            capture_output=True,
-            text=True,
-            timeout=_QUERY_TIMEOUT_S,
-            check=False,
+        proc = host.run(
+            [SOCKETFILTERFW, *args], capture_output=True, text=True, timeout=_QUERY_TIMEOUT_S
         )
     except (OSError, subprocess.SubprocessError):
         return None
     return proc.stdout if proc.returncode == 0 else None
 
 
-def firewall_enabled() -> bool | None:
+def firewall_enabled(*, host: Host) -> bool | None:
     """Is ALF filtering at all? None when the state cannot be read.
 
     `--getglobalstate` prints `Firewall is enabled. (State = 1)` or
     `Firewall is disabled. (State = 0)`; the `State = N` tail is matched rather
     than the prose because it is the machine-readable half of the same line.
     """
-    out = query("--getglobalstate")
+    out = query("--getglobalstate", host=host)
     if out is None:
         return None
     match = re.search(r"State\s*=\s*(\d+)", out)
@@ -195,14 +189,14 @@ def firewall_enabled() -> bool | None:
     return match.group(1) != "0"
 
 
-def allowlisted_paths() -> dict[str, bool] | None:
+def allowlisted_paths(*, host: Host) -> dict[str, bool] | None:
     """Every path ALF holds a rule for, mapped to True=Allow / False=Block.
 
     None when the list cannot be read. Note the list also contains Apple's own
     built-in service entries (`/usr/sbin/smbd`, `/usr/libexec/sharingd`, …), which
     is harmless here: this is only ever consulted for membership of paths Ava owns.
     """
-    out = query("--listapps")
+    out = query("--listapps", host=host)
     if out is None:
         return None
     rules: dict[str, bool] = {}
@@ -243,7 +237,7 @@ def _covered(binary: Path, rules: dict[str, bool]) -> bool:
     return rules.get(str(binary.resolve()), False)
 
 
-def audit_allowlist(required: tuple[Path, ...], *, machine_host: str) -> FirewallAudit:
+def audit_allowlist(required: tuple[Path, ...], *, machine_host: str, host: Host) -> FirewallAudit:
     """Does ALF currently let off-box connections reach each of `required`?
 
     `required` is the set of binaries this host serves a non-loopback port from,
@@ -254,14 +248,14 @@ def audit_allowlist(required: tuple[Path, ...], *, machine_host: str) -> Firewal
     that serves nothing off-box, then a firewall that filters nothing. Only a host
     that is all three of macOS, off-box-reachable and filtering can have the defect.
     """
-    if platform.system() != "Darwin":
+    if host.platform.system != "darwin":
         return FirewallAudit(FirewallVerdict.NOT_MACOS, "not a macOS host")
     if machine_host.strip().lower() in LOOPBACK_HOSTS:
         return FirewallAudit(
             FirewallVerdict.LOOPBACK_ONLY,
             f"this host is reachable only at {machine_host} — ALF does not filter loopback",
         )
-    enabled = firewall_enabled()
+    enabled = firewall_enabled(host=host)
     if enabled is None:
         return FirewallAudit(
             FirewallVerdict.UNREADABLE, f"could not read the firewall state from {SOCKETFILTERFW}"
@@ -270,7 +264,7 @@ def audit_allowlist(required: tuple[Path, ...], *, machine_host: str) -> Firewal
         return FirewallAudit(
             FirewallVerdict.FIREWALL_OFF, "the Application Firewall is off — it blocks nothing"
         )
-    rules = allowlisted_paths()
+    rules = allowlisted_paths(host=host)
     if rules is None:
         return FirewallAudit(
             FirewallVerdict.UNREADABLE, f"could not read the allow list from {SOCKETFILTERFW}"
@@ -412,7 +406,7 @@ FIREWALL_MANIFEST: tuple[ManifestEntry, ...] = (
 FIREWALL_LEGACY_FAMILY: tuple[str, ...] = ("~/Library/Android/sdk/platform-tools/adb",)
 
 
-def _machine_name(configured: str | None) -> str:
+def _machine_name(configured: str | None, *, host: Host) -> str:
     """This host's stable machine identifier; never raises.
 
     the ``configured`` name (``AVA_MACHINE_NAME``, None when unset) is the
@@ -423,21 +417,17 @@ def _machine_name(configured: str | None) -> str:
     """
     if configured:
         return configured
-    computer_name = _computer_name()
+    computer_name = _computer_name(host=host)
     if computer_name:
         return computer_name
     return socket.gethostname().split(".")[0].lower()
 
 
-def _computer_name() -> str | None:
+def _computer_name(*, host: Host) -> str | None:
     """The normalized ComputerName, or None when it cannot be read."""
     try:
-        proc = subprocess.run(
-            ["scutil", "--get", "ComputerName"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
+        proc = host.run(
+            ["scutil", "--get", "ComputerName"], capture_output=True, text=True, timeout=5
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -466,7 +456,7 @@ def _expand_glob(pattern: str) -> tuple[Path, ...]:
     return tuple(h for h in base.glob(rest) if h.exists())
 
 
-def manifest_paths(*, machine_name: str | None) -> tuple[Path, ...]:
+def manifest_paths(*, machine_name: str | None, host: Host) -> tuple[Path, ...]:
     """Every existing binary this host's manifest requires an allow rule for.
 
     Machine-filtered, glob-expanded, existence-checked, deduplicated and sorted.
@@ -474,7 +464,7 @@ def manifest_paths(*, machine_name: str | None) -> tuple[Path, ...]:
     contributes nothing — an absent binary needs no rule and causes no popup.
     """
     seen: dict[str, Path] = {}
-    name = _machine_name(machine_name)
+    name = _machine_name(machine_name, host=host)
     for entry in FIREWALL_MANIFEST:
         if entry.machine is not None and entry.machine != name:
             continue
@@ -496,12 +486,12 @@ def _manifest_rule_state(path: Path, rules: dict[str, bool]) -> str:
     return "Missing"
 
 
-def render_manifest_status(rules: dict[str, bool], *, machine_name: str | None) -> str:
+def render_manifest_status(rules: dict[str, bool], *, machine_name: str | None, host: Host) -> str:
     """Render every applicable manifest entry, pattern, resolved path, and state."""
     lines: list[str] = []
     resolved_states: dict[str, str] = {}
     unmatched_patterns = 0
-    name = _machine_name(machine_name)
+    name = _machine_name(machine_name, host=host)
     entries = tuple(
         entry for entry in FIREWALL_MANIFEST if entry.machine is None or entry.machine == name
     )
@@ -572,7 +562,7 @@ _REPAIR_VERBS: tuple[str, ...] = ("--add", "--unblockapp")
 _PRUNE_VERB = "--remove"
 
 
-def _sudo_mutate(verb: str, path: str) -> bool:
+def _sudo_mutate(verb: str, path: str, *, host: Host) -> bool:
     """Apply one ALF mutation directly, then through ``sudo -n`` if refused.
 
     The name is retained as the existing mutation seam. Both attempts are
@@ -585,7 +575,7 @@ def _sudo_mutate(verb: str, path: str) -> bool:
     )
     for command in commands:
         try:
-            proc = run_bounded(
+            proc = host.run(
                 command,
                 capture_output=True,
                 text=True,
@@ -598,7 +588,7 @@ def _sudo_mutate(verb: str, path: str) -> bool:
     return False
 
 
-def sudo_grant_installed() -> bool:
+def sudo_grant_installed(*, host: Host) -> bool:
     """Is an older-macOS NOPASSWD fallback grant installed?
 
     Read-only probe: ``sudo -n -l`` lists the caller's sudoers privileges
@@ -606,12 +596,8 @@ def sudo_grant_installed() -> bool:
     otherwise. The grant is identified by its Cmnd_Alias name in the listing.
     """
     try:
-        proc = subprocess.run(
-            ["sudo", "-n", "-l"],
-            capture_output=True,
-            text=True,
-            timeout=_QUERY_TIMEOUT_S,
-            check=False,
+        proc = host.run(
+            ["sudo", "-n", "-l"], capture_output=True, text=True, timeout=_QUERY_TIMEOUT_S
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -629,7 +615,7 @@ class FirewallRepair:
     removed: tuple[Path, ...] = ()
 
 
-def _persisted_after(paths: tuple[Path, ...]) -> tuple[Path, ...]:
+def _persisted_after(paths: tuple[Path, ...], *, host: Host) -> tuple[Path, ...]:
     """Of ``paths``, which ones now have an Allow rule, re-reading ALF?
 
     The daemon persists asynchronously, so the read is retried a bounded number
@@ -639,19 +625,21 @@ def _persisted_after(paths: tuple[Path, ...]) -> tuple[Path, ...]:
     ``repair_allowlist`` honest — it never claims a rule it cannot see.
     """
     for _ in range(_VERIFY_ATTEMPTS):
-        rules = allowlisted_paths()
+        rules = allowlisted_paths(host=host)
         if rules is not None:
             present = tuple(p for p in paths if _covered(p, rules))
             if len(present) == len(paths):
                 return present
         time.sleep(VERIFY_RETRY_S)
-    rules = allowlisted_paths()
+    rules = allowlisted_paths(host=host)
     if rules is None:
         return ()
     return tuple(p for p in paths if _covered(p, rules))
 
 
-def repair_allowlist(paths: tuple[Path, ...], *, rules: dict[str, bool]) -> FirewallRepair:
+def repair_allowlist(
+    paths: tuple[Path, ...], *, rules: dict[str, bool], host: Host
+) -> FirewallRepair:
     """Add Allow rules for every path in ``paths`` that lacks one, then verify.
 
     Mutating — direct first, with ``sudo -n`` as a fallback on platforms that
@@ -671,11 +659,11 @@ def repair_allowlist(paths: tuple[Path, ...], *, rules: dict[str, bool]) -> Fire
     if not missing:
         return FirewallRepair()
     attempted = tuple(
-        p for p in missing if all(_sudo_mutate(verb, str(p)) for verb in _REPAIR_VERBS)
+        p for p in missing if all(_sudo_mutate(verb, str(p), host=host) for verb in _REPAIR_VERBS)
     )
     if not attempted:
         return FirewallRepair(failed=missing)
-    allowed = _persisted_after(attempted)
+    allowed = _persisted_after(attempted, host=host)
     allowed_set = set(allowed)
     return FirewallRepair(
         allowed=allowed,
@@ -683,7 +671,7 @@ def repair_allowlist(paths: tuple[Path, ...], *, rules: dict[str, bool]) -> Fire
     )
 
 
-def prune_stale_rules(rules: dict[str, bool]) -> FirewallRepair:
+def prune_stale_rules(rules: dict[str, bool], *, host: Host) -> FirewallRepair:
     """Remove stale manifest-family rules (see ``stale_manifest_rules``).
 
     Hygiene only — an orphaned rule blocks nothing and prompts nothing — so a
@@ -696,6 +684,6 @@ def prune_stale_rules(rules: dict[str, bool]) -> FirewallRepair:
     """
     removed: list[Path] = []
     for path in stale_manifest_rules(rules):
-        if _sudo_mutate(_PRUNE_VERB, str(path)):
+        if _sudo_mutate(_PRUNE_VERB, str(path), host=host):
             removed.append(path)
     return FirewallRepair(removed=tuple(removed))

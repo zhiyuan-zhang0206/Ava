@@ -7,6 +7,8 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from base.host.system.hostport import Host
+
 
 def _repo_root() -> Path:
     # cli/commands/ is two levels below repo root.
@@ -73,7 +75,7 @@ def stop_cluster() -> int:
     return subprocess.run(cmd, cwd=_repo_root(), check=False).returncode
 
 
-def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
+def cmd_cluster_destroy(*, drop_db: bool = False, host: Host) -> int:
     """Detach the host's cluster: stop it, retire its OS jobs and helper, mark the
     home detached, optionally remove its data dirs.
 
@@ -115,7 +117,7 @@ def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
             print("cluster stop incomplete; destroy intent retained", file=sys.stderr)
             return rc
         try:
-            unregister_scheduled_jobs()
+            unregister_scheduled_jobs(host=host)
             unregister_helper(
                 home,
                 helper_port=settings.services.permissions_helper_port,
@@ -140,7 +142,7 @@ def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
     return 0
 
 
-def unregister_scheduled_jobs() -> None:
+def unregister_scheduled_jobs(*, host: Host) -> None:
     """Remove every OS-scheduled job the host registered (health probe, boot
     autostart, logs maintenance, packages refresh, PR flow and the WAL-G tick).
 
@@ -157,7 +159,7 @@ def unregister_scheduled_jobs() -> None:
     from base.host.system.pr_flow_job import unregister_pr_flow_job
     from base.host.system.walg_job import unregister_walg_job
 
-    jobs: list[tuple[str, Callable[[], None]]] = [
+    jobs: list[tuple[str, Callable[..., None]]] = [
         ("health probe", unregister_os_cron),
         ("autostart", unregister_autostart),
         ("logs maintenance", unregister_logs_job),
@@ -168,7 +170,7 @@ def unregister_scheduled_jobs() -> None:
     failed: list[str] = []
     for name, unregister in jobs:
         try:
-            unregister()
+            unregister(host=host)
         except Exception as e:
             failed.append(f"{name} ({e})")
 

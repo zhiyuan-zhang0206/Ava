@@ -8,6 +8,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.host.system.tests.fake_commands import fake_host
 from services.supervision.roster import spec
 
 
@@ -25,13 +26,15 @@ def test_plugin_gate_flows_through_annotation(
     image.write_text(FleetConfig(task_maintenance_enabled=False).model_dump_json())
     start = {
         s.session
-        for s in spec.services_for_capabilities(frozenset({"gateway"}), machine=machine_identity)
+        for s in spec.services_for_capabilities(
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
+        )
     }
     assert "task-maintenance" not in start
     annotated = {
         s.session: r
         for s, r in spec.services_for_capabilities_annotated(
-            frozenset({"gateway"}), machine=machine_identity
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
         )
     }
     assert annotated["task-maintenance"] and "disabled" in annotated["task-maintenance"]

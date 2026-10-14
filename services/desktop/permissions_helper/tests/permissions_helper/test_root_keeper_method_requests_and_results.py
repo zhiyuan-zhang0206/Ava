@@ -7,7 +7,6 @@ import json
 import os
 import plistlib
 import socket
-import sys
 import threading
 import time
 from pathlib import Path
@@ -20,6 +19,8 @@ from base.host.converge.accessibility import AccessibilityState
 from base.host.converge.screen_capture import ScreenCaptureState
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_host
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     FakeHelper,
     fake_tools,
@@ -207,34 +208,36 @@ def test_gui_ops_wire_requests(fake_helper) -> None:
 
 
 def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Probe ordering only ever reaches the first branch on Linux CI; drive the
-    # macOS branches explicitly so a reordered or dropped prong is caught.
+    # Drive every branch explicitly (a macOS host with the tools it has, then a Linux one) so a
+    # reordered or dropped prong is caught whatever machine the test runs on.
     from base.host.system import probes as pp
 
-    def reason() -> str:
-        r = pp.permissions_helper_incapability()
+    def mac(programs: dict[str, str]) -> Host:
+        return fake_host(platform=DARWIN_ARM64, programs=programs)
+
+    def reason(host: Host) -> str:
+        r = pp.permissions_helper_incapability(host=host)
         assert r is not None
         return r
 
-    monkeypatch.setattr(sys, "platform", "darwin")
     present = {"swiftc": "/usr/bin/swiftc", "codesign": "/usr/bin/codesign"}
-    monkeypatch.setattr(pp, "display_available", lambda: True)
 
-    monkeypatch.setattr(pp.shutil, "which", present.get)
-    assert pp.permissions_helper_incapability() is None
+    def fake_display_available(*, host: Host) -> bool:
+        return True
 
-    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    assert "no swiftc" in reason()
+    monkeypatch.setattr(pp, "display_available", fake_display_available)
 
-    monkeypatch.setattr(pp.shutil, "which", lambda n: "/usr/bin/swiftc" if n == "swiftc" else None)  # pyright: ignore[reportUnknownArgumentType]
-    assert "no codesign" in reason()
+    assert pp.permissions_helper_incapability(host=mac(present)) is None
+    assert "no swiftc" in reason(mac({}))
+    assert "no codesign" in reason(mac({"swiftc": "/usr/bin/swiftc"}))
 
-    monkeypatch.setattr(pp.shutil, "which", present.get)
-    monkeypatch.setattr(pp, "display_available", lambda: False)
-    assert "no display" in reason()
+    def fake_display_available2(*, host: Host) -> bool:
+        return False
 
-    monkeypatch.setattr(sys, "platform", "linux")
-    assert "macOS only" in reason()
+    monkeypatch.setattr(pp, "display_available", fake_display_available2)
+    assert "no display" in reason(mac(present))
+
+    assert "macOS only" in reason(fake_host(platform=LINUX_X86))
 
 
 def test_recv_reassembles_across_chunks(fake_helper) -> None:

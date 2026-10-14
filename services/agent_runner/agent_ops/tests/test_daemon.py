@@ -23,6 +23,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster import operations as cluster_ops
@@ -118,6 +119,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert result == {"id": 777}
@@ -158,6 +160,7 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert seen == {"agent_id": 42}
@@ -208,6 +211,7 @@ async def test_dispatch_shell_probe_bad_payload_fails(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "failed"
     assert "agent_id" in str(result["error"])
@@ -247,6 +251,7 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 5}
@@ -289,6 +294,7 @@ async def test_dispatch_shell_kill_reports_absent(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert result == {"mode": "absent", "interrupted": False, "name": None}
@@ -332,6 +338,7 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "pool": pool}
@@ -375,6 +382,7 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "failed"
     assert "agent_id" in str(result["error"])
@@ -416,6 +424,7 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 3, "lines": 500}
@@ -461,6 +470,7 @@ async def test_dispatch_shell_capture_defaults_lines(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert seen == {"lines": 200}
@@ -491,6 +501,7 @@ async def test_dispatch_unknown_kind(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "failed"
     assert "unknown kind" in str(result["error"])
@@ -529,6 +540,7 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "failed"
     assert "ShellNotFoundError" in str(result["error"])

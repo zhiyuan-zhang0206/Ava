@@ -18,10 +18,12 @@ import pytest
 from base import paths
 from base.config import settings
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 
 
-def _allow_pr_flow(*, production: bool) -> None:
+def _allow_pr_flow(*, production: bool, host: Host) -> None:
     """Credentials are present; registration still applies its home and switch gates."""
     _ = production
 
@@ -120,7 +122,7 @@ _REGISTERS = [
         id="walg",
     ),
 ]
-_UNREGISTER_CALLS: dict[str, Callable[[], None]] = {
+_UNREGISTER_CALLS: dict[str, Callable[..., None]] = {
     "health-probe": cron.unregister_os_cron,
     "autostart": autostart.unregister_autostart,
     "logs-maintenance": logs_job.unregister_logs_job,
@@ -140,9 +142,9 @@ def test_registration_never_reaches_the_backend_when_gated(
     _exploding_platform(monkeypatch)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
-        call(production=True)
+        call(production=True, host=fake_host())
     else:
-        call()  # no AssertionError == the gate held
+        call(host=fake_host())  # no AssertionError == the gate held
 
 
 def test_registration_dispatches_when_enabled(
@@ -152,21 +154,26 @@ def test_registration_dispatches_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
-    cron.register_os_cron(enabled_reader=lambda: settings.general.os_jobs_enabled)
-    autostart.register_autostart(enabled_reader=lambda: settings.general.os_jobs_enabled)
-    logs_job.register_logs_job(enabled_reader=lambda: settings.general.os_jobs_enabled)
+    cron.register_os_cron(enabled_reader=lambda: settings.general.os_jobs_enabled, host=fake_host())
+    autostart.register_autostart(
+        enabled_reader=lambda: settings.general.os_jobs_enabled, host=fake_host()
+    )
+    logs_job.register_logs_job(
+        enabled_reader=lambda: settings.general.os_jobs_enabled, host=fake_host()
+    )
     packages_job.register_packages_job(
         enabled_reader=lambda: settings.general.os_jobs_enabled,
         refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
         tick_reader=lambda: settings.packages.refresh_tick_seconds,
+        host=fake_host(),
     )
     pr_flow_job.register_pr_flow_job(
-        enabled_reader=lambda: settings.general.os_jobs_enabled,
-        production=True,
+        enabled_reader=lambda: settings.general.os_jobs_enabled, production=True, host=fake_host()
     )
     walg_job.register_walg_job(
         enabled_reader=lambda: settings.general.os_jobs_enabled,
         backup_hour_reader=lambda: settings.services.backup_hour,
+        host=fake_host(),
     )
     assert backend.calls == [
         "cron",
@@ -184,7 +191,7 @@ def test_deregistration_is_not_gated_by_the_os_jobs_switch(
     """Cleanup has to work wherever registration is switched off (the suite runs
     with it off) — otherwise a leak under an older build can never be swept."""
     for call in _UNREGISTER_CALLS.values():
-        call()
+        call(host=fake_host())
     assert backend.calls == [
         "unregister-cron",
         "unregister-autostart",
@@ -216,9 +223,9 @@ def test_a_scratch_home_registers_nothing(
     monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
-        call(production=True)
+        call(production=True, host=fake_host())
     else:
-        call()  # no AssertionError == nothing reached the scheduler
+        call(host=fake_host())  # no AssertionError == nothing reached the scheduler
 
 
 @pytest.mark.parametrize("call", _UNREGISTERS)
@@ -227,7 +234,7 @@ def test_a_scratch_home_removes_nothing(
 ) -> None:
     _exploding_platform(monkeypatch)
     assert callable(call)
-    call()
+    call(host=fake_host())
 
 
 def test_the_default_home_owns_the_jobs_however_it_is_spelled(
@@ -245,15 +252,14 @@ def test_the_default_home_owns_the_jobs_however_it_is_spelled(
 # ---------------------------------------------------------------------------
 
 
-def test_ava_binary_path_prefers_this_checkout_over_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ava_binary_path_prefers_this_checkout_over_path() -> None:
     """PATH belongs to whoever launched the process; the job must run the binary
     of the checkout that owns `$AVA_HOME`. A leaked e2e job named a worktree's
     `ava` resolved off `uv run`'s PATH — one `shutil.which` hit away from naming
     prod's."""
-    import shutil
-
-    monkeypatch.setattr(shutil, "which", lambda _n: "/somewhere/else/bin/ava")  # pyright: ignore[reportUnknownArgumentType]
-    resolved = Path(cron.ava_binary_path())
+    resolved = Path(
+        cron.ava_binary_path(host=fake_host(programs={"ava": "/somewhere/else/bin/ava"}))
+    )
     assert resolved.parent.parent.parent == Path(__file__).resolve().parents[4]
     assert resolved.parent.parent.name == ".venv"
 
@@ -261,18 +267,20 @@ def test_ava_binary_path_prefers_this_checkout_over_path(monkeypatch: pytest.Mon
 def test_ava_binary_path_falls_back_to_path_without_a_venv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import shutil
-
     monkeypatch.setattr(paths, "repo_root", lambda: tmp_path)
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/local/bin/ava")  # pyright: ignore[reportUnknownArgumentType]
-    assert cron.ava_binary_path() == "/usr/local/bin/ava"
+    host = fake_host(programs={"ava": "/usr/local/bin/ava"})
+    assert cron.ava_binary_path(host=host) == "/usr/local/bin/ava"
 
 
 def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """An OS probe observes its owning home and carries no release policy."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
-    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/x/ava")
-    body = cron.launchd_plist_content(300)
+
+    def fake_ava_binary_path(*, host: Host) -> str:
+        return "/x/ava"
+
+    monkeypatch.setattr(cron, "ava_binary_path", fake_ava_binary_path)
+    body = cron.launchd_plist_content(300, host=fake_host())
     import plistlib
 
     assert plistlib.loads(body.encode())["ProgramArguments"] == [
@@ -295,10 +303,14 @@ def test_every_launchagent_pins_ava_home(
     render: object, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
-    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/x/ava")
-    monkeypatch.setattr(autostart, "ava_binary_path", lambda: "/x/ava")
+
+    def fake_ava_binary_path(*, host: Host) -> str:
+        return "/x/ava"
+
+    monkeypatch.setattr(cron, "ava_binary_path", fake_ava_binary_path)
+    monkeypatch.setattr(autostart, "ava_binary_path", fake_ava_binary_path)
     assert callable(render)
-    body = render()
+    body = render(host=fake_host())
     assert isinstance(body, str)
     assert f"<key>AVA_HOME</key>\n        <string>{tmp_path / '.ava-x'}</string>" in body
 

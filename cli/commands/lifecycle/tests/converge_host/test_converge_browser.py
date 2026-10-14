@@ -11,7 +11,8 @@ import cli.commands.lifecycle.converge_host as cv
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
-from base.host.tests.fake_commands import fake_host
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
@@ -58,7 +59,7 @@ def test_enabled_runs_preflight(
     ctx.config.set_field("browser_enabled", True)
     import services.desktop.browser.profile as bp
 
-    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(bp, "ensure_browser_profile", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     cv.ensure_browser(ctx)
 
@@ -82,14 +83,14 @@ def test_capable_offers_profile_seed_with_tty_flag(
     ctx.config.set_field("browser_enabled", True)
     import services.desktop.browser.profile as bp
 
-    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cv.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(cv.sys.stdout, "isatty", lambda: False)
     seen: list[bool] = []
     monkeypatch.setattr(
         bp,
         "ensure_browser_profile",
-        lambda *, interactive: seen.append(interactive),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *, interactive, **_kwargs: seen.append(interactive),  # pyright: ignore[reportUnknownArgumentType]
     )
     cv.ensure_browser(ctx)
     assert seen == [False]  # stdout not a tty -> not interactive
@@ -113,7 +114,7 @@ def test_incapable_host_does_not_offer_profile_seed(
     ctx.config.set_field("browser_enabled", True)
     import services.desktop.browser.profile as bp
 
-    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: "no display")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome, **_kwargs: "no display")  # pyright: ignore[reportUnknownArgumentType]
 
     def _must_not_call(**_k: object) -> None:
         raise AssertionError("profile seed offered on an incapable host")
@@ -139,7 +140,7 @@ def test_enabled_but_incapable_warns_not_raises(
         command_runtime=command_runtime,
     )
     ctx.config.set_field("browser_enabled", True)
-    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: "no display")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome, **_kwargs: "no display")  # pyright: ignore[reportUnknownArgumentType]
     cv.ensure_browser(ctx)
     stderr = capsys.readouterr().err
     assert "not applicable" in stderr
@@ -166,7 +167,7 @@ def test_enabled_with_missing_npx_prints_the_repair_box(
     monkeypatch.setattr(
         cv,
         "browser_incapability",
-        lambda _chrome: "no npx (install Node.js for chrome-devtools-mcp)",  # pyright: ignore[reportUnknownArgumentType]
+        lambda _chrome, **_kwargs: "no npx (install Node.js for chrome-devtools-mcp)",  # pyright: ignore[reportUnknownArgumentType]
     )
     cv.ensure_browser(ctx)
     assert "Install Node.js" in capsys.readouterr().err
@@ -199,17 +200,17 @@ def test_steps_read_their_context_owner_and_later_overlay(
     second.config.set_field("browser_enabled", True)
     probed: list[bool] = []
 
-    def capable(_chrome: str | None) -> None:
-        probed.append(True)
+    def capable(_chrome: str | None, *, host: Host) -> None:
+        probed.append(isinstance(host, Host))
 
-    def seed(*, interactive: bool) -> None:
+    def seed(*, interactive: bool, host: Host) -> None:
         assert isinstance(interactive, bool)
 
     monkeypatch.setattr(cv, "browser_incapability", capable)
     monkeypatch.setattr(profile, "ensure_browser_profile", seed)
     cv.ensure_browser(first)
     cv.ensure_browser(second)
-    assert probed == [True]
+    assert probed == [True]  # called once, and handed the context's host
     assert first.config is not second.config
     first.config.set_field("browser_enabled", True)
     cv.ensure_browser(first)

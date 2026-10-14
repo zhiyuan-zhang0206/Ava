@@ -19,6 +19,7 @@ from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
+from base.host.system.hostport import Host
 from base.packages.plugin_config_admin import (
     panel_metadata,
     panel_overrides,
@@ -39,7 +40,9 @@ from ops.rpc_schemas import (
 SENSITIVE_MASK = "••••••••"
 
 
-def config_read_op(*, authority: ConfigAuthority, local_machine: str) -> ConfigReadResult:
+def config_read_op(
+    *, authority: ConfigAuthority, local_machine: str, host: Host
+) -> ConfigReadResult:
     """Read this machine's host-scope config fields and return them with metadata.
 
     Returns a ConfigReadResult with:
@@ -64,7 +67,7 @@ def config_read_op(*, authority: ConfigAuthority, local_machine: str) -> ConfigR
         if meta.sensitive and value:
             value = SENSITIVE_MASK
         cap = config_validators.read_time_capability(
-            meta.name, chrome_binary=settings.services.chrome_binary
+            meta.name, chrome_binary=settings.services.chrome_binary, host=host
         )
         host_fields[meta.name] = HostConfigField(
             value=value,
@@ -93,7 +96,7 @@ def config_audit_read_op(last: int, *, local_machine: str) -> ConfigAuditReadRes
 
 
 def _field_verdicts(
-    overrides: dict[str, Any], metas: dict[str, Any], *, local: bool
+    overrides: dict[str, Any], metas: dict[str, Any], *, local: bool, host: Host
 ) -> dict[str, FieldWriteResult]:
     """Per-field gate: known, host-scope, editable here, and (unless an unset) valid."""
     results: dict[str, FieldWriteResult] = {}
@@ -121,7 +124,9 @@ def _field_verdicts(
             except (ValueError, TypeError):
                 results[field] = FieldWriteResult(ok=False, reason="invalid declared scalar")
             continue
-        vr = config_validators.validate(field, value, chrome_binary=settings.services.chrome_binary)
+        vr = config_validators.validate(
+            field, value, chrome_binary=settings.services.chrome_binary, host=host
+        )
         results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
     return results
 
@@ -215,6 +220,7 @@ def config_write_op(
     actor: str | None = None,
     trace_id: str | None = None,
     local_machine: str,
+    host: Host,
 ) -> ConfigWriteOpResult:
     """Validate and merge this machine's host overrides into its .env (reducer semantics).
 
@@ -247,7 +253,7 @@ def config_write_op(
             restart_required=[],
         )
 
-    results = _field_verdicts(overrides, metas, local=local)
+    results = _field_verdicts(overrides, metas, local=local, host=host)
 
     # all() over an empty dict is True, so an empty payload is trivially applied.
     applied = all(r.ok for r in results.values())

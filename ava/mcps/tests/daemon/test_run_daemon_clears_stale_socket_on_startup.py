@@ -42,6 +42,8 @@ from ava.mcps.tests.test_daemon import (
 from ava.mcps.tests.test_daemon import (
     short_socket_path as short_socket_path,
 )
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.paths.home import resolve_ava_home
 
 
@@ -54,7 +56,7 @@ async def test_run_daemon_clears_stale_socket_on_startup(
 
     monkeypatch.setattr(daemon_mod, "connect_server", AsyncMock())
     daemon_task = asyncio.create_task(
-        daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0)
+        daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0, host=fake_host())
     )
 
     # being able to connect means bind succeeded = stale was cleaned
@@ -304,7 +306,10 @@ async def test_connect_server_enforces_requires_before_connecting(
 
     # display_available is imported into mcp_config from base.host.system.probes;
     # patch the bound name (where assert_requirements calls it).
-    monkeypatch.setattr(_cfg, "display_available", lambda: False)
+    def fake_display_available(*, host: Host) -> bool:
+        return False
+
+    monkeypatch.setattr(_cfg, "display_available", fake_display_available)
     called = False
 
     def _boom(*_a: object, **_k: object) -> None:
@@ -314,7 +319,7 @@ async def test_connect_server_enforces_requires_before_connecting(
 
     with pytest.raises(_cfg.MCPError, match="requires a display"):
         await daemon_mod.connect_server(
-            "chrome", {}, timeout_seconds=lambda: 15.0, stdio_client=_boom
+            "chrome", {}, timeout_seconds=lambda: 15.0, stdio_client=_boom, host=fake_host()
         )
     assert called is False
 
@@ -340,7 +345,7 @@ async def test_overlay_error_or_disabled_server_never_starts_a_process(
     launch = MagicMock(side_effect=AssertionError("server startup must not be reached"))
     monkeypatch.setattr(mcp.client.stdio, "stdio_client", launch)
     response = await daemon_mod.dispatch_with_retry(
-        {"id": 1, "method": "list_tools", "params": {"server": "fs"}}, scope
+        {"id": 1, "method": "list_tools", "params": {"server": "fs"}}, scope, host=fake_host()
     )
     assert response["ok"] is False
     assert error in response["error"]
@@ -450,7 +455,7 @@ async def test_invalidate_session_removes_cached_session_and_closes_stack(
     stack.aclose = AsyncMock()
     monkeypatch.setattr(daemon_mod, "connect_server", AsyncMock(return_value=(session, stack)))
 
-    await daemon_mod.get_session("fs", scope)
+    await daemon_mod.get_session("fs", scope, host=fake_host())
     assert "fs" in scope.local.sessions
     assert "fs" in scope.local.stacks
 
@@ -490,11 +495,7 @@ async def test_handle_client_retries_on_transport_error_and_succeeds(
     req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["ok"] is True
     assert call_count == 2
@@ -522,11 +523,7 @@ async def test_handle_client_does_not_retry_non_transport_error(
     req = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["ok"] is False
     assert "ValueError" in resp["error"]
@@ -556,11 +553,7 @@ async def test_handle_client_gives_up_after_max_retries(
     req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["ok"] is False
     assert "BrokenPipeError" in resp["error"]
@@ -591,11 +584,7 @@ async def test_handle_client_retry_reconnects_after_invalidation(
     req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["ok"] is True
     assert connect_count == 2  # reconnected after invalidation
@@ -632,11 +621,7 @@ async def test_handle_client_retries_on_mcp_error_connection_closed(
     req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["ok"] is True
     assert connect_count == 2  # dead session invalidated, fresh one connected
@@ -670,11 +655,7 @@ async def test_handle_client_does_not_retry_tool_level_mcp_error(
     req = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["ok"] is False
     assert "MCPError" in resp["error"]

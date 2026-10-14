@@ -16,6 +16,7 @@ from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig, db_config_from_boot
+from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
@@ -102,6 +103,7 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
         image: LoadedCommit,
         local_machine: MachineIdentity,
         config: ConfigBoot,
+        host: Host,
     ) -> None:
         _assert_run_owner(database, image, captures, roots, gates, readers, local_machine)
         events.append("run")

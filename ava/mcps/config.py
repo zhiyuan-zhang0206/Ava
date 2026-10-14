@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 from base.host.runtime_interpreter import external_plugin_read_root
+from base.host.system.hostport import Host
 from base.host.system.probes import display_available
 from base.paths import ava_home, mcps_dir, repo_root
 
@@ -85,7 +86,7 @@ def validate_requirements(spec: dict[str, Any]) -> dict[str, bool]:
     return validated
 
 
-def assert_requirements(spec: dict[str, Any]) -> None:
+def assert_requirements(spec: dict[str, Any], *, host: Host) -> None:
     """Evaluate a server entry's optional `requires` preconditions before connect.
 
     Raises MCPError with an actionable message if a precondition is unmet, so the
@@ -97,13 +98,13 @@ def assert_requirements(spec: dict[str, Any]) -> None:
     """
     requires = validate_requirements(spec)
     for key, want in requires.items():
-        if key == "display" and want and not display_available():
+        if key == "display" and want and not display_available(host=host):
             raise MCPError(
                 "MCP server requires a display, but this host has none (headless server)"
             )
 
 
-def server_capability(spec: dict[str, Any]) -> tuple[bool, str | None]:
+def server_capability(spec: dict[str, Any], *, host: Host) -> tuple[bool, str | None]:
     """Validate requirements and return this host's capability verdict.
 
     Mirrors assert_requirements but returns (ok, reason) instead of raising, for
@@ -112,7 +113,7 @@ def server_capability(spec: dict[str, Any]) -> tuple[bool, str | None]:
     connect-time validation; only an unavailable host capability returns false.
     """
     requires = validate_requirements(spec)
-    if requires.get("display") and not display_available():
+    if requires.get("display") and not display_available(host=host):
         return (False, "requires a display, but this host has none")
     return (True, None)
 

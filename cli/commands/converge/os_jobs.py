@@ -32,7 +32,9 @@ def ensure_health_probe_cron(ctx: ConvergeCtx) -> None:
     that runs before the gateway process starts. Idempotent."""
     from base.host.system.cron import register_os_cron
 
-    register_os_cron(enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled)
+    register_os_cron(
+        enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled, host=ctx.host
+    )
     # On failure the exception propagates so converge fails fast.
 
 
@@ -40,7 +42,9 @@ def ensure_logs_maintenance(ctx: ConvergeCtx) -> None:
     """Register daily rotation followed by retention."""
     from base.host.system.logs_job import register_logs_job
 
-    register_logs_job(enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled)
+    register_logs_job(
+        enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled, host=ctx.host
+    )
 
 
 def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
@@ -57,6 +61,7 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
         enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
         refresh_enabled_reader=lambda: ctx.read_config().view.packages.refresh_enabled,
         tick_reader=lambda: ctx.read_config().view.packages.refresh_tick_seconds,
+        host=ctx.host,
     )
     # A registration failure propagates so converge fails fast.
 
@@ -75,6 +80,7 @@ def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
     register_pr_flow_job(
         enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
         production=production_identity(machine=ctx.machine, home=ctx.ava_home),
+        host=ctx.host,
     )
 
 
@@ -93,9 +99,10 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
         register_walg_job(
             enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
             backup_hour_reader=lambda: ctx.read_config().view.services.backup_hour,
+            host=ctx.host,
         )
     else:
-        unregister_walg_job()
+        unregister_walg_job(host=ctx.host)
 
 
 def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:
@@ -108,5 +115,7 @@ def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:
     Delegates to `base.host.system.autostart`. Idempotent."""
     from base.host.system.autostart import register_autostart
 
-    register_autostart(enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled)
+    register_autostart(
+        enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled, host=ctx.host
+    )
     # On failure the exception propagates so converge fails fast.

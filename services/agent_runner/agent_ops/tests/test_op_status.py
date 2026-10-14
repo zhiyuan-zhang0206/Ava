@@ -14,6 +14,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db import pool as db_pool
 from base.db.code_version_gate import ProcessDbGate
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.rpc_schemas import OpStatus
@@ -65,6 +66,7 @@ async def test_replay_returns_canonical_status_without_reexecution(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert actual is status
     assert result == {}
@@ -98,6 +100,7 @@ async def test_replay_rejects_unknown_stored_status_without_reexecution(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     assert db_conn.execute(
         "SELECT op_status FROM api_idempotency WHERE key='status-test'"
@@ -136,6 +139,7 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status is OpStatus.FAILED
     assert "never completed" in str(result["error"])

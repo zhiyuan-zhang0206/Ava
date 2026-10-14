@@ -15,7 +15,7 @@ from services.agent_runner.agent_ops import boot, daemon
 
 def _crash() -> None:
     async def _boom(
-        *, database: object, image: object, local_machine: object, config: object
+        *, database: object, image: object, local_machine: object, config: object, host: object
     ) -> None:
         raise RuntimeError("db pool exploded mid-loop")
 

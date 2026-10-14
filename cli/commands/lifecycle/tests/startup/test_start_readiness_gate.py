@@ -19,6 +19,7 @@ from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.host.system.hostport import Host
 from base.telemetry import EventPipeline
 from cli import start_runtime
 from cli.commands.lifecycle import converge_host, start
@@ -65,7 +66,7 @@ def roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None], 
     )
 
     def selected(
-        _roles: object, skip: set[str], *, machine: MachineIdentity
+        _roles: object, skip: set[str], *, machine: MachineIdentity, host: Host
     ) -> tuple[ServiceSpec, ...]:
         del machine
         return tuple(spec for spec, reason in specs if reason is None and spec.session not in skip)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.host.system.tests.fake_commands import fake_host
 from services.agent_runner.pty_sessions import shutdown_budget
 from services.supervision import roster
 from services.supervision.roster import service_spec, spec
@@ -28,7 +29,9 @@ def test_both_a_gateway_host_and_a_runner_host_run_the_service(
     for role in ("gateway", "agent-runner"):
         started = {
             s.session
-            for s in spec.services_for_capabilities(frozenset({role}), machine=machine_identity)
+            for s in spec.services_for_capabilities(
+                frozenset({role}), machine=machine_identity, host=fake_host()
+            )
         }
         assert "pty-sessions" in started, role
 

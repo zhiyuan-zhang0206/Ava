@@ -5,9 +5,9 @@ What is asserted here is the step's two jobs on top of it — picking the right 
 of serving binaries per capability, and reporting rather than raising.
 
 **Nothing here mutates a real firewall.** The step attempts an unprivileged
-mutation first and falls back to `sudo -n`, but every test stubs the process runner the
-mutation goes through (`base.host.system.macos_firewall.run_bounded`), so what is asserted
-is output and decision-making, never ALF state.
+mutation first and falls back to `sudo -n`, but every test hands the step a host whose process runner the
+mutation goes through (the `Host` the step is handed), so what is asserted is output and
+decision-making, never ALF state.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -28,8 +28,9 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import macos_firewall as fw
+from base.host.system.hostport import Host
 from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict
-from base.host.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
@@ -44,6 +45,7 @@ def _ctx(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
+    host: Host | None = None,
 ) -> cv.ConvergeCtx:
     machine_config = ConfigBoot()
     return cv.ConvergeCtx(
@@ -55,7 +57,7 @@ def _ctx(
         producer=producer,
         machine=machine_from_boot(machine_config),
         helper=refuse_helper,
-        host=fake_host(),
+        host=host if host is not None else fake_host(),
         services=frozenset(),
     )  # type: ignore[arg-type]
 
@@ -124,7 +126,9 @@ def test_nonexistent_resolved_paths_are_dropped(
 
 
 def _stub_audit(monkeypatch: pytest.MonkeyPatch, audit: FirewallAudit) -> None:
-    def fake_audit_this_host(_roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
+    def fake_audit_this_host(
+        _roles: frozenset[str], *, machine: MachineIdentity, host: Host
+    ) -> FirewallAudit:
         assert isinstance(machine, MachineIdentity)
         return audit
 
@@ -153,35 +157,59 @@ def test_quiet_on_every_host_that_cannot_have_the_defect(
     _stub_audit(monkeypatch, FirewallAudit(verdict, "detail"))
     _stub_rules(monkeypatch, {})  # host-independent: CI has no socketfilterfw
     monkeypatch.setattr(fw, "manifest_paths", _empty_manifest)
-    _stub_mutation_result(monkeypatch, False)
+    _, host = _mutating_result(False)
     cfw.ensure_firewall_allowlist(
         _ctx(
-            tmp_path, cv.ALL_ROLES, operator_database=operator_database, producer=operator_pipeline
+            tmp_path,
+            cv.ALL_ROLES,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            host=host,
         )
     )
     assert capsys.readouterr().err == ""
 
 
-def _empty_manifest(*, machine_name: str | None) -> tuple[Path, ...]:
+def _empty_manifest(*, machine_name: str | None, host: Host) -> tuple[Path, ...]:
     assert machine_name is None or isinstance(machine_name, str)
     return ()
 
 
 def _stub_rules(monkeypatch: pytest.MonkeyPatch, rules: dict[str, bool]) -> None:
-    monkeypatch.setattr(fw, "allowlisted_paths", lambda: rules)
+    def fake_allowlisted_paths(*, host: Host) -> dict[str, bool]:
+        return rules
+
+    monkeypatch.setattr(fw, "allowlisted_paths", fake_allowlisted_paths)
 
 
-def _stub_mutation(monkeypatch: pytest.MonkeyPatch, mutate: Callable[[str, str], bool]) -> None:
-    """Route every `socketfilterfw <verb> <path>` mutation (direct or via `sudo -n`) to `mutate`."""
+class _Mutations:
+    """The runner behind a host: every `socketfilterfw <verb> <path>` (direct or via `sudo -n`)
+    goes to `mutate`, which says whether the daemon accepted it."""
 
-    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(command, 0 if mutate(command[-2], command[-1]) else 1)
+    def __init__(self, mutate: Callable[[str, str], bool]) -> None:
+        self.mutate = mutate
+        self.calls: list[list[str]] = []
 
-    monkeypatch.setattr(fw, "run_bounded", run)
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        command = list(argv)
+        self.calls.append(command)
+        accepted = self.mutate(command[-2], command[-1])
+        return subprocess.CompletedProcess(command, 0 if accepted else 1, "", "")
 
 
-def _stub_mutation_result(monkeypatch: pytest.MonkeyPatch, ok: bool) -> None:
-    _stub_mutation(monkeypatch, lambda _verb, _path: ok)
+def _mutating_host(mutate: Callable[[str, str], bool]) -> tuple[_Mutations, Host]:
+    runner = _Mutations(mutate)
+    return runner, fake_host(runner, platform=DARWIN_ARM64)
+
+
+def _mutating_result(ok: bool) -> tuple[_Mutations, Host]:
+    return _mutating_host(lambda _verb, _path: ok)
 
 
 def _skip_verify_waits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,26 +236,21 @@ def test_failed_direct_and_sudo_repairs_print_exact_commands_and_do_not_raise(
     )
     _stub_rules(monkeypatch, {})  # nothing allow-listed yet
     monkeypatch.setattr(fw, "manifest_paths", _empty_manifest)  # host-independent
-    calls: list[list[str]] = []
-
-    def fail(cmd: list[str], **_kw: object):
-        calls.append(cmd)
-        return type("R", (), {"returncode": 1})()
-
-    monkeypatch.setattr(fw, "run_bounded", fail)
+    runner, host = _mutating_result(False)
     cfw.ensure_firewall_allowlist(
         _ctx(
             tmp_path,
             frozenset({"gateway"}),
             operator_database=operator_database,
             producer=operator_pipeline,
+            host=host,
         )
     )  # no raise
     err = capsys.readouterr().err
     assert "1 of 1 managed binaries have no ALF allow rule" in err
     assert str(missing) in err
     assert "--add" in err and "--unblockapp" in err
-    assert calls == [
+    assert runner.calls == [
         [fw.SOCKETFILTERFW, "--add", str(missing)],
         ["sudo", "-n", fw.SOCKETFILTERFW, "--add", str(missing)],
     ]
@@ -255,7 +278,7 @@ def test_grant_installed_repairs_silently(
     )
     persisted = False
 
-    def rules() -> dict[str, bool]:
+    def rules(*, host: Host) -> dict[str, bool]:
         return {str(missing): True} if persisted else {}
 
     monkeypatch.setattr(fw, "allowlisted_paths", rules)
@@ -265,7 +288,7 @@ def test_grant_installed_repairs_silently(
         persisted = True  # the fake daemon accepts the mutation
         return True
 
-    _stub_mutation(monkeypatch, mutate)
+    _, host = _mutating_host(mutate)
     _skip_verify_waits(monkeypatch)
     monkeypatch.setattr(fw, "manifest_paths", _empty_manifest)
     cfw.ensure_firewall_allowlist(
@@ -274,6 +297,7 @@ def test_grant_installed_repairs_silently(
             frozenset({"gateway"}),
             operator_database=operator_database,
             producer=operator_pipeline,
+            host=host,
         )
     )
     err = capsys.readouterr().err
@@ -297,10 +321,14 @@ def test_stale_rules_are_pruned_when_grant_installed(
         "stale_manifest_rules",
         lambda _rules: (Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),),  # pyright: ignore[reportUnknownArgumentType]
     )
-    _stub_mutation_result(monkeypatch, True)
+    _, host = _mutating_result(True)
     cfw.ensure_firewall_allowlist(
         _ctx(
-            tmp_path, cv.ALL_ROLES, operator_database=operator_database, producer=operator_pipeline
+            tmp_path,
+            cv.ALL_ROLES,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            host=host,
         )
     )
     err = capsys.readouterr().err
@@ -331,9 +359,13 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
         FirewallAudit(FirewallVerdict.RULES_MISSING, "1 of 1 have no rule", missing=(missing,)),
     )
     state = {str(stale): True}
-    monkeypatch.setattr(fw, "allowlisted_paths", lambda: dict(state))
 
-    def manifest(*, machine_name: str | None) -> tuple[Path, ...]:
+    def fake_allowlisted_paths(*, host: Host) -> dict[str, bool]:
+        return dict(state)
+
+    monkeypatch.setattr(fw, "allowlisted_paths", fake_allowlisted_paths)
+
+    def manifest(*, machine_name: str | None, host: Host) -> tuple[Path, ...]:
         assert machine_name is None or isinstance(machine_name, str)
         return (missing,)
 
@@ -352,10 +384,14 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
             state[path] = True
         return True
 
-    _stub_mutation(monkeypatch, mutate)
+    _, host = _mutating_host(mutate)
     cfw.ensure_firewall_allowlist(
         _ctx(
-            tmp_path, cv.ALL_ROLES, operator_database=operator_database, producer=operator_pipeline
+            tmp_path,
+            cv.ALL_ROLES,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            host=host,
         )
     )
     assert order[0] == ("--remove", str(stale))  # prune frees the identifier first
@@ -392,9 +428,12 @@ def test_unconfigured_unit_audits_the_interpreter(
     """`roles is None` is a fresh install — no capabilities, but still an interpreter."""
     seen: list[frozenset[str]] = []
 
-    def fake_audit_this_host(roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
+    def fake_audit_this_host(
+        roles: frozenset[str], *, machine: MachineIdentity, host: Host
+    ) -> FirewallAudit:
         assert isinstance(machine, MachineIdentity)
-        return seen.append(roles) or FirewallAudit(FirewallVerdict.ALLOWED, "ok")
+        seen.append(roles)
+        return FirewallAudit(FirewallVerdict.ALLOWED, "ok")
 
     monkeypatch.setattr(
         cfw,
@@ -403,9 +442,15 @@ def test_unconfigured_unit_audits_the_interpreter(
     )
     _stub_rules(monkeypatch, {})
     monkeypatch.setattr(fw, "manifest_paths", _empty_manifest)
-    _stub_mutation_result(monkeypatch, False)
+    _, host = _mutating_result(False)
     cfw.ensure_firewall_allowlist(
-        _ctx(tmp_path, None, operator_database=operator_database, producer=operator_pipeline)
+        _ctx(
+            tmp_path,
+            None,
+            operator_database=operator_database,
+            producer=operator_pipeline,
+            host=host,
+        )
     )
     assert seen == [frozenset()]
 
@@ -424,7 +469,9 @@ def test_firewall_status_renders_manifest_details(
 
     monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
-    def fake_audit_this_host(_roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
+    def fake_audit_this_host(
+        _roles: frozenset[str], *, machine: MachineIdentity, host: Host
+    ) -> FirewallAudit:
         assert isinstance(machine, MachineIdentity)
         return FirewallAudit(FirewallVerdict.ALLOWED, "all allow-listed")
 
@@ -433,16 +480,26 @@ def test_firewall_status_renders_manifest_details(
         "audit_this_host",
         fake_audit_this_host,  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(fw, "allowlisted_paths", lambda: {"/bin/listener": True})
 
-    def render_manifest_status(rules: dict[str, bool], *, machine_name: str | None) -> str:
+    def fake_allowlisted_paths(*, host: Host) -> dict[str, bool]:
+        return {"/bin/listener": True}
+
+    monkeypatch.setattr(fw, "allowlisted_paths", fake_allowlisted_paths)
+
+    def render_manifest_status(
+        rules: dict[str, bool], *, machine_name: str | None, host: Host
+    ) -> str:
         assert machine_name is None or isinstance(machine_name, str)
         return f"  rendered manifest with {len(rules)} rule"
 
     monkeypatch.setattr(fw, "render_manifest_status", render_manifest_status)
     monkeypatch.setattr(fw, "stale_manifest_rules", lambda _rules: ())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(fw, "sudo_grant_installed", lambda: False)
-    assert firewall_cmd.cmd_firewall_status(machine=command_runtime.machine) == 0
+
+    def fake_sudo_grant_installed(*, host: Host) -> bool:
+        return False
+
+    monkeypatch.setattr(fw, "sudo_grant_installed", fake_sudo_grant_installed)
+    assert firewall_cmd.cmd_firewall_status(machine=command_runtime.machine, host=fake_host()) == 0
     output = capsys.readouterr().out
     assert "rendered manifest with 1 rule" in output
     assert "sudo fallback grant" in output

@@ -13,6 +13,7 @@ import pytest
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.host.system.hostport import Host
 from cli.commands.cluster import health as cluster_health
 from cli.commands.converge.redis_bridge import RedisBridgeStatus
 from cli.database.runtime import CommandRuntime
@@ -32,8 +33,11 @@ def unhealthy(*_args: object, database_factory: DatabaseFactory) -> bool:
     return False
 
 
-def service_probe_verdict(*, machine: MachineIdentity, failures: list[str]) -> list[str]:
+def service_probe_verdict(
+    *, machine: MachineIdentity, host: Host, failures: list[str]
+) -> list[str]:
     assert isinstance(machine, MachineIdentity)
+    assert isinstance(host, Host)
     return failures
 
 

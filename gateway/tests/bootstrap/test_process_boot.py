@@ -18,6 +18,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.host import proc
+from base.host.system.tests.fake_commands import fake_host
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import DrainStatus
 from gateway import app as gateway_app
@@ -40,7 +41,10 @@ def test_gateway_owner_construction_is_cold(
     config = ConfigBoot()
     monkeypatch.setattr(ConfigBoot, "get_field", forbidden)
     process = GatewayProcess(
-        config=config, image=LoadedCommit(Path("unknown-source"), None), machine=machine_identity
+        config=config,
+        image=LoadedCommit(Path("unknown-source"), None),
+        machine=machine_identity,
+        host=fake_host(),
     )
     with process.lifetime():
         assert process.gate.min_read_due()
@@ -60,7 +64,10 @@ def test_gateway_handles_retain_the_same_entry_gate(
         original(handle, config, gate=gate, direct_url=direct_url)
 
     process = GatewayProcess(
-        config=snapshot_process_config(), image=LOADED_IMAGE, machine=machine_identity
+        config=snapshot_process_config(),
+        image=LOADED_IMAGE,
+        machine=machine_identity,
+        host=fake_host(),
     )
     monkeypatch.setattr(Database, "__init__", build)
     with process.lifetime():
@@ -81,7 +88,9 @@ def test_gateway_cleanup_preserves_a_startup_primary(
     def fail(_clients: ClientSet) -> None:
         raise cleanup
 
-    process = GatewayProcess(config=ConfigBoot(), image=LOADED_IMAGE, machine=machine_identity)
+    process = GatewayProcess(
+        config=ConfigBoot(), image=LOADED_IMAGE, machine=machine_identity, host=fake_host()
+    )
     monkeypatch.setattr(ClientSet, "close", fail)
     with pytest.raises(ValueError) as caught, process.lifetime():
         raise primary
@@ -154,7 +163,7 @@ def test_asgi_health_keeps_its_explicit_entry_image(
     monkeypatch.setattr(GatewayProcess, "database", test_database)
     image = LoadedCommit(Path("entry-source"), sha)
     process = GatewayProcess(
-        config=snapshot_process_config(), image=image, machine=machine_identity
+        config=snapshot_process_config(), image=image, machine=machine_identity, host=fake_host()
     )
     monkeypatch.setattr(gateway_app.app.state, "gateway_process_input", process, raising=False)
     with (

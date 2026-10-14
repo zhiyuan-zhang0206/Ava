@@ -11,7 +11,8 @@ import pytest
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import logs_job as job
-from base.host.tests.fake_commands import fake_host
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
@@ -30,7 +31,7 @@ def test_converge_registers_logs_maintenance(
 
     calls: list[str] = []
 
-    def register(*, enabled_reader: object) -> None:
+    def register(*, enabled_reader: object, host: Host) -> None:
         calls.append("register")
 
     monkeypatch.setattr(job, "register_logs_job", register)

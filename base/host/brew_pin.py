@@ -5,6 +5,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from base.host.proc import CommandRunner
+
+_BREW_TIMEOUT_S = (
+    60.0  # `brew list` reads the Cellar; the bound only keeps a wedged brew from stalling
+)
+
 PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
     {
         "ca-certificates",
@@ -57,7 +63,7 @@ PGBOUNCER_APT_VERSION = "1.26.0-1.pgdg24.04+1"
 REDIS_APT_VERSION = "6:8.2.*"
 
 
-def pinned_brew_formulae() -> set[str] | None:
+def pinned_brew_formulae(*, run: CommandRunner) -> set[str] | None:
     """Return Homebrew's pinned formulae, or ``None`` when brew is absent.
 
     This probe is warning-only infrastructure: process errors degrade to an
@@ -65,11 +71,8 @@ def pinned_brew_formulae() -> set[str] | None:
     commands. It never mutates pins and does no work at import time.
     """
     try:
-        result = subprocess.run(
-            ["brew", "list", "--pinned"],
-            capture_output=True,
-            text=True,
-            check=False,
+        result = run(
+            ["brew", "list", "--pinned"], capture_output=True, text=True, timeout=_BREW_TIMEOUT_S
         )
     except FileNotFoundError:
         return None
@@ -78,7 +81,7 @@ def pinned_brew_formulae() -> set[str] | None:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-def installed_brew_formulae() -> set[str] | None:
+def installed_brew_formulae(*, run: CommandRunner) -> set[str] | None:
     """Return Homebrew's installed formulae, or ``None`` when brew is absent.
 
     This probe is warning-only infrastructure: process errors degrade to an
@@ -86,11 +89,8 @@ def installed_brew_formulae() -> set[str] | None:
     commands. It never mutates pins and does no work at import time.
     """
     try:
-        result = subprocess.run(
-            ["brew", "list", "--formula"],
-            capture_output=True,
-            text=True,
-            check=False,
+        result = run(
+            ["brew", "list", "--formula"], capture_output=True, text=True, timeout=_BREW_TIMEOUT_S
         )
     except FileNotFoundError:
         return None
@@ -99,12 +99,12 @@ def installed_brew_formulae() -> set[str] | None:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-def unpinned_formulae() -> tuple[str, ...]:
+def unpinned_formulae(*, run: CommandRunner) -> tuple[str, ...]:
     """Return installed approved formulae missing from the host's pin set, sorted."""
-    pinned = pinned_brew_formulae()
+    pinned = pinned_brew_formulae(run=run)
     if pinned is None:
         return ()
-    installed = installed_brew_formulae()
+    installed = installed_brew_formulae(run=run)
     if installed is None:
         return ()
     return tuple(sorted((PINNED_BREW_FORMULAE & installed) - pinned))

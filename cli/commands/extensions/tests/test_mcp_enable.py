@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.system.hostport import Host
 from cli.commands.extensions.mcp import cmd_mcp_add, cmd_mcp_disable, cmd_mcp_enable, cmd_mcp_list
 
 
@@ -93,7 +94,7 @@ def test_enable_and_list_validate_declarations_without_host_probes(
     import ava.mcps.config as cfg_mod
     from base.packages.plugins.mcp_enabled import read_enabled
 
-    def unexpected_probe() -> bool:
+    def unexpected_probe(*, host: Host) -> bool:
         pytest.fail("CLI declaration validation must not probe host capabilities")
 
     monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
