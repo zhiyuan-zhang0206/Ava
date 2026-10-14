@@ -26,6 +26,7 @@ from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.host import proc
 from base.sessions.pty import client
 from base.sessions.pty.paths import SERVICE_UNIT
+from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_shells import new
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -51,7 +52,6 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause, pty_close_notices
 from ops.cluster_status import pause
-from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
