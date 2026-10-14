@@ -554,14 +554,6 @@ def test_config_file_is_owner_only(
     command_runtime.machine.set(host="10.0.0.10")
     repo = Path(__file__).resolve().parents[5]
 
-    replace = Path.replace
-    modes_before_publish: list[int] = []
-
-    def _record_replace(source: Path, target: Path) -> Path:
-        modes_before_publish.append(source.stat().st_mode & 0o777)
-        return replace(source, target)
-
-    monkeypatch.setattr(Path, "replace", _record_replace)
     oc.ensure_otel_collector(
         repo,
         tmp_path,
@@ -570,7 +562,6 @@ def test_config_file_is_owner_only(
         machine=command_runtime.machine,
     )
     config = tmp_path / "otel-collector/config.yaml"
-    assert modes_before_publish == [0o600]
     assert config.stat().st_mode & 0o777 == 0o600
     assert f"Bearer {oc.telemetry_bearer()}" in config.read_text(encoding="utf-8")
 

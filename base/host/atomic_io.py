@@ -4,26 +4,79 @@ Replacing the path commits a complete, visible file. A later parent-directory
 fsync can still fail; callers choose whether that durability failure raises,
 warns, or is suppressed. This module never creates or validates private
 directories; secret storage keeps using ``base.host.private_storage``.
+
+The three calls whose failure a test must cause (``replace``, ``fsync`` and
+``fchmod``) are the fields of :class:`Fs`; an :class:`AtomicWriter` runs every
+write through one. This module's own tests build ``AtomicWriter(Fs(...))`` with
+the failure they need. Every other module calls ``write_text_atomic``,
+``write_bytes_atomic`` and ``fsync_parent`` (the writer over ``SYSTEM_FS``) and
+its tests use real files under ``tmp_path``: the commit, cleanup and durability
+contract is this module's, so it is proved here. A caller whose own policy on a failure
+needs proving (it warns, suppresses, or never syncs) takes a required ``AtomicWriter``;
+the callers that still patch instead are listed above ``SYSTEM_FS``.
 """
 
 from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 
 
-def fsync_parent(path: Path) -> None:
-    """Sync the directory containing a committed path, without a platform guard."""
+@dataclass(frozen=True)
+class Fs:
+    """The filesystem calls an atomic write makes whose failure a test has to cause."""
+
+    # Rename `source` onto `target` (both in one directory), replacing it atomically.
+    replace: Callable[[Path, Path], None]
+    # Flush a file descriptor (a file or a directory) to stable storage.
+    fsync: Callable[[int], None]
+    # Set the permission bits of an open file.
+    fchmod: Callable[[int, int], None]
+
+
+def _replace(source: Path, target: Path) -> None:
+    source.replace(target)
+
+
+def _fsync(fd: int) -> None:
+    os.fsync(fd)
+
+
+def _fchmod(fd: int, mode: int) -> None:
+    os.fchmod(fd, mode)
+
+
+# The real calls.
+#
+# TRANSITIONAL. The three wrappers above look Path.replace, os.fsync and os.fchmod up when they are
+# called, rather than binding them here, only to keep the remaining patches behaving as they did
+# before this seam existed: they patch the shared os module or Path, so they also reach an atomic
+# write. The recorded debt that does:
+#   - os.fsync in cli/commands/observability/tests/test_atomic_writer_contracts.py. It proves a
+#     caller's policy (grafana_render.atomic_write never syncs); the cli observability batch (S9)
+#     gives that writer a required AtomicWriter parameter and the test builds an Fs.
+#   - os.replace, os.fchmod and Path.replace in the tests of modules that do their own replace or
+#     chmod: base/host (private_storage), base/tests/config (dotenv), cli/commands/data_plane,
+#     cli/commands/agents, cli/commands/extensions, agent/graph/exec, services/entrypoints/im_bridge,
+#     ava/tests, scripts/ci and scripts/tests. Each goes with its component's batch.
+# When the last is gone, SYSTEM_FS binds the os functions directly and the wrappers are deleted.
+SYSTEM_FS = Fs(replace=_replace, fsync=_fsync, fchmod=_fchmod)
+
+
+def _fsync_parent(fs: Fs, path: Path) -> None:
     fd = os.open(path.parent, os.O_RDONLY)
     try:
-        os.fsync(fd)
+        fs.fsync(fd)
     finally:
         os.close(fd)
 
 
 def _write_atomic(
+    fs: Fs,
     path: Path,
     data: bytes | str,
     *,
@@ -40,7 +93,7 @@ def _write_atomic(
     replaced = False
     try:
         if mode is not None:
-            os.fchmod(fd, mode)
+            fs.fchmod(fd, mode)
         if isinstance(data, bytes):
             stream = os.fdopen(fd, "wb")
             fd = -1
@@ -48,7 +101,7 @@ def _write_atomic(
                 stream.write(data)
                 stream.flush()
                 if sync_file:
-                    os.fsync(stream.fileno())
+                    fs.fsync(stream.fileno())
         else:
             text_stream = os.fdopen(fd, "w", encoding=encoding)
             fd = -1
@@ -56,12 +109,11 @@ def _write_atomic(
                 text_stream.write(data)
                 text_stream.flush()
                 if sync_file:
-                    os.fsync(text_stream.fileno())
-        # Path.replace reaches os.replace and preserves both test injection seams.
-        tmp.replace(path)
+                    fs.fsync(text_stream.fileno())
+        fs.replace(tmp, path)
         replaced = True
         if sync_parent:
-            fsync_parent(path)
+            _fsync_parent(fs, path)
     finally:
         if fd != -1:
             os.close(fd)
@@ -71,6 +123,78 @@ def _write_atomic(
                     tmp.unlink(missing_ok=True)
             else:
                 tmp.unlink(missing_ok=True)
+
+
+@dataclass(frozen=True)
+class AtomicWriter:
+    """Atomic writes through one :class:`Fs`; the methods are the module functions' contract."""
+
+    fs: Fs
+
+    def fsync_parent(self, path: Path) -> None:
+        """Sync the directory containing a committed path, without a platform guard."""
+        _fsync_parent(self.fs, path)
+
+    def write_bytes(
+        self,
+        path: Path,
+        data: bytes,
+        *,
+        mode: int | None = None,
+        sync_file: bool = True,
+        sync_parent: bool = False,
+        prefix: str | None = None,
+        suffix: str = ".tmp",
+        suppress_cleanup_error: bool = False,
+    ) -> None:
+        """Publish complete bytes through a unique sibling temporary file."""
+        _write_atomic(
+            self.fs,
+            path,
+            data,
+            encoding=None,
+            mode=mode,
+            sync_file=sync_file,
+            sync_parent=sync_parent,
+            prefix=prefix if prefix is not None else f".{path.name}.",
+            suffix=suffix,
+            suppress_cleanup_error=suppress_cleanup_error,
+        )
+
+    def write_text(
+        self,
+        path: Path,
+        data: str,
+        *,
+        encoding: str | None = None,
+        mode: int | None = None,
+        sync_file: bool = True,
+        sync_parent: bool = False,
+        prefix: str | None = None,
+        suffix: str = ".tmp",
+        suppress_cleanup_error: bool = False,
+    ) -> None:
+        """Publish complete text using the requested text-stream encoding."""
+        _write_atomic(
+            self.fs,
+            path,
+            data,
+            encoding=encoding,
+            mode=mode,
+            sync_file=sync_file,
+            sync_parent=sync_parent,
+            prefix=prefix if prefix is not None else f".{path.name}.",
+            suffix=suffix,
+            suppress_cleanup_error=suppress_cleanup_error,
+        )
+
+
+_SYSTEM_WRITER = AtomicWriter(SYSTEM_FS)
+
+
+def fsync_parent(path: Path) -> None:
+    """Sync the directory containing a committed path, without a platform guard."""
+    _SYSTEM_WRITER.fsync_parent(path)
 
 
 def write_bytes_atomic(
@@ -85,14 +209,13 @@ def write_bytes_atomic(
     suppress_cleanup_error: bool = False,
 ) -> None:
     """Publish complete bytes through a unique sibling temporary file."""
-    _write_atomic(
+    _SYSTEM_WRITER.write_bytes(
         path,
         data,
-        encoding=None,
         mode=mode,
         sync_file=sync_file,
         sync_parent=sync_parent,
-        prefix=prefix if prefix is not None else f".{path.name}.",
+        prefix=prefix,
         suffix=suffix,
         suppress_cleanup_error=suppress_cleanup_error,
     )
@@ -111,14 +234,14 @@ def write_text_atomic(
     suppress_cleanup_error: bool = False,
 ) -> None:
     """Publish complete text using the requested text-stream encoding."""
-    _write_atomic(
+    _SYSTEM_WRITER.write_text(
         path,
         data,
         encoding=encoding,
         mode=mode,
         sync_file=sync_file,
         sync_parent=sync_parent,
-        prefix=prefix if prefix is not None else f".{path.name}.",
+        prefix=prefix,
         suffix=suffix,
         suppress_cleanup_error=suppress_cleanup_error,
     )
