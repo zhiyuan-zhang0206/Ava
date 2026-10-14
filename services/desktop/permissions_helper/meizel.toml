@@ -4,8 +4,3 @@ exports = ["launchd_job.py", "lifecycle.py"]
 "__init__.py" = ["lifecycle.py"]
 "lifecycle.py" = ["build_state.py", "hardened_runtime.py", "launchd_job.py"]
 "tests" = ["__init__.py", "launchd_job.py", "lifecycle.py"]
-
-[debt.private-name]
-"tests/test_helper_retirement.py -> lifecycle.py#_run" = 3
-"tests/test_os_jobs_gate.py -> lifecycle.py#_run" = 2
-"tests/test_permissions_helper.py -> lifecycle.py#_run" = 1
