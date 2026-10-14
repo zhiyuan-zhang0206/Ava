@@ -57,7 +57,7 @@ def run_start_command(**kwargs: Any) -> int:
     return cmd_start(**kwargs)
 
 
-def complete_start(*, helper: HelperFactory, host: Host) -> None:
+def complete_start(*, helper: HelperFactory | None, host: Host) -> None:
     """Report the root boot complete (lazy import, as above)."""
     from cli.commands.lifecycle.root_driver import complete_boot_start
 

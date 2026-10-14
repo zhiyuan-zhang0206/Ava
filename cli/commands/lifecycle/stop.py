@@ -161,7 +161,7 @@ def force_stop(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
-    helper: HelperFactory,
+    helper: HelperFactory | None,
 ) -> int:
     """Explicit force-only resource stop; normal commands use _temporary_stop.
 
@@ -255,7 +255,7 @@ def do_stop(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
-    helper: HelperFactory,
+    helper: HelperFactory | None,
 ) -> int:
     """Shared stop kernel; only explicit force escalates a service stop."""
     if force:
@@ -299,7 +299,7 @@ def cmd_stop(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
-    helper: HelperFactory,
+    helper: HelperFactory | None,
 ) -> int:
     """Stop this unit, including terminals and infrastructure; retain its data."""
     return do_stop(

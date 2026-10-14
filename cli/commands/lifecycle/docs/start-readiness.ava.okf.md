@@ -34,7 +34,8 @@ executing that handover. The GUI child runs ordinary locked start and owns
 readiness and resume. The observer cannot release the maintenance hold or start
 services in its own non-GUI domain when delegation fails.
 
-After launch, selected core services must be running and answer their protocol.
+After launch, `cli/commands/lifecycle/root_readiness.py` observes the roster through
+the root driver. Selected core services must be running and answer their protocol.
 Optional services are reported without blocking serving or adding a startup wait.
 Protocol availability is an observation, not a proof that an endpoint belongs to
 a particular native process generation. Process ownership for actual signals

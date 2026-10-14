@@ -11,6 +11,7 @@ import pytest
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
+import cli.commands.lifecycle.root_readiness as _root_readiness_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
 import services.supervision.roster.spec as roster_spec
@@ -138,7 +139,7 @@ def hermetic_start(
             sessions_gone=False,
         )
 
-    monkeypatch.setattr(_root_driver_commands, "wait_for_service_tree", wait)
+    monkeypatch.setattr(_root_readiness_commands, "wait_for_service_tree", wait)
     roster(monkeypatch, (("gateway", None), ("frontend", None)))
 
 

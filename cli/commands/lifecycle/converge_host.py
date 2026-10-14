@@ -151,7 +151,7 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
         raise RuntimeError(f"macOS root supervision cannot start: {reason}")
     from services.desktop.permissions_helper import converge
 
-    converge(helper=ctx.helper, timers=ctx.timers)
+    converge(helper=ctx.require_helper(), timers=ctx.timers)
 
 
 def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
@@ -239,7 +239,7 @@ def ensure_screen_capture(ctx: ConvergeCtx) -> None:
         clear_status()
         return
 
-    status = ctx.helper().check_screen_capture()
+    status = ctx.require_helper()().check_screen_capture()
     if status.available:
         # Drop any stale "unavailable" file so a fixed host does not fire a
         # false notification on the next agent startup.
@@ -266,7 +266,7 @@ def ensure_accessibility(ctx: ConvergeCtx) -> None:
         clear_accessibility_status()
         return
 
-    status = ctx.helper().check_accessibility()
+    status = ctx.require_helper()().check_accessibility()
     if status.available:
         clear_accessibility_status()
         return

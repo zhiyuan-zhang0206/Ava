@@ -37,10 +37,21 @@ class ConvergeCtx:
     machine: MachineIdentity
     database_factory: DatabaseFactory
     producer: Callable[[], EventPipeline]
-    helper: HelperFactory
+    # The permissions-helper factory, or None on a platform that has no helper (Linux). None
+    # never means "skip the helper": a platform that has one always carries it, and a step that
+    # needs it calls `require_helper`.
+    helper: HelperFactory | None
     host: Host
     timers: Timers
     services: frozenset[str]
+
+    def require_helper(self) -> HelperFactory:
+        """The permissions-helper factory, for a step that only runs where a helper exists."""
+        if self.helper is None:
+            raise RuntimeError(
+                "this converge step needs the permissions helper, but this platform has none"
+            )
+        return self.helper
 
     def read_config(self) -> ConfigBoot:
         """Read startup inputs on first use, retaining an explicitly prepared owner."""
