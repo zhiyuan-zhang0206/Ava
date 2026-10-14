@@ -494,7 +494,7 @@ function HomeContent({
               contextPending={contextPending}
               agentId={activeId}
               agentTerminated={activeAgent?.status === "terminated"}
-              suggestion={replySuggestion}
+              suggestions={replySuggestion}
               details={<ContentToggle />}
             >
               <UploadButton

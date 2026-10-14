@@ -236,9 +236,9 @@ vi.mock("@/components/conversation/composer", () => {
     children,
     details,
     maxWidthCss,
-    suggestion,
+    suggestions,
   }: {
-    suggestion?: string | null;
+    suggestions?: readonly string[] | null;
     mode: string;
     onSend: (s: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
     onUploadFiles?: (files: File[]) => void;
@@ -262,7 +262,7 @@ vi.mock("@/components/conversation/composer", () => {
         data-testid="composer"
         data-mode={mode}
         data-max-width={maxWidthCss ?? "undefined"}
-        data-suggestion={suggestion ?? ""}
+        data-suggestion={suggestions?.join("|") ?? ""}
       >
         <textarea data-testid="composer-paste-target" onPaste={pasteImage} />
         {thumbnail ? <div data-testid="composer-image-thumbnail" data-url={thumbnail} /> : null}
@@ -376,7 +376,7 @@ describe("HomePage reply suggestion", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.mocked(api.getReplySuggestion).mockResolvedValue({ suggestion: "Yes, go ahead.", reason: null });
+    vi.mocked(api.getReplySuggestion).mockResolvedValue({ suggestions: ["Yes, go ahead.", "Not yet."], reason: null });
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     hooksState.timelineItems = agentSpoke;
@@ -396,7 +396,7 @@ describe("HomePage reply suggestion", () => {
     });
 
     expect(api.getReplySuggestion).toHaveBeenCalledWith(5, expect.any(AbortSignal));
-    expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("Yes, go ahead.");
+    expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("Yes, go ahead.|Not yet.");
   });
 
   it("never asks while the agent is running", async () => {
