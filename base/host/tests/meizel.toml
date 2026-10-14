@@ -1,3 +1,9 @@
+exports = ["fake_commands.py"]
+
+[uses]
+"test_fake_commands.py" = ["fake_commands.py"]
+"test_hostport.py" = ["fake_commands.py"]
+
 [debt.first-party-patch]
 "test_config_validators.py#monkeypatch.setattr base.host.config_validators.browser_capable" = 1
 "test_config_validators.py#monkeypatch.setattr base.host.config_validators.display_available" = 1

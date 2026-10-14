@@ -505,6 +505,7 @@ a test has to control it; production code that no test needs to steer may still
 | A path | A parameter. A test hands in `tmp_path`; it does not switch `AVA_HOME`. |
 | A socket or a server | A real local service: a listener on port 0, a unix socket under `tmp_path`. Only fault injection (a refused or half-open connect) goes through a `connect` parameter, and only in the clients of `services/redis_bridge` and `base/host/permissions_helper`. |
 | A logger, a meter, a tracer | Production may use the global facade, because it is write-only and decides nothing. A test does not patch it; it reads what was recorded through the capture fixture the facade's owner exports from its `tests/`. |
+| Processes, programs, the platform | A required `Host` (`base/host/system/hostport.py`): `run` (`proc.run_bounded`), `which`, `platform` and `uid`, and nothing else. A root builds `Host.system()`; a test builds the `Host` it wants, with `FakeCommands` from `base/host/tests` as `run` (it records argv, answers by prefix and fails on an unscripted command) and plain values for the rest. A test that needs a real process uses `Host.system()`. A test never patches `subprocess`, `shutil.which`, `os.access`, `sys.platform` or `platform.system()`. |
 
 A fake lives in the `tests/` of the component that defines the port and is exported by
 that directory's `meizel.toml`; a test of the component or of a layer above it imports

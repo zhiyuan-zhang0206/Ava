@@ -23,13 +23,13 @@ import signal
 import subprocess
 import time
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import psutil
 
 from base.native_process.ownership import OwnedProcess, capture_tree
 
-__all__ = ["run_bounded"]
+__all__ = ["CommandRunner", "run_bounded"]
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # expected during a teardown, not an error: between enumerating a tree and
@@ -266,6 +266,25 @@ def kill_process_tree(
         with contextlib.suppress(*_GONE):
             identity.send_signal(signal.SIGKILL)
     wait_owned(alive, _REAP_TIMEOUT_S)
+
+
+class CommandRunner(Protocol):
+    """`run_bounded`'s call shape: argv, a required timeout, one `CompletedProcess` back.
+
+    It never raises for a non-zero exit. A tree that outlives `timeout` raises
+    `subprocess.TimeoutExpired`, and a program that cannot start raises `OSError`. A component
+    that must be testable takes one of these (inside a `Host`) and a test passes a fake.
+    """
+
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        capture_output: bool = False,
+        input: bytes | str | None = None,  # mirrors subprocess.run's own parameter name
+        **popen_kwargs: object,
+    ) -> subprocess.CompletedProcess[Any]: ...
 
 
 def run_bounded(
