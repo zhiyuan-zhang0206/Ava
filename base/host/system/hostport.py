@@ -15,52 +15,14 @@ addition here, so the object does not become a bag of everything the machine can
 from __future__ import annotations
 
 import os
-import platform
 import shutil
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
 
 from base.host.proc import CommandRunner, run_bounded
+from base.native_process.os_platform import Platform
 
-__all__ = ["Host", "Platform"]
-
-
-@dataclass(frozen=True)
-class Platform:
-    """The operating-system facts a component branches on."""
-
-    # `sys.platform` reduced to the two supported systems.
-    system: Literal["linux", "darwin"]
-    # The hardware name as the OS reports it (`platform.machine()`): "arm64", "x86_64", "aarch64".
-    machine: str
-    # The running interpreter's absolute path (`sys.executable`).
-    executable: str
-
-    def __post_init__(self) -> None:
-        if self.system not in ("linux", "darwin"):
-            raise ValueError(f"unsupported platform system {self.system!r}: linux or darwin")
-        if not self.machine:
-            raise ValueError("platform machine is empty")
-        if not self.executable:
-            raise ValueError("platform executable is empty")
-
-    @classmethod
-    def from_sys_platform(cls, sys_platform: str, *, machine: str, executable: str) -> Platform:
-        """Build from a `sys.platform` value; anything but macOS and Linux is refused."""
-        if sys_platform == "darwin":
-            return cls("darwin", machine, executable)
-        if sys_platform.startswith("linux"):
-            return cls("linux", machine, executable)
-        raise ValueError(f"unsupported platform {sys_platform!r}: Ava runs on macOS and Linux")
-
-    @classmethod
-    def current(cls) -> Platform:
-        """The platform of this process."""
-        return cls.from_sys_platform(
-            sys.platform, machine=platform.machine(), executable=sys.executable
-        )
+__all__ = ["Host"]
 
 
 @dataclass(frozen=True)

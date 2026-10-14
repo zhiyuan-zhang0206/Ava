@@ -1,4 +1,4 @@
-"""`Host` and `Platform`: the real host answers for this machine, a hand-built one for a test."""
+"""`Host`: the real host answers for this machine, a hand-built one for a test."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ import platform
 import shutil
 import subprocess
 import sys
-from typing import Any, cast
 
 import pytest
 
 from base.host import proc
-from base.host.system.hostport import Host, Platform
+from base.host.system.hostport import Host
 from base.host.tests.fake_commands import FakeCommands, Reply
+from base.native_process.os_platform import Platform
 
 
 def test_the_system_host_is_this_machine() -> None:
@@ -37,39 +37,6 @@ def test_the_system_host_runs_a_real_command() -> None:
 def test_the_system_host_bounds_a_command_by_its_timeout() -> None:
     with pytest.raises(subprocess.TimeoutExpired):
         Host.system().run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.5)
-
-
-@pytest.mark.parametrize(
-    ("sys_platform", "system"),
-    [("darwin", "darwin"), ("linux", "linux"), ("linux2", "linux")],
-)
-def test_a_supported_sys_platform_reduces_to_linux_or_darwin(
-    sys_platform: str, system: str
-) -> None:
-    built = Platform.from_sys_platform(sys_platform, machine="arm64", executable="/usr/bin/python")
-    assert built.system == system
-    assert built == Platform(cast("Any", system), "arm64", "/usr/bin/python")
-
-
-@pytest.mark.parametrize("sys_platform", ["win32", "cygwin", "freebsd14", ""])
-def test_an_unsupported_sys_platform_is_refused(sys_platform: str) -> None:
-    with pytest.raises(ValueError, match="unsupported platform"):
-        Platform.from_sys_platform(sys_platform, machine="x86_64", executable="/usr/bin/python")
-
-
-@pytest.mark.parametrize(
-    ("system", "machine", "executable", "message"),
-    [
-        ("windows", "x86_64", "/usr/bin/python", "system"),
-        ("linux", "", "/usr/bin/python", "machine"),
-        ("linux", "x86_64", "", "executable"),
-    ],
-)
-def test_a_platform_rejects_values_it_cannot_describe(
-    system: str, machine: str, executable: str, message: str
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        Platform(cast("Any", system), machine, executable)
 
 
 def test_a_host_is_immutable_and_has_exactly_the_four_reviewed_fields() -> None:

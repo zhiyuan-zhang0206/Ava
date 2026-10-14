@@ -7,12 +7,51 @@ from __future__ import annotations
 
 import contextlib
 import os
+import platform
 import re
 import subprocess
 import sys
 import time
 from collections.abc import Generator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class Platform:
+    """The operating-system facts a component branches on (the one definition; `Host.platform` is one)."""
+
+    # `sys.platform` reduced to the two supported systems.
+    system: Literal["linux", "darwin"]
+    # The hardware name as the OS reports it (`platform.machine()`): "arm64", "x86_64", "aarch64".
+    machine: str
+    # The running interpreter's absolute path (`sys.executable`).
+    executable: str
+
+    def __post_init__(self) -> None:
+        if self.system not in ("linux", "darwin"):
+            raise ValueError(f"unsupported platform system {self.system!r}: linux or darwin")
+        if not self.machine:
+            raise ValueError("platform machine is empty")
+        if not self.executable:
+            raise ValueError("platform executable is empty")
+
+    @classmethod
+    def from_sys_platform(cls, sys_platform: str, *, machine: str, executable: str) -> Platform:
+        """Build from a `sys.platform` value; anything but macOS and Linux is refused."""
+        if sys_platform == "darwin":
+            return cls("darwin", machine, executable)
+        if sys_platform.startswith("linux"):
+            return cls("linux", machine, executable)
+        raise ValueError(f"unsupported platform {sys_platform!r}: Ava runs on macOS and Linux")
+
+    @classmethod
+    def current(cls) -> Platform:
+        """The platform of this process."""
+        return cls.from_sys_platform(
+            sys.platform, machine=platform.machine(), executable=sys.executable
+        )
 
 
 def is_macos() -> bool:

@@ -10,11 +10,13 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 import base.native_process.os_platform as plat
 from base.native_process.os_platform import (
+    Platform,
     descends_from_launchd_job,
     ensure_line_buffered_stdio,
     launchd_job_loaded,
@@ -163,3 +165,39 @@ class TestLaunchdOwnership:
     def test_unreadable_ancestor_is_not_proof(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._fake(monkeypatch, print_rc=0, print_out="pid = 200\n", ps={500: "300"})
         assert descends_from_launchd_job("com.x") is False
+
+
+# -- Platform: the facts a Host reports, validated at construction --
+
+
+@pytest.mark.parametrize(
+    ("sys_platform", "system"),
+    [("darwin", "darwin"), ("linux", "linux"), ("linux2", "linux")],
+)
+def test_a_supported_sys_platform_reduces_to_linux_or_darwin(
+    sys_platform: str, system: str
+) -> None:
+    built = Platform.from_sys_platform(sys_platform, machine="arm64", executable="/usr/bin/python")
+    assert built.system == system
+    assert built == Platform(cast("Any", system), "arm64", "/usr/bin/python")
+
+
+@pytest.mark.parametrize("sys_platform", ["win32", "cygwin", "freebsd14", ""])
+def test_an_unsupported_sys_platform_is_refused(sys_platform: str) -> None:
+    with pytest.raises(ValueError, match="unsupported platform"):
+        Platform.from_sys_platform(sys_platform, machine="x86_64", executable="/usr/bin/python")
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "executable", "message"),
+    [
+        ("windows", "x86_64", "/usr/bin/python", "system"),
+        ("linux", "", "/usr/bin/python", "machine"),
+        ("linux", "x86_64", "", "executable"),
+    ],
+)
+def test_a_platform_rejects_values_it_cannot_describe(
+    system: str, machine: str, executable: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        Platform(cast("Any", system), machine, executable)
