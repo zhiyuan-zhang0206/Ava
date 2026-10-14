@@ -43,3 +43,11 @@ components' tests use real files and patch none of these calls.
 idempotency gates. Bootstrap fetches use this owner. Provider and Redis-listener
 loops still have dedicated contracts; the remaining Redis audit is a
 [future item](../../../future/infra/engineering/retry-consumer-contracts.md).
+
+`base/host/net/ports.py` is the port for an HTTP request whose answer a test controls.
+`UrlOpener` has `urllib.request.urlopen`'s shape (a request or a URL and a timeout in, a readable
+context manager out); a component that makes the request takes it as a required argument and a
+composition root passes `SYSTEM_URL_OPENER`. `base.host.net.tests.fake_url_opener.FakeUrlOpener`
+records each request and answers from a script routed by URL prefix, raises `HTTPError` for a
+status outside 2xx as `urlopen` does, and refuses a URL nobody scripted. A test that wants the
+real client starts a listener on port 0; none patches `urlopen` or `socket`.

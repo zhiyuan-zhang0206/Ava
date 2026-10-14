@@ -1,7 +1,8 @@
-exports = ["retry_waits.py"]
+exports = ["fake_url_opener.py", "retry_waits.py"]
 
 [uses]
 "conftest.py" = ["retry_waits.py"]
+"test_ports.py" = ["fake_url_opener.py"]
 
 [debt.env-patch]
 "test_resilience.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 1
