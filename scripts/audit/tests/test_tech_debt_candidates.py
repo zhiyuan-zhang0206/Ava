@@ -32,6 +32,8 @@ def _run(
     python.write_text(
         "#!/bin/bash\n"
         f'if [[ "$1" == - && $# -gt 1 ]]; then exec "{sys.executable}" "$@"; fi\n'
+        # REAL_DOC: run the docstring-budget section's own Python instead of stubbing its output
+        f'if [[ "$1" == - && -n "${{REAL_DOC:-}}" ]]; then exec "{sys.executable}" -; fi\n'
         'if [[ "$1" == scripts/structure/cochange.py ]]; then\n'
         ' printf "%s\\n" "$COCHANGE_OUT"; exit "${COCHANGE_CODE:-0}"\n'
         "fi\n"
@@ -118,3 +120,25 @@ def test_tool_or_parser_failure_marks_report_incomplete(
         or overrides.get("COCHANGE_OUT") == "{}"
     ):
         assert "report parse error:" in result.stderr
+
+
+def test_docstring_budget_section_runs_for_real_and_the_scan_is_complete(tmp_path: Path) -> None:
+    """The section imports first-party helpers, so a rename there must turn the scan red.
+
+    Every other test stubs this section's interpreter; here it runs the section's own Python
+    against a fixed agent-surface fixture and the scan must still come out complete."""
+    (tmp_path / "ava").mkdir()
+    (tmp_path / "ava/__init__.py").write_text('__all_for_ava__ = ["tools"]\n')
+    (tmp_path / "ava/tools.py").write_text(
+        '"""Tools.\n\nSecond line.\nThird line.\n"""\n'
+        '__all__ = ["fetch"]\n\n\n'
+        "def fetch() -> None:\n"
+        '    """Fetch it.\n\n    Raises:\n        ValueError: never.\n    """\n'
+    )
+    repo_root = Path(__file__).parents[3]
+    result = _run(tmp_path, {"REAL_DOC": "1", "PYTHONPATH": str(repo_root)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ava/tools.py:1: module docstring 4 lines (soft cap 2)" in result.stdout
+    assert "fetch has a Raises: section" in result.stdout
+    assert "=== Scan complete " in result.stdout
+    assert "=== Scan incomplete" not in result.stdout
