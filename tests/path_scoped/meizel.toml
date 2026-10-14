@@ -1,8 +1,7 @@
-exports = ["agent_tests.py", "api_keys.py", "ava_tests.py", "cli_tests.py", "gateway_tests.py", "integration_tests.py", "pty_jobs.py", "pty_reaper.py", "services_tests.py", "structure_tests.py"]
+exports = ["agent_tests.py", "api_keys.py", "ava_tests.py", "cli_tests.py", "gateway_tests.py", "integration_tests.py", "services_tests.py", "structure_tests.py"]
 
 [uses]
 "ava_tests.py" = ["api_keys.py"]
-"cli_tests.py" = ["pty_reaper.py"]
 "gateway_tests.py" = ["api_keys.py"]
 "integration_tests.py" = ["api_keys.py", "gateway_tests.py"]
 

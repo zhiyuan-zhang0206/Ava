@@ -23,6 +23,7 @@ from base.db import create_agent
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.sessions.pty.paths import ledger_path
+from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests import pty_shells
 from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
@@ -44,7 +45,6 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
-from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
