@@ -707,7 +707,7 @@ describe("InspectorPanel", () => {
     // Blocking tag
     expect(screen.getByText("Blocking")).toBeTruthy();
     // Type label
-    expect(screen.getByText("Decision")).toBeTruthy();
+    expect(screen.getByText("Needs your answer")).toBeTruthy();
     // Created time
     expect(
       screen.getByText(`${formatRelative(createdAt)}, ${formatAbsolute(createdAt)}`),
@@ -716,6 +716,33 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("Approve deploy?")).toBeTruthy();
     // Content preview
     expect(screen.getByText("Can we push to prod?")).toBeTruthy();
+  });
+
+  it("renders the same numbered question controls in the inspector", async () => {
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        notice: {
+          id: 9,
+          title: "Which layout?",
+          content: "Choose the scope.",
+          priority: "P2",
+          require_response: true,
+          blocking: false,
+          created_at: "2026-10-14T00:00:00Z",
+          question: {
+            type: "single_select",
+            options: [{ id: "z", label: "First layout" }, { id: "a", label: "Second layout" }],
+            allow_other: true,
+          },
+        },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "1. First layout" })).toBeTruthy());
+    expect(screen.getByRole("radio", { name: "2. Second layout" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "3. Other" }));
+    expect(screen.getByLabelText("Your alternative answer")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Submit answer" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("hides the Notice section when no notice is open", async () => {
