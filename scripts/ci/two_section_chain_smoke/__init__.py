@@ -24,6 +24,8 @@ and the launchd job uses its own test label (never the production helper's). The
 registration nudge is disabled via AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION=1 -- an Aqua-session
 helper with a fresh code identity would otherwise raise TCC dialogs on an unattended machine.
 
+`signing_smoke.py` is the lane's other step (build, ad-hoc sign, readback and ping of the real helper).
+
 Exit 0 = every phase passed. Evidence (ps/logs/status snapshots) is retained
 under the workdir; pass --cleanup to remove it. Run with the repository venv,
 on macOS, from a checkout that contains services/supervision/ava_root (dev/CI only).
