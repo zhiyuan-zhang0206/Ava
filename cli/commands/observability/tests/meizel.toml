@@ -52,7 +52,6 @@
 "test_lgtm_native.py#monkeypatch.setattr base.config.settings.observability.telemetry_prometheus_url" = 2
 "test_lgtm_native.py#monkeypatch.setattr base.config.settings.observability.telemetry_tempo_query_url" = 2
 "test_lgtm_native.py#monkeypatch.setattr base.packages.dashboard_supply.render_dashboard_json" = 2
-"test_lgtm_native.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.download_and_verify" = 4
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.ensure_lgtm_native" = 1
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.native_versions" = 1

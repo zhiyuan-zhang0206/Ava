@@ -25,6 +25,8 @@ from base.cluster.machine.tests.gateway_stubs import (
     gateway_auth_headers_stub,
 )
 from base.telemetry import EventPipeline
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.management import schedules as _sched
 from cli.commands.management import schedules_verify as _verify
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -620,46 +622,37 @@ def test_verify_check_file_unreadable_is_a_tool_error(
     assert "cannot read script file" in capsys.readouterr().err
 
 
-def _capture_verify_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
-    emitted: list[dict[str, object]] = []
-
-    def emit(category: str, event_name: str, **kwargs: object) -> None:
-        assert (category, event_name) == ("telemetry", "schedule_verify_failed")
-        assert kwargs["level"] == "error"
-        attributes = kwargs["attributes"]
-        assert isinstance(attributes, dict)
-        emitted.append(dict(attributes))  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(_verify.telemetry, "emit", emit)
-    return emitted
+def _verify_failed(events: EmittedEvents) -> dict[str, object]:
+    """The one `schedule_verify_failed` event (an error-level telemetry event), as its attributes."""
+    (event,) = events
+    assert (event.category, event.event_name, event.level) == (
+        "telemetry",
+        "schedule_verify_failed",
+        "error",
+    )
+    return event.attributes
 
 
-def test_report_verify_emits_one_event_naming_the_reds(
-    monkeypatch: pytest.MonkeyPatch, operator_pipeline: Callable[[], EventPipeline]
-) -> None:
+def test_report_verify_emits_one_event_naming_the_reds(emitted_events: EmittedEvents) -> None:
     """A red run emits one `schedule_verify_failed` event; the counts are the
     event's metric fields and the detail names each failing script."""
-    emitted = _capture_verify_events(monkeypatch)
     _verify._report_verify(
         checked=2,
         reds=[(7, "drifted", "shared.watcher")],
         tool_error=None,
-        producer=operator_pipeline,
+        producer=emitted_events.producer,
     )
-    (event,) = emitted
+    event = _verify_failed(emitted_events)
     assert event["checked"] == 2 and event["red"] == 1 and event["tool_error"] is None
     detail = str(event["detail"])
     assert "id=7" in detail and "shared.watcher" in detail
 
 
-def test_report_verify_tool_error_names_the_error(
-    monkeypatch: pytest.MonkeyPatch, operator_pipeline: Callable[[], EventPipeline]
-) -> None:
-    emitted = _capture_verify_events(monkeypatch)
+def test_report_verify_tool_error_names_the_error(emitted_events: EmittedEvents) -> None:
     _verify._report_verify(
-        checked=0, reds=[], tool_error="RuntimeError: db down", producer=operator_pipeline
+        checked=0, reds=[], tool_error="RuntimeError: db down", producer=emitted_events.producer
     )
-    (event,) = emitted
+    event = _verify_failed(emitted_events)
     assert event["red"] == 0 and event["tool_error"] == "RuntimeError: db down"
     assert "RuntimeError: db down" in str(event["detail"])
 

@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Iterator
+from typing import Any
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from base.config import settings
+from base.telemetry.tests.capture.event_capture import EmittedEvents, capturing_events
 from gateway.app import app
-from gateway.events import resolutions
 
 
 @pytest.fixture
@@ -23,14 +24,15 @@ def client(db_conn: psycopg.Connection) -> Any:
 
 
 @pytest.fixture
-def emitted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, object]]]:
-    out: list[tuple[str, str, dict[str, object]]] = []
+def emitted_events(client: TestClient) -> Iterator[EmittedEvents]:
+    """The events emitted from here on: the capture takes over once the gateway has bound its own
+    pipeline (a capture bound before would make the gateway's start refuse), and gives it back."""
+    with capturing_events() as events:
+        yield events
 
-    def emit(category: str, event_name: str, **kwargs: object) -> None:
-        out.append((category, event_name, cast(dict[str, object], kwargs["attributes"])))
 
-    monkeypatch.setattr(resolutions.telemetry, "emit", emit)
-    return out
+def _markers(events: EmittedEvents) -> list[tuple[str, str, dict[str, Any]]]:
+    return [(event.category, event.event_name, event.attributes) for event in events]
 
 
 def _body(**overrides: object) -> dict[str, object]:
@@ -46,7 +48,7 @@ def _body(**overrides: object) -> dict[str, object]:
 
 
 def test_create_emits_marker_and_duplicate_conflicts(
-    client: TestClient, emitted: list[tuple[str, str, dict[str, object]]]
+    client: TestClient, emitted_events: EmittedEvents
 ) -> None:
     created = client.post("/api/event-resolutions", json=_body())
 
@@ -54,7 +56,7 @@ def test_create_emits_marker_and_duplicate_conflicts(
     row = created.json()
     assert row["status"] == "dismissed"
     assert row["dismissed_by"] == 0
-    assert emitted == [
+    assert _markers(emitted_events) == [
         (
             "telemetry",
             "warning_resolved",
@@ -73,12 +75,11 @@ def test_create_emits_marker_and_duplicate_conflicts(
 
     duplicate = client.post("/api/event-resolutions", json=_body())
     assert duplicate.status_code == 409
-    assert emitted[0][1] == "warning_resolved"  # no duplicate transition marker
-    assert len(emitted) == 1
+    assert emitted_events.names() == ["warning_resolved"]  # no duplicate transition marker
 
 
 def test_list_filter_and_manual_reopen_emit_marker(
-    client: TestClient, emitted: list[tuple[str, str, dict[str, object]]]
+    client: TestClient, emitted_events: EmittedEvents
 ) -> None:
     first = client.post("/api/event-resolutions", json=_body()).json()
     second = client.post(
@@ -93,7 +94,7 @@ def test_list_filter_and_manual_reopen_emit_marker(
     reopened = client.post(f"/api/event-resolutions/{first['id']}/reopen")
     assert reopened.status_code == 200
     assert reopened.json()["status"] == "reopened"
-    assert emitted[-1] == (
+    assert _markers(emitted_events)[-1] == (
         "telemetry",
         "warning_reopened",
         {
@@ -131,7 +132,7 @@ def test_gateway_auth_protects_resolution_routes(
 
 
 def test_process_scoped_dismissals_coexist(
-    client: TestClient, emitted: list[tuple[str, str, dict[str, object]]]
+    client: TestClient, emitted_events: EmittedEvents
 ) -> None:
     """One class may carry a wildcard row and per-process rows at once — the
     dimension that makes the coarse log classes targetable (task #4329 B5);
@@ -141,7 +142,7 @@ def test_process_scoped_dismissals_coexist(
 
     assert wildcard["process"] == ""
     assert exact["process"] == "agent_host"
-    assert emitted[-1][2]["process"] == "agent_host"
+    assert emitted_events.attributes("warning_resolved")[-1]["process"] == "agent_host"
 
     duplicate = client.post("/api/event-resolutions", json=_body(process="agent_host"))
     assert duplicate.status_code == 409

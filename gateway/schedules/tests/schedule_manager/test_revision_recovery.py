@@ -10,6 +10,8 @@ from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
 from base.sessions.pty.client import SessionInfo
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.schedules import session_control
 from services.wake.schedule_manager import manager, requests, revisions
 
@@ -231,6 +233,7 @@ def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an
     backend: Backend,
     monkeypatch: pytest.MonkeyPatch,
     blocked_by: str,
+    emitted_events: EmittedEvents,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -250,19 +253,14 @@ def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an
         monkeypatch.setattr(revisions.client, "list_sessions", unavailable)
     clock = {"t": 1000.0}
     monkeypatch.setattr(manager.time, "monotonic", lambda: clock["t"])
-    events: list[tuple[str, object]] = []
-
-    def capture(_category: object, event_name: str, **kwargs: object) -> None:
-        events.append((event_name, kwargs["attributes"]))
-
-    monkeypatch.setattr(manager.telemetry, "emit", capture)
+    emitted_events.clear()
     with base.db.pool(gate=database_gate) as pool:
         mgr = manager.ScheduleManager(pool)
         session_control.enqueue_blocking(pool, sid)
         while clock["t"] < 1000.0 + manager.BLOCKED_GIVE_UP_AFTER_S:
             assert requests.consume_requests(pool, mgr) == 0  # still blocked: requeued
             clock["t"] += 30
-        assert events == []
+        assert emitted_events.names() == []
         assert requests.consume_requests(pool, mgr) == 1  # the window ended: consumed
         killed = list(backend.killed)
         for _ in range(3):
@@ -272,7 +270,7 @@ def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an
     assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
         "error",
     )
-    assert [event for event, _attrs in events] == ["schedule_convergence_abandoned"]
+    assert emitted_events.names() == ["schedule_convergence_abandoned"]
     assert backend.killed == killed
     assert backend.launches == 0
     assert name in backend.commands  # the process is left alone

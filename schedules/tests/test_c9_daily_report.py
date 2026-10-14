@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import cast
 from unittest.mock import Mock
 
 import psycopg
@@ -21,7 +20,8 @@ from base.config import settings
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import fire_slot_once
-from base import telemetry
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "c9-daily-report-schedule.py"
@@ -81,19 +81,6 @@ class _FakeAccounting(SimpleNamespace):
     def append_ledger(self, path: Path, fresh: list[dict[str, int | None]]) -> int:
         del path, fresh
         return 1
-
-
-def _install_fake_accounting(
-    monkeypatch: pytest.MonkeyPatch, accounting: _FakeAccounting
-) -> list[dict[str, object]]:
-    monkeypatch.setattr(accounting.module, "_load_accounting", lambda: accounting)
-    emitted: list[dict[str, object]] = []
-
-    def record_emit(category: str, event_name: str, **kwargs: object) -> None:
-        emitted.append({"category": category, "event_name": event_name, **kwargs})
-
-    monkeypatch.setattr(telemetry, "emit", record_emit)
-    return emitted
 
 
 def test_repo_root_survives_runtime_materialization(
@@ -190,6 +177,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     machine_identity: MachineIdentity,
+    emitted_events: EmittedEvents,
 ) -> None:
     """_fire derives its window from the CLAIMED slot (the fire_slot_once
     callback argument), not from the wall clock — the layer QA's simulation flagged."""
@@ -205,7 +193,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     accounting = _FakeAccounting(module)
-    emitted = _install_fake_accounting(monkeypatch, accounting)
+    monkeypatch.setattr(accounting.module, "_load_accounting", lambda: accounting)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)  # 05:00 cluster
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
@@ -223,11 +211,10 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     )
 
     assert accounting.windows == [("2026-09-05T21:00:00Z", "2026-09-06T21:00:00Z")]
-    assert len(emitted) == 1
-    event = emitted[0]
-    assert event["category"] == "telemetry"
-    assert event["event_name"] == "ci_usage_daily"
-    attributes = cast("dict[str, str | int | float]", event["attributes"])
+    [event] = emitted_events
+    assert event.category == "telemetry"
+    assert event.event_name == "ci_usage_daily"
+    attributes = event.attributes
     assert attributes["day"] == "2026-09-07"
     assert attributes["window_start"] == "2026-09-05T21:00:00Z"
     assert attributes["window_end"] == "2026-09-06T21:00:00Z"

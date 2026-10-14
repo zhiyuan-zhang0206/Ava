@@ -8,11 +8,17 @@ from typing import Any
 
 import pytest
 
+from base.telemetry.tests.capture.event_capture import FollowedAttributes
 from cli.commands.cluster import health as cluster_health
-from cli.commands.cluster.tests.health_probe_inputs import Probe, service_probe_verdict, unhealthy
+from cli.commands.cluster.tests.health_probe_inputs import (
+    Probe,
+    service_probe_verdict,
+    unhealthy,
+)
 from cli.commands.cluster.tests.health_probe_inputs import (
     all_checks_pass as all_checks_pass,
 )
+from cli.commands.cluster.tests.health_probe_inputs import emitted_events as emitted_events
 from cli.commands.cluster.tests.health_probe_inputs import probe as probe
 from cli.commands.cluster.tests.health_probe_inputs import (
     provider_guard_healthy as provider_guard_healthy,
@@ -109,7 +115,7 @@ def test_full_disk_is_reported_when_gateway_is_down(
     all_checks_pass: None,
     isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    signals: list[dict[str, object]],
+    signals: FollowedAttributes,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Disk pressure leads the report of a gateway outage: with no short-circuit,

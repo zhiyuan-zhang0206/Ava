@@ -13,8 +13,12 @@ from base.agents.context.clients import DatabaseFactory
 from base.db.tests.fakes import patch_database
 from base.deploy.lifecycle import service_selection
 from base.deploy.maintenance import pause_owner
+from base.telemetry.tests.capture.event_capture import EmittedEvents, FollowedAttributes
 from cli.commands.cluster import health as cluster_health
-from cli.commands.cluster.tests.health_probe_inputs import Probe
+from cli.commands.cluster.tests.health_probe_inputs import (
+    Probe,
+)
+from cli.commands.cluster.tests.health_probe_inputs import emitted_events as emitted_events
 from cli.commands.cluster.tests.health_probe_inputs import probe as probe
 from cli.commands.cluster.tests.health_probe_inputs import (
     provider_guard_healthy as provider_guard_healthy,
@@ -34,6 +38,7 @@ from cli.commands.cluster.tests.health_probe_inputs import (
 from cli.commands.cluster.tests.health_probe_inputs import (
     schema_verdicts as schema_verdicts,
 )
+from cli.commands.cluster.tests.health_probe_inputs import signals as signals
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -84,21 +89,9 @@ def rollbacks(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 
 
 @pytest.fixture
-def alerts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+def alerts(emitted_events: EmittedEvents) -> FollowedAttributes:
     """The attributes of every `health_probe_failing` event the probe emits."""
-    emitted: list[dict[str, object]] = []
-
-    def emit(category: str, event_name: str, **kwargs: object) -> None:
-        assert category == "telemetry"
-        if event_name == "health_probe_ran":
-            return
-        assert event_name == "health_probe_failing"
-        attributes = kwargs["attributes"]
-        assert isinstance(attributes, dict)
-        emitted.append(dict(attributes))  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(cluster_health.telemetry, "emit", emit)
-    return emitted
+    return emitted_events.following("health_probe_failing")
 
 
 @pytest.mark.parametrize("intent", ["disabled", "maintenance"])
@@ -107,7 +100,7 @@ def test_expected_low_population_does_not_rollback_or_promote(
     operator_database: DatabaseFactory,
     probe_home: Path,
     rollbacks: list[list[str]],
-    alerts: list[dict[str, object]],
+    alerts: FollowedAttributes,
     intent: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -138,7 +131,7 @@ def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
     probe: Probe,
     probe_home: Path,
     rollbacks: list[list[str]],
-    alerts: list[dict[str, object]],
+    alerts: FollowedAttributes,
     intent: str,
 ) -> None:
     holder, acquired_at = "test-maintenance", datetime.now(UTC)
@@ -169,7 +162,7 @@ def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
 
 
 def test_reenabled_host_keeps_low_population_unhealthy(
-    probe: Probe, probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]]
+    probe: Probe, probe_home: Path, rollbacks: list[list[str]], alerts: FollowedAttributes
 ) -> None:
     _select_excluded({"agent-host"})
     assert probe() == 1
@@ -184,7 +177,7 @@ def test_disabled_host_does_not_explain_gateway_code_failure(
     probe: Probe,
     probe_home: Path,
     rollbacks: list[list[str]],
-    alerts: list[dict[str, object]],
+    alerts: FollowedAttributes,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: DatabaseFactory,
 ) -> None:
@@ -206,7 +199,7 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
     operator_database: DatabaseFactory,
     probe_home: Path,
     rollbacks: list[list[str]],
-    alerts: list[dict[str, object]],
+    alerts: FollowedAttributes,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _select_excluded({"agent-host"})

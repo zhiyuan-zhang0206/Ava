@@ -6,7 +6,6 @@
 "staleness_support.py#monkeypatch.setattr gateway.app.TelemetryStaleness" = 1
 "test_fleet_graph.py#monkeypatch.setattr base.config.settings.display.fleet_graph_decay_lambda" = 1
 "test_fleet_graph.py#monkeypatch.setattr gateway.app.app.state.db_pool" = 2
-"test_fleet_graph_resilience.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_fleet_graph_resilience.py#monkeypatch.setattr gateway.app.app.state.db_pool" = 1
 
 [debt.unresolved-patch]

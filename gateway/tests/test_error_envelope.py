@@ -20,6 +20,8 @@ from starlette.responses import Response
 from base import config
 from base.api_contracts.agent_contract import AgentNotFound, AvaAgentError, ErrorReason
 from base.host.db_authority.api import AcceptanceCache
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.app import (
     app,
     cluster_auth_middleware,
@@ -470,23 +472,16 @@ def test_auth401_drain_returns_count_once_and_resets(monkeypatch: pytest.MonkeyP
     assert app.state.auth401_log.drain() == 1
 
 
-def test_auth401_emit_aggregate_event(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auth401_emit_aggregate_event(emitted_events: EmittedEvents) -> None:
     """emit_auth401_count sends one `auth401_rejected` telemetry event with the
     window count; a zero window emits nothing (no zero datapoints)."""
-    emitted: list[tuple[str, str, dict[str, int]]] = []
-
-    def _fake_emit(
-        category: str, event_name: str, *, attributes: dict[str, int] | None = None
-    ) -> None:
-        emitted.append((category, event_name, attributes or {}))
-
-    monkeypatch.setattr(rejection_log.telemetry, "emit", _fake_emit)
-
     rejection_log.emit_auth401_count(0)
-    assert emitted == []
+    assert emitted_events.names() == []
 
     rejection_log.emit_auth401_count(17)
-    assert emitted == [("telemetry", "auth401_rejected", {"count": 17})]
+    assert [(e.category, e.event_name, e.attributes) for e in emitted_events] == [
+        ("telemetry", "auth401_rejected", {"count": 17})
+    ]
 
 
 def test_cluster_pause_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:

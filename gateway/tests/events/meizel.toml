@@ -7,7 +7,6 @@ exports = ["test_notices_endpoint.py"]
 
 [debt.first-party-patch]
 "test_event_resolutions_api.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
-"test_event_resolutions_api.py#monkeypatch.setattr gateway.events.resolutions.telemetry.emit" = 1
 "test_events_api.py#monkeypatch.setattr base.config.settings.display.events_default_limit" = 1
 "test_events_api.py#monkeypatch.setattr gateway.events.telemetry_rows.count_events" = 1
 "test_events_api.py#monkeypatch.setattr gateway.events.telemetry_rows.query_events" = 2

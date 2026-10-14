@@ -6,7 +6,6 @@
 "test_agent_inspect_widgets.py#monkeypatch.setattr ava_builtins.plugins.__path__" = 1
 "test_agent_inspect_widgets.py#monkeypatch.setattr base.packages.plugins.enable_config.installed_plugin_dirs" = 1
 "test_agent_inspect_widgets.py#monkeypatch.setattr base.packages.plugins.enable_config.load_for_runtime" = 2
-"test_agent_inspect_widgets.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_agent_inspect_widgets.py#monkeypatch.setattr gateway.inspect._plugin_widgets.enabled_inspector_modules" = 5
 "test_agent_inspect_widgets.py#monkeypatch.setattr gateway.inspect._plugin_widgets.load_inspect_widgets" = 1
 "test_heartbeat_projection.py#monkeypatch.setattr gateway.inspect._live.JITTER_SPAN_S" = 1

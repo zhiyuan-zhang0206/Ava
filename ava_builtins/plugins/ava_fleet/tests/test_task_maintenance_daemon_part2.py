@@ -27,10 +27,11 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
 from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import run_escalate
-from base import telemetry
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 _DAY_S = 86400.0
 
@@ -59,16 +60,11 @@ def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     return calls
 
 
-@pytest.fixture
-def emitted_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, Any]]]:
-    """Capture maintenance telemetry without starting an event pipeline."""
-    events: list[tuple[str, str, dict[str, Any]]] = []
-
-    def _capture(category: str, event_name: str, **kwargs: Any) -> None:
-        events.append((category, event_name, kwargs))
-
-    monkeypatch.setattr(telemetry, "emit", _capture)
-    return events
+def _maintenance_events(
+    events: EmittedEvents,
+) -> list[tuple[str, str, int | None, str, dict[str, Any]]]:
+    """What the maintenance daemon emitted: category, name, agent, source and attributes."""
+    return [(e.category, e.event_name, e.agent_id, e.source, e.attributes) for e in events]
 
 
 def _make_agent(db: psycopg.Connection, *, status: str = "running") -> int:
@@ -179,7 +175,7 @@ class TestEscalate:
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         deliver: list[tuple[int, str]],
-        emitted_events: list[tuple[str, str, dict[str, Any]]],
+        emitted_events: EmittedEvents,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -210,19 +206,17 @@ class TestEscalate:
         # digest message (checked membership-wise above) nor the telemetry makes
         # an ordering claim — assert the id set, not the SQL's incidental row
         # order. Exact-list equality here was a shard7 flake (task #2199).
-        assert emitted_events == [
+        assert _maintenance_events(emitted_events) == [
             (
                 "telemetry",
                 "task_escalation",
+                delegator,
+                "system",
                 {
-                    "attributes": {
-                        "owner_id": delegator,
-                        "task_count": 2,
-                        "task_ids": sorted(task_ids),
-                        "leg": "delegator",
-                    },
-                    "agent_id": delegator,
-                    "source": "system",
+                    "owner_id": delegator,
+                    "task_count": 2,
+                    "task_ids": sorted(task_ids),
+                    "leg": "delegator",
                 },
             )
         ]
@@ -322,7 +316,7 @@ class TestEscalate:
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         deliver: list[tuple[int, str]],
-        emitted_events: list[tuple[str, str, dict[str, Any]]],
+        emitted_events: EmittedEvents,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -351,20 +345,13 @@ class TestEscalate:
         assert task_id == child  # grouped under the stalled task
         assert priority == "P1"  # inherits the task's priority
         assert "stalled" in title.lower()
-        assert emitted_events == [
+        assert _maintenance_events(emitted_events) == [
             (
                 "telemetry",
                 "task_escalation",
-                {
-                    "attributes": {
-                        "owner_id": owner,
-                        "task_count": 1,
-                        "task_ids": [child],
-                        "leg": "user",
-                    },
-                    "agent_id": owner,
-                    "source": "system",
-                },
+                owner,
+                "system",
+                {"owner_id": owner, "task_count": 1, "task_ids": [child], "leg": "user"},
             )
         ]
 

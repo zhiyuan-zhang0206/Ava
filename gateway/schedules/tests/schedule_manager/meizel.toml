@@ -10,7 +10,6 @@
 "test_revision_recovery.py#monkeypatch.setattr base.deploy.maintenance.admission.held" = 1
 "test_revision_recovery.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.current_generation" = 1
 "test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.get_shell_backend" = 1
-"test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.telemetry.emit" = 1
 "test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.time.monotonic" = 1
 "test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.revisions.client.list_sessions" = 3
 

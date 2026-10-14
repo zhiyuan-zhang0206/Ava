@@ -28,6 +28,7 @@ from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.log.tests.log_records import LogRecords
 from base.packages.plugins.extensions import ExtensionRegistry
 
 _SHARED = "ava_memory__shared_notes"
@@ -347,24 +348,17 @@ async def test_a_deadline_overrun_is_logged_and_adds_nothing(
     stores: tuple[Path, Path],
     model_catalog: Any,
     monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
 ):
-    from ava_builtins.plugins.ava_memory import agent_runtime
-
     pool, _ = stores
     _write(pool, "broken.md", "no frontmatter")
     monkeypatch.setattr(settings.agent, "memory_write_check_deadline_seconds", 0.05)
     search.delay = 0.4
-    logged: list[str] = []
-
-    def record(message: str, *args: object, **_kwargs: object) -> None:
-        logged.append(message.format(*args))
-
-    monkeypatch.setattr(agent_runtime.logger, "info", record)
 
     result = await hook(_state({"broken.md"}), _runtime(model_catalog), RunnableConfig())
 
     assert _is_cleared(result) and _reminders(result) == []
-    assert any("exceeded its 0.05s deadline" in line for line in logged)
+    assert any("exceeded its 0.05s deadline" in line for line in loguru_records.messages("INFO"))
 
 
 async def test_an_unexpected_error_is_logged_and_never_escapes(
@@ -372,31 +366,16 @@ async def test_an_unexpected_error_is_logged_and_never_escapes(
     search: _FakeSearch,
     stores: tuple[Path, Path],
     model_catalog: Any,
-    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
 ):
-    from ava_builtins.plugins.ava_memory import agent_runtime
-
     pool, _ = stores
     _write(pool, "retry.md", _GOOD)
     search.failure = RuntimeError("a bug in the fake")
-    errors: list[str] = []
-
-    class _Logger:
-        def opt(self, **_kwargs: Any) -> _Logger:
-            return self
-
-        def error(self, message: str, *args: Any) -> None:
-            errors.append(message.format(*args))
-
-        def info(self, *_args: Any, **_kwargs: Any) -> None:
-            pass
-
-    monkeypatch.setattr(agent_runtime, "logger", _Logger())
 
     result = await hook(_state({"retry.md"}), _runtime(model_catalog), RunnableConfig())
 
     assert _is_cleared(result) and _reminders(result) == []
-    assert len(errors) == 1
+    assert loguru_records.messages("ERROR") == ["[memory-write-check] check failed; no reminder"]
 
 
 async def test_the_check_never_changes_a_note(

@@ -21,6 +21,7 @@ from agent.state import build_agent_state
 from ava import gateway_client
 from ava.sdk_surface import install, process_context
 from ava.tests.fixtures.pin_agent import pin_agent
+from base.log.tests.log_records import LogRecords
 from base.packages.plugins.extensions import ExtensionRegistry
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -197,26 +198,15 @@ def test_the_exception_of_the_layer_below_propagates_as_is() -> None:
 
 
 def test_a_failure_while_recording_is_logged_and_does_not_touch_the_write(
-    exec_turn: Path, monkeypatch: pytest.MonkeyPatch
+    exec_turn: Path, loguru_records: LogRecords
 ) -> None:
-    from ava_builtins.plugins.ava_memory import written_notes
-
-    logged: list[str] = []
-
-    class _Logger:
-        def opt(self, **_kwargs: Any) -> _Logger:
-            return self
-
-        def warning(self, message: str, *args: Any) -> None:
-            logged.append(message.format(*args))
-
-    monkeypatch.setattr(written_notes, "logger", _Logger())
     ava.state_update = "tampered"  # the state update the record is merged into is unusable
 
     note = ava.memory.PATH / "survives.md"
     assert ava.files.write(note, "kept") is None
     assert note.read_text() == "kept"
-    assert len(logged) == 1 and "survives.md" in logged[0]
+    [logged] = loguru_records.messages("WARNING")
+    assert "survives.md" in logged
 
 
 def test_outside_an_exec_turn_nothing_is_recorded_and_nothing_fails(exec_turn: Path) -> None:

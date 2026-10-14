@@ -20,7 +20,6 @@
 "test_upload_delivery_lifecycle.py#monkeypatch.setattr gateway.upload_delivery.worker.UploadRecovery.copy_proof" = 2
 "test_upload_delivery_lifecycle.py#monkeypatch.setattr gateway.upload_delivery.worker.business_paused" = 1
 "test_upload_delivery_lifecycle.py#monkeypatch.setattr gateway.upload_delivery.worker.publish_inbound_wake" = 1
-"test_upload_delivery_lifecycle.py#monkeypatch.setattr gateway.upload_delivery.worker.telemetry.emit" = 1
 "test_upload_delivery_recovery.py#monkeypatch.setattr base.agents.upload_delivery.storage.publish" = 2
 "test_upload_delivery_recovery.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_upload_delivery_recovery.py#monkeypatch.setattr gateway.routers.upload.router.MAX_AGENT_UPLOAD_BYTES" = 1

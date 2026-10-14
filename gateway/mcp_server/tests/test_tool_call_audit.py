@@ -8,15 +8,15 @@ reported instead.
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 import psycopg
 import pytest
 
-from base import telemetry
 from base.api_contracts.caller_identity import CallerIdentity
 from base.db import Database
 from base.telemetry import audit_events
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.mcp_server.endpoint import record_tool_call
 
 
@@ -42,24 +42,21 @@ async def test_a_tool_call_is_recorded_with_its_outcome(
 
 
 async def test_a_failed_audit_write_does_not_fail_the_tool_call(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    emitted_events: EmittedEvents,
 ) -> None:
     caller = _caller()
-    reported: list[str] = []
 
     def refuse(_db: object, _event: object) -> None:
         raise RuntimeError("database down")
 
     monkeypatch.setattr(audit_events, "record_audit_standalone", refuse)
 
-    def emit(_category: str, name: str, **kwargs: Any) -> None:
-        if name == "audit_write_failed":
-            reported.append(kwargs["attributes"]["event_name"])
-
-    monkeypatch.setattr(telemetry, "emit", emit)
-
     await record_tool_call(database, caller, {"tool": "spawn_agent", "outcome": "ok"})
 
+    reported = [a["event_name"] for a in emitted_events.attributes("audit_write_failed")]
     assert reported == ["mcp_tool_call"]
     count = db_conn.execute(
         "SELECT count(*) FROM audit_events WHERE source=%s", (caller.source(),)
