@@ -244,7 +244,6 @@ frontend = ["ui"]
 "tests/scripts/test_rotate_cluster_secret.py -> services/backup/dump.py" = 7
 "tests/scripts/test_test_selector_contract.py -> scripts/ci/test_selector.py" = 3
 "tests/scripts/test_update_model_pricing_contract.py -> scripts/model_registry/update_model_pricing.py" = 16
-"tests/skills/__init__.py -> ava_builtins/skills" = 1
 "tests/skills/test_impersonation_launch.py -> ava_builtins/skills" = 1
 "tests/skills/test_impersonation_launch.py -> cli/commands/agents/impersonation_adapters.py" = 1
 "tests/skills/test_watcher_wake_delivery.py -> ava_builtins/skills" = 1

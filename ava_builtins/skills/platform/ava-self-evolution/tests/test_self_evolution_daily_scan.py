@@ -13,8 +13,8 @@ from typing import Any, cast
 
 import pytest
 
+from ava_builtins.skills.tests.skill_script import load_skill_script
 from base.db import Database
-from tests.skills import load_skill_script
 
 
 @pytest.fixture()
