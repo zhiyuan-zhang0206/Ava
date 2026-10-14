@@ -1,3 +1,2 @@
 [debt.first-party-patch]
 "test_manifest_serializer_contract.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 1
-"test_telemetry_staleness.py#monkeypatch.setattr base.telemetry.emit" = 2

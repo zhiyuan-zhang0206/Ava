@@ -11,7 +11,6 @@ exports = ["test_maintenance.py"]
 "test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.config.settings.gateway.pause_lifecycle_wait_seconds" = 4
 "test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.deploy.maintenance.cohort.orphaned_claims" = 1
 "test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.deploy.maintenance.cohort.prepare" = 1
-"test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_maintenance_lifecycle_wait.py#monkeypatch.setattr ops.agent_pause.host_identity" = 1
 "test_maintenance_lifecycle_wait.py#monkeypatch.setattr ops.agent_pause.host_running" = 1
 "test_maintenance_lifecycle_wait.py#monkeypatch.setattr ops.agent_pause.publish_inbound_wake" = 1

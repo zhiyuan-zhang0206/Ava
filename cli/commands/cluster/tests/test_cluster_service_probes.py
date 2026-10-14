@@ -16,6 +16,7 @@ from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import (
     config_boot_environment as config_boot_environment,
 )
+from cli.commands.cluster.tests.health_probe_inputs import emitted_events as emitted_events
 from cli.commands.cluster.tests.health_probe_inputs import (
     provider_guard_healthy as provider_guard_healthy,
 )

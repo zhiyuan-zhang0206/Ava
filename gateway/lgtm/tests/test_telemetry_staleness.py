@@ -7,12 +7,11 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import psycopg
-import pytest
 
-from base import telemetry
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.lgtm import telemetry_staleness
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 
@@ -55,9 +54,8 @@ def test_heartbeat_age_reads_the_newest_heartbeat_row(db_conn: psycopg.Connectio
     assert telemetry_staleness.heartbeat_age(pool, now=later) is None
 
 
-def test_check_reports_stale_rate_limits_and_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_check_reports_stale_rate_limits_and_recovers(emitted_events: EmittedEvents) -> None:
     ages: dict[str, float | None] = {"postgres": 30.0}
-    emitted: list[tuple[str, dict[str, Any]]] = []
 
     def postgres_age(_pool: object, *, now: datetime) -> float | None:
         del now
@@ -65,50 +63,42 @@ def test_check_reports_stale_rate_limits_and_recovers(monkeypatch: pytest.Monkey
 
     guard = TelemetryStaleness(check_interval_s=0, read_heartbeat_age=postgres_age)
 
-    def capture_emit(
-        _category: str, event_name: str, *, attributes: dict[str, Any], **_kwargs: Any
-    ) -> None:
-        emitted.append((event_name, attributes))
-
-    monkeypatch.setattr(telemetry, "emit", capture_emit)
     started = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
 
     assert guard.check_and_report(None, now=started) is False
-    assert emitted == []
+    assert emitted_events.names() == []
 
     ages["postgres"] = None
     assert guard.check_and_report(None, now=started) is True
-    assert emitted == [
-        (
-            "telemetry_read_stale",
-            {
-                "source": "postgres",
-                "signal": "gateway_latency",
-                "threshold_s": 300,
-                "age_s": None,
-                "action": "entered",
-                "reason": "heartbeat missing",
-            },
-        )
+    assert emitted_events.names() == ["telemetry_read_stale"]
+    assert emitted_events.attributes("telemetry_read_stale") == [
+        {
+            "source": "postgres",
+            "signal": "gateway_latency",
+            "threshold_s": 300,
+            "age_s": None,
+            "action": "entered",
+            "reason": "heartbeat missing",
+        }
     ]
 
     assert guard.check_and_report(None, now=datetime(2026, 8, 23, 12, 4, 59, tzinfo=UTC))
-    assert len(emitted) == 1
+    assert len(emitted_events) == 1
 
     assert guard.check_and_report(None, now=datetime(2026, 8, 23, 12, 5, tzinfo=UTC))
-    assert emitted[-1][0] == "telemetry_read_stale"
-    assert emitted[-1][1]["action"] == "ongoing"
+    assert emitted_events.names() == ["telemetry_read_stale"] * 2
+    assert emitted_events.attributes("telemetry_read_stale")[-1]["action"] == "ongoing"
 
     ages["postgres"] = 30.0
     assert guard.check_and_report(None, now=datetime(2026, 8, 23, 12, 6, tzinfo=UTC)) is False
-    assert emitted[-1] == (
-        "telemetry_read_recovered",
+    assert emitted_events.names()[-1] == "telemetry_read_recovered"
+    assert emitted_events.attributes("telemetry_read_recovered") == [
         {
             "source": "postgres",
             "signal": "gateway_latency",
             "stale_duration_s": 360.0,
-        },
-    )
+        }
+    ]
 
 
 def test_check_throttles_heartbeat_queries() -> None:
@@ -135,18 +125,11 @@ def test_check_throttles_heartbeat_queries() -> None:
     assert calls == 2
 
 
-def test_check_fail_open_when_heartbeat_query_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    emitted: list[str] = []
-
+def test_check_fail_open_when_heartbeat_query_raises(emitted_events: EmittedEvents) -> None:
     def boom(_pool: object, *, now: datetime) -> float | None:
         raise RuntimeError(f"backend failed at {now}")
 
     guard = TelemetryStaleness(check_interval_s=0, read_heartbeat_age=boom)
 
-    def capture_emit(_category: str, event_name: str, **_kwargs: Any) -> None:
-        emitted.append(event_name)
-
-    monkeypatch.setattr(telemetry, "emit", capture_emit)
-
     assert guard.check_and_report(None) is False
-    assert emitted == []
+    assert emitted_events.names() == []

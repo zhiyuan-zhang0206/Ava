@@ -7,9 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
-from base import telemetry
 from base.api_contracts.agent_contract import AgentStatus, LivenessState
 from base.events.live.tests.fakes import patch_sync_redis
+from base.telemetry.tests.capture.event_capture import capturing_events
 from gateway.app import app
 from gateway.schemas.fleet_graph import FleetGraphNode, FleetGraphResponse
 from gateway.tests.routers.fleet_graph.staleness_support import use_heartbeat_age
@@ -104,22 +104,11 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
         del pool, now
 
     use_heartbeat_age(monkeypatch, missing_heartbeat)
-    emitted: list[tuple[str, dict[str, object]]] = []
 
-    def capture_emit(
-        _category: str,
-        event_name: str,
-        *,
-        attributes: dict[str, object],
-        **_kwargs: object,
-    ) -> None:
-        if event_name == "telemetry_read_stale":
-            emitted.append((event_name, attributes))
-
-    monkeypatch.setattr(telemetry, "emit", capture_emit)
-
-    with TestClient(app) as client:
+    # The capture is bound inside the app's lifespan: the gateway binds its own pipeline on start.
+    with TestClient(app) as client, capturing_events() as emitted_events:
         resp = client.get("/api/fleet/graph")
+        stale = emitted_events.attributes("telemetry_read_stale")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -127,8 +116,7 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     assert body["snapshot_at"] is not None
     key = fg.cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
     assert {write[0] for write in redis.writes} == {key}
-    assert emitted[0][0] == "telemetry_read_stale"
-    assert emitted[0][1]["source"] == "postgres"
+    assert stale[0]["source"] == "postgres"
 
 
 def test_pg_cancellation_is_a_500_and_ignores_leftover_last_good_entries(

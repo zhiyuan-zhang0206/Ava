@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 
 import psutil
 import pytest
 
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.http.middleware import runtime_metrics
 
 
@@ -59,14 +61,8 @@ class _Process:
 
 
 def test_runtime_monitor_callback_emits_process_and_loop_metrics(
-    monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
-    emitted: list[tuple[str, dict[str, Any]]] = []
-
-    def capture_emit(_category: str, event_name: str, *, attributes: dict[str, Any]) -> None:
-        emitted.append((event_name, attributes))
-
-    monkeypatch.setattr(runtime_metrics.telemetry, "emit", capture_emit)
     loop = _Loop()
     process = _Process()
     monitor = runtime_metrics.GatewayRuntimeMonitor(
@@ -83,7 +79,7 @@ def test_runtime_monitor_callback_emits_process_and_loop_metrics(
     loop.now = 1.25
     callback(*args)
 
-    assert emitted == [
+    assert [(event.event_name, event.attributes) for event in emitted_events] == [
         (
             "gateway_event_loop",
             {
@@ -129,18 +125,14 @@ def test_runtime_monitor_reschedules_after_sampling_failure(
     assert loop.scheduled[-1][0] == 2.0
 
 
-def test_sse_metrics_initialize_idle_modes_at_zero(monkeypatch: pytest.MonkeyPatch) -> None:
-    emitted: list[dict[str, Any]] = []
+def test_sse_metrics_initialize_idle_modes_at_zero(
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+) -> None:
     monkeypatch.setattr(runtime_metrics, "sse_active_connections", {"filtered": 9})
-
-    def capture_emit(_category: str, _event_name: str, *, attributes: dict[str, Any]) -> None:
-        emitted.append(attributes)
-
-    monkeypatch.setattr(runtime_metrics.telemetry, "emit", capture_emit)
 
     runtime_metrics.initialize_sse_metrics()
 
-    assert emitted == [
+    assert [event.attributes for event in emitted_events] == [
         {"mode": "filtered", "active_connections": 0},
         {"mode": "throttled", "active_connections": 0},
     ]

@@ -42,15 +42,12 @@
 "test_memory.py#monkeypatch.setattr ava.gateway_client.memory_search" = 9
 "test_memory.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_memory_write_check_hook.py#monkeypatch.setattr ava.gateway_client.memory_search" = 1
-"test_memory_write_check_hook.py#monkeypatch.setattr ava_builtins.plugins.ava_memory.agent_runtime.logger" = 1
-"test_memory_write_check_hook.py#monkeypatch.setattr ava_builtins.plugins.ava_memory.agent_runtime.logger.info" = 1
 "test_memory_write_check_hook.py#monkeypatch.setattr base.config.settings.agent.memory_write_check_deadline_seconds" = 1
 "test_memory_write_check_hook.py#monkeypatch.setattr base.config.settings.agent.memory_write_dedup_threshold" = 1
 "test_memory_write_wraps.py#assignment ava.state" = 1
 "test_memory_write_wraps.py#assignment ava.state_update" = 2
 "test_memory_write_wraps.py#monkeypatch.setattr ava.gateway_client.memory_search" = 1
 "test_memory_write_wraps.py#monkeypatch.setattr ava.gateway_client.post" = 1
-"test_memory_write_wraps.py#monkeypatch.setattr ava_builtins.plugins.ava_memory.written_notes.logger" = 1
 "test_memory_write_wraps.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_validation_ava_memory.py#monkeypatch.setattr ava.gateway_client.memory_search" = 2
 

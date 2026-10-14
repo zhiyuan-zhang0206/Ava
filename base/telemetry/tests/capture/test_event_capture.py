@@ -58,6 +58,20 @@ def test_an_event_emitted_through_the_exposed_producer_lands_in_the_capture(
     assert emitted_events.attributes("understanding_chunk_failed") == [{"n": 1}]
 
 
+def test_a_followed_view_reads_what_has_been_emitted_at_each_use(
+    emitted_events: EmittedEvents,
+) -> None:
+    view = emitted_events.following("understanding_chunk_failed")
+    assert view == []
+    assert len(view) == 0
+    telemetry.emit("telemetry", "understanding_chunk_failed", attributes={"n": 1})
+    telemetry.emit("telemetry", "understanding_group_failed", attributes={"n": 2})
+    telemetry.emit("telemetry", "understanding_chunk_failed", attributes={"n": 3})
+    assert view == [{"n": 1}, {"n": 3}]
+    assert [row["n"] for row in view] == [1, 3]
+    assert view[-1] == {"n": 3}
+
+
 def test_the_previous_pipeline_binding_is_put_back() -> None:
     before = process_state["pipeline"]
     with capturing_events() as capture:

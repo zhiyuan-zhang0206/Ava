@@ -8,9 +8,9 @@ land in a real `EventPipeline` whose `writer` is a list.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, overload
 
 import pytest
 
@@ -18,9 +18,36 @@ from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
 from base.telemetry.delivery.state import process_state
 
-__all__ = ["EmittedEvents", "capturing_events", "emitted_events"]
+__all__ = ["EmittedEvents", "FollowedAttributes", "capturing_events", "emitted_events"]
 
 _SETTLE_TIMEOUT_S = 5.0
+
+
+class FollowedAttributes(Sequence[dict[str, Any]]):
+    """The attributes of the events with one name, read from the capture at each use: it compares
+    and indexes like a list that follows what the code under test emits."""
+
+    def __init__(self, events: EmittedEvents, event_name: str) -> None:
+        self._events = events
+        self._event_name = event_name
+
+    def _read(self) -> list[dict[str, Any]]:
+        return self._events.attributes(self._event_name)
+
+    @overload
+    def __getitem__(self, index: int) -> dict[str, Any]: ...
+    @overload
+    def __getitem__(self, index: slice) -> list[dict[str, Any]]: ...
+    def __getitem__(self, index: int | slice) -> dict[str, Any] | list[dict[str, Any]]:
+        return self._read()[index]
+
+    def __len__(self) -> int:
+        return len(self._read())
+
+    def __eq__(self, other: object) -> bool:
+        return self._read() == other
+
+    __hash__ = None  # type: ignore[assignment]
 
 
 class EmittedEvents:
@@ -61,6 +88,10 @@ class EmittedEvents:
     def attributes(self, event_name: str) -> list[dict[str, Any]]:
         """The `attributes` of every event with this name, in emit order."""
         return [event.attributes for event in self.named(event_name)]
+
+    def following(self, event_name: str) -> FollowedAttributes:
+        """The attributes of the events named `event_name`, as a view that is read at each use."""
+        return FollowedAttributes(self, event_name)
 
     def clear(self) -> None:
         """Forget what was emitted so far (a later read sees only later events)."""

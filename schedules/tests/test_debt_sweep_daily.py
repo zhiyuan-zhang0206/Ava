@@ -20,7 +20,8 @@ from base.native_process.loaded_commit import LoadedCommit
 from ava.sdk_surface import process_context
 from schedules import entry
 from base import db
-from base import telemetry
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "debt-sweep-daily-schedule.py"
@@ -48,6 +49,7 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    emitted_events: EmittedEvents,
 ) -> None:
     module = _load_schedule_module()
     calls: list[str] = []
@@ -76,11 +78,11 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     monkeypatch.setattr(module, "ava_home", forbidden)
     monkeypatch.setattr(db, "connect", forbidden)
     monkeypatch.setattr(db, "pool", forbidden)
-    monkeypatch.setattr(telemetry, "emit", forbidden)
 
     module.main(["--once", "--dry-run", "--repo", str(REPO_ROOT)])
 
     assert calls == []
+    assert emitted_events.names() == []
     output = capsys.readouterr().out
     assert "resolved worker label: debt-sweep-daily" in output
     assert "prompt preview:" in output
@@ -164,6 +166,7 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
+    emitted_events: EmittedEvents,
 ) -> None:
     module = _load_schedule_module()
     scan = module.ScanReport(
@@ -172,7 +175,6 @@ def test_scan_failure_is_passed_to_worker_and_registered(
         summary="mechanical scan failed: exit 1",
     )
     prompts: list[str] = []
-    emitted: list[dict[str, object]] = []
 
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
 
@@ -190,13 +192,9 @@ def test_scan_failure_is_passed_to_worker_and_registered(
         assert callable(producer) and callable(machine_reader)
         assert image.sha is None
 
-    def record_emit(category: str, event_name: str, **kwargs: object) -> None:
-        emitted.append({"category": category, "event_name": event_name, **kwargs})
-
     monkeypatch.setattr(module, "_run_mechanical_scan", fake_scan)
     monkeypatch.setattr(module, "ensure_worker", ensure_worker)
     monkeypatch.setattr(module, "init_gateway_process", init_gateway_process)
-    monkeypatch.setattr(telemetry, "emit", record_emit)
 
     module._fire(
         datetime(2026, 9, 21, 22, 30, tzinfo=UTC),
@@ -209,19 +207,19 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     assert len(prompts) == 1
     assert "mechanical scan failed: exit 1" in prompts[0]
     assert (
-        emitted
+        [(e.category, e.event_name, e.source, e.attributes) for e in emitted_events]
         == [
-            {
-                "category": "telemetry",
-                "event_name": "debt_sweep_daily",
-                "source": "system",
-                "attributes": {
+            (
+                "telemetry",
+                "debt_sweep_daily",
+                "system",
+                {
                     "day": "2026-09-22",  # time-bomb-ok: derived from the explicit slot argument (Asia/Shanghai), no real-clock window
                     "scan_status": "failed",
                     "action": "spawned",
                     "worker_agent_id": 44,
                 },
-            }
+            )
         ]
     )
 

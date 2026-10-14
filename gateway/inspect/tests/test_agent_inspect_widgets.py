@@ -33,6 +33,8 @@ from base.db import Database
 from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.surface.inspector import DuplicateInspectWidget, InspectWidgetSpec
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.inspect import _plugin_widgets
 from gateway.inspect.router import router
 
@@ -404,7 +406,10 @@ def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch
 
 
 def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+    emitted_events: EmittedEvents,
 ) -> None:
     """Fail-soft (user ruling 2026-09-11): a broken inspector.py is reported
     loudly and skipped — the endpoint keeps serving the remaining widgets.
@@ -413,8 +418,6 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     at module import) restated for the inspector surface: the load must not
     raise, the remaining plugin still serves, and the failure is loud on both
     channels (loguru ERROR + the plugin_load_failed telemetry event)."""
-    import base.telemetry
-
     good = _shipped_fleet_module()
     bad = _fixture_inspector(
         tmp_path,
@@ -423,20 +426,6 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
         widget_id="w",
     )
     monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [bad, good])
-
-    events: list[tuple[str, dict[str, object]]] = []
-
-    def fake_emit(
-        category: str,
-        event_name: str,
-        *,
-        level: str = "info",
-        attributes: dict[str, object] | None = None,
-        **kw: object,
-    ) -> None:
-        events.append((event_name, attributes or {}))
-
-    monkeypatch.setattr(base.telemetry, "emit", fake_emit)
 
     # A failed import must not leave the module behind (importlib's own cleanup).
     leftover = "ava_builtins.plugins.fx_broken_plugin.inspector"
@@ -450,7 +439,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
         "fx_broken_plugin" in r["message"] and "fail-soft" in r["message"] for r in loguru_records
     )
     # loud: the plugin_load_failed event carrying the plugin + the exception
-    attrs = [a for n, a in events if n == "plugin_load_failed"]
+    attrs = emitted_events.attributes("plugin_load_failed")
     assert [a["plugin"] for a in attrs] == ["fx_broken_plugin"]
     assert "ModuleNotFoundError" in str(attrs[0]["error"])
 
