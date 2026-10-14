@@ -4,12 +4,13 @@ Checks cover gateway liveness, agent population, schema, selected
 services, Redis relay, disk usage, WAL archiving, editable-install records, source integrity,
 and provider account health. Any failed check returns unhealthy.
 
-Every run emits one `health_probe_ran` heartbeat (its absence is the dead-man
-signal); every unhealthy run also emits one `health_probe_failing` event naming
-the failed check and its failure class, repeated on every run while the condition holds;
-Grafana alert rules turn that stream into graded notifications (`for:` is the
-normal-recovery budget, then WARNING, then ERROR). The probe itself decides
-nothing about notifying.
+Every check runs on every round — a failing check never stops the others — and
+every failed check emits its own `health_probe_failing` event (check, failure
+class, message), repeated on every run while it stays failed. Every run also
+emits one `health_probe_ran` heartbeat (its absence is the dead-man signal)
+carrying the count of checks that failed; Grafana alert rules turn the failing
+stream into graded notifications (`for:` is the normal-recovery budget, then
+WARNING, then ERROR). The probe itself decides nothing about notifying.
 
 The probe never selects a release, rolls back code, or publishes known-good
 state.
@@ -172,7 +173,9 @@ def _report_failing(check: str, message: str, *, failure_class: str = "alert-onl
 
 
 def _report_ran(unhealthy_checks: int) -> None:
-    """Emit this run's `health_probe_ran` heartbeat; its absence means the probe stopped."""
+    """Emit this run's `health_probe_ran` heartbeat; its absence means the probe stopped.
+
+    `unhealthy_checks` counts this round's failed checks (0 = healthy)."""
     telemetry.emit(
         "telemetry",
         "health_probe_ran",
@@ -426,14 +429,14 @@ def run_health_probe(
     telemetry.init_telemetry(
         process="cli-health-probe", pipeline=producer(), machine_reader=command.machine.name
     )
-    rc = _observe_cluster_health(
+    unhealthy_checks = _observe_cluster_health(
         agent_min=agent_min,
         check_schema=check_schema,
         database_factory=database_factory,
         command=command,
     )
-    _report_ran(unhealthy_checks=rc)
-    return rc
+    _report_ran(unhealthy_checks=unhealthy_checks)
+    return 1 if unhealthy_checks else 0
 
 
 def _observe_cluster_health(
@@ -443,25 +446,36 @@ def _observe_cluster_health(
     database_factory: DatabaseFactory,
     command: CommandRuntime,
 ) -> int:
-    """Observe one health round and report the first failed check."""
+    """Observe one health round, report every failed check, and count them.
+
+    A failing check never stops the round: every check still runs and reports,
+    so a schema/code skew cannot silence the disk, service or provider-account
+    signals (task #5064). The disk check keeps its position first — a full data
+    volume can keep the gateway from starting, and the report must lead with
+    that cause; the disk success line keeps check 6's output position below.
+    """
+    failures = 0
+
     # Check disk before gateway liveness: a full data volume can keep the
     # gateway from starting, and its alert must name the cause of that outage.
-    # Keep the existing success line in check 6's output position below.
+    # A failing reading reports here, first; a healthy one prints in check 6's
+    # output position below.
     disk_failure = disk_usage_failure()
     if disk_failure is not None:
-        return _alert_only_failure("disk_usage", f"FAIL: disk usage — {disk_failure}")
+        failures += _alert_only_failure("disk_usage", f"FAIL: disk usage — {disk_failure}")
 
     # 1. Gateway liveness (primary signal)
     if not gateway_liveness_with_retry():
         failure_class = (
             "environment" if data_plane_abnormal(database_factory=database_factory) else "code"
         )
-        return _unhealthy(
+        failures += _unhealthy(
             "gateway_liveness",
             "FAIL: gateway liveness — health endpoint unreachable or non-200",
             failure_class=failure_class,
         )
-    print("  ✓ gateway liveness")
+    else:
+        print("  ✓ gateway liveness")
 
     # 2. Agent population
     # `agent_min` defaults to the cluster's AVA_HEALTH_PROBE_AGENT_MIN (itself
@@ -472,7 +486,7 @@ def _observe_cluster_health(
 
         agent_min = settings.daemon.health_probe_agent_min
     if not agent_population(agent_min, database_factory=database_factory):
-        return _unhealthy(
+        failures += _unhealthy(
             "agent_population",
             f"FAIL: agent population — fewer than {agent_min} agent(s) running/idling",
             failure_class=agent_population_failure_class(
@@ -480,22 +494,30 @@ def _observe_cluster_health(
             )
             or "code",
         )
-    print(f"  ✓ agent population (>= {agent_min})")
+    else:
+        print(f"  ✓ agent population (>= {agent_min})")
 
     # 3. Schema health
     if check_schema:
         if not schema_health(database_factory=database_factory):
-            return _unhealthy(
+            failures += _unhealthy(
                 "schema",
                 "FAIL: schema health — applied version behind required (CodeBehindSchema)",
             )
-        print("  ✓ schema health")
+        else:
+            print("  ✓ schema health")
 
-    return _check_alert_only_health(database_factory=database_factory, command=command)
+    return failures + _check_alert_only_health(
+        database_factory=database_factory, command=command, disk_healthy=disk_failure is None
+    )
 
 
-def _check_alert_only_health(*, database_factory: DatabaseFactory, command: CommandRuntime) -> int:
-    """Observe the remaining service, host, and provider health signals."""
+def _check_alert_only_health(
+    *, database_factory: DatabaseFactory, command: CommandRuntime, disk_healthy: bool
+) -> int:
+    """Observe the remaining service, host, and provider health signals: report
+    every failure and count them."""
+    failures = 0
 
     # 5. Per-service health and the host-level Redis bridge.
     failing = service_probes(machine=command.machine, host=command.host) + [
@@ -504,14 +526,17 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory, command: Comm
         if failure is not None
     ]
     if failing:
-        return _alert_only_failure(
+        failures += _alert_only_failure(
             "service_probe", f"FAIL: service probe — not healthy: {', '.join(sorted(failing))}"
         )
-    print("  ✓ service probes")
+    else:
+        print("  ✓ service probes")
 
-    # 6. Data-volume usage passed before gateway liveness. A full disk alerts
-    # directly instead of being graded as a code failure.
-    print("  ✓ disk usage")
+    # 6. Data-volume usage was observed before gateway liveness (see above): a
+    # full disk alerts directly instead of being graded as a code failure, and
+    # its report led the round. Only the healthy outcome prints here.
+    if disk_healthy:
+        print("  ✓ disk usage")
 
     # 6b. WAL archiving — alert-only, same class as checks 5 and 6: a stuck or
     # misconfigured archiver is fixed by repairing the archive path, not by rolling
@@ -525,11 +550,12 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory, command: Comm
 
     archive_failure = walg_archive_failure(path_reader=path_reader)
     if archive_failure is not None:
-        return _alert_only_failure("walg_archive", f"FAIL: {archive_failure}")
-    from services.backup.walg.config import enabled as walg_enabled
+        failures += _alert_only_failure("walg_archive", f"FAIL: {archive_failure}")
+    else:
+        from services.backup.walg.config import enabled as walg_enabled
 
-    if walg_enabled(path_reader=path_reader):
-        print("  ✓ WAL archiving")
+        if walg_enabled(path_reader=path_reader):
+            print("  ✓ WAL archiving")
 
     # 7. Editable-install records — alert-only, same class as checks 5 and 6:
     # the 2026-08-27 outage class (a worktree uv sync under a polluted
@@ -538,10 +564,11 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory, command: Comm
     # recovery; this probe and ordinary startup never rewrite these records.
     editable_failure = editable_install_failure()
     if editable_failure is not None:
-        return _alert_only_failure(
+        failures += _alert_only_failure(
             "editable_install", f"FAIL: editable install — {editable_failure}"
         )
-    print("  ✓ editable install records")
+    else:
+        print("  ✓ editable install records")
 
     # 8. Source-tree integrity — alert-only, same class as checks 5-7: a
     # tampered checkout that a source-run home executes is the 2026-08-28
@@ -551,16 +578,14 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory, command: Comm
     # the operator.
     source_check = _run_source_tree_check()
     if source_check is not None:
-        return source_check
-    print("  ✓ source tree integrity")
+        failures += source_check
+    else:
+        print("  ✓ source tree integrity")
 
     # 9-10. Provider account guard — alert-only, like checks 5-8 (see `_provider_guard`).
-    if (
-        guard_rc := run_provider_guard(report=_report_failing, database_factory=database_factory)
-    ) is not None:
-        return guard_rc
+    failures += run_provider_guard(report=_report_failing, database_factory=database_factory)
 
-    return 0
+    return failures
 
 
 def cmd_health_probe(
