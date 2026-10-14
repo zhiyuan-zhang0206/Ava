@@ -8,9 +8,12 @@ deliberate change to a namespace edits its list here in the same PR.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 import ava
+from ava import agents, security
 from ava.sdk_surface.discovery import agent_visible_names
 
 _SURFACE: dict[str, list[str]] = {
@@ -61,12 +64,52 @@ _SURFACE: dict[str, list[str]] = {
     "watcher": ["at", "cron", "launch"],
     "web": ["ReasoningEffort", "SearchResult", "fetch", "search"],
     "skills": [],
+    "files": ["append", "delete", "edit", "glob", "read", "write"],
+    "shell": ["BackgroundRun", "run", "run_background", "sessions"],
+    # Not a top-level namespace: the scan the other namespaces run their results through. Its
+    # three names are still what `ava.help` and the docs lint treat as its surface.
+    "security": ["SecurityFindingEntry", "is_flagged", "scan_content"],
 }
+
+_TOP_LEVEL = [
+    "agents",
+    "context",
+    "files",
+    "help",
+    "mcps",
+    "self",
+    "shell",
+    "skills",
+    "ui",
+    "understand",
+    "watcher",
+    "web",
+]
 
 
 @pytest.mark.parametrize("namespace", sorted(_SURFACE))
 def test_the_agent_visible_names_of_a_core_namespace_are_pinned(namespace: str) -> None:
-    assert agent_visible_names(getattr(ava, namespace)) == _SURFACE[namespace]
+    module = security if namespace == "security" else getattr(ava, namespace)
+    assert agent_visible_names(module) == _SURFACE[namespace]
+
+
+def test_the_top_level_namespaces_are_pinned() -> None:
+    assert agent_visible_names(ava) == _TOP_LEVEL
+
+
+@pytest.mark.parametrize(
+    ("function", "signature"),
+    [
+        (security.is_flagged, "(content: str) -> bool"),
+        (security.scan_content, "(content: str, source: str = 'unknown') -> str"),
+        (agents.commands, "() -> 'list[CommandInfo]'"),
+    ],
+    ids=["is_flagged", "scan_content", "commands"],
+)
+def test_the_signatures_behind_the_visible_names_are_pinned(
+    function: object, signature: str
+) -> None:
+    assert str(inspect.signature(function)) == signature  # pyright: ignore[reportArgumentType]
 
 
 def test_the_mcps_surface_is_its_two_helpers_plus_the_configured_servers() -> None:
