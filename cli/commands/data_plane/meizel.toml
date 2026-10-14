@@ -7,3 +7,6 @@ exports = ["bringup.py", "cluster_instance.py", "maintenance_stop.py", "maintena
 "pgbouncer.py" = ["_pooler_stop.py", "cluster_instance.py"]
 "stop_waits.py" = ["maintenance_stop_report.py"]
 "tests" = ["_pooler_stop.py", "bringup.py", "cluster_instance.py", "maintenance_stop.py", "pgbouncer.py"]
+
+[debt.first-party-patch]
+"bringup.py#assignment base.config.settings.data_plane.db_url" = 1

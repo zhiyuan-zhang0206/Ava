@@ -1,3 +1,10 @@
+[uses]
+"test_ava_root_health.py" = ["child_unit.py"]
+"test_ava_root_intent.py" = ["child_unit.py"]
+"test_ava_root_stop_window.py" = ["child_unit.py"]
+"test_ava_root_supervisor.py" = ["child_unit.py"]
+"test_maintenance_late_child.py" = ["child_unit.py"]
+
 [debt.first-party-patch]
 "test_ava_root_failure_state.py#monkeypatch.setattr base.log.logger" = 1
 "test_ava_root_failure_state.py#monkeypatch.setattr services.supervision.ava_root.health.monotonic" = 1
@@ -13,6 +20,15 @@
 "test_ava_root_probes.py#monkeypatch.setattr services.supervision.ava_root.probes.resolve_ref" = 1
 "test_ava_root_selfcheck.py#monkeypatch.setattr base.log.logger" = 1
 "test_ava_root_selfcheck.py#monkeypatch.setattr services.supervision.ava_root.selfcheck.child_state" = 1
+
+[debt.restricted-python]
+"child_unit.py#python -c" = 1
+"test_ava_root_daemon.py#python -c" = 3
+"test_ava_root_health.py#python -c" = 2
+"test_ava_root_selfcheck.py#python -c" = 2
+"test_ava_root_supervisor.py#python -c" = 3
+"test_ava_root_supervisor_reaping.py#python -c" = 2
+"test_root_work_ownership.py#python -c" = 5
 
 [debt.stdlib-patch]
 "test_ava_root_supervisor.py#monkeypatch.setattr os.killpg" = 2

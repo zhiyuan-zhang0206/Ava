@@ -3,7 +3,7 @@ exports = ["scenario_recording.py", "scenarios"]
 [uses]
 "scenario_recording.py" = ["scripted_model.py"]
 "scenarios" = ["scenario_recording.py", "scripted_model.py"]
-"test_budget_handoff.py" = ["scenarios"]
+"test_budget_handoff.py" = ["child_budget_writer.py", "scenarios"]
 "test_chat_model.py" = ["scripted_model.py"]
 "test_recording.py" = ["scenario_recording.py", "scripted_model.py"]
 "test_watcher_resurrection.py" = ["scenarios"]
@@ -16,4 +16,11 @@ exports = ["scenario_recording.py", "scenarios"]
 "test_watcher_resurrection.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
+"child_budget_writer.py#assignment ava.agents.send_message" = 1
+"child_budget_writer.py#assignment ava.agents.spawn" = 1
+"child_budget_writer.py#assignment ava.context" = 1
 "test_budget_handoff.py#monkeypatch.setattr tests.e2e.fakes.scenarios.budget_handoff.scratch_root" = 1
+
+[debt.stdlib-patch]
+"child_budget_writer.py#assignment os.fdopen" = 1
+"child_budget_writer.py#assignment pathlib.Path.open" = 1

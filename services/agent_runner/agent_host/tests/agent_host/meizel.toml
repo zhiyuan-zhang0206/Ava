@@ -1,7 +1,13 @@
 [loads]
 "child_sdk_host_posture.py" = ["services/agent_runner/agent_host"]
 
+[uses]
+"test_sdk_host_posture.py" = ["child_sdk_host_posture.py"]
+
 [debt.first-party-patch]
+"child_runtime_scenarios.py#assignment services.agent_runner.agent_host.stdout_log.STDOUT_LOG_ROTATE_BYTES" = 3
+"child_runtime_scenarios.py#assignment services.agent_runner.agent_host.stdout_log.stdout_log_path" = 3
+"child_sdk_host_posture.py#assignment base.config.ConfigBoot.ensure_eager" = 1
 "test_config_rebind.py#monkeypatch.setattr agent.ownership.hosted.renew_hosted_owner" = 3
 "test_config_rebind.py#monkeypatch.setattr base.config.settings.daemon.host_turn_no_progress_timeout_seconds" = 1
 "test_config_rebind.py#monkeypatch.setattr base.config.settings.daemon.host_turn_progress_scan_interval_seconds" = 1
@@ -19,6 +25,9 @@
 "test_rejected_model_config.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 4
 "test_rejected_model_config.py#monkeypatch.setattr services.agent_runner.agent_host.settlement.reconcile_inbounds_after_turn" = 1
 "test_run_turn_task_owner.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.source.finish_force_and_compact" = 2
+
+[debt.stdlib-patch]
+"child_runtime_scenarios.py#assignment os.open" = 2
 
 [debt.unresolved-patch]
 "test_maintenance_failures.py#monkeypatch.setattr graph.ainvoke" = 1

@@ -1,4 +1,11 @@
+exports = ["helper_chain_probe.py"]
+
+[uses]
+"test_shutdown.py" = ["plugin_restart_probe.py"]
+
 [debt.first-party-patch]
+"plugin_restart_probe.py#assignment services.agent_runner.agent_host.daemon.PLUGINS_POLL_INTERVAL_S" = 1
+"plugin_restart_probe.py#assignment services.agent_runner.agent_host.daemon.plugins_fingerprint" = 1
 "test_no_secrets_on_argv.py#monkeypatch.setattr base.cluster.ownership.redis_data_dir" = 1
 "test_no_secrets_on_argv.py#monkeypatch.setattr base.cluster.port_preflight.bind_addrs" = 1
 "test_no_secrets_on_argv.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.ensure_redis_acl" = 1

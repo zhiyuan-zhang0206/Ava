@@ -8,6 +8,7 @@ from meizel.contracts.debt import edge_key
 from meizel.contracts.manifest import Manifest, manifest_path
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
+from meizel.graph.universe import is_private_module
 
 __all__ = ["Projection", "cycle_edge", "is_private", "judge", "project", "relative"]
 
@@ -118,7 +119,7 @@ def _blocked(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic | N
     for position, (directory, child) in enumerate(proj.steps):
         if child == "__init__.py" and position == last:
             continue
-        if child.startswith("_"):
+        if is_private_module(child):
             hint = f"{child!r} is private to {_where(directory)} and cannot be exported; import its door `{_where(directory)}/__init__.py` or a sibling that is exported"
             return Diagnostic(
                 *_site(fact),

@@ -9,6 +9,7 @@ exports = ["test_inbound_ownership.py"]
 "test_claim_terminate_cancel.py" = ["claim_status_support.py", "test_inbound_ownership.py"]
 
 [debt.first-party-patch]
+"claim_status_support.py#assignment ava.context" = 1
 "test_claim.py#monkeypatch.setattr agent.graph.prompt.context_notes.fork_notes" = 2
 "test_claim_terminate_cancel.py#monkeypatch.setattr base.config.settings.general.message_timestamps" = 1
 "test_inbound_ownership.py#monkeypatch.setattr base.config.settings.agent.db_pool_acquire_timeout_seconds" = 1

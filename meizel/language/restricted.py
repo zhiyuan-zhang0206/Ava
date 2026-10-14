@@ -43,6 +43,7 @@ _SHELL_CALLS = frozenset(
         "subprocess.Popen",
         "os.system",
         "os.popen",
+        "asyncio.create_subprocess_shell",
     }
 )
 _IMPORT_IN_SOURCE = re.compile(
@@ -141,25 +142,6 @@ class RestrictedForms(ImportAccess):
         text = const_str(node.args[0]) if node.args else None
         if text is not None and _SHELL_PYTHON_C.search(text):
             self.check_source(text, node.lineno)
-
-    def python_c_in_sequence(self, node: ast.List | ast.Tuple) -> None:
-        for index, element in enumerate(node.elts[:4]):
-            if index and const_str(element) == "-c" and index + 1 < len(node.elts):
-                if self.looks_like_python(node.elts[0]):
-                    self.python_c(node.elts[index + 1], node.lineno)
-                break
-
-    @staticmethod
-    def looks_like_python(command: ast.expr) -> bool:
-        text = ast.unparse(command).lower()
-        return "python" in text or "executable" in text
-
-    def python_c(self, source: ast.expr, line: int) -> None:
-        text = self.string_value(source)
-        if text is None:
-            self.restrict(line, "python -c source that is not a literal")
-        else:
-            self.check_source(text, line)
 
     def check_source(self, text: str, line: int) -> None:
         if any(self.u.is_first_party_name(m) for m in _IMPORT_IN_SOURCE.findall(text)):

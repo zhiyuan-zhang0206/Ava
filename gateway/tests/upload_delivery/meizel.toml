@@ -1,8 +1,9 @@
 [uses]
 "test_upload_delivery_faults.py" = ["test_upload_delivery_recovery.py"]
-"test_upload_delivery_lifecycle.py" = ["test_upload_delivery_recovery.py"]
+"test_upload_delivery_lifecycle.py" = ["child_native_link_crash.py", "test_upload_delivery_recovery.py"]
 
 [debt.first-party-patch]
+"child_native_link_crash.py#assignment base.host.private_storage.os.link" = 1
 "test_upload_delivery_faults.py#monkeypatch.setattr base.agents.upload_delivery.source.validate_pending" = 1
 "test_upload_delivery_faults.py#monkeypatch.setattr base.agents.upload_delivery.source.write_transaction" = 4
 "test_upload_delivery_faults.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1

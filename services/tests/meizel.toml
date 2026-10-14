@@ -1,3 +1,6 @@
+[uses]
+"test_service_entries_httpx_import.py" = ["child_httpx_probe.py"]
+
 [debt.env-patch]
 "test_backup_process_composition.py#patch.dict os.environ" = 2
 "test_heartbeat_im_composition.py#patch.dict os.environ" = 1
@@ -37,6 +40,12 @@
 "test_upkeep_wake_composition.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
 "test_upkeep_wake_composition.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_upkeep_wake_composition.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
+
+[debt.restricted-python]
+"test_daemon_shutdown_bound.py#python -c" = 1
+
+[debt.stdlib-patch]
+"test_daemon_shutdown_bound.py#assignment sys.argv" = 1
 
 [debt.unresolved-patch]
 "test_heartbeat_im_composition.py#monkeypatch.setattr entry.Database" = 1

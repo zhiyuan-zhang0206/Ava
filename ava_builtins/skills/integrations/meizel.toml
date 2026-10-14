@@ -1,0 +1,4 @@
+exports = ["gmail"]
+
+[uses]
+"web-sources" = ["audio-transcribe"]

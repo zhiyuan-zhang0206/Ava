@@ -13,3 +13,8 @@ exports = ["config.py"]
 "tests/test_browser.py -> _browser.py#_CONNECT_DELAY_S" = 1
 "tests/test_browser.py -> _browser.py#_RELEASE_TIMEOUT_S" = 1
 "tests/test_browser.py -> _browser.py#_dial_browser_mcp" = 2
+
+[debt.third-party-patch]
+"_oauth.py#assignment mcp.client.auth.oauth2.OAuthContext.prepare_token_auth" = 1
+"_oauth.py#assignment mcp.client.auth.oauth2.validate_metadata_issuer" = 1
+"_oauth.py#assignment mcp.client.auth.utils.validate_metadata_issuer" = 1

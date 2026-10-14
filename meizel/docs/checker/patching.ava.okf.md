@@ -29,12 +29,32 @@ the fake in directly. Meizel reports every patch, by what is patched:
 
 `mock.patch(...)` with a string target, `mock.patch.object`, `mock.patch.multiple`
 (one site per patched name), `mock.patch.dict`, and `monkeypatch.setattr`,
-`delattr`, `setitem` and `delitem` on `os.environ`, `setenv`, `delenv`. A target is
+`delattr`, `setitem` and `delitem` on `os.environ`, `setenv`, `delenv`. A write to an
+attribute of an imported name is the same patch under another spelling and is counted
+the same way, keyed by its form and target: `mod.x = v`, `mod.x += v`, `mod.x: T = v`
+(form `assignment`), `del mod.x` (`del`), `setattr(mod, "x", v)` and `delattr(mod, "x")`,
+and `mod.__dict__["x"] = v` or `vars(mod)["x"] = v` (`__dict__ write`). Only a name the
+file's imports resolve is a patch: a parameter, `self.x` or a class defined in the same
+file is not, and a module may write to itself. A target is
 classified through the file's imports; a string target names a dotted path. A
 first-party string target stays `restricted-python`, since it hides the dependency
 from the checker, and is not counted twice; an unreadable string target is
 `restricted-python` too. `setitem` and `delitem` on other dicts are not patches
 here. It applies to fixtures and production code that patch, not only to tests.
+
+## A name the module does not bind
+
+A patch of a name that a first-party module never binds changes nothing the module
+reads: `monkeypatch.setattr(mod, "x", v, raising=False)` and `mod.x = v` quietly create
+an attribute, and the test passes whatever the code does. That is `missing-patch-target`,
+a hard error that cannot be recorded as debt. It applies to every form above and to
+`mock.patch.object` / `patch.multiple` on a first-party module, and `raising=False` does
+not excuse it. A name counts as bound when the module defines or imports it at its top
+level (also under `if`, `try`, `for`, `with` or a walrus, or declared `global` in a
+function), is a builtin, is a submodule of the package, or is `__path__` of a package;
+a module with a module-level `__getattr__`, a star import or a `globals()` call serves
+names at run time and is not checked. An object reached through a module (a class, an
+instance) is not checked, only counted.
 
 ## Recording
 

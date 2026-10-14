@@ -12,6 +12,11 @@
 "test_skills_attribution.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_reported" = 6
 "test_skills_attribution.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_standalone" = 1
 "test_skills_mount.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 6
+"test_skills_state_note.py#assignment ava.state" = 1
+"test_skills_state_note.py#assignment ava.state_update" = 2
 "test_skills_state_note.py#monkeypatch.setattr ava.__plugin_installation__" = 1
 "test_skills_state_note.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_agent_id" = 1
 "test_skills_state_note.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_reported" = 2
+
+[debt.restricted-python]
+"test_skills_state_note.py#python -c" = 1

@@ -1,3 +1,6 @@
+[uses]
+"test_pg_throwaway_sweep.py" = ["_orphan_owner_child.py"]
+
 [debt.env-patch]
 "test_pg_tools.py#monkeypatch.delenv os.environ" = 1
 "test_pg_tools.py#monkeypatch.delenv os.environ.LANG" = 4
@@ -11,6 +14,7 @@
 "test_walg_binary.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
+"_orphan_owner_child.py#assignment base.cluster.dataplane.pg_throwaway_base.default_base" = 1
 "test_direct_url.py#monkeypatch.setattr base.cluster.dataplane.direct_url.get_record" = 1
 "test_direct_url.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "test_direct_url.py#monkeypatch.setattr base.config.settings.data_plane.pgbouncer_enabled" = 2
@@ -66,6 +70,9 @@
 "test_walg_binary.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.download" = 3
 "test_walg_binary.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.platform.machine" = 2
 "test_walg_binary.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.platform.system" = 2
+
+[debt.restricted-python]
+"test_pg_throwaway_sweep.py#python -c" = 1
 
 [debt.stdlib-patch]
 "test_pg_runtime.py#monkeypatch.setattr platform.machine" = 1

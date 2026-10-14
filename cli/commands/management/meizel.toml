@@ -1,6 +1,7 @@
 exports = ["config.py", "presets.py", "schedules.py", "schedules_verify.py"]
 
 [uses]
+"schedules_verify.py" = ["schedule_verify_child.py"]
 "schedules_verify_read_rows.py" = ["schedules_verify.py"]
 "tests" = ["config.py", "schedules.py", "schedules_verify.py"]
 

@@ -1,3 +1,6 @@
+[uses]
+"test_survival.py" = ["child_pty_clients.py"]
+
 [debt.first-party-patch]
 "test_protocol.py#monkeypatch.setattr base.sessions.pty.client.CONNECT_WAIT_S" = 1
 "test_session.py#monkeypatch.setattr base.sessions.pty.client.request" = 1
@@ -6,6 +9,10 @@
 "test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.process_groups.signal" = 2
 "test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.process_groups.wait" = 1
 "test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.reap_child" = 2
+
+[debt.restricted-python]
+"test_sessions.py#python -c" = 1
+"test_survival.py#python -c" = 1
 
 [debt.stdlib-patch]
 "test_session.py#monkeypatch.setattr os.getpgid" = 1

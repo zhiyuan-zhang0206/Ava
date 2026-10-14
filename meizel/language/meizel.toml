@@ -1,7 +1,8 @@
 exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "scan.py", "type_checking.py"]
 
 [uses]
-"scan.py" = ["fixtures.py", "restricted.py"]
+"python_commands.py" = ["restricted.py"]
+"scan.py" = ["bindings.py", "fixtures.py", "python_commands.py", "restricted.py"]
 "tests" = ["no_script_sibling_imports.py", "path_imports.py"]
 
 [debt.private-name]

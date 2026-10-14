@@ -4,3 +4,6 @@ exports = ["telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_metri
 "telemetry_otlp.py" = ["telemetry_otlp_defer.py", "telemetry_otlp_gauges.py", "telemetry_otlp_logs.py", "telemetry_otlp_metrics.py", "telemetry_otlp_worker.py"]
 "telemetry_otlp_worker.py" = ["telemetry_otlp_barrier.py"]
 "tests" = ["telemetry_otlp.py"]
+
+[debt.first-party-patch]
+"telemetry_otlp.py#assignment base.telemetry.otlp.telemetry_otlp_metrics.cluster_label" = 2

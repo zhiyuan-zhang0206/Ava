@@ -1,3 +1,6 @@
+[uses]
+"test_editable_install.py" = ["_guard_probe_child.py"]
+
 [debt.first-party-patch]
 "test_collector_artifact_retry.py#monkeypatch.setattr base.deploy.release.collector_artifact.stream_download" = 1
 "test_collector_artifact_retry.py#monkeypatch.setattr base.deploy.release.collector_artifact.time.monotonic" = 1

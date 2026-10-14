@@ -25,6 +25,9 @@ exports = ["test_resources.py", "test_runner_role.py"]
 "test_exec_request_evidence.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_exec_request_evidence.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
 
+[debt.restricted-python]
+"test_exec_request_evidence.py#python -c" = 1
+
 [debt.third-party-patch]
 "test_runner_role.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.MIGRATIONS" = 1
 "test_runner_role.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.setup" = 8

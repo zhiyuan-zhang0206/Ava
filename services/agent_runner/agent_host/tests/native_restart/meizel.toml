@@ -2,4 +2,8 @@
 "test_cold_owner.py" = ["child_fixture.py"]
 
 [debt.first-party-patch]
+"child_original_owner.py#assignment base.config.settings.data_plane.db_url" = 1
 "test_return.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.apply_hosted_lifecycle" = 1
+
+[debt.restricted-python]
+"test_cold_owner.py#python subprocess that runs something other than a literal repository file" = 1

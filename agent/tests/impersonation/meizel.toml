@@ -1,7 +1,7 @@
 exports = ["external_attachment.py"]
 
 [uses]
-"test_external_database_owner.py" = ["external_attachment.py"]
+"test_external_database_owner.py" = ["child_undelivered_login.py", "external_attachment.py"]
 "test_external_machine_owner.py" = ["external_attachment.py"]
 "test_external_mcp_lease.py" = ["external_attachment.py"]
 "test_impersonation_consent.py" = ["test_impersonation.py"]
@@ -81,6 +81,10 @@ exports = ["external_attachment.py"]
 [debt.private-name]
 "test_impersonation_consent.py -> test_impersonation.py#_session" = 1
 "test_impersonation_part2.py -> test_impersonation.py#_notes" = 1
+
+[debt.restricted-python]
+"conftest.py#python -c" = 1
+"test_impersonation_transport.py#python -c" = 2
 
 [debt.third-party-patch]
 "child_undelivered_login.py#patch psycopg.connect" = 1

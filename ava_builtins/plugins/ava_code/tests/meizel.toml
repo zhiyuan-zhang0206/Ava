@@ -9,6 +9,10 @@
 "test_ava_code_walk.py#patch.dict os.environ" = 10
 
 [debt.first-party-patch]
+"test_after_exec_hook.py#assignment ava.state" = 1
+"test_after_exec_hook.py#assignment ava.state_update" = 1
+"test_ava_code_plugin.py#assignment ava.state" = 21
+"test_ava_code_plugin.py#assignment ava.state_update" = 21
 "test_ava_code_plugin.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_ava_code_plugin.py#monkeypatch.setattr base.config.settings.sandbox.exec_output_max_chars" = 1
 "test_ava_code_plugin.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 1

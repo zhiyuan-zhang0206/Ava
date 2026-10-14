@@ -4,6 +4,7 @@ exports = ["test_start_readiness_gate.py"]
 "test_commands_start.py" = ["test_start_readiness_gate.py"]
 "test_config_read_facts.py" = ["config_read_facts.py"]
 "test_gateway_consumer_guard.py" = ["config_read_facts.py"]
+"test_start_generation.py" = ["child_loaded_verifier_import.py"]
 "test_start_health_port_gate.py" = ["test_start_readiness_gate.py"]
 
 [debt.first-party-patch]

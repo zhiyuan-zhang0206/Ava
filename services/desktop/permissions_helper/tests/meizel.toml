@@ -54,6 +54,9 @@
 "test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_readonly_query" = 1
 "test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_tool" = 1
 
+[debt.restricted-python]
+"test_helper_retirement.py#python -c" = 2
+
 [debt.stdlib-patch]
 "test_os_jobs_gate.py#monkeypatch.setattr shutil.which" = 2
 

@@ -1,3 +1,7 @@
+[uses]
+"test_evidence.py" = ["_evidence_import_child.py"]
+"test_os_platform.py" = ["_os_platform_child.py"]
+
 [debt.env-patch]
 "test_child_env.py#monkeypatch.setenv os.environ" = 1
 "test_child_env.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
@@ -22,7 +26,14 @@
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd.pidfd_libc" = 1
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd.sys" = 1
 
+[debt.restricted-python]
+"test_exec_domain_confirmation.py#python -c" = 11
+"test_group_closure.py#python -c" = 2
+"test_proc_tree.py#python -c" = 1
+"test_proc_tree_identity.py#python -c" = 3
+
 [debt.stdlib-patch]
+"_os_platform_child.py#assignment platform.uname" = 1
 "test_exec_domain_confirmation.py#monkeypatch.setattr os.killpg" = 6
 "test_group_closure.py#monkeypatch.setattr os.killpg" = 2
 "test_loaded_commit.py#monkeypatch.setattr subprocess.run" = 5

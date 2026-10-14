@@ -86,6 +86,10 @@ exports = ["stop_support.py"]
 "test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.live_terminals" = 2
 "test_stop_terminals.py#monkeypatch.setattr services.agent_runner.pty_sessions.ledger.SWEEP_HANGUP_WAIT_S" = 1
 
+[debt.restricted-python]
+"stop_support.py#python -c" = 1
+"test_data_plane_stop.py#python -c" = 1
+
 [debt.stdlib-patch]
 "test_data_plane_stop.py#monkeypatch.setattr pathlib.Path.read_text" = 1
 

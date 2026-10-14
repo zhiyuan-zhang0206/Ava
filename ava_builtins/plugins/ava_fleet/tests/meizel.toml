@@ -2,6 +2,7 @@ exports = ["registry_support.py", "task_registry"]
 
 [uses]
 "test_ava_fleet_plugin.py" = ["registry_support.py"]
+"test_launched_boot.py" = ["child_launched_boot.py"]
 "test_task_registry.py" = ["task_registry"]
 
 [external]
@@ -12,6 +13,7 @@ exports = ["registry_support.py", "task_registry"]
 "test_owned_configuration.py#monkeypatch.setenv os.environ" = 6
 
 [debt.first-party-patch]
+"child_launched_boot.py#assignment base.config.ConfigBoot.read_process_environment" = 1
 "test_ava_fleet_plugin.py#monkeypatch.setattr ava.gateway_client.patch_label" = 1
 "test_ava_fleet_plugin.py#monkeypatch.setattr ava.gateway_client.spawn" = 2
 "test_ava_fleet_plugin.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
@@ -35,3 +37,6 @@ exports = ["registry_support.py", "task_registry"]
 "test_validation_ava_fleet.py#monkeypatch.setattr ava.gateway_client.raise_from_response" = 1
 "test_validation_ava_fleet.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_registry.update" = 1
 "test_validation_ava_fleet.py#monkeypatch.setattr base.events.live.announce.publish_task_created_sync" = 1
+
+[debt.restricted-python]
+"test_lazy_plugin_import.py#python -c" = 1

@@ -1,0 +1,2 @@
+[uses]
+"test_grafana_dashboard_render.py" = ["child_dashboard_hash.py"]

@@ -2,3 +2,6 @@ exports = ["agent", "base", "cli", "gateway", "lifecycle", "ops", "services"]
 
 [uses]
 "cli" = ["services"]
+
+[debt.first-party-patch]
+"test_process_config_snapshot.py#assignment base.config.settings.general.timezone" = 4

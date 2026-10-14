@@ -9,3 +9,7 @@
 "self-evolution-daily-schedule.py" = ["agent_status_guard.py", "catchup.py", "entry.py"]
 "self-evolution-weekly-schedule.py" = ["agent_status_guard.py", "catchup.py", "entry.py"]
 "tests" = ["adversarial_eval_cases.py", "agent_status_guard.py", "catchup.py", "entry.py"]
+
+[debt.restricted-python]
+"model-update-tracker-schedule.py#python subprocess that runs something other than a literal repository file" = 1
+"self-evolution-daily-schedule.py#python subprocess that runs something other than a literal repository file" = 1

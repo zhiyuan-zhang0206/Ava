@@ -12,7 +12,9 @@ from meizel.graph.model import Code, Fact, FactKind, MeizelError, Patch, Problem
 from meizel.graph.scopes import Scope, collect_scope, dotted_chain, parameter_names
 from meizel.graph.universe import Universe
 from meizel.language import fixtures
-from meizel.language.restricted import EXTERNAL_FORMS, RestrictedForms, const_str
+from meizel.language.bindings import module_bindings, provides
+from meizel.language.python_commands import PythonCommands
+from meizel.language.restricted import EXTERNAL_FORMS, const_str
 
 __all__ = ["EXTERNAL_FORMS", "FileScan", "scan_file", "scan_source"]
 
@@ -21,6 +23,35 @@ _PATCH_CALLS = {
     "unittest.mock.patch.object": "object",
     "unittest.mock.patch.multiple": "multiple",
     "unittest.mock.patch.dict": "dict",
+}
+# The calls that start a process, with where the argument list is: the index of the list argument,
+# or the index where an unpacked list starts. A bare `python` counts as a command in these only.
+_ARGV_LIST_AT = {
+    "subprocess.run": 0,
+    "subprocess.call": 0,
+    "subprocess.check_call": 0,
+    "subprocess.check_output": 0,
+    "subprocess.Popen": 0,
+    "base.host.proc.run_bounded": 0,
+    "os.execv": 1,
+    "os.execve": 1,
+    "os.execvp": 1,
+    "os.execvpe": 1,
+    "os.spawnv": 2,
+    "os.spawnve": 2,
+    "os.spawnvp": 2,
+    "os.spawnvpe": 2,
+}
+_ARGV_UNPACKED_FROM = {
+    "asyncio.create_subprocess_exec": 0,
+    "os.execl": 1,
+    "os.execle": 1,
+    "os.execlp": 1,
+    "os.execlpe": 1,
+    "os.spawnl": 2,
+    "os.spawnle": 2,
+    "os.spawnlp": 2,
+    "os.spawnlpe": 2,
 }
 _MONKEYPATCH_METHODS = frozenset({"setattr", "delattr", "setitem", "delitem", "setenv", "delenv"})
 # The dotted name of the process environment, spelled in parts so this scanner does not itself
@@ -80,7 +111,7 @@ class FileScan:
     imported: set[str] = field(default_factory=set[str])
 
 
-class Scanner(RestrictedForms):
+class Scanner(PythonCommands):
     def __init__(self, universe: Universe, path: str, tree: ast.Module, *, walrus: bool) -> None:
         super().__init__(universe, path, tree, walrus=walrus)
         self.test_file = fixtures.is_test_file(path)
@@ -98,6 +129,9 @@ class Scanner(RestrictedForms):
             ast.AsyncFunctionDef: self.visit_function,
             ast.ClassDef: self.visit_class_def,
             ast.Assign: self.visit_assign,
+            ast.AugAssign: self.visit_store,
+            ast.AnnAssign: self.visit_store,
+            ast.Delete: self.visit_store,
             ast.Expr: self.visit_expr,
             ast.List: self.visit_sequence,
             ast.Tuple: self.visit_sequence,
@@ -197,6 +231,7 @@ class Scanner(RestrictedForms):
             self.children(node)
 
     def visit_assign(self, node: ast.Assign) -> None:
+        self.stores(node.targets, node.lineno, "assignment")
         at_module = self.scope.parent is None
         if at_module and any(
             isinstance(t, ast.Name) and t.id == "pytest_plugins" for t in node.targets
@@ -209,6 +244,93 @@ class Scanner(RestrictedForms):
                 for name in names:
                     self.plugin_fact(name, node.lineno)
         self.children(node)
+
+    def visit_store(self, node: ast.AugAssign | ast.AnnAssign | ast.Delete) -> None:
+        if isinstance(node, ast.Delete):
+            self.stores(node.targets, node.lineno, "del")
+        elif not isinstance(node, ast.AnnAssign) or node.value is not None:
+            self.stores([node.target], node.lineno, "assignment")
+        self.children(node)
+
+    # --- attribute writes ----------------------------------------------------------
+
+    def stores(self, targets: list[ast.expr], line: int, form: str) -> None:
+        """Writes through an imported name are patches, exactly as `monkeypatch.setattr` is."""
+        for target in targets:
+            if isinstance(target, ast.Tuple | ast.List):
+                self.stores(target.elts, line, form)
+            elif isinstance(target, ast.Starred):
+                self.stores([target.value], line, form)
+            elif isinstance(target, ast.Attribute):
+                self.written(target.value, (target.attr,), line, form)
+            elif isinstance(target, ast.Subscript):
+                self.dict_write(target, line)
+
+    def dict_write(self, target: ast.Subscript, line: int) -> None:
+        value = target.value
+        owner: ast.expr | None = None
+        if isinstance(value, ast.Attribute) and value.attr == "__dict__":
+            owner = value.value
+        elif (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "vars"
+            and value.args
+        ):
+            owner = value.args[0]
+        if owner is not None:
+            name = const_str(target.slice)
+            self.written(owner, (name,) if name else (), line, "__dict__ write")
+
+    def written(self, owner: ast.expr, names: tuple[str, ...], line: int, form: str) -> None:
+        dotted = self.dotted(owner)
+        if dotted is None:
+            return
+        module = self.u.resolve_module(dotted) if self.u.is_first_party_name(dotted) else None
+        if module is not None and module.file == self.path:
+            return
+        for name in names or ("",):
+            target = f"{dotted}.{name}" if name else dotted
+            self.patches.append(Patch(line, form, target, self.patch_code(dotted)))
+        self.require_target(owner, names, line, form)
+
+    def is_builtin_attribute_call(self, node: ast.Call) -> bool:
+        func = node.func
+        return (
+            isinstance(func, ast.Name)
+            and func.id in {"setattr", "delattr"}
+            and bool(node.args)
+            and self.scope.find(func.id) == (None, False)
+        )
+
+    def builtin_attribute_call(self, node: ast.Call) -> None:
+        name = const_str(node.args[1]) if len(node.args) > 1 else None
+        form = cast("ast.Name", node.func).id
+        self.written(node.args[0], (name,) if name else (), node.lineno, form)
+
+    def require_target(self, owner: ast.expr, names: tuple[str, ...], line: int, form: str) -> None:
+        """A name set or removed on a first-party module must be one the module binds.
+
+        Otherwise the write creates an attribute nothing in the module reads, and the patch
+        silently changes nothing. Dynamic modules, builtins and submodules count as bound.
+        """
+        dotted = self.dotted(owner)
+        if dotted is None or not self.u.is_first_party_name(dotted):
+            return
+        module = self.u.resolve_module(dotted)
+        if module is None or module.file is None or module.file == self.path:
+            return
+        bindings = module_bindings(self.u.root, module.file)
+        for name in names:
+            if provides(bindings, name) or self.u.resolve_module(f"{dotted}.{name}") is not None:
+                continue
+            self.problem(
+                line,
+                f"{form} on {dotted}.{name}: {module.file} binds no `{name}`, so the write"
+                " changes a name nothing in the module reads; patch a name the code under test"
+                " looks up, or inject the dependency",
+                Code.MISSING_PATCH_TARGET,
+            )
 
     def plugin_fact(self, dotted: str, line: int) -> None:
         module = self.u.resolve_module(dotted) if self.u.is_first_party_name(dotted) else None
@@ -224,12 +346,27 @@ class Scanner(RestrictedForms):
             self.patch_call(node, kind)
         elif self.is_monkeypatch(node.func):
             self.monkeypatch_call(node)
+        elif self.is_builtin_attribute_call(node):
+            self.builtin_attribute_call(node)
         elif self.is_sys_modules_method(node.func):
             self.sys_modules_call(node)
         elif self.is_shell_call(callee):
             self.shell_call(node)
+        self.spawn_call(callee, node)
         fixtures.record_call(self.fixture_state, node, callee)
         self.children(node)
+
+    def spawn_call(self, callee: str | None, node: ast.Call) -> None:
+        """A call that starts a process: judge its argument list when that starts a Python interpreter."""
+        at = _ARGV_LIST_AT.get(callee or "")
+        if at is not None and len(node.args) > at:
+            argv = node.args[at]
+            if isinstance(argv, ast.List | ast.Tuple):
+                self.interpreter_command(argv.elts, node.lineno, bare=True)
+            return
+        start = _ARGV_UNPACKED_FROM.get(callee or "")
+        if start is not None:
+            self.interpreter_command(node.args[start:], node.lineno)
 
     @staticmethod
     def is_monkeypatch(func: ast.expr) -> bool:
@@ -254,6 +391,7 @@ class Scanner(RestrictedForms):
             names = self.patched_names(node, kind)
             self.patch_fact(first, names, node.lineno, form)
             self.record_patch(first, names, node.lineno, form)
+            self.require_target(first, names, node.lineno, form)
 
     @staticmethod
     def patched_names(node: ast.Call, kind: str) -> tuple[str, ...]:
@@ -293,6 +431,7 @@ class Scanner(RestrictedForms):
             name = const_str(node.args[1]) if len(node.args) > 1 else None
             self.patch_fact(node.args[0], (name,) if name else (), node.lineno, "monkeypatch")
             self.record_patch(node.args[0], (name,) if name else (), node.lineno, form)
+            self.require_target(node.args[0], (name,) if name else (), node.lineno, form)
 
     def monkeypatch_item(self, node: ast.Call, form: str) -> None:
         if self.is_sys_modules(node.args[0]):
@@ -347,7 +486,7 @@ class Scanner(RestrictedForms):
     # --- python -c -----------------------------------------------------------------
 
     def visit_sequence(self, node: ast.List | ast.Tuple) -> None:
-        self.python_c_in_sequence(node)
+        self.interpreter_command(node.elts, node.lineno, bare=False)
         self.children(node)
 
 

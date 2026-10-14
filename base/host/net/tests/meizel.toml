@@ -14,6 +14,9 @@ exports = ["retry_waits.py"]
 "test_resilience.py#monkeypatch.setattr base.host.net.resilience.retry_asleep" = 1
 "test_resilience.py#monkeypatch.setattr base.host.net.resilience.retry_sleep" = 1
 
+[debt.restricted-python]
+"test_httpx_import.py#python -c" = 1
+
 [debt.stdlib-patch]
 "test_http_dial.py#monkeypatch.setattr socket.getaddrinfo" = 1
 

@@ -9,5 +9,8 @@ exports = ["job_wait.py", "pty_service.py", "pty_shells.py"]
 [debt.first-party-patch]
 "test_closure.py#monkeypatch.setattr base.sessions.pty.process_groups.signal" = 2
 
+[debt.restricted-python]
+"test_closure.py#python -c" = 1
+
 [debt.stdlib-patch]
 "test_closure.py#monkeypatch.setattr os.killpg" = 1

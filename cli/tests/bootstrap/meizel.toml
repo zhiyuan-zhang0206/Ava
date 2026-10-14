@@ -1,6 +1,10 @@
+exports = ["child_first_start.py", "child_main_dispatch.py", "child_telemetry_exit.py"]
+
 
 [uses]
+"test_logging_entry.py" = ["_logging_entry_child.py"]
 "test_python_install.py" = ["_python_install_fixture.py"]
+"test_redis_binary_selection.py" = ["child_redis_probe.py"]
 "test_start_identity.py" = ["_init_identity.py"]
 
 [loads]
@@ -35,6 +39,23 @@
 "test_start_identity.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
+"_logging_entry_child.py#assignment cli.main.main" = 1
+"child_first_start.py#assignment base.cluster.port_free" = 1
+"child_first_start.py#assignment cli.start_intent.checkout" = 1
+"child_first_start.py#assignment cli.start_intent.complete_start" = 1
+"child_first_start.py#assignment cli.start_intent.run_start_command" = 1
+"child_main_dispatch.py#assignment base.cluster.port_free" = 1
+"child_main_dispatch.py#assignment base.config.ConfigBoot.prepare" = 1
+"child_main_dispatch.py#assignment base.db.Database.from_settings" = 1
+"child_main_dispatch.py#assignment cli.start_intent.checkout" = 1
+"child_main_dispatch.py#assignment cli.start_intent.complete_start" = 1
+"child_main_dispatch.py#assignment cli.start_intent.release_serving" = 1
+"child_main_dispatch.py#assignment cli.start_intent.run_start_command" = 1
+"child_main_dispatch.py#assignment cli.startup_support.init_cli_logging" = 1
+"child_redis_probe.py#assignment cli.commands.data_plane.cluster_instance.is_macos" = 1
+"child_telemetry_exit.py#assignment base.telemetry.event_store.store_events" = 1
+"child_telemetry_exit.py#assignment base.telemetry.metrics.observed_metrics.project_events" = 1
+"child_telemetry_exit.py#assignment cli.parsers.build_parser" = 1
 "test_checkout_guard.py#monkeypatch.setattr cli.init_intent.initialize_home" = 1
 "test_checkout_guard.py#monkeypatch.setattr cli.start_intent.checkout" = 3
 "test_checkout_guard.py#monkeypatch.setattr cli.start_intent.require_initialized" = 1
@@ -60,5 +81,12 @@
 "test_start_identity.py#monkeypatch.setattr cli.start_identity.upsert_env" = 6
 "test_start_identity.py#monkeypatch.setattr cli.start_intent.checkout" = 10
 
+[debt.restricted-python]
+"test_logging_entry.py#python -m of a module that is not a literal" = 1
+"test_python_install.py#python -c" = 1
+
 [debt.stdlib-patch]
+"_logging_entry_child.py#assignment sys.argv" = 1
+"child_main_dispatch.py#assignment socket.create_connection" = 1
+"child_main_dispatch.py#assignment socket.socket.connect" = 1
 "test_start_identity.py#monkeypatch.setattr socket.getaddrinfo" = 1
