@@ -686,7 +686,7 @@ def install_env(
         probe_calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-    monkeypatch.setattr(lifecycle, "_run", run)
+    monkeypatch.setattr(lifecycle, "run_tool", run)
     monkeypatch.setattr(lifecycle, "run_readonly_query", probe)
     if matching_plist:
         plist_path.parent.mkdir(parents=True)

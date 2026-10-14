@@ -144,7 +144,7 @@ class PermissionsHelperSigningUnavailableError(PermissionsHelperBuildError):
     key, so this fires on every rollout rather than rarely)."""
 
 
-def _run(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
+def run_tool(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
     """Run a step that must succeed, raising `PermissionsHelperBuildError` if it
     does not -- including when it outlived its `TIMEOUTS_S` bound, which is a
     failure of the same kind and is reported as one so the converge step aborts
@@ -312,7 +312,7 @@ def source_content_hash() -> str:
 
 
 def read_dr(app: Path) -> str:
-    proc = _run(["codesign", "-d", "-r-", str(app)])
+    proc = run_tool(["codesign", "-d", "-r-", str(app)])
     # codesign writes the designated-requirement line to stdout on current
     # macOS (stderr carries `Executable=...`); older toolchains have emitted
     # it on stderr, so search both streams rather than pinning one.
@@ -346,7 +346,7 @@ def preflight_signing_smoke() -> None:
             scratch = Path(td) / "signing-smoke"
             scratch.write_bytes(b"\x00")
             try:
-                _run(
+                run_tool(
                     [
                         "codesign",
                         "--sign",
@@ -377,19 +377,19 @@ def preflight_signing_smoke() -> None:
         )
 
 
-def _app_executable(app: Path) -> Path:
+def app_executable(app: Path) -> Path:
     return app / "Contents" / "MacOS" / "AvaPermissionsHelper"
 
 
 def is_valid_stable_app(app: Path) -> bool:
     return (
-        _app_executable(app).exists()
+        app_executable(app).exists()
         and run_readonly_query(["codesign", "--verify", str(app)]).returncode == 0
         and signed_with_stable_cert(app)
     )
 
 
-def _remove_app(app: Path) -> None:
+def remove_app(app: Path) -> None:
     if app.is_symlink() or app.is_file():
         app.unlink(missing_ok=True)
     else:
@@ -419,7 +419,7 @@ def ensure_signing_cert() -> None:
     with tempfile.TemporaryDirectory() as td:
         d = Path(td)
         key, cert, p12 = d / "key.pem", d / "cert.pem", d / "ident.p12"
-        _run(
+        run_tool(
             [
                 "openssl",
                 "req",
@@ -443,7 +443,7 @@ def ensure_signing_cert() -> None:
                 "extendedKeyUsage=critical,codeSigning",
             ]
         )
-        _run(
+        run_tool(
             [
                 "openssl",
                 "pkcs12",
@@ -460,7 +460,7 @@ def ensure_signing_cert() -> None:
                 CERT_CN,
             ]
         )
-        _run(
+        run_tool(
             [
                 "security",
                 "import",
@@ -525,7 +525,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     build_dir = build_directory(destination)
     state_path = build_dir / BUILD_STATE_NAME
     app = build_dir / "AvaPermissionsHelper.app"
-    exe = _app_executable(app)
+    exe = app_executable(app)
     source_hash = source_content_hash()
     expected_dr = pinned_designated_requirement()
     state = read_build_state(state_path)
@@ -557,11 +557,11 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
 
     build_dir.mkdir(parents=True, exist_ok=True)
     binary = build_dir / "AvaPermissionsHelper"
-    _run(["swiftc", "-O", str(SOURCE), "-o", str(binary)])
+    run_tool(["swiftc", "-O", str(SOURCE), "-o", str(binary)])
 
     if replacing:
         require_retired_helper(exe)  # proved again right before the old artifact goes
-    _remove_app(app)
+    remove_app(app)
     exe.parent.mkdir(parents=True, exist_ok=True)
     (app / "Contents" / "Info.plist").write_bytes(INFO_PLIST.read_bytes())
     exe.write_bytes(binary.read_bytes())
@@ -570,7 +570,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
         shutil.copytree(lproj, app / "Contents" / "Resources" / lproj.name, dirs_exist_ok=True)
 
     try:
-        _run(
+        run_tool(
             [
                 "codesign",
                 "--force",
@@ -692,7 +692,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
         base.paths.root_run_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
         clear_helper_stop_intent(base.paths.ava_home())
         path.write_bytes(new_bytes)
-        _run(["launchctl", "bootstrap", launchd_domain(), str(path)])
+        run_tool(["launchctl", "bootstrap", launchd_domain(), str(path)])
     if not helper_answers_ping():
         raise PermissionsHelperBuildError(
             "permissions helper is unresponsive; custody is unknown. Diagnose the native job "
