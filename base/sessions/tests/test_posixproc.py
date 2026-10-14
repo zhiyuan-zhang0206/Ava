@@ -24,13 +24,13 @@ from base.native_process import pid_starttime_ticks
 from base.native_process.os_platform import is_linux
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
+from base.sessions.tests.poll_until import poll_until
 from base.sessions.tests.process_evidence import (
     detach_evidence,
     detached_to_known_reaper,
     no_new_direct_children,
     no_zombie_children,
 )
-from tests.components.base.poll_until import poll_until
 
 # A long-lived child that outlives the test body; each test kills it explicitly.
 _SLEEP = ["/bin/sleep", "300"]

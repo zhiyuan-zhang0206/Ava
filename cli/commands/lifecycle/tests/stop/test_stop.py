@@ -24,6 +24,7 @@ from base.deploy.state import host_deploy_state
 from base.host import proc
 from base.sessions.pty import client
 from base.sessions.pty.paths import SERVICE_UNIT
+from base.sessions.pty.tests.pty_shells import new
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _stop_extras
@@ -52,7 +53,6 @@ from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 from tests.path_scoped.pty_reaper import PtyReaper
-from tests.path_scoped.pty_shells import new
 
 
 def _restart_stop(

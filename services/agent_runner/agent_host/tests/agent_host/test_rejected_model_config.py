@@ -13,6 +13,7 @@ from base.lm.factory import validate_model_config
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources
 from base.packages.tests.model_catalog import AddModels
+from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host import dispatcher, settlement
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
@@ -24,7 +25,6 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     wired as wired,
 )
-from tests.components.base.poll_until import poll_until_async
 
 
 class TestRejectedModelConfig:

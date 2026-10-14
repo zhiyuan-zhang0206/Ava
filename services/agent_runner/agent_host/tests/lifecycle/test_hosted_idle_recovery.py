@@ -23,11 +23,11 @@ from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import pause_owner
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import admit as _admit
-from tests.components.base.poll_until import poll_until_async
 
 
 def _accept_model(**_kwargs: object) -> None:

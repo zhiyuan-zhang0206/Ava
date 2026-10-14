@@ -17,8 +17,8 @@ from base.sessions.backend import (
     get_shell_backend,
 )
 from base.sessions.protocol import SessionBackend
-from tests.path_scoped.pty_service import PtyServiceProcess
-from tests.path_scoped.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 
 # ---------------------------------------------------------------------------
 # get_backend

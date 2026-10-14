@@ -17,11 +17,11 @@ import psutil
 import pytest
 
 from base.sessions.pty import client
+from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
-from tests.path_scoped import pty_shells as support
-from tests.path_scoped.pty_service import PtyServiceProcess
-from tests.path_scoped.pty_service import pty_service as pty_service
-from tests.path_scoped.pty_shells import (
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_shells import (
     new,
     output_until,
     press,
@@ -414,7 +414,7 @@ def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) 
     themselves mid-flight."""
     import sys
 
-    from tests.path_scoped.pty_service import REPO
+    from base.sessions.pty.tests.pty_service import REPO
 
     name = "ava-test-hosting-1"
     new(name, REPO, {"AVA_HOME": str(unit_home), "AVA_CONFIG_FETCH": "skip"})

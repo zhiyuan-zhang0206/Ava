@@ -1,8 +1,4 @@
-exports = ["poll_until.py", "test_runner_role.py"]
-
-[uses]
-"test_poll_until.py" = ["poll_until.py"]
-"test_shutdown.py" = ["poll_until.py"]
+exports = ["test_runner_role.py"]
 
 [debt.first-party-patch]
 "test_no_secrets_on_argv.py#monkeypatch.setattr base.cluster.ownership.redis_data_dir" = 1

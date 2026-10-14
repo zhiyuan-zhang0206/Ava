@@ -1,7 +1,7 @@
 """ava.shell unit tests — one-shot `run(cmd)` + persistent PTY session wrapper.
 
 Runs against a real pty-sessions service + real bash. The `pty_service` fixture
-(tests/path_scoped/pty_service.py) starts one under the tmp test home and closes its
+(base/sessions/pty/tests/pty_service.py) starts one under the tmp test home and closes its
 sessions when the test ends.
 
 Sessions are distinguished by name prefix. Parallel xdist workers each use a
