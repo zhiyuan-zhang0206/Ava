@@ -52,9 +52,9 @@ def _package_root(pkg: InstalledPackage) -> Path | None:
     from base import paths
 
     root = {
-        "skill": paths.skills_dir() / pkg.name,
+        "skill": paths.skills_dir(paths.ava_home()) / pkg.name,
         "plugin": paths.plugins_dir() / pkg.name,
-        "mcp": paths.mcps_dir() / pkg.name,
+        "mcp": paths.mcps_dir(paths.ava_home()) / pkg.name,
     }.get(pkg.type)
     if root is None or not root.is_dir():
         return None
@@ -395,7 +395,7 @@ def cmd_packages_rollback(name: str) -> int:
             file=sys.stderr,
         )
         return 1
-    skills = paths.skills_dir()
+    skills = paths.skills_dir(paths.ava_home())
     dest = skills / row.name
     prev = skills / f".{row.name}.prev"
     if not prev.is_dir():

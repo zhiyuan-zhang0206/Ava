@@ -54,7 +54,6 @@ exports = ["context_inputs.py"]
 "test_converge_ownership.py#monkeypatch.setattr cli.commands.converge.ownership_preflight.repair_command" = 1
 "test_converge_preserve_signal.py#monkeypatch.setattr base.db.Database.pool" = 1
 "test_converge_preserve_signal.py#monkeypatch.setattr base.packages.extensions.materialize.materialize_skills" = 1
-"test_converge_preserve_signal.py#monkeypatch.setattr base.paths.skills_dir" = 1
 "test_converge_preserve_signal.py#monkeypatch.setattr base.telemetry.converge_report.emit" = 1
 "test_converge_selection.py#monkeypatch.setattr cli.commands.lifecycle.converge_host.is_default_home" = 3
 "test_converge_transfer_backend.py#monkeypatch.setattr base.host.converge.google_drive.candidate_drive_dirs" = 1

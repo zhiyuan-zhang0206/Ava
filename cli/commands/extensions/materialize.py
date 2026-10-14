@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 
 
-def materialize_cluster_extensions(*, database_factory: DatabaseFactory) -> None:
-    """Land the cluster's installed skills onto this machine.
+def materialize_cluster_extensions(*, database_factory: DatabaseFactory, skills_root: Path) -> None:
+    """Land the cluster's installed skills onto `skills_root` on this machine.
 
     Adds the names that arrived by `ava skill install` on any machine of the
     cluster, alongside the repo/plugin skills converge already syncs from the
@@ -45,7 +46,6 @@ def materialize_cluster_extensions(*, database_factory: DatabaseFactory) -> None
     local-only result is drift; materialization is the moment a machine catches
     up.
     """
-    from base import paths
     from base.packages.extensions import materialize
     from base.telemetry.converge_report import report_converge_preserve
 
@@ -54,7 +54,7 @@ def materialize_cluster_extensions(*, database_factory: DatabaseFactory) -> None
         # than letting ConnectionPool.__del__ run at interpreter exit (it then
         # joins its own worker and prints "cannot join current thread" noise).
         with database_factory().pool() as pool, pool.connection() as conn:
-            result = materialize.materialize_skills(conn, dest_root=paths.skills_dir())
+            result = materialize.materialize_skills(conn, dest_root=skills_root)
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: cluster registry unreachable ({exc}); skipping", file=sys.stderr)
         return
@@ -65,16 +65,14 @@ def materialize_cluster_extensions(*, database_factory: DatabaseFactory) -> None
         if names:
             print(f"    {kind}: {', '.join(names)}")
     for name in result.kept_local_edits:
-        report_converge_preserve(
-            path=str(paths.skills_dir() / name), key=name, surface="extensions"
-        )
+        report_converge_preserve(path=str(skills_root / name), key=name, surface="extensions")
         print(f"  ! extensions: kept local edits to {name} (not overwritten)", file=sys.stderr)
     for name in result.missing_blob:
         print(f"  ! extensions: {name} has no stored content — reinstall it", file=sys.stderr)
 
 
 def adopt_local_extensions(
-    *, database_factory: DatabaseFactory, machine_name: Callable[[], str]
+    *, database_factory: DatabaseFactory, machine_name: Callable[[], str], skills_root: Path
 ) -> None:
     """Upload this machine's pre-registry skill installs into the cluster.
 
@@ -89,13 +87,12 @@ def adopt_local_extensions(
     disagree on, which `base.packages.extensions.adopt` logs and this reports again on
     the operator's terminal — it is the only outcome here that needs a person.
     """
-    from base import paths
     from base.packages.extensions import adopt
 
     try:
         with database_factory().pool() as pool:
             result = adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=machine_name()
+                pool, skills_root=skills_root, machine_name=machine_name()
             )
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: could not adopt local installs ({exc}); skipping", file=sys.stderr)

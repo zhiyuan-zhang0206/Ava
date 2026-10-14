@@ -96,7 +96,7 @@ def test_install_on_home_a_materializes_on_home_b(
         assert not (home_b / "skills" / "two-home-demo").exists(), (
             "home B must start without it, or the test proves nothing"
         )
-        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())
+        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir(paths.ava_home()))
 
         assert result.landed == ["two-home-demo"]
         landed = home_b / "skills" / "two-home-demo"
@@ -135,8 +135,8 @@ def test_home_b_is_idempotent_on_a_second_pass(
         )
 
     with as_machine(home_b):
-        first = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())
-        second = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())
+        first = mat.materialize_skills(db_conn, dest_root=paths.skills_dir(paths.ava_home()))
+        second = mat.materialize_skills(db_conn, dest_root=paths.skills_dir(paths.ava_home()))
 
     assert first.landed == ["idem-demo"]
     assert second.unchanged == ["idem-demo"]
@@ -208,7 +208,7 @@ def test_disabling_on_the_cluster_stops_new_machines_getting_it(
     db_conn.commit()
 
     with as_machine(home_b):
-        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())
+        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir(paths.ava_home()))
 
     assert result.landed == []
     assert not (home_b / "skills" / "policy-demo").exists()
@@ -246,7 +246,9 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
         )
 
     with as_machine(home_b):
-        assert mat.materialize_skills(db_conn, dest_root=paths.skills_dir()).landed == ["edit-demo"]
+        assert mat.materialize_skills(
+            db_conn, dest_root=paths.skills_dir(paths.ava_home())
+        ).landed == ["edit-demo"]
         edited = home_b / "skills" / "edit-demo" / "SKILL.md"
         edited.write_text(
             _SKILL_MD.format(name="edit-demo", body="MY LOCAL EDIT"), encoding="utf-8"
@@ -267,7 +269,7 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
             )
 
     with as_machine(home_b):
-        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())
+        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir(paths.ava_home()))
 
     assert result.kept_local_edits == ["edit-demo"]
     assert result.updated == []

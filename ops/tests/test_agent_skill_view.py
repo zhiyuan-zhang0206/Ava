@@ -19,7 +19,7 @@ from base.db import create_agent
 from base.packages import composer_commands
 from base.packages.extensions import install_registry
 from base.packages.plugins import mcp_enabled
-from base.paths import skills_dir
+from base.paths import ava_home, skills_dir
 from ops.cluster import operations as cluster
 
 
@@ -34,7 +34,7 @@ def _write_skill(root: Path, name: str, description: str = "project skill") -> N
 
 @pytest.fixture
 def load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root = skills_dir()
+    root = skills_dir(ava_home())
     root.mkdir()
     _write_skill(root, "load-skill", "converged skill")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"load-skill"})
