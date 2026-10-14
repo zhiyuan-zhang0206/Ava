@@ -10,7 +10,7 @@ from typing import Any
 from ava.sdk_surface import process_context, skill_sources
 from ava.skills.skill_proxies import Namespace, SkillProxy, node_to_obj
 from base.packages.skills.tree import Skill, flatten, identifier
-from base.paths import skills_dir
+from base.paths import ava_home, skills_dir
 
 # Attribution timing: a `skill_invoked` row at depth `"loaded"` — the only
 # depth the producer writes — means the agent CONSUMED a skill's SKILL.md body
@@ -96,7 +96,7 @@ def _scan_tree() -> dict[str, Any]:
     from ava.skills.skill_index import scan_tree
     from base.packages.extensions.install_registry import loadable_skill_names
 
-    return scan_tree(skills_dir(), loadable_skill_names(), _provider_roots())
+    return scan_tree(skills_dir(ava_home()), loadable_skill_names(), _provider_roots())
 
 
 def skills_in(roots: list[Path]) -> list[Skill]:
