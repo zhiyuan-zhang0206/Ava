@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from meizel.graph.model import MeizelError
 
-__all__ = ["MANIFEST", "Module", "Universe", "load_universe", "parent_of", "toplevel"]
+__all__ = [
+    "MANIFEST",
+    "Module",
+    "Universe",
+    "is_private_module",
+    "load_universe",
+    "parent_of",
+    "toplevel",
+]
 
 MANIFEST = "meizel.toml"
 
@@ -19,6 +28,17 @@ class Module:
 
     file: str | None
     path: str
+
+
+_DUNDER_MODULE = re.compile(r"__\w+__(\.py)?")
+
+
+def is_private_module(child: str) -> bool:
+    """A module or package whose name starts with an underscore is private to its directory.
+
+    A dunder name (`__init__.py`, `__main__.py`) is the language's own protocol, not a private one.
+    """
+    return child.startswith("_") and _DUNDER_MODULE.fullmatch(child) is None
 
 
 def parent_of(path: str) -> str:

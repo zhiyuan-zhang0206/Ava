@@ -13,7 +13,8 @@ from meizel.graph.scopes import Scope, collect_scope, dotted_chain, parameter_na
 from meizel.graph.universe import Universe
 from meizel.language import fixtures
 from meizel.language.bindings import module_bindings, provides
-from meizel.language.restricted import EXTERNAL_FORMS, RestrictedForms, const_str
+from meizel.language.python_commands import PythonCommands
+from meizel.language.restricted import EXTERNAL_FORMS, const_str
 
 __all__ = ["EXTERNAL_FORMS", "FileScan", "scan_file", "scan_source"]
 
@@ -22,6 +23,35 @@ _PATCH_CALLS = {
     "unittest.mock.patch.object": "object",
     "unittest.mock.patch.multiple": "multiple",
     "unittest.mock.patch.dict": "dict",
+}
+# The calls that start a process, with where the argument list is: the index of the list argument,
+# or the index where an unpacked list starts. A bare `python` counts as a command in these only.
+_ARGV_LIST_AT = {
+    "subprocess.run": 0,
+    "subprocess.call": 0,
+    "subprocess.check_call": 0,
+    "subprocess.check_output": 0,
+    "subprocess.Popen": 0,
+    "base.host.proc.run_bounded": 0,
+    "os.execv": 1,
+    "os.execve": 1,
+    "os.execvp": 1,
+    "os.execvpe": 1,
+    "os.spawnv": 2,
+    "os.spawnve": 2,
+    "os.spawnvp": 2,
+    "os.spawnvpe": 2,
+}
+_ARGV_UNPACKED_FROM = {
+    "asyncio.create_subprocess_exec": 0,
+    "os.execl": 1,
+    "os.execle": 1,
+    "os.execlp": 1,
+    "os.execlpe": 1,
+    "os.spawnl": 2,
+    "os.spawnle": 2,
+    "os.spawnlp": 2,
+    "os.spawnlpe": 2,
 }
 _MONKEYPATCH_METHODS = frozenset({"setattr", "delattr", "setitem", "delitem", "setenv", "delenv"})
 # The dotted name of the process environment, spelled in parts so this scanner does not itself
@@ -81,7 +111,7 @@ class FileScan:
     imported: set[str] = field(default_factory=set[str])
 
 
-class Scanner(RestrictedForms):
+class Scanner(PythonCommands):
     def __init__(self, universe: Universe, path: str, tree: ast.Module, *, walrus: bool) -> None:
         super().__init__(universe, path, tree, walrus=walrus)
         self.test_file = fixtures.is_test_file(path)
@@ -322,8 +352,21 @@ class Scanner(RestrictedForms):
             self.sys_modules_call(node)
         elif self.is_shell_call(callee):
             self.shell_call(node)
+        self.spawn_call(callee, node)
         fixtures.record_call(self.fixture_state, node, callee)
         self.children(node)
+
+    def spawn_call(self, callee: str | None, node: ast.Call) -> None:
+        """A call that starts a process: judge its argument list when that starts a Python interpreter."""
+        at = _ARGV_LIST_AT.get(callee or "")
+        if at is not None and len(node.args) > at:
+            argv = node.args[at]
+            if isinstance(argv, ast.List | ast.Tuple):
+                self.interpreter_command(argv.elts, node.lineno, bare=True)
+            return
+        start = _ARGV_UNPACKED_FROM.get(callee or "")
+        if start is not None:
+            self.interpreter_command(node.args[start:], node.lineno)
 
     @staticmethod
     def is_monkeypatch(func: ast.expr) -> bool:
@@ -443,7 +486,7 @@ class Scanner(RestrictedForms):
     # --- python -c -----------------------------------------------------------------
 
     def visit_sequence(self, node: ast.List | ast.Tuple) -> None:
-        self.python_c_in_sequence(node)
+        self.interpreter_command(node.elts, node.lineno, bare=False)
         self.children(node)
 
 

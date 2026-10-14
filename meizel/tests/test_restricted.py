@@ -69,7 +69,7 @@ def test_python_dash_c_with_first_party_imports_is_restricted(make_repo: RepoFac
     assert restricted(make_repo, source) == [2, 4, 5]
 
 
-def test_python_dash_c_without_first_party_imports_is_fine(make_repo: RepoFactory) -> None:
+def test_python_dash_c_is_restricted_whatever_it_imports(make_repo: RepoFactory) -> None:
     source = (
         "import subprocess, sys\n"
         "subprocess.run([sys.executable, '-c', 'import os; print(os.getcwd())'])\n"
@@ -77,7 +77,7 @@ def test_python_dash_c_without_first_party_imports_is_fine(make_repo: RepoFactor
         "subprocess.run(['sh', '-c', 'import lib'])\n"
         "subprocess.run([sys.executable, '-c', f'print({1+1})'])\n"
     )
-    assert restricted(make_repo, source) == []
+    assert restricted(make_repo, source) == [2, 5]
 
 
 def test_python_dash_c_with_an_unreadable_source_cannot_be_shown_static(
