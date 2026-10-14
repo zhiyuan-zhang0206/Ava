@@ -55,7 +55,7 @@ from services.derived.memory_indexer.backends.base import MemorySearchBackend, c
 from services.derived.memory_indexer.backends.factory import get_backend
 from services.derived.memory_indexer.backends.probe import probe_backend
 from services.derived.memory_indexer.chunking import _file_rows
-from services.derived.memory_indexer.config import MemoryIndexerInputs
+from services.derived.memory_indexer.config import MemoryIndexerConfig, MemoryIndexerInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
 from services.derived.memory_indexer.embeddings.factory import get_provider
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -76,14 +76,6 @@ def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
 def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return _endpoint(config, runtime=runtime).pidfile
 
-
-LOOP_INTERVAL_S = 1.0
-# Startup reconciles beat before and after file-granular chunks:
-# a full rebuild can outlive the liveness ceiling. Chunks bound preparation and
-# local work; process_paths also beats before external calls within each chunk.
-RECONCILE_CHUNK_PATHS = 64
-BATCH_SIZE = 32
-"""Gemini embed_content accepts multiple inputs per call; batching amortizes round-trips."""
 
 _MD_SUFFIX = ".md"
 
@@ -205,10 +197,12 @@ def _embed_batches(
     total_by_file: dict[Path, int],
     progress: _EmbedProgress,
     liveness: Liveness,
+    *,
+    config: MemoryIndexerConfig,
 ) -> None:
     """Embed `flat_rows` in batches, recording each embedded row (and each completed file)."""
-    for i in range(0, len(flat_rows), BATCH_SIZE):
-        batch = flat_rows[i : i + BATCH_SIZE]
+    for i in range(0, len(flat_rows), config.batch_size):
+        batch = flat_rows[i : i + config.batch_size]
         texts = [text for *_, text in batch]
         # One external call per gap; commit calls beat separately below.
         liveness.beat()
@@ -228,6 +222,7 @@ def process_paths(
     liveness: Liveness,
     *,
     machine: MachineIdentity,
+    config: MemoryIndexerConfig,
 ) -> None:
     """Process a batch of dirty paths: missing/foreign -> delete; else embed+upsert.
 
@@ -293,7 +288,7 @@ def process_paths(
         for mtime, hash_, kind, chunk_idx, text in rows
     ]
     try:
-        _embed_batches(provider, flat_rows, total_by_file, progress, liveness)
+        _embed_batches(provider, flat_rows, total_by_file, progress, liveness, config=config)
     except EmbeddingAPIError:
         # Only files whose rows are ALL embedded commit; a partially-embedded
         # file keeps its old rows intact (consistent old state, re-embeds on
@@ -357,6 +352,7 @@ def reconcile(
     liveness: Liveness,
     *,
     machine: MachineIdentity,
+    config: MemoryIndexerConfig,
 ) -> bool:
     """Diff disk vs index db once at cold start.
 
@@ -373,7 +369,7 @@ def reconcile(
     another semantic space (a provider switch), so every row must be
     re-embedded.
 
-    The dirty set is worked in file-granular chunks (`RECONCILE_CHUNK_PATHS`),
+    The dirty set is worked in file-granular chunks (`config.reconcile_chunk_paths`),
     beating `liveness` before and after each chunk. `process_paths` also beats
     before each embed batch so a long rebuild stays alive. Chunk boundaries
     never split a file; its rows commit as one unit (issue #1946). An
@@ -408,10 +404,10 @@ def reconcile(
         # across chunks (`process_paths` commits a file's rows as one unit).
         ordered = sorted(dirty, key=str)
         try:
-            for i in range(0, len(ordered), RECONCILE_CHUNK_PATHS):
-                chunk = set(ordered[i : i + RECONCILE_CHUNK_PATHS])
+            for i in range(0, len(ordered), config.reconcile_chunk_paths):
+                chunk = set(ordered[i : i + config.reconcile_chunk_paths])
                 liveness.beat()  # per chunk: a rebuild outlives the liveness ceiling
-                process_paths(backend, chunk, provider, liveness, machine=machine)
+                process_paths(backend, chunk, provider, liveness, machine=machine, config=config)
                 liveness.beat()  # chunk committed -> the rebuild is progressing
         except EmbeddingAPIError as exc:
             _log.error(
@@ -429,8 +425,9 @@ async def drain_loop(
     provider: EmbeddingProvider,
     *,
     machine: MachineIdentity,
+    config: MemoryIndexerConfig,
 ) -> None:
-    """Main loop: every LOOP_INTERVAL_S drain queue, dedup, batch process.
+    """Main loop: every `config.loop_interval_s` drain queue, dedup, batch process.
 
     `process_paths` blocks (network embed + backend write calls); use
     ``asyncio.to_thread`` so the event loop can still serve the health
@@ -440,7 +437,7 @@ async def drain_loop(
     _log.info("[indexer] daemon loop started, pid=%s", os.getpid())
     while True:
         liveness.beat()
-        await asyncio.sleep(LOOP_INTERVAL_S)
+        await asyncio.sleep(config.loop_interval_s)
         if admission.quiesced():
             continue  # the pgvector backend borrows the pool; dirty paths wait in the queue
         batch: set[Path] = set()
@@ -452,7 +449,7 @@ async def drain_loop(
             continue
         try:
             await asyncio.to_thread(
-                process_paths, backend, batch, provider, liveness, machine=machine
+                process_paths, backend, batch, provider, liveness, machine=machine, config=config
             )
             liveness.beat()  # embed batch returned -> loop is making progress
         except EmbeddingAPIError as exc:
@@ -532,6 +529,7 @@ async def run(
     database: Callable[[], Database],
     image: LoadedCommit,
     machine: MachineIdentity,
+    tuning: MemoryIndexerConfig,
 ) -> None:
     """Write pidfile -> start healthz server -> cold-start -> drain loop.
 
@@ -618,9 +616,11 @@ async def run(
     _log.info("[indexer] watching %s", root)
 
     try:
-        if not await asyncio.to_thread(reconcile, backend, provider, liveness, machine=machine):
+        if not await asyncio.to_thread(
+            reconcile, backend, provider, liveness, machine=machine, config=tuning
+        ):
             _log.warning("[indexer] startup index incomplete; explicit rebuild required")
-        await drain_loop(backend, dirty_queue, liveness, provider, machine=machine)
+        await drain_loop(backend, dirty_queue, liveness, provider, machine=machine, config=tuning)
     finally:
         observer.stop()
         observer.join(timeout=5.0)
@@ -671,6 +671,7 @@ def main() -> None:
                     database=database,
                     image=image,
                     machine=machine,
+                    tuning=MemoryIndexerConfig(),
                 )
             )
         except KeyboardInterrupt:
