@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
@@ -147,6 +148,124 @@ async def test_slow_diagnostic_cannot_block_peer_or_duplicate_itself(
         assert calls == 1
     finally:
         release.set()
+
+
+async def test_reporting_never_races_a_settling_worker(caplog: pytest.LogCaptureFixture) -> None:
+    """The 10-14 echo: a worker whose result is complete but whose thread has not
+    retired made the check's next admission answer 'previous observation worker
+    still completing', and the report step logged that as ERROR every time. The
+    reporter now runs inside the sample's own worker pass, so the round reaches
+    no second admission that could race."""
+    entered, release_probe = Event(), Event()
+    tail_entered, release_tail = Event(), Event()
+
+    def probe() -> DaemonProbe:
+        entered.set()
+        release_probe.wait(2)
+        return DaemonProbe.up("fresh sample")
+
+    reported: list[DaemonProbe] = []
+    monitor = DiagnosticMonitor(
+        [Diagnostic("held", probe, interval_s=0.001, timeout_s=5.0, report=reported.append)]
+    )
+    runner = monitor._states["held"].runner
+    caplog.set_level(logging.ERROR, logger="services.supervision.ava_root_glue.diagnostics")
+    round_task = asyncio.create_task(monitor.run_round())
+    try:
+        await asyncio.to_thread(entered.wait, 2)
+        assert entered.is_set()
+        observation = runner._observation
+        assert observation is not None
+
+        def hold_tail(_future: object) -> None:
+            # The worker's result is already complete; only its thread has not retired.
+            tail_entered.set()
+            release_tail.wait(5)
+
+        observation.future.add_done_callback(hold_tail)
+        release_probe.set()
+        await asyncio.to_thread(tail_entered.wait, 2)
+        await round_task
+        assert [result.detail for result in reported] == ["fresh sample"]
+        assert "reporting unavailable" not in caplog.text
+    finally:
+        release_probe.set()
+        release_tail.set()
+        await round_task
+
+
+async def test_a_hanging_report_retains_its_check_worker_without_overlap() -> None:
+    """An alert backend that hangs retains the check's single worker exactly like
+    a hung probe: later rounds observe the retained worker and start no
+    overlapping sample or report."""
+    entered, release, done = Event(), Event(), Event()
+    probe_calls = 0
+    report_calls = 0
+
+    def probe() -> DaemonProbe:
+        nonlocal probe_calls
+        probe_calls += 1
+        return DaemonProbe.down("observed failure")
+
+    def report(_result: DaemonProbe) -> None:
+        nonlocal report_calls
+        report_calls += 1
+        entered.set()
+        try:
+            release.wait(5)
+        finally:
+            done.set()
+
+    monitor = DiagnosticMonitor(
+        [
+            Diagnostic("held", probe, interval_s=0.001, timeout_s=0.05, report=report),
+            Diagnostic("peer", lambda: DaemonProbe.up("ok"), interval_s=0.001),
+        ]
+    )
+    try:
+        await monitor.run_round()
+        assert report_calls == 1
+        await asyncio.to_thread(entered.wait, 2)
+        await monitor.run_round()  # the retained worker admits no replacement
+        assert probe_calls == 1 and report_calls == 1
+        snapshot = monitor.health_snapshot()
+        assert _entry(snapshot, "diagnostic:held")["last_verdict"] == "unavailable"
+        assert _entry(snapshot, "diagnostic:peer")["last_verdict"] == "alive"
+        release.set()
+        await asyncio.to_thread(done.wait, 2)
+        await asyncio.sleep(0.05)  # the retained worker retires
+        await monitor.run_round()
+        assert probe_calls == 2 and report_calls == 2
+    finally:
+        release.set()
+
+
+async def test_a_report_exception_keeps_the_fresh_sample(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A report that raises fails the report, not the sample: the fresh verdict
+    is recorded, and the failure is named as the report's own."""
+
+    def broken_report(_result: DaemonProbe) -> None:
+        raise RuntimeError("alert backend down")
+
+    monitor = DiagnosticMonitor(
+        [
+            Diagnostic(
+                "canary",
+                lambda: DaemonProbe.down("observed failure"),
+                interval_s=0.001,
+                report=broken_report,
+            )
+        ]
+    )
+    caplog.set_level(logging.ERROR, logger="services.supervision.ava_root_glue.diagnostics")
+    await monitor.run_round()
+    state = _entry(monitor.health_snapshot(), "diagnostic:canary")
+    assert state["last_verdict"] == "down"
+    assert state["consecutive_failures"] == 1
+    assert "reporting failed" in caplog.text
+    assert "alert backend down" in caplog.text
 
 
 async def test_unknown_never_resolves_station_alert_but_extends_the_streak(
