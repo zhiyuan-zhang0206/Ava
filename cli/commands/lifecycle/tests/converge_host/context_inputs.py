@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
@@ -80,6 +81,7 @@ def converge_context(
         helper=helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
 

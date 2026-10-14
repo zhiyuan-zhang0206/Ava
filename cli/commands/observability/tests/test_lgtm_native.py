@@ -13,6 +13,7 @@ import yaml
 
 import base.config as base_config
 from base import telemetry
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
@@ -425,6 +426,7 @@ def test_native_step_does_not_touch_an_unmarked_home(
         machine=machine_from_boot(machine_config_484),
         helper=refuse_helper,
         host=fake_host(),
+        timers=ManualTimers(),
     )
 
     def fail_ensure(_repo_path: Path, _home: Path) -> None:

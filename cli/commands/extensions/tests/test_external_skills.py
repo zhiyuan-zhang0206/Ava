@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
@@ -79,6 +80,7 @@ def _ctx(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
 

@@ -10,6 +10,7 @@ import pytest
 
 import cli.commands.converge.brew_pin as cbp
 import cli.commands.lifecycle.converge_host as cv
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host import brew_pin
@@ -64,6 +65,7 @@ def _ctx(
         helper=refuse_helper,
         host=host,
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
 

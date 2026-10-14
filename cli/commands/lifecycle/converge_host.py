@@ -151,7 +151,7 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
         raise RuntimeError(f"macOS root supervision cannot start: {reason}")
     from services.desktop.permissions_helper import converge
 
-    converge(helper=ctx.helper)
+    converge(helper=ctx.helper, timers=ctx.timers)
 
 
 def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
@@ -517,6 +517,7 @@ def converge_host(
         services=selected,
         producer=producer,
         helper=command.helper,
+        timers=command.timers,
         host=command.host,
     )
 

@@ -67,12 +67,13 @@ import pytest
 
 def test_00_late_host_boundaries():
     from base.host.env import bootstrap
+    from base.clock.tests.manual_timers import ManualTimers
     from base.sessions.tests.refuse_helper import refuse_helper
     from services.desktop import permissions_helper
     with pytest.raises(AssertionError, match="would leave the test process"):
         bootstrap.dial_get("http://127.0.0.1:1/api/bootstrap")
     with pytest.raises(pytest.fail.Exception, match="native effect forbidden"):
-        permissions_helper.converge(helper=refuse_helper)
+        permissions_helper.converge(helper=refuse_helper, timers=ManualTimers())
     with pytest.raises(AssertionError, match="would replace the pytest process"):
         os.execv("/nonexistent-test-executable", [])
 

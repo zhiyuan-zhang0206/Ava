@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -51,6 +52,7 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
     def must_not_install(*_args: object, **_kwargs: object) -> None:
@@ -94,6 +96,7 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
     installed: list[tuple[object, object, object]] = []
@@ -142,6 +145,7 @@ def test_collector_preparation_never_controls_a_running_service_tree(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
     def no_root_control() -> None:
@@ -180,6 +184,7 @@ def test_non_lgtm_gateway_reports_and_preserves_residual_config(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)

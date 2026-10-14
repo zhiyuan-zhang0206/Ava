@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.derive import production_identity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -104,6 +105,7 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
     readers: list[Callable[[], bool]] = []
     ticks: list[Callable[[], int]] = []
@@ -209,6 +211,7 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
             programs={"crontab": "/usr/bin/crontab"},
         ),
         services=frozenset(),
+        timers=ManualTimers(),
     )
     monkeypatch.setattr(cron, "ava_binary_path", _isolated_ava)
     monkeypatch.setattr(cron, "launchd_path_env", _usr_bin)
