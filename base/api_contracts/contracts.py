@@ -125,6 +125,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/agents/{agent_id}"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
+    # ── gateway/agents/to_user/document.py ──────────────────────────
+    ("GET", "/api/agents/{agent_id}/to-user"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/to-user/document"): RouteContract(),
     # ── gateway/alerts/router.py ───────────────────────────────────
     ("GET", "/api/alerts"): RouteContract(),
     ("GET", "/api/alerts/stream"): RouteContract(

@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Fragment, useCallback, useRef, type ReactNode, useEffect } from "react";
+import { Fragment, useCallback, useRef, type ReactNode, useEffect, useState } from "react";
 
 import { LiveSectionsSkeleton, SectionSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { InspectWidgetSection } from "@/components/inspector/inspector-widgets";
@@ -113,8 +113,10 @@ function matchesInspectWindow(
   return (data.window_hours ?? null) === hours;
 }
 
-export function InspectorPanel({ agentId }: { agentId: number }) {
+export function InspectorPanel({ agentId, embedded = false }: { agentId: number; embedded?: boolean }) {
   const t = useTranslations("inspector");
+  const contextText = useTranslations("toUser");
+  const [category, setCategory] = useState("all");
   const { open, toggle } = useInspectorOpen();
   const { inspectorHours: hours, setInspectorHours: setHours } = useInspectorHours();
   const { isLarge } = useBreakpoint();
@@ -302,7 +304,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     key: "run-link",
     node: runLinkNode,
   });
-  if (liveData?.notice) {
+  if (liveData?.notice && !embedded) {
     sections.push({
       order: INSPECT_SECTION_ORDER.notice,
       tie: 0,
@@ -340,7 +342,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const body = (
     <>
       <header className={cn("relative items-center gap-2 px-4", BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX)}>
-        {!isLarge ? (
+        {!isLarge && !embedded ? (
           // Mobile-only close (see the header note above): the full-screen
           // overlay covers the page header, so the top-bar InspectorToggle is
           // unreachable; on desktop that toggle IS the close control and a
@@ -356,7 +358,15 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
           </button>
         ) : null}
         <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
-          {t("title")}
+          {embedded ? (
+            <select aria-label={contextText("category")} value={category} onChange={(event) => setCategory(event.target.value)} className="w-full cursor-pointer rounded border border-border bg-background px-2 py-1 text-xs text-foreground">
+              <option value="all">{contextText("allSections")}</option>
+              <option value="runtime">{contextText("runtime")}</option>
+              <option value="usage">{contextText("usage")}</option>
+              <option value="pages">{contextText("pages")}</option>
+              <option value="extensions">{contextText("extensions")}</option>
+            </select>
+          ) : t("title")}
         </span>
         {hasStaleError ? <StaleDot /> : null}
         <button
@@ -393,7 +403,13 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       <ScrollArea ref={scrollRef} className={cn("text-xs", MIN_H_0, FLEX_1)}>
         <div className="px-4 py-3">
           <div className="space-y-4">
-            {sections.map((section) => (
+            {sections.filter((section) => {
+              if (!embedded || category === "all") return true;
+              if (category === "runtime") return ["shells", "liveness", "config-overlay", "live-state"].includes(section.key);
+              if (category === "usage") return ["cost", "activity", "run-link", "windowed-error"].includes(section.key);
+              if (category === "pages") return section.key === "page";
+              return section.key.startsWith("widget:") || section.key === "widgets-state";
+            }).map((section) => (
               <Fragment key={section.key}>{section.node}</Fragment>
             ))}
           </div>
@@ -404,7 +420,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 
   // Desktop: fill the parent resizable panel. The 2026-08-23 ruling supersedes
   // the 2026-08-05 floating overlay for this breakpoint.
-  if (isLarge) {
+  if (isLarge || embedded) {
     return (
       <aside className={cn("h-full w-full bg-background", FLEX, FLEX_COL, MIN_H_0)}>
         {body}

@@ -3,7 +3,7 @@
 import { newOperationKey } from "@/lib/transport/operation-key";
 
 // Ava home page — three-column layout: agent sidebar on the left,
-// timeline + composer in the center, inspector panel on the right.
+// timeline + composer in the center, shared context and inspector on the right.
 //
 // agent_id == agent_id 1:1. Picking an agent in the sidebar == selecting
 // an agent. State is split across two hooks (lib/use-agents +
@@ -44,6 +44,9 @@ import { ContentToggle } from "@/components/content/content-toggle";
 import { HeaderBar } from "@/components/shell/header-bar";
 import { HomeLayout } from "@/components/shell/home-layout";
 import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
+import { useToUser } from "@/lib/context/use-to-user";
+import { useNotices } from "@/lib/notifications/use-notices";
+import { PRIORITY_RANK } from "@/lib/notifications/notices";
 import { InspectorToggle } from "@/components/inspector/inspector-toggle";
 import { PendingStrip } from "@/components/conversation/pending-strip";
 import { UploadButton } from "@/components/conversation/upload-button";
@@ -68,11 +71,9 @@ import { AgentEventStreamProvider } from "@/lib/transport/useEventStream";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-// The toggle stays in the initial graph; the panel body is needed only after
-// the existing open-state guard below renders it.
-const LazyInspectorPanel = dynamic(
-  () =>
-    import("@/components/inspector/inspector-panel").then((module) => module.InspectorPanel),
+// Load the document and reply controls only when the right panel is needed.
+const SharedContextPanel = dynamic(
+  () => import("@/components/context/shared-context-panel").then((module) => module.SharedContextPanel),
   { loading: () => <InspectorPanelSkeleton /> },
 );
 
@@ -145,10 +146,16 @@ function HomeShell({ showError }: HomeShellProps) {
     isLoading: agentsLoading,
   } = useAgents(showError);
 
-  // User ruling 2026-08-23 supersedes the 2026-08-05 floating desktop
-  // overlay: desktop uses a fixed right-side panel and mobile keeps the
-  // full-screen overlay. Both start CLOSED and open via the composer's toggle.
-  const { open: inspectorOpen } = useInspectorOpen();
+  // Shared context opens when present; the existing Inspector preference selects its tab.
+  const { open: inspectorOpen, toggle: toggleInspector } = useInspectorOpen();
+  const toUser = useToUser(activeId);
+  const noticeFeed = useNotices();
+  const [mobileContextOpen, setMobileContextOpen] = useState(false);
+  const activeNotices = [...noticeFeed.awaiting, ...noticeFeed.open]
+    .filter((notice) => notice.agent_id === activeId)
+    .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || b.created_at.localeCompare(a.created_at));
+  const hasContext = Boolean(toUser.data?.content) || activeNotices.length > 0;
+  const showContext = isLarge ? hasContext || inspectorOpen : mobileContextOpen || inspectorOpen;
 
   const handleSpawn = useCallback(
     async ({
@@ -213,6 +220,8 @@ function HomeShell({ showError }: HomeShellProps) {
         forkPending={forkPending}
         showError={showError}
         handleFork={handleFork}
+        contextAvailable={!isLarge && hasContext}
+        openContext={() => setMobileContextOpen(true)}
       />
     </AgentEventStreamProvider>
   );
@@ -220,9 +229,17 @@ function HomeShell({ showError }: HomeShellProps) {
   // leaves a healthy one mounted, so the inspector's per-agent cache survives
   // the switch (task #3894).
   const inspector =
-    inspectorOpen && activeId != null ? (
+    showContext && activeId != null ? (
       <ErrorBoundary resetKey={activeId}>
-        <LazyInspectorPanel agentId={activeId} />
+        <SharedContextPanel
+          agentId={activeId}
+          document={toUser}
+          notices={activeNotices}
+          noticesFailed={noticeFeed.error}
+          mobile={!isLarge}
+          onShowDocument={() => { if (!isLarge) setMobileContextOpen(true); }}
+          onClose={() => { setMobileContextOpen(false); if (inspectorOpen) toggleInspector(); }}
+        />
       </ErrorBoundary>
     ) : null;
 
@@ -244,6 +261,8 @@ interface HomeContentProps {
   forkPending: boolean;
   showError: (msg: string) => void;
   handleFork: () => void;
+  contextAvailable: boolean;
+  openContext: () => void;
 }
 
 function HomeContent({
@@ -252,9 +271,12 @@ function HomeContent({
   forkPending,
   showError,
   handleFork,
+  contextAvailable,
+  openContext,
 }: HomeContentProps) {
   const t = useTranslations("common");
   const timelineText = useTranslations("timeline");
+  const contextText = useTranslations("toUser");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
   // Timeline content-column width — user-adjustable fraction of the viewport
   // (display.timeline_width_ratio, default 0.4). The composer gets the same
@@ -470,6 +492,7 @@ function HomeContent({
             {/* Alert system (Task #1224): unresolved badge in the top bar
                 jumps to /insights#alerts. */}
             <AlertsBadge />
+            {contextAvailable && <button onClick={openContext} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">{contextText("openContext")}</button>}
             <InspectorToggle />
           </HeaderBar>
           {/* Bottom stack: pending strip + composer in normal flow (user

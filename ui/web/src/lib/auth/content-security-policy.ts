@@ -77,8 +77,8 @@ export function buildContentSecurityPolicy({
     "img-src 'self' data: http: https:",
     "font-src 'self' data:",
     `connect-src 'self' ${resolvedGatewayOrigin} ${webSocketOrigin(resolvedGatewayOrigin)}`,
-    // Grafana and plugin pages are mounted through the configured gateway.
-    `frame-src 'self' ${resolvedGatewayOrigin}`,
+    // Shared context links can open HTTP(S) pages inside the sandboxed reader.
+    "frame-src 'self' http: https:",
     "frame-ancestors 'none'",
   ].join("; ");
 }
