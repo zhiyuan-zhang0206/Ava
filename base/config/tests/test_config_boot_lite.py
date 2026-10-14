@@ -410,7 +410,7 @@ def test_bad_non_lite_field_does_not_block_lite_scripts(tmp_path: Path) -> None:
 
 def test_field_faces_serve_while_another_thread_builds() -> None:
     """The settings-free faces must not race another thread's eager build: a
-    `from base.config import _FIELDS` that lands while a build is in flight is
+    `from base.config import FIELD_REFS` that lands while a build is in flight is
     served in place — without waiting and without upgrading (task #4964: the
     delivery_outbox keyed-send path used to get a spurious ImportError from
     the global `is_upgrading()` gate; these faces never depend on the

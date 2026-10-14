@@ -158,10 +158,10 @@ def _guarded_by_has_domain(tree: ast.AST, node: ast.AST, domain: str) -> bool:
 
 def _settings_field_alias(domain: str, field: str) -> str | None:
     """Return the env alias for a settings field, or None if not found."""
-    from base.config import _FIELDS, field_alias
+    from base.config import FIELD_REFS, field_alias
 
     name = field  # field names are globally unique
-    if name not in _FIELDS:
+    if name not in FIELD_REFS:
         return None
     return field_alias(name)
 
@@ -372,7 +372,7 @@ def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
 def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
     """settings reads in base/ modules reachable from gateway-side code must
     not resolve to popped aliases, unless the module is agent-only at runtime."""
-    from base.config import _FIELDS, field_alias
+    from base.config import FIELD_REFS, field_alias
     from base.host.env.registry import agent_runner_cluster_aliases
 
     runner_cluster_aliases = agent_runner_cluster_aliases()
@@ -388,7 +388,7 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
             continue
         src = py_file.read_text(errors="replace")
         for domain, field in _extract_settings_reads(src):
-            if field not in _FIELDS:
+            if field not in FIELD_REFS:
                 continue
             alias = field_alias(field)
             if alias in runner_cluster_aliases:

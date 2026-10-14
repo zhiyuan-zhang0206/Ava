@@ -7,7 +7,7 @@ through `base/host/env/registry.py` without a timing dependency).
 
 It sits in `base.config`, but importing it never constructs Settings: the package
 boots lite (`base/config/_lite.py`), which defers the Settings build, and the
-module-level `_FIELDS` / `FIELD_INFOS` faces of `base.config` are served from this
+module-level `FIELD_REFS` / `FIELD_INFOS` faces of `base.config` are served from this
 registry without upgrading. The sub-model class imports are deferred into the build
 (first use); the build completes against a partially-initialized `base.config` when
 one is already in flight (for example, the standalone `load_ava_env()` boot path),
