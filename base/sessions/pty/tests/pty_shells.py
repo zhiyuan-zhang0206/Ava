@@ -1,6 +1,6 @@
 """Helpers for tests that drive real shells through the pty-sessions client.
 
-Used with the `pty_service` fixture (`tests/path_scoped/pty_service.py`); `pty_jobs`
+Used with the `pty_service` fixture (`base/sessions/pty/tests/pty_service.py`); `pty_jobs`
 holds the jobs a test types into those shells."""
 
 from __future__ import annotations

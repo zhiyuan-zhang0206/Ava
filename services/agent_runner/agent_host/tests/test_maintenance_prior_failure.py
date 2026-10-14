@@ -24,6 +24,8 @@ from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
+from base.deploy.tests.maintenance_factory import WHEN, maintenance_agent
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -36,8 +38,6 @@ from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import Alerts
 from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import alerts as alerts
-from tests.components.agent.test_maintenance import WHEN, maintenance_agent
-from tests.components.agent.test_maintenance import isolate as isolate
 
 
 async def _failed_turn(

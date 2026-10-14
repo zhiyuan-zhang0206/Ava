@@ -1,11 +1,10 @@
-exports = ["api_keys.py", "ava_tests.py", "cli_tests.py", "db_authority_tests.py", "gateway_tests.py", "pty_jobs.py", "pty_reaper.py", "pty_service.py", "pty_shells.py", "structure_tests.py"]
+exports = ["api_keys.py", "ava_tests.py", "cli_tests.py", "gateway_tests.py", "pty_jobs.py", "pty_reaper.py", "structure_tests.py"]
 
 [uses]
-"ava_tests.py" = ["api_keys.py", "pty_service.py"]
+"ava_tests.py" = ["api_keys.py"]
 "cli_tests.py" = ["pty_reaper.py"]
 "gateway_tests.py" = ["api_keys.py"]
 "integration_tests.py" = ["api_keys.py", "gateway_tests.py"]
-"pty_jobs.py" = ["pty_shells.py"]
 
 [debt.env-patch]
 "agent_tests.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1

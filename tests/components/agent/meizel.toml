@@ -1,9 +1,5 @@
 exports = ["test_maintenance.py"]
 
-[uses]
-"test_maintenance_legacy_cold.py" = ["test_maintenance.py"]
-"test_maintenance_lifecycle_wait.py" = ["test_maintenance.py"]
-
 [debt.first-party-patch]
 "test_corpse_reap.py#monkeypatch.setattr agent.ownership.hosted.stamp_turn_fatal" = 1
 "test_hosted_resurrection_fences.py#monkeypatch.setattr base.agents.incarnation.exec_owner_recovery.process_ended" = 1

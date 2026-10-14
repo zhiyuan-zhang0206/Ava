@@ -8,6 +8,8 @@ import pytest
 
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
+from base.deploy.tests.maintenance_factory import WHEN
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,
     FakeConnCtx,
@@ -22,8 +24,6 @@ from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading imp
     fc10_hold,
 )
 from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import alerts as alerts
-from tests.components.agent.test_maintenance import WHEN
-from tests.components.agent.test_maintenance import isolate as isolate
 
 
 async def test_a_failed_continuation_is_alerted_and_the_held_control_stays_runnable(

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from base.sessions.pty.paths import service_socket_path
-from tests.path_scoped.pty_service import FakePtyService
+from base.sessions.pty.tests.pty_service import FakePtyService
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 

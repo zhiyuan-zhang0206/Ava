@@ -22,6 +22,8 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
+from base.deploy.tests.maintenance_factory import WHEN
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 from base.host.env import dotenv_file
 from base.host.net.auth import bearer_header
@@ -29,8 +31,6 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 from gateway.app import app
 from gateway.tests.agents.gateway_auth import without_credentials
-from tests.components.agent.test_maintenance import WHEN
-from tests.components.agent.test_maintenance import isolate as isolate
 
 
 @pytest.fixture(autouse=True)

@@ -25,10 +25,10 @@ from base.agents.incarnation import exec_request_evidence
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance import cohort, pause_owner
+from base.deploy.tests.maintenance_factory import WHEN, maintenance_agent
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 from ops.agent_pause import resume_agents
-from tests.components.agent.test_maintenance import WHEN, maintenance_agent
-from tests.components.agent.test_maintenance import isolate as isolate
 
 
 class _State(TypedDict):

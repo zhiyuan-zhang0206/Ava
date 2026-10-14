@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership import hosted
 from agent.ownership.corpse_reap import ReapedCorpse
+from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host import invocation
 from services.agent_runner.agent_host.runtime import config_fingerprint
 from services.agent_runner.agent_host.tests.runtime.host_support import (
@@ -26,7 +27,6 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     wired as wired,
 )
-from tests.components.base.poll_until import poll_until_async
 
 
 class TestConfigRebind:

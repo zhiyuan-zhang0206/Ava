@@ -1,3 +1,8 @@
+exports = ["telemetry_stream.py"]
+
+[uses]
+"test_metrics_aggregate_equivalence.py" = ["telemetry_stream.py"]
+
 [debt.first-party-patch]
 "test_observed_metrics.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_no_pipeline" = 1
 "test_observed_metrics.py#monkeypatch.setattr base.telemetry.metrics.observed_metrics.event_row" = 1

@@ -15,6 +15,7 @@ from ava.sdk_surface import install
 from ava.sdk_surface.installation import installed
 from base.config import FIELD_INFOS, settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.config_authority import config_authority as config_authority
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -22,7 +23,6 @@ from base.packages.tests.model_catalog import add_bindings as add_bindings
 from base.packages.tests.model_catalog import add_models as add_models
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from base.packages.tests.model_catalog import set_prices as set_prices
-from tests.fixtures.unit.config_authority import config_authority as config_authority
 
 
 @pytest.fixture(autouse=True)

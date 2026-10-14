@@ -28,11 +28,11 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
+from base.deploy.tests.maintenance_factory import WHEN, maintenance_agent
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 from ops import agent_pause
 from ops.agent_pause.probe import HostIdentity
-from tests.components.agent.test_maintenance import WHEN, maintenance_agent
-from tests.components.agent.test_maintenance import isolate as isolate
 
 
 def _as_live_host(

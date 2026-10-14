@@ -28,8 +28,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
-from tests.factories.maintenance import WHEN, maintenance_agent
-from tests.factories.maintenance import isolate as isolate
+from base.deploy.tests.maintenance_factory import WHEN, maintenance_agent
+from base.deploy.tests.maintenance_factory import isolate as isolate
 
 _MINUTE_AGO = datetime.now(UTC) - timedelta(minutes=1)
 

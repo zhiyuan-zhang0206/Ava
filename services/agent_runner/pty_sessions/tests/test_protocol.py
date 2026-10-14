@@ -20,9 +20,9 @@ import pytest
 
 from base.sessions.pty import client, protocol
 from base.sessions.pty.paths import service_socket_path
-from tests.path_scoped import pty_shells as support
-from tests.path_scoped.pty_service import PtyServiceProcess
-from tests.path_scoped.pty_service import pty_service as pty_service
+from base.sessions.pty.tests import pty_shells as support
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 
 pytestmark = pytest.mark.usefixtures("pty_service")
 
@@ -154,7 +154,7 @@ def test_a_mutating_request_waits_for_a_service_that_is_still_starting(
 def test_a_second_service_refuses_to_start_over_a_live_one(
     pty_service: PtyServiceProcess,
 ) -> None:
-    from tests.path_scoped.pty_service import REPO
+    from base.sessions.pty.tests.pty_service import REPO
 
     env = {"AVA_HOME": str(pty_service.home), "PATH": "/usr/bin:/bin", "AVA_CONFIG_FETCH": "skip"}
     result = subprocess.run(

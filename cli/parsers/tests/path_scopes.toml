@@ -4,7 +4,7 @@
     "test_walg_cmd.py",
     "test_hold_report.py",
 ]
-"tests.fixtures.unit.generation" = [
+"base.host.db_authority.tests.generation" = [
     "test_hold_report.py",
 ]
 "base.paths.tests.homes" = [

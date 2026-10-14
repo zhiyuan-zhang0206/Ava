@@ -7,7 +7,7 @@ import os
 import psutil
 import pytest
 
-from tests.path_scoped.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
 
 # Values that must never appear in an argv. Shaped like the real thing: the
 # cluster secret, the data-plane URLs that embed it, a provider key.

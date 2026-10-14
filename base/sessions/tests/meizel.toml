@@ -1,8 +1,10 @@
-exports = ["refuse_helper.py", "scripted_helper.py"]
+exports = ["poll_until.py", "refuse_helper.py", "scripted_helper.py"]
 
 [uses]
 "subreaper_probe.py" = ["process_evidence.py"]
-"test_posixproc.py" = ["process_evidence.py"]
+"test_poll_until.py" = ["poll_until.py"]
+"test_posix_backend.py" = ["poll_until.py"]
+"test_posixproc.py" = ["poll_until.py", "process_evidence.py"]
 
 [debt.env-patch]
 "test_coding_session_owner.py#monkeypatch.setenv os.environ.AVA_HOME" = 1

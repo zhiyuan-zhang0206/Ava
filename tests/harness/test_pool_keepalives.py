@@ -50,12 +50,12 @@ import base.telemetry.process_logging
 from base import db, telemetry
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.config.tests.config_authority import config_authority as config_authority
 from base.db.code_version_gate import ProcessDbGate
 from base.telemetry.delivery.receipts import DrainStatus
 from gateway.app import app
 from services.agent_runner.agent_ops import boot
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.config_authority import config_authority as config_authority
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 

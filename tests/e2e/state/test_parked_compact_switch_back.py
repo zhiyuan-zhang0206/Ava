@@ -61,7 +61,7 @@ from playwright.sync_api import Page, expect
 from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from base.db import Database
-from tests.components.base.poll_until import poll_until
+from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e._settings import pin_compact_history_off, pin_expand_runs_all
 from tests.e2e.fakes.scenarios.parked_compact import (

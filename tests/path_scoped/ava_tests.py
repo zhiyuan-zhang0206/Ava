@@ -20,14 +20,14 @@ import pytest
 
 import ava
 from ava import shell
+
+# Registers `pty_service` for the paths this module governs.
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from tests.fixtures.pin_agent import pin_agent
 
 # One definition shared with the gateway and integration modules; imported here so it
 # registers for this module's paths.
 from tests.path_scoped.api_keys import mock_api_keys as mock_api_keys
-
-# Registers `pty_service` for the paths this module governs.
-from tests.path_scoped.pty_service import pty_service as pty_service
 
 # Parallel xdist worker isolation: pty session records/sockets live under each
 # worker's own tmp test home, so workers cannot collide; still, each worker uses

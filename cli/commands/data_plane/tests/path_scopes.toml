@@ -14,3 +14,6 @@
 "tests.path_scoped.services_tests" = [
     "test_native_storage_diagnostics.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_pooler_clients.py",
+]
