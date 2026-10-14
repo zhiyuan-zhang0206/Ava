@@ -29,6 +29,7 @@ from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
