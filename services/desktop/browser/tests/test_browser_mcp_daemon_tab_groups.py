@@ -248,8 +248,10 @@ async def _agent_with_one_page(
 
 async def test_release_closes_the_agents_last_page_through_close_page() -> None:
     d, up = await _agent_with_one_page()
-    assert await page_lifecycle.release_agent_page(d, 7) == 1
-    assert up.closed_pages() == [1]
+    await d.call_tool_for_agent("new_page", {"url": "http://localhost:9/dev-2"}, 7)
+    up.calls.clear()
+    assert await page_lifecycle.release_agent_page(d, 7) == 2
+    assert up.closed_pages() == [1, 2]
 
 
 async def test_hard_ttl_reaper_closes_through_close_page() -> None:

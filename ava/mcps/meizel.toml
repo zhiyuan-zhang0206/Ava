@@ -1,7 +1,7 @@
 exports = ["config.py"]
 
 [uses]
-"__init__.py" = ["_clients.py", "_tools.py", "config.py"]
+"__init__.py" = ["_browser.py", "_clients.py", "_tools.py", "config.py"]
 "_clients.py" = ["_remote.py", "config.py"]
 "_daemon.py" = ["_browser.py", "_computer.py", "_oauth.py", "config.py"]
 "_remote.py" = ["config.py"]

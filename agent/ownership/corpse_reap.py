@@ -7,6 +7,7 @@ from uuid import UUID
 
 from psycopg_pool import AsyncConnectionPool
 
+from agent.ownership.hosted_cleanup import release_browser_pages
 from base import telemetry
 from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
@@ -90,7 +91,7 @@ async def reap_crash_corpses(
 
 
 async def _publish_reaped_corpses(bus: EventBus, reaped: list[int]) -> None:
-    """Best-effort refresh of mounted frontends; the durable flip already committed."""
+    """Best-effort refresh of mounted frontends and browser page release; the durable flip already committed."""
     for agent_id in reaped:
         try:
             await publish_agent_updated(bus, agent_id)
@@ -100,3 +101,4 @@ async def _publish_reaped_corpses(bus: EventBus, reaped: list[int]) -> None:
                 event="corpse_reaper_publish_failed",
                 agent_id=agent_id,
             )
+        await release_browser_pages(agent_id)

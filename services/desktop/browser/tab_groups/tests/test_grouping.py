@@ -215,11 +215,13 @@ def test_manifest_points_at_the_worker_and_asks_only_for_what_it_uses() -> None:
 
 
 def test_worker_is_stateless_and_neither_colors_nor_deletes() -> None:
-    """The group is found by title (no groupId survives anywhere), Chrome picks the
-    color, and Chrome deletes a group when its last tab closes -- the worker has
-    no delete path of its own."""
+    """The group is found by title (no groupId survives anywhere), duplicate
+    open groups with that title are coalesced into the first one, Chrome picks
+    the color, and Chrome deletes a group when its last tab closes -- the
+    worker has no delete path of its own."""
     source = next(EXTENSION_DIR.glob("group-*.js")).read_text()
     assert "tabGroups.query({ title })" in source
+    assert "duplicates.map((g) => chrome.tabs.query({ groupId: g.id }))" in source
     assert not re.search(r"\bcolor\s*:", source)
     assert not re.search(r"ungroup|tabs\.remove|tabGroups\.remove|storage\.", source)
 

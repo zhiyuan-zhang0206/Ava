@@ -353,7 +353,7 @@ class ChromeMcpDaemon:
         before = await self.tab_groups.snapshot() if group else None
         result = await self._call("new_page", args)
         if not result.is_error:
-            self.pages.register_created_page(selected_id(result))
+            self.pages.register_created_page(selected_id(result), agent_id=agent_id)
             if group and agent_id is not None:
                 await self.tab_groups.group_new_page(agent_id, before)
         return result

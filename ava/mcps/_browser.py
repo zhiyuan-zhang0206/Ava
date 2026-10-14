@@ -207,16 +207,16 @@ _RELEASE_TIMEOUT_S = 3.0
 
 
 async def release_agent_chrome_pages(agent_id: int) -> bool:
-    """Best-effort: ask the browser-mcp service to close this agent's page.
+    """Best-effort: ask the browser-mcp service to close this agent's pages.
 
-    Called from the agent process's exit hook so a terminated worker does not
-    leave its tab (usually a dev-server page pointing at a dead localhost port)
-    in the user's shared Chrome. The service closes exactly the agent's
-    affinity page — never another agent's or the user's — and is idempotent.
+    Called after an agent's termination commits so a terminated worker does not
+    leave its tabs (or its ``Ava #<id>`` tab group) in the user's shared Chrome.
+    The service closes every page created by ``agent_id`` — never another
+    agent's or the user's — and is idempotent.
     A machine without the browser service (no socket), a daemon that is down
     (`OSError`) or one that does not answer in time returns False; a protocol
-    error propagates. Deaths that never reach the exit hook are left to the service's page
-    TTL sweep (24h by default).
+    error propagates. Deaths that never reach termination cleanup are left to
+    the service's page TTL sweep (24h by default).
     """
     try:
         from base.config import settings

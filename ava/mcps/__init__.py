@@ -23,6 +23,9 @@ from pathlib import Path
 from typing import Any
 
 from ava.mcps import _tools
+from ava.mcps._browser import (
+    release_agent_chrome_pages as release_agent_chrome_pages,
+)
 from ava.mcps._clients import McpClients
 from ava.mcps.config import (
     MCPCallError as MCPCallError,
