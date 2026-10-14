@@ -1,10 +1,10 @@
 """Composer commands endpoint — `GET /api/commands`.
 
-Lists the registered prompt templates (see `ava.skills.composer_commands`) for the web
+Lists the registered prompt templates (see `base.packages.composer_commands`) for the web
 Composer's `/`-autocomplete. Read-only filesystem scan; no auth beyond the
 gateway's default session gate. Only the metadata the dropdown needs is
 returned — the body is never sent to the browser, since expansion happens
-server-side in the agent's claim node (`ava.skills.composer_commands.expand_command`).
+server-side in the agent's claim node (`base.packages.composer_commands.expand_command`).
 """
 
 from __future__ import annotations
@@ -24,7 +24,8 @@ _AGENT_SKILL_VIEW_TIMEOUT_S = 3.0
 
 def _local_commands() -> list[CommandItem]:
     """The gateway-local catalog: the unscoped view and the availability fallback."""
-    from ava.skills.composer_commands import discover_commands
+    from ava import skills
+    from base.packages.composer_commands import CommandCatalog
 
     return [
         CommandItem(
@@ -32,7 +33,7 @@ def _local_commands() -> list[CommandItem]:
             description=c["description"],
             instruction_hint=c["instruction_hint"],
         )
-        for c in discover_commands()
+        for c in CommandCatalog(skills=skills.names).discover()
     ]
 
 

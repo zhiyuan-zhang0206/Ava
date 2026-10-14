@@ -17,6 +17,7 @@ from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
 from ava.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_enabled
 from ava.tests.skills._skills_helpers import write_skill
 from base.packages.extensions import install_registry
+from base.packages.skills.tree import identifier, target
 from base.paths import skills_dir
 
 # Every test runs in a per-test unit home whose `skills/` does not exist by
@@ -400,8 +401,8 @@ def test_plugin_skill_carries_namespace_in_names(fake_skills_dir: Path) -> None:
     write_skill(d, "test-driven-development", "name: test-driven-development\ndescription: tdd")
     sk = next(s for s in skills_mod.names() if s["name"] == "test-driven-development")
     assert sk["namespace"] == ("superpowers",)
-    assert skills_mod.identifier(sk) == "superpowers:test-driven-development"
-    assert skills_mod.target(sk) == "superpowers.test_driven_development"
+    assert identifier(sk) == "superpowers:test-driven-development"
+    assert target(sk) == "superpowers.test_driven_development"
 
 
 def test_plugin_skill_hyphen_attr_under_namespace(fake_skills_dir: Path) -> None:
@@ -437,8 +438,8 @@ def test_folder_becomes_namespace(fake_skills_dir: Path) -> None:
     assert proxy.name == "tdd"
     sk = next(s for s in skills_mod.names() if s["name"] == "tdd")
     assert sk["namespace"] == ("coding",)
-    assert skills_mod.identifier(sk) == "coding:tdd"
-    assert skills_mod.target(sk) == "coding.tdd"
+    assert identifier(sk) == "coding:tdd"
+    assert target(sk) == "coding.tdd"
 
 
 def test_deep_folder_nesting(fake_skills_dir: Path) -> None:
@@ -451,7 +452,7 @@ def test_deep_folder_nesting(fake_skills_dir: Path) -> None:
     assert proxy.name == "receiving"
     sk = next(s for s in skills_mod.names() if s["name"] == "receiving")
     assert sk["namespace"] == ("superpowers", "review")
-    assert skills_mod.identifier(sk) == "superpowers:review:receiving"
+    assert identifier(sk) == "superpowers:review:receiving"
 
 
 # ─── root skill: a folder that is both a skill and a namespace ─────────────
@@ -484,7 +485,7 @@ def test_root_skill_is_both_skill_and_namespace(db_url: str, fake_skills_dir: Pa
     assert isinstance(node.bilibili, SkillProxy)
 
     # both the root skill and its child appear in the flat listing
-    by_id = {skills_mod.identifier(s): s for s in skills_mod.names()}
+    by_id = {identifier(s): s for s in skills_mod.names()}
     assert "sources" in by_id and by_id["sources"]["namespace"] == ()
     assert "sources:bilibili" in by_id and by_id["sources:bilibili"]["namespace"] == ("sources",)
 

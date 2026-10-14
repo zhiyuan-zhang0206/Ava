@@ -18,6 +18,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.composer_commands import CommandCatalog
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import force_terminate_transaction
@@ -69,6 +70,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
         bus=EventBus.from_settings(),
         db=database,
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     host._owner = incarnation.owner
 

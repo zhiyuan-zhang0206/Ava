@@ -1,8 +1,9 @@
 """The data model of the skill tree: one skill's metadata and the namespace nodes that hold it.
 
 Pure values and functions of them - no scan, no files, no ambient state. The scan lives in
-`skill_index.py`; `ava.skills` (the facade) re-exports `Skill`, `SkillNameCollision`,
-`identifier` and `target`.
+`ava/skills/skill_index.py` and the `ava.skills` facade serves the tree to the agent; the
+composer commands (`base.packages.composer_commands`) and the agent's prompt read skills as
+`Skill` values and render them with `identifier` / `target`.
 """
 
 from __future__ import annotations
@@ -14,8 +15,10 @@ from base.packages.skills.names import display_name, match_key
 __all__ = [
     "NS",
     "Leaf",
+    "Node",
     "Skill",
     "SkillNameCollision",
+    "Tree",
     "claim",
     "descend",
     "flatten",
@@ -89,7 +92,7 @@ class Leaf:
         self.skill = skill
 
 
-class NS(dict):
+class NS(dict[str, "Node"]):
     """A namespace node — a folder that contains skill-bearing children. A `dict`
     of `child_attr -> (Leaf | NS)` carrying two optional folder-level fields:
 
@@ -105,12 +108,16 @@ class NS(dict):
     doc: str | None = None
 
 
-def descend(tree: dict, segs: tuple[str, ...]) -> NS:
+type Node = Leaf | NS
+type Tree = dict[str, Node]
+
+
+def descend(tree: Tree, segs: tuple[str, ...]) -> NS:
     """Walk `segs` from `tree`, returning the `NS` at that path (creating nodes
     as needed). A `Leaf` met mid-walk is promoted to an `NS` that keeps the
     leaf's skill — the folder turns out to be a root skill (a skill AND a
     namespace)."""
-    node: dict = tree
+    node: Tree = tree
     for seg in segs:
         seg_attr = match_key(seg)
         child = node.get(seg_attr)
@@ -143,7 +150,7 @@ def claim(claimed: dict[tuple[str, ...], str], attr_path: tuple[str, ...], src: 
     claimed[attr_path] = src
 
 
-def flatten(tree: dict) -> list[Skill]:
+def flatten(tree: Tree) -> list[Skill]:
     """All `Skill` entries in the tree, namespace-then-name sorted. A root
     skill's own skill is emitted alongside descending into its children.
     A leaf child whose name matches its parent root skill's name is skipped —
@@ -151,7 +158,7 @@ def flatten(tree: dict) -> list[Skill]:
     root skill already emitted."""
     out: list[Skill] = []
 
-    def walk(node: dict, parent_skill_name: str | None = None) -> None:
+    def walk(node: Tree, parent_skill_name: str | None = None) -> None:
         for key in sorted(node):
             value = node[key]
             if isinstance(value, Leaf):

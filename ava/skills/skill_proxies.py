@@ -12,7 +12,7 @@ import types
 from collections.abc import Callable
 from typing import Any
 
-from ava.skills.skill_model import NS, Leaf, Skill
+from base.packages.skills.tree import NS, Leaf, Skill
 
 __all__ = ["Consume", "LazySkillDoc", "Namespace", "SkillProxy", "node_to_obj"]
 

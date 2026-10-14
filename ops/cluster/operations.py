@@ -137,12 +137,13 @@ def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]
 
     from ava import skills
     from base.packages.skills.names import match_key
+    from base.packages.skills.tree import identifier, target
 
     loaded = skills.names()
-    by_ident = {match_key(skills.identifier(skill)): skill for skill in loaded}
+    by_ident = {match_key(identifier(skill)): skill for skill in loaded}
     by_name = {match_key(skill["name"]): skill for skill in loaded}
     selected_targets = {
-        skills.target(skill)
+        target(skill)
         for name in wanted
         if (skill := by_ident.get(match_key(name)) or by_name.get(match_key(name))) is not None
     }
@@ -162,14 +163,15 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     project skills into a later agent's result.  The
     result also carries this runner's enabled MCP names as phase-2 groundwork.
     """
+    from ava import skills
     from ava.mcps.config import load_mcp_config
     from ava.sdk_surface import skill_sources
-    from ava.skills.composer_commands import discover_commands
+    from base.packages.composer_commands import CommandCatalog
     from base.packages.plugins.mcp_enabled import read_enabled
 
     cwd, wanted = agent_skill_view_inputs(pool, agent_id)
     with skill_sources.scoped(lambda: _project_skill_roots(cwd)):
-        commands = _narrow_commands(discover_commands(), wanted)
+        commands = _narrow_commands(CommandCatalog(skills=skills.names).discover(), wanted)
     merged_mcp = load_mcp_config(include_disabled=True)
     mcp_overlay = read_enabled()
     return AgentSkillViewResult(

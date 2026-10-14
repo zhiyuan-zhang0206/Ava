@@ -49,6 +49,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
@@ -222,6 +223,7 @@ async def prepare_graph(
         original_incarnation=owner,
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
+        commands=CommandCatalog(skills=list),
     )
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
     reset: dict[str, Any] = {

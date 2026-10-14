@@ -11,6 +11,8 @@ dependencies as `runtime.context.X`:
 - **`agent`**: the agent's resolved per-turn configuration (`AgentSlices`, see
   `base.host.env.agent_slices`), built by the host when the turn starts;
 - **`extensions`**: the plugins' contributions, held by the host that loaded them;
+- **`commands`**: the composer commands the host serves, which the claim node expands a chat
+  inbound's `/name` through;
 - **`identity`**: who the run acts as (`AgentIdentity`);
 - **`clients`**: the lazily-built connections the process holds (SQL, Redis, gateway HTTP, and the
   SDK layer's own), closed with `close()`.
@@ -64,6 +66,7 @@ if TYPE_CHECKING:
     from base.events.live.bus import EventBus
     from base.events.live.publisher import AgentEventPublisher
     from base.host.env.agent_slices import AgentSlices
+    from base.packages.composer_commands import CommandCatalog
     from base.packages.plugins.extensions import ExtensionRegistry
 
 
@@ -144,6 +147,11 @@ class AvaContext:
     extensions: ExtensionRegistry | None = None
     """What the enabled plugins contribute (prompt sections, context notes), as the loader built it
     for this host. None for the eval driver and tests that run no plugins (`plugin_registry`)."""
+
+    commands: CommandCatalog | None = None
+    """The composer commands the host serves (`/name` templates and skill-as-commands). The host
+    that claims chat inbounds sets it; the exec child, the eval driver and tests that claim
+    nothing leave it None."""
 
     identity: AgentIdentity | None = None
     """Who this run acts as. The host sets it for a turn it serves; the exec child and a launched
@@ -250,6 +258,12 @@ class AvaContext:
         if self.agent is None:
             raise RuntimeError("this AvaContext carries no AgentSlices (ctx.agent is None)")
         return self.agent
+
+    def require_commands(self) -> CommandCatalog:
+        """The composer command catalog; a claim run built without one fails explicitly."""
+        if self.commands is None:
+            raise RuntimeError("this AvaContext carries no CommandCatalog (ctx.commands is None)")
+        return self.commands
 
     def require_catalog(self) -> ModelCatalog:
         """The process-owned provider catalog; a run without one fails explicitly."""

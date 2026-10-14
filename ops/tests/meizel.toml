@@ -5,9 +5,9 @@ exports = ["pool_support.py"]
 
 [debt.first-party-patch]
 "test_agent_skill_view.py#monkeypatch.setattr ava.mcps.config.load_mcp_config" = 3
-"test_agent_skill_view.py#monkeypatch.setattr ava.skills.composer_commands.external_plugin_read_root" = 1
-"test_agent_skill_view.py#monkeypatch.setattr ava.skills.composer_commands.repo_plugins_dir" = 1
-"test_agent_skill_view.py#monkeypatch.setattr ava.skills.composer_commands.repo_root" = 1
+"test_agent_skill_view.py#monkeypatch.setattr base.packages.composer_commands.external_plugin_read_root" = 1
+"test_agent_skill_view.py#monkeypatch.setattr base.packages.composer_commands.repo_plugins_dir" = 1
+"test_agent_skill_view.py#monkeypatch.setattr base.packages.composer_commands.repo_root" = 1
 "test_agent_skill_view.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 2
 "test_agent_skill_view.py#monkeypatch.setattr base.packages.plugins.mcp_enabled.read_enabled" = 3
 "test_agent_skill_view.py#monkeypatch.setattr ops.cluster.operations.agent_skill_view_inputs" = 9

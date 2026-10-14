@@ -65,6 +65,7 @@ from base.lm.catalog import ModelCatalog
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
+from base.packages.composer_commands import CommandCatalog
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
@@ -145,6 +146,7 @@ class AgentHost:
         policy: HostPolicy,
         clients: ClientSet | None = None,
         extensions: ExtensionRegistry = EMPTY,
+        commands: CommandCatalog | None = None,
         plugin_configs: Mapping[str, BaseModel] | None = None,
     ) -> None:
         self._bus = bus
@@ -154,6 +156,7 @@ class AgentHost:
         # Shared clients are passed through each turn's explicit `AvaContext`.
         self._clients = clients if clients is not None else ClientSet(database=lambda: db)
         self._extensions = extensions
+        self._commands = commands
         self._plugin_configs = plugin_configs or {}
         self._pool = pool
         self._control_pool = control_pool if control_pool is not None else pool
@@ -566,6 +569,7 @@ class AgentHost:
             bus=self._bus,
             agent=slices,
             extensions=self._extensions,
+            commands=self._commands,
             turn_progress=self.turn_progress,
             relays=self.relays,
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),

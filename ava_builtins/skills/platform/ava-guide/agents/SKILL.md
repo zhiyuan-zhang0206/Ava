@@ -43,7 +43,7 @@ SDK reference: `ava.agents` (`spawn` / `terminate` / `restart` / `resurrect` /
 ## Command (user-level command)
 
 A **command** is a `/name <natural language instruction>` — issued from the
-frontend Composer or via `send_message` between peers. `expand_command` expands
+frontend Composer or via `send_message` between peers. The receiving agent's host expands
 it into the prompt the model actually sees; the model never sees the `/`-trigger
 process, only the expanded text. Commands are addressable prompt functions —
 agents can use `ava.agents.send_message(peer, "/name ...")` to send a named

@@ -19,6 +19,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Event
 from services.agent_runner.agent_host import daemon
@@ -70,6 +71,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
         clients=clients,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
+        commands=CommandCatalog(skills=list),
     )
     release = AsyncMock()
     monkeypatch.setattr(agent_host_host, "release_hosted_owner", release)

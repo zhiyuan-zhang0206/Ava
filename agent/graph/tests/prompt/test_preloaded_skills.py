@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-import ava.skills as skills_mod
 from agent.graph.prompt.capabilities import resolve_prompt_skills
 from agent.graph.prompt.context_notes import preloaded_skills_note
 from base.agents.context import AvaContext
@@ -28,6 +27,7 @@ from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.extensions import install_registry
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.skills.tree import identifier
 from base.paths import skills_dir
 
 
@@ -89,7 +89,7 @@ def test_resolve_by_dotted_identifier(fake_skills_dir: Path) -> None:
         ).prompt.sdk_disable,
         config_field="skills_to_expand_at_start",
     )
-    assert [skills_mod.identifier(s) for s in resolved] == ["ava-memory:consolidation"]
+    assert [identifier(s) for s in resolved] == ["ava-memory:consolidation"]
 
 
 def test_resolve_accepts_the_python_spelling_of_a_dash_skill(fake_skills_dir: Path) -> None:
@@ -105,7 +105,7 @@ def test_resolve_accepts_the_python_spelling_of_a_dash_skill(fake_skills_dir: Pa
         ).prompt.sdk_disable,
         config_field="skills_to_expand_at_start",
     )
-    assert [skills_mod.identifier(s) for s in resolved] == ["ava-memory:consolidation"]
+    assert [identifier(s) for s in resolved] == ["ava-memory:consolidation"]
 
 
 def test_resolve_accepts_the_plugin_colon_spelling(fake_skills_dir: Path) -> None:
@@ -119,7 +119,7 @@ def test_resolve_accepts_the_plugin_colon_spelling(fake_skills_dir: Path) -> Non
         ).prompt.sdk_disable,
         config_field="skills_to_expand_at_start",
     )
-    assert [skills_mod.identifier(s) for s in resolved] == ["ava-memory:consolidation"]
+    assert [identifier(s) for s in resolved] == ["ava-memory:consolidation"]
 
 
 def test_resolve_wildcard_selects_whole_catalog(fake_skills_dir: Path) -> None:
