@@ -119,7 +119,11 @@ def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
 
 @pytest.mark.skipif(not restore_drill.pg_tool("pg_dump").exists(), reason="needs native pg_dump")
 def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     """The command path decrypts, restores, and proves a checkpoint
     reader can consume the restored conversation without touching the source DB.
@@ -167,7 +171,7 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
         credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
     report, elapsed = restore_drill.run_drill(
-        artifact, database_for_url=_database_factory(), throwaway=ThrowawayConfig(None)
+        artifact, database_for_url=_database_factory(), throwaway=throwaway_config
     )
 
     assert report.agents == 1

@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from gateway.tests.agents.gateway_auth import install_default_gateway_credentials
@@ -48,8 +49,17 @@ _PROCESS_IMAGE_KEY = pytest.StashKey[LoadedCommit]()
 
 
 @pytest.fixture(scope="session")
+def throwaway_config(process_config) -> ThrowawayConfig:
+    """Carry the session owner's storage override into every requested native cluster."""
+    return ThrowawayConfig(configured_base(process_config.view.data_plane.pg_throwaway_base))
+
+
+@pytest.fixture(scope="session")
 def provisioned_db(
-    pytestconfig: pytest.Config, process_config, database_version: CodeVersion
+    pytestconfig: pytest.Config,
+    process_config,
+    database_version: CodeVersion,
+    throwaway_config: ThrowawayConfig,
 ) -> Iterator[str]:
     """Own one native cluster only when a database consumer requests it."""
     if static_mode(pytestconfig):
@@ -63,7 +73,7 @@ def provisioned_db(
     # Resolve this entry's image before tests can replace subprocess.run.
     database_version.get()
     machine = machine_from_boot(process_config)
-    with postgres(machine_name=machine.name, watch_stalls=False) as url:
+    with postgres(config=throwaway_config, machine_name=machine.name, watch_stalls=False) as url:
         assert_test_db_url(url, context="provisioned_db")
         process_config.set_field("db_url", url)
         with PostgresSaver.from_conn_string(url) as saver:
