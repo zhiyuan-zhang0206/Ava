@@ -7,21 +7,17 @@ injection check as callables, so a test hands them a fake opener and the values 
 
 from __future__ import annotations
 
-import urllib.request
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import SecretStr
 
 from base.host.env.agent_slices import ModelOverrides
+from base.host.net.ports import UrlOpener
 from base.lm.catalog import ModelCatalog
 
-__all__ = ["BraveConfig", "FetchModel", "JinaConfig", "UrlOpener", "WebDeps"]
-
-# `urllib.request.urlopen`'s shape: a request and a timeout in, a readable context manager out.
-type UrlOpener = Callable[[urllib.request.Request, float], AbstractContextManager[Any]]
+__all__ = ["BraveConfig", "FetchModel", "JinaConfig", "WebDeps"]
 
 
 @dataclass(frozen=True)
