@@ -19,6 +19,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.deploy.lifecycle import service_selection as ds
 from base.paths import ava_home
+from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.telemetry import EventPipeline, process_logging
 from cli.commands.tests.health_port_guard import guard_health_port_gate as guard_health_port_gate
 from cli.database import (
@@ -30,7 +31,6 @@ from cli.database import (
 )
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
 
 @pytest.fixture(autouse=True)

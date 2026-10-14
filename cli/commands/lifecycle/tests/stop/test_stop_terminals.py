@@ -35,6 +35,7 @@ from base.deploy.maintenance import admission
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import SERVICE_UNIT, ledger_path
 from base.sessions.pty.tests import pty_shells as support
+from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_shells import new, wait_for
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
@@ -65,7 +66,6 @@ from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
-from tests.path_scoped.pty_reaper import PtyReaper
 
 # The idle test's own prompt, set by its home's `.bash_profile`.
 _IDLE_PROMPT = "ava-idle-shell>"
