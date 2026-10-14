@@ -1,4 +1,4 @@
-"""`python -m scripts.ci.two_section_chain_smoke` — and `python scripts/ci/two_section_chain_smoke/`.
+"""`python -m scripts.ci.helper_smoke` (the chain smoke) — and `python scripts/ci/helper_smoke/`.
 
 The path form needs the checkout on sys.path: PYTHONSAFEPATH keeps a script's
 own directory off it, and the module form resolves `scripts.ci...` from the
@@ -14,7 +14,7 @@ _ROOT = Path(__file__).resolve().parents[3]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from scripts.ci.two_section_chain_smoke.cli import main  # noqa: E402 - checkout path guard above
+from scripts.ci.helper_smoke.cli import main  # noqa: E402 - checkout path guard above
 
 if __name__ == "__main__":
     raise SystemExit(main())

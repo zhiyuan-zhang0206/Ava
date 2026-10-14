@@ -3,7 +3,7 @@
 "__main__.py" = ["cli.py"]
 "cli.py" = ["f12.py", "support.py"]
 "f12.py" = ["support.py"]
-"tests" = ["__init__.py"]
+"tests" = ["__init__.py", "signing_smoke.py"]
 
 [debt.private-name]
 "cli.py -> support.py#_run" = 1

@@ -1,4 +1,4 @@
-"""Unit tests for the F12b/restart sampling helpers in scripts/ci/two_section_chain_smoke/.
+"""Unit tests for the F12b/restart sampling helpers in scripts/ci/helper_smoke/.
 
 The smoke itself needs launchd, a compiled helper, and an unlocked desktop
 session, so CI cannot run it; these tests pin the pure parse/join/summary/
@@ -14,7 +14,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.ci import two_section_chain_smoke as smoke  # noqa: E402 - checkout path guard above
+from scripts.ci import helper_smoke as smoke  # noqa: E402 - checkout path guard above
 
 
 def _line(stamp: str, requesting_pid: int, responsible_pid: int | None = 400) -> str:
