@@ -43,6 +43,19 @@ and CI run it) also fails when a `FAMILY_MODULES` file or an
 at module level in its file — an exemption for a deleted symbol would silently
 pre-approve whatever next takes that name.
 
+## Values bound to a clock name
+
+The same vocabulary also governs the value a name is *bound* to, wherever the binding is written:
+a module constant (above), the default of a dataclass field, a keyword argument at a call, or an
+ordinary assignment (`name = 5.0`, `self.name = 5.0`). A name that carries lattice vocabulary as whole
+snake_case words (`stall`, `grace`, `reap`, `budget`, `wedged`, `no_progress`, `launch_confirm`,
+`lease_ttl`, `lease_renew`, `scan_interval`, `reap_interval`) and is bound to a number literal (or an
+expression of literals only) is a definition of a clock, so it may appear only in a family
+module or under an `INDEPENDENT_CLOCKS` entry (`path::name`). Anything else defines nothing and is not
+checked: a bare reference to another name or attribute (an alias, or a config field that carries the
+value somebody else gave it), a field without a default, a default of `None`. Moving the
+literal to the call site (`HealthConfig(startup_grace_s=30)`) is a definition at that site.
+
 Scope: non-test code only (tests monkeypatch clocks smaller on purpose).
 Settings fields are class-body definitions in `base/config/` and are the
 operator-overridable configuration authority, not module constants — they are not
@@ -56,6 +69,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from meizel import allowances, lint_common
@@ -149,7 +163,73 @@ def _is_unregistered_clock(rel: str, name: str, value: ast.expr | None) -> bool:
     return not (isinstance(value, ast.Name) and value.id in _registered_clock_names())
 
 
-def scan_file(path: Path) -> list[str]:
+def _carries_vocabulary(name: str) -> bool:
+    """Lattice vocabulary as whole snake_case words (so `install` does not carry `stall`)."""
+    padded = f"_{name.lower()}_"
+    return any(f"_{term.lower()}_" in padded for term in _LATTICE_TERMS)
+
+
+def _literal(node: ast.expr | None) -> bool:
+    """A number, or an expression made only of numbers."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
+    if isinstance(node, ast.UnaryOp):
+        return isinstance(node.op, (ast.USub, ast.UAdd)) and _literal(node.operand)
+    if isinstance(node, ast.BinOp):
+        return _literal(node.left) and _literal(node.right)
+    return False
+
+
+def _bound_names(target: ast.expr) -> list[str]:
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, ast.Attribute):
+        return [target.attr]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for element in target.elts for name in _bound_names(element)]
+    return []
+
+
+def _assignment_bindings(
+    node: ast.Assign | ast.AnnAssign, *, module_level: bool
+) -> list[tuple[str, int]]:
+    """The vocabulary-carrying names one assignment binds to a literal, minus module constants."""
+    if not _literal(node.value):
+        return []
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    return [
+        (name, node.lineno)
+        for target in targets
+        for name in _bound_names(target)
+        if _carries_vocabulary(name) and not (module_level and _CONST_NAME.match(name))
+    ]
+
+
+def _keyword_bindings(call: ast.Call) -> list[tuple[str, int]]:
+    return [
+        (keyword.arg, keyword.value.lineno)
+        for keyword in call.keywords
+        if keyword.arg and _literal(keyword.value) and _carries_vocabulary(keyword.arg)
+    ]
+
+
+def literal_bindings(tree: ast.Module) -> list[tuple[str, int]]:
+    """(name, line) of every vocabulary-carrying name bound to a literal, outside module constants.
+
+    The bindings are field defaults, assignments in any scope and call keyword arguments; a
+    module-level `UPPER_CASE` constant is left to the constant rules above.
+    """
+    found: list[tuple[str, int]] = []
+    module_level = {id(node) for node in tree.body}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            found.extend(_assignment_bindings(node, module_level=id(node) in module_level))
+        elif isinstance(node, ast.Call):
+            found.extend(_keyword_bindings(node))
+    return found
+
+
+def scan_file(path: Path, *, independent: Mapping[tuple[str, str], str] | None = None) -> list[str]:
     try:
         rel = path.relative_to(_REPO_ROOT).as_posix()
     except ValueError:
@@ -159,6 +239,15 @@ def scan_file(path: Path) -> list[str]:
     except (OSError, UnicodeDecodeError, SyntaxError):
         return []  # unreadable entry (dangling symlink / non-UTF-8), or a syntax error the compiler owns
     errors: list[str] = []
+    exempt = INDEPENDENT_CLOCKS if independent is None else independent
+    if rel not in FAMILY_MODULES:
+        errors.extend(
+            f"{path}:{line}: {name} — a lattice-vocabulary name bound to a literal outside the "
+            "lattice family modules; give it no value here (take it from a config the root builds) "
+            "or define the clock in a family module and register it in CLOCKS"
+            for name, line in literal_bindings(tree)
+            if (rel, name) not in exempt
+        )
     for node in tree.body:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
@@ -182,13 +271,16 @@ def _module_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
-def stale_allowlist_entries() -> list[str]:
+def stale_allowlist_entries(
+    independent: Mapping[tuple[str, str], str] | None = None,
+) -> list[str]:
     """Allowlist entries whose file or exempted constant no longer exists."""
+    exempt = INDEPENDENT_CLOCKS if independent is None else independent
     errors: list[str] = []
     for rel in FAMILY_MODULES:
         if not (_REPO_ROOT / rel).is_file():
             errors.append(f"{rel}: stale FAMILY_MODULES entry — the file no longer exists")
-    for rel, name in INDEPENDENT_CLOCKS:
+    for rel, name in exempt:
         path = _REPO_ROOT / rel
         if not path.is_file():
             errors.append(
@@ -199,7 +291,13 @@ def stale_allowlist_entries() -> list[str]:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, SyntaxError):
             continue  # unreadable or a syntax error the compiler owns: cannot judge
-        if name not in _module_level_names(tree):
+        if name.islower():
+            if name not in {bound for bound, _ in literal_bindings(tree)}:
+                errors.append(
+                    f"{rel}: stale INDEPENDENT_CLOCKS entry {name} — nothing binds {name} to a "
+                    "literal there any more; drop the exemption"
+                )
+        elif name not in _module_level_names(tree):
             errors.append(
                 f"{rel}: stale INDEPENDENT_CLOCKS entry {name} — no module-level {name} "
                 "is defined there any more; drop the exemption"
