@@ -221,7 +221,7 @@ def test_frontend_service_command_is_exec_safe():
     unable to self-heal."""
     from base.cluster import frontend_service_cmd
 
-    cmd = frontend_service_cmd(3001)
+    cmd = frontend_service_cmd(3001, gateway_port=8000, browser_origin="")
     assert "exec npm run start -- -p 3001" in cmd
     assert exec_into(cmd) == cmd
 

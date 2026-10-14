@@ -32,7 +32,7 @@ import pytest
 
 from base.cluster.dataplane import pg_throwaway_base, pg_tools
 from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig
-from base.config import settings
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.native_process.child_env import daemon_process_env
 
 _MMAP_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
@@ -95,7 +95,6 @@ def scratch_pg_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> I
     root = Path(tempfile.mkdtemp(prefix="ava-pg-env-", dir="/tmp"))
     monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
     monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
-    monkeypatch.setattr(settings.data_plane, "pg_throwaway_base", "")
     yield root
     for data in root.glob("ava-pg-*/data"):
         if (data / "PG_VERSION").is_file():
@@ -224,7 +223,10 @@ def test_throwaway_pg_ctl_start_is_handed_the_built_start_env(
 
     monkeypatch.setattr(pg_tools.subprocess, "run", spy)
 
-    with pg_tools.throwaway_postgres() as url, psycopg.connect(url) as conn:
+    with (
+        pg_tools.throwaway_postgres(config=ThrowawayConfig(None)) as url,
+        psycopg.connect(url) as conn,
+    ):
         assert conn.execute("select 1").fetchone() == (1,)
 
     assert start_envs == [sentinel]

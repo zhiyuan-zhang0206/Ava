@@ -102,7 +102,13 @@ def _reconcile_database(boot: ConfigBoot, *, machine: MachineIdentity) -> Databa
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
-    return Database(db_config_from_boot(boot), gate=gate, direct_url=ClusterDirectUrl(machine.host))
+    return Database(
+        db_config_from_boot(boot),
+        gate=gate,
+        direct_url=ClusterDirectUrl(
+            machine.host, gateway_url_reader=lambda: boot.view.gateway.gateway_url
+        ),
+    )
 
 
 def _arguments() -> argparse.Namespace:

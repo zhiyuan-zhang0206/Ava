@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from base.cluster.dataplane import pg_throwaway_base, pg_tools
-from base.config import settings
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 
 
 @pytest.fixture
@@ -36,7 +36,6 @@ def scratch_tmpfs(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     # the disk fallback at this scratch dir and the override cleared, so a host's
     # configured base cannot redirect an instance out from under the teardown.
     monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
-    monkeypatch.setattr(settings.data_plane, "pg_throwaway_base", "")
     yield root
     for data in root.glob("ava-pg-*/data"):
         if (data / "PG_VERSION").is_file():
@@ -73,7 +72,7 @@ def test_failed_start_preserves_pg_log_into_artifacts(
         monkeypatch.setattr(pg_tools, "free_port", lambda: blocker.getsockname()[1])
         with pytest.raises(subprocess.CalledProcessError) as excinfo:
             # __enter__() runs the generator body — the bare call only builds it.
-            pg_tools.throwaway_postgres().__enter__()
+            pg_tools.throwaway_postgres(config=ThrowawayConfig(None)).__enter__()
         # The raised error names the preserved artifact and shows the tail.
         assert "pg.log artifact" in str(excinfo.value)
         assert "Address already in use" in str(excinfo.value)
@@ -104,7 +103,7 @@ def test_failure_before_any_pg_log_still_writes_an_artifact(
     )
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
-        pg_tools.throwaway_postgres().__enter__()
+        pg_tools.throwaway_postgres(config=ThrowawayConfig(None)).__enter__()
 
     assert pg_tools.NO_PG_LOG_NOTE in str(excinfo.value)
     saved = list(artifact_dir.glob("*.pg.log"))

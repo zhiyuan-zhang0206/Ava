@@ -1,85 +1,77 @@
-"""The one-DB-URL design: AVA_DB_URL's port is chosen at generation by the
-pgbouncer toggle, the admin plane derives the direct URL from this home's
-cluster record, and the pooler port is a record fact only (no AVA_PGBOUNCER_PORT
-env key). Tests `base.cluster.dataplane.direct_url`.
-"""
+"""Direct database resolution consumes the root's lazy gateway and host readers."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 from base.cluster.dataplane import direct_url
 from base.cluster.dataplane.direct_url import ClusterDirectUrl, direct_db_url
-from base.cluster.machine import MachineIdentity
 from base.cluster.ports import ClusterPorts
 from base.cluster.record import ClusterRecord
-from base.config import DataPlaneSettings, settings
+from base.config import DataPlaneSettings
 from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 _POOLED = "postgresql://ava_main:sek@127.0.0.1:6433/ava_main"
 _DIRECT = "postgresql://ava_main:sek@127.0.0.1:5433/ava_main"
+_HOME = "/x/.ava-t"
 
 
 def test_pgbouncer_enabled_defaults_on() -> None:
-    """The product default is ON (own-instance clusters pool by default; a fleet of a few
-    hundred agents at 2 conns each would blow a 500 max_connections direct). The test suite
-    pins it off in conftest for determinism, so assert the field default directly rather
-    than the loaded value."""
     assert DataPlaneSettings.model_fields["pgbouncer_enabled"].default is True
 
 
 def test_no_pgbouncer_port_field_on_the_settings_surface() -> None:
-    """F8b: the pooler port is a record fact, not a Settings field — a normal
-    process sees only AVA_DB_URL (whose port the toggle chose at generation)."""
     assert "pgbouncer_port" not in DataPlaneSettings.model_fields
-
-
-# ── direct_db_url: the admin plane's never-pooled dial ──
 
 
 def _rec(home: str, ports: dict[str, int]) -> ClusterRecord:
     return ClusterRecord(ports=cast("ClusterPorts", ports), gateway_home=home, created_at="t")
 
 
-def _set(monkeypatch: pytest.MonkeyPatch, *, db_url: str, rec: ClusterRecord | None) -> None:
+_PG_REC = _rec(_HOME, {"gateway": 8000, "postgres": 5433, "redis": 6380, "pgbouncer": 6433})
+
+
+def _set_record(monkeypatch: pytest.MonkeyPatch, rec: ClusterRecord | None) -> None:
     from base import paths
 
-    monkeypatch.setattr(settings.data_plane, "db_url", db_url)
     monkeypatch.setattr(direct_url, "get_record", lambda home: rec if str(home) == _HOME else None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(paths, "ava_home", lambda: Path(_HOME))
 
 
-_HOME = "/x/.ava-t"
-# A record carrying the fixed table's data-plane ports.
-_PG_REC = _rec(_HOME, {"gateway": 8000, "postgres": 5433, "redis": 6380, "pgbouncer": 6433})
+def _config(url: str, *, pooling: bool = True) -> DbConfig:
+    return DbConfig(
+        db_url=url,
+        db_sslmode="",
+        db_pool_min_size=1,
+        db_pool_max_size=2,
+        pgbouncer_enabled=pooling,
+    )
 
 
-def test_direct_handle_uses_owned_lazy_host_and_preserves_short_circuits(
+def _unused_reader() -> str:
+    raise AssertionError("this resolution must not read the dependency")
+
+
+def test_direct_handle_uses_owned_lazy_readers_and_preserves_short_circuits(
     database_gate: ProcessDbGate,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _set(monkeypatch, db_url=_POOLED, rec=_PG_REC)
+    _set_record(monkeypatch, _PG_REC)
     reads: list[str] = []
 
     def local_host() -> str:
         reads.append("host")
-        return "owned-host"
+        return "OWNED-HOST"
 
     def handle(url: str) -> Database:
         return Database(
-            DbConfig(
-                db_url=url,
-                db_sslmode="",
-                db_pool_min_size=1,
-                db_pool_max_size=2,
-                pgbouncer_enabled=True,
-            ),
-            direct_url=ClusterDirectUrl(local_host),
+            _config(url),
+            direct_url=ClusterDirectUrl(local_host, gateway_url_reader=_unused_reader),
             gate=database_gate,
         )
 
@@ -93,167 +85,148 @@ def test_direct_handle_uses_owned_lazy_host_and_preserves_short_circuits(
     assert reads == ["host"]
 
 
-def test_the_direct_url_of_a_handle_without_a_pooler_is_its_url(
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    url = "postgresql://handle_user:pw@db.example:5432/handle_db"
-    config = DbConfig(
-        db_url=url,
-        db_sslmode="",
-        db_pool_min_size=1,
-        db_pool_max_size=2,
-        pgbouncer_enabled=False,
-    )
+@pytest.mark.parametrize(
+    "url",
+    [
+        PLACEHOLDER_DB_URL,
+        "postgresql://host:bad/ava",
+        "postgresql://host/ava",
+        "postgresql://[/ava",
+    ],
+)
+def test_direct_url_short_circuits_read_neither_dependency(url: str) -> None:
     assert (
-        Database(
-            config, gate=database_gate, direct_url=ClusterDirectUrl(machine_identity.host)
-        ).direct_url()
+        direct_db_url(_config(url), gateway_url_reader=_unused_reader, local_host=_unused_reader)
         == url
     )
 
 
-def test_direct_db_url_swaps_pooler_port_to_direct_pg(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AVA_DB_URL carries the pooler port (pooling on) -> the admin plane dials
-    the same URL with the port swapped to the record's direct Postgres port."""
-    _set(monkeypatch, db_url=_POOLED, rec=_PG_REC)
-    assert direct_db_url() == _DIRECT
-
-
-def test_direct_db_url_passes_through_when_already_direct(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pooling off: AVA_DB_URL already names Postgres -> returned verbatim."""
-    _set(monkeypatch, db_url=_DIRECT, rec=_PG_REC)
-    assert direct_db_url() == _DIRECT
-
-
-def test_direct_db_url_never_rewrites_placeholder_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The sentinel must stay byte-identical for the connect guard."""
-    _set(monkeypatch, db_url=PLACEHOLDER_DB_URL, rec=_PG_REC)
-    assert direct_db_url() == PLACEHOLDER_DB_URL
-
-
-def test_direct_host_comparison_requires_an_explicit_reader(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    url = _POOLED.replace("127.0.0.1", "owned-host")
-    _set(monkeypatch, db_url=url, rec=_PG_REC)
+def test_direct_host_comparison_requires_an_explicit_reader() -> None:
     with pytest.raises(RuntimeError, match="explicit local_host reader"):
-        direct_db_url()
+        direct_db_url(
+            _config(_POOLED.replace("127.0.0.1", "owned-host")), gateway_url_reader=_unused_reader
+        )
+
+
+@pytest.mark.parametrize("url, expected", [(_POOLED, _DIRECT), (_DIRECT, _DIRECT)])
+def test_local_record_resolves_without_reading_gateway(
+    monkeypatch: pytest.MonkeyPatch, url: str, expected: str
+) -> None:
+    _set_record(monkeypatch, _PG_REC)
+    assert direct_db_url(_config(url), gateway_url_reader=_unused_reader) == expected
+
+
+@pytest.mark.parametrize("rec", [None, _PG_REC])
+def test_local_unknown_port_preserves_url_without_reading_gateway(
+    monkeypatch: pytest.MonkeyPatch, rec: ClusterRecord | None, loguru_records: list[dict[str, Any]]
+) -> None:
+    _set_record(monkeypatch, rec)
+    url = "postgresql://ava:dev@localhost:5432/ava"
+    assert direct_db_url(_config(url), gateway_url_reader=_unused_reader) == url
+    assert [record["level"].name for record in loguru_records] == ["INFO"]
+
+
+def test_pooler_url_without_a_record_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_record(monkeypatch, None)
+    assert direct_db_url(_config(_POOLED), gateway_url_reader=_unused_reader) == _POOLED
+
+
+@pytest.mark.parametrize("pg_port, pooler_port", [(18011, 18013), (19011, 19013)])
+def test_direct_db_url_uses_the_ports_the_record_names(
+    monkeypatch: pytest.MonkeyPatch, pg_port: int, pooler_port: int
+) -> None:
+    rec = _rec(
+        "/x/.ava-other",
+        {"gateway": 18000, "postgres": pg_port, "redis": 18012, "pgbouncer": pooler_port},
+    )
+    _set_record(monkeypatch, rec)
+    url = f"postgresql://ava:sek@127.0.0.1:{pooler_port}/ava?sslmode=prefer"
+    assert direct_db_url(_config(url), gateway_url_reader=_unused_reader) == (
+        f"postgresql://ava:sek@127.0.0.1:{pg_port}/ava?sslmode=prefer"
+    )
 
 
 @pytest.mark.parametrize(
-    "url", [PLACEHOLDER_DB_URL, "postgresql://host:bad/ava", "postgresql://host/ava", _POOLED]
+    "host, gateway_url, logs",
+    [
+        ("10.0.0.9", "http://127.0.0.1:18000", False),
+        ("10.0.0.9", "http://10.0.0.9:18000", True),
+        ("DB.EXAMPLE", "https://db.example:18000", True),
+        ("[2001:db8::9]", "http://[2001:DB8::9]:18000", True),
+        ("db.example", "", False),
+    ],
 )
-def test_direct_url_short_circuits_do_not_require_a_reader(
-    monkeypatch: pytest.MonkeyPatch, url: str
-) -> None:
-    _set(monkeypatch, db_url=url, rec=_PG_REC)
-    assert direct_db_url() == (_DIRECT if url == _POOLED else url)
-
-
-def test_direct_db_url_keeps_the_url_without_a_record(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No record (a home without the gateway) -> AVA_DB_URL as-is rather than guessing."""
-    _set(monkeypatch, db_url=_POOLED, rec=None)
-    assert direct_db_url() == _POOLED
-
-
-def test_direct_db_url_leaves_operator_standin_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A URL naming neither this cluster's pg nor its pooler port (a dev-only
-    stand-in) is not rewritten — converge normalizes only the two cluster ports."""
-    _set(monkeypatch, db_url="postgresql://ava:dev@localhost:5432/ava", rec=_PG_REC)
-    assert direct_db_url() == "postgresql://ava:dev@localhost:5432/ava"
-
-
-def test_direct_db_url_uses_the_ports_the_record_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The swap follows whatever ports the record carries, not the table's."""
-    rec = _rec(
-        "/x/.ava-dev",
-        {"gateway": 18000, "postgres": 18011, "redis": 18012, "pgbouncer": 18013},
-    )
-    _set(
-        monkeypatch,
-        db_url="postgresql://ava:sek@127.0.0.1:18013/ava",
-        rec=rec,
-    )
-    assert direct_db_url() == "postgresql://ava:sek@127.0.0.1:18011/ava"
-
-
-# ── F-S5-9: the host-record assumption ──
-
-
-def test_direct_db_url_swaps_any_local_record_pooler(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The URL names ANOTHER local cluster's pooler (multi-cluster box, or a
-    worktree pointing at a sibling cluster) — the admin plane must dial THAT
-    cluster's real Postgres, so the swap uses the record that owns the port,
-    not this home's record."""
-    other = _rec(
-        "/x/.ava-other",
-        {"gateway": 19000, "postgres": 19011, "redis": 19012, "pgbouncer": 19013},
-    )
-    _set(
-        monkeypatch,
-        db_url="postgresql://ava:sek@127.0.0.1:19013/ava",
-        rec=other,
-    )
-    assert direct_db_url() == "postgresql://ava:sek@127.0.0.1:19011/ava"
-
-
-def test_direct_db_url_remote_host_ignores_the_home_record(
+def test_remote_fallback_logs_only_for_its_gateway(
     monkeypatch: pytest.MonkeyPatch,
-    loguru_records,
-    machine_identity: MachineIdentity,
+    loguru_records: list[dict[str, Any]],
+    host: str,
+    gateway_url: str,
+    logs: bool,
 ) -> None:
-    """A URL naming a REMOTE host (a split runner dialing the gateway, or a
-    remote/SaaS plane — Task #1752) must not be resolved against this home's
-    record even when its port happens to collide — the swap would
-    mis-route to this box's own Postgres. The URL passes through SILENTLY: a
-    foreign host has no local pooler, so the "routes through PgBouncer"
-    warning would be factually wrong noise on every admin-plane dial."""
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://127.0.0.1:18000")
-    _set(
-        monkeypatch,
-        db_url="postgresql://ava_main:sek@10.0.0.9:6433/ava_main",
-        rec=_PG_REC,
+    _set_record(monkeypatch, _PG_REC)
+    reads: list[str] = []
+
+    def local_host() -> str:
+        reads.append("host")
+        return "owned-host"
+
+    def gateway_reader() -> str:
+        reads.append("gateway")
+        return gateway_url
+
+    url = f"postgresql://ava_main:sek@{host}:6433/ava_main"
+    resolver = ClusterDirectUrl(local_host, gateway_url_reader=gateway_reader)
+    assert reads == []
+    assert resolver(_config(url)) == url
+    assert reads == ["host", "gateway"]
+    lines = [record for record in loguru_records if "this home's record" in record["message"]]
+    assert [record["level"].name for record in lines] == (["INFO"] if logs else [])
+
+
+@pytest.mark.parametrize("host", ["localhost", "db.example"])
+def test_pooling_off_does_not_read_gateway_or_log(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]], host: str
+) -> None:
+    _set_record(monkeypatch, None)
+    url = f"postgresql://ava:dev@{host}:5432/ava"
+    assert (
+        direct_db_url(
+            _config(url, pooling=False),
+            gateway_url_reader=_unused_reader,
+            local_host=lambda: "owned-host",
+        )
+        == url
     )
-    got = direct_db_url(local_host=machine_identity.host)
-    assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
-    assert not any("direct_db_url" in r["message"] for r in loguru_records)
-
-
-def test_direct_db_url_split_runner_falls_back_with_an_info_line(
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records,
-    machine_identity: MachineIdentity,
-) -> None:
-    """The split-runner case: this home's record does not explain the URL's port
-    (the gateway's pooler port is a fact of the GATEWAY home's record). The URL is
-    returned as-is — runner boot must not break — and the expected degraded dial
-    is logged at INFO, never silent and never a warning (every start logs one;
-    2026-10-03 triage). The runner's URL names its own gateway
-    (AVA_GATEWAY_URL), which keeps this distinct from a remote/SaaS plane —
-    foreign but pooler-less, dialed silently (Task #1752)."""
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://10.0.0.9:18000")
-    _set(
-        monkeypatch,
-        db_url="postgresql://ava_main:sek@10.0.0.9:6433/ava_main",
-        rec=None,
-    )
-    got = direct_db_url(local_host=machine_identity.host)
-    assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
-    lines = [r for r in loguru_records if "this home's record" in r["message"]]
-    assert [r["level"].name for r in lines] == ["INFO"]  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_direct_db_url_unknown_port_stays_silent_when_pooling_off(
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records,
-) -> None:
-    """Pooling off: the one URL IS the direct Postgres URL by construction; an
-    unknown port (an operator stand-in) is genuinely direct — no warning."""
-    assert settings.data_plane.pgbouncer_enabled is False
-    _set(monkeypatch, db_url="postgresql://ava:dev@localhost:5432/ava", rec=None)
-    got = direct_db_url()
-    assert got == "postgresql://ava:dev@localhost:5432/ava"
     assert loguru_records == []
+
+
+def test_resolvers_read_their_own_live_gateway_values(loguru_records: list[dict[str, Any]]) -> None:
+    gateways = {"first": "http://db.example:8000", "second": "http://elsewhere:8000"}
+    first = ClusterDirectUrl(lambda: "owned-host", gateway_url_reader=lambda: gateways["first"])
+    second = ClusterDirectUrl(lambda: "owned-host", gateway_url_reader=lambda: gateways["second"])
+    config = _config("postgresql://ava:dev@db.example:6433/ava")
+    assert first(config) == config.db_url
+    assert len(loguru_records) == 1
+    assert second(config) == config.db_url
+    assert len(loguru_records) == 1
+    gateways["first"] = "http://elsewhere:8000"
+    gateways["second"] = "http://db.example:8000"
+    assert first(config) == config.db_url
+    assert len(loguru_records) == 1
+    assert second(config) == config.db_url
+    assert len(loguru_records) == 2
+
+
+def test_gateway_reader_failure_propagates() -> None:
+    failure = AttributeError("gateway domain missing")
+
+    def unavailable() -> str:
+        raise failure
+
+    with pytest.raises(AttributeError) as caught:
+        direct_db_url(
+            _config("postgresql://ava:dev@db.example:6433/ava"),
+            gateway_url_reader=unavailable,
+            local_host=lambda: "owned-host",
+        )
+    assert caught.value is failure

@@ -95,7 +95,6 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
     monkeypatch.setattr(_server, "init_gateway_process", logging_initialized)
     monkeypatch.setattr(ProcessDbGate, "raise_min_code_version", _raised)
     monkeypatch.setattr(settings.general, "machine_serve_gateway", serves_gateway)
-    monkeypatch.setattr(_server, "verify_transport_encryption", _ignore)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _ignore)
 
@@ -129,7 +128,6 @@ def _stub_process_entry(
     monkeypatch.setattr(_server, "init_gateway_process", _ignore)
     monkeypatch.setattr(ProcessDbGate, "raise_min_code_version", _ignore)
     monkeypatch.setattr(settings.general, "machine_serve_gateway", gateway)
-    monkeypatch.setattr(_server, "verify_transport_encryption", _ignore)
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _serve)
     return steps

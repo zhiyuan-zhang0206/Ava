@@ -583,7 +583,8 @@ def database(db_url: str, database_gate):
 
     # The test cluster is loopback, so the direct (admin-plane) dials tests make need no host reader.
     return Database.from_settings(
-        gate=database_gate, direct_url=ClusterDirectUrl(lambda: "127.0.0.1")
+        gate=database_gate,
+        direct_url=ClusterDirectUrl(lambda: "127.0.0.1", gateway_url_reader=lambda: ""),
     )
 
 

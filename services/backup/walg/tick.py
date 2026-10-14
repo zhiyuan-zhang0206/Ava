@@ -37,6 +37,7 @@ from pathlib import Path
 import psycopg
 
 from base.cluster.dataplane import pg_admin, walg_binary
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.db import Database
 from base.log import logger
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -169,6 +170,7 @@ def _drill(
     report: Report,
     now: Callable[[], datetime],
     *,
+    throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> bool:
@@ -180,6 +182,7 @@ def _drill(
         previous,
         report,
         now,
+        throwaway=throwaway,
         path_reader=path_reader,
         database_for_url=database_for_url,
     )
@@ -197,13 +200,20 @@ def _weekly_drill(
     report: Report,
     now: Callable[[], datetime],
     *,
+    throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> None:
     """The drill when one is due. Its failure is recorded and reported, never raised."""
     if drill.drill_due(state.read_state().drill, backups, now()):
         _drill(
-            target, backups, report, now, path_reader=path_reader, database_for_url=database_for_url
+            target,
+            backups,
+            report,
+            now,
+            path_reader=path_reader,
+            database_for_url=database_for_url,
+            throwaway=throwaway,
         )
 
 
@@ -244,6 +254,7 @@ def _run_steps(
     report: Report,
     now: Callable[[], datetime],
     *,
+    throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> str:
@@ -253,7 +264,13 @@ def _run_steps(
         before = _preflight(path_reader=path_reader)
         report(f"preflight: ok, {len(before)} backups listed")
         _weekly_drill(
-            target, before, report, now, path_reader=path_reader, database_for_url=database_for_url
+            target,
+            before,
+            report,
+            now,
+            path_reader=path_reader,
+            database_for_url=database_for_url,
+            throwaway=throwaway,
         )
         current = STEP_BACKUP
         after = _backup(target, before, report, now, path_reader=path_reader)
@@ -301,6 +318,7 @@ def _locked_tick(
     report: Report,
     now: Callable[[], datetime],
     *,
+    throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> int:
@@ -327,7 +345,12 @@ def _locked_tick(
     state.update_state(tick=TickRecord(started_at=started))
     try:
         summary = _run_steps(
-            target, report, now, path_reader=path_reader, database_for_url=database_for_url
+            target,
+            report,
+            now,
+            path_reader=path_reader,
+            database_for_url=database_for_url,
+            throwaway=throwaway,
         )
     except StepFailedError as failure:
         return _record_failure(started, failure, report, now)
@@ -343,6 +366,7 @@ def run_tick(
     report: Report,
     *,
     now: Callable[[], datetime] = _now,
+    throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> int:
@@ -354,7 +378,12 @@ def run_tick(
     try:
         with file_lock(state.lock_path(), timeout_s=0):
             return _locked_tick(
-                db, report, now, path_reader=path_reader, database_for_url=database_for_url
+                db,
+                report,
+                now,
+                path_reader=path_reader,
+                database_for_url=database_for_url,
+                throwaway=throwaway,
             )
     except LockTimeoutError:
         report("another WAL-G tick is still running; nothing to do")
@@ -365,6 +394,7 @@ def _locked_drill(
     report: Report,
     now: Callable[[], datetime],
     *,
+    throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> int:
@@ -384,7 +414,13 @@ def _locked_drill(
     return (
         0
         if _drill(
-            target, backups, report, now, path_reader=path_reader, database_for_url=database_for_url
+            target,
+            backups,
+            report,
+            now,
+            path_reader=path_reader,
+            database_for_url=database_for_url,
+            throwaway=throwaway,
         )
         else 1
     )
@@ -394,6 +430,7 @@ def run_drill_now(
     report: Report,
     *,
     now: Callable[[], datetime] = _now,
+    throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path_reader: Callable[[], Path | None],
 ) -> int:
@@ -408,7 +445,11 @@ def run_drill_now(
     try:
         with file_lock(state.lock_path(), timeout_s=0):
             return _locked_drill(
-                report, now, path_reader=path_reader, database_for_url=database_for_url
+                report,
+                now,
+                path_reader=path_reader,
+                database_for_url=database_for_url,
+                throwaway=throwaway,
             )
     except LockTimeoutError:
         report("failed: a WAL-G tick or drill is still running")

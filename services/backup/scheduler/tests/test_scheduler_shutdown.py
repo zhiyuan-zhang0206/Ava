@@ -25,7 +25,8 @@ import psutil
 import pytest
 
 from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
-from base.config import ConfigBoot, ensure_eager, settings
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.config import ConfigBoot, ensure_eager
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from services.backup.scheduler import daemon, worker
@@ -97,7 +98,9 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
 def _restore(root: Path, mode: str, postgres_base: Path) -> None:
     from base.cluster.dataplane.pg_tools import throwaway_postgres
 
-    with throwaway_postgres(base=postgres_base, foreground=True) as url:
+    with throwaway_postgres(
+        base=postgres_base, foreground=True, config=ThrowawayConfig(postgres_base)
+    ) as url:
         import psycopg
 
         with psycopg.connect(url) as conn:
@@ -117,9 +120,15 @@ def exercise_job(root: Path, mode: str, postgres_base: Path) -> None:
     from services.backup import restore_drill
 
     def restore(
-        *, database_for_url: Callable[[str], Database], foreground: bool, scratch_root: Path
+        *,
+        database_for_url: Callable[[str], Database],
+        foreground: bool,
+        scratch_root: Path,
+        throwaway: ThrowawayConfig,
     ) -> None:
         assert foreground
+        assert throwaway.override is not None
+        assert throwaway.override.is_absolute() and throwaway.override.samefile(postgres_base)
         (scratch_root / "backup.dump").write_bytes(b"PLAINTEXT")
         _restore(root, "stubborn" if mode == "restore-stubborn" else mode, postgres_base)
 
@@ -141,6 +150,11 @@ def _operation_harness(root: Path, mode: str, postgres_base: Path):
         timeout_s: float = 6 * 3600,
     ) -> CompletedOperation:
         assert module == "services.backup.scheduler.worker"
+        if request["kind"] == "restore":
+            raw_base = request["pg_throwaway_base"]
+            assert isinstance(raw_base, str)
+            captured = Path(raw_base)
+            assert captured.is_absolute() and captured.samefile(postgres_base)
         # Only the trusted worker entry changes. Production bootstrap, launch,
         # logs, process group and cancellation execute without private patches.
         return await run(
@@ -195,7 +209,6 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
         patch.object(daemon, "stop_health_server", AsyncMock()),
         patch.object(daemon, "is_due", return_value=True),
         patch.object(worker, "ava_home", return_value=root),
-        patch.object(settings.data_plane, "pg_throwaway_base", str(postgres_base)),
         patch.object(worker, "run_operation", _operation_harness(root, mode, postgres_base)),
         patch.object(daemon, "load_local_dump_restore_success", return_value=None),
         patch.object(daemon, "local_dump_restore_due", return_value=True),
@@ -207,17 +220,18 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
     ):
         if restore_mode:
             with patch.object(daemon, "backup_loop", loop):
-                _run_daemon()
+                _run_daemon(Path(os.path.relpath(postgres_base, root)))
         else:
-            _run_daemon()
+            _run_daemon(Path(os.path.relpath(postgres_base, root)))
     (root / "state.json").write_text(
         json.dumps({"running": state.running, "success": state.last_success})
     )
 
 
-def _run_daemon() -> None:
+def _run_daemon(postgres_base: Path) -> None:
     daemon.install_graceful_shutdown("backup-shutdown-test")
     config = ConfigBoot()
+    config.view.data_plane.pg_throwaway_base = str(postgres_base)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(
             daemon.run(
@@ -298,6 +312,7 @@ def _assert_sigterm_reaps_job_before_scheduler_exits(
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=True,
+        cwd=tmp_path,
     )
     try:
         _terminate_and_assert_reaped(tmp_path, process)
@@ -324,6 +339,8 @@ def test_killed_restore_uses_parent_owned_postgres_base(
     tmp_path: Path, postgres_base: Path
 ) -> None:
     _assert_sigterm_reaps_job_before_scheduler_exits(tmp_path, "restore-stubborn", postgres_base)
+    # The controller starts in tmp_path with a relative override. Its worker
+    # starts at the repository root, yet creation and parent cleanup agree.
     assert Path((tmp_path / "pgdata").read_text()).is_relative_to(postgres_base)
     # The killed worker bypassed its context manager. The sanitizer uses the
     # existing temporary-cluster owner lock and native shutdown to clean it.
@@ -335,10 +352,25 @@ async def test_restore_job_accepts_clean_foreground_postgres_exit(
 ) -> None:
     """A real foreground postmaster that stops cleanly lets the job succeed."""
     monkeypatch.setattr(worker, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(
-        worker, "run_operation", _operation_harness(tmp_path, "roundtrip", postgres_base)
-    )
-    await worker.run_job("restore", config=ConfigBoot())
+    config = ConfigBoot()
+    config.view.data_plane.pg_throwaway_base = str(postgres_base)
+    run = _operation_harness(tmp_path, "roundtrip", postgres_base)
+
+    async def start(
+        module: str,
+        request: Mapping[str, object],
+        *,
+        kind: worker.OperationKind,
+        env: dict[str, str],
+    ) -> CompletedOperation:
+        assert request["pg_throwaway_base"] == str(postgres_base)
+        # A live configuration edit after launch must not retarget parent cleanup
+        # or the child restore away from the captured request.
+        config.view.data_plane.pg_throwaway_base = str(tmp_path / "later-root")
+        return await run(module, request, kind=kind, env=env)
+
+    monkeypatch.setattr(worker, "run_operation", start)
+    await worker.run_job("restore", config=config)
     assert not _alive(int((tmp_path / "postgres").read_text()))
     controls = tmp_path / "backups" / "operations" / "restore-drill"
     assert [path.name for path in controls.iterdir()] == [".lock"]

@@ -11,8 +11,39 @@ from pathlib import Path
 import pytest
 
 from base.config import ConfigBoot
+from base.db import Database
 from services.backup.scheduler.operation import worker_process as workers
 from services.backup.scheduler.tests.operation_support import operation_kind, stub_worker, until
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ({"kind": "restore", "now": None}, ValueError),
+        ({"kind": "restore", "now": None, "pg_throwaway_base": 42}, TypeError),
+        ({"kind": "restore", "now": None, "pg_throwaway_base": []}, TypeError),
+    ],
+)
+def test_restore_worker_requires_the_captured_throwaway_base(
+    tmp_path: Path, payload: dict[str, object], error: type[Exception]
+) -> None:
+    from services.backup.scheduler import worker
+
+    def database() -> Database:
+        pytest.fail("an invalid request must fail before database access")
+
+    def database_for_url(_url: str) -> Database:
+        return database()
+
+    with pytest.raises(error):
+        worker.execute(
+            payload,
+            tmp_path,
+            config=ConfigBoot(),
+            database=database,
+            database_for_url=database_for_url,
+        )
+    assert not (tmp_path / "scratch").exists()
 
 
 async def test_zero_exit_valid_result_is_committed_and_staging_removed(

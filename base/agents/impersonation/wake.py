@@ -13,6 +13,7 @@ from base.agents.impersonation.status import (
     RELAY_HEARTBEAT_STALE_SECONDS,
 )
 from base.cluster import inbound_channel
+from base.config import settings
 from base.db import Database
 from base.events.live.announce import publish_agent_updated_sync, publish_impersonation_changed_sync
 from base.events.live.bus import EventBus
@@ -43,7 +44,7 @@ def publish_inbound_wake(db: Database, bus: EventBus, agent_id: int, payload: st
     # A wake for an impersonated agent whose relay heartbeat is stale must not
     # be silent: the inbound can sit unread in the inbox forever. Best-effort.
     relay_liveness_alert(db, agent_id)
-    channel = inbound_channel(agent_id)
+    channel = inbound_channel(agent_id, settings.data_plane.events_channel)  # ambient: B2
     try:
         r = bus.sync_redis()
         try:

@@ -5,13 +5,12 @@ import subprocess
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 
 from base import cluster
 from base.cluster.machine import MachineIdentity
-from base.config import settings
 from base.db.tests.fakes import patch_database
 from cli import start_identity
 from cli.commands.data_plane import cluster_instance as _ci
@@ -78,8 +77,6 @@ def plane(monkeypatch: pytest.MonkeyPatch, data_plane_config: DataPlaneConfig) -
     monkeypatch.setattr(bringup, "prove_generation_logins", record("prove-logins"))
     monkeypatch.setattr(bringup, "adopt_gateway_login", record("adopt"))
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    # `cluster.db_identity()` (base.cluster) still names the database from the global settings.
-    monkeypatch.setattr(settings.data_plane, "db_url", recorded.config.db_url)
     monkeypatch.setattr(cluster, "ensure_pgvector_extension", record("extension"))
 
     def fake_ledger(_home: object) -> _Ledger:
@@ -242,7 +239,13 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
     from services.derived.memory_indexer.embeddings import factory
 
     calls: list[str] = []
-    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: _Authority(calls))
+
+    def owner_authority(db_url: str, *, remote_plane: bool) -> _Authority:
+        assert db_url == data_plane_config.db_url
+        assert not remote_plane
+        return _Authority(calls)
+
+    monkeypatch.setattr(pg_admin, "local_owner_authority", owner_authority)
 
     def prepare(conn: str, dim: int) -> None:
         calls.append(f"prepare:{conn}:{dim}")
@@ -296,7 +299,11 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
         memory_search_backend="pgvector",
     )
     patch_database(monkeypatch, connect=provider)
-    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: pytest.fail("no local admin"))
+
+    def refuse_local_owner(_db_url: str, *, remote_plane: bool) -> NoReturn:
+        pytest.fail(f"remote plane must not resolve local authority (remote={remote_plane})")
+
+    monkeypatch.setattr(pg_admin, "local_owner_authority", refuse_local_owner)
     monkeypatch.setattr(pgvector, "prepare_table", prepare)
 
     def descriptor(name: str) -> SimpleNamespace:

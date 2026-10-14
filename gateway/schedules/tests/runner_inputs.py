@@ -35,7 +35,11 @@ def run_schedule(schedule_id: int, revision: int | None = None, *, machine: Mach
     image = process_context.loaded_code_image()
     version = CodeVersion(image)
     gate = ProcessDbGate(process=process_name(), version=version.get)
-    database = partial(Database.from_settings, gate=gate, direct_url=ClusterDirectUrl(machine.host))
+    database = partial(
+        Database.from_settings,
+        gate=gate,
+        direct_url=ClusterDirectUrl(machine.host, gateway_url_reader=lambda: ""),
+    )
     with closing(process_clients(database=database, machine=machine)) as clients:
         return engine.run(
             schedule_id,

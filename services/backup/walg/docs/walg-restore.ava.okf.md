@@ -37,7 +37,9 @@ one code path with two callers.
   logical restore drill's check: required tables, counts, a real agent conversation read back
   through the production checkpoint reader), then `pg_current_wal_lsn()` must be at or beyond
   the target.
-- **Scratch space**: `select_throwaway_base(required)`, where `required` is the backup's
+- **Scratch space**: `select_throwaway_base(required, override=throwaway.override)`, where
+  the CLI root supplies one frozen `ThrowawayConfig` through the tick and drill, and
+  `required` is the backup's
   uncompressed size plus the WAL since it started plus `max_wal_size`: no multiplier. The copy
   is removed after native scratch-Postgres shutdown; a failed stop preserves
   its data directory and reports the error. No process-family disappearance proof is made.

@@ -21,8 +21,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.agents.history import checkpoint as checkpoint_reader
-from base.cluster.dataplane.pg_throwaway_base import format_bytes, select_throwaway_base
+from base.cluster.dataplane.pg_throwaway_base import (
+    ThrowawayConfig,
+    configured_base,
+    format_bytes,
+    select_throwaway_base,
+)
 from base.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
+from base.config import ConfigBoot
 from base.db import Database, connect_url
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
@@ -190,6 +196,7 @@ def run_drill(
     artifact: Path | None = None,
     *,
     database_for_url: Callable[[str], Database],
+    throwaway: ThrowawayConfig,
     foreground: bool = False,
     scratch_root: Path | None = None,
 ) -> tuple[RestoreReport, float]:
@@ -208,12 +215,14 @@ def run_drill(
         raw_dump = scratch / "backup.dump"
         backup.decrypt_artifact(artifact, raw_dump)
         required = scratch_space_requirement(raw_dump)
-        base = select_throwaway_base(required)
+        base = select_throwaway_base(required, override=throwaway.override)
         logger.info(
             f"restore drill: scratch cluster on {base} "
             f"(estimate {format_bytes(required)} for artifact {artifact.name})"
         )
-        with throwaway_postgres(base=base, foreground=foreground) as scratch_db_url:
+        with throwaway_postgres(
+            config=throwaway, base=base, foreground=foreground
+        ) as scratch_db_url:
             _ensure_restore_roles(scratch_db_url)
             _restore(raw_dump, scratch_db_url, base=base)
             report = verify_restored_database(scratch_db_url, database_for_url=database_for_url)
@@ -224,6 +233,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Restore and verify an encrypted Ava DB backup.")
     parser.add_argument("artifact", nargs="?", type=Path, help="managed .dump.enc artifact")
     args = parser.parse_args(argv)
+    config = ConfigBoot()
+    config.read_process_environment()
+    throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
@@ -233,6 +245,7 @@ def main(argv: list[str] | None = None) -> None:
 
     report, elapsed = run_drill(
         args.artifact,
+        throwaway=throwaway,
         database_for_url=database_for_url,
     )
     print(  # noqa: T201 — the operator command's result line, read on stdout

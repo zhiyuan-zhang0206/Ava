@@ -12,7 +12,9 @@ _OTHER = "postgresql://ava_g1_gateway:pw@db.example:5432/ava"
 
 def _factory() -> OperatorDatabaseFactory:
     return operator_database_factory(
-        local_host=lambda: "localhost", open_database=open_operator_database
+        local_host=lambda: "localhost",
+        open_database=open_operator_database,
+        gateway_url_reader=lambda: "",
     )
 
 

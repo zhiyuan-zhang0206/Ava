@@ -17,6 +17,7 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.cluster.authority import ensure_groups
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -165,7 +166,9 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
         bucket_reader=lambda: settings.services.backup_offsite_bucket,
         credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
-    report, elapsed = restore_drill.run_drill(artifact, database_for_url=_database_factory())
+    report, elapsed = restore_drill.run_drill(
+        artifact, database_for_url=_database_factory(), throwaway=ThrowawayConfig(None)
+    )
 
     assert report.agents == 1
     assert report.sample_agent_id == agent_id
@@ -226,6 +229,7 @@ def test_standalone_entry_captures_once_and_retains_gate_for_scratch_reads(
         artifact: Path | None,
         *,
         database_for_url: Callable[[str], Database],
+        throwaway: ThrowawayConfig,
     ) -> tuple[Any, float]:
         create.assert_not_called()
         database_for_url("postgresql://scratch.invalid/one")

@@ -40,6 +40,7 @@ from base.cluster.dataplane.pg_stall_watchdog import (
     fixture_log_artifact_dir,
     stall_guard,
 )
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.log import logger
 from base.native_process.child_env import daemon_process_env
 from base.native_process.os_platform import is_macos
@@ -246,14 +247,14 @@ OWNER_LOCK_NAME = "owner.lock"
 CLAIM_LOCK_NAME = "owner.lock.claim"
 
 
-def _throwaway_locks() -> list[Path]:
+def _throwaway_locks(config: ThrowawayConfig) -> list[Path]:
     """Every owner lock under any throwaway root
     (`base.cluster.dataplane.pg_throwaway_base.throwaway_roots`), sorted for a deterministic reap
     order. The single enumeration the sweep and the port registry share, so both
     see the same set of instance roots."""
     return sorted(
         lock
-        for root in _throwaway_base.throwaway_roots()
+        for root in _throwaway_base.throwaway_roots(config.override)
         for lock in root.glob(f"{THROWAWAY_PREFIX}*/{OWNER_LOCK_NAME}")
     )
 
@@ -295,7 +296,7 @@ def unregister_throwaway(registration: Registration) -> None:
     registration.lock.unlink(missing_ok=True)
 
 
-def resolved_throwaway_dir(instance_dir: Path) -> Path | None:
+def resolved_throwaway_dir(instance_dir: Path, *, config: ThrowawayConfig) -> Path | None:
     """`instance_dir` resolved, when it really is a throwaway instance dir this
     module created: `THROWAWAY_PREFIX`-named, a real directory that resolves to a
     direct child of a throwaway root under that same name, holding a `data` entry
@@ -306,7 +307,7 @@ def resolved_throwaway_dir(instance_dir: Path) -> Path | None:
     if not instance_dir.name.startswith(THROWAWAY_PREFIX) or not instance_dir.is_dir():
         return None
     resolved = instance_dir.resolve()
-    roots = {root.resolve() for root in _throwaway_base.throwaway_roots()}
+    roots = {root.resolve() for root in _throwaway_base.throwaway_roots(config.override)}
     if resolved.parent not in roots or resolved.name != instance_dir.name:
         return None
     if (resolved / "data").is_symlink():
@@ -348,12 +349,12 @@ def _owner_detail(fd: int) -> str:
     return ""
 
 
-def _reap_locked(lock: Path, fd: int) -> int:
+def _reap_locked(lock: Path, fd: int, *, config: ThrowawayConfig) -> int:
     """Reap the instance holding `lock` — its flock is held here, so its owner is
     provably gone. Returns 1 if an instance was removed."""
     if os.fstat(fd).st_nlink == 0:
         return 0  # a racing sweeper already reaped it between our open and our lock
-    instance_dir = resolved_throwaway_dir(lock.parent)
+    instance_dir = resolved_throwaway_dir(lock.parent, config=config)
     if instance_dir is None:
         # Nothing safely reapable: the lock sits somewhere that is not one of this
         # module's instance dirs. Drop the stray lock, touch nothing else.
@@ -372,7 +373,7 @@ def _reap_locked(lock: Path, fd: int) -> int:
     return 1
 
 
-def sweep_orphaned_throwaway_clusters() -> int:
+def sweep_orphaned_throwaway_clusters(*, config: ThrowawayConfig) -> int:
     """Stop and delete every throwaway cluster whose owning process is gone, and
     return how many were reaped. Called at the top of `throwaway_postgres`, so any
     run that starts one first bounds the leak from every previous killed run.
@@ -385,7 +386,7 @@ def sweep_orphaned_throwaway_clusters() -> int:
     import fcntl
 
     reaped = 0
-    for lock in _throwaway_locks():
+    for lock in _throwaway_locks(config):
         try:
             fd = os.open(lock, os.O_RDWR)
         except OSError:
@@ -395,7 +396,7 @@ def sweep_orphaned_throwaway_clusters() -> int:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 continue  # a live process still owns this instance — leave it alone
-            reaped += _reap_locked(lock, fd)
+            reaped += _reap_locked(lock, fd, config=config)
         finally:
             os.close(fd)
     return reaped
@@ -427,7 +428,7 @@ def sweep_orphaned_throwaway_clusters() -> int:
 # sweep globs to trip on, and the kernel drops it on process death like any flock.
 
 
-def _live_throwaway_ports() -> set[int]:
+def _live_throwaway_ports(config: ThrowawayConfig) -> set[int]:
     """Ports reserved by LIVE throwaway clusters — owner flock still held. Dead
     owners' entries are ignored: either the orphaned postmaster still holds the
     port (the OS probe refuses it anyway) or it is truly free. Only this module's
@@ -436,7 +437,7 @@ def _live_throwaway_ports() -> set[int]:
     import fcntl
 
     ports: set[int] = set()
-    for lock in _throwaway_locks():
+    for lock in _throwaway_locks(config):
         try:
             fd = os.open(lock, os.O_RDWR)
         except OSError:
@@ -464,7 +465,7 @@ def _port_lock_root() -> Path:
     return _throwaway_base.default_base()
 
 
-def allocate_port(instance_dir: Path) -> tuple[int, Registration]:
+def allocate_port(instance_dir: Path, *, config: ThrowawayConfig) -> tuple[int, Registration]:
     """Reserve a localhost TCP port no LIVE throwaway cluster already holds, and
     register it under `instance_dir`'s owner lock. Probe, registry check, and
     registration all happen under one host-wide flock, so the reservation is
@@ -477,7 +478,7 @@ def allocate_port(instance_dir: Path) -> tuple[int, Registration]:
         try:
             while True:
                 port = free_port()
-                if port not in _live_throwaway_ports():
+                if port not in _live_throwaway_ports(config):
                     break
             return port, register_throwaway(instance_dir, port)
         finally:
@@ -591,6 +592,7 @@ def teardown_throwaway(
 def throwaway_postgres(
     schema_sql: str | None = None,
     *,
+    config: ThrowawayConfig,
     base: Path | None = None,
     foreground: bool = False,
     watch_stalls: bool = True,
@@ -614,11 +616,12 @@ def throwaway_postgres(
             run too. If None, yields a bare `ava_citest` database (the caller applies
             its own DDL, e.g. the migration smoke replaying migrations/* onto a
             blank DB).
-        base: where the instance dir is created. None — every existing caller —
+        config: the root-owned override used for creation, sweeping and port registration.
+        base: where the instance dir is created. None
             resolves through `base.cluster.dataplane.pg_throwaway_base.select_throwaway_base` (the
             configured override, else the platform default); a caller that knows its
             data footprint (the restore drill) passes a base from
-            `select_throwaway_base(required_bytes)`, so the base it reports is the
+            `select_throwaway_base(required_bytes, override=config.override)`, so the base it reports is the
             base used here.
         foreground: keep Postgres as a direct child in the caller's process group.
             Restore workers use native pg_ctl shutdown through their direct child
@@ -629,7 +632,7 @@ def throwaway_postgres(
     """
     import psycopg
 
-    sweep_orphaned_throwaway_clusters()
+    sweep_orphaned_throwaway_clusters(config=config)
     tmp = data = Path()
     port = 0
     process: subprocess.Popen[bytes] | None = None
@@ -638,7 +641,8 @@ def throwaway_postgres(
         attempt += 1
         tmp = Path(
             tempfile.mkdtemp(
-                prefix=THROWAWAY_PREFIX, dir=base or _throwaway_base.select_throwaway_base()
+                prefix=THROWAWAY_PREFIX,
+                dir=base or _throwaway_base.select_throwaway_base(override=config.override),
             )
         )
         data = tmp / "data"
@@ -646,7 +650,7 @@ def throwaway_postgres(
         # Registered BEFORE initdb (inside `allocate_port`): a kill in the window
         # between here and a running postmaster must still leave a record, or the
         # instance dir leaks unswept.
-        port, registration = allocate_port(tmp)
+        port, registration = allocate_port(tmp, config=config)
         try:
             try:
                 subprocess.run(  # noqa: S603 — argv is the resolved initdb path + static flags

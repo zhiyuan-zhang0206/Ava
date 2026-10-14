@@ -32,6 +32,8 @@ from pathlib import Path
 import psycopg
 import redis
 
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+
 _SCHEMA_SQL = Path(__file__).resolve().parents[3] / "db" / "schema.sql"
 
 # tmpfs base for the throwaway redis data dir: /dev/shm on Linux (RAM), else the
@@ -81,7 +83,9 @@ def postgres(*, machine_name: Callable[[], str], watch_stalls: bool = True) -> G
     from base.cluster.dataplane.pg_tools import throwaway_postgres
     from base.deploy.schema.migrations import apply_pending_migrations
 
-    with throwaway_postgres(schema_sql=_SCHEMA_SQL.read_text(), watch_stalls=watch_stalls) as url:
+    with throwaway_postgres(
+        schema_sql=_SCHEMA_SQL.read_text(), watch_stalls=watch_stalls, config=ThrowawayConfig(None)
+    ) as url:
         # Non-autocommit conn: apply_pending_migrations manages its own
         # per-migration transactions + advisory lock.
         with psycopg.connect(url) as conn:

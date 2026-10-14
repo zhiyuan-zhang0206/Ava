@@ -33,7 +33,7 @@ async def _publish_inbound(agent_id: int, inbound_id: int = 42) -> None:
 
     r = EventBus.from_settings().sync_redis()
     try:
-        r.publish(inbound_channel(agent_id), str(inbound_id))  # pyright: ignore[reportUnknownMemberType]
+        r.publish(inbound_channel(agent_id, settings.data_plane.events_channel), str(inbound_id))  # pyright: ignore[reportUnknownMemberType]
     finally:
         r.close()
 
@@ -54,7 +54,7 @@ async def _until(condition: Callable[[], bool], what: str, timeout: float = 10.0
 
 async def _subscribed(agent_id: int) -> None:
     """Wait until Redis itself reports a subscriber on the agent's inbound channel."""
-    channel = inbound_channel(agent_id)
+    channel = inbound_channel(agent_id, settings.data_plane.events_channel)
     probe = EventBus.from_settings().sync_redis()
     try:
         await _until(
@@ -146,10 +146,12 @@ class TestRedisInboundListener:
         agent_id = 9993
         listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
         try:
-            expected = inbound_channel(agent_id)
+            expected = inbound_channel(agent_id, settings.data_plane.events_channel)
             assert listener._channel == expected
             assert expected.endswith(f":inbound:{agent_id}")
-            assert expected.startswith(f"{redis_channel_prefix()}:")
+            assert expected.startswith(
+                f"{redis_channel_prefix(settings.data_plane.events_channel)}:"
+            )
         finally:
             await listener.close()
 
@@ -445,15 +447,13 @@ class TestWakeHealth:
 class TestInboundChannelPrefix:
     """`inbound_channel` maps cluster prefix → per-agent wake channel."""
 
-    def test_prefix_derivation_main_and_dev(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_prefix_derivation_main_and_dev(self) -> None:
         # main cluster: bare `ava` prefix (the historical hardcoded shape)
-        monkeypatch.setattr(settings.data_plane, "events_channel", "ava:events")
-        assert redis_channel_prefix() == "ava"
-        assert inbound_channel(7) == "ava:inbound:7"
+        assert redis_channel_prefix("ava:events") == "ava"
+        assert inbound_channel(7, "ava:events") == "ava:inbound:7"
         # dev cluster: `ava:<cluster>` prefix — the case the hardcode broke
-        monkeypatch.setattr(settings.data_plane, "events_channel", "ava:mycluster:events")
-        assert redis_channel_prefix() == "ava:mycluster"
-        assert inbound_channel(7) == "ava:mycluster:inbound:7"
+        assert redis_channel_prefix("ava:mycluster:events") == "ava:mycluster"
+        assert inbound_channel(7, "ava:mycluster:events") == "ava:mycluster:inbound:7"
 
 
 def _scoped_user_url(user: str) -> str:
@@ -514,7 +514,7 @@ class TestAclScopedChannel:
             await denied.aclose()
             # The cluster-prefixed channel is inside the grant → no NOPERM.
             allowed = client.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
-            await allowed.subscribe(inbound_channel(5))
+            await allowed.subscribe(inbound_channel(5, settings.data_plane.events_channel))
             assert await allowed.get_message(timeout=1.0) is None  # timeout, not error
             await allowed.aclose()
         finally:

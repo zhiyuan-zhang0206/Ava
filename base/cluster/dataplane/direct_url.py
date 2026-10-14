@@ -1,16 +1,16 @@
 """The admin-plane Postgres URL: this cluster's access URL never routed through PgBouncer.
 
-`base.db` dials a direct (unpooled) connection from a resolver its composition root
-injects (`Database(..., direct_url=ClusterDirectUrl(machine.host))`), because the
-resolution reads this home's cluster record, which sits above the database layer.
+`base.db` dials a direct (unpooled) connection from a `ClusterDirectUrl` resolver its
+composition root injects with explicit host and gateway URL readers. Resolution reads
+this home's cluster record, which sits above the database layer.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from base.cluster.record import get_record
-from base.db.config import DbConfig, db_config_from_settings
+from base.db.config import DbConfig
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_port
@@ -19,16 +19,22 @@ from base.log import logger
 
 @dataclass(frozen=True)
 class ClusterDirectUrl:
-    """The resolver a composition root hands to `Database`: `direct_db_url` bound to its host."""
+    """The resolver a composition root binds to its lazy host and gateway URL readers."""
 
     local_host: Callable[[], str]
+    gateway_url_reader: Callable[[], str] = field(kw_only=True, repr=False)
 
     def __call__(self, config: DbConfig) -> str:
-        return direct_db_url(config, local_host=self.local_host)
+        return direct_db_url(
+            config, gateway_url_reader=self.gateway_url_reader, local_host=self.local_host
+        )
 
 
 def direct_db_url(
-    config: DbConfig | None = None, *, local_host: Callable[[], str] | None = None
+    config: DbConfig,
+    *,
+    gateway_url_reader: Callable[[], str],
+    local_host: Callable[[], str] | None = None,
 ) -> str:
     """The admin-plane Postgres URL: this cluster's `AVA_DB_URL` never routed
     through PgBouncer.
@@ -48,7 +54,7 @@ def direct_db_url(
     only, and only when the URL names this box. A home knows no other cluster, so
     a unit whose URL names another home's pooler (a split agent-runner on this or
     another box) cannot be resolved here. In that case the URL is returned as-is
-    with a WARNING:
+    with an INFO line:
     the "direct" dial silently routes through the gateway's pooler (the
     migration authority model keeps a runner from mutating the schema in
     practice, but the exemption itself is unavailable and must not be silent).
@@ -57,8 +63,7 @@ def direct_db_url(
     matches it byte-for-byte), and a home with no record (no gateway capability)
     keeps `AVA_DB_URL` as-is rather than guessing.
     """
-    cfg = config or db_config_from_settings()
-    url = cfg.db_url
+    url = config.db_url
     if url == PLACEHOLDER_DB_URL:
         return url
     try:
@@ -86,27 +91,18 @@ def direct_db_url(
     # This home's record does not explain the URL's port: a local operator
     # stand-in, or a split runner naming the gateway's pooler. A remote/SaaS plane (Task #1752)
     # is direct by definition — no local pooler exists — so it dials silently.
-    if cfg.pgbouncer_enabled and (local or host == _gateway_url_host()):
+    if config.pgbouncer_enabled and (local or host == _gateway_url_host(gateway_url_reader())):
         _log_pooled_fallback(host, port)
     return url
 
 
-def _gateway_url_host() -> str:
+def _gateway_url_host(gateway_url: str) -> str:
     """The host this process dials as its gateway (`AVA_GATEWAY_URL`), lowercased and
-    unbracketed; "" when the gateway domain is not constructed in this process's profile (or
-    unset). It tells a split agent-runner's URL, which names the GATEWAY's pooler (a foreign
-    host whose direct-exemption warning is meaningful), apart from a remote/SaaS plane URL,
-    which is direct by definition and must dial silently (Task #1752).
-
-    Imported at call time so importing this module (every composition root does) does not
-    pull the eager config chain; resolving a direct dial has loaded it by then anyway."""
-    from base.config import settings
-
-    try:
-        url = settings.gateway.gateway_url
-    except AttributeError:
-        return ""
-    return (urlsplit(url).hostname or "").lower().removeprefix("[").removesuffix("]")
+    unbracketed; "" when its explicit URL is empty. It tells a split agent-runner's URL,
+    which names the gateway's pooler (a foreign host whose fallback log is meaningful),
+    apart from a remote/SaaS plane URL,
+    which is direct by definition and must dial silently (Task #1752)."""
+    return (urlsplit(gateway_url).hostname or "").lower().removeprefix("[").removesuffix("]")
 
 
 def _from_record(url: str, port: int) -> str | None:

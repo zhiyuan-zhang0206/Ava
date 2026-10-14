@@ -325,7 +325,13 @@ def test_the_admin_dial_is_custody_checked_and_bounded(
         owner="owner",
         data_dir=sandbox.home / "pg",
     )
-    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
+
+    def owner_authority(db_url: str, *, remote_plane: bool) -> pg_admin.OwnerAuthority:
+        assert db_url == settings.data_plane.db_url
+        assert not remote_plane
+        return authority
+
+    monkeypatch.setattr(pg_admin, "local_owner_authority", owner_authority)
     monkeypatch.setattr(pg_admin, "connect", connect)
 
     with probe.admin_connection():

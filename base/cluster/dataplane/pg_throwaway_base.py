@@ -26,16 +26,16 @@ not a size guarantee (the restore drill's `_SCRATCH_SPACE_FACTOR`): on
 did not — the same death mid-restore — so a capacity-declaring caller now takes
 the durable base outright instead of betting the estimate on a RAM-sized one.
 
-The override channel is the host-scoped `AVA_PG_THROWAWAY_BASE` settings field
-(`settings.data_plane.pg_throwaway_base`), imported only when a base is selected:
-this module is loaded by minimal contexts (test fixtures, smokes) that must not
-pull the Settings tree any earlier.
+The root parses the host-scoped `AVA_PG_THROWAWAY_BASE` value once and passes
+`ThrowawayConfig` through the whole cluster lifecycle. This module never reads
+Settings; minimal contexts (test fixtures, smokes) supply their own explicit value.
 """
 
 from __future__ import annotations
 
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.log import logger
@@ -62,14 +62,16 @@ def disk_fallback_base() -> Path:
     return Path(tempfile.gettempdir())
 
 
-def configured_base() -> Path | None:
-    """The operator's explicit throwaway base — `settings.data_plane.pg_throwaway_base`
-    (`AVA_PG_THROWAWAY_BASE`); None when unset. Imported lazily: this module is
-    loaded by minimal contexts (test fixtures, smokes) and must not pull the
-    Settings tree until a base is actually selected."""
-    from base.config import settings
+@dataclass(frozen=True)
+class ThrowawayConfig:
+    """One lifecycle's configured root, shared by creation, sweep and port registration."""
 
-    raw = settings.data_plane.pg_throwaway_base.strip()
+    override: Path | None
+
+
+def configured_base(raw: str) -> Path | None:
+    """Parse the root's explicit `AVA_PG_THROWAWAY_BASE` value; blank means no override."""
+    raw = raw.strip()
     return Path(raw) if raw else None
 
 
@@ -91,7 +93,7 @@ class InsufficientThrowawaySpaceError(RuntimeError):
     """No candidate throwaway base offers the free space the caller requires."""
 
 
-def throwaway_roots() -> tuple[Path, ...]:
+def throwaway_roots(override: Path | None) -> tuple[Path, ...]:
     """Every directory a throwaway instance dir may exist under: the configured
     override (when set), the platform default `throwaway_postgres` hands to
     `mkdtemp`, and the disk fallback the restore path demotes to — deduped, order
@@ -101,13 +103,13 @@ def throwaway_roots() -> tuple[Path, ...]:
     does not, which is exactly why the owner-lock sweep — not the OS — is the
     durable reaper."""
     roots: list[Path] = []
-    for root in (configured_base(), default_base(), disk_fallback_base()):
+    for root in (override, default_base(), disk_fallback_base()):
         if root is not None and root not in roots:
             roots.append(root)
     return tuple(roots)
 
 
-def select_throwaway_base(required_bytes: int | None = None) -> Path:
+def select_throwaway_base(required_bytes: int | None = None, *, override: Path | None) -> Path:
     """Pick the base directory for a throwaway cluster's data dir.
 
     Order: the configured override (`AVA_PG_THROWAWAY_BASE`) when set — used as-is,
@@ -134,7 +136,6 @@ def select_throwaway_base(required_bytes: int | None = None) -> Path:
             free space instead of dying mid-restore when the data outgrows its
             base (2026-09-14, 2026-09-19, 2026-10-05).
     """
-    override = configured_base()
     if override is not None:
         if not override.is_dir():
             raise RuntimeError(

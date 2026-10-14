@@ -318,7 +318,12 @@ def _prepare_by_authority(
         database_factory=operator_database, machine_name=command_runtime.machine.name
     )
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=_data_dir())
-    prepare_memory_vectors(config, database_factory=operator_database)
+    prepare_memory_vectors(
+        dataclasses.replace(
+            config, db_url=f"postgresql://{identity}@127.0.0.1:{pg_port}/{identity}"
+        ),
+        database_factory=operator_database,
+    )
     _grant_groups(pg_port, identity)
 
 
@@ -413,7 +418,7 @@ def test_owner_without_login_keeps_every_admin_path(
         command_runtime=command_runtime,
     )
 
-    authority = local_owner_authority()
+    authority = local_owner_authority(settings.data_plane.db_url, remote_plane=False)
     assert authority == OwnerAuthority(
         admin_url=admin, database=identity, owner=identity, data_dir=_data_dir()
     )
@@ -505,11 +510,9 @@ def test_local_owner_authority_reads_record_and_url_as_data(
     monkeypatch.setattr(pg_admin, "get_record", _record)
     # A delivered generation login replaces the URL's username; the owner is the
     # database's same-named identity.
-    monkeypatch.setattr(
-        settings.data_plane, "db_url", "postgresql://ava_g2_gateway:pw@127.0.0.1:6999/ava_db"
+    authority = local_owner_authority(
+        "postgresql://ava_g2_gateway:pw@127.0.0.1:6999/ava_db", remote_plane=False
     )
-
-    authority = local_owner_authority()
 
     assert (authority.database, authority.owner) == ("ava_db", "ava_db")
     assert authority.data_dir == home / "pg"
@@ -517,7 +520,6 @@ def test_local_owner_authority_reads_record_and_url_as_data(
     assert "pw" not in authority.conninfo
 
 
-def test_remote_plane_has_no_local_owner_authority(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
+def test_remote_plane_has_no_local_owner_authority() -> None:
     with pytest.raises(RuntimeError, match="remote-managed"):
-        local_owner_authority()
+        local_owner_authority("postgresql://owner@db.example/ava", remote_plane=True)
