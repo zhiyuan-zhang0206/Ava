@@ -37,7 +37,6 @@ exports = ["fixtures"]
 "test_attachment_transport.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 6
 "test_security.py#assignment ava.state" = 2
 "test_security.py#assignment ava.state_update" = 2
-"test_security.py#monkeypatch.setattr ava.security.logger.warning" = 1
 "test_security.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 1
 "test_self_evolution_evaluate.py#monkeypatch.setattr ava.agents.spawn" = 1
 "test_self_machine_spec.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1

@@ -30,7 +30,6 @@
 "test_termination_message.py#monkeypatch.setattr ops.lifecycle.kill_agent_shells" = 2
 "test_termination_message.py#monkeypatch.setattr ops.lifecycle.termination.insert_pending_termination_message" = 1
 "test_termination_message.py#monkeypatch.setattr ops.lifecycle.termination.insert_termination_pair" = 3
-"test_termination_message.py#monkeypatch.setattr ops.lifecycle.termination.telemetry.emit_prepared" = 1
 "test_termination_recovery_wake.py#monkeypatch.setattr ops.agents.wake.publish_inbound_wake" = 1
 "test_termination_recovery_wake.py#monkeypatch.setattr ops.lifecycle.termination.record_audit" = 1
 

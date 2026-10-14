@@ -14,5 +14,4 @@ exports = ["fakes.py"]
 "test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.chunk_threshold" = 1
 "test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.enqueue_chunk" = 10
 "test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.newest_checkpoint_ts" = 1
-"test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.telemetry.emit" = 3
 "test_understanding_chunks.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 5

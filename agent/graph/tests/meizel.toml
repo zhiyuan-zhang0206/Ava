@@ -18,7 +18,6 @@ exports = ["cancel_fixture.py", "test_llm_helpers.py"]
 "test_build_with_extensions.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_build_with_extensions.py#monkeypatch.setattr base.paths.plugins_dir" = 1
 "test_build_with_extensions.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 2
-"test_build_with_extensions.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_callbacks.py#monkeypatch.setattr agent.graph._callbacks.time" = 1
 "test_claim_attach_drain.py#monkeypatch.setattr agent.graph.claim.node.claim_inbound_batch" = 2
 "test_exec_timeout_note.py#monkeypatch.setattr base.config.settings.sandbox.exec_timeout_seconds" = 1

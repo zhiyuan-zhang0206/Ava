@@ -44,6 +44,20 @@ def test_clear_forgets_what_was_emitted_so_far(emitted_events: EmittedEvents) ->
     assert emitted_events.names() == ["understanding_group_failed"]
 
 
+def test_an_event_emitted_through_the_exposed_producer_lands_in_the_capture(
+    emitted_events: EmittedEvents,
+) -> None:
+    """Code that is handed `producer=` instead of reading the process pipeline writes to the same
+    list: the one capture serves both routes."""
+    telemetry.emit(
+        "telemetry",
+        "understanding_chunk_failed",
+        attributes={"n": 1},
+        producer=emitted_events.producer,
+    )
+    assert emitted_events.attributes("understanding_chunk_failed") == [{"n": 1}]
+
+
 def test_the_previous_pipeline_binding_is_put_back() -> None:
     before = process_state["pipeline"]
     with capturing_events() as capture:

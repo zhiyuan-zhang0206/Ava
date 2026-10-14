@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -12,19 +12,18 @@ import ava
 from ava.sdk_surface import install, metering, process_context
 from ava.shell.coding_tools._common import owner_terminated
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
-from base.agents.sdk import telemetry as sdk_telemetry
 from base.agents.sdk.tally import SdkCallTally
 from base.api_contracts.agent_contract import AgentStatus
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkMember
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 
-def test_real_shell_owner_probe_counts_its_public_fanout(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-
-    def emit(fn: str, *_args: Any, **_kwargs: Any) -> None:
-        calls.append(fn)
-
+def test_real_shell_owner_probe_counts_its_public_fanout(
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+) -> None:
     def terminated(_agent_id: int) -> AgentStatus:
         return AgentStatus.TERMINATED
 
@@ -32,7 +31,6 @@ def test_real_shell_owner_probe_counts_its_public_fanout(monkeypatch: pytest.Mon
         return call_policy.SamplingPolicy()
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-    monkeypatch.setattr(sdk_telemetry, "emit", emit)
     sampling = call_policy.SamplingPolicyOwner()
     monkeypatch.setattr(
         ava.agents,
@@ -52,7 +50,13 @@ def test_real_shell_owner_probe_counts_its_public_fanout(monkeypatch: pytest.Mon
     install.install(registry, sampling=sampling)
     previous = getattr(ava, "context", None)
     tally = SdkCallTally()
-    process_context.bind_context(replace(previous or AvaContext(), sdk_calls=tally))
+    process_context.bind_context(
+        replace(
+            previous or AvaContext(),
+            sdk_calls=tally,
+            clients=ClientSet(pipeline_factory=emitted_events.producer),
+        )
+    )
     try:
         assert cast(Callable[[int], bool], ava.self.owner_probe_test)(41)
     finally:
@@ -61,4 +65,7 @@ def test_real_shell_owner_probe_counts_its_public_fanout(monkeypatch: pytest.Mon
         else:
             process_context.bind_context(previous)
     assert tally.snapshot() == {"agents.get_status": 1, "self.owner_probe_test": 1}
-    assert calls == ["agents.get_status", "self.owner_probe_test"]
+    assert [event.attributes["fn"] for event in emitted_events] == [
+        "agents.get_status",
+        "self.owner_probe_test",
+    ]

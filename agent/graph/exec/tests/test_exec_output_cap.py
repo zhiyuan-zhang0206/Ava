@@ -27,6 +27,7 @@ from agent.graph.exec.tests.output_inputs import CropConfig
 from ava.tests.fixtures.pin_agent import exec_context, pin_agent
 from base.clock import Clock
 from base.db import Database
+from base.log.tests.log_records import LogRecords
 
 # ---------------------------------------------------------------------------
 # The accumulator: head + rolling tail under a fixed budget
@@ -254,23 +255,13 @@ def test_overflow_archive_says_it_is_not_the_full_output(
 
 def test_instrumentation_logs_the_true_length_not_the_capped_one(
     _overflow: Path,
-    monkeypatch: pytest.MonkeyPatch,
     crop_config: CropConfig,
     output_clock: Clock,
+    loguru_records: LogRecords,
 ) -> None:
     """`[exec output chars]` is how max_chars gets tuned from a real
     distribution. Fed the capped length it would report the budget forever and
     the runaway execs would be invisible in the data."""
-    from agent.graph.exec import output
-
-    logged: list[int] = []
-
-    def _capture(_msg: str, **kw: object) -> None:
-        if "n" in kw:
-            logged.append(int(kw["n"]))  # pyright: ignore[reportArgumentType]
-
-    monkeypatch.setattr(output.logger, "info", _capture)
-
     stream = StreamingTextIO(max_chars=2000)
     stream.write("X" * 250_000)
     wrap_code_output(
@@ -284,7 +275,7 @@ def test_instrumentation_logs_the_true_length_not_the_capped_one(
         elapsed_seconds=1.0,
     )
 
-    assert logged == [250_000]
+    assert [r["extra"]["n"] for r in loguru_records if "n" in r["extra"]] == [250_000]
 
 
 # ---------------------------------------------------------------------------
