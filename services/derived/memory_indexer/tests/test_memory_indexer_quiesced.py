@@ -15,6 +15,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.daemon.health import Liveness
 from base.deploy.maintenance import admission
 from services.derived.memory_indexer import daemon
+from services.derived.memory_indexer.config import MemoryIndexerConfig
 
 
 @pytest.mark.parametrize("quiesced", [True, False])
@@ -26,7 +27,7 @@ async def test_a_quiesced_unit_processes_no_batch(
     machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
-    monkeypatch.setattr(daemon, "LOOP_INTERVAL_S", 0.01)
+    indexer_config = MemoryIndexerConfig(loop_interval_s=0.01)
     batches: list[set[Path]] = []
 
     def record_batch(
@@ -36,6 +37,7 @@ async def test_a_quiesced_unit_processes_no_batch(
         _liveness: object,
         *,
         machine: MachineIdentity,
+        config: MemoryIndexerConfig,
     ) -> None:
         batches.append(batch)
 
@@ -43,7 +45,9 @@ async def test_a_quiesced_unit_processes_no_batch(
     dirty: queue.Queue[Path] = queue.Queue()
     dirty.put(tmp_path / "note.md")
     task = asyncio.create_task(
-        daemon.drain_loop(Mock(), dirty, Liveness(60.0), Mock(), machine=machine_identity)
+        daemon.drain_loop(
+            Mock(), dirty, Liveness(60.0), Mock(), machine=machine_identity, config=indexer_config
+        )
     )
     try:
         await asyncio.sleep(0.2)

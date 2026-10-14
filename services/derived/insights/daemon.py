@@ -30,7 +30,7 @@ from pathlib import Path
 import uvicorn
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -103,7 +103,9 @@ async def run(*, config: ConfigBoot, database: Callable[[], Database]) -> None:
                     catalog=build_model_catalog(),
                     default_model_reader=lambda: config.view.lm.llm_model,
                     timeline_inputs=TimelineReadInputs(
-                        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+                        clock_factory=lambda: Clock(
+                            clock_config_from_boot(config), timers=SYSTEM_TIMERS
+                        ),
                         timestamps_enabled=lambda: config.view.general.message_timestamps,
                     ),
                 ),

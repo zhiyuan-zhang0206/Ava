@@ -181,28 +181,7 @@ jobs:
           trap 'rm -rf "$CLASSIFY_TMP"' EXIT
           git merge-base "$BASE_SHA" HEAD > "$CLASSIFY_TMP/base.txt"
           git diff --name-only "$(cat "$CLASSIFY_TMP/base.txt")"...HEAD > "$CLASSIFY_TMP/changed.txt"
-          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
-          import os
-          import sys
-          from pathlib import Path
-
-          sys.path.insert(0, ".")
-          from base.deploy.git.repo_change import classify_change
-          from scripts.ci.test_selector import documentation_runtime_tests
-
-          scratch = Path(os.environ["CLASSIFY_TMP"])
-          paths = (scratch / "changed.txt").read_text().splitlines()
-          frontend, backend = classify_change(paths)
-          if os.environ["HEAD_REF"].startswith(("trunk-merge/", "trunk-temp/")):
-              backend = True
-          elif not backend:
-              backend = bool(documentation_runtime_tests(
-                  paths, repo_root=Path.cwd(),
-                  base_ref=(scratch / "base.txt").read_text().strip(),
-              ))
-          print(f"frontend={str(frontend).lower()}")
-          print(f"backend={str(backend).lower()}")
-          EOF
+          python3 -m scripts.ci.pull_requests.classify_paths "$CLASSIFY_TMP" "$HEAD_REF" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
       - name: Select runtime-impact test subset
@@ -1046,21 +1025,9 @@ jobs:
           set -e
           set -o pipefail
           mkdir -p tmp/file-shards
-          timeout --kill-after=15s 4m uv run python -u - <<'PY' 2>&1 | tee tmp/file-shards/plan-collection.log
-          from scripts.ci.collection_tracebacks import periodic_tracebacks
-
-          with open("tmp/file-shards/plan-stacks.log", "w") as stacks:
-              with periodic_tracebacks(stacks):
-                  import pytest
-
-                  raise SystemExit(pytest.main([
-                      "-c", "pyproject.toml", "--rootdir=.", "--collect-only", "-qq",
-                      "--ignore=tests/e2e", "-m", "not flaky", "--omit-static-tests",
-                      "-o", "junit_family=xunit1", "-o", "faulthandler_timeout=300",
-                      "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=8",
-                      "--file-shard-plan=tmp/file-shards/plan.json",
-                  ]))
-          PY
+          timeout --kill-after=15s 4m uv run python -u -m scripts.ci.pull_requests.plan_file_shards \
+            --count 8 --plan tmp/file-shards/plan.json --stacks tmp/file-shards/plan-stacks.log \
+            2>&1 | tee tmp/file-shards/plan-collection.log
           set +e
           uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
             -p scripts.ci.file_shard_shadow --file-shard-execute \

@@ -117,6 +117,7 @@ def test_deepseek_catalog_entries_are_in_the_archive() -> None:
 def test_gemini_chat_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
+        "gemini-4-argon",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
@@ -454,6 +455,23 @@ def test_gemini_flash_date_only_increase_uses_earliest_global_boundary(
 
     assert rates_at(model, before, _M, prices=gemini_archive_catalog) == Rates(0.75, 0.075, 3.75)
     assert rates_at(model, after, _M, prices=gemini_archive_catalog) == Rates(1.5, 0.15, 7.5)
+
+
+def test_gemini_4_argon_intro_price_uses_earliest_global_boundary(
+    gemini_archive_catalog: pricing.PriceBook,
+) -> None:
+    """The source prices the launch window as "through November 30, 2026" and
+    the increase as "starting December 1, 2026" with no timezone, so UTC+14
+    prevents underestimating cost."""
+    before = datetime(2026, 11, 30, 9, 59, 59, 999999, tzinfo=UTC)
+    after = datetime(2026, 11, 30, 10, 0, tzinfo=UTC)
+
+    assert rates_at("gemini-4-argon", before, _M, prices=gemini_archive_catalog) == Rates(
+        2.0, 0.10, 10.0
+    )
+    assert rates_at("gemini-4-argon", after, _M, prices=gemini_archive_catalog) == Rates(
+        4.0, 0.20, 20.0
+    )
 
 
 def test_quote_returns_cost_and_the_exact_selected_rates(

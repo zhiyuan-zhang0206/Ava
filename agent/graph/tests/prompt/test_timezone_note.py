@@ -17,7 +17,7 @@ from agent.graph.prompt.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE,
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
@@ -129,7 +129,8 @@ def test_timezone_notes_follow_two_explicit_live_clock_roots() -> None:
                         if owner.field_explicitly_set("timezone")
                         else None,
                         owner.view.general.message_timestamp_weekday,
-                    )
+                    ),
+                    timers=SYSTEM_TIMERS,
                 )
 
             first_ctx = AvaContext(

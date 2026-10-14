@@ -27,7 +27,7 @@ from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.lifecycle import AgentImpersonation
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.tests.configuration import snapshot_process_config
@@ -63,7 +63,7 @@ def gate_ctx(
         machine=machine_identity,
         relays=relays,
         catalog=build_model_catalog(),
-        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(config.view, domain), field)
         ),

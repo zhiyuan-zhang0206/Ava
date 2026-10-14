@@ -23,7 +23,7 @@ from base.agents import impersonation as control
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -177,7 +177,11 @@ class Attachment:
         self._clock_factory = (
             bound.require_clock
             if bound is not None
-            else (lambda: Clock(clock_config_from_boot(cast(ConfigBoot, config))))
+            else (
+                lambda: Clock(
+                    clock_config_from_boot(cast(ConfigBoot, config)), timers=SYSTEM_TIMERS
+                )
+            )
         )
         self._machine = (
             bound.require_machine()

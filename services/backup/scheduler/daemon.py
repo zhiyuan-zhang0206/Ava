@@ -27,7 +27,7 @@ from datetime import time as clock_time
 from pathlib import Path
 
 from base import telemetry
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -166,7 +166,9 @@ async def sleep_in_chunks(seconds: float) -> None:
 async def sleep_until_next_backup_hour(now: datetime, *, config: ConfigBoot) -> None:
     """Sleep until the next configured backup hour on the cluster clock."""
     local_now = now.astimezone(
-        cluster_tz(clock_factory=lambda: Clock(clock_config_from_boot(config)))
+        cluster_tz(
+            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
+        )
     )
     backup_hour = config.view.services.backup_hour
     next_date = local_now.date()
@@ -186,7 +188,7 @@ async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot) -> No
         if not local_dump_restore_due(
             now,
             last_success=load_local_dump_restore_success(),
-            clock_factory=lambda: Clock(clock_config_from_boot(config)),
+            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             hour_reader=lambda: config.view.services.backup_hour,
         ):
             return
@@ -212,7 +214,7 @@ async def backup_loop(state: BackupState, *, config: ConfigBoot) -> None:
         now = datetime.now(UTC)
         if not is_due(
             now,
-            clock_factory=lambda: Clock(clock_config_from_boot(config)),
+            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             hour_reader=lambda: config.view.services.backup_hour,
         ):
             await sleep_until_next_backup_hour(now, config=config)

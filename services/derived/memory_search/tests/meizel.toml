@@ -8,8 +8,6 @@
 [debt.first-party-patch]
 "test_memory_indexer.py#monkeypatch.setattr base.config.settings.services.embedding_backend" = 2
 "test_memory_indexer.py#monkeypatch.setattr base.daemon.health.time" = 3
-"test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.BATCH_SIZE" = 2
-"test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.RECONCILE_CHUNK_PATHS" = 1
 "test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.memory_root" = 5
 "test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.process_paths" = 1
 "test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.factory.worst_case_batch_seconds" = 1

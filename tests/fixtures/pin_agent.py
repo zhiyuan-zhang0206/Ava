@@ -16,7 +16,7 @@ from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config.tests.configuration import snapshot_process_config
@@ -84,5 +84,5 @@ def exec_context(
         machine=machine,
         hosted_resources=resources,
         clients=process_clients(config=config, machine=machine),
-        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )

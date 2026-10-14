@@ -32,8 +32,9 @@ def _run(
     python.write_text(
         "#!/bin/bash\n"
         f'if [[ "$1" == - && $# -gt 1 ]]; then exec "{sys.executable}" "$@"; fi\n'
-        # REAL_DOC: run the docstring-budget section's own Python instead of stubbing its output
-        f'if [[ "$1" == - && -n "${{REAL_DOC:-}}" ]]; then exec "{sys.executable}" -; fi\n'
+        # REAL_DOC: run the docstring-budget section's own module instead of stubbing its output
+        f'if [[ "$1" == -m && "$2" == scripts.lint.docstring_budget_report && -n "${{REAL_DOC:-}}" ]]; '
+        f'then exec "{sys.executable}" "$@"; fi\n'
         'if [[ "$1" == scripts/structure/cochange.py ]]; then\n'
         ' printf "%s\\n" "$COCHANGE_OUT"; exit "${COCHANGE_CODE:-0}"\n'
         "fi\n"
