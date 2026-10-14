@@ -6,7 +6,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 import ava.sdk_surface.agent_identity
-from ava import gateway_client as _client
+from ava import gateway_client
 from ava.agents import peers
 from ava.sdk_surface import process_context
 from ava.sdk_surface.validation import coerce_str, coerce_typed
@@ -289,7 +289,7 @@ def get_neighbors(
             depth=n["depth"],
             score=n["score"],
         )
-        for n in _client.get_neighbors(agent_id, depth=resolved_depth, limit=resolved_limit)
+        for n in gateway_client.get_neighbors(agent_id, depth=resolved_depth, limit=resolved_limit)
     ]
 
 
@@ -308,7 +308,7 @@ def get_ancestors(agent_id: int) -> list[Neighbor]:
             depth=n["depth"],
             score=n["score"],
         )
-        for n in _client.get_ancestors(agent_id)
+        for n in gateway_client.get_ancestors(agent_id)
     ]
 
 
@@ -339,7 +339,7 @@ def list_agents(
         raise ValueError("limit must be between 1 and 200")
     if before_id is not None and not 1 <= before_id <= 9223372036854775807:
         raise ValueError("before_id must be a positive bigint agent ID")
-    page = _client.list_agents(scope=scope, query=query, before_id=before_id, limit=limit)
+    page = gateway_client.list_agents(scope=scope, query=query, before_id=before_id, limit=limit)
     return AgentDirectoryPage(
         agents=[_row_from_dict(row) for row in page["agents"]],
         next_cursor=page["next_cursor"],
@@ -347,7 +347,7 @@ def list_agents(
 
 
 def list_machines() -> list[Machine]:
-    return machines_from_rows(_client.list_machines())
+    return machines_from_rows(gateway_client.list_machines())
 
 
 def machines_from_rows(rows: list[dict[str, Any]]) -> list[Machine]:
@@ -438,7 +438,7 @@ def get_launch_attempt(agent_id: int) -> UUID:
     another attempt. Fails when no launch attempt can be observed.
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    return _client.get_launch_attempt(agent_id)
+    return gateway_client.get_launch_attempt(agent_id)
 
 
 def retry_launch(
@@ -454,7 +454,7 @@ def retry_launch(
     A deliberate new retry needs a new key and the latest observed attempt.
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    return _client.retry_launch(
+    return gateway_client.retry_launch(
         agent_id,
         idempotency_key=idempotency_key,
         expected_prior_attempt_id=expected_prior_attempt_id,
@@ -508,7 +508,7 @@ def spawn_impl(
                 models=catalog.models,
                 decision_models=catalog.decision_models,
             )
-    return _client.spawn(
+    return gateway_client.spawn(
         spawner=spawner,
         prompt=prompt,
         fork_from=fork_from,
@@ -545,7 +545,7 @@ def terminate(
     message = coerce_str(message, "message", allow_none=True)
     force = coerce_typed(force, "force", bool)
     kill_all_shell_sessions = coerce_typed(kill_all_shell_sessions, "kill_all_shell_sessions", bool)
-    data = _client.terminate(
+    data = gateway_client.terminate(
         agent_id,
         message=message,
         force=force,
@@ -567,14 +567,14 @@ def restart(agent_id: int) -> RestartResult:
     """The agent finishes its current turn, then comes back up as a fresh
     process under the same id."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    return RestartResult(_client.restart(agent_id))
+    return RestartResult(gateway_client.restart(agent_id))
 
 
 def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
     """Wake a terminated agent with its previous conversation state intact."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     prompt = coerce_str(prompt, "prompt")
-    return ResurrectResult(_client.resurrect(agent_id, prompt=prompt))
+    return ResurrectResult(gateway_client.resurrect(agent_id, prompt=prompt))
 
 
 def commands() -> list[CommandInfo]:
@@ -598,7 +598,7 @@ def send_message(agent_id: int, content: str) -> None:
     agent_id = coerce_typed(agent_id, "agent_id", int)
     content = coerce_str(content, "content", allow_types=(list,))
     source = ava.sdk_surface.agent_identity.require_actor()
-    _client.send_message(agent_id, content=content, source=source)
+    gateway_client.send_message(agent_id, content=content, source=source)
 
 
 def send_system_note(
@@ -637,7 +637,7 @@ def send_system_note(
         idempotency_key=idempotency_key,
     )
     source = ava.sdk_surface.agent_identity.require_actor()
-    return _client.send_system_note(
+    return gateway_client.send_system_note(
         note.agent_id,
         content=note.content,
         note_tag=note.tag,
@@ -663,10 +663,10 @@ def get_last_message(agent_id: int) -> str | None:
     agent_id = coerce_typed(agent_id, "agent_id", int)
     caller = ava.sdk_surface.agent_identity.require_actor()
     return peers.scanned_last_message(
-        _client.get_last_message(agent_id, caller), agent_id, scan=scan_content
+        gateway_client.get_last_message(agent_id, caller), agent_id, scan=scan_content
     )
 
 
 def get_status(agent_id: int) -> AgentStatus:
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    return AgentStatus(_client.get_agent(agent_id)["status"])
+    return AgentStatus(gateway_client.get_agent(agent_id)["status"])
