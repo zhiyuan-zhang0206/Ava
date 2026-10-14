@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.ci.two_section_chain_smoke import signing_smoke as smoke
+from scripts.ci.helper_smoke import signing_smoke as smoke
 
 
 @pytest.mark.parametrize(

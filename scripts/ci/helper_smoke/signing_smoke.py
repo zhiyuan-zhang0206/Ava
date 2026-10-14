@@ -1,6 +1,6 @@
 """The helper signing smoke of the macOS CI lane (job `helper-signing-smoke`).
 
-`python -m scripts.ci.two_section_chain_smoke.signing_smoke run --keychain-password PW` builds the
+`python -m scripts.ci.helper_smoke.signing_smoke run --keychain-password PW` builds the
 real permissions-helper app from this checkout, signs it ad-hoc, reads the designated requirement and
 the AppleEvents entitlement back through the real `codesign`, then bootstraps it under launchd and
 pings it. `... signing_smoke label` prints the launchd label the lane tears down.

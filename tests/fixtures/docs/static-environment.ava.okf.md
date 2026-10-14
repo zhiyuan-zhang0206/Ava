@@ -13,7 +13,7 @@ tags:
 `scripts/audit/tests`, `scripts/content_lint/tests`, `scripts/lint/tests`,
 `scripts/lint/diagnostics/tests`, `scripts/lint/locks/tests`,
 `scripts/lint/plugins/tests`, `meizel`,
-`scripts/structure/tests`, `scripts/ci/tests`, `scripts/ci/pull_requests/tests`, `scripts/ci/two_section_chain_smoke/tests`, `tests/ci`, `base/paths/tests`,
+`scripts/structure/tests`, `scripts/ci/tests`, `scripts/ci/pull_requests/tests`, `scripts/ci/helper_smoke/tests`, `tests/ci`, `base/paths/tests`,
 `base/sessions/pty/tests/test_pty_sessions_screen.py`, and the environment boundary
 and selection canaries.
 Directory ownership includes descendant tests and their existing local fixtures.
