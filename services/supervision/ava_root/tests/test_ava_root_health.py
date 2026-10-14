@@ -29,6 +29,7 @@ from services.supervision.ava_root.failure_state import UnitFailureFacts
 from services.supervision.ava_root.health import HealthConfig, HealthMonitor
 from services.supervision.ava_root.inputs import InputSeal
 from services.supervision.ava_root.probes import ProbeRegistry
+from services.supervision.ava_root.stopping import UnitStopTimeoutError
 from services.supervision.ava_root.supervisor import Supervisor
 
 
@@ -177,6 +178,73 @@ async def test_three_actual_restarts_then_only_observation(clock: FakeClock) -> 
     probe.verdict = DaemonProbe.down("new outage")
     await monitor.run_round()
     assert stub.restart_calls == ["svc"] * 4
+    assert monitor.snapshot()["svc"].restart_attempts == 1
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+async def test_stop_timeout_is_budgeted_and_later_units_are_observed(grouped: bool) -> None:
+    timeout = UnitStopTimeoutError("unit svc did not stop")
+    failure = (
+        ExceptionGroup("subtree", [timeout, ExceptionGroup("child", [timeout])])
+        if grouped
+        else timeout
+    )
+
+    def refuse() -> None:
+        raise failure
+
+    stub = StubSupervisor()
+    stub.on_restart = refuse
+    registry = _registry("svc", CellProbe(DaemonProbe.down("listener closed")))
+    sibling = CellProbe(DaemonProbe.up("serving"))
+    registry.register("sibling", sibling)
+    monitor = HealthMonitor(stub, registry, config=_config())
+    for _ in range(5):
+        await monitor.run_round()
+    assert stub.restart_calls == ["svc"] * 3
+    assert sibling.calls == 5
+    assert monitor.snapshot()["svc"].restart_attempts == 3
+    assert monitor.snapshot()["svc"].last_detail == "listener closed"
+
+
+def _failure_leaves(error: BaseException) -> list[BaseException]:
+    if isinstance(error, BaseExceptionGroup):
+        group = cast("BaseExceptionGroup[BaseException]", error)
+        return [leaf for child in group.exceptions for leaf in _failure_leaves(child)]
+    return [error]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ValueError("unknown"),
+        PermissionError("signal denied"),
+        RuntimeError("unit svc did not stop"),
+        asyncio.CancelledError(),
+    ],
+)
+@pytest.mark.parametrize("grouped", [False, True])
+async def test_restart_unknown_or_cancelled_failure_still_propagates(
+    failure: BaseException, grouped: bool
+) -> None:
+    def fail() -> None:
+        if grouped:
+            raise BaseExceptionGroup(
+                "subtree", [UnitStopTimeoutError("refused"), BaseExceptionGroup("child", [failure])]
+            )
+        raise failure
+
+    stub = StubSupervisor()
+    stub.on_restart = fail
+    sibling = CellProbe(DaemonProbe.up("serving"))
+    registry = _registry("svc", CellProbe(DaemonProbe.down("listener closed")))
+    registry.register("sibling", sibling)
+    monitor = HealthMonitor(stub, registry, config=_config())
+    with pytest.raises(BaseException) as caught:
+        await monitor.run_round()
+    assert _failure_leaves(caught.value) == [failure]
+    assert _failure_leaves(caught.value)[0] is failure
+    assert sibling.calls == 0
     assert monitor.snapshot()["svc"].restart_attempts == 1
 
 
