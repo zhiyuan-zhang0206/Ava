@@ -23,6 +23,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, settings
 from base.host import resource_sample
+from base.host.system.tests.fake_commands import fake_host
 from base.native_process.root_control import client
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.database.runtime import CommandRuntime
@@ -89,6 +90,7 @@ def test_status_explains_persistently_unselected_services(
             database_factory=operator_database,
             machine=command_runtime.machine,
             config=command_runtime.config,
+            host=fake_host(),
         )
         == 0
     )
@@ -165,6 +167,7 @@ def test_status_runs_without_error(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -193,6 +196,7 @@ def test_status_gateway_excludes_ops(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -217,6 +221,7 @@ def test_status_agent_runner_shows_ops(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -244,7 +249,7 @@ def test_status_shows_browser_skip_reason(
     monkeypatch.setattr(
         roster_spec,
         "browser_incapability",
-        lambda _chrome: "no display (headless)",  # pyright: ignore[reportUnknownArgumentType]
+        lambda _chrome, **_kwargs: "no display (headless)",  # pyright: ignore[reportUnknownArgumentType]
     )
 
     def fake_run(_args, **_kwargs):
@@ -255,6 +260,7 @@ def test_status_shows_browser_skip_reason(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -291,6 +297,7 @@ def test_status_shows_the_gate_entry_row(
             database_factory=operator_database,
             machine=command_runtime.machine,
             config=command_runtime.config,
+            host=fake_host(),
         )
         == 0
     )
@@ -331,6 +338,7 @@ def test_status_shows_the_end_to_end_redis_bridge_row(
             database_factory=operator_database,
             machine=command_runtime.machine,
             config=command_runtime.config,
+            host=fake_host(),
         )
         == 0
     )
@@ -358,6 +366,7 @@ def test_status_runner_only_has_no_gate_section(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -405,6 +414,7 @@ def test_status_reads_root_units(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
@@ -449,6 +459,7 @@ def test_status_root_mode_survives_an_unreachable_root(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
@@ -551,6 +562,7 @@ def test_cmd_status_warns_on_prod_source_drift(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -580,6 +592,7 @@ def test_cmd_status_detached_prod_source_is_not_a_warning(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -619,6 +632,7 @@ def test_cmd_status_names_the_source_checkout_it_runs(
             database_factory=operator_database,
             machine=command_runtime.machine,
             config=command_runtime.config,
+            host=fake_host(),
         )
         == 0
     )
@@ -653,6 +667,7 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     out = capsys.readouterr().out
@@ -682,6 +697,7 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=command_runtime.config,
+        host=fake_host(),
     )
     assert rc == 0
     assert "gateway unreachable" in capsys.readouterr().out
@@ -721,6 +737,7 @@ def test_status_prints_a_live_host_reading(
             database_factory=operator_database,
             machine=command_runtime.machine,
             config=command_runtime.config,
+            host=fake_host(),
         )
         == 0
     )
@@ -762,6 +779,7 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
             database_factory=operator_database,
             machine=command_runtime.machine,
             config=command_runtime.config,
+            host=fake_host(),
         )
         == 0
     )

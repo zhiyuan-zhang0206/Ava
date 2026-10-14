@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -15,7 +16,8 @@ from base.config import ConfigBoot, settings
 from base.host.converge import accessibility, screen_capture
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system import probes
-from base.host.tests.fake_commands import fake_host
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import converge_host
@@ -136,10 +138,18 @@ def capable_helper_context(
     ava_home = tmp_path / "avahome"
     ava_home.mkdir()
     (ava_home / ".env").write_text("")
-    monkeypatch.setattr(converge_host.sys, "platform", "darwin")
-    monkeypatch.setattr(probes, "permissions_helper_incapability", lambda: None)
-    ctx = converge_context(
-        tmp_path, ava_home, operator_database=operator_database, producer=producer
+
+    def fake_permissions_helper_incapability(*, host: Host) -> str | None:
+        return None
+
+    monkeypatch.setattr(
+        probes, "permissions_helper_incapability", fake_permissions_helper_incapability
+    )
+    ctx = replace(
+        converge_context(
+            tmp_path, ava_home, operator_database=operator_database, producer=producer
+        ),
+        host=fake_host(platform=DARWIN_ARM64),
     )
     ctx.config.set_field("permissions_helper_enabled", True)
     return ctx
@@ -155,7 +165,13 @@ def screen_capture_environment(
 ) -> None:
     monkeypatch.setattr(screen_capture, "ava_home", lambda: tmp_path)
     config.set_field("permissions_helper_enabled", enabled)
-    monkeypatch.setattr(probes, "permissions_helper_incapability", lambda: incapability)
+
+    def fake_permissions_helper_incapability(*, host: Host) -> str | None:
+        return incapability
+
+    monkeypatch.setattr(
+        probes, "permissions_helper_incapability", fake_permissions_helper_incapability
+    )
 
 
 def accessibility_environment(
@@ -168,7 +184,13 @@ def accessibility_environment(
 ) -> None:
     monkeypatch.setattr(accessibility, "ava_home", lambda: tmp_path)
     config.set_field("permissions_helper_enabled", enabled)
-    monkeypatch.setattr(probes, "permissions_helper_incapability", lambda: incapability)
+
+    def fake_permissions_helper_incapability(*, host: Host) -> str | None:
+        return incapability
+
+    monkeypatch.setattr(
+        probes, "permissions_helper_incapability", fake_permissions_helper_incapability
+    )
 
 
 @pytest.fixture

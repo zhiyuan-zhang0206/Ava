@@ -20,9 +20,6 @@ every registrar consults.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -30,16 +27,18 @@ from typing import TextIO
 
 from loguru import logger
 
+from base.host.system.hostport import Host
 from base.native_process.os_platform import (
     crontab_lock,
     descends_from_launchd_job,
-    is_linux,
-    is_macos,
     launchd_job_label,
 )
 from base.paths import ava_home
 
 DEFAULT_INTERVAL_SECONDS = 300  # 5 minutes
+
+# launchctl and crontab answer at once; the bound only keeps a wedged tool from stalling a converge.
+_TOOL_TIMEOUT_S = 30.0
 
 # launchd labels are `com.ava.<job>` (health-probe, autostart, logs-maintenance,
 # packages-refresh, pr-flow): the host runs one cluster, so a label names a job,
@@ -97,18 +96,18 @@ def owns_os_jobs(kind: str) -> bool:
     return False
 
 
-def reload_launchd_job(label: str, plist_path: Path) -> int:
+def reload_launchd_job(label: str, plist_path: Path, *, host: Host) -> int:
     """Replace a loaded LaunchAgent after its caller writes the plist."""
-    subprocess.run(  # noqa: S603
-        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+    host.run(
+        ["launchctl", "bootout", f"gui/{host.uid}/{label}"],
         capture_output=True,
-        check=False,
+        timeout=_TOOL_TIMEOUT_S,
     )
-    result = subprocess.run(  # noqa: S603
-        ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist_path)],
+    result = host.run(
+        ["launchctl", "bootstrap", f"gui/{host.uid}", str(plist_path)],
         capture_output=True,
         text=True,
-        check=False,
+        timeout=_TOOL_TIMEOUT_S,
     )
     if result.returncode != 0:
         logger.error("launchctl bootstrap failed for {}: {}", label, result.stderr)
@@ -116,21 +115,21 @@ def reload_launchd_job(label: str, plist_path: Path) -> int:
     return 0
 
 
-def remove_launchd_job(label: str, plist_path: Path) -> None:
+def remove_launchd_job(label: str, plist_path: Path, *, host: Host) -> None:
     """Unload a LaunchAgent and remove its plist, even when already absent."""
-    subprocess.run(  # noqa: S603
-        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+    host.run(
+        ["launchctl", "bootout", f"gui/{host.uid}/{label}"],
         capture_output=True,
-        check=False,
+        timeout=_TOOL_TIMEOUT_S,
     )
     plist_path.unlink(missing_ok=True)
 
 
 def require_crontab(
-    missing_message: str, *, missing_returncode: int, missing_stream: TextIO
+    missing_message: str, *, missing_returncode: int, missing_stream: TextIO, host: Host
 ) -> int | None:
     """Report a missing crontab with the caller's existing message and policy."""
-    if shutil.which("crontab") is None:
+    if host.which("crontab") is None:
         print(missing_message, file=missing_stream)
         return missing_returncode
     return None
@@ -143,13 +142,16 @@ def replace_crontab_entry(
     skip_phrase: str,
     update_failure: Callable[[str], None],
     owns_line: Callable[[str], bool] | None = None,
+    host: Host,
 ) -> int:
     """Replace owned lines, defaulting to a marker substring match.
 
     The caller reports a failed write in its own channel.
     """
     with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+        result = host.run(
+            ["crontab", "-l"], capture_output=True, text=True, timeout=_TOOL_TIMEOUT_S
+        )
         # Only benign "no crontab" means empty; other read failures must block a clobbering rewrite.
         if result.returncode != 0 and "no crontab" not in (result.stderr or "").lower():
             print(  # noqa: T201
@@ -165,12 +167,12 @@ def replace_crontab_entry(
             if not (owns_line(line) if owns_line is not None else marker in line)
         ]
         lines.append(entry)
-        result = subprocess.run(
+        result = host.run(
             ["crontab", "-"],
             input="\n".join(lines) + "\n",
             capture_output=True,
             text=True,
-            check=False,
+            timeout=_TOOL_TIMEOUT_S,
         )
         if result.returncode != 0:
             update_failure(result.stderr)
@@ -186,6 +188,7 @@ def remove_crontab_entry(
     owns_line: Callable[[str], bool] | None = None,
     on_read_failed: Callable[[], None] | None = None,
     on_absent: Callable[[], None] | None = None,
+    host: Host,
 ) -> int:
     """Remove owned lines, defaulting to a marker substring match.
 
@@ -193,7 +196,9 @@ def remove_crontab_entry(
     reported only after a successful write.
     """
     with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+        result = host.run(
+            ["crontab", "-l"], capture_output=True, text=True, timeout=_TOOL_TIMEOUT_S
+        )
         if result.returncode != 0:
             if on_read_failed is not None:
                 on_read_failed()
@@ -207,12 +212,12 @@ def remove_crontab_entry(
             if on_absent is not None:
                 on_absent()
             return 0
-        result = subprocess.run(
+        result = host.run(
             ["crontab", "-"],
             input="\n".join(lines) + "\n",
             capture_output=True,
             text=True,
-            check=False,
+            timeout=_TOOL_TIMEOUT_S,
         )
         if result.returncode != 0:
             return write_failure_rc
@@ -221,7 +226,7 @@ def remove_crontab_entry(
     return 0
 
 
-def ava_binary_path() -> str:
+def ava_binary_path(*, host: Host) -> str:
     """The absolute path to the `ava` binary of THIS CHECKOUT.
 
     The checkout is the anchor, not PATH. A job spec written by a worktree's code
@@ -246,9 +251,7 @@ def ava_binary_path() -> str:
     if candidate.exists():
         return str(candidate)
 
-    import shutil
-
-    return shutil.which("ava") or str(candidate)
+    return host.which("ava") or str(candidate)
 
 
 def job_home() -> str:
@@ -264,7 +267,9 @@ def job_home() -> str:
     return str(ava_home())
 
 
-def launchd_env_block(indent: str = "    ", extra: dict[str, str] | None = None) -> str:
+def launchd_env_block(
+    indent: str = "    ", extra: dict[str, str] | None = None, *, host: Host
+) -> str:
     """The `EnvironmentVariables` plist fragment every LaunchAgent here carries:
     the cluster's `AVA_HOME` (see `job_home`) and a usable PATH (see
     `launchd_path_env`), followed by whatever `extra` the caller adds.
@@ -274,7 +279,7 @@ def launchd_env_block(indent: str = "    ", extra: dict[str, str] | None = None)
     decide whether the job needs replacing
     cannot afford a fragment that reshuffles between runs.
     """
-    entries = {"AVA_HOME": job_home(), "PATH": launchd_path_env(), **(extra or {})}
+    entries = {"AVA_HOME": job_home(), "PATH": launchd_path_env(host=host), **(extra or {})}
     return (
         f"{indent}<key>EnvironmentVariables</key>\n"
         f"{indent}<dict>\n"
@@ -295,7 +300,7 @@ def cron_env_prefix() -> str:
     return f"AVA_HOME={job_home()} "
 
 
-def launchd_path_env() -> str:
+def launchd_path_env(*, host: Host) -> str:
     """PATH for a LaunchAgent's environment.
 
     launchd hands a job a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that omits
@@ -309,10 +314,9 @@ def launchd_path_env() -> str:
     dead watchdog). A probe without brew on PATH would fail exactly when it is
     needed, so this is not cosmetic.
     """
-    import shutil
 
-    dirs: list[str] = [str(Path(ava_binary_path()).parent)]  # ~/.local/bin or venv/bin
-    brew = shutil.which("brew")
+    dirs: list[str] = [str(Path(ava_binary_path(host=host)).parent)]  # ~/.local/bin or venv/bin
+    brew = host.which("brew")
     dirs += [str(Path(brew).parent)] if brew else ["/opt/homebrew/bin", "/usr/local/bin"]
     dirs += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     seen: set[str] = set()
@@ -327,9 +331,9 @@ def _launchd_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_HEALTH_PROBE_LABEL}.plist"
 
 
-def launchd_plist_content(interval_s: int) -> str:
+def launchd_plist_content(interval_s: int, *, host: Host) -> str:
     """Generate the observation-only health-probe launchd job."""
-    ava_path = ava_binary_path()
+    ava_path = ava_binary_path(host=host)
     label = _HEALTH_PROBE_LABEL
     log_dir = ava_home() / "logs"
     log_file = log_dir / "health-probe.log"
@@ -347,7 +351,7 @@ def launchd_plist_content(interval_s: int) -> str:
         <string>cluster</string>
         <string>health-probe</string>
     </array>
-{launchd_env_block()}
+{launchd_env_block(host=host)}
     <key>StartInterval</key>
     <integer>{interval_s}</integer>
     <key>RunAtLoad</key>
@@ -377,7 +381,7 @@ def _own_probe_job_of(own_labels: set[str]) -> str | None:
     return None
 
 
-def register_macos(interval_s: int) -> int:
+def register_macos(interval_s: int, *, host: Host) -> int:
     """Register the health probe as a launchd User LaunchAgent.
 
     Writes the plist to ~/Library/LaunchAgents/ and loads it with
@@ -402,22 +406,22 @@ def register_macos(interval_s: int) -> int:
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write the plist.
-    plist_path.write_text(launchd_plist_content(interval_s))
+    plist_path.write_text(launchd_plist_content(interval_s, host=host))
     logger.info("Wrote plist to {}", plist_path)
 
     # Unload any existing instance (ignore errors if not loaded).
-    subprocess.run(  # noqa: S603
-        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+    host.run(
+        ["launchctl", "bootout", f"gui/{host.uid}/{label}"],
         capture_output=True,
-        check=False,
+        timeout=_TOOL_TIMEOUT_S,
     )
 
     # Load (bootstrap) the new plist.
-    result = subprocess.run(  # noqa: S603
-        ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist_path)],
+    result = host.run(
+        ["launchctl", "bootstrap", f"gui/{host.uid}", str(plist_path)],
         capture_output=True,
         text=True,
-        check=False,
+        timeout=_TOOL_TIMEOUT_S,
     )
     if result.returncode != 0:
         logger.error("launchctl bootstrap failed: {}", result.stderr)
@@ -426,16 +430,16 @@ def register_macos(interval_s: int) -> int:
     return 0
 
 
-def unregister_macos() -> int:
+def unregister_macos(*, host: Host) -> int:
     """Remove the health probe's launchd job and plist."""
     plist_path = _launchd_plist_path()
     label = _HEALTH_PROBE_LABEL
 
     # Bootout the job.
-    subprocess.run(  # noqa: S603
-        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+    host.run(
+        ["launchctl", "bootout", f"gui/{host.uid}/{label}"],
         capture_output=True,
-        check=False,
+        timeout=_TOOL_TIMEOUT_S,
     )
 
     # Remove the plist.
@@ -447,7 +451,7 @@ def unregister_macos() -> int:
     return 0
 
 
-def register_linux(interval_s: int) -> int:
+def register_linux(interval_s: int, *, host: Host) -> int:
     """Add the health probe to the user's crontab.
 
     Reads the current crontab, removes any existing Ava health-probe entry,
@@ -465,11 +469,12 @@ def register_linux(interval_s: int) -> int:
         "cluster runs without a health-probe cron",
         missing_returncode=0,
         missing_stream=sys.stdout,
+        host=host,
     )
     if missing is not None:
         return missing
 
-    ava_path = ava_binary_path()
+    ava_path = ava_binary_path(host=host)
     minutes = max(1, interval_s // 60)
     entry = f"*/{minutes} * * * * {cron_env_prefix()}{ava_path} cluster health-probe {_CRON_MARKER}"
 
@@ -481,13 +486,14 @@ def register_linux(interval_s: int) -> int:
         entry,
         skip_phrase="health-probe registration",
         update_failure=report_update_failure,
+        host=host,
     )
     if rc == 0:
         print(f"  . crontab entry added (every {minutes} min)")  # noqa: T201
     return rc
 
 
-def unregister_linux() -> int:
+def unregister_linux(*, host: Host) -> int:
     """Remove the health-probe entry from the user's crontab."""
 
     def report_read_failure() -> None:
@@ -505,18 +511,21 @@ def unregister_linux() -> int:
         on_removed=report_removed,
         on_read_failed=report_read_failure,
         on_absent=report_absent,
+        host=host,
     )
 
 
-def register_platform_job(what: str, *, macos: Callable[[], int], linux: Callable[[], int]) -> None:
+def register_platform_job(
+    what: str, *, macos: Callable[[], int], linux: Callable[[], int], host: Host
+) -> None:
     """Run this host's registrar for an OS job; a non-zero return code is a failed registration.
 
     Raises:
         RuntimeError: on an unsupported platform or a failed registration.
     """
-    if is_macos():
+    if host.platform.system == "darwin":
         rc, platform = macos(), "macOS"
-    elif is_linux():
+    elif host.platform.system == "linux":
         rc, platform = linux(), "Linux"
     else:
         raise RuntimeError("unsupported host platform for OS jobs")
@@ -524,20 +533,20 @@ def register_platform_job(what: str, *, macos: Callable[[], int], linux: Callabl
         raise RuntimeError(f"{what} registration failed on {platform}")
 
 
-def unregister_platform_job(*, macos: Callable[[], int], linux: Callable[[], int]) -> None:
+def unregister_platform_job(
+    *, macos: Callable[[], int], linux: Callable[[], int], host: Host
+) -> None:
     """Run this host's remover for an OS job (the return code is not an error: removal is idempotent)."""
-    if is_macos():
+    if host.platform.system == "darwin":
         macos()
-    elif is_linux():
+    elif host.platform.system == "linux":
         linux()
     else:
         raise RuntimeError("unsupported host platform for OS jobs")
 
 
 def register_os_cron(
-    interval_s: int = DEFAULT_INTERVAL_SECONDS,
-    *,
-    enabled_reader: Callable[[], bool],
+    interval_s: int = DEFAULT_INTERVAL_SECONDS, *, enabled_reader: Callable[[], bool], host: Host
 ) -> None:
     """Register the OS cron job for the cluster health probe.
 
@@ -572,12 +581,13 @@ def register_os_cron(
         return
     register_platform_job(
         "cron",
-        macos=lambda: register_macos(interval_s),
-        linux=lambda: register_linux(interval_s),
+        macos=lambda: register_macos(interval_s, host=host),
+        linux=lambda: register_linux(interval_s, host=host),
+        host=host,
     )
 
 
-def unregister_os_cron() -> None:
+def unregister_os_cron(*, host: Host) -> None:
     """Remove the OS cron job of the cluster health probe.
 
     Platform-aware. Safe to call when no job is registered (no-op), and a no-op
@@ -585,4 +595,8 @@ def unregister_os_cron() -> None:
     """
     if not owns_os_jobs("health-probe"):
         return
-    unregister_platform_job(macos=unregister_macos, linux=unregister_linux)
+    unregister_platform_job(
+        macos=lambda: unregister_macos(host=host),
+        linux=lambda: unregister_linux(host=host),
+        host=host,
+    )

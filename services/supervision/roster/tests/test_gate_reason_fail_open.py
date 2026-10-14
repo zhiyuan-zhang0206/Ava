@@ -9,6 +9,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.host.system.tests.fake_commands import fake_host
 from services.supervision.roster.spec import ServiceSpec, gate_reason
 
 
@@ -32,7 +33,7 @@ def test_gate_reason_reports_and_propagates_raising_gate(
         raise RuntimeError("gate exploded")
 
     with pytest.raises(RuntimeError, match="gate exploded"):
-        gate_reason(_spec_with_gate(_boom), machine=machine_identity)
+        gate_reason(_spec_with_gate(_boom), machine=machine_identity, host=fake_host())
     errors = [r["message"] for r in loguru_records if r["level"].name == "ERROR"]
     assert any("faulty-gate" in m and "roster evaluation aborted" in m for m in errors), errors
 
@@ -41,9 +42,12 @@ def test_gate_reason_passes_through_normal_gate_result(machine_identity: Machine
     def _gated() -> str | None:
         return "disabled (test)"
 
-    assert gate_reason(_spec_with_gate(_gated), machine=machine_identity) == "disabled (test)"
+    assert (
+        gate_reason(_spec_with_gate(_gated), machine=machine_identity, host=fake_host())
+        == "disabled (test)"
+    )
 
     def _open() -> str | None:
         return None
 
-    assert gate_reason(_spec_with_gate(_open), machine=machine_identity) is None
+    assert gate_reason(_spec_with_gate(_open), machine=machine_identity, host=fake_host()) is None

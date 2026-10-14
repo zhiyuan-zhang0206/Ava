@@ -76,6 +76,7 @@ from base.events.live.bus import EventBus
 from base.host.db_authority.api import AcceptanceCache
 from base.host.net.auth import cookie_name
 from base.host.system.cron import register_os_cron
+from base.host.system.hostport import Host
 from base.packages.plugin_providers import build_model_catalog
 from gateway.agents import launch_retry as agents_launch_retry_router
 from gateway.agents import lifecycle as agents_lifecycle_router
@@ -244,10 +245,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         config = ConfigBoot()
         config.boot()
         process = GatewayProcess(
-            config=config, image=LOADED_IMAGE, machine=machine_from_boot(config)
+            config=config,
+            image=LOADED_IMAGE,
+            machine=machine_from_boot(config),
+            host=Host.system(),
         )
     app.state.gateway_process = process
     app.state.machine = process.machine
+    app.state.host = process.host
     with process.lifetime() if owned else nullcontext(process):
         config = process.config
         app.state.process_image = process.image
@@ -298,7 +303,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # without relying on the converge phase. Idempotent.
         try:
             await asyncio.to_thread(
-                register_os_cron, enabled_reader=lambda: config.view.general.os_jobs_enabled
+                register_os_cron,
+                enabled_reader=lambda: config.view.general.os_jobs_enabled,
+                host=process.host,
             )
         except Exception:
             _log.warning("OS health-probe cron registration failed", exc_info=True)

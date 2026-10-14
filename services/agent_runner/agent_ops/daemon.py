@@ -71,6 +71,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.host.exit_codes import hard_exit as _hard_exit
+from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -122,6 +123,7 @@ async def run_arm(
     database: Callable[[], Database],
     image: LoadedCommit,
     local_machine: MachineIdentity,
+    host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Run a blocking arm on this invocation's executor and database pool.
 
@@ -143,6 +145,7 @@ async def run_arm(
                 database=database,
                 image=image,
                 local_machine=local_machine,
+                host=host,
             ),
         )
         maintenance_activity.track_worker(future, workers=workers)
@@ -161,6 +164,7 @@ def bind_dispatch_sync(
     database: Callable[[], Database],
     image: LoadedCommit,
     local_machine: MachineIdentity,
+    host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Bind blocking arms to this invocation's pool, authority, image and machine.
 
@@ -174,6 +178,7 @@ def bind_dispatch_sync(
         authority=authority,
         image=image,
         local_machine=local_machine,
+        host=host,
     )
 
 
@@ -190,6 +195,7 @@ async def _dispatch(
     database: Callable[[], Database],
     image: LoadedCommit,
     local_machine: MachineIdentity,
+    host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Execute one op in-process by calling the `ops` op clusters.
 
@@ -273,6 +279,7 @@ async def _dispatch(
                     database=database,
                     image=image,
                     local_machine=local_machine,
+                    host=host,
                 )
     except AvaAgentError as exc:
         # Carry both detail and the wire `reason` enum value so the
@@ -310,6 +317,7 @@ async def dispatch_idempotent(
     database: Callable[[], Database],
     image: LoadedCommit,
     local_machine: MachineIdentity,
+    host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Dispatch one op with a dedup key, retrying a pass that dies on a
     closed DB connection.
@@ -338,6 +346,7 @@ async def dispatch_idempotent(
                 database=database,
                 image=image,
                 local_machine=local_machine,
+                host=host,
             )
         except psycopg.OperationalError:
             if attempt + 1 >= DISPATCH_RETRY_ATTEMPTS:
@@ -365,6 +374,7 @@ async def dispatch_idempotent_pass(
     database: Callable[[], Database],
     image: LoadedCommit,
     local_machine: MachineIdentity,
+    host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
     """Replay one immutable request; unresolved execution never frees its identity.
 
@@ -396,6 +406,7 @@ async def dispatch_idempotent_pass(
             database=database,
             image=image,
             local_machine=local_machine,
+            host=host,
         )
     request_hash = hashlib.sha256(
         json.dumps([kind, payload], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -423,6 +434,7 @@ async def dispatch_idempotent_pass(
             database=database,
             image=image,
             local_machine=local_machine,
+            host=host,
         )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -471,6 +483,7 @@ async def ops_route(
     database: Callable[[], Database],
     image: LoadedCommit,
     local_machine: MachineIdentity,
+    host: Host,
 ) -> tuple[int, bytes, str]:
     """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
@@ -520,6 +533,7 @@ async def ops_route(
                         database=database,
                         image=image,
                         local_machine=local_machine,
+                        host=host,
                     )
                 else:
                     status, result = await _dispatch(
@@ -534,6 +548,7 @@ async def ops_route(
                         database=database,
                         image=image,
                         local_machine=local_machine,
+                        host=host,
                     )
         except Exception as exc:
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
@@ -556,6 +571,7 @@ async def serve_ops_daemon(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     config: ConfigBoot,
+    host: Host,
 ) -> None:
     runtime = config.ensure_eager()
     catalog = build_model_catalog()
@@ -623,6 +639,7 @@ async def serve_ops_daemon(
                     workers=workers,
                     pool=pool,
                     local_machine=local_machine,
+                    host=host,
                 )
             },
             liveness=liveness,
@@ -702,7 +719,11 @@ def main(*, argv: list[str] | None = None) -> None:
         try:
             runner.run(
                 serve_ops_daemon(
-                    database=database, image=image, local_machine=machine, config=config
+                    database=database,
+                    image=image,
+                    local_machine=machine,
+                    config=config,
+                    host=Host.system(),
                 )
             )
         except KeyboardInterrupt as exc:

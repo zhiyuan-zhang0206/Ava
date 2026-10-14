@@ -505,7 +505,11 @@ def _cmd_restart_body(
     print("\n→ start readiness preflight (validate-before-kill, local state)")
     with status_journal.phase("preflight"):
         rc = _start_readiness_preflight.preflight_start_readiness(
-            repo, check_launcher=False, runtime=runtime, machine=command.machine
+            repo,
+            check_launcher=False,
+            runtime=runtime,
+            machine=command.machine,
+            host=command.host,
         )
     if rc != 0:
         print(

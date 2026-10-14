@@ -29,6 +29,8 @@ from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from base.deploy.tests.maintenance_factory import WHEN
 from base.deploy.tests.maintenance_factory import isolate as isolate
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import boot, daemon, health
@@ -85,6 +87,7 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
                 database=ops_database,
                 image=ops_image,
                 local_machine=machine_identity,
+                host=fake_host(),
             )
         )
         for _ in range(2)
@@ -111,6 +114,7 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
         assert status == 200
         assert b'"status": "failed"' in body
@@ -147,6 +151,7 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         assert pool is dispatch_pool
@@ -171,6 +176,7 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
                     database=ops_database,
                     image=ops_image,
                     local_machine=machine_identity,
+                    host=fake_host(),
                 )
             )
             for index in range(2)
@@ -285,6 +291,7 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
                 database=ops_database,
                 image=ops_image,
                 local_machine=machine_identity,
+                host=fake_host(),
             )
             assert status == 200
             return json.loads(raw)
@@ -319,6 +326,7 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         assert pool is dispatch_pool
@@ -345,6 +353,7 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
                     database=ops_database,
                     image=ops_image,
                     local_machine=machine_identity,
+                    host=fake_host(),
                 )
             )
             for index, kind in enumerate(("config_read", "inventory_read"))
@@ -409,6 +418,7 @@ async def test_op_invocations_dispatch_on_their_own_executor(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         assert pool is dispatch_pool
@@ -430,6 +440,7 @@ async def test_op_invocations_dispatch_on_their_own_executor(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
         boot.shutdown_op_pool(first)
         second_result = await daemon.run_arm(
@@ -443,6 +454,7 @@ async def test_op_invocations_dispatch_on_their_own_executor(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     first_thread = first_result[1]["thread"]
     second_thread = second_result[1]["thread"]

@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import MachineIdentity
 from base.config.tests.configuration import snapshot_process_config
+from base.host.system.tests.fake_commands import fake_host
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 
 __all__ = [
@@ -43,7 +44,7 @@ def gateway_test_process(
     owned = process is None
     if owned:
         process = GatewayProcess(
-            config=snapshot_process_config(), image=LOADED_IMAGE, machine=machine
+            config=snapshot_process_config(), image=LOADED_IMAGE, machine=machine, host=fake_host()
         )
     assert process is not None
     with (

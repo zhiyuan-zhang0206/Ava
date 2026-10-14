@@ -26,6 +26,7 @@ from base.host.converge.accessibility import (
 )
 from base.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
 from base.host.converge.screen_capture import clear_status, write_status
+from base.host.system.hostport import Host
 from base.host.system.probes import browser_incapability
 from base.paths.home import is_default_home, resolve_ava_home
 from base.telemetry import EventPipeline
@@ -118,13 +119,13 @@ def ensure_browser(ctx: ConvergeCtx) -> None:
     """
     if not ctx.read_config().view.services.browser_enabled:
         return
-    reason = browser_incapability(ctx.read_config().view.services.chrome_binary)
+    reason = browser_incapability(ctx.read_config().view.services.chrome_binary, host=ctx.host)
     if reason is not None:
         if reason.startswith("no display"):
             print(f"  i browser: {browser_deps_notice(reason)}", file=sys.stderr)
             return
         print(f"  ! browser: {reason}", file=sys.stderr)
-        print(browser_deps_warning(reason), file=sys.stderr)
+        print(browser_deps_warning(reason, host=ctx.host), file=sys.stderr)
         print("    (ava-browser will not start on this host)", file=sys.stderr)
         return
     # Host is browser-capable. Offer, once, to seed the dedicated Chrome profile
@@ -134,18 +135,18 @@ def ensure_browser(ctx: ConvergeCtx) -> None:
     # default and never block.
     from services.desktop.browser.profile import ensure_browser_profile
 
-    ensure_browser_profile(interactive=sys.stdin.isatty() and sys.stdout.isatty())
+    ensure_browser_profile(interactive=sys.stdin.isatty() and sys.stdout.isatty(), host=ctx.host)
 
 
 def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
     """Require the stable signed ancestor before starting a macOS root."""
-    if sys.platform != "darwin":
+    if ctx.host.platform.system != "darwin":
         return
     if not ctx.read_config().view.services.permissions_helper_enabled:
         raise RuntimeError("macOS root supervision requires the permissions helper")
     from base.host.system.probes import permissions_helper_incapability
 
-    reason = permissions_helper_incapability()
+    reason = permissions_helper_incapability(host=ctx.host)
     if reason is not None:
         raise RuntimeError(f"macOS root supervision cannot start: {reason}")
     from services.desktop.permissions_helper import converge
@@ -233,7 +234,7 @@ def ensure_screen_capture(ctx: ConvergeCtx) -> None:
 
     if (
         not ctx.read_config().view.services.permissions_helper_enabled
-        or permissions_helper_incapability() is not None
+        or permissions_helper_incapability(host=ctx.host) is not None
     ):
         clear_status()
         return
@@ -260,7 +261,7 @@ def ensure_accessibility(ctx: ConvergeCtx) -> None:
 
     if (
         not ctx.read_config().view.services.permissions_helper_enabled
-        or permissions_helper_incapability() is not None
+        or permissions_helper_incapability(host=ctx.host) is not None
     ):
         clear_accessibility_status()
         return
@@ -502,7 +503,9 @@ def converge_host(
     """
     resolved_home = ava_home if ava_home is not None else resolve_ava_home()
     selected = (
-        _desired_service_names(roles, machine=command.machine) if services is None else services
+        _desired_service_names(roles, machine=command.machine, host=command.host)
+        if services is None
+        else services
     )
     ctx = ConvergeCtx(
         repo=repo,
@@ -557,7 +560,7 @@ def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool)
 
 
 def _desired_service_names(
-    roles: MachineRoles | None, *, machine: MachineIdentity
+    roles: MachineRoles | None, *, machine: MachineIdentity, host: Host
 ) -> frozenset[str]:
     from base.deploy.lifecycle.service_selection import read_selection
     from services.supervision.roster.spec import services_for_capabilities_annotated
@@ -567,7 +570,7 @@ def _desired_service_names(
     selection = read_selection()
     return frozenset(
         spec.session
-        for spec, gate in services_for_capabilities_annotated(roles, machine=machine)
+        for spec, gate in services_for_capabilities_annotated(roles, machine=machine, host=host)
         if gate is None and selection.enabled(spec.session)
     )
 

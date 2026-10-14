@@ -13,6 +13,8 @@ from psycopg_pool import ConnectionPool
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster import operations as cluster_ops
@@ -47,6 +49,7 @@ async def test_ops_route_wraps_dispatch_in_envelope(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         assert local_machine is machine_identity
         assert kind == "status_probe"
@@ -66,6 +69,7 @@ async def test_ops_route_wraps_dispatch_in_envelope(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == 200
     assert ctype == "application/json"
@@ -138,6 +142,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == 200
     assert ctype == "application/json"
@@ -195,6 +200,7 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
 
     assert status == 200

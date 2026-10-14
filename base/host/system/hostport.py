@@ -4,7 +4,7 @@ A component that starts a process, looks up an executable or branches on the pla
 `host: Host` as a required argument and calls `host.run`, `host.which`, `host.platform` and
 `host.uid` instead of `subprocess`, `shutil.which`, `sys.platform` and `os.getuid`. The
 composition root builds one with `Host.system()`; a test builds the host it wants, with
-`FakeCommands` (`base/host/tests/fake_commands.py`) as `run` and plain values for the rest.
+`FakeCommands` (`base/host/system/tests/fake_commands.py`) as `run` and plain values for the rest.
 A test that really needs a process uses `Host.system()` and patches nothing.
 
 `run` is `base.host.proc.run_bounded`, not a second runner: its timeout bounds the whole process

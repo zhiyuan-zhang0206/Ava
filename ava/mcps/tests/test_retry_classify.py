@@ -18,6 +18,7 @@ from ava import mcps
 from ava.mcps._tools import call_raw
 from ava.mcps.config import is_transport_error
 from ava.mcps.tests._mcps_helpers import tool_source
+from base.host.system.tests.fake_commands import fake_host
 
 
 def test_transport_subclasses_keep_the_known_retry_contract() -> None:
@@ -89,7 +90,7 @@ async def _daemon_call(
         oauth_locks={},
         timeout_seconds=lambda: 15.0,
     )
-    await daemon.handle_client(reader, cast(asyncio.StreamWriter, writer), scope)
+    await daemon.handle_client(reader, cast(asyncio.StreamWriter, writer), scope, host=fake_host())
     return json.loads(b"".join(chunks))
 
 

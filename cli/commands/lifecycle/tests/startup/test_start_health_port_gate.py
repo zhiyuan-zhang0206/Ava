@@ -35,6 +35,7 @@ import cli.commands.probe as _probe_commands
 import services.supervision.roster.spec as roster_spec
 from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
+from base.host.system.hostport import Host
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import start as start_mod
 from cli.commands.lifecycle.root_driver import LaunchOutcome
@@ -207,14 +208,14 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
     launched: list[str] = []
 
     def annotated_roster(
-        roles: frozenset[str], *, machine: MachineIdentity
+        roles: frozenset[str], *, machine: MachineIdentity, host: Host
     ) -> tuple[tuple[ServiceSpec, None], ...]:
         assert isinstance(machine, MachineIdentity)
         del roles
         return tuple((spec, None) for spec in specs)
 
     def start_roster(
-        roles: frozenset[str], skip: set[str], *, machine: MachineIdentity
+        roles: frozenset[str], skip: set[str], *, machine: MachineIdentity, host: Host
     ) -> tuple[ServiceSpec, ...]:
         assert isinstance(machine, MachineIdentity)
         del roles

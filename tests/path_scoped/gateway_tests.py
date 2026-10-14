@@ -33,6 +33,8 @@ from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from gateway.agents import creation as _agents_creation
@@ -60,9 +62,11 @@ def gateway_config_owner(
     from gateway import app as gateway_app
 
     def build_process(
-        *, config: ConfigBoot, image: LoadedCommit, machine: MachineIdentity
+        *, config: ConfigBoot, image: LoadedCommit, machine: MachineIdentity, host: Host
     ) -> GatewayProcess:
-        return GatewayProcess(config=config, image=image, machine=machine_identity)
+        return GatewayProcess(
+            config=config, image=image, machine=machine_identity, host=fake_host()
+        )
 
     # Capture configuration at each real lifespan entry, after the test's pins.
     # Borrowed process inputs bypass this constructor and keep their writer.
@@ -194,13 +198,16 @@ def _local_config_in_process(
             )
             if kind == "config_read":
                 return host_config.config_read_op(
-                    authority=config_authority, local_machine=machine_identity.name()
+                    authority=config_authority,
+                    local_machine=machine_identity.name(),
+                    host=fake_host(),
                 ).model_dump(mode="json")
             return host_config.config_write_op(
                 cast("dict[str, Any]", payload["overrides"]),
                 local=bool(payload.get("local", False)),
                 authority=config_authority,
                 local_machine=machine_identity.name(),
+                host=fake_host(),
             ).model_dump(mode="json")
         # Not a config op — fall through to the real dispatch (other routers
         # share this module object and must keep their own behavior).

@@ -7,19 +7,26 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from cli.database.tests.command_inputs import command_machine as command_machine
 from services.supervision.roster import spec
 
 
 def _sessions(role: str, *, machine: MachineIdentity) -> set[str]:
-    return {s.session for s in spec.services_for_capabilities(frozenset({role}), machine=machine)}
+    return {
+        s.session
+        for s in spec.services_for_capabilities(
+            frozenset({role}), machine=machine, host=fake_host()
+        )
+    }
 
 
 def _annotated(role: str, *, machine: MachineIdentity) -> dict[str, str | None]:
     return {
         s.session: reason
         for s, reason in spec.services_for_capabilities_annotated(
-            frozenset({role}), machine=machine
+            frozenset({role}), machine=machine, host=fake_host()
         )
     }
 
@@ -30,7 +37,7 @@ def test_browser_present_on_agent_runner_when_enabled_and_capable(
 ) -> None:
     """browser_enabled=True AND host is capable -> browser starts."""
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     assert "browser" in _sessions("agent-runner", machine=command_machine)
 
 
@@ -39,7 +46,7 @@ def test_browser_absent_when_disabled(
     command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(settings.services, "browser_enabled", False)
-    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     assert "browser" not in _sessions("agent-runner", machine=command_machine)
 
 
@@ -50,7 +57,11 @@ def test_browser_absent_when_enabled_but_not_capable(
     """browser_enabled=True but host not capable (no display/Chrome/npx)
     -> browser dropped from the start roster."""
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: "no display (headless)")  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_browser_incapability(_chrome: str | None, *, host: Host) -> str | None:
+        return "no display (headless)"
+
+    monkeypatch.setattr(spec, "browser_incapability", fake_browser_incapability)  # pyright: ignore[reportUnknownArgumentType]
     assert "browser" not in _sessions("agent-runner", machine=command_machine)
 
 
@@ -59,7 +70,7 @@ def test_browser_never_on_gateway(
     command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     assert "browser" not in _sessions("gateway", machine=command_machine)
 
 
@@ -70,7 +81,11 @@ def test_annotated_keeps_browser_with_incapability_reason(
     """The diagnostic view keeps a capability-gated browser WITH its reason, even
     though the start roster drops it — so `ava status` shows why, not nothing."""
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: "no display (headless)")  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_browser_incapability(_chrome: str | None, *, host: Host) -> str | None:
+        return "no display (headless)"
+
+    monkeypatch.setattr(spec, "browser_incapability", fake_browser_incapability)  # pyright: ignore[reportUnknownArgumentType]
     annotated = _annotated("agent-runner", machine=command_machine)
     assert annotated["browser"] == "no display (headless)"
     assert "browser" not in _sessions(
@@ -85,7 +100,7 @@ def test_annotated_browser_disabled_reason(
     """Disabled (operator opt-out) is distinct from incapable, and is surfaced
     as its own reason rather than conflated with a missing display."""
     monkeypatch.setattr(settings.services, "browser_enabled", False)
-    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     assert (
         _annotated("agent-runner", machine=command_machine)["browser"]
         == "disabled (AVA_BROWSER_ENABLED off)"
@@ -102,7 +117,13 @@ def test_computer_mcp_present_when_capable(
     """No governance gate (user ruling 2026-08-10): the service runs whenever
     the platform can host it — permissions helper enabled and capable."""
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
-    monkeypatch.setattr(spec, "permissions_helper_incapability", lambda: None)
+
+    def fake_permissions_helper_incapability(*, host: Host) -> str | None:
+        return None
+
+    monkeypatch.setattr(
+        spec, "permissions_helper_incapability", fake_permissions_helper_incapability
+    )
     assert "computer-mcp" in _sessions("agent-runner", machine=command_machine)
 
 
@@ -114,7 +135,13 @@ def test_computer_mcp_absent_without_helper(
     display on macOS) -> service gated out: the executor
     layer would have nothing to execute through."""
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
-    monkeypatch.setattr(spec, "permissions_helper_incapability", lambda: "no swiftc")
+
+    def fake_permissions_helper_incapability(*, host: Host) -> str | None:
+        return "no swiftc"
+
+    monkeypatch.setattr(
+        spec, "permissions_helper_incapability", fake_permissions_helper_incapability
+    )
     assert "computer-mcp" not in _sessions("agent-runner", machine=command_machine)
     assert _annotated("agent-runner", machine=command_machine)["computer-mcp"] == "no swiftc"
 
@@ -124,7 +151,13 @@ def test_computer_mcp_absent_when_helper_disabled(
     command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", False)
-    monkeypatch.setattr(spec, "permissions_helper_incapability", lambda: None)
+
+    def fake_permissions_helper_incapability(*, host: Host) -> str | None:
+        return None
+
+    monkeypatch.setattr(
+        spec, "permissions_helper_incapability", fake_permissions_helper_incapability
+    )
     assert "computer-mcp" not in _sessions("agent-runner", machine=command_machine)
 
 
@@ -133,5 +166,11 @@ def test_computer_mcp_never_on_gateway(
     command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
-    monkeypatch.setattr(spec, "permissions_helper_incapability", lambda: None)
+
+    def fake_permissions_helper_incapability(*, host: Host) -> str | None:
+        return None
+
+    monkeypatch.setattr(
+        spec, "permissions_helper_incapability", fake_permissions_helper_incapability
+    )
     assert "computer-mcp" not in _sessions("gateway", machine=command_machine)

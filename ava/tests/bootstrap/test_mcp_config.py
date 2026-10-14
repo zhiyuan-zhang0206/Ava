@@ -18,6 +18,8 @@ from typing import Any
 import pytest
 
 import ava.mcps.config as cfg_mod
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 
 
 def _write(path: Path, servers: dict[str, dict[str, str]]) -> None:
@@ -306,27 +308,33 @@ def test_server_cwd_unknown_is_none(unit_home: Path) -> None:
 
 
 def test_assert_requirements_noop_without_requires() -> None:
-    cfg_mod.assert_requirements({"command": "x"})  # no raise
+    cfg_mod.assert_requirements({"command": "x"}, host=fake_host())  # no raise
 
 
 def test_assert_requirements_display_ok_with_display(monkeypatch: pytest.MonkeyPatch) -> None:
     # display_available is imported into cfg_mod from base.host.system.probes;
     # patch the bound name (where assert_requirements calls it).
-    monkeypatch.setattr(cfg_mod, "display_available", lambda: True)
-    cfg_mod.assert_requirements({"requires": {"display": True}})  # no raise
+    def fake_display_available(*, host: Host) -> bool:
+        return True
+
+    monkeypatch.setattr(cfg_mod, "display_available", fake_display_available)
+    cfg_mod.assert_requirements({"requires": {"display": True}}, host=fake_host())  # no raise
 
 
 def test_assert_requirements_display_raises_without_display(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cfg_mod, "display_available", lambda: False)
+    def fake_display_available(*, host: Host) -> bool:
+        return False
+
+    monkeypatch.setattr(cfg_mod, "display_available", fake_display_available)
     with pytest.raises(cfg_mod.MCPError, match="requires a display"):
-        cfg_mod.assert_requirements({"requires": {"display": True}})
+        cfg_mod.assert_requirements({"requires": {"display": True}}, host=fake_host())
 
 
 def test_assert_requirements_unknown_key_fails_fast() -> None:
     with pytest.raises(cfg_mod.MCPError, match="unknown requires key"):
-        cfg_mod.assert_requirements({"requires": {"gpu": True}})
+        cfg_mod.assert_requirements({"requires": {"gpu": True}}, host=fake_host())
 
 
 # ─── server_capability ───────────────────────────────────────────────────
@@ -352,15 +360,15 @@ def test_assert_requirements_unknown_key_fails_fast() -> None:
 @pytest.mark.parametrize("reader", [cfg_mod.assert_requirements, cfg_mod.server_capability])
 def test_invalid_requirements_fail_before_host_probe(
     requires: object,
-    reader: Callable[[dict[str, Any]], object],
+    reader: Callable[..., object],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def unexpected_probe() -> bool:
+    def unexpected_probe(*, host: Host) -> bool:
         pytest.fail("invalid declarations must fail before probing host capabilities")
 
     monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
     with pytest.raises(cfg_mod.MCPError):
-        reader({"requires": requires})
+        reader({"requires": requires}, host=fake_host())
 
 
 @pytest.mark.parametrize(
@@ -375,17 +383,23 @@ def test_invalid_requirements_fail_before_host_probe(
 def test_optional_or_false_requirements_need_no_host_probe(
     spec: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def unexpected_probe() -> bool:
+    def unexpected_probe(*, host: Host) -> bool:
         pytest.fail("optional or false requirements must not probe host capabilities")
 
     monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
-    cfg_mod.assert_requirements(spec)
-    assert cfg_mod.server_capability(spec) == (True, None)
+    cfg_mod.assert_requirements(spec, host=fake_host())
+    assert cfg_mod.server_capability(spec, host=fake_host()) == (True, None)
 
 
 def test_server_capability_ok_when_host_has_a_display(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cfg_mod, "display_available", lambda: True)
-    assert cfg_mod.server_capability({"requires": {"display": True}}) == (True, None)
+    def fake_display_available(*, host: Host) -> bool:
+        return True
+
+    monkeypatch.setattr(cfg_mod, "display_available", fake_display_available)
+    assert cfg_mod.server_capability({"requires": {"display": True}}, host=fake_host()) == (
+        True,
+        None,
+    )
 
 
 # ─── server_url ──────────────────────────────────────────────────────────

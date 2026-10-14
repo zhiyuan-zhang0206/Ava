@@ -24,6 +24,7 @@ import pytest
 import base.packages.plugins.enable_config as pc
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.host.system.tests.fake_commands import fake_host
 from services.supervision import roster
 from services.supervision.roster import plugin_services as roster_plugins
 from services.supervision.roster import service_spec, spec
@@ -263,7 +264,7 @@ def test_failed_gate_never_produces_a_start_or_status_roster(
         spec.services_for_capabilities_annotated if diagnostic else spec.services_for_capabilities
     )
     with pytest.raises(RuntimeError, match="broken gate"):
-        read(frozenset({"gateway"}), machine=machine_identity)
+        read(frozenset({"gateway"}), machine=machine_identity, host=fake_host())
     assert any("roster evaluation aborted" in r["message"] for r in loguru_records)
 
 

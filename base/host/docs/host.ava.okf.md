@@ -24,7 +24,7 @@ looks up a program or branches on the platform takes a required `host: Host` wit
 `run` (`proc.run_bounded`, whose timeout bounds the whole process tree), `which`
 (`shutil.which`), `platform` (`base.native_process.os_platform.Platform`: `system` as `linux` or
 `darwin`, `machine`, `executable`; it is defined there once because `native_process` sits below `base.host`) and `uid`. The composition root builds it with `Host.system()`; a test builds the
-`Host` it wants with `base.host.tests.fake_commands.FakeCommands` as `run`, which records each
+`Host` it wants with `base.host.system.tests.fake_commands.FakeCommands` as `run`, which records each
 argv, answers from a script routed by argv prefix and refuses an unscripted command. A test that
 needs a real process uses `Host.system()`. The four fields are the whole port; a new capability
 is a reviewed addition, not a field that appears on its own.

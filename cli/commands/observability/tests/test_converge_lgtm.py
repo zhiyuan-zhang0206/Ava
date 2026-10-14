@@ -22,7 +22,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system.hostport import Host
-from base.host.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx

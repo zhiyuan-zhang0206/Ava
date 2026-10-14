@@ -13,6 +13,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.system.hostport import Host
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
@@ -30,10 +31,11 @@ class GatewayProcess:
     """The configuration, admission and writer owned by one Gateway entry."""
 
     def __init__(
-        self, *, config: ConfigBoot, image: LoadedCommit, machine: MachineIdentity
+        self, *, config: ConfigBoot, image: LoadedCommit, machine: MachineIdentity, host: Host
     ) -> None:
         self.config = config
         self.machine = machine
+        self.host = host
         self.image = image
         self.version = CodeVersion(image)
         self.gate = ProcessDbGate(version=self.version.get, process="gateway")

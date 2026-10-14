@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import ava.mcps._daemon as daemon_mod
+from base.host.system.tests.fake_commands import fake_host
 
 # Most tests here are deterministic (mocked I/O / pure DB side-effects) and run in
 # the parallel pool. Only the real AF_UNIX socket lifecycle smoke tests depend on
@@ -206,10 +207,13 @@ async def test_get_session_lazy_inits_and_caches(
     connect = AsyncMock(return_value=(session, stack))
     monkeypatch.setattr(daemon_mod, "connect_server", connect)
 
-    s1 = await daemon_mod.get_session("fs", scope)
-    s2 = await daemon_mod.get_session("fs", scope)
+    host = fake_host()
+    s1 = await daemon_mod.get_session("fs", scope, host=host)
+    s2 = await daemon_mod.get_session("fs", scope, host=host)
     assert s1 is session and s2 is session
-    connect.assert_awaited_once_with("fs", scope.oauth_locks, timeout_seconds=scope.timeout_seconds)
+    connect.assert_awaited_once_with(
+        "fs", scope.oauth_locks, timeout_seconds=scope.timeout_seconds, host=host
+    )
     assert scope.local.sessions["fs"] is session
     assert scope.local.stacks["fs"] is stack
 
@@ -221,7 +225,7 @@ async def test_get_session_raises_on_unknown_server(
     write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod, "connect_server", AsyncMock())
     with pytest.raises(ValueError, match="nope"):
-        await daemon_mod.get_session("nope", scope)
+        await daemon_mod.get_session("nope", scope, host=fake_host())
 
 
 async def test_get_session_concurrent_calls_share_one_connect(
@@ -249,9 +253,9 @@ async def test_get_session_concurrent_calls_share_one_connect(
 
     monkeypatch.setattr(daemon_mod, "connect_server", slow_connect)
 
-    t1 = asyncio.create_task(daemon_mod.get_session("fs", scope))
+    t1 = asyncio.create_task(daemon_mod.get_session("fs", scope, host=fake_host()))
     await started.wait()  # ensure t1 has entered connect
-    t2 = asyncio.create_task(daemon_mod.get_session("fs", scope))
+    t2 = asyncio.create_task(daemon_mod.get_session("fs", scope, host=fake_host()))
     r1, r2 = await asyncio.gather(t1, t2)
     assert r1 is session and r2 is session
     assert call_count == 1
@@ -275,11 +279,7 @@ async def test_handle_client_lists_tools(
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
 
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
 
     [resp] = writer.responses()
     assert resp["id"] == 1
@@ -314,11 +314,7 @@ async def test_handle_client_call_tool_returns_content(
     }
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
 
     [resp] = writer.responses()
     assert resp == {
@@ -352,11 +348,7 @@ async def test_handle_client_call_tool_carries_is_error_true(
     req = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "rm"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
 
     [resp] = writer.responses()
     assert resp["ok"] is True
@@ -383,11 +375,7 @@ async def test_handle_client_call_tool_unknown_content_block_raises_type_error(
     req = {"id": 2, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
 
     [resp] = writer.responses()
     assert resp["id"] == 2
@@ -402,11 +390,7 @@ async def test_handle_client_bad_json_returns_parse_error(
     """JSON line parse failure → ok=False with 'JSON parse error', id is None."""
     reader = make_reader([b"not json {{{\n"])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["id"] is None
     assert resp["ok"] is False
@@ -432,11 +416,7 @@ async def test_handle_client_continues_after_bad_json(
         ]
     )
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
 
     r1, r2 = writer.responses()
     assert r1["ok"] is False and "JSON parse error" in r1["error"]
@@ -451,11 +431,7 @@ async def test_handle_client_unknown_method(fake_home: Path, scope: daemon_mod.S
     req = {"id": 3, "method": "nuke_database", "params": {"server": "fs"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp == {"id": 3, "ok": False, "error": "Unknown method: nuke_database"}
 
@@ -464,11 +440,7 @@ async def test_handle_client_eof_closes_writer(fake_home: Path, scope: daemon_mo
     """Empty readline (client disconnects) → break out of loop, finally close writer."""
     reader = make_reader([])  # immediate EOF
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     assert writer.responses() == []
     assert writer.closed
     assert writer.wait_closed_called
@@ -488,6 +460,7 @@ async def test_handle_client_connection_reset_is_suppressed(
         _ResettingReader(),  # type: ignore[arg-type]
         writer_arg(writer),
         scope,
+        host=fake_host(),
     )
     assert writer.closed
 
@@ -505,11 +478,7 @@ async def test_handle_client_call_tool_session_call_failure_propagates_as_error(
     req = {"id": 4, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["id"] == 4
     assert resp["ok"] is False
@@ -529,11 +498,7 @@ async def test_handle_client_default_server_param_empty_string(
     req = {"id": 5, "method": "list_tools", "params": {}}  # didn't pass server
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["id"] == 5
     assert resp["ok"] is False
@@ -553,11 +518,7 @@ async def test_handle_client_response_content_empty_when_no_blocks(
     req = {"id": 6, "method": "call_tool", "params": {"server": "fs", "tool": "noop"}}
     reader = make_reader([(json.dumps(req) + "\n").encode()])
     writer = FakeWriter()
-    await daemon_mod.handle_client(
-        reader,
-        writer_arg(writer),
-        scope,
-    )
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope, host=fake_host())
     [resp] = writer.responses()
     assert resp["ok"] is True
     assert resp["result"]["content"] == []
@@ -649,7 +610,7 @@ async def test_run_daemon_full_lifecycle_via_unix_socket(
     Path(short_socket_path).write_text("stale")
 
     daemon_task = asyncio.create_task(
-        daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0)
+        daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0, host=fake_host())
     )
     reader, writer = await wait_for_daemon_socket(daemon_task, short_socket_path, timeout=1.5)
 
@@ -690,7 +651,7 @@ async def test_run_daemon_graceful_shutdown_closes_server_and_cleans_socket(
     monkeypatch.setattr(daemon_mod.asyncio, "Event", _SpyEvent)
 
     daemon_task = asyncio.create_task(
-        daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0)
+        daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0, host=fake_host())
     )
 
     # wait for daemon to listen + get the stop_event instance

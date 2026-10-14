@@ -19,6 +19,7 @@ from base.config import runtime_config
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env import dotenv_file
+from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugin_config_admin import panel_metadata
 from ops import host_config as ops
 from ops.host_config import config_audit_read_op, config_read_op, config_write_op
@@ -115,7 +116,9 @@ def test_config_read_op_returns_all_host_fields(
 ) -> None:
     """config_read_op returns one entry per host-scope field."""
     machine_identity.set(name="test-machine")
-    result = config_read_op(authority=config_authority, local_machine=machine_identity.name())
+    result = config_read_op(
+        authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     host_names = set(_host_field_names(config_authority=config_authority))
     assert host_names == set(result.host_fields.keys())
 
@@ -133,7 +136,9 @@ def test_config_read_op_sensitive_field_masked(
     # inject one (see the helper) instead of skipping/failing on the empty
     # real-world list.
     name = _inject_sensitive_host_field(monkeypatch, config_authority=config_authority)
-    result = config_read_op(authority=config_authority, local_machine=machine_identity.name())
+    result = config_read_op(
+        authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     entry = result.host_fields[name]
     assert entry.value == "••••••••", f"{name} should be masked but got {entry.value!r}"
 
@@ -149,7 +154,9 @@ def test_config_read_op_overridden_flag_reflects_local_file(
     machine_identity.set(name="test-machine")
     # Set ops_concurrency in this machine's .env
     runtime_config.write_fields({"ops_concurrency": 7}, set())
-    result = config_read_op(authority=config_authority, local_machine=machine_identity.name())
+    result = config_read_op(
+        authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     assert result.host_fields["ops_concurrency"].overridden is True
     # A field not in the local file should not be marked overridden
     not_overridden = [
@@ -176,7 +183,9 @@ def test_config_read_op_can_enable_for_browser_enabled(
             config_validators.ValidationResult(ok=True) if name == "browser_enabled" else None
         ),
     )
-    result = config_read_op(authority=config_authority, local_machine=machine_identity.name())
+    result = config_read_op(
+        authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     entry = result.host_fields["browser_enabled"]
     assert isinstance(entry.can_enable, bool)
     assert entry.can_enable is True
@@ -201,7 +210,9 @@ def test_config_read_op_can_enable_false_carries_reason(
             else None
         ),
     )
-    result = config_read_op(authority=config_authority, local_machine=machine_identity.name())
+    result = config_read_op(
+        authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     entry = result.host_fields["browser_enabled"]
     assert entry.can_enable is False
     assert entry.reason == "no display detected"
@@ -216,7 +227,9 @@ def test_config_read_op_non_gated_field_has_null_can_enable(
 ) -> None:
     """Fields with no static read-time gate get can_enable=None, reason=None."""
     machine_identity.set(name="test-machine")
-    result = config_read_op(authority=config_authority, local_machine=machine_identity.name())
+    result = config_read_op(
+        authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     # machine_description has no entry in VALIDATORS and no read_time_capability
     entry = result.host_fields["machine_description"]
     assert entry.can_enable is None
@@ -242,7 +255,9 @@ def test_config_read_op_raw_overrides_omits_sensitive(
         return {name: "secret-val", "ops_concurrency": 3}
 
     monkeypatch.setattr(ops, "panel_overrides", _overrides)
-    result = config_read_op(authority=config_authority, local_machine=machine_identity.name())
+    result = config_read_op(
+        authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     raw = result.raw_overrides
     assert name not in raw, f"sensitive field {name} must be omitted from raw_overrides"
     assert raw.get("ops_concurrency") == 3
@@ -257,7 +272,9 @@ def test_config_read_op_machine_name_in_result(
 ) -> None:
     """Result includes the explicitly supplied local machine name."""
     machine_identity.set(name="my-host")
-    result = config_read_op(authority=config_authority, local_machine=machine_identity.name())
+    result = config_read_op(
+        authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     assert result.machine == "my-host"
 
 
@@ -279,6 +296,7 @@ def test_config_write_op_rejects_unknown_field(
         {"totally_unknown_field": 42},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is False
     assert result.results["totally_unknown_field"].ok is False
@@ -298,6 +316,7 @@ def test_config_write_op_rejects_non_host_field(
         {"llm_model": "something"},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is False
     assert result.results["llm_model"].ok is False
@@ -328,6 +347,7 @@ def test_config_write_op_rejects_non_remote_writable(
         {non_writable[0]: "any-value"},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is False
     assert result.results[non_writable[0]].ok is False
@@ -354,6 +374,7 @@ def test_config_write_op_local_accepts_writable_host_field(
         local=True,
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"cross_machine_transfer_backend"}
@@ -373,6 +394,7 @@ def test_config_write_op_remote_rejects_writable_only_host_field(
         {"cross_machine_transfer_backend": "none"},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is False
     assert "not remotely editable" in (
@@ -391,7 +413,10 @@ def test_config_write_op_rejects_failing_validator(
     machine_identity.set(name="test-machine")
     # ops_concurrency must be int in [1, 64] — 0 should fail
     result = config_write_op(
-        {"ops_concurrency": 0}, authority=config_authority, local_machine=machine_identity.name()
+        {"ops_concurrency": 0},
+        authority=config_authority,
+        local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is False
     assert result.results["ops_concurrency"].ok is False
@@ -413,6 +438,7 @@ def test_config_write_op_rejects_unknown_transfer_backend(
         local=True,
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is False
     assert result.results["cross_machine_transfer_backend"].ok is False
@@ -434,6 +460,7 @@ def test_config_write_op_atomic_one_bad_writes_nothing(
         {"ops_concurrency": 0, "machine_description": "ok"},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is False
     # Nothing should be written to .env
@@ -458,6 +485,7 @@ def test_config_write_op_all_good_writes_file(
         {"ops_concurrency": 4, "machine_description": "test"},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
@@ -482,6 +510,7 @@ def test_config_write_op_none_unsets_field(
         {"ops_concurrency": 4, "machine_description": "hi"},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
     # Explicit None unsets machine_description; ops_concurrency is untouched.
@@ -489,6 +518,7 @@ def test_config_write_op_none_unsets_field(
         {"machine_description": None},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency"}
@@ -515,10 +545,14 @@ def test_config_write_op_absent_key_left_untouched(
         {"ops_concurrency": 4, "machine_description": "hi"},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     # A patch touching only ops_concurrency must NOT drop machine_description.
     result = config_write_op(
-        {"ops_concurrency": 5}, authority=config_authority, local_machine=machine_identity.name()
+        {"ops_concurrency": 5},
+        authority=config_authority,
+        local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
@@ -540,9 +574,14 @@ def test_config_write_op_empty_patch_is_noop(
         lambda _field, _val, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op(
-        {"ops_concurrency": 4}, authority=config_authority, local_machine=machine_identity.name()
+        {"ops_concurrency": 4},
+        authority=config_authority,
+        local_machine=machine_identity.name(),
+        host=fake_host(),
     )
-    result = config_write_op({}, authority=config_authority, local_machine=machine_identity.name())
+    result = config_write_op(
+        {}, authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     assert result.applied is True
     assert runtime_config.env_set_field_names() == {"ops_concurrency"}
 
@@ -565,10 +604,16 @@ def test_config_write_op_does_not_disturb_non_managed_env(
     )
     isolated_host_home.joinpath(".env").write_text("AVA_DB_URL=postgresql://x@127.0.0.1:1/x\n")
     config_write_op(
-        {"ops_concurrency": 4}, authority=config_authority, local_machine=machine_identity.name()
+        {"ops_concurrency": 4},
+        authority=config_authority,
+        local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     config_write_op(
-        {"ops_concurrency": None}, authority=config_authority, local_machine=machine_identity.name()
+        {"ops_concurrency": None},
+        authority=config_authority,
+        local_machine=machine_identity.name(),
+        host=fake_host(),
     )  # explicit unset must not touch AVA_DB_URL
     assert dotenv_file.read_env_aliases()["AVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
     assert "AVA_OPS_CONCURRENCY" not in dotenv_file.read_env_aliases()
@@ -592,6 +637,7 @@ def test_config_write_op_restart_required_union(
         {"ops_concurrency": 4, "machine_description": "hi"},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert result.applied is True
     # ops_concurrency.restart_required + machine_description.restart_required
@@ -616,7 +662,9 @@ def test_config_write_op_empty_overrides_applied_no_write(
 ) -> None:
     """Empty overrides dict -> applied=True, nothing written, restart_required=[]."""
     machine_identity.set(name="test-machine")
-    result = config_write_op({}, authority=config_authority, local_machine=machine_identity.name())
+    result = config_write_op(
+        {}, authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     assert result.applied is True
     assert result.restart_required == []
     assert dotenv_file.read_env_aliases() == {}
@@ -638,6 +686,7 @@ def test_config_write_op_rejects_an_invalid_candidate_without_writing(
         local=True,
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
 
     assert result.applied is False
@@ -656,7 +705,9 @@ def test_config_write_op_machine_name_in_result(
 ) -> None:
     """Result includes the explicitly supplied local machine name."""
     machine_identity.set(name="my-host")
-    result = config_write_op({}, authority=config_authority, local_machine=machine_identity.name())
+    result = config_write_op(
+        {}, authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
+    )
     assert result.machine == "my-host"
 
 

@@ -14,6 +14,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
@@ -48,6 +50,7 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         calls.append(1)
@@ -70,6 +73,7 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     assert result == {"ok": True}
@@ -104,6 +108,7 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         calls.append(1)
@@ -125,6 +130,7 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     assert len(calls) == daemon.DISPATCH_RETRY_ATTEMPTS
 
@@ -157,6 +163,7 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         calls.append(1)
@@ -178,5 +185,6 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     assert len(calls) == 1

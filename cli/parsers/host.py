@@ -87,6 +87,7 @@ def _h_status(args: argparse.Namespace) -> int:
         database_factory=args.database_factory,
         machine=args.runtime.machine,
         config=args.runtime.config,
+        host=args.runtime.host,
     )
 
 
@@ -101,13 +102,13 @@ def _h_converge(args: argparse.Namespace) -> int:
 def _h_firewall_status(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_status
 
-    return cmd_firewall_status(machine=args.runtime.machine)
+    return cmd_firewall_status(machine=args.runtime.machine, host=args.runtime.host)
 
 
 def _h_firewall_sync(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_sync
 
-    return cmd_firewall_sync(machine=args.runtime.machine)
+    return cmd_firewall_sync(machine=args.runtime.machine, host=args.runtime.host)
 
 
 def _h_trace_ship(args: argparse.Namespace) -> int:

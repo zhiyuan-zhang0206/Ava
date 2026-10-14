@@ -18,12 +18,10 @@ from base.host.system.cron import (
     register_os_cron,
     unregister_os_cron,
 )
+from base.host.system.hostport import Host
 
 
-def cmd_cron_register(
-    *,
-    interval_s: int = DEFAULT_INTERVAL_SECONDS,
-) -> int:
+def cmd_cron_register(*, interval_s: int = DEFAULT_INTERVAL_SECONDS, host: Host) -> int:
     """Register the OS cron job for the cluster health probe.
 
     CLI entry — delegates to `base.host.system.cron.register_os_cron`. Idempotent —
@@ -36,19 +34,19 @@ def cmd_cron_register(
         return config.view.general.os_jobs_enabled
 
     try:
-        register_os_cron(interval_s=interval_s, enabled_reader=enabled_reader)
+        register_os_cron(interval_s=interval_s, enabled_reader=enabled_reader, host=host)
     except RuntimeError as e:
         print(f"  * {e}")
         return 1
     return 0
 
 
-def cmd_cron_unregister() -> int:
+def cmd_cron_unregister(*, host: Host) -> int:
     """Remove the OS cron job for the cluster health probe.
 
     CLI entry — delegates to `base.host.system.cron.unregister_os_cron`."""
     try:
-        unregister_os_cron()
+        unregister_os_cron(host=host)
     except RuntimeError as e:
         print(f"  * {e}")
         return 1

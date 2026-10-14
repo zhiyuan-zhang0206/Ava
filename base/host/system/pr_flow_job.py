@@ -24,7 +24,6 @@ ever pass there — would register its own pair, never prod's.
 from __future__ import annotations
 
 import shlex
-import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -33,6 +32,7 @@ from xml.sax.saxutils import escape
 from loguru import logger
 
 import base.host.system.cron
+from base.host.system.hostport import Host
 
 # Daily at 00:25 host-local (macmini lives on the fleet wall clock,
 # Asia/Shanghai): just past midnight so the previous day is complete, clear of
@@ -59,9 +59,9 @@ def _log_file() -> Path:
     return Path(base.host.system.cron.job_home()) / "logs" / "pr-flow.out.log"
 
 
-def _python_path() -> str:
+def _python_path(*, host: Host) -> str:
     """The owning checkout's venv python, beside the venv's `ava` binary."""
-    return str(Path(base.host.system.cron.ava_binary_path()).parent / "python")
+    return str(Path(base.host.system.cron.ava_binary_path(host=host)).parent / "python")
 
 
 def _script_path() -> str:
@@ -70,11 +70,11 @@ def _script_path() -> str:
     return str(repo_root() / "scripts" / "ci" / "pull_requests" / "pr_flow_export.py")
 
 
-def _shell_command() -> str:
-    return f"{shlex.quote(_python_path())} {shlex.quote(_script_path())}"
+def _shell_command(*, host: Host) -> str:
+    return f"{shlex.quote(_python_path(host=host))} {shlex.quote(_script_path())}"
 
 
-def launchd_plist_content() -> str:
+def launchd_plist_content(*, host: Host) -> str:
     log_file = _log_file()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -87,9 +87,9 @@ def launchd_plist_content() -> str:
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>{escape(_shell_command())}</string>
+        <string>{escape(_shell_command(host=host))}</string>
     </array>
-{base.host.system.cron.launchd_env_block()}
+{base.host.system.cron.launchd_env_block(host=host)}
     <key>StartCalendarInterval</key>
     <dict>
             <key>Hour</key>
@@ -108,36 +108,36 @@ def launchd_plist_content() -> str:
 """
 
 
-def register_macos() -> int:
+def register_macos(*, host: Host) -> int:
     """Rewrite and reload the PR-flow LaunchAgent."""
     label = _LABEL
     plist_path = launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(launchd_plist_content(), encoding="utf-8")
+    plist_path.write_text(launchd_plist_content(host=host), encoding="utf-8")
 
-    if base.host.system.cron.reload_launchd_job(label, plist_path) != 0:
+    if base.host.system.cron.reload_launchd_job(label, plist_path, host=host) != 0:
         return 1
     logger.info("launchd job '{}' loaded (daily at {:02d}:{:02d})", label, _HOUR, _MINUTE)
     return 0
 
 
-def unregister_macos() -> int:
-    base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path())
+def unregister_macos(*, host: Host) -> int:
+    base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path(), host=host)
     return 0
 
 
-def _cron_entry() -> str:
+def _cron_entry(*, host: Host) -> str:
     log_file = _log_file()
     return (
         f"{_MINUTE} {_HOUR} * * * {base.host.system.cron.cron_env_prefix()}"
-        f"/bin/sh -c {shlex.quote(_shell_command())} "
+        f"/bin/sh -c {shlex.quote(_shell_command(host=host))} "
         f">> {shlex.quote(str(log_file))} 2>&1  {_CRON_MARKER}"
     )
 
 
-def register_linux() -> int:
+def register_linux(*, host: Host) -> int:
     """Replace the PR-flow line in the user crontab.
 
     Lines are matched by the marker as a substring.
@@ -146,6 +146,7 @@ def register_linux() -> int:
         "  * PR flow: crontab not installed; the daily sampler job cannot be registered",
         missing_returncode=1,
         missing_stream=sys.stderr,
+        host=host,
     )
     if missing_rc is not None:
         return missing_rc
@@ -155,22 +156,23 @@ def register_linux() -> int:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     if base.host.system.cron.replace_crontab_entry(
         marker,
-        _cron_entry(),
+        _cron_entry(host=host),
         skip_phrase="PR-flow registration",
         update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
+        host=host,
     ):
         return 1
     logger.info("crontab PR-flow entry added ({})", marker)
     return 0
 
 
-def unregister_linux() -> int:
+def unregister_linux(*, host: Host) -> int:
     return base.host.system.cron.remove_crontab_entry(
-        _CRON_MARKER, write_failure_rc=1, on_removed=None
+        _CRON_MARKER, write_failure_rc=1, on_removed=None, host=host
     )
 
 
-def credential_blocker(*, production: bool) -> str | None:
+def credential_blocker(*, production: bool, host: Host) -> str | None:
     """Why this unit cannot run the sampler, or None when it can.
 
     Cheap and local by design (converge runs on every start): production-home
@@ -179,7 +181,7 @@ def credential_blocker(*, production: bool) -> str | None:
     """
     if not production:
         return "not the registered production home"
-    if shutil.which("gh") is None:
+    if host.which("gh") is None:
         return "gh CLI not on PATH"
     token = trunk_token_path()
     if not token.exists() or not token.read_text(encoding="utf-8").strip():
@@ -187,7 +189,9 @@ def credential_blocker(*, production: bool) -> str | None:
     return None
 
 
-def register_pr_flow_job(*, enabled_reader: Callable[[], bool], production: bool) -> None:
+def register_pr_flow_job(
+    *, enabled_reader: Callable[[], bool], production: bool, host: Host
+) -> None:
     """Register the daily PR-flow sampler (idempotent).
 
     Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED` — the test suite), when
@@ -200,18 +204,25 @@ def register_pr_flow_job(*, enabled_reader: Callable[[], bool], production: bool
         return
     if not base.host.system.cron.owns_os_jobs("pr flow"):
         return
-    blocker = credential_blocker(production=production)
+    blocker = credential_blocker(production=production, host=host)
     if blocker is not None:
         logger.info("PR-flow sampler job not registered: {}", blocker)
         return
     base.host.system.cron.register_platform_job(
-        "PR-flow", macos=register_macos, linux=register_linux
+        "PR-flow",
+        macos=lambda: register_macos(host=host),
+        linux=lambda: register_linux(host=host),
+        host=host,
     )
 
 
-def unregister_pr_flow_job() -> None:
+def unregister_pr_flow_job(*, host: Host) -> None:
     """Remove the PR-flow sampler job; safe when none is registered, and a no-op
     outside the default home."""
     if not base.host.system.cron.owns_os_jobs("pr flow"):
         return
-    base.host.system.cron.unregister_platform_job(macos=unregister_macos, linux=unregister_linux)
+    base.host.system.cron.unregister_platform_job(
+        macos=lambda: unregister_macos(host=host),
+        linux=lambda: unregister_linux(host=host),
+        host=host,
+    )

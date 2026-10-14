@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 from base.host.proc import process_alive
+from base.host.system.hostport import Host
 from base.host.system.probes import default_chrome_user_data_dir
 from base.paths import ava_home
 
@@ -182,7 +183,7 @@ def _confirm_copy(src: Path, dst: Path, size_bytes: int) -> bool:
     return input("  Type 'yes' to confirm the copy: ").strip().lower() in ("yes", "y")
 
 
-def ensure_browser_profile(*, interactive: bool) -> None:
+def ensure_browser_profile(*, interactive: bool, host: Host) -> None:
     """Offer, once, to seed the agent's dedicated Chrome profile from the daily one.
 
     No-ops (leaving the daemon to create a fresh empty profile) when the profile
@@ -195,7 +196,7 @@ def ensure_browser_profile(*, interactive: bool) -> None:
         return  # never clobber an existing profile
     if not interactive:
         return  # non-interactive default = fresh empty profile
-    src = default_chrome_user_data_dir()
+    src = default_chrome_user_data_dir(host=host)
     if src is None:
         return  # no daily Chrome to copy from -> fresh profile, no prompt
 

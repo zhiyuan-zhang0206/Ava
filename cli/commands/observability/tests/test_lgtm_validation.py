@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from base.host.tests.fake_commands import FakeCommands, Reply, fake_host
+from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 from cli.commands.observability import lgtm_native
 
 

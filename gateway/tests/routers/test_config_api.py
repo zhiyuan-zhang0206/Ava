@@ -30,6 +30,8 @@ from base.config import runtime_config, settings
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env import dotenv_file
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from gateway.app import app
 from gateway.routers.configuration import runtime as config_router
 from ops.cluster import rpc as cluster_rpc
@@ -141,7 +143,7 @@ def stub_browser_capability(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Patches the predicate as bound in `config_validators`: no real display / Chrome / npx.
     """
-    monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_get_self_host_fields_carry_capability_hint(stub_browser_capability: None) -> None:
@@ -168,8 +170,12 @@ def test_get_self_host_fields_carry_capability_hint(stub_browser_capability: Non
 
 def test_get_self_browser_disabled_when_no_display(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET self with no display: browser_enabled.can_enable is False + a reason."""
-    monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(config_validators, "display_available", lambda: False)
+    monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome, **_kwargs: False)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_display_available(*, host: Host) -> bool:
+        return False
+
+    monkeypatch.setattr(config_validators, "display_available", fake_display_available)
     with TestClient(app) as client:
         resp = client.get("/api/config")
     assert resp.status_code == 200, resp.text
@@ -644,6 +650,7 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
                     db=object(),
                     db_pool=object(),
                     machine=machine_identity,
+                    host=fake_host(),
                 )
             ),
         ),
@@ -763,6 +770,7 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         local=True,
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert rejected.applied is False
     accepted = config_write_op(
@@ -770,6 +778,7 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         local=False,
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert accepted.applied is True
     assert (
@@ -780,6 +789,7 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         {"task_maintenance_enabled": True, "heartbeat_enabled": False},
         authority=config_authority,
         local_machine=machine_identity.name(),
+        host=fake_host(),
     )
     assert mixed.applied is False
     assert "mixes owners" in str(mixed.results["task_maintenance_enabled"].reason)

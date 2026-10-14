@@ -14,20 +14,26 @@ import pytest
 
 import services.desktop.browser.daemon as bd
 from base.config import settings
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 
 
 def test_assert_capable_raises_reason_with_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     """assert_browser_capable raises the browser_incapability reason, prefixed
     with the ava-browser tag, so a launch on an incapable host dies loudly with
     the same wording `ava status` shows."""
-    monkeypatch.setattr(bd, "browser_incapability", lambda _chrome: "no display (headless server)")  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_browser_incapability(_chrome: str | None, *, host: Host) -> str | None:
+        return "no display (headless server)"
+
+    monkeypatch.setattr(bd, "browser_incapability", fake_browser_incapability)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(RuntimeError, match=r"ava-browser: no display"):
-        bd.assert_browser_capable()
+        bd.assert_browser_capable(host=fake_host())
 
 
 def test_assert_capable_ok_when_capable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bd, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
-    bd.assert_browser_capable()  # no raise
+    monkeypatch.setattr(bd, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+    bd.assert_browser_capable(host=fake_host())  # no raise
 
 
 def test_chrome_args_has_debug_port_and_profile(tmp_path: Path) -> None:
@@ -45,13 +51,17 @@ def test_main_asserts_capable_then_execvps_chrome(
     """main() must fail-loud-check capability before launching, then exec the
     resolved Chrome with the configured port but no automatic page."""
     order: list[str] = []
-    monkeypatch.setattr(bd, "assert_browser_capable", lambda: order.append("capable"))
+
+    def fake_assert_browser_capable(*, host: Host) -> None:
+        order.append("capable")
+
+    monkeypatch.setattr(bd, "assert_browser_capable", fake_assert_browser_capable)
     monkeypatch.setattr(
         bd,
         "cdp_reachable",
         lambda _p: (order.append("port"), False)[1],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(bd, "resolve_chrome_binary", lambda _chrome: "/chrome")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bd, "resolve_chrome_binary", lambda _chrome, **_kwargs: "/chrome")  # pyright: ignore[reportUnknownArgumentType]
 
     def _profile() -> Path:
         order.append("profile")
@@ -93,7 +103,7 @@ def test_main_asserts_capable_then_execvps_chrome(
 
 
 def test_main_propagates_capability_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom() -> None:
+    def _boom(*, host: Host) -> None:
         raise RuntimeError("no display")
 
     monkeypatch.setattr(bd, "assert_browser_capable", _boom)
@@ -133,7 +143,11 @@ def test_main_refuses_when_cdp_port_already_served(
     profile lock) makes main() refuse with a non-zero exit and never exec a
     colliding second Chrome — so the healthcheck/watchdog don't churn a
     profile-lock crash."""
-    monkeypatch.setattr(bd, "assert_browser_capable", lambda: None)
+
+    def fake_assert_browser_capable(*, host: Host) -> None:
+        return None
+
+    monkeypatch.setattr(bd, "assert_browser_capable", fake_assert_browser_capable)
     monkeypatch.setattr(bd, "cdp_reachable", lambda _p: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(bd, "profile_dir", lambda: Path("/x/chrome-profile"))
     monkeypatch.setattr(

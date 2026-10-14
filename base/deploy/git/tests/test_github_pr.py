@@ -13,7 +13,7 @@ import pytest
 
 import base.deploy.git.github_pr as gp
 from base.host.system.hostport import Host
-from base.host.tests.fake_commands import FakeCommands, Reply, fake_host
+from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 
 # ── memory_repo_slug ──────────────────────────────────────────────────────
 

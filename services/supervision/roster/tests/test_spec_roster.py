@@ -18,6 +18,8 @@ from base.cluster.machine import MachineIdentity, MachineRole
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.endpoints import ServiceEndpoints
 from base.host.system import probes
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from services.supervision import roster
 from services.supervision.healthchecks import lgtm
 from services.supervision.roster import healthz, service_spec, spec
@@ -125,7 +127,7 @@ def test_annotated_roster_membership_per_capability(
     got = {
         s.session
         for s, _reason in spec.services_for_capabilities_annotated(
-            frozenset({role}), machine=machine_identity
+            frozenset({role}), machine=machine_identity, host=fake_host()
         )
     }
     assert got == expected
@@ -144,7 +146,7 @@ def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
 
     monkeypatch.setattr(lgtm, "is_lgtm_host", disabled)
     rows = spec.services_for_capabilities_annotated(
-        frozenset({"observability-station"}), machine=machine_identity
+        frozenset({"observability-station"}), machine=machine_identity, host=fake_host()
     )
     assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
     assert all(reason is not None for _service, reason in rows)
@@ -152,7 +154,7 @@ def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
     assert {
         service.session
         for service in spec.services_for_capabilities(
-            frozenset({"observability-station"}), machine=machine_identity
+            frozenset({"observability-station"}), machine=machine_identity, host=fake_host()
         )
     } == {"loki", "prometheus", "grafana"}
 
@@ -168,7 +170,7 @@ def test_agent_runner_roster_ordering(*, machine_identity: MachineIdentity) -> N
     order = [
         s.session
         for s, _r in spec.services_for_capabilities_annotated(
-            frozenset({"agent-runner"}), machine=machine_identity
+            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
         )
     ]
     assert order.index("agent-host") < order.index("ops")
@@ -191,14 +193,14 @@ def test_browser_gated_when_disabled(
     start = {
         s.session
         for s in spec.services_for_capabilities(
-            frozenset({"agent-runner"}), machine=machine_identity
+            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
         )
     }
     assert "browser" not in start
     annotated = {
         s.session: r
         for s, r in spec.services_for_capabilities_annotated(
-            frozenset({"agent-runner"}), machine=machine_identity
+            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
         )
     }
     assert annotated["browser"] and "AVA_BROWSER_ENABLED" in annotated["browser"]
@@ -212,7 +214,7 @@ def _agent_runner_annotated(
     return {
         s.session: r
         for s, r in spec.services_for_capabilities_annotated(
-            frozenset({"agent-runner"}), machine=local_machine
+            frozenset({"agent-runner"}), machine=local_machine, host=fake_host()
         )
     }
 
@@ -234,7 +236,7 @@ def test_otel_collector_gated_on_gateway_without_lgtm_marker(
     annotated = {
         service.session: reason
         for service, reason in spec.services_for_capabilities_annotated(
-            frozenset({"gateway"}), machine=machine_identity
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
         )
     }
     reason = annotated["otel-collector"]
@@ -244,7 +246,7 @@ def test_otel_collector_gated_on_gateway_without_lgtm_marker(
     start = {
         service.session
         for service in spec.services_for_capabilities(
-            frozenset({"gateway"}), machine=machine_identity
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
         )
     }
     assert "otel-collector" not in start
@@ -267,14 +269,14 @@ def test_otel_collector_runs_on_gateway_with_lgtm_marker(
     annotated = {
         service.session: reason
         for service, reason in spec.services_for_capabilities_annotated(
-            frozenset({"gateway"}), machine=machine_identity
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
         )
     }
     assert annotated["otel-collector"] is None
     start = {
         service.session
         for service in spec.services_for_capabilities(
-            frozenset({"gateway"}), machine=machine_identity
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
         )
     }
     assert "otel-collector" in start
@@ -300,14 +302,14 @@ def test_otel_collector_runs_on_gateway_without_marker_when_endpoint_override_ex
     annotated = {
         service.session: reason
         for service, reason in spec.services_for_capabilities_annotated(
-            frozenset({"gateway"}), machine=machine_identity
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
         )
     }
     assert annotated["otel-collector"] is None
     start = {
         service.session
         for service in spec.services_for_capabilities(
-            frozenset({"gateway"}), machine=machine_identity
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
         )
     }
     assert "otel-collector" in start
@@ -327,14 +329,14 @@ def test_otel_collector_runs_on_pure_runner(
     annotated = {
         service.session: reason
         for service, reason in spec.services_for_capabilities_annotated(
-            frozenset({"agent-runner"}), machine=machine_identity
+            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
         )
     }
     assert annotated["otel-collector"] is None
     start = {
         service.session
         for service in spec.services_for_capabilities(
-            frozenset({"agent-runner"}), machine=machine_identity
+            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
         )
     }
     assert "otel-collector" in start
@@ -344,8 +346,16 @@ def test_browser_mcp_gated_out_when_browser_is(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """An incapable browser host also drops browser-mcp, with the browser reason."""
-    monkeypatch.setattr(probes, "browser_incapability", lambda _chrome: "no display (headless)")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: "no display (headless)")  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_browser_incapability(_chrome: str | None, *, host: Host) -> str | None:
+        return "no display (headless)"
+
+    monkeypatch.setattr(probes, "browser_incapability", fake_browser_incapability)  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_browser_incapability2(_chrome: str | None, *, host: Host) -> str | None:
+        return "no display (headless)"
+
+    monkeypatch.setattr(spec, "browser_incapability", fake_browser_incapability2)  # pyright: ignore[reportUnknownArgumentType]
     annotated = _agent_runner_annotated(monkeypatch, local_machine=machine_identity)
     assert annotated["browser"] == "no display (headless)"
     assert annotated["browser-mcp"] == "no display (headless)"
@@ -401,7 +411,7 @@ def test_im_bridge_gated_when_disabled(
     annotated = {
         s.session: reason
         for s, reason in spec.services_for_capabilities_annotated(
-            frozenset({"gateway"}), machine=machine_identity
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
         )
     }
     assert "im-bridge" in annotated

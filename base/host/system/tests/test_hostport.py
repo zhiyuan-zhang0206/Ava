@@ -13,7 +13,7 @@ import pytest
 
 from base.host import proc
 from base.host.system.hostport import Host
-from base.host.tests.fake_commands import FakeCommands, Reply
+from base.host.system.tests.fake_commands import FakeCommands, Reply
 from base.native_process.os_platform import Platform
 
 
@@ -28,15 +28,13 @@ def test_the_system_host_is_this_machine() -> None:
 
 
 def test_the_system_host_runs_a_real_command() -> None:
-    result = Host.system().run(
-        [sys.executable, "-c", "print('hi')"], timeout=60, capture_output=True, text=True
-    )
+    result = Host.system().run(["echo", "hi"], timeout=60, capture_output=True, text=True)
     assert (result.returncode, result.stdout) == (0, "hi\n")
 
 
 def test_the_system_host_bounds_a_command_by_its_timeout() -> None:
     with pytest.raises(subprocess.TimeoutExpired):
-        Host.system().run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.5)
+        Host.system().run(["sleep", "30"], timeout=0.5)
 
 
 def test_a_host_is_immutable_and_has_exactly_the_four_reviewed_fields() -> None:

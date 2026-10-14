@@ -15,6 +15,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
@@ -75,6 +76,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "completed"
     # _dispatch serializes the lifecycle response model to a JSON dict for the wire.
@@ -115,6 +117,7 @@ async def test_dispatch_lifecycle_missing_path_fails(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "failed"
     # LifecyclePayload validation rejects a missing 'path' before lifecycle_op runs.
@@ -163,6 +166,7 @@ async def test_dispatch_unparseable_lifecycle_path(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "failed"
     assert "not recognized" in str(result["error"])
@@ -213,6 +217,7 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert (status, result) == ("failed", {"error": "ResurrectRefused: runtime_cutover_required"})
 
@@ -262,6 +267,7 @@ async def test_dispatch_wire_error_carries_reason(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == "failed"
     assert "AgentNotFound" in str(result["error"])
