@@ -135,9 +135,12 @@ def _init_and_start_settings_free() -> None:
     from base import cluster
     from cli import main, start_intent, startup_support
 
+    scenario = sys.argv[1]
+    authority = scenario != "init_and_start_settings_free"
     home = Path(os.environ["AVA_HOME"])
-    checkout = home.parent / "checkout"
-    checkout.mkdir()
+    checkout = Path(sys.argv[2]) if authority else home.parent / "checkout"
+    if not authority:
+        checkout.mkdir()
     start_intent.checkout = lambda: checkout
     cluster.port_free = lambda _port: True
     calls: list[str] = []
@@ -158,6 +161,8 @@ def _init_and_start_settings_free() -> None:
         assert not kwargs["command"].config.prepared
         configured()
         calls.append("runtime")
+        if authority:
+            _verify_start_delivery(scenario, home, kwargs, expected)
         return 0
 
     start_intent.run_start_command = start
@@ -172,15 +177,99 @@ def _init_and_start_settings_free() -> None:
     assert calls == []  # init started nothing
     assert "base.config" not in sys.modules
     guard.admitted = True
+    expected = _prepare_start_delivery(scenario, home) if authority else None
+    assert "base.config" not in sys.modules
+    if not authority or scenario == "start_delivery_foreign":
+        _boot_start_delivery(scenario, home)
+    assert main.main(["start"]) == 0
+    assert calls == ["logging", "runtime", "boot-complete"]
+    assert "base.config" in sys.modules  # admitted root types are allowed; delivery stayed lazy
+
+
+def _boot_start_delivery(scenario: str, home: Any) -> None:
+    # run_command imports this before start_once enters the admitted home.
     from base.config import ConfigBoot
+    from cli.database.runtime import CommandRuntime
+
+    assert not CommandRuntime.create().config.prepared
+    if scenario != "init_and_start_settings_free":
+        _inherit_foreign_delivery(home)
+        return
 
     def no_prepare(self):
         raise AssertionError("typed root prepared configuration before runtime delivery")
 
     ConfigBoot.prepare = no_prepare
-    assert main.main(["start"]) == 0
-    assert calls == ["logging", "runtime", "boot-complete"]
-    assert "base.config" in sys.modules  # admitted root types are allowed; delivery stayed lazy
+
+
+def _prepare_start_delivery(scenario: str, home: Any) -> Any:
+    import json
+    import os
+
+    from base.host.db_authority.tests.generation import seed_active_generation
+    from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
+
+    if scenario == "start_delivery_cold":
+        return None
+    secret = seed_active_generation(home)
+    if scenario == "start_delivery_refused":
+        path = home / "start-intent.json"
+        intent = json.loads(path.read_text())
+        intent["checkout"] = str(home.parent / "foreign-checkout")
+        path.write_text(json.dumps(intent))
+    elif scenario == "start_delivery_launcher":
+        os.environ[LAUNCHER_PROFILE_ENV_KEY] = "agent"
+    return secret
+
+
+def _inherit_foreign_delivery(home: Any) -> None:
+    import os
+
+    from base.host.db_authority.delivery import GENERATION_ENV, write_grant
+    from base.host.db_authority.tests.generation import seed_active_generation
+
+    assert GENERATION_ENV in os.environ
+    foreign = home.parent / "foreign"
+    foreign.mkdir()
+    seed_active_generation(foreign)
+    own = os.environ["AVA_DB_URL"]
+    os.environ.update(write_grant(foreign, "gateway").environment(own))
+    assert os.environ["AVA_DB_URL"] != own
+
+
+def _verify_start_delivery(scenario: str, home: Any, kwargs: Any, expected: Any) -> None:
+    from urllib.parse import urlsplit
+
+    from base.db import NoDatabaseAuthorityError
+    from base.host.db_authority.tests.generation import seed_active_generation
+    from cli.commands.data_plane.bringup import adopt_gateway_login
+    from cli.database import OperatorDatabaseFactory
+
+    config = kwargs["command"].config
+    factory: OperatorDatabaseFactory = kwargs["database_factory"]
+    url: str = config.view.data_plane.db_url
+    if scenario in {"start_delivery_refused", "start_delivery_launcher"}:
+        reason = config.view.env_boot.db_authority_refusal
+        assert reason is not None
+        assert (
+            "source checkout" if scenario == "start_delivery_refused" else "agent-profile"
+        ) in reason
+        try:
+            factory().connect()
+        except NoDatabaseAuthorityError as exc:
+            assert expected.roles.gateway.password not in str(exc)
+            return
+        raise AssertionError("an unauthorized start reached the database")
+    if scenario == "start_delivery_cold":
+        assert urlsplit(url).password is None
+        expected = seed_active_generation(home)
+        adopt_gateway_login(home, url, database_factory=factory)
+    else:
+        assert urlsplit(url).password == expected.roles.gateway.password
+    assert urlsplit(factory.db_url()).password == expected.roles.gateway.password
+    # The subsequent checkpoint assertion receives the same authorized login.
+    direct: str = factory().direct_url()
+    assert urlsplit(direct).password == expected.roles.gateway.password
 
 
 def _help_admission() -> None:
@@ -232,7 +321,7 @@ if __name__ == "__main__":
         _defer_logging()
     elif sys.argv[1] == "import_boundary":
         _import_boundary(sys.argv[2])
-    elif sys.argv[1] == "init_and_start_settings_free":
+    elif sys.argv[1] == "init_and_start_settings_free" or sys.argv[1].startswith("start_delivery_"):
         _init_and_start_settings_free()
     elif sys.argv[1] == "help_admission":
         _help_admission()
