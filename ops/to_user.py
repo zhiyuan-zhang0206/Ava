@@ -2,8 +2,9 @@
 
 from psycopg_pool import ConnectionPool
 
-from base.agents.to_user import ToUserDocument, ToUserFormat, read_document
+from base.agents.to_user import ToUserDocument, read_document
 from base.config.agent_pins import resolve_agent_config_pins
+from base.host.env.agent_slices import ToUserFormat
 from base.paths import workspace_dir_readonly
 
 

@@ -15,10 +15,11 @@ from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
 from base.config.base import EnvSettings
+from base.host.env.agent_slices import ToUserFormat
 
 
 class AgentPromptSettings(EnvSettings):
-    to_user_format: Literal["html", "markdown"] = Field(
+    to_user_format: ToUserFormat = Field(
         default="html",
         alias="AVA_TO_USER_FORMAT",
         description="Workspace document displayed beside messages: to_user.html or to_user.md.",

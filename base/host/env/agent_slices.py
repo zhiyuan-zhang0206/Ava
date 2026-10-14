@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
 Cadence = Literal["once_per_compaction", "every_time"]
+ToUserFormat = Literal["html", "markdown"]
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class Prompt:
     prompt_codeact_enabled: bool
     prompt_sequential_tool_calls_enabled: bool
     sdk_disable: tuple[str, ...]
+    to_user_format: ToUserFormat
 
 
 @dataclass(frozen=True)

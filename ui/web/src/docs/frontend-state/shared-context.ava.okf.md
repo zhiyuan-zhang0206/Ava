@@ -41,3 +41,7 @@ The document read accepts only a regular UTF-8 file up to 256 KiB.
 An explicit refresh, focus, or SSE reconnect rechecks availability. A failed read
 retains an already-cached snapshot and marks it stale; it never turns a machine
 failure into an empty file. This is not an offline document store.
+
+The format vocabulary is `ToUserFormat` in `base.host.env.agent_slices`; the
+config schema and document response use the same type. Each turn freezes the format with its prompt
+slice so prompt guidance and compacted context read the same filename.

@@ -563,7 +563,7 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         return ""
     # Ensure the workspace directory exists (mkdir side effect).
     workspace_dir(agent_id)
-    filename = document_filename(slices.read("agent", "to_user_format"))
+    filename = document_filename(slices.prompt.to_user_format)
     return (
         "# Workspace\n\n"
         "Your workspace is your per-agent folder — it is named with your agent "

@@ -3,7 +3,8 @@
 import pytest
 from fastapi import HTTPException
 
-from base.agents.to_user import ToUserDocument, ToUserFormat
+from base.agents.to_user import ToUserDocument
+from base.host.env.agent_slices import ToUserFormat
 from gateway.agents.to_user.document import html_document_response
 
 
