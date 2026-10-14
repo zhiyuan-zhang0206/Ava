@@ -30,6 +30,7 @@ import { newOperationKey } from "@/lib/transport/operation-key";
 //   active-agent SSE connection (isEventForThread remains a defensive gate).
 
 import { useQuery } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -42,7 +43,7 @@ import { Composer } from "@/components/conversation/composer";
 import { ContentToggle } from "@/components/content/content-toggle";
 import { HeaderBar } from "@/components/shell/header-bar";
 import { HomeLayout } from "@/components/shell/home-layout";
-import { SharedContextPanel } from "@/components/context/shared-context-panel";
+import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { useToUser } from "@/lib/context/use-to-user";
 import { useNotices } from "@/lib/notifications/use-notices";
 import { PRIORITY_RANK } from "@/lib/notifications/notices";
@@ -69,6 +70,12 @@ import { useTokenUsage } from "@/lib/inspector/use-token-usage";
 import { AgentEventStreamProvider } from "@/lib/transport/useEventStream";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+
+// Load the document and reply controls only when the right panel is needed.
+const SharedContextPanel = dynamic(
+  () => import("@/components/context/shared-context-panel").then((module) => module.SharedContextPanel),
+  { loading: () => <InspectorPanelSkeleton /> },
+);
 
 export default function HomePage() {
   // Read only client-only state here; the global SSE broadcast is provided at
