@@ -594,6 +594,8 @@ def test_pinned_work_detail_seal(
         header = page.locator(header_selector)
         if header.get_attribute("aria-expanded") == "false":
             header.click()
+        # A detail needs enough body height for its sticky header to stay in range.
+        row.locator("pre").evaluate("el => { el.style.minHeight = '1200px'; }")
         row.evaluate("""el => {
           const viewport = el.closest('[data-radix-scroll-area-viewport]');
           viewport.scrollTop += el.getBoundingClientRect().top

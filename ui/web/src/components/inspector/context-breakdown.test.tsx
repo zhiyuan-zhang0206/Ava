@@ -15,7 +15,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/transport/api";
 
-import { ContextBreakdownCard, ContextButton, type ContextButtonProps } from "./context-breakdown";
+import { ContextButton, type ContextButtonProps } from "./context-breakdown";
+import { ContextBreakdownCard } from "./context-breakdown-body";
 
 vi.mock("@/lib/transport/api", () => ({
   api: { getContextBreakdown: vi.fn(), getRunTimelineContext: vi.fn(), getSettings: vi.fn() },
