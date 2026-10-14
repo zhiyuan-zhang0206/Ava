@@ -1,6 +1,6 @@
 """`services.wake.heartbeat.daemon` — idle-agent check-in selection + the pause window.
 
-`_select_idle_agents_needing_heartbeat` is the daemon's core predicate. The idle
+`select_idle_agents_needing_heartbeat` is the daemon's core predicate. The idle
 clock is `last_active_at` (the last completed LLM turn — real work), NOT
 `status_changed_at` (bumped by every status flip, including ops lifecycle churn).
 `TestIdleClockCountsRealActivityOnly` pins that semantic: an ops restart resets
@@ -21,7 +21,7 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
-    _select_idle_agents_needing_heartbeat,
+    select_idle_agents_needing_heartbeat,
 )
 from services.wake.heartbeat.tests.heartbeat_support import (
     THRESHOLD_S,
@@ -34,7 +34,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
-    return dict(_select_idle_agents_needing_heartbeat(pool, THRESHOLD_S))
+    return dict(select_idle_agents_needing_heartbeat(pool, THRESHOLD_S))
 
 
 class TestSelectIdleAgents:
@@ -568,11 +568,11 @@ class TestWakeupStormFlattening:
         offset = aid % int(span)
 
         self._backdate(db_conn, aid, threshold + offset - 5)
-        got = dict(_select_idle_agents_needing_heartbeat(pool, threshold, jitter_span_s=span))
+        got = dict(select_idle_agents_needing_heartbeat(pool, threshold, jitter_span_s=span))
         assert aid not in got, "idle just short of the jittered due-time must be excluded"
 
         self._backdate(db_conn, aid, threshold + offset + 5)
-        got = dict(_select_idle_agents_needing_heartbeat(pool, threshold, jitter_span_s=span))
+        got = dict(select_idle_agents_needing_heartbeat(pool, threshold, jitter_span_s=span))
         assert aid in got, "idle just past the jittered due-time must be selected"
 
     def test_zero_jitter_matches_plain_threshold(
@@ -596,7 +596,7 @@ class TestWakeupStormFlattening:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        got = dict(_select_idle_agents_needing_heartbeat(pool, 300.0, jitter_span_s=0.0))
+        got = dict(select_idle_agents_needing_heartbeat(pool, 300.0, jitter_span_s=0.0))
         assert aid in got
 
     def test_limit_caps_batch_oldest_idle_first(
@@ -637,9 +637,9 @@ class TestWakeupStormFlattening:
             local_machine=machine_identity,
         )
 
-        order = [r[0] for r in _select_idle_agents_needing_heartbeat(pool, THRESHOLD_S)]
+        order = [r[0] for r in select_idle_agents_needing_heartbeat(pool, THRESHOLD_S)]
         assert order.index(a_old) < order.index(a_mid) < order.index(a_new)
 
-        capped = _select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, limit=2)
+        capped = select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, limit=2)
         assert len(capped) == 2
         assert a_new not in [r[0] for r in capped]

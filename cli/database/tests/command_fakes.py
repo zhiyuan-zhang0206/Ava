@@ -13,16 +13,16 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 # Explicit shared surface: every name the split test modules import from here.
 __all__ = [
-    "_FakeResponse",
-    "_FakeResult",
+    "FakeResponse",
+    "FakeResult",
     "_FakeSessionBackend",
-    "_git_aware",
-    "_patch_gateway_http",
     "_sess",
     "_spec",
     "fake_session_backends",
     "gateway_role_pinned",
+    "git_aware",
     "hermetic_gateway_base",
+    "patch_gateway_http",
 ]
 
 
@@ -32,7 +32,7 @@ def _sess(service: str) -> str:
     return f"ava-{service}"
 
 
-class _FakeResult:
+class FakeResult:
     def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
         self.returncode = returncode
         self.stdout = stdout
@@ -48,7 +48,7 @@ class _FakeResult:
 _REAL_SUBPROCESS_RUN = _subprocess.run
 
 
-def _git_aware(fake):
+def git_aware(fake):
     """Wrap a fake subprocess.run so `git ...` calls still hit real git."""
 
     def _run(args, **kwargs):
@@ -175,7 +175,7 @@ def _spec(service: str):
     )
 
 
-class _FakeResponse:
+class FakeResponse:
     def __init__(self, payload: dict | list, status_code: int = 200):
         self._payload = payload  # pyright: ignore[reportUnknownMemberType]
         self.status_code = status_code
@@ -192,6 +192,6 @@ class _FakeResponse:
         return self._payload  # pyright: ignore[reportUnknownMemberType]
 
 
-def _patch_gateway_http(monkeypatch: pytest.MonkeyPatch) -> None:
+def patch_gateway_http(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub gateway URL/headers resolution so the HTTP helpers don't hit settings."""
     monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")

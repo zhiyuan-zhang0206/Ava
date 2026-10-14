@@ -64,7 +64,7 @@ class LaunchOutcome(NamedTuple):
     failed: tuple[str, ...]
 
 
-def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
+def service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     """Bind profile, database login and API token to one service, never its parent."""
     from base.telemetry.lgtm_local import BACKENDS, service_environment
     from cli.commands.data_plane.bringup import api_delivery, db_delivery
@@ -88,7 +88,7 @@ def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     return extra
 
 
-def _root_tree_roster(
+def root_tree_roster(
     roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
 ) -> tuple[ServiceSpec, ...]:
     """The capability/config-selected units for this root."""
@@ -227,7 +227,7 @@ def tree_manifest(
         capabilities=sorted(roles),
         repo_root=repo,
         specs=roster,
-        environments={spec.session: _service_extra_env(spec) for spec in roster},
+        environments={spec.session: service_extra_env(spec) for spec in roster},
     )
 
 
@@ -556,9 +556,9 @@ def ensure_root_service_tree(
             if unit is not None and unit.get("state") == "running":
                 continue
             if spec.session == "frontend":
-                from cli.commands._repo import _ensure_frontend_deps
+                from cli.commands._repo import ensure_frontend_deps
 
-                _ensure_frontend_deps(repo)
+                ensure_frontend_deps(repo)
         if status is None:
             require_root_absent()
             write_manifest(manifests, manifest)
@@ -578,10 +578,10 @@ def start_roster(
     roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
 ) -> tuple[ServiceSpec, ...]:
     """Return the sole root-owned service roster."""
-    return _root_tree_roster(roles, launch_skip, machine=machine)
+    return root_tree_roster(roles, launch_skip, machine=machine)
 
 
-def _launch_service_tree(
+def launch_service_tree(
     roster: tuple[ServiceSpec, ...],
     repo: Path,
     roles: MachineRoles,
@@ -704,7 +704,7 @@ def require_root_absent() -> None:
     instance_lock.release_instance_lock(fd)
 
 
-def _root_tree_plan(preserve: frozenset[str] = frozenset()) -> list[str]:
+def root_tree_plan(preserve: frozenset[str] = frozenset()) -> list[str]:
     """Display names for the selected exact root units."""
     return sorted(name for name, unit in root_tree_selection().items() if unit not in preserve)
 

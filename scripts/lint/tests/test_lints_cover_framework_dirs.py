@@ -17,11 +17,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 @pytest.mark.parametrize(
     "scan_dirs",
     [
-        clock_lattice._SCAN_DIRS,
-        no_emoji._SCAN_DIRS,
-        termination_source._SCAN_DIRS,
-        logger_add_diagnose._SCAN_DIRS,
-        loguru_format._SCAN_DIRS,
+        clock_lattice.SCAN_DIRS,
+        no_emoji.SCAN_DIRS,
+        termination_source.SCAN_DIRS,
+        logger_add_diagnose.SCAN_DIRS,
+        loguru_format.SCAN_DIRS,
     ],
 )
 def test_framework_scoped_lints_cover_every_framework_dir(scan_dirs: tuple[str, ...]) -> None:

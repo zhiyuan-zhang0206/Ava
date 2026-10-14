@@ -34,7 +34,7 @@ from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.managed_work import managed_work
-from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
+from services.agent_runner.agent_host.tests.native_cancel.test_continuation import install_faults
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -89,7 +89,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
             database_gate=database_gate,
             machine=machine_identity,
         )
-        faults = _install_faults(monkeypatch, initial.agent_id, fault_site)
+        faults = install_faults(monkeypatch, initial.agent_id, fault_site)
         running = asyncio.create_task(
             host._invoke_until_done(
                 initial.agent_id,

@@ -39,7 +39,7 @@ def test_passes_when_writable_drive_found(
     import base.host.converge.google_drive as gd
 
     monkeypatch.setattr(gd, "find_writable_google_drive", lambda: tmp_path / "My Drive")
-    cv._ensure_cross_machine_transfer(
+    cv.ensure_cross_machine_transfer(
         _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     )  # no raise
 
@@ -57,7 +57,7 @@ def test_warns_but_continues_when_drive_missing(
 
     monkeypatch.setattr(gd, "find_writable_google_drive", lambda: None)
     monkeypatch.setattr(gd, "candidate_drive_dirs", lambda: [Path("/some/My Drive")])
-    cv._ensure_cross_machine_transfer(
+    cv.ensure_cross_machine_transfer(
         _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     )  # no raise
     err = capsys.readouterr().err
@@ -91,7 +91,7 @@ def test_skips_on_single_box(
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config),
     )
-    cv._ensure_cross_machine_transfer(ctx)  # no raise
+    cv.ensure_cross_machine_transfer(ctx)  # no raise
     assert capsys.readouterr().err == ""
 
 
@@ -112,7 +112,7 @@ def test_skips_when_backend_none(
     monkeypatch.setattr(gd, "find_writable_google_drive", _must_not_probe)
     ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     ctx.config.set_field("cross_machine_transfer_backend", "none")
-    cv._ensure_cross_machine_transfer(ctx)  # no raise
+    cv.ensure_cross_machine_transfer(ctx)  # no raise
     assert capsys.readouterr().err == ""
 
 

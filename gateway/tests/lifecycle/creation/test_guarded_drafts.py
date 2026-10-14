@@ -199,7 +199,7 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
 ) -> None:
     from base.agents.birth.creation_identity import find_creation
     from gateway.app import app
-    from ops.lifecycle.launch import _validate_launch_row
+    from ops.lifecycle.launch import validate_launch_row
 
     first = client.post("/api/keyed/v1/guide/draft", json={"nl": "one"}, headers=HEADERS)
     agent_id = first.json()["agent_id"]
@@ -225,7 +225,7 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     assert original is not None and original.launch_attempt_id == attempt
     assert not original.launch_pending
     with pytest.raises(ValueError, match="launch"):
-        _validate_launch_row(
+        validate_launch_row(
             app.state.db_pool,
             LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=attempt),
             local_machine=machine_identity.name(),

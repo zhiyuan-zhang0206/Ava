@@ -49,7 +49,7 @@ sys.path.insert(0, str(_ROOT))
 from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
-_SCAN_DIRS = ("gateway", "ops")
+SCAN_DIRS = ("gateway", "ops")
 
 # Sync library/method surfaces that must not appear un-awaited in an async body.
 LIBRARY_BLOCKING_NAMES = {
@@ -208,7 +208,7 @@ def _scanned_files(scope: frozenset[str] | None) -> list[Path]:
         lint_common.restrict(
             (
                 p
-                for d in _SCAN_DIRS
+                for d in SCAN_DIRS
                 for p in (_ROOT / d).rglob("*.py")
                 if "__pycache__" not in p.parts and not lint_common.is_repo_test_file(p, _ROOT)
             ),

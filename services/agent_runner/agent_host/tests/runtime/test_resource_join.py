@@ -53,14 +53,14 @@ async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
         assert not worker.thread.is_alive()
         events.append("pools")
 
-    monkeypatch.setattr(daemon, "_close_host_pools", close_pools)
+    monkeypatch.setattr(daemon, "close_host_pools", close_pools)
 
     def remove_pidfile(_path: object) -> None:
         events.append("pidfile")
 
     monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
     with pytest.raises(TypeError) as caught:
-        await daemon._close_process_owners(
+        await daemon.close_process_owners(
             None,
             cast(Any, object()),
             cast(Any, object()),
@@ -97,12 +97,12 @@ async def test_original_error_joins_before_clients_and_pools_close(
     async def close_pools(*_args: object) -> None:
         events.append("pools")
 
-    monkeypatch.setattr(daemon, "_close_host_pools", close_pools)
+    monkeypatch.setattr(daemon, "close_host_pools", close_pools)
     with pytest.raises(ValueError) as observed:
         await host.aclose()
     assert observed.value is failure
     assert host.resources_joined
-    await daemon._close_joined_host_pools(host, cast(Any, object()), cast(Any, object()))
+    await daemon.close_joined_host_pools(host, cast(Any, object()), cast(Any, object()))
     assert events == ["clients", "pools"]
 
 
@@ -158,7 +158,7 @@ def exercise_unfinished_main() -> None:
             await host.aclose(resource_deadline=asyncio.get_running_loop().time() + 0.02)
         finally:
             marker.write_text(str(host.resources_joined))
-            await daemon._close_joined_host_pools(host, cast(Any, object()), cast(Any, object()))
+            await daemon.close_joined_host_pools(host, cast(Any, object()), cast(Any, object()))
 
     pytest.MonkeyPatch().setattr(daemon, "run", run)
     daemon.main()

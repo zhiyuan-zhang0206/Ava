@@ -11,25 +11,5 @@ exports = ["converge_host.py", "hold_report.py", "lgtm_toggle.py", "migrations.p
 "tests" = ["_pause_resume.py", "_start_readiness_preflight.py", "_stop_extras.py", "_temporary_stop.py", "converge_host.py", "lgtm_toggle.py", "login_link.py", "migrations.py", "root_driver.py", "service_stop.py", "start.py", "start_generation.py", "status.py", "stop.py"]
 
 [debt.private-name]
-"_start_readiness_preflight.py -> root_driver.py#_root_tree_roster" = 1
-"start.py -> root_driver.py#_launch_service_tree" = 1
-"stop.py -> root_driver.py#_root_tree_plan" = 2
-"tests/converge_host/test_converge.py -> converge_host.py#_ensure_accessibility" = 4
 "tests/converge_host/test_converge.py -> converge_host.py#_ensure_permissions_helper" = 2
-"tests/converge_host/test_converge.py -> converge_host.py#_ensure_screen_capture" = 3
-"tests/converge_host/test_converge_browser.py -> converge_host.py#_ensure_browser" = 9
-"tests/converge_host/test_converge_github_pr.py -> converge_host.py#_ensure_github_pr" = 4
-"tests/converge_host/test_converge_transfer_backend.py -> converge_host.py#_ensure_cross_machine_transfer" = 4
-"tests/converge_host/test_migration_warning.py -> converge_host.py#_warn_untracked_migrations" = 2
-"tests/identity/restart_inputs.py -> root_driver.py#_launch_service_tree" = 1
-"tests/identity/restart_inputs.py -> root_driver.py#_root_tree_plan" = 1
-"tests/identity/test_commands_restart_stop.py -> stop.py#_repo_root" = 2
-"tests/startup/test_agent_profile_launch_env.py -> root_driver.py#_service_extra_env" = 1
-"tests/startup/test_commands_start.py -> root_driver.py#_launch_service_tree" = 3
-"tests/startup/test_gateway_consumer_guard.py -> root_driver.py#_service_extra_env" = 1
-"tests/startup/test_start_health_port_gate.py -> root_driver.py#_launch_service_tree" = 1
-"tests/startup/test_start_readiness_gate.py -> root_driver.py#_launch_service_tree" = 6
-"tests/startup/test_start_readiness_preflight.py -> root_driver.py#_root_tree_roster" = 1
-"tests/stop/stop_support.py -> root_driver.py#_root_tree_plan" = 2
 "tests/stop/test_stop_terminals.py -> service_stop.py#_TERMINAL_STOP_GRACE_S" = 2
-"tests/test_commands_status.py -> status.py#_repo_root" = 2

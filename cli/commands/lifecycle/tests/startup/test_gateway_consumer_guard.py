@@ -606,7 +606,7 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(bringup, "db_delivery", delivery)
     monkeypatch.setattr(bringup, "api_delivery", token_delivery)
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
-    profile = root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
+    profile = root_driver.service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"
     assert profile == "agent"
 

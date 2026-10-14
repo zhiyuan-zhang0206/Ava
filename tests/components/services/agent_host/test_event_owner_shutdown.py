@@ -111,14 +111,14 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
     def remove_pidfile(_path: object) -> None:
         events.append("pidfile")
 
-    monkeypatch.setattr(daemon, "_close_host_pools", close_pools)
+    monkeypatch.setattr(daemon, "close_host_pools", close_pools)
     monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
     try:
         clients.event_pipeline().enqueue(event())
         with pytest.raises(TypeError):
             clients.sync_events(timeout=1)
         with pytest.raises(TypeError) as observed:
-            await daemon._close_process_owners(
+            await daemon.close_process_owners(
                 None,
                 cast(Any, object()),
                 cast(Any, object()),
@@ -190,9 +190,9 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     monkeypatch.setattr(daemon, "assert_clock_lattice", no_op)
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
     monkeypatch.setattr(daemon, "acquire_pidfile", acquire)
-    monkeypatch.setattr(daemon, "_boot_handles", boot_handles)
-    monkeypatch.setattr(daemon, "_open_host_pools", open_pools)
-    monkeypatch.setattr(daemon, "_close_host_pools", close_pools)
+    monkeypatch.setattr(daemon, "boot_handles", boot_handles)
+    monkeypatch.setattr(daemon, "open_host_pools", open_pools)
+    monkeypatch.setattr(daemon, "close_host_pools", close_pools)
     monkeypatch.setattr(daemon, "load_installation", load_plugins)
     monkeypatch.setattr(daemon, "process_clients", process_clients)
     monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)

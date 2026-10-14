@@ -361,7 +361,7 @@ def api_delivery(cls: DbAccess) -> dict[str, str]:
     return {API_TOKEN_ENV: api_token(ava_home().resolve(), cls)}
 
 
-def _ensure_pooler(
+def ensure_pooler(
     rec: ClusterRecord,
     database: str,
     home: Path,
@@ -520,7 +520,7 @@ def complete_gateway_data_plane(
                 generation = _birth_generation(conn, home, database)
             else:
                 generation = _admitted_generation(conn, home, database, refresh=refresh_schema)
-            _ensure_pooler(rec, database, home, generation, machine=machine)
+            ensure_pooler(rec, database, home, generation, machine=machine)
             prove_generation_logins(home, generation, endpoint)
             if ledger.require_ledger(home).active is None:
                 verified = authority.verify_generation(conn, home)

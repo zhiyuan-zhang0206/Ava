@@ -71,7 +71,7 @@ _LITE_VERBS = frozenset(
 )
 
 
-def _normalize_process_profile() -> None:
+def normalize_process_profile() -> None:
     """Pop the launcher's process profile, recording it for the boot pass.
 
     The CLI is a settings-full process and must never inherit a launcher-set
@@ -166,7 +166,7 @@ def run_command(
     # updater session) streams its own progress in real time instead of block-buffering
     # it to the end of the log, out of order against its children's unbuffered output.
     ensure_line_buffered_stdio()
-    _normalize_process_profile()
+    normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
     # The checkout gate comes first, before `boot` and before anything loads a
     # home's configuration: every command is refused unless this CLI belongs to

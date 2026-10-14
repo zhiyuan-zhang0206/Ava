@@ -79,7 +79,7 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
 
     monkeypatch.setattr(heartbeat_daemon, "time", SimpleNamespace(time=lambda: clock[0]))
     monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", next_tick)
-    monkeypatch.setattr(heartbeat_daemon, "_send_heartbeat_checkin", record_checkin)
+    monkeypatch.setattr(heartbeat_daemon, "send_heartbeat_checkin", record_checkin)
     monkeypatch.setattr(heartbeat_daemon, "_sweep_backoff_resets", skip_sweep)
 
     with pytest.raises(asyncio.CancelledError):

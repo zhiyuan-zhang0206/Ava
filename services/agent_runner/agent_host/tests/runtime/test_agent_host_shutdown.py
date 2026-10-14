@@ -143,7 +143,7 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
         events.append("boot_settled")
         return []
 
-    original_loops = daemon._background_loops
+    original_loops = daemon.background_loops
 
     def loops(*args: Any, catalog: ModelCatalog, config: ConfigBoot) -> dict[str, Any]:
         if failure == "plugin":
@@ -180,19 +180,19 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
             remove_pidfile=MagicMock(side_effect=partial(_note_pidfile_removed, events)),
             build_shared_pool=MagicMock(return_value=workload),
             build_control_pool=MagicMock(return_value=control),
-            _open_host_pools=AsyncMock(),
-            _close_host_pools=close_pools,
-            _build_checkpointer=AsyncMock(),
+            open_host_pools=AsyncMock(),
+            close_host_pools=close_pools,
+            build_checkpointer=AsyncMock(),
             AgentHost=MagicMock(return_value=host),
             TurnScheduler=MagicMock(return_value=scheduler),
-            _beat_forever=beat,
+            beat_forever=beat,
             settle_stale_running_rows=settle,
             start_health_server=AsyncMock(return_value=object()),
             stop_health_server=close_health,
-            _background_loops=loops,
-            _plugins_fingerprint=MagicMock(side_effect=["before", "after"]),
-            _PLUGINS_POLL_INTERVAL_S=0.01,
-            _rotate_stdout_log_forever=background,
+            background_loops=loops,
+            plugins_fingerprint=MagicMock(side_effect=["before", "after"]),
+            PLUGINS_POLL_INTERVAL_S=0.01,
+            rotate_stdout_log_forever=background,
             InboundWakeDispatcher=MagicMock(return_value=MagicMock(run=dispatch)),
         ),
     ):

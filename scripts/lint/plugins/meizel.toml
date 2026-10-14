@@ -5,5 +5,4 @@ exports = ["no_plugin_wrap.py"]
 
 [debt.private-name]
 "tests/runtime_rules/test_lint_no_ava_in_hooks.py -> no_ava_in_hooks.py#_REPO_ROOT" = 1
-"tests/runtime_rules/test_lint_no_ava_in_hooks.py -> no_ava_in_hooks.py#_SCAN_DIRS" = 1
 "tests/runtime_rules/test_lint_no_plugin_wrap.py -> no_plugin_wrap.py#_REPO_ROOT" = 4

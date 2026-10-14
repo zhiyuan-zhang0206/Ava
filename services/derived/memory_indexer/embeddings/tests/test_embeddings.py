@@ -78,7 +78,7 @@ class _FakeResponse(httpx.Response):
         )
 
 
-class _AsyncClient:
+class AsyncClient:
     """Records attempts across client instances, including sync retry loops."""
 
     def __init__(
@@ -99,11 +99,11 @@ class _AsyncClient:
         self.calls: list[dict[str, Any]] = []
         self.timeout = 0.0
 
-    def __call__(self, *, timeout: float) -> _AsyncClient:
+    def __call__(self, *, timeout: float) -> AsyncClient:
         self.timeout = timeout
         return self
 
-    async def __aenter__(self) -> _AsyncClient:
+    async def __aenter__(self) -> AsyncClient:
         return self
 
     async def __aexit__(self, *args: object) -> None:
@@ -127,7 +127,7 @@ class _AsyncClient:
         yield _FakeResponse(body, status_code=self._status_code)
 
 
-def patch_client(monkeypatch: pytest.MonkeyPatch, fake: _AsyncClient) -> None:
+def patch_client(monkeypatch: pytest.MonkeyPatch, fake: AsyncClient) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", fake)
 
 
@@ -240,7 +240,7 @@ def test_provider_declares_vector_space() -> None:
 
 
 def test_embed_batch_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _AsyncClient(vectors=[[1.0] * DIM, [2.0] * DIM])
+    fake = AsyncClient(vectors=[[1.0] * DIM, [2.0] * DIM])
     patch_client(monkeypatch, fake)
     result = _provider().embed_batch(["text1", "text2"])
     assert result.shape == (2, DIM)
@@ -250,7 +250,7 @@ def test_embed_batch_shape(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_embed_query_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _AsyncClient(vectors=[[1.0] * DIM])
+    fake = AsyncClient(vectors=[[1.0] * DIM])
     patch_client(monkeypatch, fake)
     result = _provider().embed_query("hello")
     assert result.shape == (DIM,)
@@ -262,7 +262,7 @@ def test_embed_batch_emits_priced_billing_span(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
 
@@ -286,7 +286,7 @@ def test_embed_batch_unknown_model_emits_unpriced_billing_span(
     from services.derived.memory_indexer.embeddings import gemini
 
     monkeypatch.setattr(gemini, "MODEL_ID", "gemini-unknown-embedding-model")
-    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
 
@@ -302,7 +302,7 @@ def test_embed_batch_emits_priced_accounting_without_usage_metadata(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    fake = _AsyncClient(vectors=[[1.0] * DIM])
+    fake = AsyncClient(vectors=[[1.0] * DIM])
     patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
 
@@ -317,7 +317,7 @@ def test_embed_batch_emits_priced_accounting_without_usage_metadata(
 
 def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     """Async queries use the same client seam and query payload as sync queries."""
-    fake = _AsyncClient(vectors=[[1.0] * DIM])
+    fake = AsyncClient(vectors=[[1.0] * DIM])
     patch_client(monkeypatch, fake)
     result = asyncio.run(_provider().embed_query_async("hello"))
     assert result.shape == (DIM,)
@@ -332,7 +332,7 @@ def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_embed_query_async_emits_priced_billing_span(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
 
@@ -344,7 +344,7 @@ def test_embed_query_async_emits_priced_billing_span(
 
 def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Wire contract: endpoint, api-key header, per-text request shape."""
-    fake = _AsyncClient(vectors=[[1.0] * DIM])
+    fake = AsyncClient(vectors=[[1.0] * DIM])
     patch_client(monkeypatch, fake)
     _provider().embed_batch(["hello world"])
     call = fake.calls[-1]
@@ -357,7 +357,7 @@ def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_embed_batch_empty_short_circuit(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _AsyncClient(vectors=[])
+    fake = AsyncClient(vectors=[])
     patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
     result = _provider().embed_batch([])
@@ -370,7 +370,7 @@ def test_embed_retries_then_succeeds(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    fake = _AsyncClient(vectors=[[1.0] * DIM], raises_times=2)
+    fake = AsyncClient(vectors=[[1.0] * DIM], raises_times=2)
     patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
     result = _provider().embed_batch(["hello"])
@@ -384,7 +384,7 @@ def test_embed_retries_then_succeeds(
 
 
 def test_embed_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _AsyncClient(vectors=[[1.0] * DIM], raises_times=100)
+    fake = AsyncClient(vectors=[[1.0] * DIM], raises_times=100)
     patch_client(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
     with pytest.raises(EmbeddingAPIError, match="failed after"):
@@ -398,7 +398,7 @@ def test_embed_usage_failure_propagates(
     monkeypatch: pytest.MonkeyPatch, mode: str, error_type: type[Exception]
 ) -> None:
     """Accounting fails after one successful provider call, without replaying it."""
-    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     patch_client(monkeypatch, fake)
     failure = error_type("billing exploded")
 
@@ -430,7 +430,7 @@ def test_factory_passes_same_catalog_to_all_embedding_paths(
         seen.append(catalog)
 
     monkeypatch.setattr(usage, "log_usage_fields", record_usage)
-    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     patch_client(monkeypatch, fake)
     provider = factory.get_provider(
         settings.services.embedding_backend,
@@ -448,7 +448,7 @@ def test_factory_passes_same_catalog_to_all_embedding_paths(
 
 def test_embed_http_error_status_retries_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Non-2xx (raise_for_status) is a retryable failure; exhausting retries raises."""
-    fake = _AsyncClient(vectors=[[1.0] * DIM], status_code=500)
+    fake = AsyncClient(vectors=[[1.0] * DIM], status_code=500)
     patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="failed after"):
         _provider().embed_query("hello")
@@ -473,7 +473,7 @@ def test_embed_query_async_uses_the_query_policy(
     (2 attempts), not the indexer's 4: a 429 during a fleet wake must not burn
     the search deadline on retries."""
 
-    fake = _AsyncClient(raises_times=100)
+    fake = AsyncClient(raises_times=100)
     patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="failed after 2 attempts"):
         asyncio.run(_provider().embed_query_async("hello"))
@@ -485,7 +485,7 @@ def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
     (R2-D classify; the pre-R2 loop wasted its whole budget retrying 400/403 —
     audit 06 Q4)."""
 
-    fake = _AsyncClient(status_code=400)
+    fake = AsyncClient(status_code=400)
     patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="Gemini embed HTTP 400"):
         _provider().embed_query("hello")
@@ -497,7 +497,7 @@ def test_embed_timeout_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     task #698 G8); the retry policy is a module constant (R2-D)."""
 
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", 12.5)
-    fake = _AsyncClient(vectors=[[1.0] * DIM], raises_times=1)
+    fake = AsyncClient(vectors=[[1.0] * DIM], raises_times=1)
     patch_client(monkeypatch, fake)
 
     _provider().embed_batch(["hello"])
@@ -561,7 +561,7 @@ def test_unknown_http_stage_failure_propagates_without_retry(
 
         monkeypatch.setattr(httpx, "AsyncClient", failed_client)
     else:
-        patch_client(monkeypatch, _AsyncClient())
+        patch_client(monkeypatch, AsyncClient())
 
         async def failed_request(*_args: object, **_kwargs: object) -> dict[str, Any]:
             calls.append("request")
@@ -581,7 +581,7 @@ def test_unknown_http_stage_failure_propagates_without_retry(
 
 
 def test_embed_response_shape_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _AsyncClient(vectors=[[1.0] * DIM] * 3)
+    fake = AsyncClient(vectors=[[1.0] * DIM] * 3)
     patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="unexpected shape"):
         _provider().embed_batch(["a", "b"])
@@ -590,7 +590,7 @@ def test_embed_response_shape_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -
 def test_embed_malformed_response_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Embedding entries missing `values` -> EmbeddingAPIError, not a crash."""
 
-    fake = _AsyncClient(response_body={"embeddings": [{"nope": []}]})
+    fake = AsyncClient(response_body={"embeddings": [{"nope": []}]})
     patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="malformed"):
         _provider().embed_query("hello")

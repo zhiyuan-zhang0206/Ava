@@ -5,11 +5,6 @@ exports = ["async_no_sync_blocking.py", "ava_root_scope.py", "diagnostics", "fix
 
 [debt.private-name]
 "tests/runtime_rules/test_lint_async_no_sync_blocking.py -> async_no_sync_blocking.py#_ROOT" = 1
-"tests/runtime_rules/test_lint_async_no_sync_blocking.py -> async_no_sync_blocking.py#_SCAN_DIRS" = 1
 "tests/runtime_rules/test_lint_ava_root_scope.py -> ava_root_scope.py#_REPO_ROOT" = 2
 "tests/test_lint_fixture_scope.py -> fixture_scope.py#_REPO_ROOT" = 4
 "tests/test_lint_only_mode.py -> diagnostics/zombie_pyright_ignores.py#_REPO_ROOT" = 3
-"tests/test_lints_cover_framework_dirs.py -> diagnostics/logger_add_diagnose.py#_SCAN_DIRS" = 1
-"tests/test_lints_cover_framework_dirs.py -> diagnostics/loguru_format.py#_SCAN_DIRS" = 1
-"tests/test_lints_cover_framework_dirs.py -> diagnostics/no_emoji.py#_SCAN_DIRS" = 1
-"tests/test_lints_cover_framework_dirs.py -> termination_source.py#_SCAN_DIRS" = 1

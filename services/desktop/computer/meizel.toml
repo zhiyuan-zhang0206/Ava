@@ -14,7 +14,4 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "tests" = ["ax_act.py", "ax_gap.py", "ax_ids.py", "ax_tools.py", "config.py", "errors.py", "mcp_daemon.py", "mcp_wrapper.py", "ocr", "ocr_text.py", "protocol.py", "screen.py", "session.py", "targets.py", "task_sessions.py"]
 
 [debt.private-name]
-"tests/computer_mcp_daemon/test_click_text_measures_scale_and_tracks_pointer.py -> mcp_daemon.py#_tracked_client" = 1
-"tests/test_computer_mcp_daemon.py -> ocr_text.py#_match_ocr_boxes" = 4
-"tests/test_computer_mcp_daemon.py -> ocr_text.py#_validate_text_query" = 2
 "tests/test_computer_mcp_wrapper.py -> mcp_wrapper.py#_ReconnectingLink" = 1

@@ -581,7 +581,7 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
         "AVA_IMPERSONATION_ACK_WINDOW_SECONDS=999\nAVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS=9\n"
     )
     pushes: list[str] = []
-    monkeypatch.setattr(relay, "_MIN_EMIT_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(relay, "MIN_EMIT_INTERVAL_SECONDS", 0)
 
     async def read() -> relay.InboxSnapshot:
         return relay.read_relay_inbox(

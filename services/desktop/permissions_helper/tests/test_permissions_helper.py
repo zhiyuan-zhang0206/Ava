@@ -32,7 +32,7 @@ from base.host.permissions_helper.client import (
 )
 
 
-def _read_line(conn: socket.socket) -> bytes:
+def read_line(conn: socket.socket) -> bytes:
     data = b""
     while not data.endswith(b"\n"):
         chunk = conn.recv(65536)
@@ -42,7 +42,7 @@ def _read_line(conn: socket.socket) -> bytes:
     return data
 
 
-class _FakeHelper:
+class FakeHelper:
     """A pure-Python Unix-socket server speaking the helper's JSON-line protocol.
 
     `handler` maps a request dict to a response dict (the common path). `raw`
@@ -76,7 +76,7 @@ class _FakeHelper:
                     self._raw(conn)
                     continue
                 assert self._handler is not None  # pyright: ignore[reportUnknownMemberType]
-                resp = self._handler(json.loads(_read_line(conn)))  # pyright: ignore[reportUnknownMemberType]
+                resp = self._handler(json.loads(read_line(conn)))  # pyright: ignore[reportUnknownMemberType]
                 conn.sendall((json.dumps(resp) + "\n").encode())
 
     def close(self) -> None:
@@ -87,7 +87,7 @@ class _FakeHelper:
 
 @pytest.fixture
 def fake_helper():
-    servers: list[_FakeHelper] = []
+    servers: list[FakeHelper] = []
     paths: list[str] = []
 
     def start(
@@ -99,7 +99,7 @@ def fake_helper():
         # what pytest's tmp_path would produce.
         path = f"/tmp/avah{os.getpid()}-{len(servers)}.sock"  # noqa: S108
         Path(path).unlink(missing_ok=True)
-        servers.append(_FakeHelper(path, handler, raw))
+        servers.append(FakeHelper(path, handler, raw))
         paths.append(path)
         return path
 
@@ -379,7 +379,7 @@ def test_signal_session_requires_exactly_one_target(name: str | None, pid: int |
 # SECURITY SYNC: mirrors the resolved-string boundary check in
 # services/desktop/permissions_helper/helper/main.swift::resolvedWhitelistedFilePath.
 # Update both implementations together whenever whitelist containment changes.
-def _is_whitelisted_file_path(path: Path, roots: list[Path]) -> bool:
+def is_whitelisted_file_path(path: Path, roots: list[Path]) -> bool:
     if not path.is_absolute():
         return False
     resolved_path = str(path.resolve())
@@ -395,7 +395,7 @@ def _is_whitelisted_file_path(path: Path, roots: list[Path]) -> bool:
 # reads it from the helper; the calling process's own grant is a different fact.
 
 
-def _ping_reply(preflight_screen: bool, ax_trusted: bool = True) -> Callable[[dict], dict]:
+def ping_reply(preflight_screen: bool, ax_trusted: bool = True) -> Callable[[dict], dict]:
     return lambda req: {
         "id": req["id"],
         "ok": True,
@@ -415,7 +415,7 @@ def _ping_reply(preflight_screen: bool, ax_trusted: bool = True) -> Callable[[di
 # --- Bundle content -------------------------------------------------------
 
 
-def _parse_strings(path: Path) -> dict[str, str]:
+def parse_strings(path: Path) -> dict[str, str]:
     entries: dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -432,10 +432,10 @@ def _parse_strings(path: Path) -> dict[str, str]:
 # is never an acceptable substitute -- and a current bundle is never re-signed.
 
 
-_TEST_CERT_SHA1 = "0123456789ABCDEF0123456789ABCDEF01234567"
+TEST_CERT_SHA1 = "0123456789ABCDEF0123456789ABCDEF01234567"
 
 
-def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool) -> Path:
+def stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool) -> Path:
     from services.desktop.permissions_helper import launchd_job, lifecycle
 
     src = tmp_path / "main.swift"
@@ -459,26 +459,26 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     zh_lproj.mkdir()
     (zh_lproj / "Localizable.strings").write_text('"panel.title" = "zh";')
     monkeypatch.setattr(lifecycle, "SOURCE", src)
-    monkeypatch.setattr(lifecycle, "_INFO_PLIST", info)
-    monkeypatch.setattr(lifecycle, "_ENTITLEMENTS", entitlements)
-    monkeypatch.setattr(lifecycle, "_LOCALES", locales)
+    monkeypatch.setattr(lifecycle, "INFO_PLIST", info)
+    monkeypatch.setattr(lifecycle, "ENTITLEMENTS", entitlements)
+    monkeypatch.setattr(lifecycle, "LOCALES", locales)
     monkeypatch.setattr(base_paths, "permissions_helper_app_dir", lambda: build)
     return app
 
 
-def _test_dr() -> str:
+def test_dr() -> str:
     return (
         'identifier "com.ava.permissions-helper" and certificate leaf = '
-        f'H"{_TEST_CERT_SHA1.lower()}"'
+        f'H"{TEST_CERT_SHA1.lower()}"'
     )
 
 
-def _write_current_build_state(app: Path, source_hash: str, *, dr: str | None = None) -> None:
+def write_current_build_state(app: Path, source_hash: str, *, dr: str | None = None) -> None:
     (app.parent / "build-state.json").write_text(
         json.dumps(
             {
                 "source_hash": source_hash,
-                "dr": dr or _test_dr(),
+                "dr": dr or test_dr(),
                 "signed_at": "2026-09-05T00:00:00+00:00",
             }
         )
@@ -494,7 +494,7 @@ class _Call(NamedTuple):
 
 @dataclass(frozen=True)
 class _FakeToolOutputs:
-    """What the stand-in swiftc / codesign / security answer, per `_fake_tools`'s arguments."""
+    """What the stand-in swiftc / codesign / security answer, per `fake_tools`'s arguments."""
 
     authority: str | None
     keychain_rc: int
@@ -537,7 +537,7 @@ class _FakeToolOutputs:
     def _find_identity(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         from services.desktop.permissions_helper import lifecycle
 
-        output = self.identity_output or f'  1) {_TEST_CERT_SHA1} "{lifecycle._CERT_CN}"\n'
+        output = self.identity_output or f'  1) {TEST_CERT_SHA1} "{lifecycle.CERT_CN}"\n'
         return subprocess.CompletedProcess(cmd, 0, output.encode(), b"")
 
     def _list_keychains(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -545,7 +545,7 @@ class _FakeToolOutputs:
 
         output = self.list_keychains_output
         if output is None:
-            output = f'    "{lifecycle._keychain_path()}"\n'.encode()
+            output = f'    "{lifecycle.keychain_path()}"\n'.encode()
         return subprocess.CompletedProcess(
             cmd,
             self.list_keychains_rc,
@@ -556,7 +556,7 @@ class _FakeToolOutputs:
     def _designated_requirement(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         if self.dr_streams is not None:
             return subprocess.CompletedProcess(cmd, 0, *self.dr_streams)
-        dr = self.designated_requirement or _test_dr()
+        dr = self.designated_requirement or test_dr()
         # Real codesign on current macOS emits the DR line on stdout
         # (stderr carries `Executable=...`); the reader accepts either.
         return subprocess.CompletedProcess(cmd, 0, f"designated => {dr}\n".encode(), b"")
@@ -568,7 +568,7 @@ class _FakeToolOutputs:
         return subprocess.CompletedProcess(cmd, rc, b"", stderr)
 
 
-def _fake_tools(
+def fake_tools(
     monkeypatch: pytest.MonkeyPatch,
     *,
     authority: str | None,
@@ -633,7 +633,7 @@ def recorded_argvs(recorded: list[_Call]) -> list[list[str]]:
     return [c.argv for c in recorded]
 
 
-def _sign_command(recorded: list[_Call]) -> list[str]:
+def sign_command(recorded: list[_Call]) -> list[str]:
     return next(c.argv for c in recorded if c.argv[:2] == ["codesign", "--force"])
 
 
@@ -649,7 +649,7 @@ def _sign_command(recorded: list[_Call]) -> list[str]:
 # --- Install, in-place upgrade, and launchd repair ------------------------
 
 
-def _install_env(
+def install_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
@@ -669,11 +669,11 @@ def _install_env(
     log = tmp_path / "logs" / "permissions-helper.log"
     socket_path = tmp_path / "run" / "permissions-helper.sock"
     monkeypatch.setattr(lifecycle.base.paths, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(lifecycle, "_refuse_foreign_label_jobs", lambda: None)
-    monkeypatch.setattr(lifecycle, "_label", lambda: "com.ava.permissions-helper.test")
+    monkeypatch.setattr(lifecycle, "refuse_foreign_label_jobs", lambda: None)
+    monkeypatch.setattr(lifecycle, "label", lambda: "com.ava.permissions-helper.test")
     monkeypatch.setattr(lifecycle, "launchd_domain", lambda: "gui/501")
-    monkeypatch.setattr(lifecycle, "_plist_path", lambda: plist_path)
-    monkeypatch.setattr(lifecycle, "_is_loaded", lambda: loaded)
+    monkeypatch.setattr(lifecycle, "plist_path", lambda: plist_path)
+    monkeypatch.setattr(lifecycle, "is_loaded", lambda: loaded)
     monkeypatch.setattr(lifecycle, "logs_dir", lambda: log.parent)
     monkeypatch.setattr(lifecycle, "helper_socket", lambda: socket_path)
     run_calls: list[list[str]] = []
@@ -720,7 +720,7 @@ def _skip_sleep(_seconds: float) -> None:
 # home's own KeepAlive job for it.
 
 
-def _write_agent_plist(
+def write_agent_plist(
     agents: Path, label: str, sock: str, env_key: str = "AVA_PERMISSIONS_HELPER_SOCKET"
 ) -> Path:
     p = agents / f"{label}.plist"
@@ -736,7 +736,7 @@ def _write_agent_plist(
     return p
 
 
-def _retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 9223) -> Path:
+def retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 9223) -> Path:
     """Point the retire machinery at a fake home: current socket, agents dir,
     launchd domain."""
     from services.desktop.permissions_helper import lifecycle
@@ -745,7 +745,7 @@ def _retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 
     agents.mkdir(parents=True)
     run = tmp_path / "run"
     run.mkdir(parents=True)
-    monkeypatch.setattr(lifecycle, "_agents_dir", lambda: agents)
+    monkeypatch.setattr(lifecycle, "agents_dir", lambda: agents)
     monkeypatch.setattr(lifecycle, "launchd_domain", lambda: "gui/501")
     monkeypatch.setattr(lifecycle, "helper_socket", lambda: run / f"permissions-helper.{port}.sock")
     return agents

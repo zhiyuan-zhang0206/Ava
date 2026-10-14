@@ -432,11 +432,11 @@ async def test_retry_delay_is_bounded_and_jittered(monkeypatch: pytest.MonkeyPat
         "uniform",
         lambda _a, _b: 1.0,  # pyright: ignore[reportUnknownArgumentType]
     )  # pin jitter
-    assert cr._retry_delay_s(0) == 0.5
-    assert cr._retry_delay_s(1) == 1.0
-    assert cr._retry_delay_s(2) == 2.0
-    assert cr._retry_delay_s(3) == 4.0
-    assert cr._retry_delay_s(10) == 4.0  # cap holds for any attempt count
+    assert cr.retry_delay_s(0) == 0.5
+    assert cr.retry_delay_s(1) == 1.0
+    assert cr.retry_delay_s(2) == 2.0
+    assert cr.retry_delay_s(3) == 4.0
+    assert cr.retry_delay_s(10) == 4.0  # cap holds for any attempt count
 
 
 @pytest.mark.asyncio
@@ -530,9 +530,9 @@ async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
 def test_launch_key_is_stable_within_attempt_and_rotates_between_attempts() -> None:
     first = {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"}
     second = {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000002"}
-    key = cluster_rpc._default_idempotency_key("runner-a", "spawn-launch", first)
-    assert key == cluster_rpc._default_idempotency_key("runner-a", "spawn-launch", first)
-    assert key != cluster_rpc._default_idempotency_key("runner-a", "spawn-launch", second)
+    key = cluster_rpc.default_idempotency_key("runner-a", "spawn-launch", first)
+    assert key == cluster_rpc.default_idempotency_key("runner-a", "spawn-launch", first)
+    assert key != cluster_rpc.default_idempotency_key("runner-a", "spawn-launch", second)
     assert key.startswith("spawn-launch:runner-a:42:")
 
 
@@ -703,7 +703,7 @@ async def test_unknown_kind_is_rejected_before_machine_lookup(
         raise AssertionError("an unknown operation cannot resolve or contact a machine")
 
     monkeypatch.setattr(cluster_rpc, "lookup_machine_url", forbidden)
-    monkeypatch.setattr(cluster_rpc, "_default_idempotency_key", forbidden)
+    monkeypatch.setattr(cluster_rpc, "default_idempotency_key", forbidden)
     with pytest.raises(ValueError, match="unknown op kind"):
         await cluster_rpc.dispatch_to_machine(
             _db(database_gate=database_gate),

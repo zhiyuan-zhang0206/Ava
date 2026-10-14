@@ -63,7 +63,7 @@ from meizel.roles import packages
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_SCAN_DIRS = packages("application", "tooling")
+SCAN_DIRS = packages("application", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -235,9 +235,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     paths = (
-        [Path(a).resolve() for a in argv]
-        if argv
-        else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
     )
     # `--only` (the commit hook) judges the changed files under the default scope; the
     # lattice's own family modules are inputs: editing one re-judges every file.

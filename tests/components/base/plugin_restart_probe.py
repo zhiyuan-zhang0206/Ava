@@ -16,13 +16,13 @@ from services.agent_runner.agent_host import daemon
 
 install_graceful_shutdown("private-plugin-restart-test")
 fingerprints = iter(["before", "after"])
-daemon._plugins_fingerprint = lambda: next(fingerprints)
-daemon._PLUGINS_POLL_INTERVAL_S = 0.01
+daemon.plugins_fingerprint = lambda: next(fingerprints)
+daemon.PLUGINS_POLL_INTERVAL_S = 0.01
 
 
 async def run() -> None:
     try:
-        await daemon._watch_plugins_for_restart()
+        await daemon.watch_plugins_for_restart()
     finally:
         await asyncio.sleep(0.05)
         Path(sys.argv[1]).write_text("clean")

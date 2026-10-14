@@ -20,9 +20,9 @@ from services.desktop.browser.mcp_daemon import ChromeMcpDaemon
 from services.desktop.browser.tab_groups.grouping import AgentTabGroups
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
     FakeUpstream,
-    _text_of,
     err,
     new_daemon,
+    text_of,
 )
 
 
@@ -144,7 +144,7 @@ async def test_grouping_failure_leaves_the_page_created_registered_and_selected(
     auto = await d.call_tool_for_agent("navigate_page", {"url": "https://b.example/"}, 8)
 
     assert not explicit.is_error and not auto.is_error
-    assert _text_of(explicit) == "  1: https://a.example/ [selected]"
+    assert text_of(explicit) == "  1: https://a.example/ [selected]"
     assert d.pages.get_agent_page(7) == 1
     assert d.pages.get_agent_page(8) == 2
     assert set(d.pages.ttl_deadlines) == {1, 2}

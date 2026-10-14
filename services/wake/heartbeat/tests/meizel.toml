@@ -7,15 +7,15 @@
 
 [debt.first-party-patch]
 "test_completion_digest.py#monkeypatch.setattr services.wake.heartbeat.completion_digest.deliver_chat_inbound" = 1
-"test_heartbeat_checkin_retry.py#monkeypatch.setattr services.wake.heartbeat.daemon._send_heartbeat_checkin" = 1
 "test_heartbeat_checkin_retry.py#monkeypatch.setattr services.wake.heartbeat.daemon._sweep_backoff_resets" = 1
+"test_heartbeat_checkin_retry.py#monkeypatch.setattr services.wake.heartbeat.daemon.send_heartbeat_checkin" = 1
 "test_heartbeat_checkin_retry.py#monkeypatch.setattr services.wake.heartbeat.daemon.sleep_with_liveness" = 1
 "test_heartbeat_checkin_retry.py#monkeypatch.setattr services.wake.heartbeat.daemon.time" = 1
-"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon._reconcile_checkin_outcomes" = 1
-"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon._select_idle_agents_needing_heartbeat" = 1
 "test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon._sweep_backoff_resets" = 1
 "test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.backoff_deadlines" = 1
+"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.reconcile_checkin_outcomes" = 1
 "test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.run_liveness_pass" = 1
+"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.select_idle_agents_needing_heartbeat" = 1
 "test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.sleep_with_liveness" = 1
 "test_heartbeat_liveness.py#monkeypatch.setattr base.config.settings.gateway.status_probe_timeout_seconds" = 1
 "test_heartbeat_liveness.py#monkeypatch.setattr services.wake.heartbeat.liveness.publish_agent_updated_sync" = 1

@@ -15,7 +15,7 @@ from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from ops.lifecycle.termination import _force_terminate_transaction
+from ops.lifecycle.termination import force_terminate_transaction
 
 
 @pytest.mark.parametrize("applied", [False, True])
@@ -41,7 +41,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
         _, _, _, force, _cutoff = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user"
+            force_terminate_transaction, agent_id, pool, source="user"
         )
     later = insert_lifecycle_command(db_conn, agent_id, "restart")
     assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None) is None

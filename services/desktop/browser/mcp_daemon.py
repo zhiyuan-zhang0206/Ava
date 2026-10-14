@@ -93,11 +93,11 @@ from services.desktop.browser.mcp_upstream import (
 from services.desktop.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
     PageRegistry,
-    _text_of,
     expired_page_reaper,
     handle_release_agent_page,
     renew_agent_page,
     renew_page_tool_dump,
+    text_of,
 )
 from services.desktop.browser.protocol import Request, Response
 from services.desktop.browser.tab_groups.grouping import AgentTabGroups
@@ -156,9 +156,9 @@ _UPSTREAM_WATCHDOG_INTERVAL_S = 30.0
 _UPSTREAM_WATCHDOG_TIMEOUT_S = 10.0
 
 
-def _selected_id(result: types.CallToolResult) -> int | None:
+def selected_id(result: types.CallToolResult) -> int | None:
     """The `[selected]` page id in a page-list result, or None on format drift."""
-    m = _SELECTED_RE.search(_text_of(result))
+    m = _SELECTED_RE.search(text_of(result))
     return int(m.group(1)) if m else None
 
 
@@ -189,7 +189,7 @@ def _in_isolated_context(args: dict[str, Any]) -> bool:
     return args.get("isolatedContext") is not None
 
 
-def _no_page_result() -> types.CallToolResult:
+def no_page_result() -> types.CallToolResult:
     """The upstream's own no-page error, returned for a page-scoped call from a
     connection that owns no page -- forwarding it would touch another client's
     tab via the shared global selection."""
@@ -327,7 +327,7 @@ class ChromeMcpDaemon:
         if repin.is_error:
             logger.warning(
                 f"[browser-mcp] re-pin to page {current_page} failed "
-                f"({_text_of(repin)!r}); dropping affinity"
+                f"({text_of(repin)!r}); dropping affinity"
             )
             return None
         return current_page
@@ -353,7 +353,7 @@ class ChromeMcpDaemon:
         before = await self.tab_groups.snapshot() if group else None
         result = await self._call("new_page", args)
         if not result.is_error:
-            self.pages.register_created_page(_selected_id(result))
+            self.pages.register_created_page(selected_id(result))
             if group and agent_id is not None:
                 await self.tab_groups.group_new_page(agent_id, before)
         return result
@@ -365,8 +365,8 @@ class ChromeMcpDaemon:
         fast instead of touching another client's tab."""
         if name == "navigate_page" and isinstance(args.get("url"), str):
             result = await self._new_page(args, agent_id)
-            return result, (_selected_id(result) or None)
-        return _no_page_result(), None
+            return result, (selected_id(result) or None)
+        return no_page_result(), None
 
     async def _affinity_call(
         self,
@@ -404,7 +404,7 @@ class ChromeMcpDaemon:
         if result.is_error:
             return current_page
         if name == "new_page":
-            return _selected_id(result) or current_page  # the freshly opened tab
+            return selected_id(result) or current_page  # the freshly opened tab
         if name == "select_page":
             pid = _page_id(args.get("pageId"))
             return pid if pid is not None else current_page
@@ -497,7 +497,7 @@ async def _serve_line(
     return conn_page
 
 
-async def _handle_client(
+async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     daemon_ref: list[ChromeMcpDaemon | None],
@@ -604,12 +604,12 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
     with suppress(OSError):
         sock.unlink()
 
-    # Mutable reference so _handle_client always sees the current daemon across
+    # Mutable reference so handle_client always sees the current daemon across
     # initial upstream connection. None while starting.
     daemon_ref: list[ChromeMcpDaemon | None] = [None]
 
     server = await asyncio.start_unix_server(
-        lambda r, w: _handle_client(r, w, daemon_ref), path=str(sock), limit=_LINE_LIMIT
+        lambda r, w: handle_client(r, w, daemon_ref), path=str(sock), limit=_LINE_LIMIT
     )
     logger.info(f"[browser-mcp] listening on {sock} (upstream {browser_url})")
 

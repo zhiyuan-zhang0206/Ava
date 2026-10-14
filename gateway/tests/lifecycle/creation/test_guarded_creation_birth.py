@@ -124,7 +124,7 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
     machine_identity: MachineIdentity,
 ) -> None:
     from gateway.app import app
-    from ops.lifecycle.launch import _validate_launch_row
+    from ops.lifecycle.launch import validate_launch_row
 
     first = client.post(PATH, json=BODY, headers=HEADERS)
     assert first.status_code == 201, first.text
@@ -143,13 +143,13 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
     assert retry.status_code == 200, retry.text
     replacement = UUID(retry.json()["launch_attempt_id"])
     assert replacement != original
-    _validate_launch_row(
+    validate_launch_row(
         app.state.db_pool,
         LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=replacement),
         local_machine=machine_identity.name(),
     )
     with pytest.raises(ValueError, match="stale"):
-        _validate_launch_row(
+        validate_launch_row(
             app.state.db_pool,
             LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=original),
             local_machine=machine_identity.name(),
@@ -248,12 +248,12 @@ def test_native_launch_ack_loss_recovers_same_attempt(
     machine_identity: MachineIdentity,
 ) -> None:
     from gateway.app import app
-    from ops.lifecycle.launch import _validate_launch_row
+    from ops.lifecycle.launch import validate_launch_row
 
     calls: list[LaunchAgentRequest] = []
 
     async def lost_once(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-        _validate_launch_row(app.state.db_pool, body, local_machine=machine_identity.name())
+        validate_launch_row(app.state.db_pool, body, local_machine=machine_identity.name())
         calls.append(body)
         if len(calls) == 1:
             raise TimeoutError("native launch acknowledgement lost")

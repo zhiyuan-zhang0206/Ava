@@ -10,4 +10,4 @@ def test_renewal_clock_is_the_agent_hosts_actual_beat() -> None:
     (it once registered 60 s while the agent host renewed every 15 s)."""
     from services.agent_runner.agent_host import daemon as agent_host_daemon
 
-    assert CLOCKS["AGENT_LEASE_RENEW_INTERVAL_S"].get() == agent_host_daemon._LIVENESS_BEAT_STEP_S
+    assert CLOCKS["AGENT_LEASE_RENEW_INTERVAL_S"].get() == agent_host_daemon.LIVENESS_BEAT_STEP_S

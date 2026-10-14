@@ -28,7 +28,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops import cluster_status
-from ops.lifecycle.termination import _force_terminate_transaction
+from ops.lifecycle.termination import force_terminate_transaction
 from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -542,7 +542,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
         _, _, _, command, _cutoff = await asyncio.to_thread(
-            _force_terminate_transaction,
+            force_terminate_transaction,
             agent_id,
             pool,
             source="user",

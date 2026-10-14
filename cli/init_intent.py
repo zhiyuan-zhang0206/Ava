@@ -134,7 +134,7 @@ def _require_foreign_endpoint(endpoint: SplitResult, local: set[str]) -> None:
 
 def _first_time_examples() -> str:
     """What to run, from this checkout: the host's bare `ava` is linked by the first start."""
-    cli = start_intent._checkout() / ".venv" / "bin" / "ava"
+    cli = start_intent.checkout() / ".venv" / "bin" / "ava"
     return (
         "\nfirst-time examples (this checkout's CLI; a bare `ava` is linked by the first start):\n"
         "  # single box (owns data plane + runs agents):\n"
@@ -172,7 +172,7 @@ def _inputs(args: argparse.Namespace, home: Path) -> IdentityInput:
             "--db-capability is for agent-runner units; a gateway unit keeps its own "
             "write-generation ledger"
         )
-    return IdentityInput(home, start_intent._checkout(), roles, values, digest)
+    return IdentityInput(home, start_intent.checkout(), roles, values, digest)
 
 
 def service_path(values: dict[str, str], home: Path) -> str:
@@ -185,7 +185,7 @@ def service_path(values: dict[str, str], home: Path) -> str:
     if "AVA_SERVICE_PATH" in os.environ:
         return admit_service_path(os.environ["AVA_SERVICE_PATH"])
     bin_name = "bin"
-    venvs = [start_intent._checkout() / ".venv"]
+    venvs = [start_intent.checkout() / ".venv"]
     if sys.prefix != sys.base_prefix:
         venvs.append(Path(sys.prefix))
     if activated := os.environ.get("VIRTUAL_ENV"):
@@ -248,7 +248,7 @@ def run_init(args: argparse.Namespace) -> int:
         with file_lock(home / "start-intent.lock", timeout_s=30):
             verdict = initialize_home(args, home)
         print(f"✓ {verdict}")
-        print(f"next: run `{start_intent._checkout() / '.venv' / 'bin' / 'ava'} start`")
+        print(f"next: run `{start_intent.checkout() / '.venv' / 'bin' / 'ava'} start`")
         return 0
     except (ValueError, TypeError, RuntimeError, OSError) as exc:
         print(f"ava init: {exc}", file=sys.stderr)

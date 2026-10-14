@@ -262,7 +262,7 @@ def _single_box(*extra: str):
 def test_init_uses_explicit_home_not_ambient_projection(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     monkeypatch.setenv("AVA_DB_URL", "postgresql://foreign@foreign.invalid/production")
     monkeypatch.setenv("AVA_CLUSTER_SECRET", "foreign-secret")
@@ -277,7 +277,7 @@ def test_init_uses_explicit_home_not_ambient_projection(
 def test_interrupted_init_keeps_admitted_tool_path(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
     activated = inputs.checkout.parent / "other-venv"
@@ -319,7 +319,7 @@ def test_existing_home_cannot_recapture_caller_tool_path(
 def test_lossy_tool_path_is_rejected_before_identity_publication(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "tools #1"))
@@ -350,7 +350,7 @@ def _runner_start(
     """A remote runner's first start against a gateway serving the endpoint only."""
     from base.host.env import bootstrap
 
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     # A remote unit joins without the human secret: its capability authenticates.
     monkeypatch.delenv("AVA_CLUSTER_SECRET", raising=False)
@@ -434,7 +434,7 @@ def test_capability_bundle_needs_its_transport_key(
 def test_gateway_init_refuses_a_capability_bundle(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     with pytest.raises(ValueError, match="agent-runner units"):
         prepare_init_identity(_single_box("--db-capability", str(tmp_path / "unit.bundle")))
@@ -525,7 +525,7 @@ def test_corrupt_foreign_reservation_never_publishes(inputs: identity.IdentityIn
 def test_config_file_is_taken_once_and_a_second_init_is_refused(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     config = inputs.home.parent / "config.env"
     config.write_text("AVA_LLM_OVERRIDE=fixture:model\n")
@@ -551,7 +551,7 @@ def _remote_config(
 ):
     import socket
 
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setattr(
         init_intent,
         "local_addresses",
@@ -618,7 +618,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
     )
     from base.native_process.os_platform import LockTimeoutError
 
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
 
     def runtime(**_kw: object) -> int:
@@ -656,7 +656,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
     from cli.commands.lifecycle import root_driver
 
     calls: list[str] = []
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
 
     def runtime(**_kw: object) -> int:
@@ -690,7 +690,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle import root_driver
 
-    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     calls: list[str] = []
 

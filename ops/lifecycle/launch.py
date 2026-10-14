@@ -44,12 +44,12 @@ async def launch_agent_op(
         model=settings.lm.llm_model,
         config=resolve_agent_config_pins(body.config, body.birth_config),
     )
-    await asyncio.to_thread(_validate_launch_row, db_pool, body, local_machine=local_machine)
+    await asyncio.to_thread(validate_launch_row, db_pool, body, local_machine=local_machine)
     publish_inbound_wake(db, bus, body.agent_id, "0")
     return SpawnedAgent(id=body.agent_id)
 
 
-def _validate_launch_row(
+def validate_launch_row(
     db_pool: ConnectionPool, body: LaunchAgentRequest, *, local_machine: str
 ) -> None:
     """A stale attempt cannot wake an identity now placed somewhere else."""

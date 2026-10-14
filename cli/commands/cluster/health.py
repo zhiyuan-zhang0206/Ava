@@ -249,7 +249,7 @@ def service_probes(*, machine: MachineIdentity) -> list[str]:
     from base.deploy.lifecycle.service_selection import read_selection
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
-    roles = _repo_commands._roles_or_none(machine=machine)
+    roles = _repo_commands.roles_or_none(machine=machine)
     if roles is None:
         return ["service roster unavailable"]
     try:
@@ -276,7 +276,7 @@ def redis_bridge_probe(*, machine: MachineIdentity, config: ConfigBoot) -> str |
     """
     import cli.commands._repo as _repo_commands
 
-    roles = _repo_commands._roles_or_none(machine=machine)
+    roles = _repo_commands.roles_or_none(machine=machine)
     if roles is None or "gateway" not in roles:
         return None
     from cli.commands.converge.redis_bridge import probe_redis_bridge
