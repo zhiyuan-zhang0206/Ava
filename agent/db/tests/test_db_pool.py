@@ -5,7 +5,8 @@ A transiently unresponsive Postgres used to read as a mystery node stall: the
 only signal was a gap in the agent log while `getconn` silently waited out its
 (default 30s) timeout. These tests pin the logging contract — fast borrow is
 quiet, slow borrow WARNs, `PoolTimeout` ERRORs and still propagates — without a
-live pg by stubbing the base `getconn` and the clock.
+live pg by stubbing the base `getconn`; the pool's `ManualTimers` is the clock,
+and the stubbed borrow advances it by how long that borrow "took".
 """
 
 from __future__ import annotations
@@ -19,15 +20,17 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent import db
 from agent.db import LoggingConnectionPool, claim_inbound_batch
+from base.clock.tests.manual_timers import ManualTimers
 from base.config import settings
 from base.events.declarations.agent_runtime import DbPoolAcquireSlow
 
 
-def _pool() -> LoggingConnectionPool[psycopg.AsyncConnection]:
+def _pool(timers: ManualTimers) -> LoggingConnectionPool[psycopg.AsyncConnection]:
     # open=False → no connection attempt; we never touch a real pg here.
     return LoggingConnectionPool[psycopg.AsyncConnection](
         "postgresql://unused",
         pool_name="ops",
+        timers=timers,
         min_size=0,
         max_size=2,
         open=False,
@@ -46,7 +49,7 @@ async def test_fast_acquire_is_quiet(loguru_records, monkeypatch: pytest.MonkeyP
         return sentinel
 
     monkeypatch.setattr(AsyncConnectionPool, "getconn", _fast)  # pyright: ignore[reportUnknownArgumentType]
-    conn = await _pool().getconn()
+    conn = await _pool(ManualTimers()).getconn()
 
     assert conn is sentinel
     assert _acquire_records(loguru_records) == []  # pyright: ignore[reportUnknownArgumentType]
@@ -55,21 +58,15 @@ async def test_fast_acquire_is_quiet(loguru_records, monkeypatch: pytest.MonkeyP
 async def test_slow_acquire_warns(loguru_records, monkeypatch: pytest.MonkeyPatch) -> None:
     """A borrow that succeeds but took >= the slow threshold WARNs, named."""
 
-    async def _ok(self, timeout=None):
-        return object()
-
-    pool = _pool()  # construct under the real clock, before we stub it
-    monkeypatch.setattr(AsyncConnectionPool, "getconn", _ok)  # pyright: ignore[reportUnknownArgumentType]
-    # `t0` is the first read; every later read (ours + any loguru-internal one)
-    # returns a value past the threshold, so the stub is robust to extra calls.
-    reads = {"n": 0}
+    timers = ManualTimers()
     threshold = settings.agent.db_pool_slow_acquire_warn_seconds
 
-    def _clock() -> float:
-        reads["n"] += 1
-        return 0.0 if reads["n"] == 1 else threshold + 1.0
+    async def _ok(self, timeout=None):
+        timers.advance(threshold + 1.0)  # the borrow took one second past the threshold
+        return object()
 
-    monkeypatch.setattr(db.time, "monotonic", _clock)
+    pool = _pool(timers)
+    monkeypatch.setattr(AsyncConnectionPool, "getconn", _ok)  # pyright: ignore[reportUnknownArgumentType]
 
     await pool.getconn()
 
@@ -87,18 +84,14 @@ async def test_every_slow_acquire_warns(loguru_records, monkeypatch: pytest.Monk
     """No per-host coalescing: each slow borrow is one WARNING with the event's
     elapsed and pool-state fields, so a rule can count them per host."""
 
+    timers = ManualTimers()
+
     async def _ok(self, timeout=None):
+        timers.advance(100.0)
         return object()
 
-    pool = _pool()  # construct under the real clock, before we stub it
+    pool = _pool(timers)
     monkeypatch.setattr(AsyncConnectionPool, "getconn", _ok)  # pyright: ignore[reportUnknownArgumentType]
-    clock = [0.0]
-
-    def _monotonic() -> float:
-        clock[0] += 100.0
-        return clock[0]
-
-    monkeypatch.setattr(db.time, "monotonic", _monotonic)
 
     await pool.getconn()
     await pool.getconn()
@@ -114,23 +107,22 @@ async def test_every_slow_acquire_warns(loguru_records, monkeypatch: pytest.Monk
 async def test_slow_acquire_separates_slot_wait_and_check(
     loguru_records, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pool = _pool()
-    clock = [0.0]
+    timers = ManualTimers()
+    pool = _pool(timers)
     sentinel = object()
 
     async def slot(_self: Any, _timeout: float) -> object:
-        clock[0] += 6.0
+        timers.advance(6.0)
         return sentinel
 
     async def check(_self: Any, _conn: object) -> None:
-        clock[0] += 6.0
+        timers.advance(6.0)
 
     async def borrow(self: Any, timeout: float | None = None) -> object:
         conn = await self._getconn_unchecked(timeout or 5.0)
         await self._check_connection(conn)
         return conn
 
-    monkeypatch.setattr(db.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(AsyncConnectionPool, "_getconn_unchecked", slot)
     monkeypatch.setattr(AsyncConnectionPool, "_check_connection", check)
     monkeypatch.setattr(AsyncConnectionPool, "getconn", borrow)
@@ -153,7 +145,7 @@ async def test_pool_timeout_errors_and_propagates(
 
     monkeypatch.setattr(AsyncConnectionPool, "getconn", _timeout)  # pyright: ignore[reportUnknownArgumentType]
 
-    pool = _pool()
+    pool = _pool(ManualTimers())
     monkeypatch.setattr(
         pool,
         "get_stats",
