@@ -55,8 +55,8 @@ process-generation contract.
 
 `process_control.ProcessControl` is the port for `kill`, `killpg`, `getpgid` and `getsid`,
 the calls whose failure a test must be able to cause. A component that signals takes it as a
-required argument; a composition root passes `SYSTEM_PROCESS_CONTROL`, which looks the `os`
-function up at each call. `tests/fake_process_control.FakeProcessControl` records the signals in
+required argument; a composition root passes `SYSTEM_PROCESS_CONTROL`.
+`tests/fake_process_control.FakeProcessControl` records the signals in
 order and sends none, refuses chosen targets, answers group and session reads from a table, and can
 forward to the system implementation for a test that signals a real child. Observing who is in a
 group stays with `group_closure` and `ownership`.

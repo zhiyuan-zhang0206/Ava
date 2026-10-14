@@ -44,7 +44,7 @@ class ProcessControl(Protocol):
 
 
 class _SystemProcessControl:
-    """The real calls. Each looks `os` up when it is called, so it never captures a stale function."""
+    """The real calls."""
 
     def kill(self, pid: int, signum: int, /) -> None:
         os.kill(pid, signum)
