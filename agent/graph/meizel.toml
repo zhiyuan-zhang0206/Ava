@@ -8,7 +8,7 @@ exports = ["agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm"
 "exec" = ["_attach_drain.py", "_attach_merge.py", "agent_traceback.py", "claim", "interrupt.py", "node_log.py", "tool_calls.py"]
 "hooks" = ["interrupt.py", "node_log.py", "prompt", "recall"]
 "interrupt.py" = ["node_log.py"]
-"llm" = ["_callbacks.py", "hooks", "interrupt.py", "llm_errors.py", "node_log.py", "tool_calls.py"]
+"llm" = ["_callbacks.py", "claim", "hooks", "interrupt.py", "llm_errors.py", "node_log.py", "tool_calls.py"]
 "recall" = ["prompt"]
 "tests" = ["__init__.py", "_attach_drain.py", "_attach_merge.py", "_callbacks.py", "_init_context.py", "_shared.py", "agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm", "llm_errors.py", "node_log.py", "prompt", "recall"]
 

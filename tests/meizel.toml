@@ -9,7 +9,6 @@ exports = ["components", "e2e", "factories", "fixtures", "path_scoped", "scripts
 "integration" = ["path_scoped"]
 "path_scoped" = ["fixtures"]
 "scripts" = ["path_scoped"]
-"skills" = ["fixtures"]
 "ui" = ["e2e"]
 
 [debt.cycle-edge]

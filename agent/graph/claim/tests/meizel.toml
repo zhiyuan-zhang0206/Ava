@@ -1,6 +1,7 @@
 exports = ["claim_support.py", "cursor_fixture.py"]
 
 [uses]
+"path_scopes.toml" = ["cursor_fixture.py"]
 "test_claim_dispatch_guards.py" = ["claim_support.py"]
 "test_claim_markers_and_idle.py" = ["claim_support.py", "cursor_fixture.py"]
 

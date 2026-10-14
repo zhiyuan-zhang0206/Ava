@@ -1,12 +1,15 @@
-exports = ["claim"]
+exports = ["agent_tests.py", "claim"]
 
 [uses]
-"compact" = ["claim", "test_compact.py"]
-"state_slot" = ["test_state_slot.py"]
+"claim" = ["agent_tests.py"]
+"compact" = ["agent_tests.py", "claim", "test_compact.py"]
+"execution" = ["agent_tests.py"]
+"history" = ["agent_tests.py"]
+"impersonation" = ["agent_tests.py"]
+"path_scopes.toml" = ["agent_tests.py"]
+"plugins" = ["agent_tests.py"]
+"state_slot" = ["agent_tests.py", "test_state_slot.py"]
 "test_external.py" = ["impersonation"]
-
-[external]
-"test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 
 [debt.env-patch]
 "agent_tests.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
@@ -14,7 +17,6 @@ exports = ["claim"]
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONPATH" = 1
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONUTF8" = 1
 "test_external.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
-"test_external_integration_agent.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
 "test_resource_admission.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
@@ -28,10 +30,6 @@ exports = ["claim"]
 "test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
 "test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.seal_local_participant" = 3
 "test_external.py#monkeypatch.setattr base.telemetry.sync" = 3
-"test_external_integration_agent.py#monkeypatch.setattr ava.__plugin_installation__" = 1
-"test_external_integration_agent.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
-"test_external_integration_agent.py#monkeypatch.setattr ava.impersonation.attachment.process_metadata" = 3
-"test_external_integration_agent.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1
 "test_hosted_ownership_agent.py#monkeypatch.setattr agent.ownership.hosted.publish_agent_updated" = 1
 "test_hosted_ownership_agent.py#monkeypatch.setattr agent.ownership.hosted_cleanup.publish_agent_updated" = 1
 "test_state_slot.py#assignment ava.state" = 8

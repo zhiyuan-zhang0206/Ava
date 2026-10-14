@@ -7,23 +7,17 @@
     "test_security.py",
     "test_self_machine_spec.py",
 ]
-"tests.path_scoped.integration_tests" = [
-    "test_core.py",
-]
 "base.paths.tests.homes" = ["."]
 "base.packages.tests.model_catalog" = [
     "test_attachment_transport.py",
-    "test_core.py",
     "test_security.py",
 ]
 "base.config.tests.config_authority" = [
     "test_attachment_transport.py",
-    "test_core.py",
     "test_security.py",
 ]
 "ava.tests.fixtures.model_owner" = [
     "test_attachment_transport.py",
-    "test_core.py",
     "test_security.py",
 ]
 "ava.tests.fixtures.sdk" = [
