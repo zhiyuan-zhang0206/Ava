@@ -85,8 +85,8 @@ describe("useReplySuggestion", () => {
     expect(pending[0].agentId).toBe(7);
     expect(result.current).toBeNull();
 
-    await settle({ suggestion: "Yes, go ahead.", reason: null });
-    expect(result.current).toBe("Yes, go ahead.");
+    await settle({ suggestions: ["Use A.", "Use B.", "Use C.", "Use D."], reason: null });
+    expect(result.current).toEqual(["Use A.", "Use B.", "Use C.", "Use D."]);
   });
 
   it("starts nothing when a new turn begins within the quiet period", async () => {
@@ -123,7 +123,7 @@ describe("useReplySuggestion", () => {
     expect(pending[0].signal.aborted).toBe(true);
 
     // A late answer for the aborted request must not show.
-    await settle({ suggestion: "stale", reason: null });
+    await settle({ suggestions: ["stale"], reason: null });
     rerender(idle);
     expect(result.current).toBeNull();
   });
@@ -133,8 +133,8 @@ describe("useReplySuggestion", () => {
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
-    await settle({ suggestion: "Yes", reason: null });
-    expect(result.current).toBe("Yes");
+    await settle({ suggestions: ["Yes"], reason: null });
+    expect(result.current).toEqual(["Yes"]);
 
     rerender({ ...idle, busy: true });
     expect(result.current).toBeNull();
@@ -145,7 +145,7 @@ describe("useReplySuggestion", () => {
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
-    await settle({ suggestion: "Yes", reason: null });
+    await settle({ suggestions: ["Yes"], reason: null });
 
     rerender({ ...idle, items: [...AGENT_SAYS, item("inbound_chat", "3.0", { source: "user" })] });
     expect(result.current).toBeNull();
@@ -249,7 +249,7 @@ describe("useReplySuggestion", () => {
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
-    await settle({ suggestion: null, reason: "not_awaiting_reply" });
+    await settle({ suggestions: [], reason: "not_useful" });
 
     rerender({ ...idle, busy: true });
     rerender(idle);
@@ -282,7 +282,7 @@ describe("useReplySuggestion", () => {
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
-    await settle({ suggestion: "first", reason: null });
+    await settle({ suggestions: ["first"], reason: null });
 
     rerender({ ...idle, busy: true });
     rerender({
@@ -300,7 +300,7 @@ describe("useReplySuggestion", () => {
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
 
-    await settle({ suggestion: null, reason: "not_awaiting_reply" });
+    await settle({ suggestions: [], reason: "not_useful" });
 
     expect(result.current).toBeNull();
   });

@@ -25,10 +25,6 @@ from base.lm.provider_api import (
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugins.extensions import PluginContributions
 
-# DeepSeek's anthropic-compatible endpoint. Also the single source of truth
-# for model name → endpoint resolution; not written twice — to change the
-# endpoint, change here.
-_DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
 _DEEPSEEK_EFFORT_LEVELS = ("high", "max")
 
 
@@ -76,7 +72,10 @@ def build(ctx: BuildContext) -> BaseChatModel:
     `output_config.effort` via extra_body; `none` maps onto thinking
     disabled (the endpoint's effort vocabulary has no off level).
     """
-    from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
+    from ava_builtins.plugins.lm_deepseek.chat import (
+        DEEPSEEK_ANTHROPIC_API_BASE,
+        DeepSeekChatModel,
+    )
 
     # Use DeepSeek's anthropic-compatible endpoint via ChatAnthropic client.
     # Not langchain-deepseek (1.0.1 reasoning_content roundtrip bug).
@@ -145,10 +144,10 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # alias. Each parameter line of a multi-line call needs its own
     # ignore — pyright does not propagate from the opening paren line to
     # subsequent keyword argument lines.
-    return ThinkingTokensChatAnthropic(
+    return DeepSeekChatModel(
         model=ctx.model,  # type: ignore[call-arg]
         api_key=api_key,
-        base_url=_DEEPSEEK_ANTHROPIC_BASE_URL,
+        base_url=DEEPSEEK_ANTHROPIC_API_BASE,
         max_tokens=max_tokens,  # type: ignore[call-arg]
         model_kwargs=deepseek_model_kwargs,
         timeout=ctx.timeout,
