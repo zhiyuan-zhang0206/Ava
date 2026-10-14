@@ -1,11 +1,5 @@
 [loads]
-"__init__.py" = ["ava_builtins/skills"]
-"test_impersonation_launch.py" = ["ava_builtins/skills"]
 "test_inspect_a_trace_fetch.py" = [".agents/skills/inspect-a-trace/scripts"]
-"test_watcher_wake_delivery.py" = ["ava_builtins/skills"]
-
-[external]
-"test_watcher_wake_delivery.py" = "executes skill reference scripts up to a marker assignment"
 
 [debt.env-patch]
 "test_inspect_a_trace_fetch.py#monkeypatch.delitem os.environ.AVA_API_TOKEN" = 1
@@ -13,30 +7,11 @@
 "test_inspect_a_trace_fetch.py#monkeypatch.setitem os.environ.AVA_API_TOKEN" = 1
 "test_inspect_a_trace_fetch.py#monkeypatch.setitem os.environ.AVA_CLUSTER_SECRET" = 3
 
-[debt.first-party-patch]
-"test_impersonation_launch.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_agent_id" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr ava.self" = 1
-
 [debt.stdlib-patch]
-"test_impersonation_launch.py#monkeypatch.setattr sys.argv" = 2
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr urllib.request.build_opener" = 1
 
 [debt.unresolved-patch]
-"test_impersonation_launch.py#monkeypatch.setattr instruction_reader.impersonation.attach" = 1
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.fetch_from_mirror" = 1
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.fetch_from_tempo" = 1
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.resolve_ava_home" = 1
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr rt.resolve_ava_home" = 2
-"test_watcher_wake_delivery.py#monkeypatch.setattr gather_files.EXPECTED_FILES" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr gather_files.HANDOFF_DIR" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr gather_files.ORCHESTRATOR_ID" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr gather_files._dir" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr module.ava" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr module.time.sleep" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work.HEARTBEAT_SECONDS" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work._notify" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work._owner_terminated" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work._session_crashed" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work.coding_session_owner.read" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work.time" = 1
-"test_watcher_wake_delivery.py#monkeypatch.setattr watch_work.time.sleep" = 2

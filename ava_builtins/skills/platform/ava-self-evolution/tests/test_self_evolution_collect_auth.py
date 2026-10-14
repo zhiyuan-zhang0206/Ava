@@ -12,8 +12,8 @@ from typing import Any
 
 import pytest
 
+from ava_builtins.skills.tests.skill_script import load_skill_script
 from base.config import settings
-from tests.skills import load_skill_script
 
 _START = datetime.fromisoformat("2026-08-13T00:00:00+00:00")
 

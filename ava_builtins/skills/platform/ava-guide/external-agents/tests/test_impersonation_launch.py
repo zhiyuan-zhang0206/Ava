@@ -6,7 +6,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -16,7 +15,8 @@ from ava.shell.coding_tools import codex
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 
-_SKILL_DIR = Path(__file__).parents[2] / "ava_builtins/skills/platform/ava-guide/external-agents"
+_REPO = Path(__file__).parents[6]
+_SKILL_DIR = Path(__file__).parents[1]
 _ENDPOINT = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
 
 
@@ -80,7 +80,7 @@ def _assert_provider_specific_relay_instructions(message: str, provider: str) ->
 def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     provider: str, tmp_path: Path
 ) -> None:
-    guide = Path(__file__).parents[2] / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     assert guide.is_file()
     brief = "Goal: fix the login flow.\nDecision: keep the session table as-is."
     message = bootstrap_message(42, "Fix login", provider, brief, guide)
@@ -95,7 +95,7 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
 )
 def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide: str) -> None:
     """The general guide covers every host; relay startup and traps are per host."""
-    guide = Path(__file__).parents[2] / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     path = guide.parent / "reference" / host_guide
     assert path.is_file()
     message = bootstrap_message(42, "Fix login", provider, "brief", guide)
@@ -107,7 +107,7 @@ def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide:
 def test_impersonator_guide_carries_receipt_semantics_and_the_borrowed_context() -> None:
     """Task #5010: an ACK is receipt and the takeover inherits the borrowed identity's
     standing context — both must be present in the guide the bootstrap points at."""
-    guide = Path(__file__).parents[2] / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     text = guide.read_text(encoding="utf-8")
     assert "## Before acting: inherit the borrowed context" in text
     assert "memory/MEMORY.md" in text
@@ -132,7 +132,7 @@ def _assert_message_receipt_contract(entry: str, receipt: str) -> None:
 
 
 def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
-    guide = Path(__file__).parents[2] / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, codex_remote=_ENDPOINT)
     assert f"--codex-remote {_ENDPOINT}" in message
     assert "delivers into that same server" in message
@@ -151,10 +151,7 @@ def test_installed_dsh_launcher_uses_the_runtime_executor_guide(tmp_path: Path) 
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     message = module._takeover_bootstrap_message(42, "Fix login", "brief")
-    guide = (
-        Path(__file__).resolve().parents[2]
-        / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
-    )
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     assert guide.is_file()
     assert str(guide) in message
 
@@ -371,7 +368,7 @@ def test_launch_requires_native_identity_before_creating_workspace(
 
 
 def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
-    guide = Path(__file__).parents[2] / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "claude", "brief", guide, relay_resident=True)
     assert "Ava relay plugin" in message
     assert "do not arm a Monitor watch" in message
@@ -380,14 +377,14 @@ def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
 
 
 def test_codex_bootstrap_ignores_the_resident_flag() -> None:
-    guide = Path(__file__).parents[2] / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, relay_resident=True)
     assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
     assert "Ava relay plugin" not in message
 
 
 def test_dsh_bootstrap_names_the_session_plugin_relay() -> None:
-    guide = Path(__file__).parents[2] / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "dsh", "brief", guide)
     assert "--provider dsh" in message and "--as 'DeepSeek Harness: Fix login'" in message
     assert "Ava relay plugin loaded into this DeepSeek Harness session" in message
@@ -417,126 +414,8 @@ def test_dsh_launcher_boots_headless_with_the_relay_plugin_as_its_runner(tmp_pat
     assert not module._EXITED.search(command)  # the echoed command never reads as an exit
 
 
-def test_dsh_relay_emits_one_json_string_per_line(capsys: pytest.CaptureFixture[str]) -> None:
-    """The plugin splits relay stdout by line: a multi-line envelope must stay one line."""
-    from cli.commands.agents.impersonation_adapters import resolve_adapter
-
-    resolve_adapter("dsh", None).send("Ava message agent=42\n[id=7] kind=chat\nhi")
-    assert capsys.readouterr().out == '"Ava message agent=42\\n[id=7] kind=chat\\nhi"\n'
-
-
-_PLUGIN_HARNESS = """
-import { existsSync, writeFileSync } from 'node:fs'
-const [pluginPath, relayPy, out, mode, takeoverFile] = process.argv.slice(2)
-const plugin = await import(pluginPath)
-const steered = [], followed = [], created = [], disposers = []
-let contributor, stub
-const agent = {
-  id: 'session-1', session: { header: { id: 'session-1' } },
-  steer: (m) => steered.push(m), followup: (m) => followed.push(m),
-}
-const services = {
-  loader: { await: async () => {} },
-  agentDefaultModel: { currentSelection: () => ({ provider: 'p', model: 'm' }) },
-}
-const finish = (extra) => {
-  writeFileSync(out, JSON.stringify({ steered, followed, created, ...extra }))
-  disposers.forEach((dispose) => dispose())
-}
-const ctx = {
-  agents: {
-    get: (id) => (id === 'session-1' ? agent : undefined),
-    create: async (options) => { created.push(options); return { agent } },
-  },
-  shellEnv: { register: (c) => { contributor = c } },
-  effect: (fn) => { disposers.push(fn()) },
-  on: () => {},
-  get: (name) => services[name],
-  jobs: {
-    start(spec) {
-      const hooks = spec.run()
-      hooks.done.then((outcome) => finish({
-        kind: spec.kind, owned: spec.owner === agent, outcome,
-        stubGone: !existsSync(stub), anonymous: contributor.resolve({}),
-      }))
-      return 'ava-relay-1'
-    },
-  },
-}
-plugin.apply(ctx, mode === 'takeover' ? { takeoverFile } : {})
-if (mode === 'takeover') {
-  setTimeout(() => finish({ launchGone: !existsSync(takeoverFile) }), 200)
-} else {
-  stub = contributor.resolve({ agent }).DSH_AVA_RELAY_STUB
-  writeFileSync(stub, `SID=3\\nAGENT=42\\nAVA_IMPERSONATION_RELAY_TOKEN=tok-3\\nAVA_IMPERSONATION_RELAY_PY=${relayPy}\\n`)
-}
-"""
-
-
-def _run_plugin(tmp_path: Path, *args: str) -> dict[str, Any]:
-    harness = tmp_path / "harness.mjs"
-    harness.write_text(_PLUGIN_HARNESS, encoding="utf-8")
-    out = tmp_path / "out.json"
-    plugin = _SKILL_DIR / "scripts" / "ava-relay-dsh" / "ava-relay.mjs"
-    subprocess.run(  # noqa: S603 — fixed argv: node, the test harness and fixture paths
-        ["node", str(harness), plugin.as_uri(), args[0], str(out), *args[1:]],
-        check=True,
-        timeout=60,
-    )
-    return json.loads(out.read_text(encoding="utf-8"))
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="the dsh plugin runs on Node.js")
-def test_dsh_plugin_relays_the_session_stub_into_that_session(tmp_path: Path) -> None:
-    """Stub -> relay child with the scoped token -> each JSON line steered, envelopes intact."""
-    envelope = "Ava message agent=42 lease=3 ids=7\n[id=7] kind=chat from=user\nhi"
-    texts = tmp_path / "texts.json"
-    texts.write_text(json.dumps(["Ava control active.", envelope]), encoding="utf-8")
-    relay = tmp_path / "relay.sh"
-    relay.write_text(
-        "#!/bin/sh\n"
-        f'printf "%s\\n" "$@" > {tmp_path}/argv.txt\n'
-        f'printf "%s" "$AVA_IMPERSONATION_RELAY_TOKEN" > {tmp_path}/token.txt\n'
-        f"exec {sys.executable} -c 'import json, sys; "
-        "from cli.commands.agents.impersonation_adapters import emit_dsh; "
-        f"[emit_dsh(text) for text in json.load(open(sys.argv[1]))]' {texts}\n",
-        encoding="utf-8",
-    )
-    relay.chmod(0o755)
-    result = _run_plugin(tmp_path, str(relay), "relay")
-    assert (tmp_path / "argv.txt").read_text().split() == [
-        "-m", "cli", "impersonate", "relay", "42", "--session", "3", "--provider", "dsh",
-    ]  # fmt: skip
-    assert (tmp_path / "token.txt").read_text() == "tok-3"
-    steered: list[dict[str, Any]] = result["steered"]
-    assert [m["content"][0]["text"] for m in steered] == ["Ava control active.", envelope]
-    assert all(m["role"] == "user" for m in steered)
-    assert [m["source"] for m in steered] == [
-        {"kind": "plugin", "plugin": "ava-relay", "form": "notice", "summary": summary}
-        for summary in ("Ava control active.", "Ava message agent=42 lease=3 ids=7")
-    ]
-    assert result["kind"] == "ava-relay" and result["owned"] and result["stubGone"]
-    assert result["outcome"] == {"status": "completed", "detail": "exit code: 0"}
-    assert result["anonymous"] == {}
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="the dsh plugin runs on Node.js")
-def test_dsh_plugin_takeover_runner_submits_and_consumes_the_launch_message(
-    tmp_path: Path,
-) -> None:
-    launch = tmp_path / "launch.txt"
-    launch.write_text("You will take over Ava agent 42.", encoding="utf-8")
-    result = _run_plugin(tmp_path, "unused", "takeover", str(launch))
-    created: list[dict[str, Any]] = result["created"]
-    followed: list[dict[str, Any]] = result["followed"]
-    assert [c["agentOptions"] for c in created] == [{"provider": "p", "model": "m"}]
-    assert [m["content"][0]["text"] for m in followed] == ["You will take over Ava agent 42."]
-    assert followed[0]["source"] == {"kind": "user"}
-    assert result["launchGone"]
-
-
 def test_impersonator_sdk_reference_covers_instruction_read_and_direct_python() -> None:
-    guide = Path(__file__).parents[2] / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     text = guide.read_text(encoding="utf-8")
     assert "scripts/read_instructions.py" in text
     assert "reference/sdk.md" in text
@@ -545,76 +424,8 @@ def test_impersonator_sdk_reference_covers_instruction_read_and_direct_python() 
     assert "Use direct Python as the normal SDK path" in sdk_text
 
 
-@pytest.fixture
-def instruction_reader() -> Any:
-    script = (
-        Path(__file__).parents[2]
-        / "ava_builtins/skills/platform/impersonator-guide/scripts/read_instructions.py"
-    )
-    spec = importlib.util.spec_from_file_location("impersonator_instruction_reader", script)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_instruction_script_selects_native_prompt_and_preloaded_skills(
-    instruction_reader: Any,
-) -> None:
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    from agent.messages import NoteTag, system_note_message
-
-    messages = [
-        SystemMessage(content="Native core and plugin rules\n"),
-        system_note_message(content="Memory index", tag=NoteTag.MEMORY),
-        system_note_message(content="Preloaded skill", tag=NoteTag.PRELOADED_SKILLS),
-        HumanMessage(content="Task history"),
-        system_note_message(content="Fork-added skill", tag=NoteTag.PRELOADED_SKILLS),
-    ]
-    assert instruction_reader.instruction_text(messages) == (
-        "Native core and plugin rules\n\n\n[system] Preloaded skill\n\n[system] Fork-added skill"
-    )
-
-
-@pytest.mark.parametrize("content", [None, "", [{"type": "text", "text": "rules"}]])
-def test_instruction_script_refuses_missing_or_nontext_prompt(
-    instruction_reader: Any, content: Any
-) -> None:
-    from langchain_core.messages import SystemMessage
-
-    messages = [] if content is None else [SystemMessage(content=content)]
-    with pytest.raises((RuntimeError, ValueError), match=r"system prompt|nonempty text"):
-        instruction_reader.instruction_text(messages)
-
-
-def test_instruction_script_prints_only_after_successful_detach(
-    instruction_reader: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from contextlib import contextmanager
-    from types import SimpleNamespace
-
-    from langchain_core.messages import SystemMessage
-
-    @contextmanager
-    def attach(session_id: int, *, agent_id: int) -> Any:
-        assert (session_id, agent_id) == (0, 405)
-        yield SimpleNamespace(
-            native_snapshot=lambda: SimpleNamespace(
-                messages=[SystemMessage(content="Native rules")]
-            )
-        )
-        raise RuntimeError("lease expired before detach")
-
-    monkeypatch.setattr(instruction_reader.impersonation, "attach", attach)
-    monkeypatch.setattr(sys, "argv", ["read_instructions.py", "0", "--agent", "405"])
-    with pytest.raises(RuntimeError, match="lease expired"):
-        instruction_reader.main()
-    assert capsys.readouterr().out == ""
-
-
 def test_impersonator_guide_routes_replies_by_request_origin() -> None:
-    guide = Path(__file__).parents[2] / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
+    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     text = guide.read_text()
     assert "Read [message receipt](reference/message-receipt.md)" in text
     assert "reply at the request's entry point" in text

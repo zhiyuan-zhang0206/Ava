@@ -9,7 +9,7 @@ __file__-derived sys.path guard; no browser is driven.
 
 from __future__ import annotations
 
-from tests.skills import load_skill_script
+from ava_builtins.skills.tests.skill_script import load_skill_script
 
 ask = load_skill_script(
     "integrations", "web-ai", "console", "scripts", "ask.py", name="web_ai_console_ask_under_test"

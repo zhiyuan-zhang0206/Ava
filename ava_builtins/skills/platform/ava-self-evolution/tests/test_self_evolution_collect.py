@@ -18,9 +18,9 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
+from ava_builtins.skills.tests.skill_script import load_skill_script
 from base.config import settings
 from base.db import Database
-from tests.skills import load_skill_script
 
 
 @pytest.fixture(scope="module")

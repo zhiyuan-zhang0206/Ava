@@ -24,13 +24,13 @@ from unittest.mock import MagicMock
 import pytest
 
 import ava
-from tests.skills import load_skill_script
+from ava_builtins.skills.tests.skill_script import load_skill_script
 
 # `_utils.py` is a module-only sibling of `webchat.py`, reached in production
 # only through a child sub-skill script's own __file__-derived sys.path guard
 # (e.g. ava_builtins/skills/integrations/web-ai/console/scripts/ask.py). Loading it here
 # directly reproduces that guard — tests are outside Structure Rule 6's scope
-# (see tests/skills/__init__.py) — so this file does not depend on collection
+# (see ava_builtins/skills/tests/skill_script.py) — so this file does not depend on collection
 # order putting some other skill's guard on sys.path first.
 sys.path.insert(
     0,
