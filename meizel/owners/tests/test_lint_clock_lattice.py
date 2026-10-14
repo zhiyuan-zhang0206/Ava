@@ -234,3 +234,76 @@ def test_full_scan_fails_on_a_stale_family_module(
     assert "stale FAMILY_MODULES entry" in capsys.readouterr().err
     ok = _write(scan_tmp, "ok.py", "value = 1\n")
     assert _lint.main([str(ok)]) == 0
+
+
+# ── values bound to a clock name ──────────────────────────────────────────────
+
+
+def test_a_dataclass_default_that_is_a_literal_is_a_definition(scan_tmp) -> None:
+    errs = _errors(
+        scan_tmp,
+        "services/derived/thing.py",
+        """
+        from dataclasses import dataclass
+
+
+        @dataclass(frozen=True)
+        class ThingConfig:
+            batch_size: int = 32
+            stall_timeout_s: float = 5.0
+            reap_grace_s: float
+            wedged_after_s: float | None = None
+        """,
+    )
+    assert len(errs) == 1
+    assert "stall_timeout_s" in errs[0] and "services/derived/thing.py:8" in errs[0]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def go(cfg):\n    return cfg(startup_grace_s=30)\n",
+        "def go(cfg):\n    return cfg(reap_grace_s=5 * 60)\n",
+        "def go(box):\n    startup_grace_s = 2.5\n    box.stall_timeout_s = -1.0\n",
+        "class Box:\n    grace_s = 7\n",
+        "grace_s: float = 7.0\n",
+    ],
+)
+def test_every_way_of_binding_a_literal_counts(scan_tmp, body: str) -> None:
+    assert _errors(scan_tmp, "ops/bound.py", body), body
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def go(cfg, config):\n    return cfg(startup_grace_s=config.startup_grace_s)\n",
+        "from base.deploy.timing import TERMINATE_GRACE_S\n\ndef go(cfg):\n    return cfg(grace_s=TERMINATE_GRACE_S)\n",
+        "def go(cfg):\n    return cfg(grace_s=None)\n",
+        "def go(cfg):\n    return cfg(grace_s=cfg.default() + 1)\n",
+        "class Cfg:\n    grace_s: float\n",
+        "def go(cfg):\n    return cfg(install_count=3, installation=9, breakfast_s=1)\n",
+        "def go(cfg):\n    return cfg(grace_s='soon', stall_s=True)\n",
+    ],
+)
+def test_a_reference_a_missing_default_or_another_word_defines_nothing(scan_tmp, body: str) -> None:
+    assert _errors(scan_tmp, "ops/not_bound.py", body) == [], body
+
+
+def test_a_family_module_may_bind_literals(scan_tmp) -> None:
+    body = "from dataclasses import dataclass\n\n@dataclass\nclass StopTimingConfig:\n    cancel_unwind_grace_s: float = 5.0\n"
+    assert _errors(scan_tmp, "base/native_process/stop_timing.py", body) == []
+
+
+def test_an_audited_exemption_lets_a_binding_stand(scan_tmp) -> None:
+    body = "def go(cfg):\n    return cfg(claude_thinking_budget_tokens=0)\n"
+    path = _write(scan_tmp, "ops/z.py", body)
+    assert _lint.scan_file(path, independent={}) != []
+    reason = {("ops/z.py", "claude_thinking_budget_tokens"): "a token budget, not a time value"}
+    assert _lint.scan_file(path, independent=reason) == []
+
+
+def test_an_exemption_that_binds_nothing_any_more_is_stale(scan_tmp) -> None:
+    _write(scan_tmp, "ops/z.py", "def go(cfg):\n    return cfg(limit=3)\n")
+    gone = {("ops/z.py", "claude_thinking_budget_tokens"): "a token budget, not a time value"}
+    stale = [m for m in _lint.stale_allowlist_entries(independent=gone) if "claude_thinking" in m]
+    assert len(stale) == 1 and "drop the exemption" in stale[0]
