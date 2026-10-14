@@ -19,7 +19,7 @@ from meizel.contracts.debt import (
 )
 from meizel.graph.graphs import cycle_through, strongly_connected, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic
-from meizel.graph.universe import MANIFEST, Universe
+from meizel.graph.universe import MANIFEST, Universe, is_private_module
 from meizel.roles import check_table
 
 __all__ = ["Manifest", "load_manifests", "manifest_path"]
@@ -237,7 +237,7 @@ class _Reader:
         line = self.manifest.line_of("exports")
         kept: list[str] = []
         for name in self.names(value, "exports", line):
-            if name.startswith("_"):
+            if is_private_module(name):
                 self.report(
                     line,
                     Code.MANIFEST_EXPORT_PRIVATE,

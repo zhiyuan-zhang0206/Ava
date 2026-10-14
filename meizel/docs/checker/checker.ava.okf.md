@@ -79,8 +79,8 @@ For a fact edge `f -> t`, `L` is the deepest directory containing both; `cf` and
 
 1. `L`'s `[uses]` declares `cf -> ct`.
 2. Every directory from `ct` down to `t`'s parent exports the next child on the
-   path. `__init__.py` is the door and needs no export; a child whose name starts
-   with an underscore can never be exported.
+   path. `__init__.py` is the door, no export needed; a child whose name starts
+   with an underscore (not a dunder) can never be exported.
 3. Every name used from `t` is public. A leading underscore (dunders excepted)
    makes a name private to its defining file, tests and fixtures included: a
    fixture requested from another file has a public name.
@@ -94,8 +94,8 @@ Local graphs are acyclic. A test's use of a fixture from an ancestor
 Binding resolution finds these through aliases (`from importlib import
 import_module as im`): `importlib.import_module`, `__import__`,
 `runpy.run_module`, `runpy.run_path`, `importlib.util.spec_from_file_location`,
-`exec`, `compile`, `python -c` source that imports first-party code or cannot be
-read as a literal, a `pytest_plugins` that is not a literal, string patch
+`exec`, `compile`, a Python subprocess that runs anything but a literal file or module
+([[meizel/docs/checker/python-commands.ava.okf.md|commands]]), a `pytest_plugins` that is not a literal, string patch
 targets that name first-party code (`mock.patch("a.b")`, `monkeypatch.setattr("a.b", v)`;
 stdlib and third-party targets are fine, an unreadable target is not), and
 writing a first-party module into `sys.modules` by name (`sys.modules["a.b"] = ...`,
@@ -120,12 +120,11 @@ module named by operator configuration) declares it under `[external]` with a re
 ```
 
 The file is then exempt from `exec`, `compile` and the dynamic-import forms; none
-makes an edge. Other restricted forms (`sys.modules` writes, `python -c` imports,
+makes an edge. Other restricted forms (`sys.modules` writes, python commands,
 string patches) still apply. The reason must be non-empty; an entry whose file
 has none of the exempt forms is `stale-external`.
 
-Plugin and schedule-script discovery is `[external]`, never `[loads]`: it is
-discovered content that core does not depend on.
+Plugin and schedule-script discovery is `[external]`, never `[loads]`.
 
 ## Manifest
 
