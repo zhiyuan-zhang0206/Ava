@@ -19,7 +19,9 @@ context opens as a full-screen reading view with a return-to-messages control.
 
 `["to-user", agentId]` owns the document snapshot. The home-machine ops server
 reads `to_user.html` (default) or `to_user.md` (`to_user_format=markdown`) directly;
-there is no publication registry or database content copy. One shallow watchfiles
+there is no publication registry or database content copy. The runner profile
+includes the agent config domain because ops resolves `to_user_format`, with
+stored agent pins taking precedence over the cluster default. One shallow watchfiles
 watcher in each ops process broadcasts `to_user_changed`. The global fold repairs
 that agent's query and includes the family in reconnect repair. Atomic replacement,
 creation and deletion all invalidate. A missing or empty document does not open
