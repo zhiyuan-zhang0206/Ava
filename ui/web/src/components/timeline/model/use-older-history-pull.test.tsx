@@ -55,13 +55,14 @@ describe("native release-to-load older history", () => {
     const viewport = view.getByTestId("viewport");
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
     Object.defineProperty(viewport, "onscrollend", { value: null, configurable: true });
-    viewport.scrollTo = vi.fn((options?: ScrollToOptions | number) => {
+    const scrollTo = vi.fn((options?: ScrollToOptions | number) => {
       if (typeof options === "object") viewport.scrollTop = options.top ?? 0;
       viewport.dispatchEvent(new Event("scroll"));
       viewport.dispatchEvent(new Event("scrollend"));
     });
+    viewport.scrollTo = scrollTo;
     const offset = () => Number(viewport.querySelector("output")!.textContent);
-    return { ...view, viewport, loadPage, intent, offset, space: view.getByTestId("space") };
+    return { ...view, viewport, loadPage, intent, offset, scrollTo, space: view.getByTestId("space") };
   }
 
   function wheel(viewport: HTMLElement, deltaY: number, momentum?: boolean, extra: WheelEventInit = {}) {
@@ -185,6 +186,17 @@ describe("native release-to-load older history", () => {
     expect(offset()).toBe(0);
     expect(space.style.height).toBe("80px");
     expect(loadPage).not.toHaveBeenCalled();
+  });
+
+  it("smoothly closes a successful pull when a standing context anchor was not displaced", () => {
+    const { viewport, loadPage, intent, rerender, offset, scrollTo } = setup();
+    wheel(viewport, -80, false);
+    end(viewport);
+    expect(loadPage).toHaveBeenCalledOnce();
+    rerender(<Harness busy loadPage={loadPage} intent={intent} />);
+    rerender(<Harness loadPage={loadPage} intent={intent} />);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 80, behavior: "smooth" });
+    expect(offset()).toBe(0);
   });
 
   it("reversing completely closes the reserve without rearming the same gesture", () => {

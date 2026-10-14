@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 import time
+from typing import TypedDict
 
 import httpx
 import pytest
@@ -46,7 +47,10 @@ _SAMPLER_JS = """
       if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) { anchorId = n.dataset.itemId; anchorTop = r.top; break; }
     }
     if (window.__tl.samples.length > 20000) return;
-    window.__tl.samples.push({ t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), anchorId, anchorTop });
+    const reserve = vp.querySelector('[data-history-pull-space]');
+    const reserveBox = reserve?.getBoundingClientRect();
+    const exposedPullSpace = reserveBox ? Math.max(0, Math.min(reserveBox.height, reserveBox.bottom - vpRect.top)) : 0;
+    window.__tl.samples.push({ t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), anchorId, anchorTop, exposedPullSpace });
   };
   let raf = 0;
   const loop = () => { sample('raf'); raf = requestAnimationFrame(loop); };
@@ -82,6 +86,16 @@ _SCROLL_UP_JS = """
 """
 
 
+class _ReadingSample(TypedDict):
+    anchorId: str | None
+    anchorTop: float
+    exposedPullSpace: float
+
+
+def _reading_top(sample: _ReadingSample) -> float:
+    return sample["anchorTop"] - (sample["exposedPullSpace"] if sample["anchorId"] == "0.0" else 0)
+
+
 def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
     """The reading position is the first real item's viewport top. Locate the
     landing frame (the first sample whose item count differs from the previous
@@ -96,14 +110,20 @@ def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
     before = [s for s in samples[:landing_idx] if s["anchorTop"] is not None]
     after = [s for s in samples[landing_idx:] if s["anchorTop"] is not None]
     assert before and after, f"round {round_no}: no anchor measurements around the landing"
-    before_top = before[-1]["anchorTop"]
+    # The fixture's standing prompt (0.0) stays above prepended history. When
+    # only it is visible, a successful page closes the exposed pull space
+    # smoothly; compare its reading position after removing that intended motion.
+    # Real message anchors retain the strict, unadjusted viewport comparison.
+    before_top = _reading_top(before[-1])
     for s in after:
-        assert abs(s["anchorTop"] - before_top) < 3.0, (
+        top = _reading_top(s)
+        assert abs(top - before_top) < 3.0, (
             f"round {round_no}: reading position moved by "
-            f"{s['anchorTop'] - before_top:.1f}px across the load-older landing "
-            f"(before={before_top:.1f}, after={s['anchorTop']:.1f}, "
+            f"{top - before_top:.1f}px beyond pull-space motion across the landing "
+            f"(before={before_top:.1f}, after={top:.1f}, "
             f"st={s['st']}, sh={s['sh']}, n={s['n']}, anchor={s['anchorId']})"
         )
+    assert after[-1]["exposedPullSpace"] < 1, "the released pull left a blank space above history"
 
 
 def _wait_landing(
