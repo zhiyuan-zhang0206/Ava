@@ -30,11 +30,12 @@ from agent.graph.prompt import context_notes
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.messages import NoteTag, security_note_message, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
-from ava.security import SecurityFindingEntry, scan_inbound_content
 from base.agents.context import AvaContext
 from base.agents.messages.envelope import EnvelopeReadInputs
 from base.agents.messages.inbound import InboundKind
+from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.messages.security_finding import SecurityFindingEntry
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger

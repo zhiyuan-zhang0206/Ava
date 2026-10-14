@@ -16,6 +16,7 @@ import logging
 from collections.abc import Sequence
 from typing import Any, NamedTuple
 
+from base.agents.messages.injection_scan import is_flagged
 from base.host.env.agent_slices import AgentSlices, Prompt
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import resolve_setting
@@ -175,8 +176,6 @@ def _index_description(skill: Any) -> str | None:
     in-depth check for patterns the skill-scan table does not carry.) Every
     listing of a skill's description — the index, the drift note, the recall
     candidates — goes through here, so they quote the same text."""
-    from ava.security import is_flagged
-
     description = skill["description"]
     return None if is_flagged(description) else _one_line(description)
 
