@@ -3,7 +3,6 @@ is reported without undoing the breaker (the state is already set)."""
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import psycopg
@@ -13,7 +12,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.llm_errors import FatalProviderError
 from agent.state import CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
-from base import telemetry
 from base.agents.context import AvaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -26,6 +24,8 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.telemetry import audit_events
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
@@ -88,6 +88,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -101,18 +102,13 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
         database_gate=database_gate,
         machine=machine_identity,
     )
-    reported: list[str] = []
 
     async def refuse(_pool: object, _event: object) -> None:
         raise RuntimeError("audit write failed")
 
     monkeypatch.setattr(audit_events, "record_audit_standalone_async", refuse)
 
-    def emit(_category: str, name: str, **kwargs: Any) -> None:
-        if name == "audit_write_failed":
-            reported.append(kwargs["attributes"]["event_name"])
-
-    monkeypatch.setattr(telemetry, "emit", emit)
+    emitted_events.clear()  # spawning the agent above emitted its own events
 
     update = await _handle_fatal_llm_error(
         _overflow(),
@@ -132,6 +128,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
     circuit = update["circuit"]
     assert isinstance(circuit, CircuitState)
     assert circuit.open is True
+    reported = [a["event_name"] for a in emitted_events.attributes("audit_write_failed")]
     assert reported == ["circuit_breaker", "circuit_breaker"]
     count = db_conn.execute(
         "SELECT count(*) FROM audit_events WHERE agent_id = %s AND event_name = 'circuit_breaker'",

@@ -25,12 +25,10 @@ exports = ["weixin_native.py"]
 "weixin_native.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
-"test_feishu_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.feishu.logger" = 2
 "test_feishu_worker_exit.py#assignment services.entrypoints.im_bridge.daemon.run" = 1
 "test_prepared_timeline.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 2
 "test_segment_retry_safety.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 1
 "test_services_weixin_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 1
-"test_telegram_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.telegram.logger" = 3
 
 [debt.not-exported]
 "test_feishu_worker_exit.py -> feishu_adapter/child_blocked_ws.py" = 1

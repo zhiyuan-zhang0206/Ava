@@ -21,26 +21,32 @@ from base.deploy.state import host_deploy_state
 from base.deploy.tests.maintenance_factory import WHEN, maintenance_agent
 from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from ops import agent_pause
 from services.agent_runner.agent_host.lifecycle import maintenance as receipts
 from services.agent_runner.agent_host.scheduling.pending_wakes import held_maintenance_wakes
 
 
 class Alerts:
-    """Stand-in for the module logger that records every `agent_continuation_lost` row."""
+    """Every `agent_continuation_lost` row the maintenance receipts logged, as message plus fields
+    (read from `loguru_records`)."""
 
-    def __init__(self) -> None:
-        self.rows: list[dict[str, Any]] = []
+    def __init__(self, records: LogRecords) -> None:
+        self._records = records
 
-    def error(self, message: str, **fields: Any) -> None:
-        self.rows.append({"message": message, **fields})
+    @property
+    def rows(self) -> list[dict[str, Any]]:
+        return [
+            {"message": r["message"], **r["extra"]}
+            for r in self._records
+            if r["level"].name == "ERROR" and r["name"] == receipts.__name__
+        ]
 
 
 @pytest.fixture
-def alerts(monkeypatch: pytest.MonkeyPatch) -> Alerts:
-    stub = Alerts()
-    monkeypatch.setattr(receipts, "logger", stub)
-    return stub
+def alerts(loguru_records: LogRecords) -> Alerts:
+    return Alerts(loguru_records)
 
 
 def _held() -> MaintenanceHold:

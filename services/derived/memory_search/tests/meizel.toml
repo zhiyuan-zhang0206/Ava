@@ -11,7 +11,6 @@
 "test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.memory_root" = 5
 "test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.process_paths" = 1
 "test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.factory.worst_case_batch_seconds" = 1
-"test_memory_search_api.py#monkeypatch.setattr services.derived.memory_search.app.telemetry.emit" = 1
 "test_memory_search_api.py#monkeypatch.setattr services.derived.memory_search.store.time" = 1
 "test_memory_search_config.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.factory.get_provider" = 2
 "test_memory_search_config.py#monkeypatch.setattr services.derived.memory_search.daemon.MemoryStore" = 1

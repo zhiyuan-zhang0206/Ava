@@ -18,6 +18,8 @@ import pytest
 
 from base.cluster.machine import GatewayApiBaseMissing
 from base.cluster.machine.tests.gateway_stubs import gateway_api_base_stub
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from services.desktop.browser import gateway_session
 from services.desktop.browser import session as sess
 from services.desktop.browser.gateway_session import GatewaySession
@@ -265,12 +267,10 @@ def test_session_params_present_the_delivered_runner_token(
 
 
 def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secret(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
 ) -> None:
     """The daemon keeps serving without the cookie (best effort), but a launch
     that delivered no token is an error, and the human secret never stands in."""
-    errors: list[str] = []
-    monkeypatch.setattr(gateway_session.logger, "error", errors.append)
     monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
@@ -278,6 +278,7 @@ def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secr
 
     assert gateway_session.gateway_session_params() is None
 
+    errors = loguru_records.messages("ERROR")
     assert len(errors) == 1
     assert "AVA_API_TOKEN" in errors[0]
     assert SECRET not in errors[0]

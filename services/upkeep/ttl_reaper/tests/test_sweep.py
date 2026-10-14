@@ -19,6 +19,8 @@ from psycopg_pool import ConnectionPool
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.upkeep.ttl_reaper import lifecycle_fences, sweep
 from services.upkeep.ttl_reaper.sweep import (
     reap_expired_pages_blocking,
@@ -92,23 +94,6 @@ def _system_inbounds(conn: psycopg.Connection, agent_id: int) -> list[str]:
             (agent_id,),
         )
         return [r[0] for r in cur.fetchall()]
-
-
-def _capture_telemetry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> list[tuple[tuple[object, ...], dict[str, object]]]:
-    """Capture telemetry emits, asserting every name is registered (mirrors the
-    production emit contract)."""
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _capture_emit(*args: object, **kwargs: object) -> None:
-        from base.events.contract import EVENTS
-
-        assert kwargs.get("event_name") in EVENTS, f"unregistered emit name: {kwargs!r}"
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr(lifecycle_fences.telemetry, "emit", _capture_emit)
-    return emitted
 
 
 def _stuck_force_fence(
@@ -325,12 +310,9 @@ def test_prune_schedule_fire_log_is_bounded_per_pass(
 
 
 def test_stuck_pointer_scan_reports_torn_commands(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, emitted_events: EmittedEvents
 ) -> None:
     """`done` with a live pointer is counted and alerted; a cleared pointer is quiet."""
-    emitted = _capture_telemetry(monkeypatch)
     agent_id = _running_agent(db_conn)
     row = db_conn.execute(
         "INSERT INTO inbound_messages "
@@ -347,8 +329,7 @@ def test_stuck_pointer_scan_reports_torn_commands(
     db_conn.commit()
 
     assert lifecycle_fences.scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 1
-    assert emitted
-    assert emitted[-1][1]["event_name"] == "lifecycle_pointer_stuck"
+    assert emitted_events.names()[-1] == "lifecycle_pointer_stuck"
 
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
@@ -356,20 +337,20 @@ def test_stuck_pointer_scan_reports_torn_commands(
 
 
 def test_a_force_nobody_observed_is_alerted_not_settled(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, emitted_events: EmittedEvents
 ) -> None:
     """An applied force whose original host died, or whose machine was
     decommissioned, is never settled on a guess: the pointer stays set and the
     scan alerts so an operator settles it."""
-    emitted = _capture_telemetry(monkeypatch)
     aid = _stuck_force_fence(db_conn, machine="ghost")
 
     assert lifecycle_fences.scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 1
 
-    assert emitted[-1][1]["event_name"] == "lifecycle_pointer_stuck"
-    assert emitted[-1][1]["attributes"] == {"count": 1, "samples": str(aid)}
+    assert emitted_events.names()[-1] == "lifecycle_pointer_stuck"
+    assert emitted_events.attributes("lifecycle_pointer_stuck")[-1] == {
+        "count": 1,
+        "samples": str(aid),
+    }
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT i.status, i.observed_at IS NULL, m.lifecycle_command_id IS NOT NULL "
@@ -381,15 +362,12 @@ def test_a_force_nobody_observed_is_alerted_not_settled(
 
 
 def test_a_fresh_or_unapplied_force_is_not_alerted(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, emitted_events: EmittedEvents
 ) -> None:
     """A live host observes a just-applied force within moments, and an unapplied
     command is not a fence: neither is stuck."""
-    emitted = _capture_telemetry(monkeypatch)
     _stuck_force_fence(db_conn, machine="macmini", applied_ago="30 seconds")
     _stuck_force_fence(db_conn, machine="macmini", applied_ago=None)
 
     assert lifecycle_fences.scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 0
-    assert emitted == []
+    assert len(emitted_events) == 0

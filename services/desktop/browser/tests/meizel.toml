@@ -61,7 +61,6 @@
 "test_browser_session.py#monkeypatch.setattr services.desktop.browser.gateway_session.await_stop_or_timeout" = 1
 "test_browser_session.py#monkeypatch.setattr services.desktop.browser.gateway_session.gateway_api_base" = 6
 "test_browser_session.py#monkeypatch.setattr services.desktop.browser.gateway_session.inject_session_cookie" = 4
-"test_browser_session.py#monkeypatch.setattr services.desktop.browser.gateway_session.logger.error" = 1
 "test_browser_session.py#monkeypatch.setattr services.desktop.browser.gateway_session.settings.data_plane.cluster_secret" = 5
 "test_browser_session.py#monkeypatch.setattr services.desktop.browser.session.gateway_session_login" = 1
 "test_browser_session.py#monkeypatch.setattr services.desktop.browser.session.http_json" = 2

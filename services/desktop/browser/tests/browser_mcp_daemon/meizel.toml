@@ -1,4 +1,3 @@
 [debt.first-party-patch]
 "test_parse_page_listing_tolerates_titled_and_suffix.py#monkeypatch.setattr base.config.settings.daemon.chrome_page_default_ttl_seconds" = 2
 "test_parse_page_listing_tolerates_titled_and_suffix.py#monkeypatch.setattr services.desktop.browser.page_lifecycle.PAGE_SWEEP_INTERVAL_S" = 1
-"test_parse_page_listing_tolerates_titled_and_suffix.py#monkeypatch.setattr services.desktop.browser.page_lifecycle.telemetry.emit" = 2
