@@ -80,10 +80,10 @@ from ops.lifecycle.resurrect_gates import (
     system_notice_source_of_trigger as system_notice_source_of_trigger,
 )
 from ops.lifecycle.termination import (
-    _force_terminate_transaction as _force_terminate_transaction,
+    force_mark_terminated as force_mark_terminated,
 )
 from ops.lifecycle.termination import (
-    force_mark_terminated as force_mark_terminated,
+    force_terminate_transaction as force_terminate_transaction,
 )
 from ops.lifecycle.termination import (
     publish_force_terminate_inbound as publish_force_terminate_inbound,
@@ -224,7 +224,7 @@ def terminate_force_blocking(
     db_pool: ConnectionPool,
 ) -> tuple[AgentStatus, int | None, list[str], int, int]:
     """Commit the force fence before publishing its wake and lifecycle hint."""
-    old_status, pid, killed_page_names, inbound_id, cutoff = _force_terminate_transaction(
+    old_status, pid, killed_page_names, inbound_id, cutoff = force_terminate_transaction(
         agent_id,
         db_pool,
         source=body.source,
@@ -244,7 +244,7 @@ def _terminate_graceful_blocking(
     db_pool: ConnectionPool,
 ) -> tuple[int | None, int | None]:
     """Return a durable command ID, or an already-terminated shell cutoff."""
-    return termination._enqueue_termination_inbounds(
+    return termination.enqueue_termination_inbounds(
         db,
         bus,
         agent_id,

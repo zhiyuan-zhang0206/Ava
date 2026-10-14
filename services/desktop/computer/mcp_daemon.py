@@ -708,7 +708,7 @@ async def _serve_client(
         logger.exception("[computer-mcp] client handler failed")
 
 
-def _tracked_client(
+def tracked_client(
     daemon: ComputerMcpDaemon,
     clients: asyncio.TaskGroup,
     reader: asyncio.StreamReader,
@@ -742,7 +742,7 @@ async def run(
     # The group owns every client handler; the shutdown path cancels them before it closes.
     async with asyncio.TaskGroup() as clients:
         server = await asyncio.start_unix_server(
-            lambda r, w: _tracked_client(daemon, clients, r, w),
+            lambda r, w: tracked_client(daemon, clients, r, w),
             path=str(path),
             limit=_LINE_LIMIT,
         )

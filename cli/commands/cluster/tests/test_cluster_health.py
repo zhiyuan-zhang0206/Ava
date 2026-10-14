@@ -517,7 +517,7 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
     import cli.commands._repo as _repo_commands
     import cli.commands.converge.redis_bridge as bridge
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def probe(*, machine: MachineIdentity, config: ConfigBoot) -> bridge.RedisBridgeStatus:
         assert machine is command_runtime.machine

@@ -588,9 +588,9 @@ async def test_query_usage_failure_propagates_without_network_replay(
     from gateway.routers import memory
     from gateway.schemas.memory import MemorySearchRequest
     from services.derived.memory_indexer.embeddings.gemini import DIM
-    from services.derived.memory_indexer.embeddings.tests.test_embeddings import _AsyncClient
+    from services.derived.memory_indexer.embeddings.tests.test_embeddings import AsyncClient
 
-    fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     monkeypatch.setattr(httpx, "AsyncClient", fake)
     monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("test-key"))
     failure = error_type("accounting invariant failed")

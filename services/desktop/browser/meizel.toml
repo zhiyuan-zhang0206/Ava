@@ -12,12 +12,3 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "probe.py" = ["macos_readiness.py", "orphan.py", "profile.py"]
 "tab_groups" = ["session.py"]
 "tests" = ["daemon.py", "gateway_session.py", "macos_readiness.py", "mcp_daemon.py", "mcp_upstream.py", "orphan.py", "page_lifecycle.py", "probe.py", "profile.py", "session.py", "tab_groups"]
-
-[debt.private-name]
-"mcp_daemon.py -> page_lifecycle.py#_text_of" = 1
-"tests/browser_mcp_daemon/test_handle_client_renew_page_wire_roundtrip.py -> mcp_daemon.py#_handle_client" = 1
-"tests/browser_mcp_daemon/test_parse_page_listing_tolerates_titled_and_suffix.py -> mcp_daemon.py#_text_of" = 1
-"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_handle_client" = 1
-"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_no_page_result" = 1
-"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_selected_id" = 1
-"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_text_of" = 1

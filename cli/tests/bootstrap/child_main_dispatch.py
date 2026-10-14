@@ -138,7 +138,7 @@ def _init_and_start_settings_free() -> None:
     home = Path(os.environ["AVA_HOME"])
     checkout = home.parent / "checkout"
     checkout.mkdir()
-    start_intent._checkout = lambda: checkout
+    start_intent.checkout = lambda: checkout
     cluster.port_free = lambda _port: True
     calls: list[str] = []
 

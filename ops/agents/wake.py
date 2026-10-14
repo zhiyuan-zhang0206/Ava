@@ -53,7 +53,7 @@ RESURRECTION_ROW: LiteralString = (
 )
 
 
-def _transition_terminated_to_unclaimed_idling(
+def transition_terminated_to_unclaimed_idling(
     cur: psycopg.Cursor,
     agent_id: int,
     incarnation: RuntimeIncarnation | None,
@@ -227,7 +227,7 @@ def _prepare_resurrect_attempt(
             raise ResurrectSettlementDeferredError(
                 "outstanding hosted lifecycle command has not settled"
             )
-        _transition_terminated_to_unclaimed_idling(
+        transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,
             incarnation,

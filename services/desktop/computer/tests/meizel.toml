@@ -37,8 +37,3 @@ exports = ["slices.py"]
 "test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.build_pipeline" = 1
 "test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.init_gateway_process" = 1
 "test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.run" = 1
-
-[debt.private-name]
-"computer_mcp_daemon/test_click_text_measures_scale_and_tracks_pointer.py -> test_computer_mcp_daemon.py#_call" = 1
-"computer_mcp_daemon/test_click_text_measures_scale_and_tracks_pointer.py -> test_computer_mcp_daemon.py#_ok_result" = 1
-"computer_mcp_daemon/test_release_control_ends_the_capture_badge.py -> test_computer_mcp_daemon.py#_call" = 1

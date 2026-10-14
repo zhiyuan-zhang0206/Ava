@@ -417,7 +417,7 @@ def test_firewall_status_renders_manifest_details(
 
     import cli.commands._repo as _repo_commands
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_audit_this_host(_roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
         assert isinstance(machine, MachineIdentity)

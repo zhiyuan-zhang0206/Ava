@@ -38,7 +38,7 @@ from base.log import logger
 from .impersonation_adapters import resolve_adapter
 
 _CATCHUP_SECONDS = 30.0
-_MIN_EMIT_INTERVAL_SECONDS = 2.0
+MIN_EMIT_INTERVAL_SECONDS = 2.0
 # Bound each message in the host context; full bodies remain in the durable
 # inbox. The same cap also respects Claude Monitor's per-line budget.
 PUSH_MAX_CHARS = 2000
@@ -425,7 +425,7 @@ class _InboxRelay:
         # Catch ACK/release during debounce and merge bursts. Claude
         # Monitor replenishes one event allowance per two seconds.
         await asyncio.sleep(
-            max(self.debounce, self.last_emit + _MIN_EMIT_INTERVAL_SECONDS - loop_time())
+            max(self.debounce, self.last_emit + MIN_EMIT_INTERVAL_SECONDS - loop_time())
         )
         fresh = await self._read()
         if fresh is None:

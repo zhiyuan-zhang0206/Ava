@@ -19,7 +19,7 @@ def test_background_loops_are_the_plugin_watch_the_log_rotator_the_memory_guard_
     uncapped raw transcript (task #2356), and a regression that dropped it must
     turn a test red."""
     with patch.dict(os.environ):
-        loops = daemon_mod._background_loops(
+        loops = daemon_mod.background_loops(
             MagicMock(), MagicMock(), catalog=model_catalog, config=ConfigBoot()
         )
     try:

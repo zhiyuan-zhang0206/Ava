@@ -7,7 +7,3 @@ exports = ["bringup.py", "cluster_instance.py", "maintenance_stop.py", "maintena
 "pgbouncer.py" = ["_pooler_stop.py", "cluster_instance.py"]
 "stop_waits.py" = ["maintenance_stop_report.py"]
 "tests" = ["_pooler_stop.py", "bringup.py", "cluster_instance.py", "maintenance_stop.py", "pgbouncer.py"]
-
-[debt.private-name]
-"tests/test_cluster_instance_bind.py -> cluster_instance.py#_pg_bin" = 4
-"tests/test_start_data_plane.py -> bringup.py#_ensure_pooler" = 1

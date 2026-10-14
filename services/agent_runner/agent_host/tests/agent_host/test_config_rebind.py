@@ -93,9 +93,9 @@ class TestConfigRebind:
 class TestTurnLoop:
     async def test_host_builds_a_turn_scoped_nstep_saver(self) -> None:
         """The shared host saver must install the interval wrapper at boot."""
-        from services.agent_runner.agent_host.daemon import _build_checkpointer
+        from services.agent_runner.agent_host.daemon import build_checkpointer
 
-        checkpointer = await _build_checkpointer(
+        checkpointer = await build_checkpointer(
             cast(AsyncConnectionPool[Any], object()), read_checkpoint_interval=lambda: 1
         )
 

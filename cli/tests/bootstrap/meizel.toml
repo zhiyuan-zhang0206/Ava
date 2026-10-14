@@ -36,12 +36,12 @@
 
 [debt.first-party-patch]
 "test_checkout_guard.py#monkeypatch.setattr cli.init_intent.initialize_home" = 1
-"test_checkout_guard.py#monkeypatch.setattr cli.start_intent._checkout" = 3
+"test_checkout_guard.py#monkeypatch.setattr cli.start_intent.checkout" = 3
 "test_checkout_guard.py#monkeypatch.setattr cli.start_intent.require_initialized" = 1
 "test_command_runtime.py#monkeypatch.setattr base.config.ConfigBoot.prepare" = 1
 "test_init.py#monkeypatch.setattr base.cluster.port_free" = 1
 "test_init.py#monkeypatch.setattr cli.start_identity.upsert_env" = 3
-"test_init.py#monkeypatch.setattr cli.start_intent._checkout" = 1
+"test_init.py#monkeypatch.setattr cli.start_intent.checkout" = 1
 "test_python_install.py#monkeypatch.setattr cli._python_index.sys.platform" = 1
 "test_redis_binary_selection.py#monkeypatch.setattr base.config.settings.data_plane.redis_bin_dir" = 2
 "test_redis_binary_selection.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
@@ -58,7 +58,7 @@
 "test_start_identity.py#monkeypatch.setattr cli.commands.lifecycle.start.cmd_start" = 3
 "test_start_identity.py#monkeypatch.setattr cli.init_intent.local_addresses" = 1
 "test_start_identity.py#monkeypatch.setattr cli.start_identity.upsert_env" = 6
-"test_start_identity.py#monkeypatch.setattr cli.start_intent._checkout" = 10
+"test_start_identity.py#monkeypatch.setattr cli.start_intent.checkout" = 10
 
 [debt.stdlib-patch]
 "test_start_identity.py#monkeypatch.setattr socket.getaddrinfo" = 1

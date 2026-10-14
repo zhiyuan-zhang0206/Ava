@@ -97,7 +97,7 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
         return result
 
     monkeypatch.setattr(termination, "insert_termination_pair", _fail_after_pair)
-    terminate_id, _cutoff = termination._enqueue_termination_inbounds(
+    terminate_id, _cutoff = termination.enqueue_termination_inbounds(
         database,
         event_bus,
         running_agent_id,
@@ -151,7 +151,7 @@ def test_termination_survives_failed_message_retry(
 
     monkeypatch.setattr(termination, "insert_termination_pair", _fail_pair)
     monkeypatch.setattr(termination, "insert_pending_termination_message", _fail_retry)
-    terminate_id, _cutoff = termination._enqueue_termination_inbounds(
+    terminate_id, _cutoff = termination.enqueue_termination_inbounds(
         database,
         event_bus,
         running_agent_id,
@@ -198,7 +198,7 @@ def test_force_termination_retries_command_before_message(
         return result
 
     monkeypatch.setattr(termination, "insert_termination_pair", _fail_after_pair)
-    old_status, _, _, terminate_id, _cutoff = termination._force_terminate_transaction(
+    old_status, _, _, terminate_id, _cutoff = termination.force_terminate_transaction(
         running_agent_id,
         db_pool,
         source="user",

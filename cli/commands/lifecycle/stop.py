@@ -22,7 +22,7 @@ from base.events.live.bus import EventBus
 from base.sessions.hosting import hosting_supervised_session
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
-from cli.commands._repo import _repo_root
+from cli.commands._repo import repo_root
 from cli.commands.lifecycle import _temporary_stop
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
@@ -111,9 +111,9 @@ def _compute_stop_scope(
     if keep_browser:
         preserve_sessions = preserve_sessions | {_BROWSER_SESSION}
 
-    roles = _repo_commands._roles_or_none(machine=machine)
+    roles = _repo_commands.roles_or_none(machine=machine)
     runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
-    service_sessions = _root_driver_commands._root_tree_plan(preserve_sessions)
+    service_sessions = _root_driver_commands.root_tree_plan(preserve_sessions)
     return service_sessions, runner_only, keep_infra or runner_only
 
 
@@ -174,7 +174,7 @@ def force_stop(
     )
     # Keeping the pty-sessions service keeps the terminals it holds.
     keep_terminals = SERVICE_UNIT in preserve_sessions
-    plan_sessions = _root_driver_commands._root_tree_plan(root_preserve)
+    plan_sessions = _root_driver_commands.root_tree_plan(root_preserve)
     _print_stop_plan(
         plan_sessions,
         keep_terminals=keep_terminals,
@@ -289,7 +289,7 @@ def cmd_stop(
 ) -> int:
     """Stop this unit, including terminals and infrastructure; retain its data."""
     return do_stop(
-        _repo_root(),
+        repo_root(),
         require_confirmation=require_confirmation,
         keep_infra=keep_infra,
         preserve_sessions=preserve_sessions,
@@ -378,7 +378,7 @@ def require_restart_runtime(runtime: StartRuntime) -> None:
 
 def restart_runtime() -> StartRuntime:
     """Admit the currently executing checkout before restart effects."""
-    runtime = StartRuntime.development(_repo_root())
+    runtime = StartRuntime.development(repo_root())
     require_restart_runtime(runtime)
     return runtime
 

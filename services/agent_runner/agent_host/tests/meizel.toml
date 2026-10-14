@@ -37,9 +37,6 @@ exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed
 "test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.logger.exception" = 2
 "test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.logger.warning" = 1
 
-[debt.private-name]
-"native_restart/test_return.py -> native_cancel/test_continuation.py#_install_faults" = 1
-
 [debt.unresolved-patch]
 "guarded_compact_support.py#monkeypatch.setattr host._runtime_for" = 1
 "test_maintenance_prior_failure.py#monkeypatch.setattr host._drive_turns" = 1

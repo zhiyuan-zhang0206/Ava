@@ -177,7 +177,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
 
 @pytest.fixture(autouse=True)
 def no_rate_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(relay, "_MIN_EMIT_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(relay, "MIN_EMIT_INTERVAL_SECONDS", 0.0)
 
 
 def run(
@@ -538,7 +538,7 @@ def test_local_clock_cannot_revoke_db_active_lease_or_busy_spin() -> None:
 def test_emits_respect_the_monitor_event_rate_across_ack_cycles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(relay, "_MIN_EMIT_INTERVAL_SECONDS", 2.0)
+    monkeypatch.setattr(relay, "MIN_EMIT_INTERVAL_SECONDS", 2.0)
     inbox = Inbox(1)
     delays: list[float] = []
 

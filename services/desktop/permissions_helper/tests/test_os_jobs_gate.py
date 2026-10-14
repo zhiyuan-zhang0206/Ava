@@ -327,7 +327,7 @@ def test_helper_native_effects_require_explicit_test_boundary(boundary: str) -> 
         elif boundary == "sign":
             lifecycle._run(["codesign", "--sign", "unreachable"])
         elif boundary == "launchd":
-            launchd_job._retirement_command(["bootout", "gui/0/unreachable"], float("inf"))
+            launchd_job.retirement_command(["bootout", "gui/0/unreachable"], float("inf"))
 
 
 @pytest.mark.native_permissions_helper

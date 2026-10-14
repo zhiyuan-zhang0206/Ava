@@ -1,6 +1,6 @@
 """`services.wake.heartbeat.daemon` — idle-agent check-in selection + the pause window.
 
-`_select_idle_agents_needing_heartbeat` is the daemon's core predicate. The idle
+`select_idle_agents_needing_heartbeat` is the daemon's core predicate. The idle
 clock is `last_active_at` (the last completed LLM turn — real work), NOT
 `status_changed_at` (bumped by every status flip, including ops lifecycle churn).
 `TestIdleClockCountsRealActivityOnly` pins that semantic: an ops restart resets
@@ -29,9 +29,9 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
-    _reconcile_checkin_outcomes,
-    _select_idle_agents_needing_heartbeat,
     _sweep_backoff_resets,
+    reconcile_checkin_outcomes,
+    select_idle_agents_needing_heartbeat,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -122,7 +122,7 @@ def _make_idle(
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
-    return dict(_select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S))
+    return dict(select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S))
 
 
 def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
@@ -254,7 +254,7 @@ class TestNudgeBackoffB7:
         )
         noop: dict[int, int] = {aid: 2}
 
-        _reconcile_checkin_outcomes(
+        reconcile_checkin_outcomes(
             pool,
             pending_checkin={aid: 6.0},
             failure_streak={},
@@ -308,7 +308,7 @@ class TestNudgeBackoffB7:
         db_conn.commit()
         noop: dict[int, int] = {aid: 2}
 
-        _reconcile_checkin_outcomes(
+        reconcile_checkin_outcomes(
             pool,
             pending_checkin={},
             failure_streak={},
@@ -342,7 +342,7 @@ class TestNudgeBackoffB7:
         )
         noop: dict[int, int] = {aid: 2}
 
-        _reconcile_checkin_outcomes(
+        reconcile_checkin_outcomes(
             pool,
             pending_checkin={},
             failure_streak={},
@@ -379,7 +379,7 @@ class TestNudgeBackoffB7:
         self._set_level(db_conn, aid, max_level)
         noop: dict[int, int] = {aid: 2}
 
-        _reconcile_checkin_outcomes(
+        reconcile_checkin_outcomes(
             pool,
             pending_checkin={aid: 6.0},
             failure_streak={},

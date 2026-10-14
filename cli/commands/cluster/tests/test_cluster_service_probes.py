@@ -49,7 +49,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
     gated = _spec("browser")
     probeless = _spec("browser-mcp")
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_services_for_capabilities_annotated(
         _roles: object, *, machine: MachineIdentity
@@ -99,7 +99,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
     recorded_sessions: list[str] = []
 
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_gateway_observability_home(_machine: MachineIdentity, *, home: Path) -> Path:
         assert isinstance(home, Path)
@@ -141,7 +141,7 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
     recorded_sessions: list[str] = []
 
     monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_gateway_observability_home(_machine: MachineIdentity, *, home: Path) -> Path:
         assert isinstance(home, Path)
@@ -183,7 +183,7 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
     (tmp_home / "lgtm-host").touch()
     recorded_sessions: list[str] = []
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_gateway_observability_home(_machine: MachineIdentity, *, home: Path) -> Path:
         assert isinstance(home, Path)
@@ -222,7 +222,7 @@ def test_service_probes_carry_the_failing_fact(
     spec = ServiceSpec(
         session="ops", cmd="x", capabilities=frozenset({"gateway"}), requires_db=True
     )
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_services_for_capabilities_annotated(
         _roles: object, *, machine: MachineIdentity
@@ -259,7 +259,7 @@ def test_service_probes_unknown_roster_is_unhealthy(
 
     import cli.commands._repo as _repo_commands
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     assert cluster_health.service_probes(machine=command_runtime.machine) == [
         "service roster unavailable"
     ]
@@ -295,7 +295,7 @@ def test_service_probes_respect_durable_service_intent(
         assert spec is wanted
         return _probe_commands.ServiceProbe(True, "owned", "ready")
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(roster_spec, "services_for_capabilities_annotated", roster)
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
     monkeypatch.setattr(
@@ -318,7 +318,7 @@ def test_service_probes_unreadable_selection_is_unhealthy(
     def unreadable() -> None:
         raise ValueError("corrupt selection")
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(lifecycle_service_selection, "read_selection", unreadable)
     assert cluster_health.service_probes(machine=command_runtime.machine) == [
         "service selection unavailable (corrupt selection)"

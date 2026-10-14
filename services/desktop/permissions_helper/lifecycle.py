@@ -44,19 +44,19 @@ from services.desktop.permissions_helper.launchd_job import (
     require_retired_helper,
 )
 
-_CERT_CN = "Ava Permissions Helper Code Signing"
+CERT_CN = "Ava Permissions Helper Code Signing"
 _SERVICE_DIR = Path(__file__).resolve().parent
 SOURCE = _SERVICE_DIR / "helper" / "main.swift"
-_INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
+INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
 # The AppleEvents entitlement: what lets tccd build an attribution chain for
 # helper-spawned `osascript`/AE children; without it the request dies as
 # -1712/-609 before any prompt can appear.
-_ENTITLEMENTS = _SERVICE_DIR / "helper" / "helper.entitlements"
-_LOCALES = _SERVICE_DIR / "helper" / "locales"
+ENTITLEMENTS = _SERVICE_DIR / "helper" / "helper.entitlements"
+LOCALES = _SERVICE_DIR / "helper" / "locales"
 _HELPER_PING_ATTEMPTS = 10
 _HELPER_PING_SETTLE_S = 0.5
 _IDENTITY_RE = re.compile(
-    rf'^\s*\d+\)\s+([0-9A-F]{{40}})\s+"{re.escape(_CERT_CN)}"',
+    rf'^\s*\d+\)\s+([0-9A-F]{{40}})\s+"{re.escape(CERT_CN)}"',
     re.IGNORECASE | re.MULTILINE,
 )
 _DESIGNATED_REQUIREMENT_RE = re.compile(r"^designated => (.+)$", re.MULTILINE)
@@ -71,10 +71,10 @@ _ACL_REMEDY = (
     "Give /usr/bin/codesign standing access to the key on this host: in Keychain "
     "Access, open the private key under the login keychain's Keys and set Access "
     "Control to allow all applications, or from a local Terminal.app run "
-    f"`security set-key-partition-list -S apple-tool:,apple: -s -l {_CERT_CN!r}` "
+    f"`security set-key-partition-list -S apple-tool:,apple: -s -l {CERT_CN!r}` "
     "(it prompts once for the login password). Then re-run `ava converge`."
 )
-_SIGNING_REACH_REMEDY = (
+SIGNING_REACH_REMEDY = (
     "Align the signing keychain with the user search list. From a local Terminal.app, run "
     "`security list-keychains -d user -s <signing keychain path>`. Use the login keychain "
     f"path by default. {_ACL_REMEDY}"
@@ -92,7 +92,7 @@ _SIGNING_REACH_REMEDY = (
 # The bound is applied by `base.host.proc.run_bounded`, not `subprocess.run(timeout=)`,
 # which kills only the process Python spawned and leaves its descendants running.
 # Every git-driving module bounds git through the same helper.
-_TIMEOUTS_S = {
+TIMEOUTS_S = {
     "swiftc": 300.0,  # one small file; the ceiling only catches a wedged toolchain
     "codesign": 60.0,  # signs a few-MB bundle in well under a second
     "security": 30.0,  # keychain queries and a PKCS#12 import, all local
@@ -105,11 +105,11 @@ _TIMEOUTS_S = {
 # as a result instead of an exception without colliding with a real exit code.
 _TIMED_OUT_RC = 124
 
-# The ACL probe's own ceiling, deliberately far below `_TIMEOUTS_S["codesign"]`:
+# The ACL probe's own ceiling, deliberately far below `TIMEOUTS_S["codesign"]`:
 # its entire job is to decide "would signing hang", so it has to give up while the
 # answer is still cheap. Signing a scratch file is sub-second; anything past this
 # is the dialog.
-_ACL_PROBE_TIMEOUT_S = 20.0
+ACL_PROBE_TIMEOUT_S = 20.0
 
 
 class PermissionsHelperBuildError(RuntimeError):
@@ -146,10 +146,10 @@ class PermissionsHelperSigningUnavailableError(PermissionsHelperBuildError):
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
     """Run a step that must succeed, raising `PermissionsHelperBuildError` if it
-    does not -- including when it outlived its `_TIMEOUTS_S` bound, which is a
+    does not -- including when it outlived its `TIMEOUTS_S` bound, which is a
     failure of the same kind and is reported as one so the converge step aborts
     rather than blocks."""
-    timeout = _TIMEOUTS_S[cmd[0]]
+    timeout = TIMEOUTS_S[cmd[0]]
     try:
         proc = run_bounded(cmd, timeout=timeout, capture_output=True)
     except subprocess.TimeoutExpired as exc:
@@ -176,7 +176,7 @@ def run_readonly_query(
     cause, so it comes back as `_TIMED_OUT_RC` with the reason on stderr instead
     of as an exception raised into paths whose whole point is not to raise. The
     one caller that must tell the two apart compares against `_TIMED_OUT_RC`."""
-    bound = _TIMEOUTS_S[cmd[0]] if timeout is None else timeout
+    bound = TIMEOUTS_S[cmd[0]] if timeout is None else timeout
     try:
         return run_bounded(cmd, timeout=bound, capture_output=True)
     except subprocess.TimeoutExpired:
@@ -184,7 +184,7 @@ def run_readonly_query(
         return subprocess.CompletedProcess(cmd, _TIMED_OUT_RC, b"", detail)
 
 
-def _keychain_path() -> Path:
+def keychain_path() -> Path:
     """Return the signing keychain path.
 
     Defaults to the user's login keychain. CI sets the
@@ -201,7 +201,7 @@ def _keychain_path() -> Path:
 def _signing_keychain_search_list_note() -> str:
     """Describe whether the signing keychain is in the user search list."""
     try:
-        keychain = str(_keychain_path())
+        keychain = str(keychain_path())
         proc = run_readonly_query(["security", "list-keychains", "-d", "user"])
         if proc.returncode != 0:
             return "The user keychain search list is unreadable."
@@ -218,7 +218,7 @@ def _signing_keychain_search_list_note() -> str:
     return f"The signing keychain {keychain!r} is {location} the user keychain search list."
 
 
-def _keychain_lock_reason() -> str | None:
+def keychain_lock_reason() -> str | None:
     """Return why the login keychain cannot serve the signing key, or None.
 
     The stable identity's private key lives there, and over SSH that keychain is
@@ -227,14 +227,14 @@ def _keychain_lock_reason() -> str | None:
     that into a message that names the fix. `security` cannot unlock it here: the
     only non-interactive form takes the password on argv, where every process on
     the box can read it, so the unlock stays a human step."""
-    proc = run_readonly_query(["security", "show-keychain-info", str(_keychain_path())])
+    proc = run_readonly_query(["security", "show-keychain-info", str(keychain_path())])
     if proc.returncode == 0:
         return None
     detail = proc.stderr.decode(errors="replace").strip() or f"exit {proc.returncode}"
     return f"the login keychain is not unlocked ({detail})"
 
 
-def _interactive_signing_reason() -> str | None:
+def interactive_signing_reason() -> str | None:
     """Return why signing would block waiting on a human, or None.
 
     An unlocked keychain is not enough. The signing key carries its own access
@@ -259,18 +259,18 @@ def _interactive_signing_reason() -> str | None:
         scratch = Path(td) / "acl-probe"
         scratch.write_bytes(b"\x00")
         rc = run_readonly_query(
-            ["codesign", "--sign", _CERT_CN, str(scratch)], timeout=_ACL_PROBE_TIMEOUT_S
+            ["codesign", "--sign", CERT_CN, str(scratch)], timeout=ACL_PROBE_TIMEOUT_S
         ).returncode
     if rc != _TIMED_OUT_RC:
         return None
     return (
-        f"signing blocks on a GUI authorization prompt -- a test signature with {_CERT_CN!r} "
-        f"did not finish within {_ACL_PROBE_TIMEOUT_S:.0f}s, which on a headless host "
+        f"signing blocks on a GUI authorization prompt -- a test signature with {CERT_CN!r} "
+        f"did not finish within {ACL_PROBE_TIMEOUT_S:.0f}s, which on a headless host "
         "(SSH / terminal) means macOS is holding up a SecurityAgent dialog nobody can answer"
     )
 
 
-def _signed_with_stable_cert(app: Path) -> bool:
+def signed_with_stable_cert(app: Path) -> bool:
     """True when `app` already carries a signature from the stable identity.
 
     `codesign --display` writes the signing chain to stderr; the stable
@@ -279,7 +279,7 @@ def _signed_with_stable_cert(app: Path) -> bool:
     proc = run_readonly_query(["codesign", "--display", "--verbose=2", str(app)])
     if proc.returncode != 0:
         return False
-    return f"Authority={_CERT_CN}" in proc.stderr.decode(errors="replace")
+    return f"Authority={CERT_CN}" in proc.stderr.decode(errors="replace")
 
 
 def pinned_designated_requirement() -> str:
@@ -291,27 +291,27 @@ def pinned_designated_requirement() -> str:
     match = _IDENTITY_RE.search(listing.stdout.decode(errors="replace"))
     if match is None:
         raise PermissionsHelperBuildError(
-            f"code-signing identity {_CERT_CN!r} is missing or name mismatch prevented "
+            f"code-signing identity {CERT_CN!r} is missing or name mismatch prevented "
             "its SHA-1 from being resolved"
         )
     return f'identifier "{HELPER_BUNDLE_ID}" and certificate leaf = H"{match.group(1).lower()}"'
 
 
-def _source_content_hash() -> str:
+def source_content_hash() -> str:
     """Hash every input that determines the built helper bundle."""
     digest = hashlib.sha256()
     digest.update(SOURCE.read_bytes())
-    digest.update(_INFO_PLIST.read_bytes())
-    digest.update(_ENTITLEMENTS.read_bytes())
-    for path in sorted(p for p in _LOCALES.rglob("*") if p.is_file()):
-        digest.update(path.relative_to(_LOCALES).as_posix().encode() + path.read_bytes())
+    digest.update(INFO_PLIST.read_bytes())
+    digest.update(ENTITLEMENTS.read_bytes())
+    for path in sorted(p for p in LOCALES.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(LOCALES).as_posix().encode() + path.read_bytes())
     digest.update(pinned_designated_requirement().encode())
     # A signing-policy change is a new artifact, never an in-place re-sign.
     digest.update(" ".join(hardened_runtime.SIGNING_OPTIONS).encode())
     return digest.hexdigest()
 
 
-def _read_dr(app: Path) -> str:
+def read_dr(app: Path) -> str:
     proc = _run(["codesign", "-d", "-r-", str(app)])
     # codesign writes the designated-requirement line to stdout on current
     # macOS (stderr carries `Executable=...`); older toolchains have emitted
@@ -325,9 +325,9 @@ def _read_dr(app: Path) -> str:
     return match.group(1)
 
 
-def _verify_dr(app: Path) -> str:
+def verify_dr(app: Path) -> str:
     """Verify and return the app's exact designated requirement."""
-    actual = _read_dr(app)
+    actual = read_dr(app)
     expected = pinned_designated_requirement()
     if actual != expected:
         raise PermissionsHelperBuildError(
@@ -350,7 +350,7 @@ def preflight_signing_smoke() -> None:
                     [
                         "codesign",
                         "--sign",
-                        _CERT_CN,
+                        CERT_CN,
                         "-v",
                         "--identifier",
                         HELPER_BUNDLE_ID,
@@ -364,10 +364,10 @@ def preflight_signing_smoke() -> None:
                 if "-25300" in detail or "errsecitemnotfound" in detail:
                     search_list_note = _signing_keychain_search_list_note()
                     raise PermissionsHelperBuildError(
-                        f"{exc}. {_SIGNING_REACH_REMEDY} {search_list_note}"
+                        f"{exc}. {SIGNING_REACH_REMEDY} {search_list_note}"
                     ) from exc
                 raise
-            actual_dr = _read_dr(scratch)
+            actual_dr = read_dr(scratch)
     except (OSError, PermissionsHelperBuildError) as exc:
         raise PermissionsHelperBuildError(f"{refusal}: {exc}") from exc
     if actual_dr != expected_dr:
@@ -381,11 +381,11 @@ def _app_executable(app: Path) -> Path:
     return app / "Contents" / "MacOS" / "AvaPermissionsHelper"
 
 
-def _is_valid_stable_app(app: Path) -> bool:
+def is_valid_stable_app(app: Path) -> bool:
     return (
         _app_executable(app).exists()
         and run_readonly_query(["codesign", "--verify", str(app)]).returncode == 0
-        and _signed_with_stable_cert(app)
+        and signed_with_stable_cert(app)
     )
 
 
@@ -397,7 +397,7 @@ def _remove_app(app: Path) -> None:
 
 
 def _installed_build_is_current(app: Path, state: BuildState | None, source_hash: str) -> bool:
-    return _is_valid_stable_app(app) and state is not None and state["source_hash"] == source_hash
+    return is_valid_stable_app(app) and state is not None and state["source_hash"] == source_hash
 
 
 def ensure_signing_cert() -> None:
@@ -413,9 +413,9 @@ def ensure_signing_cert() -> None:
         raise PermissionsHelperBuildError(
             f"security find-identity failed: {listing.stderr.decode(errors='replace').strip()}"
         )
-    if _CERT_CN in listing.stdout.decode(errors="replace"):
+    if CERT_CN in listing.stdout.decode(errors="replace"):
         return
-    keychain = str(_keychain_path())
+    keychain = str(keychain_path())
     with tempfile.TemporaryDirectory() as td:
         d = Path(td)
         key, cert, p12 = d / "key.pem", d / "cert.pem", d / "ident.p12"
@@ -434,7 +434,7 @@ def ensure_signing_cert() -> None:
                 "3650",
                 "-nodes",
                 "-subj",
-                f"/CN={_CERT_CN}",
+                f"/CN={CERT_CN}",
                 "-addext",
                 "basicConstraints=critical,CA:false",
                 "-addext",
@@ -457,7 +457,7 @@ def ensure_signing_cert() -> None:
                 "-passout",
                 "pass:ava",
                 "-name",
-                _CERT_CN,
+                CERT_CN,
             ]
         )
         _run(
@@ -476,7 +476,7 @@ def ensure_signing_cert() -> None:
         )
 
 
-def _build_directory(destination: Path | None) -> Path:
+def build_directory(destination: Path | None) -> Path:
     """Choose an immutable artifact destination outside the installed bundle tree."""
     from base.paths.home import default_home
 
@@ -522,11 +522,11 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     recorded content hash matches all source and identity inputs. Checkout
     mtimes therefore cannot churn the binary or its TCC identity. A stale
     installed bundle is rebuilt in place, only when `_replaces_installed` admits it."""
-    build_dir = _build_directory(destination)
+    build_dir = build_directory(destination)
     state_path = build_dir / BUILD_STATE_NAME
     app = build_dir / "AvaPermissionsHelper.app"
     exe = _app_executable(app)
-    source_hash = _source_content_hash()
+    source_hash = source_content_hash()
     expected_dr = pinned_designated_requirement()
     state = read_build_state(state_path)
     if state is not None and state["dr"] != expected_dr:
@@ -543,15 +543,15 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     # converge on a host whose helper is already current -- the common SSH case.
     # Both run before anything is compiled or written, so a host that cannot sign
     # is turned away without a half-built bundle left behind, keeping any stale one.
-    locked = _keychain_lock_reason()
+    locked = keychain_lock_reason()
     if locked is not None:
         raise PermissionsHelperSigningUnavailableError(
-            f"cannot sign the permissions helper as {_CERT_CN!r}: {locked}. {_AD_HOC_REFUSAL}"
+            f"cannot sign the permissions helper as {CERT_CN!r}: {locked}. {_AD_HOC_REFUSAL}"
         )
-    blocked = _interactive_signing_reason()
+    blocked = interactive_signing_reason()
     if blocked is not None:
         raise PermissionsHelperSigningUnavailableError(
-            f"cannot sign the permissions helper as {_CERT_CN!r}: {blocked}. {_ACL_REMEDY}"
+            f"cannot sign the permissions helper as {CERT_CN!r}: {blocked}. {_ACL_REMEDY}"
         )
     preflight_signing_smoke()
 
@@ -563,10 +563,10 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
         require_retired_helper(exe)  # proved again right before the old artifact goes
     _remove_app(app)
     exe.parent.mkdir(parents=True, exist_ok=True)
-    (app / "Contents" / "Info.plist").write_bytes(_INFO_PLIST.read_bytes())
+    (app / "Contents" / "Info.plist").write_bytes(INFO_PLIST.read_bytes())
     exe.write_bytes(binary.read_bytes())
     exe.chmod(0o755)
-    for lproj in sorted(_LOCALES.glob("*.lproj")):
+    for lproj in sorted(LOCALES.glob("*.lproj")):
         shutil.copytree(lproj, app / "Contents" / "Resources" / lproj.name, dirs_exist_ok=True)
 
     try:
@@ -575,10 +575,10 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
                 "codesign",
                 "--force",
                 "--sign",
-                _CERT_CN,
+                CERT_CN,
                 *hardened_runtime.SIGNING_OPTIONS,
                 "--entitlements",
-                str(_ENTITLEMENTS),
+                str(ENTITLEMENTS),
                 "--identifier",
                 HELPER_BUNDLE_ID,
                 "--requirements",
@@ -593,7 +593,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
         raise PermissionsHelperBuildError(f"{exc}. {_ACL_REMEDY}") from exc
     except PermissionsHelperBuildError as exc:
         raise PermissionsHelperBuildError(f"{exc}. {_AD_HOC_REFUSAL}") from exc
-    actual_dr = _verify_dr(app)
+    actual_dr = verify_dr(app)
     write_build_state(state_path, source_hash, actual_dr)
     if replacing and state is not None and state["dr"] == actual_dr:
         sys.stderr.write(
@@ -603,15 +603,15 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     return app, True
 
 
-def _label() -> str:
+def label() -> str:
     return helper_job_label()
 
 
-def _agents_dir() -> Path:
+def agents_dir() -> Path:
     return helper_job_agents_dir()
 
 
-def _plist_path() -> Path:
+def plist_path() -> Path:
     return helper_job_plist_path()
 
 
@@ -619,11 +619,11 @@ def launchd_domain() -> str:
     return helper_job_domain()
 
 
-def _is_loaded() -> bool:
+def is_loaded() -> bool:
     return helper_job_loaded()
 
 
-def _foreign_label_plists() -> list[Path]:
+def foreign_label_plists() -> list[Path]:
     """LaunchAgent plists bound to this cluster's socket under a foreign label.
 
     A job whose plist pins this cluster's socket but carries a label other than
@@ -632,12 +632,12 @@ def _foreign_label_plists() -> list[Path]:
     clusters' jobs are left alone -- they pin their own sockets."""
     sock = str(helper_socket())
     foreign: list[Path] = []
-    for plist in _agents_dir().glob(f"{HELPER_BUNDLE_ID}.*.plist"):
+    for plist in agents_dir().glob(f"{HELPER_BUNDLE_ID}.*.plist"):
         try:
             data = plistlib.loads(plist.read_bytes())
         except (plistlib.InvalidFileException, OSError):
             continue
-        if data.get("Label") == _label():
+        if data.get("Label") == label():
             continue
         env: dict[str, object] = data.get("EnvironmentVariables") or {}
         if env.get("AVA_PERMISSIONS_HELPER_SOCKET") == sock:
@@ -645,8 +645,8 @@ def _foreign_label_plists() -> list[Path]:
     return foreign
 
 
-def _refuse_foreign_label_jobs() -> None:
-    foreign = _foreign_label_plists()
+def refuse_foreign_label_jobs() -> None:
+    foreign = foreign_label_plists()
     if foreign:
         raise PermissionsHelperBuildError(
             "foreign helper labels bind this home's socket; reconcile them externally before start: "
@@ -659,11 +659,11 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
 
     A loaded helper is only observed. Replacement requires an external stop
     and exact-home unregister first, so a descendant cannot unload its parent."""
-    _refuse_foreign_label_jobs()
+    refuse_foreign_label_jobs()
     exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
     log = logs_dir() / "permissions-helper.log"
     plist = {
-        "Label": _label(),
+        "Label": label(),
         "ProgramArguments": [str(exe)],
         "EnvironmentVariables": {
             "AVA_PERMISSIONS_HELPER_SOCKET": str(helper_socket()),
@@ -674,11 +674,11 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
         "StandardOutPath": str(log),
         "StandardErrorPath": str(log),
     }
-    path = _plist_path()
+    path = plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     new_bytes = plistlib.dumps(plist)
     plist_changed = not path.exists() or path.read_bytes() != new_bytes
-    loaded = _is_loaded()
+    loaded = is_loaded()
     if loaded and helper_stop_intent(base.paths.ava_home()):
         raise PermissionsHelperBuildError(
             "helper retirement is incomplete; finish ava stop externally before starting"
@@ -693,7 +693,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
         clear_helper_stop_intent(base.paths.ava_home())
         path.write_bytes(new_bytes)
         _run(["launchctl", "bootstrap", launchd_domain(), str(path)])
-    if not _helper_answers_ping():
+    if not helper_answers_ping():
         raise PermissionsHelperBuildError(
             "permissions helper is unresponsive; custody is unknown. Diagnose the native job "
             "externally; start will not bootout or kickstart its possible ancestor"
@@ -705,7 +705,7 @@ def helper_socket() -> Path:
     return permissions_helper_socket(settings.services.permissions_helper_port)
 
 
-def _helper_answers_ping() -> bool:
+def helper_answers_ping() -> bool:
     from base.host.permissions_helper import client
     from base.sessions.helperproc import helper_client
 

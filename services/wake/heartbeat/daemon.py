@@ -150,7 +150,7 @@ _ADVANCE_SLACK_MINUTES = 0.5
 # The claim node wraps it via system_note_message(tag=NoteTag.HEARTBEAT).
 
 
-def _select_idle_agents_needing_heartbeat(
+def select_idle_agents_needing_heartbeat(
     pool: ConnectionPool,
     idle_threshold_s: float,
     *,
@@ -259,7 +259,7 @@ def _select_idle_agents_needing_heartbeat(
     return rows
 
 
-def _send_heartbeat_checkin(
+def send_heartbeat_checkin(
     pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int, idle_minutes: float
 ) -> None:
     """INSERT one `heartbeat` inbound for `agent_id`, then publish a Redis wake so
@@ -379,7 +379,7 @@ def _count_noop_nudge(
             _raise_backoff_level(pool, agent_id, new_level, heartbeat_interval_s)
 
 
-def _reconcile_checkin_outcomes(
+def reconcile_checkin_outcomes(
     pool: ConnectionPool,
     *,
     pending_checkin: dict[int, float],
@@ -606,7 +606,7 @@ async def dispatch_loop(
             if admission.quiesced():
                 continue
             _sweep_backoff_resets(pool)
-            _reconcile_checkin_outcomes(
+            reconcile_checkin_outcomes(
                 pool,
                 pending_checkin=pending_checkin,
                 failure_streak=failure_streak,
@@ -614,7 +614,7 @@ async def dispatch_loop(
                 noop_streak=noop_streak,
                 heartbeat_interval_s=heartbeat_interval,
             )
-            rows = _select_idle_agents_needing_heartbeat(
+            rows = select_idle_agents_needing_heartbeat(
                 pool,
                 idle_threshold,
                 heartbeat_interval_s=heartbeat_interval,
@@ -624,7 +624,7 @@ async def dispatch_loop(
             )
             for agent_id, idle_minutes in rows:
                 try:
-                    _send_heartbeat_checkin(pool, db, bus, agent_id, idle_minutes)
+                    send_heartbeat_checkin(pool, db, bus, agent_id, idle_minutes)
                     pending_checkin[agent_id] = idle_minutes
                     _log.info(
                         "[heartbeat] checked in on idle agent %s (idle %.0f min)",

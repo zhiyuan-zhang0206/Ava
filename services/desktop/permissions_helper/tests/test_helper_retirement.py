@@ -31,15 +31,15 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
     sentinel.write_text("unchanged installed state")
     candidate = tmp_path / "candidate"
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
-    monkeypatch.setattr(lifecycle, "_source_content_hash", lambda: "source")
+    monkeypatch.setattr(lifecycle, "source_content_hash", lambda: "source")
     monkeypatch.setattr(lifecycle, "pinned_designated_requirement", lambda: "stable-dr")
 
     def verify(_app: Path) -> str:
         return "stable-dr"
 
-    monkeypatch.setattr(lifecycle, "_verify_dr", verify)
-    monkeypatch.setattr(lifecycle, "_keychain_lock_reason", lambda: None)
-    monkeypatch.setattr(lifecycle, "_interactive_signing_reason", lambda: None)
+    monkeypatch.setattr(lifecycle, "verify_dr", verify)
+    monkeypatch.setattr(lifecycle, "keychain_lock_reason", lambda: None)
+    monkeypatch.setattr(lifecycle, "interactive_signing_reason", lambda: None)
     monkeypatch.setattr(lifecycle, "preflight_signing_smoke", lambda: None)
 
     commands: list[list[str]] = []
@@ -92,15 +92,15 @@ def _stale_installed_helper(
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "home")
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path / "agents")
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
-    monkeypatch.setattr(lifecycle, "_source_content_hash", lambda: "new")
+    monkeypatch.setattr(lifecycle, "source_content_hash", lambda: "new")
     monkeypatch.setattr(lifecycle, "pinned_designated_requirement", lambda: "stable-dr")
-    monkeypatch.setattr(lifecycle, "_is_valid_stable_app", Path.exists)  # present = validly signed
+    monkeypatch.setattr(lifecycle, "is_valid_stable_app", Path.exists)  # present = validly signed
     monkeypatch.setattr(jobs, "retirement_query", _recorder(events, "launchd"))
-    monkeypatch.setattr(jobs, "_executable_pids", _recorder(events, "scan", []))
-    monkeypatch.setattr(lifecycle, "_keychain_lock_reason", _recorder(events, "keychain"))
-    monkeypatch.setattr(lifecycle, "_interactive_signing_reason", _recorder(events, "acl"))
+    monkeypatch.setattr(jobs, "executable_pids", _recorder(events, "scan", []))
+    monkeypatch.setattr(lifecycle, "keychain_lock_reason", _recorder(events, "keychain"))
+    monkeypatch.setattr(lifecycle, "interactive_signing_reason", _recorder(events, "acl"))
     monkeypatch.setattr(lifecycle, "preflight_signing_smoke", _recorder(events, "smoke"))
-    monkeypatch.setattr(lifecycle, "_verify_dr", _recorder(events, "verify", "stable-dr"))
+    monkeypatch.setattr(lifecycle, "verify_dr", _recorder(events, "verify", "stable-dr"))
 
     def run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
         events.append(command[0])
@@ -127,7 +127,7 @@ def test_stale_installed_helper_is_never_replaced_while_in_use(
     elif blocker == "plist":
         jobs.helper_job_plist_path().write_bytes(b"retained definition")
     else:
-        monkeypatch.setattr(jobs, "_executable_pids", _recorder(events, "scan", [4242]))
+        monkeypatch.setattr(jobs, "executable_pids", _recorder(events, "scan", [4242]))
     reason = {"loaded": "launchd still has", "plist": "still registered", "pid": "pid 4242 still"}
     with pytest.raises(RuntimeError, match=reason[blocker]) as refused:
         lifecycle.build_and_sign()
@@ -172,9 +172,9 @@ def test_stale_installed_helper_survives_a_host_that_cannot_sign_or_compile(
         raise lifecycle.PermissionsHelperBuildError(f"{failing} failed")
 
     if failing == "keychain":
-        monkeypatch.setattr(lifecycle, "_keychain_lock_reason", lambda: "keychain failed")
+        monkeypatch.setattr(lifecycle, "keychain_lock_reason", lambda: "keychain failed")
     elif failing == "acl":
-        monkeypatch.setattr(lifecycle, "_interactive_signing_reason", lambda: "acl failed")
+        monkeypatch.setattr(lifecycle, "interactive_signing_reason", lambda: "acl failed")
     elif failing == "smoke":
         monkeypatch.setattr(lifecycle, "preflight_signing_smoke", fail)
     else:
@@ -268,7 +268,7 @@ def test_helper_retirement_unknown_job_never_removes_definition(
         assert args[0] == "print"
         return subprocess.CompletedProcess(args, 5, b"", b"native manager unavailable")
 
-    monkeypatch.setattr(jobs, "_retirement_command", unknown)
+    monkeypatch.setattr(jobs, "retirement_command", unknown)
     with pytest.raises(RuntimeError, match="cannot inspect"):
         jobs.unregister_helper(home, helper_port=23456)
     assert path.read_bytes() == b"retained definition"
@@ -282,7 +282,7 @@ def test_helper_retirement_rejects_caller_ancestry_before_wire_or_signal(tmp_pat
     from services.desktop.permissions_helper import launchd_job as jobs
 
     with pytest.raises(RuntimeError, match="ancestor"):
-        jobs._retirement_owner(
+        jobs.retirement_owner(
             f"pid = {os.getpid()}\n", tmp_path / "no-socket", psutil.Process().exe()
         )
 
@@ -304,7 +304,7 @@ def test_helper_retirement_refuses_foreign_home_plist(tmp_path: Path) -> None:
         )
     )
     with pytest.raises(RuntimeError, match="exact home"):
-        jobs._retirement_plist(path, home, home / "socket")
+        jobs.retirement_plist(path, home, home / "socket")
 
 
 @pytest.mark.parametrize("conflict", [None, "reappeared", "changed", "live-socket", "wrong-seed"])
@@ -402,9 +402,9 @@ def test_helper_native_shutdown_wait_never_signals_unresponsive_owner(tmp_path: 
             time.sleep(0.01)
         owner = OwnedProcess.capture(psutil.Process(child.pid))
         with pytest.raises(TimeoutError, match="did not complete"):
-            jobs._wait_retirement_owner(owner, time.monotonic() + 0.05)
+            jobs.wait_retirement_owner(owner, time.monotonic() + 0.05)
         assert owner.live(), "normal helper shutdown wait must not signal its owner"
-        jobs._force_retirement_owner(owner, time.monotonic() + 5)
+        jobs.force_retirement_owner(owner, time.monotonic() + 5)
         assert not owner.live()
     finally:
         if child.poll() is None:
@@ -435,7 +435,7 @@ def test_helper_force_signal_refuses_reused_native_birth(monkeypatch: pytest.Mon
     monkeypatch.setattr(psutil, "Process", process)
     monkeypatch.setattr(OwnedProcess, "capture", staticmethod(capture))
     with pytest.raises(RuntimeError, match="identity changed"):
-        jobs._force_retirement_owner(original, time.monotonic() + 5)
+        jobs.force_retirement_owner(original, time.monotonic() + 5)
     assert signals == []
 
 
@@ -471,7 +471,7 @@ def test_idle_shutdown_retry_requires_native_success_and_retained_intent(
             args, 0, f"state = {state}\nlast exit code = {code}\n".encode(), b""
         )
 
-    monkeypatch.setattr(jobs, "_retirement_command", command)
+    monkeypatch.setattr(jobs, "retirement_command", command)
     if fault is None:
         jobs.unregister_helper(home, helper_port=23456)
         jobs.unregister_helper(home, helper_port=23456)
@@ -535,9 +535,9 @@ def test_unproven_shutdown_never_boots_out_native_job(
             )
         return subprocess.CompletedProcess(args, 0, state.encode(), b"")
 
-    monkeypatch.setattr(jobs, "_retirement_owner", capture)
-    monkeypatch.setattr(jobs, "_wait_retirement_owner", wait)
-    monkeypatch.setattr(jobs, "_retirement_command", command)
+    monkeypatch.setattr(jobs, "retirement_owner", capture)
+    monkeypatch.setattr(jobs, "wait_retirement_owner", wait)
+    monkeypatch.setattr(jobs, "retirement_command", command)
     monkeypatch.setattr(client.PermissionsHelperClient, "shutdown_helper", shutdown)
     with pytest.raises(RuntimeError):
         jobs.unregister_helper(home, helper_port=23456)
@@ -667,7 +667,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     def capture(_state: str, _socket: Path, _executable: str) -> OwnedProcess:
         return owner
 
-    monkeypatch.setattr(jobs, "_retirement_owner", capture)
+    monkeypatch.setattr(jobs, "retirement_owner", capture)
     commands: list[list[str]] = []
     loaded = [True]
 
@@ -687,7 +687,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
         assert captured == owner and not alive[0]
 
     monkeypatch.setattr(client.PermissionsHelperClient, "shutdown_helper", shutdown)
-    monkeypatch.setattr(jobs, "_wait_retirement_owner", wait)
+    monkeypatch.setattr(jobs, "wait_retirement_owner", wait)
 
     def command(args: list[str], _deadline: float) -> subprocess.CompletedProcess[bytes]:
         commands.append(args)
@@ -703,7 +703,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
             )
         return subprocess.CompletedProcess(args, 113, b"", b"Could not find service")
 
-    monkeypatch.setattr(jobs, "_retirement_command", command)
+    monkeypatch.setattr(jobs, "retirement_command", command)
     # Ordinary stop, then the shared destroy boundary, then a cleanup retry.
     jobs.unregister_helper(home, helper_port=23456)
     jobs.unregister_helper(home, helper_port=23456)

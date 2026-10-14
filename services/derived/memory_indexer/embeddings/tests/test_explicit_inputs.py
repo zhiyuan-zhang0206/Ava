@@ -13,7 +13,7 @@ from base.config import ConfigBoot
 from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings.gemini import DIM, GeminiEmbeddingProvider
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
-    _AsyncClient,
+    AsyncClient,
     patch_client,
 )
 
@@ -22,7 +22,7 @@ async def test_two_owner_providers_read_only_at_operations_and_observe_updates(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
 ) -> None:
-    fake = _AsyncClient(vectors=[[1.0] * DIM])
+    fake = AsyncClient(vectors=[[1.0] * DIM])
     patch_client(monkeypatch, fake)
     with patch.dict(os.environ):
         first, second = ConfigBoot(), ConfigBoot()

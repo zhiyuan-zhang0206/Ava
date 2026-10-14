@@ -31,7 +31,7 @@ class TestWarnUntrackedMigrations:
             "untracked_migration_files",
             lambda: ["20260808T010000_add-foo.sql"],
         )
-        converge_host._warn_untracked_migrations(
+        converge_host.warn_untracked_migrations(
             _ctx(
                 tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline
             )
@@ -50,7 +50,7 @@ class TestWarnUntrackedMigrations:
         operator_pipeline: Callable[[], EventPipeline],
     ) -> None:
         monkeypatch.setattr(migrations, "untracked_migration_files", list)
-        converge_host._warn_untracked_migrations(
+        converge_host.warn_untracked_migrations(
             _ctx(
                 tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline
             )

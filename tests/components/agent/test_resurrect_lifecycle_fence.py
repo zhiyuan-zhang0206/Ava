@@ -27,7 +27,7 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
-from ops.lifecycle.termination import _force_terminate_transaction
+from ops.lifecycle.termination import force_terminate_transaction
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -231,7 +231,7 @@ async def test_force_on_unadmitted_row_cannot_create_a_hosted_successor(
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
         _, _, _, force, _cutoff = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user"
+            force_terminate_transaction, agent_id, pool, source="user"
         )
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
         resurrect_agent(

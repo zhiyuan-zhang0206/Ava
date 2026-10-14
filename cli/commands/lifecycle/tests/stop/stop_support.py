@@ -98,7 +98,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(root_driver, "root_tree_selection", dict)
     monkeypatch.setattr(root_driver, "stop_root_service_tree", Mock(return_value=0))
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", Mock(return_value=0))
-    monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", Mock(return_value=[]))
+    monkeypatch.setattr(_root_driver_commands, "root_tree_plan", Mock(return_value=[]))
 
     # Stop intentionally consumes the ambient override. Every independent test
     # CLI still needs its explicit private binding when the checkout currently
@@ -179,7 +179,7 @@ def drained() -> None:
 
 def dependencies(monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity) -> None:
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    monkeypatch.setattr(_root_driver_commands, "root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
 
     def pause(
         _db: object,

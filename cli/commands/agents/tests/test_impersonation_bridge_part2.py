@@ -163,7 +163,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
 
 @pytest.fixture(autouse=True)
 def no_rate_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(relay, "_MIN_EMIT_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(relay, "MIN_EMIT_INTERVAL_SECONDS", 0.0)
 
 
 def run(

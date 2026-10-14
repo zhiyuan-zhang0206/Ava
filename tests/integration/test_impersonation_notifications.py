@@ -37,7 +37,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
 from ops.agents.wake import resurrect_agent
-from ops.lifecycle.termination import _enqueue_termination_inbounds, _force_terminate_transaction
+from ops.lifecycle.termination import enqueue_termination_inbounds, force_terminate_transaction
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -228,7 +228,7 @@ async def _terminate_native(
         gate=database_gate,
     ) as ops_pool:
         if mode == "force":
-            _force_terminate_transaction(owner.agent_id, ops_pool, source="user")
+            force_terminate_transaction(owner.agent_id, ops_pool, source="user")
             assert await original_host_force(
                 aops_pool,
                 owner.agent_id,
@@ -237,7 +237,7 @@ async def _terminate_native(
                 quiescent=True,
             )
         else:
-            terminate_id, _cutoff = _enqueue_termination_inbounds(
+            terminate_id, _cutoff = enqueue_termination_inbounds(
                 Database.from_settings(gate=database_gate),
                 EventBus.from_settings(),
                 owner.agent_id,

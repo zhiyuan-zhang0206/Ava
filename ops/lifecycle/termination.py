@@ -162,7 +162,7 @@ def _stage_termination_event(
     return record_audit(conn, record_central_event(conn, event))
 
 
-def _enqueue_termination_inbounds(
+def enqueue_termination_inbounds(
     db: Database,
     bus: EventBus,
     agent_id: int,
@@ -211,7 +211,7 @@ def _enqueue_termination_inbounds(
     return terminate_id, None
 
 
-def _force_terminate_transaction(
+def force_terminate_transaction(
     agent_id: int,
     db_pool: ConnectionPool,
     *,
@@ -296,7 +296,7 @@ def force_mark_terminated(
     message: str | None = None,
 ) -> list[str]:
     """Install a force fence and return the affected page names."""
-    _, _, page_names, inbound_id, _cutoff = _force_terminate_transaction(
+    _, _, page_names, inbound_id, _cutoff = force_terminate_transaction(
         agent_id,
         db_pool,
         source=source,

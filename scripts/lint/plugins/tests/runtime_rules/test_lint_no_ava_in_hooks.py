@@ -12,7 +12,7 @@ from scripts.lint.plugins import no_ava_in_hooks as gate
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
-    for scan_dir in gate._SCAN_DIRS:
+    for scan_dir in gate.SCAN_DIRS:
         (tmp_path / scan_dir).mkdir()
     return tmp_path
 

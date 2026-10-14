@@ -14,7 +14,7 @@ from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.schema.migration_errors import MigrationLayoutError
 from base.deploy.schema.migrations import applied_migration_names
-from cli.commands.cluster.control import _schema_mismatch_banner
+from cli.commands.cluster.control import schema_mismatch_banner
 from ops.cluster_status import ClusterStatus, schema_mismatch
 
 
@@ -57,7 +57,7 @@ def _assert_status_is_visible(status: SchemaMismatchStatus) -> None:
         paused=False,
         schema_mismatch=status,
     )
-    banner = _schema_mismatch_banner([machine])
+    banner = schema_mismatch_banner([machine])
     assert len(banner) == 1
     assert status.kind in banner[0]
     assert status.detail in banner[0]

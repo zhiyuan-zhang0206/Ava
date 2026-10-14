@@ -324,7 +324,7 @@ def _local_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(base_config.settings.data_plane, "redis_admin_password", "abc")
 
 
-def _render_real_template(
+def render_real_template(
     monkeypatch: pytest.MonkeyPatch,
     roles: frozenset[str] | None,
     *,
@@ -378,7 +378,7 @@ def test_gateway_config_trace_mirror_rotation_policy(
     small segments (64 MiB — the structural bound on the ACTIVE file, since
     the file exporter exposes no time-based rotation) and a bounded number of
     backups; day retention comes from $RETENTION_DAYS (the cluster setting)."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         operator_database=operator_database,
@@ -408,7 +408,7 @@ def test_sending_queues_are_in_memory_in_every_shape(
     """No exporter queue is persisted: a restart drops what was queued (the trace
     mirror and `ava trace ship` cover trace gaps), and only the filelog read
     offsets keep a file_storage extension."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch, roles, operator_database=operator_database, command_runtime=command_runtime
     )
 
@@ -433,7 +433,7 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     from base.cluster.dataplane.pg_admin import pg_socket_path
 
     monkeypatch.setattr(base_config.settings.data_plane, "db_url", _DELIVERED)
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         operator_database=operator_database,
@@ -468,7 +468,7 @@ def test_gateway_config_skips_postgres_receiver_when_otlp_export_is_disabled(
     command_runtime: CommandRuntime,
 ) -> None:
     """Disabling OTLP export keeps Redis metrics but prevents PostgreSQL receiver startup."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         otlp_enabled=False,
@@ -532,7 +532,7 @@ def test_runner_config_has_host_metrics_but_no_data_plane_receivers(
     Scraping from there would duplicate the gateway's own series under a
     second `host` / `machine_name` identity, so the two receivers are omitted
     entirely — host metrics, which ARE this machine's, stay."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"agent-runner"}),
         operator_database=operator_database,
@@ -555,7 +555,7 @@ def test_unconfigured_unit_has_no_data_plane_receivers(
 ) -> None:
     """roles=None is a unit converge has not configured yet — there are no
     cluster URLs to read, so nothing data-plane is rendered."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch, None, operator_database=operator_database, command_runtime=command_runtime
     )
     assert "postgresql" not in cfg["receivers"]
@@ -571,7 +571,7 @@ def test_infra_metrics_ride_their_own_pipeline(
     """App metrics arrive over OTLP already carrying machine/agent_id
     attributes and must not be relabelled; the host-identity processors
     therefore sit on the infra pipeline only."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         operator_database=operator_database,
@@ -591,7 +591,7 @@ def test_infra_pipeline_stamps_machine_name(
     command_runtime: CommandRuntime,
 ) -> None:
     """Infra datapoints keep physical host identity and gain Ava roster identity."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         operator_database=operator_database,
@@ -609,7 +609,7 @@ def test_collector_self_metrics_reader_is_per_unit(
     command_runtime: CommandRuntime,
 ) -> None:
     """Each unit binds and scrapes its own configurable collector metrics port."""
-    default_cfg = _render_real_template(
+    default_cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         operator_database=operator_database,
@@ -620,7 +620,7 @@ def test_collector_self_metrics_reader_is_per_unit(
     ]["prometheus"]
     assert default_reader == {"host": "localhost", "port": 8888}
 
-    override_cfg = _render_real_template(
+    override_cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         self_metrics_port=8889,
@@ -642,7 +642,7 @@ def test_collector_internal_logs_are_warn_level(
     command_runtime: CommandRuntime,
 ) -> None:
     """Exporter retry notices stay out of service stdout while warnings remain."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         operator_database=operator_database,
@@ -659,7 +659,7 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
 ) -> None:
     """The logs pipeline promotes bounded event dimensions and labels tailed
     session files before the final batch processor."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         operator_database=operator_database,
@@ -716,7 +716,7 @@ def test_local_otlp_pipelines_drop_mismatched_cluster_resources(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         operator_database=operator_database,
@@ -743,14 +743,14 @@ def test_local_otlp_pipelines_drop_mismatched_cluster_resources(
 # -- issue #172: bounded, loud download -------------------------------------
 
 
-class _ChunkedResp:
+class ChunkedResp:
     """A urlopen response stand-in that yields chunk by chunk."""
 
     def __init__(self, chunks: list[bytes], headers: dict[str, str] | None = None) -> None:
         self._chunks = list(chunks)
         self._headers = headers or {}
 
-    def __enter__(self) -> _ChunkedResp:
+    def __enter__(self) -> ChunkedResp:
         return self
 
     def __exit__(self, *_a: object) -> None:

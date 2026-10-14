@@ -120,10 +120,10 @@ def _sync_skills_load_dir() -> None:
     land in / leave `~/.ava/skills/` now, keeping the "active on the next
     skill scan, no restart" promise. Idempotent."""
     from base.paths import ava_home
-    from cli.commands._repo import _repo_root
+    from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import converge_skills
 
-    result = converge_skills(_repo_root(), ava_home())
+    result = converge_skills(repo_root(), ava_home())
     for warning in result.warnings:
         print(f"  ! skills: {warning}", file=sys.stderr)
 

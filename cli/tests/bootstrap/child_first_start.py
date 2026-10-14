@@ -26,7 +26,7 @@ prepare_process_logging()
 home = Path(os.environ["AVA_HOME"])
 checkout = home.parent / "checkout"
 checkout.mkdir()
-start_intent._checkout = lambda: checkout
+start_intent.checkout = lambda: checkout
 cluster.port_free = lambda _port: True
 start_intent.run_start_command = start
 start_intent.complete_start = lambda: None

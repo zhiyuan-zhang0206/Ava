@@ -98,7 +98,7 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
 ) -> None:
     """Why the wake follows the terminate command instead of preceding it: work
     older than a force cannot reverse that force."""
-    termination._force_terminate_transaction(
+    termination.force_terminate_transaction(
         agent_id, db_pool, source="user", message="queued before the fence"
     )
     row = db_conn.execute(
@@ -124,7 +124,7 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
 def test_a_force_terminate_queues_no_wake_unless_asked(
     db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
 ) -> None:
-    termination._force_terminate_transaction(agent_id, db_pool, source="user")
+    termination.force_terminate_transaction(agent_id, db_pool, source="user")
 
     assert _wakes(db_conn, agent_id) == []
 
@@ -144,7 +144,7 @@ def _audit_rows(
 def test_a_force_terminate_records_its_audit_fact_in_the_same_transaction(
     db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
 ) -> None:
-    _, _, _, fence, _cutoff = termination._force_terminate_transaction(
+    _, _, _, fence, _cutoff = termination.force_terminate_transaction(
         agent_id, db_pool, source="system"
     )
 
@@ -163,7 +163,7 @@ def test_a_force_terminate_whose_audit_fact_cannot_be_recorded_does_not_terminat
     monkeypatch.setattr(termination, "record_audit", refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
-        termination._force_terminate_transaction(agent_id, db_pool, source="system")
+        termination.force_terminate_transaction(agent_id, db_pool, source="system")
 
     row = db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     db_conn.commit()
@@ -180,7 +180,7 @@ def test_a_resurrection_records_its_audit_fact(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    termination._force_terminate_transaction(agent_id, db_pool, source="system")
+    termination.force_terminate_transaction(agent_id, db_pool, source="system")
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,created_at) "
         "VALUES(%s,'continue','chat','user',clock_timestamp()) RETURNING id",

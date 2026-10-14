@@ -36,7 +36,7 @@ def restart_command_environment(
     orthogonal to setup. Setup behavior itself is left to base/test_machine.py + the setup-ergonomics tests in `test_commands_start.py`.
 
     Default role="gateway" (full service set). To test secondary, explicitly override:
-        monkeypatch.setattr(_cli, "_roles_or_none", lambda *, machine: frozenset({"agent-runner"}))
+        monkeypatch.setattr(_cli, "roles_or_none", lambda *, machine: frozenset({"agent-runner"}))
         monkeypatch.setattr(_cli, "collect_setup_values", lambda: (..., []))"""
     from base.host.runtime_interpreter import LoadedRuntimeIdentity
 
@@ -77,7 +77,7 @@ def restart_command_environment(
 
     monkeypatch.setattr(
         _root_driver_commands,
-        "_launch_service_tree",
+        "launch_service_tree",
         lambda roster, *_a, **_kw: LaunchOutcome(roster, ()),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
@@ -86,7 +86,7 @@ def restart_command_environment(
         lambda *_a, **_kw: _probe_commands.ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
 
-    # _roles_or_none (stop/status/converge) + machine_role (cmd_start service
+    # roles_or_none (stop/status/converge) + machine_role (cmd_start service
     # resolution) both read the AVA_MACHINE_SERVE_* settings; the test env sets only
     # the agent-runner flag. Pin both to gateway so the default path is the
     # full-service gateway box, deterministic regardless of the dev host's
@@ -95,7 +95,7 @@ def restart_command_environment(
         assert machine is command_runtime.machine
         return frozenset({"gateway"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", roles)
     monkeypatch.setattr(command_runtime.machine, "role", lambda: frozenset({"gateway"}))
 
     # register_self goes to central DB UPSERT; test does not need real writes. cmd_start goes
@@ -115,7 +115,7 @@ def restart_command_environment(
     from cli.commands import _repo
     from cli.commands.lifecycle import root_driver
 
-    monkeypatch.setattr(_repo, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo, "ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
 
     # These call-shape tests use the suite's owner DB URL, not an enrolled
     # runner's bootstrap projection. Credential forwarding has its own tests
@@ -129,7 +129,7 @@ def restart_command_environment(
 @pytest.fixture(autouse=True)
 def root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """No command-layer test contacts or signals a native application root."""
-    monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    monkeypatch.setattr(_root_driver_commands, "root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_stop_commands, "reap_cluster_chrome", lambda: None)
     monkeypatch.setattr(_stop_commands, "force_close_terminals", lambda: None)

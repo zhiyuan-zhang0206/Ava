@@ -64,7 +64,7 @@ from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
 # Scan directories — only OUR code, never .venv / node_modules / vendored trees.
-_SCAN_DIRS = packages("application", "tooling")
+SCAN_DIRS = packages("application", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -167,9 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     # argv non-empty = explicit paths; empty = full scan, or the `--only` changed files
     # (the commit hook) under the same scope.
     targets = (
-        [Path(a).resolve() for a in argv]
-        if argv
-        else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
     )
     scope = lint_common.changed_scope(only, _REPO_ROOT)
 

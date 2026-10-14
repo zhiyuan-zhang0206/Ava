@@ -31,7 +31,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
-from ops.lifecycle.termination import _force_terminate_transaction
+from ops.lifecycle.termination import force_terminate_transaction
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.health_routes import cancel_turn_route
@@ -299,7 +299,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
                 await asyncio.sleep(0.01)
         with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
             _, _, _, command, _cutoff = await asyncio.to_thread(
-                _force_terminate_transaction, agent_id, pool, source="user"
+                force_terminate_transaction, agent_id, pool, source="user"
             )
         chat = insert(db_conn, agent_id)
         payload = json.dumps({"agent_id": agent_id, "command_id": command}).encode()
@@ -372,7 +372,7 @@ async def test_idle_force_only_original_live_host_can_observe(
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
         _, _, _, command, _cutoff = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user"
+            force_terminate_transaction, agent_id, pool, source="user"
         )
     assert not await original_host_force(
         aops_pool, agent_id, uuid4(), "claim-test", command_id=command, quiescent=True
@@ -420,7 +420,7 @@ async def test_a_force_its_original_host_never_observed_is_not_settled_by_a_succ
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
         _, _, _, command, _cutoff = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user"
+            force_terminate_transaction, agent_id, pool, source="user"
         )
 
     # The successor host that boots after the crash cannot observe the force.

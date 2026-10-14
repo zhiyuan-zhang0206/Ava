@@ -45,7 +45,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
-_SCAN_DIRS = packages("application", "templates", "examples")
+SCAN_DIRS = packages("application", "templates", "examples")
 _HOOKS_DIR = "agent/hooks/"
 _FACE_NAME = "agent_runtime.py"
 
@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         targets = [Path(a).resolve() for a in argv]
     else:
-        targets = lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+        targets = lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
 
     scope = lint_common.changed_scope(only, _REPO_ROOT)
 

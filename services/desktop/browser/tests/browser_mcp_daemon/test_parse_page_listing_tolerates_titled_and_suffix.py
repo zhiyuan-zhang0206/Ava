@@ -10,7 +10,7 @@ import pytest
 
 from base.config import settings
 from services.desktop.browser import page_lifecycle
-from services.desktop.browser.mcp_daemon import _text_of
+from services.desktop.browser.mcp_daemon import text_of
 from services.desktop.browser.page_lifecycle import parse_page_listing
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
     TitledListing,
@@ -171,7 +171,7 @@ async def test_renew_page_extends_deadline_and_sweep_keeps_it() -> None:
     res = await d.call_tool_for_agent("renew_page", {"ttl": 3600}, 7)
 
     assert not res.is_error
-    assert "renewed" in _text_of(res)
+    assert "renewed" in text_of(res)
     assert 3500 < ttl_remaining(d, 1) <= 3600
     assert await page_lifecycle.reap_expired_pages(d) == 0
     assert up.pages == {1: "x"}
@@ -198,7 +198,7 @@ async def test_renew_page_rejected_after_deadline() -> None:
     res = await d.call_tool_for_agent("renew_page", {"ttl": 60}, 7)
 
     assert res.is_error
-    assert "cannot be renewed" in _text_of(res)
+    assert "cannot be renewed" in text_of(res)
     assert await page_lifecycle.reap_expired_pages(d) == 1
 
 
@@ -212,17 +212,17 @@ async def test_renew_page_rejects_bad_arguments() -> None:
         assert res.is_error, bad
     res = await d.call_tool_for_agent("renew_page", {"ttl": 90_000}, 7)
     assert res.is_error
-    assert "at most 86400" in _text_of(res)
+    assert "at most 86400" in text_of(res)
     res = await d.call_tool_for_agent("renew_page", {"bogus": 1}, 7)
     assert res.is_error
-    assert "unexpected argument" in _text_of(res)
+    assert "unexpected argument" in text_of(res)
 
 
 async def test_renew_page_needs_current_page() -> None:
     d, _up = browser_daemon_with_fake_upstream()
     res = await d.call_tool_for_agent("renew_page", {"ttl": 60}, 7)
     assert res.is_error
-    assert "no current page" in _text_of(res)
+    assert "no current page" in text_of(res)
 
 
 async def test_renew_page_rejects_unmanaged_page() -> None:
@@ -235,7 +235,7 @@ async def test_renew_page_rejects_unmanaged_page() -> None:
     res = await d.call_tool_for_agent("renew_page", {"ttl": 60}, 7)
 
     assert res.is_error
-    assert "no page TTL" in _text_of(res)
+    assert "no page TTL" in text_of(res)
     assert 99 not in d.pages.ttl_deadlines
 
 
@@ -253,8 +253,8 @@ async def test_ttl_expiry_surfaces_native_no_page_red_green() -> None:
     after = await d.call_tool_for_agent("take_snapshot", {}, 7)
 
     assert after.is_error
-    assert "No page selected" in _text_of(after)  # the existing no-page path
-    assert "expired" not in _text_of(after).lower()  # never an invented wrapper
+    assert "No page selected" in text_of(after)  # the existing no-page path
+    assert "expired" not in text_of(after).lower()  # never an invented wrapper
 
     nav = await d.call_tool_for_agent("navigate_page", {"url": "https://example.com/app"}, 7)
     assert not nav.is_error
@@ -319,7 +319,7 @@ async def test_renew_page_requires_agent_identity_on_legacy_path() -> None:
     d, up = browser_daemon_with_fake_upstream()
     res, page = await d.call_tool("renew_page", {"ttl": 60}, None)
     assert res.is_error
-    assert "requires an agent identity" in _text_of(res)
+    assert "requires an agent identity" in text_of(res)
     assert page is None
     assert not up.calls
 

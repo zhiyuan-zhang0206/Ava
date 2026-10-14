@@ -16,7 +16,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A scratch source tree with one repo helper defined in `base/`."""
     monkeypatch.setattr(_lint, "_ROOT", tmp_path)
     monkeypatch.setattr(_lint, "DEFINITION_DIRS", ("base",))
-    monkeypatch.setattr(_lint, "_SCAN_DIRS", ("gateway",))
+    monkeypatch.setattr(_lint, "SCAN_DIRS", ("gateway",))
     monkeypatch.setattr(_lint, "REPO_BLOCKING_HELPERS", {"sync_op"})
     monkeypatch.setattr(_lint, "BLOCKING_NAMES", _lint.LIBRARY_BLOCKING_NAMES | {"sync_op"})
     _write(tmp_path, "base/ops.py", "def sync_op() -> None:\n    pass\n")

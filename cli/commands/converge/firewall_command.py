@@ -32,7 +32,7 @@ def cmd_firewall_status(*, machine: MachineIdentity) -> int:
     """`ava firewall status` — audit the host and diff the manifest (read-only)."""
     from cli.commands import _repo
 
-    roles = _repo._roles_or_none(machine=machine)
+    roles = _repo.roles_or_none(machine=machine)
     audit = audit_this_host(frozenset(roles or ()), machine=machine)
     print("→ firewall status")
     if audit.verdict is fw.FirewallVerdict.NOT_MACOS:
@@ -68,7 +68,7 @@ def cmd_firewall_sync(*, machine: MachineIdentity) -> int:
     """
     from cli.commands import _repo
 
-    roles = _repo._roles_or_none(machine=machine)
+    roles = _repo.roles_or_none(machine=machine)
     audit = audit_this_host(frozenset(roles or ()), machine=machine)
     if audit.verdict not in (fw.FirewallVerdict.ALLOWED, fw.FirewallVerdict.RULES_MISSING):
         print(f"→ firewall sync: nothing to do ({audit.detail})")

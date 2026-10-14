@@ -41,7 +41,7 @@ class _Faults:
     injected: bool = False
 
 
-def _install_faults(patch: pytest.MonkeyPatch, agent: int, site: str) -> _Faults:
+def install_faults(patch: pytest.MonkeyPatch, agent: int, site: str) -> _Faults:
     """Faults wrap actual PostgreSQL flush/transactions, never fake production storage."""
     faults = _Faults()
     actual_invoke, actual_flush, actual_tx = (
@@ -148,7 +148,7 @@ async def test_original_invocation_stops_once_after_database_fault(
             clock_factory=configured_policy().clock_factory,
             machine=machine_identity,
         )
-        faults = _install_faults(monkeypatch, agent, site)
+        faults = install_faults(monkeypatch, agent, site)
         running = asyncio.create_task(
             host._invoke_until_done(
                 agent,

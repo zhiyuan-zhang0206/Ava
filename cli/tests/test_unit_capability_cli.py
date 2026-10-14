@@ -115,7 +115,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
 
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    monkeypatch.setattr(start_intent, "_checkout", lambda: checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: checkout)
 
     bearers: list[object] = []
 

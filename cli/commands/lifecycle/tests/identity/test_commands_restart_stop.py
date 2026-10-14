@@ -33,10 +33,10 @@ from cli.commands.lifecycle.tests.identity.restart_inputs import (
 )
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_fakes import (
-    _FakeResponse,
-    _FakeResult,
-    _git_aware,
-    _patch_gateway_http,
+    FakeResponse,
+    FakeResult,
+    git_aware,
+    patch_gateway_http,
 )
 from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -66,7 +66,7 @@ def test_cmd_restart_succeeds_non_interactively(
     monkeypatch.setattr(
         subprocess,
         "run",
-        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
+        git_aware(lambda *_a, **_kw: FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_stop_commands, "do_stop", MagicMock(return_value=0))
 
@@ -661,7 +661,7 @@ def test_cmd_stop_stop_browser_flag_threads_through(
         return 0
 
     monkeypatch.setattr(_stop_mod, "do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_mod, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(_stop_mod, "repo_root", lambda: tmp_path)
 
     _stop_mod.cmd_stop(
         require_confirmation=False,
@@ -688,8 +688,8 @@ def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> 
         del machine
         return frozenset({"gateway", "agent-runner"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", roles)
-    monkeypatch.setattr(_stop_commands, "_repo_root", lambda: Path("/repo"))
+    monkeypatch.setattr(_repo_commands, "roles_or_none", roles)
+    monkeypatch.setattr(_stop_commands, "repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(
         bringup,
         "stop_cluster_instance",
@@ -711,7 +711,7 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     identifies THIS unit so a co-located peer keeps its caps."""
     from base.paths import ava_home
 
-    _patch_gateway_http(monkeypatch)
+    patch_gateway_http(monkeypatch)
     command_runtime.machine.set(name="test-host")
     events: list[str] = []
     calls: list[tuple[str, dict]] = []
@@ -719,7 +719,7 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     def _fake_post(url, **kwargs):
         events.append("announce")
         calls.append((url, kwargs))  # pyright: ignore[reportUnknownMemberType]
-        return _FakeResponse({"machine": "test-host"})
+        return FakeResponse({"machine": "test-host"})
 
     monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
     _patch_stop_teardown(monkeypatch, events)
@@ -748,7 +748,7 @@ def test_cmd_stop_aborted_confirm_does_not_announce(
     """Declining the confirm prompt must leave the roster untouched: the stopping
     announce stamps `machines.stopped_at`, and only the next `ava start` clears
     it — an announce fired before the gate would mark a running host 'stopped'."""
-    _patch_gateway_http(monkeypatch)
+    patch_gateway_http(monkeypatch)
     command_runtime.machine.set(name="test-host")
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")  # pyright: ignore[reportUnknownArgumentType]
     events: list[str] = []
@@ -776,7 +776,7 @@ def test_cmd_stop_proceeds_when_announce_fails(
 ) -> None:
     """If the stopping announce can't reach the gateway, `ava stop` logs and still
     tears down — the announce is best-effort, never a blocker."""
-    _patch_gateway_http(monkeypatch)
+    patch_gateway_http(monkeypatch)
     command_runtime.machine.set(name="runner-a")
 
     def _boom(*_a, **_kw):

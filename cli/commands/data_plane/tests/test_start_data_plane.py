@@ -64,7 +64,7 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     monkeypatch.setattr(bringup, "prepare_memory_vectors", record("memory-vectors"))
     monkeypatch.setattr(bringup, "admin_session", admin)
     monkeypatch.setattr(bringup, "db_endpoint", lambda: "postgresql://ava@127.0.0.1:6433/ava")
-    monkeypatch.setattr(bringup, "_ensure_pooler", record("pooler"))
+    monkeypatch.setattr(bringup, "ensure_pooler", record("pooler"))
     monkeypatch.setattr(bringup, "prove_generation_logins", record("prove-logins"))
     monkeypatch.setattr(bringup, "adopt_gateway_login", record("adopt"))
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs

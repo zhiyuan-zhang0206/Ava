@@ -77,7 +77,7 @@ def test_relay_rebuilds_listener_after_accept_failure(
 
     assert opened == [("10.64.0.7", 6380), ("10.64.0.7", 6380)]
     assert broken.closed
-    assert sleeps == [relay._INITIAL_REBIND_DELAY_S]
+    assert sleeps == [relay.INITIAL_REBIND_DELAY_S]
     assert "descriptor is closed; rebuilding listener" in capsys.readouterr().out
 
 
