@@ -161,8 +161,7 @@ def isolated_cluster(
 
 @pytest.fixture
 def data_plane_config(isolated_cluster: tuple[int, int]) -> DataPlaneConfig:
-    """What the commands read in this isolated cluster: the production mapping over the
-    settings the fixture pinned (base.cluster still reads those too)."""
+    """The command snapshot after the isolated cluster pins its configuration."""
     return data_plane_config_from_settings()
 
 
@@ -282,11 +281,11 @@ def test_gateway_cold_start_restores_redis_url_identity(
     operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
-    data_plane_config: DataPlaneConfig,
 ) -> None:
     """Official start restores Redis's own ACL after a real RDB-only shutdown."""
     pg_port, redis_port = isolated_cluster
     home = _gateway_config(monkeypatch, isolated_cluster)
+    data_plane_config = data_plane_config_from_settings()
     _born_intent(home)
     assert (
         ensure_gateway_data_plane(
