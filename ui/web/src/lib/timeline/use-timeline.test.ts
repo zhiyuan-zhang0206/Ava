@@ -2233,3 +2233,21 @@ describe("compact retention request ownership", () => {
     }
   });
 });
+
+
+describe("latest-message refresh lifecycle", () => {
+  it("exposes the shared reconcile request as fetching until the new tail lands", async () => {
+    queryClient.setQueryData(["timeline", 7], tlResp([snapshotItem({ item_id: "1.0", payload: "Cached reply" })]));
+    let finish!: (snapshot: ReturnType<typeof composedSnapshot>) => void;
+    vi.mocked(api.getConversationSnapshot).mockReset().mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useTimeline(7, vi.fn()), { wrapper });
+    expect(result.current.isFetching).toBe(false);
+    pushConnectionEvent({ type: "open" });
+    await waitFor(() => expect(api.getConversationSnapshot).toHaveBeenCalledOnce());
+    expect(result.current.isFetching).toBe(true);
+    expect(result.current.items[0].payload).toBe("Cached reply");
+    act(() => { finish(composedSnapshot(tlResp([snapshotItem({ item_id: "2.0", payload: "New reply" })]))); });
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    expect(result.current.items.some((item) => item.payload === "New reply")).toBe(true);
+  });
+});
