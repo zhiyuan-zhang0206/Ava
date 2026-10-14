@@ -57,8 +57,10 @@ non-alive count: failures and unknown results both extend the streak, and only a
 healthy sample resets it. Every non-alive sample emits `root_diagnostic` at
 WARNING (the observability rule's pending period carries the debounce) and the
 first healthy sample after a streak logs the recovery at INFO. Alert reporters
-run only on fresh, non-unavailable evidence through the same bounded worker
-slot. An alert backend that hangs cannot create concurrent reports or
+run only on fresh, non-unavailable evidence, inside the same bounded worker pass
+that took the sample they act on — one admission per round, so a reporter never
+races a settling worker. An alert backend that hangs retains that check's single
+worker exactly like a hung probe and cannot create concurrent reports or
 diagnostic workers.
 
 Readiness of native LGTM services belongs to their actual root service specs.

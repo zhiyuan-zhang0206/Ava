@@ -192,6 +192,43 @@ class TestServerClientRoundtrip:
         finally:
             await server.close()
 
+    @pytest.mark.parametrize(
+        "refusal",
+        [
+            RuntimeError("unit worker did not stop within its 10s window (pid 30713)"),
+            ExceptionGroup(
+                "root restart refused to stop 2 unit(s)",
+                [RuntimeError("unit worker did not stop within its 10s window (pid 30713)")] * 2,
+            ),
+        ],
+        ids=["refused-stop", "refused-siblings"],
+    )
+    async def test_a_failing_handler_answers_and_the_server_survives(
+        self, short_tmp: Path, refusal: BaseException
+    ) -> None:
+        """A refused restart — one stop refusal or a sibling ExceptionGroup — must
+        reach the operator as an error line and never take the server down with
+        the handler. The 10-14 refusal that killed root escaped through the
+        health path; this pins the transport guard beside it."""
+        sock_path = short_tmp / "root.sock"
+
+        async def refusing_handler(request: RequestPayload) -> ResponsePayload:
+            if request["verb"] == "restart":
+                raise refusal
+            return await _echo_handler(request)
+
+        server = ControlServer(sock_path, refusing_handler)
+        await server.start()
+        try:
+            client = RootClient(sock_path, timeout=5.0)
+            refused = await asyncio.to_thread(client.restart, "worker")
+            assert refused["ok"] is False
+            assert refused.get("code") == ErrorCode.INTERNAL.value
+            serving = await asyncio.to_thread(client.status)
+            assert serving["ok"] is True
+        finally:
+            await server.close()
+
     def test_unreachable_socket_raises(self, short_tmp: Path) -> None:
         client = RootClient(short_tmp / "nobody.sock", timeout=2.0)
         with pytest.raises(RootClientError, match="unreachable"):

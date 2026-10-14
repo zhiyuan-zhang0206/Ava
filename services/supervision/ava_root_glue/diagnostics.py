@@ -91,24 +91,43 @@ class DiagnosticMonitor:
         if time.monotonic() < state.next_due:
             return
         state.next_due = time.monotonic() + check.interval_s
-        result = await state.runner.observe(check.probe, check.timeout_s)
+        result = await state.runner.observe(self._sample(check), check.timeout_s)
         state.result = result
         state.sampled_at = time.time()
         recovered = result.alive and state.failures > 0
         state.failures = state.failures + 1 if not result.alive else 0
         self._report_sample(check, state, result, recovered=recovered)
-        if check.report is not None and result.verdict != ProbeVerdict.UNAVAILABLE:
-            # The result is fresh. Reporting is bounded through the SAME runner,
-            # so an alert backend that hangs also prevents overlapping samples.
-            reporter = check.report
 
-            def report() -> DaemonProbe:
-                reporter(result)
-                return DaemonProbe.up("diagnostic alert recorded")
+    @staticmethod
+    def _sample(check: Diagnostic) -> Callable[[], DaemonProbe]:
+        """The check's one bounded worker pass: its probe, then its reporter.
 
-            reported = await state.runner.observe(report, check.timeout_s)
-            if not reported.alive:
-                _log.error("[diagnostic] %s reporting unavailable: %s", check.name, reported.detail)
+        The reporter runs inside the same observation as the sample it acts on.
+        It therefore needs no admission of its own — a settling worker is met
+        once, not twice — and an alert backend that hangs retains this check's
+        single worker slot exactly like a hung probe: later rounds observe the
+        retained worker instead of starting an overlapping sample.
+        """
+        reporter = check.report
+        if reporter is None:
+            return check.probe
+
+        def sample_and_report() -> DaemonProbe:
+            result = check.probe()
+            if isinstance(result, DaemonProbe) and result.verdict != ProbeVerdict.UNAVAILABLE:
+                try:
+                    reporter(result)
+                except Exception as exc:
+                    # The fresh sample stays the verdict; only the report failed.
+                    _log.error(
+                        "[diagnostic] %s reporting failed (%s: %s)",
+                        check.name,
+                        type(exc).__name__,
+                        exc,
+                    )
+            return result
+
+        return sample_and_report
 
     @staticmethod
     def _report_sample(
