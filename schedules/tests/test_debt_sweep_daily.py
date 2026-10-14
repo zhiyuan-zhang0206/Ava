@@ -207,11 +207,12 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     assert len(prompts) == 1
     assert "mechanical scan failed: exit 1" in prompts[0]
     assert (
-        [(e.category, e.event_name, e.source, e.attributes) for e in emitted_events]
+        [(e.category, e.event_name, e.level, e.source, e.attributes) for e in emitted_events]
         == [
             (
                 "telemetry",
                 "debt_sweep_daily",
+                "info",
                 "system",
                 {
                     "day": "2026-09-22",  # time-bomb-ok: derived from the explicit slot argument (Asia/Shanghai), no real-clock window

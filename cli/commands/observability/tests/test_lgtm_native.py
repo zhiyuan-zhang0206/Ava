@@ -21,7 +21,7 @@ from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_h
 from base.native_process.os_platform import Platform
 from base.packages import dashboard_supply
 from base.sessions.tests.refuse_helper import refuse_helper
-from base.telemetry import EventPipeline
+from base.telemetry import DrainStatus, Event, EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -571,12 +571,18 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
     monkeypatch.setattr(dashboard_supply, "render_dashboard_json", broken_render)
     emitted_events.clear()  # the first render above reported nothing; only the failing one is judged
 
-    lgtm_native.render_provisioning(
-        repo, native, database_factory=operator_database, producer=emitted_events.producer
-    )
+    written: list[Event] = []
+    pipeline = EventPipeline(writer=written.extend)
+    try:
+        lgtm_native.render_provisioning(
+            repo, native, database_factory=operator_database, producer=lambda: pipeline
+        )
+    finally:
+        assert pipeline.stop().status is DrainStatus.COMPLETED
 
     assert dest.read_text(encoding="utf-8") == before
-    [event] = emitted_events
+    assert len(emitted_events) == 0
+    [event] = written
     assert (event.category, event.event_name, event.level, event.source) == (
         "telemetry",
         "lgtm_dashboard_render_failed",

@@ -62,9 +62,9 @@ def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
 
 def _maintenance_events(
     events: EmittedEvents,
-) -> list[tuple[str, str, int | None, str, dict[str, Any]]]:
-    """What the maintenance daemon emitted: category, name, agent, source and attributes."""
-    return [(e.category, e.event_name, e.agent_id, e.source, e.attributes) for e in events]
+) -> list[tuple[str, str, str, int | None, str, dict[str, Any]]]:
+    """What the maintenance daemon emitted: category, name, level, agent, source and attributes."""
+    return [(e.category, e.event_name, e.level, e.agent_id, e.source, e.attributes) for e in events]
 
 
 def _make_agent(db: psycopg.Connection, *, status: str = "running") -> int:
@@ -210,6 +210,7 @@ class TestEscalate:
             (
                 "telemetry",
                 "task_escalation",
+                "info",
                 delegator,
                 "system",
                 {
@@ -349,6 +350,7 @@ class TestEscalate:
             (
                 "telemetry",
                 "task_escalation",
+                "info",
                 owner,
                 "system",
                 {"owner_id": owner, "task_count": 1, "task_ids": [child], "leg": "user"},
