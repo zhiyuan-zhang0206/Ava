@@ -140,7 +140,7 @@ def _endpoint(url: str, what: str) -> str:
     return f"{parts.hostname}:{parts.port}"
 
 
-def _postgres_receiver_block(ava_home: Path) -> str:
+def _postgres_receiver_block(ava_home: Path, db_url: str) -> str:
     """The receiver for this home's own Postgres: its socket, the monitoring role.
 
     Everything comes from the home's registry record and identity; nothing is
@@ -161,7 +161,7 @@ def _postgres_receiver_block(ava_home: Path) -> str:
         pg_endpoint=_yaml_quote(f"{socket_dir}:{record.ports['postgres']}"),
         pg_user=_yaml_quote(MONITOR_ROLE),
         pg_placeholder=_yaml_quote(PEER_PLACEHOLDER),
-        pg_database=_yaml_quote(db_identity()),
+        pg_database=_yaml_quote(db_identity(db_url)),
     )
 
 
@@ -186,11 +186,11 @@ def _data_plane_receivers(roles: MachineRoles | None, ava_home: Path) -> tuple[s
     redis_url = settings.data_plane.redis_url
     from base.cluster import redis_admin_url
 
-    redis_admin = redis_admin_url()
+    redis_admin = redis_admin_url(redis_url, settings.data_plane.redis_admin_password)
     blocks: list[str] = []
     receivers: list[str] = []
     if settings.observability.telemetry_otlp_enabled and not settings.data_plane.is_remote:
-        blocks.append(_postgres_receiver_block(ava_home))
+        blocks.append(_postgres_receiver_block(ava_home, settings.data_plane.db_url))
         receivers.append("postgresql")
     # Redis always authenticates with its admin password and stays observable
     # in every posture.

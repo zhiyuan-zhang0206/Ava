@@ -177,7 +177,10 @@ def dump_source(db: Database, *, is_remote_reader: Callable[[], bool]) -> str:
     """
     if is_remote_reader():
         return db.direct_url()
-    return local_owner_authority().verified_conninfo()
+    from base.config import settings
+
+    db_url = settings.data_plane.db_url  # ambient: S
+    return local_owner_authority(db_url, remote_plane=False).verified_conninfo()
 
 
 def _passwordless_conninfo(db_url: str) -> tuple[str, str]:
