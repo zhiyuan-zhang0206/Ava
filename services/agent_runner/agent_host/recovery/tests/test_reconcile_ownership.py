@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import consume_claimed_inbounds
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -19,7 +20,6 @@ from services.agent_runner.agent_host.recovery.tests.test_reconcile_after_abort 
     row_statuses,
 )
 from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import admit
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _replace_owner(conn: psycopg.Connection[Any], agent: int) -> None:

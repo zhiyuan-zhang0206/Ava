@@ -17,9 +17,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.app import app
 from tests.fixtures.gateway_config import spawn_via_http
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _upload(

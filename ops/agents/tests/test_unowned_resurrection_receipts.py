@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from base.agents.birth.spawn import create_agent_row
 from base.agents.incarnation.resources import ResourceEvidenceError
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -28,7 +29,6 @@ from tests.components.ops.test_resurrection_admission import (
     restarted,
 )
 from tests.components.ops.test_resurrection_admission import wakes as wakes
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(

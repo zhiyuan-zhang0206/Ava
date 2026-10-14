@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -27,7 +28,6 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
 from gateway.app import app
 from tests.fixtures.gateway_config import spawn_via_http
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

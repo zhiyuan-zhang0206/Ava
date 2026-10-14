@@ -11,12 +11,12 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.loop_health import LoopProgress
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from services.agent_runner.page_server import daemon
 from services.agent_runner.page_server.tests.slices import page_server_config
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("quiesced", [True, False])

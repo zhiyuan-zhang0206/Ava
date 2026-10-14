@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -13,7 +14,6 @@ from services.derived.memory_indexer import daemon
 from services.derived.memory_search.tests.memory_indexer.test_reconcile_embed_error_truncates_and_returns_false import (
     owned_config_environment as owned_config_environment,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.usefixtures("owned_config_environment")

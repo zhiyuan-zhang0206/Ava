@@ -12,6 +12,7 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.daemon.health import LoopProgress
 from base.daemon.round_loop import CONSECUTIVE_ROUND_FAILURE_LIMIT, RoundFailureLimitError
@@ -20,7 +21,6 @@ from services.upkeep.events_maintenance.tests.slices import (
     events_maintenance_config,
     events_maintenance_db,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _FAKE_POOL: Any = object()
 

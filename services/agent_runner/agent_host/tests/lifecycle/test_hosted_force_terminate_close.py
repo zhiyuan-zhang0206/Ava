@@ -33,6 +33,7 @@ from base.agents.context import AvaContext
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -43,7 +44,6 @@ from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 from tests.fixtures.pin_agent import exec_context as ctx_of
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _FORCE_ERROR = "Native runtime no longer owns this agent"
 

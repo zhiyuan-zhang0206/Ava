@@ -15,6 +15,7 @@ import base.log as base_log
 from base import telemetry
 from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import DaemonProbe
 from base.host import proc
 from base.native_process.loaded_commit import LoadedCommit
@@ -30,7 +31,6 @@ from services.supervision.ava_root_glue.diagnostics import (
     DiagnosticMonitor,
     RootHealthRounds,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class _EventLog:

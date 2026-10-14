@@ -18,6 +18,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -28,7 +29,6 @@ from services.wake.delivery_watchdog.daemon import (
     scan_once,
     select_stale_pending,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _THRESHOLD_S = 30.0
 _DISPATCH_THRESHOLD_S = 1.0

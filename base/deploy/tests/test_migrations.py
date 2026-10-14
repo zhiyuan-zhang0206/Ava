@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.deploy.schema import migration_layout
 from base.deploy.schema.migrations import (
@@ -33,7 +34,6 @@ from base.deploy.schema.tests.migration_support import (
 from base.deploy.schema.tests.migration_support import (
     reset_schema_migrations_state as reset_schema_migrations_state,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_required_set_is_just_baseline_with_empty_migrations(

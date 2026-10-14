@@ -11,9 +11,9 @@ import pytest
 
 from base.cluster import port_preflight
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.host import proc
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @dataclass(frozen=True)

@@ -12,13 +12,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from gateway.agents import creation as agent_creation
 from gateway.agents.task_assignment import router as task_assignments
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 PATH = "/api/keyed/v1/task-assignments"
 HEADERS = {"Idempotency-Key": "compound", "Idempotency-Scope": "principal-v1"}

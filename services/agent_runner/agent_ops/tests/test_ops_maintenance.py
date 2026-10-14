@@ -17,6 +17,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.daemon.health import stop_health_server
 from base.daemon.http_transport import start_daemon_http
@@ -32,7 +33,6 @@ from services.agent_runner.agent_ops import boot, daemon, health
 from services.agent_runner.agent_ops import maintenance as activity
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(

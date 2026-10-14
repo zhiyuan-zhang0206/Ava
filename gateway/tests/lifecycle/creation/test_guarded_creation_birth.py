@@ -14,6 +14,7 @@ from psycopg.types.json import Jsonb
 from base.agents.birth.creation_identity import creation_request_hash, find_creation
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.agents import creation as agent_creation
 from gateway.app import app
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
@@ -21,7 +22,6 @@ from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, PATH
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 BODY = {"machine": "local-test", "prompt": "one goal", "prompt_source": "user"}

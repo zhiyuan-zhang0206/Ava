@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -19,7 +20,6 @@ from base.packages.plugin_providers import build_model_catalog
 from gateway.app import app
 from gateway.tests.test_agents_endpoints import inbound_rows
 from tests.fixtures.gateway_config import spawn_via_http
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent_id: int) -> None:

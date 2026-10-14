@@ -13,10 +13,10 @@ from agent.state import AgentState
 from agent.tests.claim.claim_status_support import committed_publishes, compact_tail
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_claim_compact_summary_alone_does_not_publish_committed(

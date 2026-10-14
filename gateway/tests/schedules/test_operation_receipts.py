@@ -10,11 +10,11 @@ from fastapi.testclient import TestClient
 import base.db
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
 from gateway.app import app
 from gateway.schedules import router
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _create(client: TestClient) -> int:

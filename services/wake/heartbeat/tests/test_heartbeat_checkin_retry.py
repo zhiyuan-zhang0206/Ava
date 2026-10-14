@@ -10,6 +10,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LoopProgress
@@ -20,7 +21,6 @@ from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat import JITTER_SPAN_S
 from services.wake.heartbeat import daemon as heartbeat_daemon
 from services.wake.heartbeat.tests.machine_probe_setup import pool as pool
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.usefixtures(pool.__name__)

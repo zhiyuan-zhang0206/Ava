@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
     record_hourly_notice,
@@ -17,7 +18,6 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from services.wake.heartbeat import completion_digest
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _agent(db_conn: psycopg.Connection) -> int:

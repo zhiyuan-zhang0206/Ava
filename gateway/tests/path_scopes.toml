@@ -4,7 +4,7 @@
     ".",
 ]
 "base.paths.tests.homes" = ["."]
-"tests.fixtures.unit.identity" = ["."]
+"base.cluster.machine.tests.identity" = ["."]
 "base.packages.tests.model_catalog" = [
     "test_agents_endpoints.py",
 ]

@@ -14,8 +14,8 @@ from agent import db
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _session(status: str = "active", **values: Any) -> dict[str, Any]:

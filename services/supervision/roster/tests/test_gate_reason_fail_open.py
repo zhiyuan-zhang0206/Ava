@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from services.supervision.roster.spec import ServiceSpec, gate_reason
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _spec_with_gate(gate: Callable[[], str | None] | None) -> ServiceSpec:

@@ -17,6 +17,7 @@ from base import telemetry
 from base.agents.context import AvaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -26,7 +27,6 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.telemetry import audit_events
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _overflow() -> FatalProviderError:

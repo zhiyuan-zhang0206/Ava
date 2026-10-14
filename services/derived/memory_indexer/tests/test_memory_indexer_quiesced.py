@@ -11,10 +11,10 @@ from unittest.mock import Mock
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import Liveness
 from base.deploy.maintenance import admission
 from services.derived.memory_indexer import daemon
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("quiesced", [True, False])

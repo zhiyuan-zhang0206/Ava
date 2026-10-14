@@ -9,10 +9,10 @@ import pytest
 
 import gateway.cluster.status as status_mod
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from gateway.cluster import roster_probe
 from gateway.cluster.process_boot import LOADED_IMAGE
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

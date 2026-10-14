@@ -14,6 +14,7 @@ import pytest
 
 from base import db
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import start_serving
@@ -27,7 +28,6 @@ from base.sessions import backend
 from ops import cluster_status
 from ops.cluster_status import schema_mismatch
 from ops.rpc_schemas import SessionInfo
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _RESOURCE = ResourceSample(
     ts=1.0,

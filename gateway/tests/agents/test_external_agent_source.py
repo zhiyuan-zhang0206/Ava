@@ -27,6 +27,7 @@ from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.agents.messages.envelope import EnvelopeReadInputs
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
@@ -36,7 +37,6 @@ from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
 from gateway.tests.agents.gateway_auth import without_credentials
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)
 _SECRET = "external-agent-source-secret"  # noqa: S105 -- isolated test credential

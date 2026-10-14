@@ -43,11 +43,11 @@ from agent.tests.claim.claim_status_support import running_agent as running_agen
 from base.agents.context import AvaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ExtensionRegistry
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # Almost all claim tests are short-path dispatch: the inbound is INSERTed before
 # claim_node runs, so its first SELECT gets the batch — pure DB side-effect +

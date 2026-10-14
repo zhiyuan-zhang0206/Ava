@@ -16,10 +16,10 @@ from base import cluster
 from base.cluster import ClusterPorts
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.record import ClusterRecord
 from base.host.db_authority import delivery
 from services.supervision.ava_root_glue.diagnostic_probes import pgbouncer
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize(

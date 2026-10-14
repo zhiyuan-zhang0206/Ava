@@ -13,6 +13,7 @@ import services.agent_runner.agent_host.host as agent_host_host
 from agent import process_boot
 from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -22,7 +23,6 @@ from base.telemetry.delivery.receipts import Event
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def event() -> Event:

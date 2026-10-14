@@ -16,6 +16,7 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
 )
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -27,7 +28,6 @@ from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import admit as _admit
 from tests.components.base.poll_until import poll_until_async
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _accept_model(**_kwargs: object) -> None:

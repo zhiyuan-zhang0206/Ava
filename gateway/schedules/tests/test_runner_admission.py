@@ -3,8 +3,8 @@
 import psycopg
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.schedules.tests.runner_inputs import run_schedule as run
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_stale_runner_revision_cannot_execute_newer_script(

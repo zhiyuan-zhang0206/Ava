@@ -17,6 +17,7 @@ import pytest
 import base.sessions.backend as sessions_backend
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database, create_agent
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
@@ -27,7 +28,6 @@ from base.events.live.bus import EventBus
 from ops import agent_pause
 from ops.cluster_status import pause as cluster_pause
 from ops.cluster_status.pause import unpause_local_cluster as _real_unpause_local_cluster
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

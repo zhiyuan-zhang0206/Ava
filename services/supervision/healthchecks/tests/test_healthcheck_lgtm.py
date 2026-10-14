@@ -15,11 +15,11 @@ import pytest
 
 from base import paths
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.native_process.root_control import client
 from services.supervision.healthchecks import lgtm as hc
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class _Response:

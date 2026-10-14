@@ -10,10 +10,10 @@ derives its stop window from.
 from __future__ import annotations
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from services.agent_runner.pty_sessions import shutdown_budget
 from services.supervision import roster
 from services.supervision.roster import service_spec, spec
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _spec() -> service_spec.ServiceSpec:

@@ -15,12 +15,12 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineIdentity, MachineRole
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.endpoints import ServiceEndpoints
 from base.host.system import probes
 from services.supervision import roster
 from services.supervision.healthchecks import lgtm
 from services.supervision.roster import healthz, service_spec, spec
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _GATEWAY_SESSIONS = {
     "gate",

@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.incarnation import hosted_force
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -30,7 +31,6 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     wired as wired,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestPoolIsolation:

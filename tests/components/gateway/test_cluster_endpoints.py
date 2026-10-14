@@ -20,6 +20,7 @@ import gateway.app as gateway_app
 import gateway.cluster.status as gateway_cluster_status
 from base import cluster
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -39,7 +40,6 @@ from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.tests.agents.gateway_auth import without_credentials
 from ops import agent_pause, cluster_status
 from ops.cluster_status import pause as cluster_pause
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

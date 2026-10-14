@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
@@ -21,7 +22,6 @@ from base.host.env import dotenv_file
 from base.packages.plugin_config_admin import panel_metadata
 from ops import host_config as ops
 from ops.host_config import config_audit_read_op, config_read_op, config_write_op
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # ---------------------------------------------------------------------------
 # Fixtures

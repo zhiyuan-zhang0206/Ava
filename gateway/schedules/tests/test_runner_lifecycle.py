@@ -14,13 +14,13 @@ import pytest
 
 from ava.sdk_surface import process_context
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules.tests.runner_inputs import run_schedule as run
 from services.wake.schedule_manager import engine as sr
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _log_text(records: list[dict[str, Any]]) -> str:

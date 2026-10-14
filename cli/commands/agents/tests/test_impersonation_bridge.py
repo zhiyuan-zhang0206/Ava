@@ -20,10 +20,10 @@ import pytest
 import base.agents.impersonation as agents_impersonation
 from base.agents.impersonation.status import ImpersonationStatus
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.events.live.bus import EventBus
 from cli.commands.agents import impersonation_relay as relay
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
 THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")

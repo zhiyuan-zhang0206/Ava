@@ -34,13 +34,13 @@ from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import MachineIdentitySetter
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.extensions import install_registry
 from base.paths import skills_dir
-from tests.fixtures.unit.identity import MachineIdentitySetter
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

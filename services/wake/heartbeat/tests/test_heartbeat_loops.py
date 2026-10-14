@@ -14,6 +14,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
@@ -22,7 +23,6 @@ from base.db.tests.fakes import patch_database
 from base.events.live.bus import EventBus
 from base.native_process.loaded_commit import LoadedCommit
 from services.wake.heartbeat import completion_digest, daemon
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _patch_run(

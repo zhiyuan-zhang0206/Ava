@@ -64,7 +64,7 @@ import ava
 from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
-from tests.fixtures.unit.identity import machine_identity as machine_identity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from tests.fixtures.unit.sdk import sdk_environment as sdk_environment
 from tests.fixtures.unit.sdk import sdk_identity as sdk_identity
 

@@ -10,6 +10,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -19,7 +20,6 @@ from base.packages.plugin_providers import build_model_catalog
 from ops import lifecycle
 from ops.lifecycle import launch
 from ops.rpc_schemas import LaunchAgentRequest
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.asyncio

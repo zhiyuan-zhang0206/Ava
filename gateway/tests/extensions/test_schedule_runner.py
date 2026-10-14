@@ -18,12 +18,12 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules.tests.runner_inputs import run_schedule as run
 from services.wake.schedule_manager.engine import script_filename
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture(autouse=True)
