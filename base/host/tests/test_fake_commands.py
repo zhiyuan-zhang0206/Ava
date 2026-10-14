@@ -7,7 +7,7 @@ import subprocess
 import pytest
 
 from base.host.proc import CommandRunner
-from base.host.tests.fake_commands import FakeCommands, Reply
+from base.host.tests.fake_commands import DARWIN_ARM64, LINUX_X86, FakeCommands, Reply, fake_host
 
 
 def test_it_is_a_command_runner_that_records_each_call() -> None:
@@ -88,3 +88,27 @@ def test_the_completed_process_carries_the_argv_and_the_exit_code() -> None:
 def test_a_route_without_replies_is_a_test_bug() -> None:
     with pytest.raises(ValueError, match="at least one reply"):
         FakeCommands().on("x")
+
+
+def test_a_predicate_selects_commands_whose_program_is_not_known_up_front() -> None:
+    commands = FakeCommands()
+    commands.on(lambda argv: "-verify-config" in argv, Reply(stdout="verified"), repeat=True)
+    done = commands(
+        ["/home/ava/lgtm/loki", "-config.file=x", "-verify-config"],
+        timeout=30,
+        capture_output=True,
+        text=True,
+    )
+    assert done.stdout == "verified"
+    with pytest.raises(AssertionError, match="unscripted"):
+        commands(["/home/ava/lgtm/loki", "-version"], timeout=30)
+
+
+def test_a_fake_host_finds_only_the_programs_it_was_given_and_runs_nothing_unscripted() -> None:
+    host = fake_host(programs={"gh": "/usr/bin/gh"}, platform=DARWIN_ARM64, uid=501)
+    assert host.which("gh") == "/usr/bin/gh"
+    assert host.which("lsof") is None
+    assert (host.platform, host.uid) == (DARWIN_ARM64, 501)
+    with pytest.raises(AssertionError, match="unscripted"):
+        host.run(["gh", "auth", "status"], timeout=5)
+    assert fake_host().platform == LINUX_X86

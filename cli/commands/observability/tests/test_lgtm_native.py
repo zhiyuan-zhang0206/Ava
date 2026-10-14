@@ -16,28 +16,20 @@ from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
+from base.host.system.hostport import Host, Platform
+from base.host.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_host
 from base.packages import dashboard_supply
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from cli.commands.observability import lgtm_native
+from cli.commands.observability.tests.lgtm_inputs import darwin_host as darwin_host
+from cli.commands.observability.tests.lgtm_inputs import verifying_host
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
-
-
-def _skip_binary_verification(_home: Path) -> None:
-    """Render fixtures do not install native executable assets."""
-
-
-@pytest.fixture(autouse=True)
-def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These existing lifecycle cases exercise the Darwin implementation."""
-    monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(lgtm_native, "verify_loki", _skip_binary_verification)
 
 
 def _repo() -> Path:
@@ -50,7 +42,7 @@ def _native_dir(home: Path) -> Path:
 
 def _mark_current(home: Path) -> None:
     native_dir = _native_dir(home)
-    for name, spec in lgtm_native.native_versions(_repo()).items():
+    for name, spec in lgtm_native.native_versions(_repo(), platform=DARWIN_ARM64).items():
         (native_dir / f"version-{name}").parent.mkdir(parents=True, exist_ok=True)
         (native_dir / f"version-{name}").write_text(spec["version"] + "\n", encoding="utf-8")
 
@@ -115,14 +107,16 @@ def test_ensure_skips_download_when_markers_match(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
 
-    def fail_download(_name: str, _version: str, _asset: dict[str, str], _native_dir: Path) -> None:
+    def fail_download(
+        _name: str, _version: str, _asset: dict[str, str], _native_dir: Path, *, tag: str
+    ) -> None:
         pytest.fail("current marker must skip the download")
 
     monkeypatch.setattr(
@@ -138,6 +132,7 @@ def test_ensure_skips_download_when_markers_match(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=darwin_host,
     )
 
     assert (home / "lgtm/native/config/loki.yaml").exists()
@@ -148,17 +143,17 @@ def test_ensure_downloads_when_a_marker_is_stale(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
     (_native_dir(home) / "version-loki").write_text("old\n", encoding="utf-8")
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     downloads: list[str] = []
 
     def record_download(
-        name: str, _version: str, _asset: dict[str, str], _native_dir: Path
+        name: str, _version: str, _asset: dict[str, str], _native_dir: Path, *, tag: str
     ) -> None:
         downloads.append(name)
 
@@ -175,6 +170,7 @@ def test_ensure_downloads_when_a_marker_is_stale(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=darwin_host,
     )
 
     assert downloads == ["loki"]
@@ -196,6 +192,7 @@ def test_download_refuses_an_archive_with_the_wrong_sha256(
             "3.7.6",
             {"url": "https://example.invalid/loki.zip", "sha256": "0" * 64},
             destination,
+            tag="darwin_arm64",
         )
 
 
@@ -341,12 +338,12 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     _pin_default_listen_hosts_and_read_urls(monkeypatch)
 
     lgtm_native.ensure_lgtm_native(
@@ -356,6 +353,7 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=darwin_host,
     )
 
     config_dir = _native_dir(home) / "config"
@@ -399,6 +397,7 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -407,7 +406,6 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
     self-scrape working without template edits."""
     home = tmp_path / "home"
     _mark_current(home)
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(base_config.settings.observability, "lgtm_listen_host", "10.0.0.5")
     monkeypatch.setattr(
         base_config.settings.observability, "telemetry_loki_url", "http://10.0.0.5:3100"
@@ -429,6 +427,7 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=darwin_host,
     )
 
     prometheus = yaml.safe_load(
@@ -497,6 +496,7 @@ def test_native_step_does_not_touch_an_unmarked_home(
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_484),
         helper=refuse_helper,
+        host=fake_host(),
     )
 
     def fail_ensure(_repo_path: Path, _home: Path) -> None:
@@ -720,15 +720,17 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
     home = tmp_path / "home"
     native = home / "lgtm/native"
     native.mkdir(parents=True)
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "linux_amd64")
     repo = Path(__file__).resolve().parents[4]
-    assets = lgtm_native.native_versions(repo)
+    assets = lgtm_native.native_versions(repo, platform=LINUX_X86)
     for name, asset in assets.items():
         (native / f"version-{name}").write_text(asset["version"])
         (native / f"platform-{name}").write_text("darwin_arm64")
     downloads: list[str] = []
 
-    def download(name: str, _version: str, asset: dict[str, str], _native: Path) -> None:
+    def download(
+        name: str, _version: str, asset: dict[str, str], _native: Path, *, tag: str
+    ) -> None:
+        assert tag == "linux_amd64"
         assert "linux" in asset["url"]
         if name != "grafana":
             assert "linux-amd64" in asset["member"]
@@ -742,6 +744,7 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=verifying_host(LINUX_X86),
     )
     assert downloads == list(BACKENDS)
 
@@ -751,15 +754,18 @@ def test_native_preparation_downloads_only_selected_backend(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
     downloads: list[str] = []
 
-    def assets(_repo: Path) -> dict[str, dict[str, str]]:
+    def assets(_repo: Path, *, platform: Platform) -> dict[str, dict[str, str]]:
         return {name: {"version": "test"} for name in lgtm_native.BACKENDS}
 
-    def download(name: str, _version: str, _asset: dict[str, str], _native: Path) -> None:
+    def download(
+        name: str, _version: str, _asset: dict[str, str], _native: Path, *, tag: str
+    ) -> None:
         downloads.append(name)
 
     def render(
@@ -775,15 +781,13 @@ def test_native_preparation_downloads_only_selected_backend(
         assert producer is operator_pipeline
         assert machine is command_runtime.machine
 
-    def no_loki(_home: Path) -> None:
-        pytest.fail("Unselected Loki must not require its executable or validator")
+    def no_grafana(_home: Path) -> None:
+        pytest.fail("Unselected Grafana must not render its password")
 
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "native_versions", assets)
     monkeypatch.setattr(lgtm_native, "download_and_verify", download)
     monkeypatch.setattr(lgtm_native, "render_configs", render)
-    monkeypatch.setattr(lgtm_native, "verify_loki", no_loki)
-    monkeypatch.setattr(lgtm_native, "render_grafana_admin_password", no_loki)
+    monkeypatch.setattr(lgtm_native, "render_grafana_admin_password", no_grafana)
     lgtm_native.ensure_lgtm_native(
         tmp_path,
         tmp_path / "home",
@@ -791,5 +795,6 @@ def test_native_preparation_downloads_only_selected_backend(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=darwin_host,
     )
     assert downloads == ["prometheus"]

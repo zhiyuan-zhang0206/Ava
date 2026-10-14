@@ -12,10 +12,10 @@ participate. This is framework plumbing, not the agent SDK.
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 
 from base.deploy.git.memory_repo import memory_remote
+from base.host.system.hostport import Host
 
 __all__ = ["github_pr_blocker", "memory_repo_slug"]
 
@@ -47,7 +47,7 @@ def memory_repo_slug() -> str:
     return f"{m['owner']}/{m['name']}"
 
 
-def github_pr_blocker() -> str | None:
+def github_pr_blocker(*, host: Host) -> str | None:
     """Return a one-line reason this host cannot open+merge PRs, or None if it can.
 
     Checks in order, returning the reason on the first failure:
@@ -55,16 +55,15 @@ def github_pr_blocker() -> str | None:
     2. `gh auth status` exits 0 (authenticated to github.com).
     3. the account has write-or-better permission on the memory repo.
     """
-    if shutil.which("gh") is None:
+    if host.which("gh") is None:
         return "gh CLI not installed"
 
     try:
-        auth = subprocess.run(
+        auth = host.run(
             ["gh", "auth", "status"],
             capture_output=True,
             text=True,
             timeout=_GH_TIMEOUT,
-            check=False,
         )
     except subprocess.TimeoutExpired:
         return "gh auth status timed out"
@@ -73,12 +72,11 @@ def github_pr_blocker() -> str | None:
 
     slug = memory_repo_slug()
     try:
-        perm = subprocess.run(  # noqa: S603
+        perm = host.run(
             ["gh", "repo", "view", slug, "--json", "viewerPermission", "-q", ".viewerPermission"],
             capture_output=True,
             text=True,
             timeout=_GH_TIMEOUT,
-            check=False,
         )
     except subprocess.TimeoutExpired:
         return f"reading permission on {slug} via gh timed out"

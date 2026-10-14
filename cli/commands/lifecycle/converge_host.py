@@ -209,7 +209,7 @@ def ensure_github_pr(ctx: ConvergeCtx) -> None:
         return
     from base.deploy.git.github_pr import github_pr_blocker
 
-    reason = github_pr_blocker()
+    reason = github_pr_blocker(host=ctx.host)
     if reason is not None:
         raise RuntimeError(
             f"this agent-runner cannot open+merge GitHub PRs on the memory repo: {reason}. "
@@ -514,6 +514,7 @@ def converge_host(
         services=selected,
         producer=producer,
         helper=command.helper,
+        host=command.host,
     )
 
     # Host-global steps belong to the host's prod install (the default home

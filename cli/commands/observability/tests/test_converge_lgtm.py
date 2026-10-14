@@ -21,12 +21,14 @@ from base import config
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.system.hostport import Host
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm_native, observatory_urls
 from cli.commands.observability.tests.lgtm_inputs import (
-    darwin_rendering as darwin_rendering,
+    darwin_host as darwin_host,
 )
 from cli.commands.observability.tests.lgtm_inputs import (
     default_provisioning as default_provisioning,
@@ -68,6 +70,7 @@ def _ctx(
         producer=producer,
         machine=machine_from_boot(machine_config_76),
         helper=refuse_helper,
+        host=fake_host(),
     )
 
 
@@ -386,6 +389,7 @@ def test_native_converge_renders_grafana_password_only_when_configured(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -393,7 +397,6 @@ def test_native_converge_renders_grafana_password_only_when_configured(
     home = tmp_path / "home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
     # Non-secret fixture; production reads the credential from settings.alerts.grafana_admin_password.
     monkeypatch.setattr(
@@ -409,6 +412,7 @@ def test_native_converge_renders_grafana_password_only_when_configured(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=darwin_host,
     )
 
     credential_file = home / "lgtm/native/grafana/admin_password"
@@ -423,6 +427,7 @@ def test_native_converge_leaves_unconfigured_grafana_password_absent(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -430,7 +435,6 @@ def test_native_converge_leaves_unconfigured_grafana_password_absent(
     home = tmp_path / "home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
     monkeypatch.setattr(config.settings.alerts, "grafana_admin_password", None)
 
@@ -441,6 +445,7 @@ def test_native_converge_leaves_unconfigured_grafana_password_absent(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=darwin_host,
     )
 
     credential_file = home / "lgtm/native/grafana/admin_password"
@@ -455,12 +460,12 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
     monkeypatch.setattr(config.settings.telegram, "telegram_bot_token", "fake-bot-token-for-test")
     monkeypatch.setattr(config.settings.telegram, "telegram_owner_id", 42)
@@ -472,6 +477,7 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=darwin_host,
     )
 
     env_file = home / "lgtm/native/grafana/telegram.env"
@@ -490,6 +496,7 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        host=darwin_host,
     )
     assert not env_file.exists()
     assert 'AVA_ALERTS_TELEGRAM_BOT_TOKEN:-unconfigured}"' in run_script
@@ -668,8 +675,10 @@ def test_native_step_runs_only_for_the_marker_home(
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
         machine: MachineIdentity,
+        host: Host,
     ) -> None:
         assert machine is ctx.machine
+        assert host is ctx.host
         assert database_factory is ctx.database_factory
         assert producer is ctx.producer
         calls.append((repo, home))
@@ -706,6 +715,7 @@ def _station_ctx(
         producer=producer,
         machine=machine_from_boot(machine_config_710),
         helper=refuse_helper,
+        host=fake_host(),
     )
 
 
@@ -730,10 +740,12 @@ def test_native_step_runs_for_station_role_without_marker(
         database_factory: Callable[[], Any],
         producer: Callable[[], EventPipeline],
         machine: MachineIdentity,
+        host: Host,
     ) -> None:
         assert database_factory is ctx.database_factory
         assert producer is ctx.producer
         assert machine is ctx.machine
+        assert host is ctx.host
         calls.append((repo, home))
 
     monkeypatch.setattr(lgtm_native, "ensure_lgtm_native", record_ensure)

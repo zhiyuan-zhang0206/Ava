@@ -29,6 +29,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import macos_firewall as fw
 from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
@@ -54,6 +55,8 @@ def _ctx(
         producer=producer,
         machine=machine_from_boot(machine_config),
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )  # type: ignore[arg-type]
 
 

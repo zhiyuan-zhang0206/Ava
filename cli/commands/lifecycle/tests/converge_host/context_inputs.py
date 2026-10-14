@@ -15,6 +15,7 @@ from base.config import ConfigBoot, settings
 from base.host.converge import accessibility, screen_capture
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system import probes
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import converge_host
@@ -75,6 +76,8 @@ def converge_context(
         database_factory=operator_database,
         producer=producer,
         helper=helper,
+        host=fake_host(),
+        services=frozenset(),
     )
 
 
