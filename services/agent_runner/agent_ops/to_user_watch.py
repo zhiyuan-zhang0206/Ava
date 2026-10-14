@@ -1,49 +1,70 @@
-"""One shallow filesystem watcher for every local agent's user context."""
+"""Shallow user-context snapshots without per-workspace native watch registration."""
 
+import asyncio
+import os
+import stat
 from pathlib import Path
-
-from watchfiles import (
-    Change,
-    awatch,  # pyright: ignore[reportUnknownVariableType] — untyped third-party stop_event union
-)
+from threading import Event
 
 from base.events.live.bus import EventBus
 from base.events.live.projection import ToUserChanged
 
+type FileStamp = tuple[int, int, int, int, int]
+type WorkspaceStamp = tuple[int, int, FileStamp | None, FileStamp | None]
 
-def changed_agent(root: Path, path: Path) -> tuple[int | None, bool]:
-    """Map a shallow watch event to an agent and whether watch roots changed."""
-    if path.parent == root and path.name.isdecimal():
-        return int(path.name), True
-    if (
-        path.name in {"to_user.html", "to_user.md"}
-        and path.parent.parent == root
-        and path.parent.name.isdecimal()
-    ):
-        return int(path.parent.name), False
-    return None, False
+
+def _file_stamp(path: Path) -> FileStamp | None:
+    try:
+        value = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+
+
+def _snapshot(root: Path, stopped: Event) -> dict[str, WorkspaceStamp]:
+    workspaces: dict[str, WorkspaceStamp] = {}
+    with os.scandir(root) as entries:
+        for entry in entries:
+            if stopped.is_set():
+                break
+            if not entry.name.isdecimal():
+                continue
+            try:
+                value = entry.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISDIR(value.st_mode):
+                workspace = root / entry.name
+                workspaces[entry.name] = (
+                    value.st_dev,
+                    value.st_ino,
+                    _file_stamp(workspace / "to_user.html"),
+                    _file_stamp(workspace / "to_user.md"),
+                )
+    return workspaces
 
 
 async def watch_to_user(root: Path, bus: EventBus) -> None:
-    root.mkdir(parents=True, exist_ok=True)
-    while True:
-        # Never recurse into repositories or node_modules inside workspaces.
-        directories = [
-            p for p in root.iterdir() if p.name.isdecimal() and p.is_dir() and not p.is_symlink()
-        ]
-        async for changes in awatch(root, *directories, recursive=False, debounce=150):
-            changed_agents: set[int] = set()
-            rebuild = False
-            for change, raw_path in changes:
-                agent_id, roots_changed = changed_agent(root, Path(raw_path))
-                if roots_changed and change == Change.modified:
-                    continue
-                rebuild |= roots_changed
-                if agent_id is not None:
-                    changed_agents.add(agent_id)
-            for agent_id in changed_agents:
+    """Publish coalesced changes after each shallow scan; propagate filesystem errors."""
+    await asyncio.to_thread(root.mkdir, parents=True, exist_ok=True)
+    stopped = Event()
+    try:
+        previous = await asyncio.to_thread(_snapshot, root, stopped)
+        # quiesce-exempt: reads local files and publishes Redis UI invalidations; no database
+        while True:
+            await asyncio.sleep(0.5)
+            current = await asyncio.to_thread(_snapshot, root, stopped)
+            changed = {
+                int(name)
+                for name in previous.keys() | current.keys()
+                if previous.get(name) != current.get(name)
+            }
+            for agent_id in sorted(changed):
                 await bus.publish_best_effort(
                     ToUserChanged(agent_id=agent_id).model_dump_json(), context="to_user"
                 )
-            if rebuild:
-                break
+            previous = current
+    finally:
+        # A cancelled to_thread waiter cannot cancel its running scan. Stop that
+        # scan between entries instead of leaving it to traverse the remaining roots.
+        stopped.set()

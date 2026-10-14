@@ -65,3 +65,28 @@ handles for a retired outbox loop or restore the old resident replay TaskGroup.
 The original primary-error and resource cleanup contract now applies to that
 single serving loop. Request-time lifecycle arms still borrow the explicit
 factory and authority at their original construction points.
+
+## User-context changes
+
+The serving TaskGroup owns `to_user_watch.watch_to_user`. Every 0.5 seconds after
+its preceding scan/publication, it snapshots numeric, non-symlink workspace
+directories and only their immediate `to_user.html` and `to_user.md` entries.
+Scanning runs in a worker thread; it never walks repositories or `node_modules`.
+Each target is identified with `lstat` device, inode, size, nanosecond mtime and
+ctime, including the link itself for a symbolic target. Directory identity uses
+only device and inode, so unrelated workspace writes do not publish events.
+
+The initial snapshot publishes nothing. Later workspace additions/removals and
+target changes publish at most one `ToUserChanged` per agent per scan. Polling
+coalesces writes between scans; a target created and removed entirely between
+scans has no persistent state to invalidate. Missing entries during a scan are
+normal deletion races, as is a workspace becoming a non-directory; other
+filesystem errors fail the watcher and propagate
+through the serving TaskGroup. Cancellation asks an in-flight scan to stop
+between entries. There is at most one scan in flight, with no detached scan loop.
+
+This avoids registering thousands of native watch roots: on macOS, watchfiles
+1.2.0's notify backend restarts an increasingly large FSEvents stream for every
+root during synchronous construction, holding the GIL and starving ops health
+and lifecycle admission. Its polling backend only compares second-resolution
+mtime by default, which misses same-second writes and atomic replacements.
