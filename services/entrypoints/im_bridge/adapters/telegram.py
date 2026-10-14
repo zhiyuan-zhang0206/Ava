@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import json
 import re
+import ssl
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,6 +30,7 @@ from base.paths import ava_home
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
+    HTTPFailure,
     IMAdapter,
     InboundMessage,
     OutboundAdapterKind,
@@ -213,8 +215,11 @@ class TelegramAdapter(IMAdapter):
                 await asyncio.sleep(_POLL_IDLE_SLEEP)
             except asyncio.CancelledError:
                 raise
-            except NETWORK_ERRORS as exc:
-                logger.warning("telegram poll failed: {}", exc)
+            except (*NETWORK_ERRORS, HTTPFailure) as exc:
+                if isinstance(exc, HTTPFailure):
+                    logger.error("telegram poll failed: {}", exc)
+                else:
+                    logger.warning("telegram poll failed: {}", exc)
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
                 delay = min(delay * 2, self._config.telegram_reconnect_max_delay_seconds)
@@ -235,11 +240,16 @@ class TelegramAdapter(IMAdapter):
                 },
                 timeout=self._config.telegram_poll_timeout_seconds + 10.0,
             )
+        # A failed TLS read surfaces as the raw ssl error (httpcore's read
+        # path maps neither OSError nor anyio's ssl errors), so a record-layer
+        # failure gets the same classification as the transport errors
+        # (task #5052).
         except (
             httpx.ConnectError,
             httpx.TimeoutException,
             httpx.NetworkError,
             httpx.RemoteProtocolError,
+            ssl.SSLError,
         ) as exc:
             # httpx error text can embed the request URL, which carries the token.
             raise RetryableTransportError(

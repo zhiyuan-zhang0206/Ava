@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections import deque
 from types import SimpleNamespace
 
 import pytest
 
+from base.sessions.tests.poll_until import poll_until_async
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter, backoff_delay
+from services.entrypoints.im_bridge.adapters.feishu_poll_cursor import FeishuListRejected
 from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeCore,
     FakeRestClient,
@@ -22,7 +25,12 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     adapter as adapter,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
-from services.entrypoints.im_bridge.types import InboundMessage, RetryableTransportError
+from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.types import (
+    HTTPFailure,
+    InboundMessage,
+    RetryableTransportError,
+)
 
 
 async def test_poll_feeds_messages_newer_than_cursor_in_order(adapter: FeishuAdapter) -> None:
@@ -524,3 +532,141 @@ async def test_stop_cancels_poller_task(adapter: FeishuAdapter) -> None:
     assert adapter._poll_task is None
     await asyncio.sleep(0.05)
     assert adapter._poll_task is None
+
+
+# -- #5052: network-class poll failures stay off the crash path ---------------
+
+
+async def test_poll_hard_http_status_raises_named_failure(adapter: FeishuAdapter) -> None:
+    """#5052: a non-retryable HTTP status raises the named HTTPFailure (with
+    the status), so the poll loop can count the round instead of crashing."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    rest.list_responses = [
+        SimpleNamespace(raw=SimpleNamespace(status_code=500), code=500, msg="boom", data=None)
+    ]
+    with pytest.raises(HTTPFailure) as exc_info:
+        await adapter._poll_once("oc_p2p_1")
+    assert exc_info.value.status == 500
+
+
+async def test_poll_retryable_http_status_keeps_transport_classification(
+    adapter: FeishuAdapter,
+) -> None:
+    """429/503 stay RetryableTransportError — the classification the existing
+    backoff was built on."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    rest.list_responses = [
+        SimpleNamespace(
+            raw=SimpleNamespace(status_code=429), code=99991400, msg="limited", data=None
+        )
+    ]
+    with pytest.raises(RetryableTransportError):
+        await adapter._poll_once("oc_p2p_1")
+
+
+async def test_poll_rejection_code_raises_named_failure(adapter: FeishuAdapter) -> None:
+    """A code != 0 response (quota, permission) is its own named failure, not
+    a bare RuntimeError the poll loop cannot classify."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    rest.list_responses = [
+        SimpleNamespace(
+            raw=SimpleNamespace(status_code=200), code=99991403, msg="quota exceeded", data=None
+        )
+    ]
+    with pytest.raises(FeishuListRejected) as exc_info:
+        await adapter._poll_once("oc_p2p_1")
+    assert exc_info.value.code == 99991403
+
+
+@pytest.mark.parametrize(
+    "failed_response",
+    [
+        pytest.param(
+            SimpleNamespace(
+                raw=SimpleNamespace(status_code=503), code=500, msg="denied", data=None
+            ),
+            id="retryable-503",
+        ),
+        pytest.param(
+            SimpleNamespace(
+                raw=SimpleNamespace(status_code=500), code=500, msg="denied", data=None
+            ),
+            id="hard-500",
+        ),
+        pytest.param(
+            SimpleNamespace(
+                raw=SimpleNamespace(status_code=200), code=99991403, msg="quota exceeded", data=None
+            ),
+            id="rejected-code",
+        ),
+    ],
+)
+async def test_poll_loop_survives_a_failed_round_and_recovers(
+    adapter: FeishuAdapter, failed_response: SimpleNamespace
+) -> None:
+    """#5052: a failed list round (transport, hard HTTP, or API rejection) is
+    counted for the bounded backoff and must not escape the poll loop; the
+    next round resumes and delivers."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    adapter._poll_seeded.add("oc_p2p_1")
+    adapter._poll_cursor["oc_p2p_1"] = "om_0"
+    adapter._poll_cursor_ms["oc_p2p_1"] = 1
+    rest.list_responses = [
+        failed_response,
+        make_list_response(
+            [
+                make_list_item(message_id="om_1", content='{"text": "recovered"}'),
+                make_list_item(message_id="om_0"),
+            ]
+        ),
+    ]
+    async with owned_tasks() as tasks:
+        poll_task = tasks.create_task(adapter._poll_loop(0.2))
+        await poll_until_async(
+            lambda: (adapter._poll_failures >= 1, (adapter._poll_failures, poll_task.done())),
+            what="the failed round to be counted with the loop still alive",
+            timeout=5,
+        )
+        assert not poll_task.done()
+        await poll_until_async(
+            lambda: (
+                bool(adapter.core.received) and adapter._poll_failures == 0,
+                (len(adapter.core.received), adapter._poll_failures),
+            ),
+            what="the next round to recover and reset the backoff",
+            timeout=5,
+        )
+        assert [m.text for m in adapter.core.received] == ["recovered"]
+        assert adapter._poll_cursor == {"oc_p2p_1": "om_1"}
+
+
+async def test_poll_loop_keeps_unclassified_failures_loud(adapter: FeishuAdapter) -> None:
+    """A schema/programming failure is not a poll-round failure: it still ends
+    the poll task so the service task owner sees it (the guard is not a
+    blanket catch)."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    # A malformed listing (no data.items) raises AttributeError in list_chat.
+    rest.list_responses = [
+        SimpleNamespace(raw=SimpleNamespace(status_code=200), code=0, msg="ok", data=object())
+    ]
+    task = asyncio.create_task(adapter._poll_loop(0.01))
+    try:
+        await poll_until_async(
+            task.done, what="the unclassified failure to end the poll task", timeout=5
+        )
+        assert isinstance(task.exception(), AttributeError)
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task

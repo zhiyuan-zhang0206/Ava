@@ -38,9 +38,15 @@ gates; restoring a subscription does not admit or send work. Invalid maintenance
 journals and unexpected restoration faults fail startup.
 
 Only explicit network failures and HTTP 429/502/503/504 retain their existing
-retry budgets. Authentication, configuration, JSON/schema and programming
-errors propagate; Feishu never advances its cursor or marks a failed message
-seen after a fixed number of errors. Restart retains its durable replay cursor.
+retry budgets. The inbound poll loops additionally keep network-class failures
+off the crash path: a Feishu list rejection — a non-200 status that is not
+retryable (`HTTPFailure`) or a `code != 0` API rejection (`FeishuListRejected`)
+— and a raw Telegram `getUpdates` TLS read failure (`ssl.SSLError`, an `OSError`
+the HTTP client leaves unmapped) fail the round under the adapter's bounded
+backoff, hard rejections logged at error level. Authentication, configuration,
+JSON/schema and programming errors otherwise propagate; Feishu never advances
+its cursor or marks a failed message seen after a fixed number of errors.
+Restart retains its durable replay cursor.
 A chat message whose keyed gateway send exhausts its bounded retries is not
 persisted or replayed: the gateway may or may not have accepted it, and the sender is told delivery is unconfirmed. Current
 switch/filter files are strict. The notice cutover is database state: the first initialization over

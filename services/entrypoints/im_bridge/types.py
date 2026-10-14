@@ -24,9 +24,23 @@ class SendNotStartedError(RuntimeError):
 class RetryableTransportError(RuntimeError):
     """A sanitized connection failure or explicit transient HTTP response.
 
-    Only 429, 502, 503 and 504 responses are retryable. Authentication,
-    schema and programming failures must reach the service task owner.
+    Only 429, 502, 503 and 504 responses are retryable; every other non-200
+    response raises HTTPFailure, and schema and programming failures stay
+    plain RuntimeErrors, reaching the service task owner.
     """
+
+
+class HTTPFailure(RuntimeError):  # noqa: N818 — named for its raiser raise_http_failure and the #5052 fix spec
+    """A non-retryable HTTP rejection from a platform API.
+
+    Adapter poll loops catch it for the bounded backoff so one rejected
+    response cannot exit the service; the sanitized message and ``status``
+    stay on the exception for the loop's error log.
+    """
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class SendOutcomeUncertainError(RuntimeError):
@@ -56,7 +70,7 @@ def raise_http_failure(status: int, message: str) -> NoReturn:
     """Raise the explicit transient classification with a caller-sanitized message."""
     if retryable_http_status(status):
         raise RetryableTransportError(message)
-    raise RuntimeError(message)
+    raise HTTPFailure(status, message)
 
 
 class OutboundAdapterKind(StrEnum):
