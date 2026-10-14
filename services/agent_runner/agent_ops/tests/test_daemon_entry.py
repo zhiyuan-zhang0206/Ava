@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -48,7 +49,7 @@ def _assert_run_owner(
 
 @pytest.mark.parametrize("sha", ["captured-image", None])
 @pytest.mark.parametrize("failure", [None, RuntimeError("dispatch crash"), KeyboardInterrupt()])
-def test_entry_shares_image_gate_factory_and_closes_writer(
+def test_entry_shares_image_gate_factory_and_closes_writer(  # noqa: PLR0915 -- one entry litany: image, gate, factory, writer and the stop's signal posture.
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
@@ -107,6 +108,23 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
     ) -> None:
         _assert_run_owner(database, image, captures, roots, gates, readers, local_machine)
         events.append("run")
+        if isinstance(failure, KeyboardInterrupt):
+            # The stop's real shape: it unwinds through the internal TaskGroup,
+            # whose drain replays the same interrupt (task #5129).
+            interruption = failure
+
+            async def stop() -> None:
+                raise interruption
+
+            try:
+                async with asyncio.TaskGroup() as group:
+                    group.create_task(stop())
+                    await asyncio.Event().wait()
+            finally:
+                events.append("cleanup-start")
+                await asyncio.sleep(0.01)
+                events.append("cleanup-end")
+            return
         if failure is not None:
             raise failure
 
@@ -126,13 +144,23 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
     monkeypatch.setattr(daemon, "serve_ops_daemon", run)
     monkeypatch.setattr(daemon, "_hard_exit", hard_exit)
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
     try:
         with pytest.raises(_ExitError) as exited:
             daemon.main(argv=[])
         assert exited.value.code == (1 if isinstance(failure, Exception) else 0)
         assert captures == [image]
-        assert events == ["logging", "run", ("stop", 2)]
+        assert events == (
+            ["logging", "run", "cleanup-start", "cleanup-end", ("stop", 2)]
+            if isinstance(failure, KeyboardInterrupt)
+            else ["logging", "run", ("stop", 2)]
+        )
+        if isinstance(failure, KeyboardInterrupt):
+            # The stop path ignores a retried SIGTERM, so its drain always reaches
+            # the bounded hard exit instead of interpreter teardown.
+            assert signal.getsignal(signal.SIGTERM) is signal.SIG_IGN
     finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
         runner.close()
 
 

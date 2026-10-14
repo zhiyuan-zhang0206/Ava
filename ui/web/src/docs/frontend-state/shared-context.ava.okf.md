@@ -22,7 +22,9 @@ reads `to_user.html` (default) or `to_user.md` (`to_user_format=markdown`) direc
 there is no publication registry or database content copy. The runner profile
 includes the agent config domain because ops resolves `to_user_format`, with
 stored agent pins taking precedence over the cluster default. One shallow watchfiles
-watcher in each ops process broadcasts `to_user_changed`. The global fold repairs
+watcher in each ops process broadcasts `to_user_changed`, on a thread of its
+own, so a watcher rebuild over every workspace cannot hold the ops loop that
+answers `/healthz` and its stop signal (task #5129). The global fold repairs
 that agent's query and includes the family in reconnect repair. Atomic replacement,
 creation and deletion all invalidate. A missing or empty document does not open
 a desktop panel; notices and an explicit Inspector selection still can.
