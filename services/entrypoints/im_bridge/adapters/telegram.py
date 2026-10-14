@@ -180,7 +180,15 @@ class TelegramAdapter(IMAdapter):
             )
             if resp.status_code != 200:
                 logger.warning("telegram setMyCommands failed: HTTP {}", resp.status_code)
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+        # A record-layer TLS read failure surfaces as the raw ssl error
+        # (httpcore's read path maps neither OSError nor anyio's ssl errors):
+        # it joins the transport set and gets the same classification (#5052).
+        except (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+            ssl.SSLError,
+        ) as exc:
             logger.warning("telegram setMyCommands failed: {}", type(exc).__name__)
 
     async def stop(self) -> None:
@@ -327,7 +335,12 @@ class TelegramAdapter(IMAdapter):
             )
             if resp.status_code != 200:
                 logger.warning("telegram answerCallbackQuery failed: HTTP {}", resp.status_code)
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+        except (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+            ssl.SSLError,
+        ) as exc:
             logger.warning("telegram answerCallbackQuery failed: {}", type(exc).__name__)
 
     # -- outbound --------------------------------------------------------
@@ -346,7 +359,12 @@ class TelegramAdapter(IMAdapter):
                 json={"chat_id": chat_id, "action": "typing"},
                 timeout=10.0,
             )
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+        except (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+            ssl.SSLError,
+        ) as exc:
             raise RetryableTransportError(f"telegram typing failed: {type(exc).__name__}") from None
         if resp.status_code != 200:
             raise_http_failure(resp.status_code, f"telegram typing failed: HTTP {resp.status_code}")
@@ -364,6 +382,7 @@ class TelegramAdapter(IMAdapter):
                     httpx.TimeoutException,
                     httpx.NetworkError,
                     httpx.RemoteProtocolError,
+                    ssl.SSLError,
                 ) as exc:
                     raise RetryableTransportError(
                         f"telegram identity request failed: {type(exc).__name__}"
@@ -511,6 +530,7 @@ class TelegramAdapter(IMAdapter):
             httpx.TimeoutException,
             httpx.NetworkError,
             httpx.RemoteProtocolError,
+            ssl.SSLError,
         ) as exc:
             if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
                 raise SendNotStartedError(

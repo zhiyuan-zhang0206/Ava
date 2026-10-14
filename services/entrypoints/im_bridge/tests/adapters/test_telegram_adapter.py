@@ -23,7 +23,11 @@ from services.entrypoints.im_bridge.adapters.telegram import InboundMessage, Tel
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
 from services.entrypoints.im_bridge.tests.slices import telegram_config
 from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
-from services.entrypoints.im_bridge.types import RetryableTransportError
+from services.entrypoints.im_bridge.types import (
+    RetryableTransportError,
+    SendNotStartedError,
+    SendOutcomeUncertainError,
+)
 
 
 class FakeCore:
@@ -640,3 +644,67 @@ async def test_spawn_taps_use_event_identity_not_shared_menu_message(env: Any) -
         "telegram-callback:second",
     ]
     assert {msg.message_id for msg in core.inbound} == {"7"}
+
+
+# --- #5149: raw ssl.SSLError on the remaining Telegram calls --------------
+
+
+def _ssl_boom(_request: httpx.Request) -> httpx.Response:
+    """The record-layer failure #5052 found: raw ssl.SSLError, unwrapped."""
+    raise ssl.SSLError("[SSL] record layer failure (_ssl.c:2580)")
+
+
+async def test_command_menu_ssl_failure_tolerated(env: None, loguru_records: LogRecords) -> None:
+    """A raw ssl.SSLError while installing the command menu is tolerated like
+    the transport errors — the bot still works via typed commands."""
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        await adapter._install_command_menu()
+    assert any(
+        "setMyCommands failed" in message and "SSLError" in message
+        for message in loguru_records.messages("WARNING")
+    )
+
+
+async def test_answer_callback_ssl_failure_tolerated(env: None, loguru_records: LogRecords) -> None:
+    """A raw ssl.SSLError while acknowledging a tap is tolerated like the
+    transport errors — the command already ran; only the spinner is left."""
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        await adapter._answer_callback("cb-1")
+    assert any(
+        "answerCallbackQuery failed" in message and "SSLError" in message
+        for message in loguru_records.messages("WARNING")
+    )
+
+
+async def test_send_ssl_failure_is_uncertain_not_retryable(env: None) -> None:
+    """A raw ssl.SSLError during sendMessage is outcome-uncertain: the request
+    may have been accepted before the TLS read failed, so it must never be
+    classified as not started — and the message stays token-free."""
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        with pytest.raises(SendOutcomeUncertainError, match="SSLError") as exc_info:
+            await adapter.send("42", "hi")
+    assert not isinstance(exc_info.value, SendNotStartedError)
+    assert "TEST-TOKEN" not in str(exc_info.value)
+
+
+async def test_typing_ssl_failure_classified_retryable(env: None) -> None:
+    """A raw ssl.SSLError from the typing indicator is retryable — the next
+    refresh re-sends it (same class as the getUpdates failures, #5052)."""
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        with pytest.raises(RetryableTransportError, match="SSLError") as exc_info:
+            await adapter.typing("42")
+    assert "TEST-TOKEN" not in str(exc_info.value)
+
+
+async def test_identity_request_ssl_failure_classified_retryable(env: None) -> None:
+    """A raw ssl.SSLError from the getMe identity lookup is retryable — the
+    next outbound call re-requests it, and the message stays token-free."""
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        with pytest.raises(RetryableTransportError, match="SSLError") as exc_info:
+            await adapter.outbound_account_id()
+    assert "TEST-TOKEN" not in str(exc_info.value)
