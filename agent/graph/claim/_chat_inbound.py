@@ -15,10 +15,11 @@ from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
 from agent.messages import inbound_message
-from ava.security import SecurityFindingEntry, scan_inbound_content
 from ava.skills.composer_commands import expand_command
 from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
 from base.agents.messages.inbound_images import parse_upload_url
+from base.agents.messages.injection_scan import scan_inbound_content
+from base.agents.messages.security_finding import SecurityFindingEntry
 from base.agents.upload_delivery.paths import fetch_upload_b64
 from base.log import logger
 

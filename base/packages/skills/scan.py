@@ -21,7 +21,7 @@ Two severities, and only one of them is a gate:
   Never blocks; printed, and the material a human reads before promoting a
   package to the `reviewed` trust tier.
 
-This is a mitigation layer, not a boundary — the same honesty `ava/security.py`
+This is a mitigation layer, not a boundary — the same honesty `base/agents/messages/injection_scan.py`
 and `SECURITY.md` apply to everything else here. It matches *known shapes of
 known attacks* in *text this scanner can read*. A clean report means "no rule
 fired", never "this package is safe". Anyone who knows these rules can write a
@@ -29,11 +29,10 @@ package that walks past all of them, and nothing here constrains what a skill
 does once an agent follows it (Ava does not sandbox execution — see
 `docs/decisions/data/security/2026-07-29-security-model-host-isolation-not-sandbox.md`).
 
-Sibling, deliberately not shared: `ava/security.py` scans content an agent
-ingests *mid-turn* and reports through a side channel. This one scans a whole
+Sibling, deliberately not shared: `base/agents/messages/injection_scan.py` scans content an
+agent ingests *mid-turn* and reports through a side channel. This one scans a whole
 package tree *before* it exists on disk, needs file/line anchoring, and answers
-a yes/no install question. The two tables overlap on hidden-text patterns only;
-merging them is also blocked by the layer rule (`base` < `ava`).
+a yes/no install question. The two tables overlap on hidden-text patterns only.
 """
 
 from __future__ import annotations
