@@ -10,8 +10,6 @@
 "lgtm_inputs.py#monkeypatch.setattr base.config.settings.gateway.gateway_port" = 1
 "lgtm_inputs.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 1
 "lgtm_inputs.py#monkeypatch.setattr base.packages.dashboard_supply.render_dashboard_json" = 1
-"test_atomic_writer_contracts.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
-"test_atomic_writer_contracts.py#monkeypatch.setattr base.sessions.coding_session_owner_record.state_path" = 1
 "test_converge_lgtm.py#monkeypatch.setattr base.config.settings.alerts.grafana_admin_password" = 2
 "test_converge_lgtm.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
 "test_converge_lgtm.py#monkeypatch.setattr base.config.settings.observability.lgtm_grafana_listen_host" = 4
@@ -84,9 +82,7 @@
 "test_trace_ship.py#monkeypatch.setattr base.host.db_authority.unit.load_unit_capability" = 1
 
 [debt.stdlib-patch]
-"test_atomic_writer_contracts.py#monkeypatch.setattr os.fsync" = 2
-"test_atomic_writer_contracts.py#monkeypatch.setattr os.replace" = 1
-"test_atomic_writer_contracts.py#monkeypatch.setattr pathlib.Path.replace" = 3
+"test_atomic_writer_contracts.py#monkeypatch.setattr os.fsync" = 1
 "test_converge_otel_collector.py#monkeypatch.setattr platform.machine" = 1
 "test_converge_otel_collector.py#monkeypatch.setattr platform.system" = 1
 
