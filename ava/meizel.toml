@@ -20,6 +20,3 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 
 [debt.private-module]
 "tests/namespaces/shell/coding_tools/test_sdk_entry_counting.py -> shell/coding_tools/_common.py" = 1
-
-[debt.private-name]
-"tests/namespaces/agents/test_agents_scan.py -> agents/__init__.py#_client" = 2
