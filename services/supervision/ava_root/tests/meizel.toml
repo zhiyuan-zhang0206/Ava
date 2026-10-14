@@ -10,11 +10,9 @@
 "test_ava_root_failure_state.py#monkeypatch.setattr services.supervision.ava_root.health.monotonic" = 1
 "test_ava_root_health.py#monkeypatch.setattr services.supervision.ava_root.health.monotonic" = 1
 "test_ava_root_ipc.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.ava_home" = 1
-"test_ava_root_ipc.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.run_dir" = 1
 "test_ava_root_ipc.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.live" = 2
 "test_ava_root_ipc.py#monkeypatch.setattr base.native_process.ownership.sys" = 1
 "test_ava_root_ipc.py#monkeypatch.setattr base.native_process.root_control.client.sys" = 2
-"test_ava_root_ipc.py#monkeypatch.setattr base.paths.root_run_dir" = 2
 "test_ava_root_probes.py#monkeypatch.setattr services.supervision.ava_root.probes.resolve_ref" = 1
 "test_ava_root_selfcheck.py#monkeypatch.setattr services.supervision.ava_root.selfcheck.child_state" = 1
 

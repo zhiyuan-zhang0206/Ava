@@ -12,7 +12,6 @@
 "test_browser.py#monkeypatch.setattr ava.mcps._browser._CONNECT_DELAY_S" = 1
 "test_browser.py#monkeypatch.setattr ava.mcps._browser._RELEASE_TIMEOUT_S" = 1
 "test_browser.py#monkeypatch.setattr ava.mcps._browser.asyncio.open_unix_connection" = 2
-"test_browser.py#monkeypatch.setattr base.paths.chrome_mcp_socket" = 6
 "test_computer.py#monkeypatch.setattr ava.mcps._computer.asyncio.open_unix_connection" = 2
 "test_daemon.py#monkeypatch.setattr ava.mcps._daemon.asyncio.Event" = 1
 "test_daemon.py#monkeypatch.setattr ava.mcps._daemon.connect_server" = 12

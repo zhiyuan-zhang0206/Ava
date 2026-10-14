@@ -109,7 +109,7 @@ def test_every_standard_daemon_records_the_pidfile_its_probe_reads(
                 spec.session
             )
             assert parameters["runtime"].kind is inspect.Parameter.KEYWORD_ONLY, spec.session
-            actual = operation(config=process_config, runtime=paths.run_dir())
+            actual = operation(config=process_config, runtime=paths.run_dir(paths.ava_home()))
         assert (
             actual == ServiceEndpoints.from_settings().of(cast("str", spec.health_name)).pidfile
         ), spec.session

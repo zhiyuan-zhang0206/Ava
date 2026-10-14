@@ -17,9 +17,9 @@ import sys
 def h_computer_release(args: object) -> int:
     """Force-release the screen from its current holder."""
     del args  # no flags today
-    from base.paths import computer_mcp_socket
+    from base.paths import ava_home, computer_mcp_socket
 
-    sock_path = str(computer_mcp_socket())
+    sock_path = str(computer_mcp_socket(ava_home()))
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(sock_path)

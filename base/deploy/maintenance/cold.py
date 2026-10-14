@@ -68,6 +68,7 @@ def _require_no_unsettled_exec(conn: psycopg.Connection[Any], agent_id: int) -> 
     )
     report = exec_request_evidence.quarantine_stale(
         agent_id,
+        home=ava_home(),
         incumbent=incumbent,
         resources=None if row is None else row[2],
         reason="maintenance cold prepare",

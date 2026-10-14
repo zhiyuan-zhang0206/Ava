@@ -69,8 +69,10 @@ def bind_socket(path: Path) -> socket.socket:
 
     Only the one daemon the pidfile admits reaches this, so a file already at `path` is a
     predecessor's leftover and is replaced. The umask closes the window between bind and a
-    later chmod in which another local user could connect.
+    later chmod in which another local user could connect. The directory is created here: the
+    path helpers derive paths and create nothing, so the process that binds owns the directory.
     """
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     previous = os.umask(0o177)
@@ -84,13 +86,13 @@ def bind_socket(path: Path) -> socket.socket:
     return sock
 
 
-async def run(*, config: ConfigBoot, database: Callable[[], Database]) -> None:
-    """Start the daemon: pidfile -> database -> socket -> serve until stopped."""
-    pidfile = insights_pidfile()
+async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database]) -> None:
+    """Start the daemon of `home`: pidfile -> database -> socket -> serve until stopped."""
+    pidfile = insights_pidfile(home)
     if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
         _log.info("[insights] daemon already running (pidfile=%s), exiting", pidfile)
         sys.exit(1)
-    path = insights_socket()
+    path = insights_socket(home)
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
@@ -162,7 +164,7 @@ def main() -> None:
     # signal path uvicorn re-raises the signal after its own graceful stop, landing here.
     runner = asyncio.Runner()
     try:
-        runner.run(run(config=config, database=database))
+        runner.run(run(home=ava_home(), config=config, database=database))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
         _log.info("[insights] interrupted, shutting down")

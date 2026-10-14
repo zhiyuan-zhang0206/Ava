@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import AsyncExitStack, suppress
+from pathlib import Path
 from typing import Any
 
 from base.host.net.resilience import Policy, aretry
@@ -179,8 +180,8 @@ async def _dial_browser_mcp(
     raise ConnectionError(f"browser-mcp daemon not reachable at {sock}: {last}")
 
 
-async def connect_browser_direct() -> tuple[BrowserLineSession, AsyncExitStack]:
-    """Line-protocol connection to the browser-mcp service (no subprocess).
+async def connect_browser_direct(home: Path) -> tuple[BrowserLineSession, AsyncExitStack]:
+    """Line-protocol connection to the browser-mcp service of `home` (no subprocess).
 
     Returns (session, stack); the caller owns the stack — closing it drops the
     socket, which the service reads as the connection ending. The stack closes
@@ -190,7 +191,7 @@ async def connect_browser_direct() -> tuple[BrowserLineSession, AsyncExitStack]:
     from base.config import settings
     from base.paths import chrome_mcp_socket
 
-    sock = str(chrome_mcp_socket(settings.services.browser_cdp_port))
+    sock = str(chrome_mcp_socket(home, settings.services.browser_cdp_port))
     reader, writer = await _dial_browser_mcp(sock)
     session = BrowserLineSession(reader, writer, sock=sock)
     stack = AsyncExitStack()
@@ -206,8 +207,8 @@ async def connect_browser_direct() -> tuple[BrowserLineSession, AsyncExitStack]:
 _RELEASE_TIMEOUT_S = 3.0
 
 
-async def release_agent_chrome_pages(agent_id: int) -> bool:
-    """Best-effort: ask the browser-mcp service to close this agent's pages.
+async def release_agent_chrome_pages(agent_id: int, home: Path) -> bool:
+    """Best-effort: ask the browser-mcp service of `home` to close this agent's pages.
 
     Called after an agent's termination commits so a terminated worker does not
     leave its tabs (or its ``Ava #<id>`` tab group) in the user's shared Chrome.
@@ -224,7 +225,7 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
 
         return await asyncio.wait_for(
             _release_roundtrip(
-                str(chrome_mcp_socket(settings.services.browser_cdp_port)), agent_id
+                str(chrome_mcp_socket(home, settings.services.browser_cdp_port)), agent_id
             ),
             timeout=_RELEASE_TIMEOUT_S,
         )

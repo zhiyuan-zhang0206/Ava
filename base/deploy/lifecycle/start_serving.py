@@ -34,11 +34,11 @@ _LOCK_FILENAME = "start-serving.lock"
 
 def state_path() -> Path:
     """The per-unit serving state persisted across service processes."""
-    return run_dir() / _STATE_FILENAME
+    return run_dir(ava_home()) / _STATE_FILENAME
 
 
 def _lock_path() -> Path:
-    return run_dir() / _LOCK_FILENAME
+    return run_dir(ava_home()) / _LOCK_FILENAME
 
 
 class RootBirth(EvidenceModel):

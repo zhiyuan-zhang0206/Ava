@@ -105,9 +105,9 @@ def root_tree_roster(
 def root_client(*, timeout: float = 5.0) -> Any:
     """A blocking client bound to this cluster's root control socket."""
     from base.native_process.root_control.client import RootClient
-    from base.paths import root_run_dir
+    from base.paths import ava_home, root_run_dir
 
-    return RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=timeout)
+    return RootClient(root_run_dir(ava_home()) / _ROOT_SOCKET_NAME, timeout=timeout)
 
 
 def root_status(client: Any) -> dict[str, Any] | None:
@@ -151,7 +151,7 @@ def require_root_owner(status: dict[str, Any], *, helper: HelperFactory | None) 
 
     from base.native_process.ownership import OwnedProcess
     from base.native_process.root_control.client import native_identity
-    from base.paths import root_run_dir
+    from base.paths import ava_home, root_run_dir
 
     root = native_identity(status.get("root"))
     if not root.live():
@@ -168,7 +168,7 @@ def require_root_owner(status: dict[str, Any], *, helper: HelperFactory | None) 
     keeper = helper().root_status()
     if (
         keeper.get("pid") != root.pid
-        or keeper.get("run_dir") != str(root_run_dir())
+        or keeper.get("run_dir") != str(root_run_dir(ava_home()))
         or psutil.Process(root.pid).ppid() != helper_process.pid
         or not helper_process.live()
         or not root.live()
@@ -529,7 +529,7 @@ def ensure_root_service_tree(
     from base.paths import ava_home, root_manifests_path, root_run_dir
     from services.supervision.ava_root_glue.manifests import write_manifest
 
-    run_dir = root_run_dir()
+    run_dir = root_run_dir(ava_home())
     if runtime is not None:
         runtime.validate()
     env = root_child_env()
@@ -537,7 +537,7 @@ def ensure_root_service_tree(
     from cli.commands.lifecycle.start_generation import launch_digest
 
     manifest["launch_digest"] = launch_digest(repo, env, home=ava_home())
-    manifests = root_manifests_path()
+    manifests = root_manifests_path(ava_home())
     client = root_client()
     try:
         status = root_status(client)
@@ -608,9 +608,9 @@ def launch_service_tree(
 
 def require_root_absent() -> None:
     from base.native_process.root_control import instance_lock
-    from base.paths import root_run_dir
+    from base.paths import ava_home, root_run_dir
 
-    run_dir = root_run_dir()
+    run_dir = root_run_dir(ava_home())
     fd = instance_lock.acquire_instance_lock(run_dir)
     instance_lock.release_instance_lock(fd)
 
@@ -672,7 +672,7 @@ def stop_root_service_tree(
     leaves the root running to host it. Raises `RootDriverError` when the
     tree cannot be brought down; the caller's phase accounting reports it.
     """
-    from base.paths import root_run_dir
+    from base.paths import ava_home, root_run_dir
 
     deadline = time.monotonic() + timeout_s
     client = root_client(timeout=timeout_s)
@@ -701,7 +701,7 @@ def stop_root_service_tree(
         return
     print(f"  ava-root: stopping the whole tree ({len(stop_ids)} unit(s)) and the root")
     stop_root_process(
-        root_run_dir(),
+        root_run_dir(ava_home()),
         client,
         status,
         timeout_s=max(0.0, deadline - time.monotonic()),

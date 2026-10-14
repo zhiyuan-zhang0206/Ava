@@ -80,7 +80,9 @@ def test_entry_keeps_the_config_owner_and_captured_image(
         assert inputs["machine_reader"]() == "browser-entry"
         factories[0][0]()
 
-    async def work(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], float]) -> None:
+    async def work(
+        *, home: Path, browser_cdp_port: int, connect_timeout_reader: Callable[[], float]
+    ) -> None:
         stages.append("run")
         assert browser_cdp_port == boot.view.services.browser_cdp_port
         boot.set_field("mcp_connect_timeout_seconds", 17.0)

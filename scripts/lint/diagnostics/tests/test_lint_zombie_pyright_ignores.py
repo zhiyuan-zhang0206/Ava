@@ -258,7 +258,7 @@ def test_verify_multiline_call_rejects_load_bearing_rule_at_call_line(
         "    target,\n"
         "    'attribute',\n"
         "    lambda value: value,\n"
-        ")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]\n",
+        ")  # pyright: ignore[reportUnknownArgumentType]\n",
     )
     candidates = frozenset(gate.scan_file(path, "agent/a.py"))
 

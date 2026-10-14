@@ -7,20 +7,21 @@ file or another home's process is not mistaken for it.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import cast
 
 from base.daemon.health import DaemonProbe
-from base.paths import ava_home, insights_pidfile, insights_socket
+from base.paths import insights_pidfile, insights_socket
 
 _TIMEOUT_S = 3.0
 
 
-def insights_probe() -> DaemonProbe:
+def insights_probe(home: Path) -> DaemonProbe:
     import httpx
 
     try:
         with httpx.Client(
-            transport=httpx.HTTPTransport(uds=str(insights_socket())),
+            transport=httpx.HTTPTransport(uds=str(insights_socket(home))),
             base_url="http://insights",
             timeout=_TIMEOUT_S,
         ) as client:
@@ -36,10 +37,10 @@ def insights_probe() -> DaemonProbe:
     payload = cast(dict[str, object], payload)
     if payload.get("name") != "insights":
         return DaemonProbe.down("the insights socket answered as another service")
-    if payload.get("home") != str(ava_home()):
+    if payload.get("home") != str(home):
         return DaemonProbe.down(f"the insights socket belongs to home {payload.get('home')!r}")
     try:
-        recorded = int(insights_pidfile().read_text().split()[0])
+        recorded = int(insights_pidfile(home).read_text().split()[0])
     except (OSError, ValueError, IndexError):
         return DaemonProbe.down("no readable pid in the insights pidfile")
     if payload.get("pid") != recorded:

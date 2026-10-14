@@ -16,7 +16,7 @@ import pytest
 from base.config import get_field, settings
 from base.daemon.endpoints import ServiceEndpoints
 from base.host.env.registry import health_port_env_aliases
-from base.paths import run_dir
+from base.paths import ava_home, run_dir
 
 # The fixed port table as of the cut-over, spelled out: renumbering a daemon is a decision, so
 # it fails here before it reaches a unit whose roster and `.env` still say the old port.
@@ -43,7 +43,7 @@ def _old_health_port(name: str) -> int:
 
 
 def _old_pid_path(name: str) -> Path:
-    return run_dir() / f"{name}.pid"
+    return run_dir(ava_home()) / f"{name}.pid"
 
 
 def _assert_rows_match_the_old_lookups() -> None:

@@ -34,6 +34,7 @@ from base.cluster.machine import MachineIdentity, MachineNameMissing
 from base.host.system import macos_firewall as fw
 from base.host.system.hostport import Host
 from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
+from base.paths import ava_home
 from cli.commands.converge.spec import ConvergeCtx
 
 
@@ -44,7 +45,7 @@ def configured_machine_name(machine: MachineIdentity) -> str | None:
     return None
 
 
-def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
+def serving_binaries(roles: frozenset[str], *, home: Path) -> tuple[Path, ...]:
     """The binaries this unit serves a non-loopback port from, by capability.
 
     Resolved through the same helpers that *launch* them, because auditing a path
@@ -76,7 +77,7 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
         # for gateway capability is harmless on a loopback-only single box (the
         # host-level audit exits before reading ALF there) and prevents a hybrid
         # gateway+runner from silently accepting only local telemetry.
-        candidates.append(otel_collector_binary())
+        candidates.append(otel_collector_binary(home))
     return tuple(p for p in candidates if p.exists())
 
 
@@ -90,7 +91,7 @@ def audit_this_host(
     firewall is the cause.
     """
 
-    required = serving_binaries(roles)
+    required = serving_binaries(roles, home=ava_home())
     if not required:
         return FirewallAudit(
             FirewallVerdict.ALLOWED, "no serving binary resolved on this host to audit"

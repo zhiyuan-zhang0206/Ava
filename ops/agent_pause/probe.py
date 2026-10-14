@@ -97,7 +97,7 @@ def _root_unit(unit_id: str) -> dict[str, object] | None:
     from base.paths import root_run_dir
 
     try:
-        response = RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=2.0).status()
+        response = RootClient(root_run_dir(ava_home()) / _ROOT_SOCKET_NAME, timeout=2.0).status()
     except RootClientError:
         return None
     if not response.get("ok"):

@@ -32,6 +32,7 @@ from base.native_process.root_control.ipc import (
     parse_response,
     parse_status_response,
 )
+from base.paths import root_run_dir
 from services.supervision.ava_root.server import ControlServer
 
 
@@ -294,7 +295,6 @@ async def test_serving_reads_bound_runtime_from_native_peer(
         source_digest="f" * 64,
     )
     monkeypatch.setattr(start_serving, "ava_home", lambda: short_tmp)
-    monkeypatch.setattr(start_serving, "run_dir", lambda: short_tmp)
     root = _root_row() | {
         "running": True,
         "home": str(short_tmp),
@@ -495,10 +495,7 @@ class TestConnectionChurn:
 
 
 @pytest.mark.parametrize("state", [None, "unknown", 7, [], {}])
-async def test_owned_process_rejects_uncertain_unit_state(
-    short_tmp: Path, monkeypatch: pytest.MonkeyPatch, state: object
-) -> None:
-    from base import paths
+async def test_owned_process_rejects_uncertain_unit_state(short_tmp: Path, state: object) -> None:
     from base.native_process.root_control.client import owned_process
 
     unit: dict[str, object] = {"id": "gateway"}
@@ -508,21 +505,17 @@ async def test_owned_process_rejects_uncertain_unit_state(
     async def status(_request: RequestPayload) -> ResponsePayload:
         return ok_response({"root": _root_row(), "units": [unit]})
 
-    monkeypatch.setattr(paths, "root_run_dir", lambda: short_tmp)
-    server = ControlServer(short_tmp / "ava-root.sock", status)
+    server = ControlServer(root_run_dir(short_tmp) / "ava-root.sock", status)
     await server.start()
     try:
         with pytest.raises(RootClientError, match="unit state"):
-            await asyncio.to_thread(owned_process, "gateway")
+            await asyncio.to_thread(owned_process, "gateway", home=short_tmp)
     finally:
         await server.close()
 
 
 @pytest.mark.parametrize("state", ["running", "stopped", "absent"])
-async def test_owned_process_preserves_known_state_semantics(
-    short_tmp: Path, monkeypatch: pytest.MonkeyPatch, state: str
-) -> None:
-    from base import paths
+async def test_owned_process_preserves_known_state_semantics(short_tmp: Path, state: str) -> None:
     from base.native_process.root_control.client import owned_process
 
     units = [] if state == "absent" else [{"id": "gateway", "state": state, **_root_row()}]
@@ -530,11 +523,10 @@ async def test_owned_process_preserves_known_state_semantics(
     async def status(_request: RequestPayload) -> ResponsePayload:
         return ok_response({"root": _root_row(), "units": units})
 
-    monkeypatch.setattr(paths, "root_run_dir", lambda: short_tmp)
-    server = ControlServer(short_tmp / "ava-root.sock", status)
+    server = ControlServer(root_run_dir(short_tmp) / "ava-root.sock", status)
     await server.start()
     try:
-        result = await asyncio.to_thread(owned_process, "gateway")
+        result = await asyncio.to_thread(owned_process, "gateway", home=short_tmp)
         if state == "running":
             assert result == OwnedProcess.capture(psutil.Process())
         else:

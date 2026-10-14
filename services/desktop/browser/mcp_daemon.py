@@ -580,14 +580,17 @@ async def socket_in_use(path: Path) -> bool:
     return True
 
 
-async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], float]) -> None:
-    """Start the browser-mcp daemon.
+async def run(
+    *, home: Path, browser_cdp_port: int, connect_timeout_reader: Callable[[], float]
+) -> None:
+    """Start the browser-mcp daemon of `home`.
 
     One upstream connection serves this process. Creation failure or upstream
     death ends the process; no browser action or session is automatically replayed.
     """
     browser_url = f"http://127.0.0.1:{browser_cdp_port}"
-    sock = chrome_mcp_socket(browser_cdp_port)
+    sock = chrome_mcp_socket(home, browser_cdp_port)
+    sock.parent.mkdir(parents=True, exist_ok=True)
     # Single-instance guard: the old code unlinked the socket unconditionally,
     # so a second daemon (watchdog misjudged the first dead and respawned)
     # stole the socket out from under the live instance — its clients all
@@ -712,6 +715,7 @@ def main() -> None:
     )
     asyncio.run(
         run(
+            home=ava_home(),
             browser_cdp_port=config.view.services.browser_cdp_port,
             connect_timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
         )

@@ -29,7 +29,7 @@ from base.deploy.release import editable_install
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.turn_identity import HostedTurnResources
-from base.paths import exec_run_dir
+from base.paths import ava_home, exec_run_dir
 
 from . import _process
 from ._child_boundary import build_child_env, read_result_envelope, result_from_payload
@@ -403,7 +403,7 @@ async def run_legacy_subprocess(
     """
     agent_id = context.require_identity().agent_id
     if exec_dir is None:
-        exec_dir = exec_run_dir()
+        exec_dir = exec_run_dir(ava_home())
     request_path = make_request_path(exec_dir, agent_id)
     result_path = make_result_path(exec_dir, agent_id)
 

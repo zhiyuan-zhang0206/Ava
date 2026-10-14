@@ -21,7 +21,7 @@ from pathlib import Path
 from base.config import ConfigBoot, get_field
 from base.host.env.health_ports import health_port
 from base.host.env.registry import health_port_env_aliases
-from base.paths import run_dir
+from base.paths import ava_home, run_dir
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ class ServiceEndpoints:
     @classmethod
     def from_settings(cls) -> ServiceEndpoints:
         """The table as the live settings and `AVA_HOME` describe it now."""
-        return cls._from_fields(get_field, runtime=run_dir())
+        return cls._from_fields(get_field, runtime=run_dir(ava_home()))
 
     @classmethod
     def from_boot(cls, config: ConfigBoot, *, runtime: Path) -> ServiceEndpoints:

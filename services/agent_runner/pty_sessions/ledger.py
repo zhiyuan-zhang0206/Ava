@@ -32,7 +32,10 @@ _VERSION = 1
 
 
 def write(path: Path, targets: Iterable[closure.Target]) -> None:
-    """Persist the live sessions' identities (atomic replace, owner-only)."""
+    """Persist the live sessions' identities (atomic replace, owner-only).
+
+    The ledger's directory is created here: the path helpers derive paths and create nothing."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": _VERSION,
         "sessions": {

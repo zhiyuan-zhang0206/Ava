@@ -13,7 +13,7 @@ import contextlib
 import psutil
 
 from base.native_process.ownership import OwnedProcess, stable_create_time
-from base.paths import run_dir
+from base.paths import ava_home, run_dir
 from base.sessions.pty import client
 from base.sessions.record import SessionRecord
 
@@ -48,7 +48,7 @@ def hosting_supervised_session() -> str | None:
         lineage = {me.pid} | {p.pid for p in me.parents()}
     except psutil.Error:  # racing our own ancestry going away — no lineage evidence
         return None
-    for record_path in (run_dir() / "sessions").glob("*.json"):
+    for record_path in (run_dir(ava_home()) / "sessions").glob("*.json"):
         name = record_path.stem
         record = SessionRecord.read(record_path)
         if record is None or record.pid not in lineage:

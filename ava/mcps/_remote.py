@@ -179,9 +179,9 @@ def socket_path_for() -> str:
     `base.paths.mcp_daemon_shared_socket`, the single source of truth (moved
     to base/ so the agent kernel's daemon can import it without going through
     this SDK-disable-able module)."""
-    from base.paths import mcp_daemon_shared_socket
+    from base.paths import ava_home, mcp_daemon_shared_socket
 
-    return mcp_daemon_shared_socket()
+    return mcp_daemon_shared_socket(ava_home())
 
 
 def daemon_socket_path() -> str | None:
