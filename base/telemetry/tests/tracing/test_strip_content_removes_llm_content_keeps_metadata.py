@@ -10,6 +10,8 @@ from typing import Any
 import pytest
 
 from base import config
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import traces_dir
 from base.telemetry import trace_mirror
 from base.telemetry import tracing as tracing_mod
@@ -20,6 +22,7 @@ from base.telemetry.tests.test_tracing import (
     otlp_with_attrs,
     under_watermark,
     wait_init_resolved,
+    warned_fields,
 )
 from base.telemetry.tests.test_tracing import (
     production_process_by_default as production_process_by_default,
@@ -337,7 +340,7 @@ def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tm
 
 
 def test_initialize_skips_when_collector_unreachable(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
 ):
     """Local collector not answering at init -> recording stays off, no
     Traceloop.init, and a warning event carries the endpoint (the same
@@ -360,47 +363,36 @@ def test_initialize_skips_when_collector_unreachable(
     monkeypatch.setattr(tracing_mod, "start_collector_retry", ignore_arguments)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    warned: list[tuple] = []
-    monkeypatch.setattr(
-        tracing_mod.logger,
-        "warning",
-        lambda *a, **kw: warned.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    )
-
     initialize_tracing(machine=machine_identity(), home=tmp_path)
 
     assert calls == []
     assert tracing_mod._state["initialized"] is False
+    warned = warned_fields(loguru_records)
     assert warned
-    attrs = warned[0][1]
-    assert attrs.get("action") == "recording_disabled_collector_unreachable"  # pyright: ignore[reportUnknownMemberType]
-    assert attrs.get("endpoint") == "http://127.0.0.1:4318"  # pyright: ignore[reportUnknownMemberType]
+    assert warned[0].get("action") == "recording_disabled_collector_unreachable"
+    assert warned[0].get("endpoint") == "http://127.0.0.1:4318"
 
 
-def test_initialize_skips_when_disk_over_watermark(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_initialize_skips_when_disk_over_watermark(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
+):
     """Disk over watermark: recording stays off, no Traceloop.init, and a
     warning telemetry event is emitted carrying the measured numbers."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "disk_usage", fixed_disk_usage(0.951, 2 * 1024**3))
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    warned: list[tuple] = []
-    monkeypatch.setattr(
-        tracing_mod.logger,
-        "warning",
-        lambda *a, **kw: warned.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    )
-
     initialize_tracing(machine=machine_identity(), home=tmp_path)
 
     assert calls == []
     assert tracing_mod._state["initialized"] is False
+    warned = warned_fields(loguru_records)
     assert warned, "a degradation warning must be logged"
-    attrs = warned[0][1]
-    assert attrs.get("event") == "trace"  # pyright: ignore[reportUnknownMemberType]
-    assert attrs.get("action") == "recording_disabled_disk_watermark"  # pyright: ignore[reportUnknownMemberType]
-    assert attrs.get("usage_fraction") == 0.951  # pyright: ignore[reportUnknownMemberType]
-    assert attrs.get("free_gb") == 2.0  # pyright: ignore[reportUnknownMemberType]
+    attrs = warned[0]
+    assert attrs.get("event") == "trace"
+    assert attrs.get("action") == "recording_disabled_disk_watermark"
+    assert attrs.get("usage_fraction") == 0.951
+    assert attrs.get("free_gb") == 2.0
 
 
 def test_enforce_dir_cap_survives_peer_prune(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

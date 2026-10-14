@@ -22,7 +22,7 @@
 "test_sdk_telemetry.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 5
 "test_sdk_telemetry.py#monkeypatch.setattr base.agents.sdk.call_policy.read_policy" = 2
 "test_sdk_telemetry.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
-"test_sdk_telemetry.py#monkeypatch.setattr base.telemetry.emit" = 3
+"test_sdk_telemetry.py#monkeypatch.setattr base.telemetry.emit" = 1
 
 [debt.stdlib-patch]
 "test_sdk_telemetry.py#monkeypatch.setattr builtins.__import__" = 1

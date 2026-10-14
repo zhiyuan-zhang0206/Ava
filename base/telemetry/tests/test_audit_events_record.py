@@ -21,6 +21,8 @@ from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.telemetry import audit_events
 from base.telemetry.audit_events import record_audit, record_audit_standalone
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 
 def _marker() -> str:
@@ -159,17 +161,15 @@ def test_standalone_commits_the_row_before_it_emits(
 
 
 def test_standalone_failure_raises_and_emits_nothing(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection, database: Database, emitted_events: EmittedEvents
 ) -> None:
     marker = _marker()
-    emitted: list[telemetry.Event] = []
-    monkeypatch.setattr(telemetry, "emit_prepared", emitted.append)
     bad_level = replace(_event(marker), level=cast(Any, "loud"))
 
     with pytest.raises(psycopg.errors.CheckViolation):
         record_audit_standalone(database, bad_level)
 
-    assert emitted == []
+    assert len(emitted_events) == 0
     assert _rows(db_conn, marker) == []
 
 
@@ -206,25 +206,16 @@ async def test_async_standalone_commits_the_row_before_it_emits(
 
 
 def test_reported_recording_does_not_raise_but_reports_and_still_projects(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection, database: Database, emitted_events: EmittedEvents
 ) -> None:
     marker = _marker()
-    emitted: list[telemetry.Event] = []
-    reports: list[tuple[str, dict[str, Any]]] = []
-    monkeypatch.setattr(telemetry, "emit_prepared", emitted.append)
-
-    def report(_category: str, name: str, **kwargs: Any) -> None:
-        reports.append((name, kwargs["attributes"]))
-
-    monkeypatch.setattr(telemetry, "emit", report)
     bad_level = replace(_event(marker), level=cast(Any, "loud"))
 
     audit_events.record_audit_reported(database, bad_level)
 
     assert _rows(db_conn, marker) == []
-    assert emitted == [bad_level]
-    [(name, attributes)] = reports
-    assert name == "audit_write_failed"
+    assert [e for e in emitted_events if e.event_name != "audit_write_failed"] == [bad_level]
+    [attributes] = emitted_events.attributes("audit_write_failed")
     assert (attributes["event_name"], attributes["error_class"]) == (
         "send_message",
         "CheckViolation",
@@ -232,24 +223,15 @@ def test_reported_recording_does_not_raise_but_reports_and_still_projects(
 
 
 def test_reported_recording_of_a_healthy_write_reports_nothing(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection, database: Database, emitted_events: EmittedEvents
 ) -> None:
     marker = _marker()
-    reports: list[str] = []
+    event = _event(marker)
 
-    def emit_prepared(_event: telemetry.Event) -> None:
-        return None
-
-    def emit(_category: str, name: str, **_kwargs: Any) -> None:
-        reports.append(name)
-
-    monkeypatch.setattr(telemetry, "emit_prepared", emit_prepared)
-    monkeypatch.setattr(telemetry, "emit", emit)
-
-    audit_events.record_audit_reported(database, _event(marker))
+    audit_events.record_audit_reported(database, event)
 
     assert len(_rows(db_conn, marker)) == 1
-    assert reports == []
+    assert list(emitted_events) == [event]
 
 
 def test_standalone_many_commits_every_row_together_and_emits_after(
@@ -269,16 +251,14 @@ def test_standalone_many_commits_every_row_together_and_emits_after(
 
 
 def test_standalone_many_with_one_refused_event_records_and_emits_none(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection, database: Database, emitted_events: EmittedEvents
 ) -> None:
     good, bad = _marker(), _marker()
-    emitted: list[telemetry.Event] = []
-    monkeypatch.setattr(telemetry, "emit_prepared", emitted.append)
 
     with pytest.raises(psycopg.errors.CheckViolation):
         audit_events.record_audit_standalone_many(
             database, [_event(good), replace(_event(bad), level=cast(Any, "loud"))]
         )
 
-    assert emitted == []
+    assert len(emitted_events) == 0
     assert _rows(db_conn, good) == []

@@ -14,6 +14,8 @@ import pytest
 
 from base import config
 from base.cluster import derive
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.otlp.identity_inputs import (
@@ -151,6 +153,12 @@ def fixed_disk_usage(fraction: float, free: int) -> Callable[..., tuple[float, i
     return disk_usage
 
 
+def warned_fields(records: LogRecords) -> list[dict[str, Any]]:
+    """The structured fields of every WARNING logged so far, in order (the tracing module tags
+    its warnings with `action=` and the details of the episode)."""
+    return [r["extra"] for r in records if r["level"].name == "WARNING"]
+
+
 def under_watermark(monkeypatch: pytest.MonkeyPatch) -> None:
     """Disk usage below the watermark: initialize_tracing's auto-degrade guard
     must not skip recording in tests (the dev disk can be >90% full and would
@@ -266,7 +274,7 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
 
 
 def test_sdk_initialize_failure_logs_and_state_unchanged(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
 ):
     """If Traceloop.init() itself raises on the arm thread, the failure is
     logged (not propagated — tracing is observability, not a boot blocker),
@@ -278,13 +286,6 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
         raise RuntimeError("boom: init failed")
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _raise)  # pyright: ignore[reportUnknownArgumentType]
-    warnings: list[tuple] = []
-    monkeypatch.setattr(
-        tracing_mod.logger,
-        "warning",
-        lambda *a, **kw: warnings.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    )
-
     initialize_tracing(
         machine=machine_identity(), home=tmp_path
     )  # must not raise: the failure is the arm thread's
@@ -292,9 +293,9 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
 
     assert tracing_mod._state["initialized"] is False
     assert tracing_mod._state["arm_failed"] is True
-    assert warnings
-    attrs = warnings[0][1]
-    assert attrs.get("action") == "recording_init_failed"  # pyright: ignore[reportUnknownMemberType]
+    warned = warned_fields(loguru_records)
+    assert warned
+    assert warned[0].get("action") == "recording_init_failed"
 
 
 def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -338,7 +339,7 @@ def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
 
 def test_collector_unreachable_retries_once_until_init_succeeds(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
 ) -> None:
     """One daemon loop retries a collector-unreachable preflight, logs the
     episode once, and exits after tracing initializes."""
@@ -355,12 +356,6 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
         return result
 
     monkeypatch.setattr(tracing_mod, "endpoint_reachable", endpoint_reachable)
-    warnings: list[str] = []
-
-    def capture_warning(message: str, *_args: object, **_kwargs: object) -> None:
-        warnings.append(message)
-
-    monkeypatch.setattr(tracing_mod.logger, "warning", capture_warning)
     initialized = threading.Event()
 
     def init_traceloop(**_kwargs: object) -> None:
@@ -379,7 +374,9 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
     wait_init_resolved()
 
     assert attempts == [False, False, True]
-    assert warnings == ["trace recording disabled — local OTel collector not answering"]
+    assert loguru_records.messages("WARNING") == [
+        "trace recording disabled — local OTel collector not answering"
+    ]
     assert tracing_mod._state["initialized"] is True
     assert tracing_mod._state["collector_offline_reported"] is False
     assert not retry_thread.is_alive()
@@ -558,7 +555,9 @@ def test_turn_span_waits_for_pending_arm(monkeypatch: pytest.MonkeyPatch) -> Non
     arm.join(timeout=5)
 
 
-def test_ensure_init_resolved_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ensure_init_resolved_bounded_wait(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+) -> None:
     """A hung arm must not hang the first turn forever: the wait is bounded,
     logs once, and later calls skip the wait entirely."""
     from base.telemetry.tracing import ensure_init_resolved
@@ -568,18 +567,12 @@ def test_ensure_init_resolved_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> N
     tracing_mod._state["arm_thread"] = arm
     arm.start()
     monkeypatch.setattr(tracing_mod, "INIT_RESOLVED_TIMEOUT_S", 0.05)
-    warnings: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _capture_warning(*a: object, **kw: object) -> None:
-        warnings.append((a, kw))
-
-    monkeypatch.setattr(tracing_mod.logger, "warning", _capture_warning)
-
     ensure_init_resolved()  # times out -> one warning
     ensure_init_resolved()  # remembered -> instant return, no second warning
 
-    assert len(warnings) == 1
-    assert warnings[0][1]["action"] == "init_resolved_timeout"
+    warned = warned_fields(loguru_records)
+    assert len(warned) == 1
+    assert warned[0]["action"] == "init_resolved_timeout"
     assert tracing_mod._state["timeout_reported"] is True
     release.set()
     arm.join(timeout=5)

@@ -11,7 +11,7 @@ exports = ["impersonation"]
 
 [debt.first-party-patch]
 "test_activation.py#monkeypatch.setattr base.packages.plugins.activation.emit" = 1
-"test_activation.py#monkeypatch.setattr base.packages.plugins.activation.logger" = 2
+"test_activation.py#monkeypatch.setattr base.packages.plugins.activation.logger" = 1
 "test_alert_shadow.py#monkeypatch.setattr base.telemetry.alerts.shadow.Jsonb" = 1
 "test_alerts.py#monkeypatch.setattr base.config.settings.general" = 2
 "test_alerts.py#monkeypatch.setattr base.telemetry.alerts.ALERT_JUMP_LINK" = 2

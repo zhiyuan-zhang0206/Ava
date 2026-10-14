@@ -21,7 +21,6 @@ exports = ["identity_inputs.py"]
 "test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_metrics.metrics_resource" = 1
 "test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_worker.report_no_pipeline" = 2
 "test_telemetry_otlp.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 3
-"test_telemetry_otlp.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_telemetry_otlp.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.cluster_label" = 1
 "test_telemetry_otlp.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.production_identity" = 1
 "test_telemetry_otlp_child_defer.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 2
