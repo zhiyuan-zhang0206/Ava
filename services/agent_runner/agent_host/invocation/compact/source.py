@@ -9,6 +9,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from agent.ownership.hosted_cleanup import release_browser_pages
 from agent.state import CompactState
 from base.agents.compaction.history import ADMISSION_SQL, PENDING_HISTORY_SQL
 from base.agents.compaction.models import CompactTarget
@@ -216,7 +217,8 @@ async def finish_force_and_compact(
     default_reader: Callable[[str, str], Any],
 ) -> None:
     """Both proof tails share the original shielded owned settlement task."""
-    await force
+    if await force:
+        await release_browser_pages(agent_id)
     await finish_compact_pump(
         pool,
         saver,

@@ -182,3 +182,16 @@ async def test_publication_failure_still_attempts_cleanup_and_keeps_primary_erro
         record["exception"].value is secondary for record in loguru_records if record["exception"]
     )
     _assert_committed_and_allocate(db_conn.info.dsn, owner.agent_id, command)
+
+
+async def test_graceful_termination_releases_browser_pages(
+    event_bus: EventBus,
+) -> None:
+    released: list[int] = []
+
+    async def fake_release(agent_id: int) -> bool:
+        released.append(agent_id)
+        return True
+
+    await hosted_cleanup.finish_termination(event_bus, 42, None, None, page_releaser=fake_release)
+    assert released == [42]

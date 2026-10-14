@@ -131,11 +131,17 @@ class PageRegistry:
       wall clock): a clock step must not move a deadline. It is the ONLY
       candidate source for the TTL sweep, so pages this stack never created
       (the user's own tabs) are never inspected or closed.
+    - ``page_owners``: page id -> creating agent id. Records which agent
+      created each stack-created page so ``release_agent_page`` closes every
+      page the agent opened (not only its last-selected tab) and
+      ``reap_expired_pages`` attributes expired pages even after the agent
+      moved on to another tab.
     """
 
     def __init__(self) -> None:
         self.affinity: dict[int, int | None] = {}
         self.ttl_deadlines: dict[int, float] = {}
+        self.page_owners: dict[int, int] = {}
 
     def get_agent_page(self, agent_id: int) -> int | None:
         """The agent's current page, or None when it has none."""
@@ -145,8 +151,8 @@ class PageRegistry:
         """Record the agent's current page."""
         self.affinity[agent_id] = page_id
 
-    def register_created_page(self, page_id: int | None) -> None:
-        """Give a freshly created page its initial TTL deadline.
+    def register_created_page(self, page_id: int | None, agent_id: int | None = None) -> None:
+        """Give a freshly created page its initial TTL deadline and record its owner.
 
         Called by the daemon right after a ``new_page`` it forwarded (an
         explicit call, or the auto-created page on a page-less first navigate)
@@ -157,24 +163,41 @@ class PageRegistry:
         if page_id is None:
             return
         self.ttl_deadlines[page_id] = time.monotonic() + _default_page_ttl_seconds()
+        if agent_id is not None:
+            self.page_owners[page_id] = agent_id
 
     def is_created_page(self, page_id: int) -> bool:
         """Whether this stack created the page, even after its TTL elapsed."""
         return page_id in self.ttl_deadlines
 
+    def agent_created_pages(self, agent_id: int) -> list[int]:
+        """Every stack-created page owned by ``agent_id``, in creation order."""
+        owned = [pid for pid in self.ttl_deadlines if self.page_owners.get(pid) == agent_id]
+        current = self.get_agent_page(agent_id)
+        if (
+            current is not None
+            and current not in owned
+            and self.is_created_page(current)
+            and self.page_owners.get(current) is None
+        ):
+            owned.append(current)
+        return owned
+
     def drop_page_ttl(self, page_id: int | None) -> None:
-        """Forget the page's TTL slot — the page is closed (or was never ours)."""
+        """Forget the page's TTL and owner slots — the page is closed (or was never ours)."""
         if page_id is not None:
             self.ttl_deadlines.pop(page_id, None)
+            self.page_owners.pop(page_id, None)
 
     def clear_affinity_for_page(self, page_id: int) -> int | None:
         """Clear every agent slot naming ``page_id`` (the page is gone);
 
-        returns one cleared owner for logs / the expiry event (None when no slot
-        named the page). Every slot is cleared — a slot left naming a closed page
-        would make the owner's next call re-pin against a dead id first.
+        returns the creating owner (or one cleared affinity owner) for logs /
+        the expiry event (None when no slot named the page). Every slot is
+        cleared — a slot left naming a closed page would make the owner's next
+        call re-pin against a dead id first.
         """
-        owner: int | None = None
+        owner: int | None = self.page_owners.pop(page_id, None)
         for agent_id, current in list(self.affinity.items()):
             if current == page_id:
                 self.set_agent_page(agent_id, None)
@@ -219,34 +242,39 @@ async def forward_legacy_call(
 
 
 async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
-    """Drop affinity, closing only a page this stack created.
+    """Drop affinity, closing every page this agent created.
 
-    Called when the agent process exits (wire method ``release_agent_page``,
-    sent by the agent's exit hook). Idempotent: an
-    agent with no slot (never used the browser, or already released) is a
-    no-op. A borrowed page is deselected without closing; the returned id is
-    the page closed, or None.
+    Called when the agent terminates (wire method ``release_agent_page``,
+    sent by the termination cleanup hook). Idempotent: an agent with no
+    created pages or affinity is a no-op. A borrowed page is deselected
+    without closing; every created page owned by ``agent_id`` is closed so the
+    agent's tab group disappears with its last tab. The returned id is the
+    closed current page (or the last closed created page), or None.
     """
     async with daemon._lock:
-        page_id = daemon.pages.get_agent_page(agent_id)
-        if page_id is None:
+        current_id = daemon.pages.get_agent_page(agent_id)
+        to_close = daemon.pages.agent_created_pages(agent_id)
+        if not to_close:
+            if current_id is not None:
+                daemon.pages.set_agent_page(agent_id, None)
             return None
-        if not daemon.pages.is_created_page(page_id):
-            daemon.pages.set_agent_page(agent_id, None)
-            return None
-        result = await daemon._call("close_page", {"pageId": page_id})
-        # A close of an already-gone page errors upstream; either way the slot
-        # is released — this agent is done with the browser. Only a transport
-        # failure (upstream down) aborts the release, and then the exception
-        # propagates and the slot survives for the expiry sweep.
-        if result.is_error:
-            logger.warning(
-                f"[browser-mcp] release of agent {agent_id} page {page_id} "
-                f"errored ({text_of(result)!r}); clearing the slot"
-            )
+        last_closed: int | None = None
+        for page_id in to_close:
+            result = await daemon._call("close_page", {"pageId": page_id})
+            # A close of an already-gone page errors upstream; either way the slot
+            # is released — this agent is done with the browser. Only a transport
+            # failure (upstream down) aborts the release, and then the exception
+            # propagates and the remaining slots survive for the expiry sweep.
+            if result.is_error:
+                logger.warning(
+                    f"[browser-mcp] release of agent {agent_id} page {page_id} "
+                    f"errored ({text_of(result)!r}); clearing the slot"
+                )
+            daemon.pages.clear_affinity_for_page(page_id)
+            daemon.pages.drop_page_ttl(page_id)
+            last_closed = page_id
         daemon.pages.set_agent_page(agent_id, None)
-        daemon.pages.drop_page_ttl(page_id)
-        return page_id
+        return current_id if current_id in to_close else last_closed
 
 
 async def handle_release_agent_page(daemon: _PageDaemon, req: Request, req_id: Any) -> Response:
@@ -404,6 +432,7 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
             if url is None:
                 # Already closed underneath us (close_page / release / a
                 # manual tab close) — nothing to close; just drop the slot.
+                daemon.pages.clear_affinity_for_page(page_id)
                 daemon.pages.drop_page_ttl(page_id)
                 continue
             result = await daemon._call("close_page", {"pageId": page_id})
@@ -412,8 +441,8 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
                     f"[browser-mcp] TTL sweep could not close page {page_id} ({url}): "
                     f"{text_of(result)!r}"
                 )
-            daemon.pages.drop_page_ttl(page_id)
             owner = daemon.pages.clear_affinity_for_page(page_id)
+            daemon.pages.drop_page_ttl(page_id)
             telemetry.emit(
                 "log",
                 "chrome_page_ttl_expired",

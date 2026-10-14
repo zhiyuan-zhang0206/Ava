@@ -529,21 +529,23 @@ async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
 
 
 async def test_release_agent_page_closes_only_that_agent() -> None:
-    """Releasing agent 7 closes exactly 7's page — agent 8's tab survives even
-    though it is the upstream's current global selection; 7's slot is cleared."""
+    """Releasing agent 7 closes every page 7 created — agent 8's tab survives
+    even though it is the upstream's current global selection; 7's slot is cleared."""
     d, up = browser_daemon_with_fake_upstream()
-    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
-    await d.call_tool_for_agent("new_page", {"url": "b"}, 8)  # page 2, selected
+    await d.call_tool_for_agent("new_page", {"url": "a1"}, 7)  # page 1
+    await d.call_tool_for_agent("new_page", {"url": "a2"}, 7)  # page 2
+    await d.call_tool_for_agent("new_page", {"url": "b"}, 8)  # page 3, selected
     up.calls.clear()
 
     page_id = await page_lifecycle.release_agent_page(d, 7)
 
-    assert page_id == 1
-    assert ("close_page", {"pageId": 1}, 2) in up.calls
-    assert 1 not in up.pages
-    assert up.pages == {2: "b"}  # the other agent's tab untouched
+    assert page_id == 2
+    assert ("close_page", {"pageId": 1}, 3) in up.calls
+    assert ("close_page", {"pageId": 2}, 3) in up.calls
+    assert 1 not in up.pages and 2 not in up.pages
+    assert up.pages == {3: "b"}  # the other agent's tab untouched
     assert d.pages.get_agent_page(7) is None
-    assert d.pages.get_agent_page(8) == 2
+    assert d.pages.get_agent_page(8) == 3
 
 
 async def test_release_agent_page_idempotent_and_no_slot() -> None:

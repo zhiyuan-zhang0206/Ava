@@ -40,9 +40,17 @@ async def test_owned_page_keeps_creation_deadline_after_switching_to_user_tab() 
     deadline = daemon.pages.ttl_deadlines[1]
     await daemon.call_tool_for_agent("select_page", {"pageId": 99}, 7)
     assert daemon.pages.ttl_deadlines[1] == deadline
-    assert await page_lifecycle.release_agent_page(daemon, 7) is None
-    assert 1 in upstream.pages
 
     expire(daemon, 1)
     assert await page_lifecycle.reap_expired_pages(daemon) == 1
+    assert upstream.pages == {99: "https://example.com/user-tab"}
+
+
+async def test_release_after_switching_to_user_tab_closes_owned_page_only() -> None:
+    daemon, upstream = browser_daemon_with_fake_upstream()
+    await daemon.call_tool_for_agent("new_page", {"url": "https://example.com/owned"}, 7)
+    upstream.pages[99] = "https://example.com/user-tab"
+    await daemon.call_tool_for_agent("select_page", {"pageId": 99}, 7)
+    assert await page_lifecycle.release_agent_page(daemon, 7) == 1
+    assert daemon.pages.get_agent_page(7) is None
     assert upstream.pages == {99: "https://example.com/user-tab"}

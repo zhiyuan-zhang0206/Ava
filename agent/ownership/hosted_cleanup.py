@@ -1,11 +1,32 @@
-"""Independent notification and best-effort shell cleanup after hosted death."""
+"""Independent notification and best-effort browser/shell cleanup after hosted death."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
+from ava.mcps import release_agent_chrome_pages
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
+
+
+async def release_browser_pages(
+    agent_id: int,
+    *,
+    page_releaser: Callable[[int], Awaitable[object]] = release_agent_chrome_pages,
+) -> None:
+    """Best-effort close of this agent's browser-mcp pages after termination commits."""
+    try:
+        released = await page_releaser(agent_id)
+        if not released:
+            logger.debug(
+                "agent {agent_id} browser-page release skipped (no service / failed)",
+                agent_id=agent_id,
+            )
+    except Exception:
+        logger.opt(exception=True).warning(
+            "agent {agent_id} browser-page release failed (non-fatal)",
+            agent_id=agent_id,
+        )
 
 
 async def finish_termination(
@@ -13,13 +34,16 @@ async def finish_termination(
     agent_id: int,
     cutoff: int | None,
     killer: Callable[[int, int], None] | None,
+    *,
+    page_releaser: Callable[[int], Awaitable[object]] = release_agent_chrome_pages,
 ) -> None:
-    """Attempt both post-commit effects while preserving a publication failure."""
+    """Attempt post-commit effects while preserving a publication failure."""
     publication_error: BaseException | None = None
     try:
         await publish_agent_updated(bus, agent_id)
     except BaseException as exc:
         publication_error = exc
+    await release_browser_pages(agent_id, page_releaser=page_releaser)
     try:
         if cutoff is not None and killer is not None:
             await asyncio.to_thread(killer, agent_id, cutoff)
