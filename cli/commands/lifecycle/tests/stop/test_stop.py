@@ -24,6 +24,7 @@ from base.deploy.state import host_deploy_state
 from base.host import proc
 from base.sessions.pty import client
 from base.sessions.pty.paths import SERVICE_UNIT
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _stop_extras
 from cli.commands.lifecycle import _temporary_stop as command
@@ -71,6 +72,7 @@ def _restart_stop(
         database_factory=database_factory,
         producer=producer,
         machine=command_runtime.machine,
+        helper=refuse_helper,
     )
 
 
@@ -310,6 +312,7 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -392,6 +395,7 @@ def test_only_explicit_force_enters_legacy_force_stop(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -404,6 +408,7 @@ def test_only_explicit_force_enters_legacy_force_stop(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -562,6 +567,7 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
     elif how == "restart":
         rc = _restart_stop(
@@ -644,6 +650,7 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        helper=refuse_helper,
     )
 
     assert rc == 1
@@ -677,6 +684,7 @@ def test_stop_refused_inside_an_exec_domain(
                 database_factory=operator_database,
                 producer=operator_pipeline,
                 machine=command_runtime.machine,
+                helper=refuse_helper,
             )
         else:
             _restart_stop(

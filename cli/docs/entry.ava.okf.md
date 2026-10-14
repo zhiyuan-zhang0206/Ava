@@ -26,6 +26,10 @@ again under its lifecycle lock. Other parsed runtime commands create one
 `cli.database.runtime.CommandRuntime` with a zero-read `ConfigBoot` and its lazy
 `MachineIdentity`. Dispatch, embedded
 lifecycle legs, logging, database host resolution and telemetry borrow that same
-identity. Successful setup resets only this owner before role and intent checks;
+identity, and with `CommandRuntime.helper`, the one place the real permissions-helper
+factory is chosen (`base.sessions.helperproc.helper_client`, which reads the helper's port only when
+a macOS code path calls it). `start`, `stop` and `converge` hand that factory down to the root
+driver and the helper bring-up; nothing below them builds a helper client. Successful setup
+resets only this owner before role and intent checks;
 failed setup preserves its cached inputs. Help exits before constructing the root,
 and lightweight status/stop paths do not force identity or configuration fetches.

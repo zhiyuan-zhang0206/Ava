@@ -9,6 +9,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import spec as converge_host
 from cli.commands.extensions import external_skills as external_skills_module
@@ -74,6 +75,7 @@ def _ctx(
         database_factory=operator_database,
         producer=producer,
         machine=machine,
+        helper=refuse_helper,
     )
 
 

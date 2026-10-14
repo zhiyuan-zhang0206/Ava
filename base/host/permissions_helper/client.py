@@ -20,6 +20,7 @@ import binascii
 import json
 import socket
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -707,3 +708,13 @@ class PermissionsHelperClient(StatefulCalls):
             return AccessibilityStatus(
                 state=AccessibilityState.NOT_GRANTED, diagnostic=_NO_AX_GRANT_DIAGNOSTIC
             )
+
+
+HelperFactory = Callable[[], PermissionsHelperClient]
+"""How a caller reaches its permissions helper: a composition root hands this to the code that
+needs the helper, and nothing below it builds a client of its own (so a host that cannot run a
+helper never reads the helper's port)."""
+
+HelperAtSocket = Callable[[Path], PermissionsHelperClient]
+"""How code that acts on an explicit home (retiring a helper) reaches that home's socket;
+`PermissionsHelperClient` itself is the production value."""

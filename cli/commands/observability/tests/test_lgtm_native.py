@@ -17,6 +17,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.packages import dashboard_supply
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
@@ -495,6 +496,7 @@ def test_native_step_does_not_touch_an_unmarked_home(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_484),
+        helper=refuse_helper,
     )
 
     def fail_ensure(_repo_path: Path, _home: Path) -> None:

@@ -34,6 +34,7 @@ from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance import admission
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import SERVICE_UNIT, ledger_path
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.maintenance_stop_report import StopIncompleteError
 from cli.commands.lifecycle import _temporary_stop as command
@@ -104,6 +105,7 @@ def test_stop_closes_busy_terminal_job_with_real_signals(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -143,6 +145,7 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -189,6 +192,7 @@ def test_stop_records_nothing_for_idle_shell(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -223,6 +227,7 @@ def test_stop_tolerates_naturally_exited_session(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -263,6 +268,7 @@ def test_the_stop_services_phase_keeps_the_pty_sessions_service_until_its_termin
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -311,6 +317,7 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 1
     )
@@ -331,6 +338,7 @@ def test_incomplete_stop_still_records_the_sessions_itclosed_session(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -371,6 +379,7 @@ def test_known_job_leftover_is_reported_without_failing_stop(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -392,6 +401,7 @@ def test_known_job_leftover_is_reported_without_failing_stop(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -426,6 +436,7 @@ def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )

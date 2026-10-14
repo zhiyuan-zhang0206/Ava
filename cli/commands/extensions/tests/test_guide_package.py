@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 import ava.skills
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills
@@ -120,6 +121,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_runtime.machine,
+        helper=refuse_helper,
     )
     external_skills.converge_external_agent_skill(context, host_home=host_home)
     target = client_home / "skills" / "ava-guide"

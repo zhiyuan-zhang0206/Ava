@@ -19,6 +19,7 @@ from base.cluster import session_name
 from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
+from base.host.permissions_helper.client import HelperFactory
 from base.sessions.hosting import hosting_supervised_session
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
@@ -154,6 +155,7 @@ def force_stop(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
+    helper: HelperFactory,
 ) -> int:
     """Explicit force-only resource stop; normal commands use _temporary_stop.
 
@@ -199,7 +201,7 @@ def force_stop(
     # path does not fabricate drain receipts and remains usable offline. The
     # pty-sessions service outlives this step: it closes the terminals below.
     _root_driver_commands.stop_root_service_tree(
-        preserve=root_preserve | {SERVICE_UNIT}, force=True
+        preserve=root_preserve | {SERVICE_UNIT}, force=True, helper=helper
     )
 
     # 1.4) a teardown that asked for the browser down finishes the job: kill any
@@ -216,7 +218,9 @@ def force_stop(
     # ledger when it is not running), then the service itself goes.
     if not keep_terminals:
         force_close_terminals()
-        _root_driver_commands.stop_root_service_tree(preserve=root_preserve, force=True)
+        _root_driver_commands.stop_root_service_tree(
+            preserve=root_preserve, force=True, helper=helper
+        )
 
     # 2) stop the data plane (data persists on disk).
     _stop_data_plane(
@@ -245,6 +249,7 @@ def do_stop(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
+    helper: HelperFactory,
 ) -> int:
     """Shared stop kernel; only explicit force escalates a service stop."""
     if force:
@@ -258,6 +263,7 @@ def do_stop(
             retained_children=retained_children,
             producer=producer,
             machine=machine,
+            helper=helper,
         )
     return _temporary_stop.stop(
         require_confirmation=require_confirmation,
@@ -271,6 +277,7 @@ def do_stop(
         database_factory=database_factory,
         producer=producer,
         machine=machine,
+        helper=helper,
     )
 
 
@@ -286,6 +293,7 @@ def cmd_stop(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
+    helper: HelperFactory,
 ) -> int:
     """Stop this unit, including terminals and infrastructure; retain its data."""
     return do_stop(
@@ -302,6 +310,7 @@ def cmd_stop(
         database_factory=database_factory,
         producer=producer,
         machine=machine,
+        helper=helper,
     )
 
 
@@ -525,6 +534,7 @@ def _cmd_restart_body(
             database_factory=database_factory,
             producer=producer,
             machine=command.machine,
+            helper=command.helper,
         )
     if rc != 0:
         # The quiesce paused this host; a failed stop means no `ava start` is

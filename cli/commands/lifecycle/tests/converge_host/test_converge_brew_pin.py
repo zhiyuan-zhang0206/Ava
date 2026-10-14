@@ -14,6 +14,7 @@ import cli.commands.lifecycle.converge_host as cv
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host import brew_pin
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -49,6 +50,7 @@ def _ctx(
         database_factory=operator_database,
         producer=producer,
         machine=machine_from_boot(machine_config),
+        helper=refuse_helper,
     )
 
 

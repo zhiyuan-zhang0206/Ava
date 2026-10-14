@@ -23,6 +23,7 @@ from base.db import create_agent
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.sessions.pty.paths import ledger_path
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
@@ -111,6 +112,7 @@ def test_stop_records_notice_for_verified_closed_busy_session(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -176,6 +178,7 @@ def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_s
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -217,6 +220,7 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -268,6 +272,7 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )
@@ -305,6 +310,7 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_runtime.machine,
+            helper=refuse_helper,
         )
         == 0
     )

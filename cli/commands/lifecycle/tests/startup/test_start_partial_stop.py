@@ -10,7 +10,9 @@ from base import cluster, paths
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.lifecycle import start_serving
 from base.host import proc
+from base.host.permissions_helper.client import HelperFactory
 from base.sessions import hosting as sessions_hosting
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as stop
 from cli.commands.lifecycle import service_stop
@@ -108,7 +110,7 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
         pytest.fail("unstarted home has no work to drain")
 
     def _fake_services_phase_action(
-        *, preserved: frozenset[str], deadline: float
+        *, preserved: frozenset[str], deadline: float, helper: HelperFactory
     ) -> Callable[[], object]:
         return lambda: steps.append("root")
 
@@ -151,6 +153,7 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
             database_factory=operator_database,
             producer=operator_pipeline,
             machine=command_machine,
+            helper=refuse_helper,
         )
         == 0
     )

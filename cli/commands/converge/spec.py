@@ -15,6 +15,7 @@ from pathlib import Path
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity, MachineRole, MachineRoles
 from base.config import ConfigBoot
+from base.host.permissions_helper.client import HelperFactory
 from base.telemetry import EventPipeline
 
 ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
@@ -34,6 +35,7 @@ class ConvergeCtx:
     machine: MachineIdentity
     database_factory: DatabaseFactory
     producer: Callable[[], EventPipeline]
+    helper: HelperFactory
     services: frozenset[str] = frozenset()
 
     def read_config(self) -> ConfigBoot:

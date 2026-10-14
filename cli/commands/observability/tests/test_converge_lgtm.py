@@ -21,6 +21,7 @@ from base import config
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm_native, observatory_urls
@@ -66,6 +67,7 @@ def _ctx(
         database_factory=operator_database,
         producer=producer,
         machine=machine_from_boot(machine_config_76),
+        helper=refuse_helper,
     )
 
 
@@ -703,6 +705,7 @@ def _station_ctx(
         database_factory=operator_database,
         producer=producer,
         machine=machine_from_boot(machine_config_710),
+        helper=refuse_helper,
     )
 
 
