@@ -75,7 +75,11 @@ def _producer(
 ) -> OperatorEventPipeline:
     del database_factory
     return OperatorEventPipeline(
-        WatchedDatabase(local_host=machine.host, open_database=open_operator_database),
+        WatchedDatabase(
+            local_host=machine.host,
+            gateway_url_reader=lambda: "",
+            open_database=open_operator_database,
+        ),
         machine=machine,
         home=home,
         flush_interval_s=FLUSH_INTERVAL_S,
