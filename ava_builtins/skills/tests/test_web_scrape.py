@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from tests.skills import load_skill_script
+from ava_builtins.skills.tests.skill_script import load_skill_script
 
 feed = load_skill_script("integrations", "web-sources", "scripts", "webscrape.py")
 

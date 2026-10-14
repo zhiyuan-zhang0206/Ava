@@ -9,9 +9,7 @@ outside that scope (pytest manages their own sys.path), so a test loads the
 script under test directly from its file path with the standard
 `importlib.util.spec_from_file_location` recipe — `load_skill_script` below
 just centralizes the handful of lines every such test previously repeated
-inline. Lives in this package's `__init__.py` (not its own module) so that
-adding it did not grow `tests/skills/`'s direct-entry count past the
-structure budget.
+inline, and carries the one `[loads]` declaration for them.
 """
 
 from __future__ import annotations
@@ -21,7 +19,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def load_skill_script(*parts: str, name: str | None = None) -> ModuleType:

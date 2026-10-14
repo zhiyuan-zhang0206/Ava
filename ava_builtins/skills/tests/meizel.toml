@@ -1,9 +1,18 @@
+exports = ["skill_script.py"]
+
 
 [loads]
+"skill_script.py" = ["ava_builtins/skills"]
 "test_rss_feed.py" = ["ava_builtins/skills"]
 "test_sms.py" = ["ava_builtins/skills"]
 "test_telegram_send_file.py" = ["ava_builtins/skills"]
 "test_youtube_feed.py" = ["ava_builtins/skills"]
+
+[uses]
+"test_audio_transcribe.py" = ["skill_script.py"]
+"test_web_ai_console.py" = ["skill_script.py"]
+"test_web_ai_webchat.py" = ["skill_script.py"]
+"test_web_scrape.py" = ["skill_script.py"]
 
 [debt.env-patch]
 "test_gmail.py#monkeypatch.setenv os.environ.GMAIL_ACCOUNT" = 1

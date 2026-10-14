@@ -8,9 +8,9 @@ from typing import Any
 import psycopg
 import pytest
 
+from ava_builtins.skills.tests.skill_script import load_skill_script
 from base.db import Database
 from base.db.tests.fakes import patch_database
-from tests.skills import load_skill_script
 
 
 def test_build_record_adds_leak_audit_only_for_eval_collection(

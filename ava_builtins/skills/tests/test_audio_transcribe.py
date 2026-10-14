@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.skills import load_skill_script
+from ava_builtins.skills.tests.skill_script import load_skill_script
 
 T = load_skill_script("integrations", "audio-transcribe", "scripts", "transcribe.py")
 
