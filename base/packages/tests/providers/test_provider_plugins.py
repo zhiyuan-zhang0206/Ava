@@ -68,6 +68,7 @@ _REPO_MODEL_VENDORS = {
     "gemini-3.5-flash": "google",
     "gemini-3.7-flash": "google",
     "gemini-3.8-flash": "google",
+    "gemini-4-argon": "google",
     "gemini-flash-lite-latest": "google",
     "glm-5.2": "zhipu",
     "glm-5.3": "zhipu",
