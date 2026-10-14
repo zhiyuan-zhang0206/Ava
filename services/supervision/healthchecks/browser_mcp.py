@@ -4,6 +4,7 @@ import json
 import logging
 import socket
 
+from base.config import settings
 from base.paths import chrome_mcp_socket
 from services.desktop.browser.protocol import Request, Response
 
@@ -12,12 +13,12 @@ _log = logging.getLogger("services.supervision.healthchecks.browser_mcp")
 _TIMEOUT_S = 5.0
 
 
-def _probe() -> bool:
+def browser_mcp_probe() -> bool:
     """True when the daemon answers a lock-free ping over its socket."""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(_TIMEOUT_S)
     try:
-        sock.connect(str(chrome_mcp_socket()))
+        sock.connect(str(chrome_mcp_socket(settings.services.browser_cdp_port)))
         req: Request = {"id": 0, "method": "ping"}
         sock.sendall((json.dumps(req) + "\n").encode())
         buf = b""
@@ -32,7 +33,7 @@ def _probe() -> bool:
         sock.close()
 
 
-def _is_alive() -> bool:
+def is_alive() -> bool:
     """True when the daemon answers a ping; ANY probe failure means "not alive".
 
     A healthcheck's contract with the watchdog is a bool, not an exception: an
@@ -41,7 +42,7 @@ def _is_alive() -> bool:
     so nothing is silently swallowed.
     """
     try:
-        return _probe()
+        return browser_mcp_probe()
     except (OSError, json.JSONDecodeError):
         return False
     except Exception:

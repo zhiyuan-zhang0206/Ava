@@ -1,2 +1,0 @@
-[uses]
-"test_cold.py" = ["child_fixture.py"]

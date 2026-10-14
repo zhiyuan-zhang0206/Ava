@@ -9,7 +9,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import cast
 
-from meizel.contracts.debt import CYCLE, TABLE_KEY, DebtTable, back_edge, owner_hint, parse_debt
+from meizel.contracts.debt import (
+    CYCLE_EDGE,
+    TABLE_KEY,
+    DebtTable,
+    local_edge,
+    owner_hint,
+    parse_debt,
+)
 from meizel.graph.graphs import cycle_through, strongly_connected, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic
 from meizel.graph.universe import MANIFEST, Universe
@@ -25,6 +32,16 @@ def manifest_path(directory: str) -> str:
     return f"{directory}/{MANIFEST}" if directory else MANIFEST
 
 
+def first(path: str) -> str:
+    """The first component of a relative path: the direct child it lies under."""
+    return path.split("/", 1)[0]
+
+
+def within(path: str, prefix: str) -> bool:
+    """`path` is `prefix` or lies below it (a file is a prefix of itself)."""
+    return path == prefix or path.startswith(f"{prefix}/")
+
+
 @dataclass(slots=True)
 class Manifest:
     directory: str
@@ -34,6 +51,10 @@ class Manifest:
     external: dict[str, str] = field(default_factory=dict[str, str])
     roles: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     debt: DebtTable = field(default_factory=dict[Code, dict[str, int]])
+    back: frozenset[tuple[str, str]] = frozenset()
+    dangling: list[tuple[str, str | None, str | None]] = field(
+        default_factory=list[tuple[str, str | None, str | None]]
+    )
     lines: list[str] = field(default_factory=list[str])
 
     @property
@@ -64,11 +85,28 @@ class Manifest:
         return start + 1
 
     def graph(self) -> dict[str, tuple[str, ...]]:
-        return dict(self.uses)
+        """The declared edges between direct children: every endpoint cut to its first component."""
+        projected: dict[str, list[str]] = {}
+        for source, targets in self.uses.items():
+            known = projected.setdefault(first(source), [])
+            known.extend(t for t in dict.fromkeys(first(t) for t in targets) if t not in known)
+        return {source: tuple(targets) for source, targets in projected.items()}
+
+    def pairs(self) -> list[tuple[str, str]]:
+        """Every declared `(source path, target path)`, each relative to this directory."""
+        return [(source, target) for source, targets in self.uses.items() for target in targets]
+
+    def covering(self, src: str, dst: str) -> list[tuple[str, str]]:
+        """The declared pairs a fact from `src` to `dst` (relative paths) falls under."""
+        return [(s, d) for s, d in self.pairs() if within(src, s) and within(dst, d)]
+
+    def narrowed(self, cf: str, ct: str) -> list[tuple[str, str]]:
+        """The declared pairs of the edge `cf -> ct` that name something deeper than a child."""
+        return [(s, d) for s, d in self.pairs() if (first(s), first(d)) == (cf, ct)]
 
     def back_edges(self) -> list[tuple[str, str]]:
-        """The declared edges recorded as allowed to close a cycle."""
-        return sorted(back_edge(key) for key in self.debt.get(CYCLE, ()))
+        """The declared edges whose facts are recorded as closing a cycle."""
+        return sorted(self.back)
 
 
 class _Reader:
@@ -97,8 +135,19 @@ class _Reader:
             seen.add(name)
         return tuple(dict.fromkeys(value))
 
-    def child(self, name: str, where: str, line: int) -> bool:
-        if name in self.children:
+    def exists(self, relative: str) -> bool:
+        """A tracked file or directory below this one, named by a normalised relative path."""
+        full = f"{self.directory}/{relative}" if self.directory else relative
+        parts = relative.split("/")
+        clean = bool(relative) and all(part not in {"", ".", ".."} for part in parts)
+        return (
+            clean
+            and parts[-1] != MANIFEST
+            and (full in self.universe.files or full in self.universe.dirs)
+        )
+
+    def child(self, name: str, where: str, line: int, *, deep: bool = False) -> bool:
+        if name in self.children or (deep and self.exists(name)):
             return True
         self.report(
             line,
@@ -121,6 +170,9 @@ class _Reader:
             line = self.manifest.line_of(TABLE_KEY)
             self.manifest.debt = parse_debt(
                 document[TABLE_KEY], lambda text: self.report(line, Code.MANIFEST_DEBT, text)
+            )
+            self.manifest.back = frozenset(
+                local_edge(key) for key in self.manifest.debt.get(CYCLE_EDGE, ())
             )
         self.check_cycles()
 
@@ -169,6 +221,7 @@ class _Reader:
                     line, Code.MANIFEST_CHILD, f"[external] key {key!r} must be a Python file"
                 )
             elif not self.child(key, "[external]", line):
+                self.manifest.dangling.append(("external", key, None))
                 continue
             elif not isinstance(reason, str) or not reason.strip():
                 self.report(
@@ -192,6 +245,8 @@ class _Reader:
                 )
             elif self.child(name, "exports", line):
                 kept.append(name)
+            else:
+                self.manifest.dangling.append(("exports", None, name))
         self.manifest.exports = tuple(kept)
 
     def read_table(
@@ -205,18 +260,26 @@ class _Reader:
         result: dict[str, tuple[str, ...]] = {}
         for key, value in cast("dict[str, object]", table).items():
             line = self.manifest.line_of(key)
-            if self.child(key, f"[{section}]", line):
+            if self.child(key, f"[{section}]", line, deep=section == "uses"):
                 values = self.names(value, f"[{section}] {key!r}", line)
                 result[key] = reader(key, values, line)
+            else:
+                self.manifest.dangling.append((section, key, None))
         return result
 
     def read_use(self, source: str, targets: tuple[str, ...], line: int) -> tuple[str, ...]:
         kept: list[str] = []
         for target in targets:
-            if target == source:
-                self.report(line, Code.MANIFEST_SELF_EDGE, f"{source!r} cannot use itself")
-            elif self.child(target, f"[uses] {source!r}", line):
+            if first(target) == first(source):
+                self.report(
+                    line,
+                    Code.MANIFEST_SELF_EDGE,
+                    f"{source!r} cannot use {target!r}: both lie under {first(source)!r}",
+                )
+            elif self.child(target, f"[uses] {source!r}", line, deep=True):
                 kept.append(target)
+            else:
+                self.manifest.dangling.append(("uses", source, target))
         return tuple(kept)
 
     def read_load(self, source: str, targets: tuple[str, ...], line: int) -> tuple[str, ...]:
@@ -232,6 +295,7 @@ class _Reader:
                     Code.MANIFEST_CHILD,
                     f"[loads] {source!r}: {target!r} is not a tracked directory",
                 )
+                self.manifest.dangling.append(("loads", source, target))
         return tuple(kept)
 
     def check_cycles(self) -> None:
@@ -251,14 +315,14 @@ class _Reader:
                 line, Code.MANIFEST_CYCLE, "cycle in the local graph: " + " -> ".join(cycle), hint
             )
         for src, dst in unneeded_back_edges(uses, back):
-            key = f"{src} -> {dst}"
             reason = (
                 "closes no cycle any more" if dst in uses.get(src, ()) else "is no longer declared"
             )
+            key = next(k for k in self.manifest.debt[CYCLE_EDGE] if local_edge(k) == (src, dst))
             self.report(
-                self.manifest.debt_line(CYCLE, key),
+                self.manifest.debt_line(CYCLE_EDGE, key),
                 Code.DEBT_PAID,
-                f"{CYCLE} debt {key!r} is recorded but the edge {reason}",
+                f"{CYCLE_EDGE} debt for {src} -> {dst} is recorded but the edge {reason}",
                 ("run `python -m meizel debt prune` to remove it",),
             )
 

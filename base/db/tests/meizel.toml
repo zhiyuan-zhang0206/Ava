@@ -1,1 +1,29 @@
 exports = ["fakes.py", "live_agents.py"]
+
+[debt.env-patch]
+"test_db_guard.py#monkeypatch.delenv os.environ.AVA_TEST_DB" = 5
+"test_db_guard.py#monkeypatch.setenv os.environ.AVA_TEST_DB" = 4
+
+[debt.first-party-patch]
+"fakes.py#monkeypatch.setattr base.db.Database" = 1
+"test_connect_helpers.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+"test_connect_helpers.py#monkeypatch.setattr base.db.code_version_gate.has_log_sink" = 1
+"test_connect_helpers.py#monkeypatch.setattr base.db.code_version_gate.time" = 1
+"test_connect_helpers.py#monkeypatch.setattr base.db.connections.ConnectionPool" = 1
+"test_connect_helpers.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
+"test_database_handle.py#monkeypatch.setattr base.config.settings.data_plane.db_pool_max_size" = 1
+"test_database_handle.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
+"test_database_handle.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
+"test_database_handle.py#monkeypatch.setattr base.db.connections.restore_pooled_session" = 1
+"test_db.py#monkeypatch.setattr base.config.settings.data_plane.db_sslmode" = 3
+"test_db.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 5
+"test_db.py#monkeypatch.setattr base.db.connections.ConnectionPool" = 1
+"test_db.py#monkeypatch.setattr base.db.connections.restore_pooled_session" = 1
+
+[debt.stdlib-patch]
+"test_connect_helpers.py#monkeypatch.setattr logging.shutdown" = 1
+"test_connect_helpers.py#monkeypatch.setattr os._exit" = 1
+
+[debt.third-party-patch]
+"test_connect_helpers.py#monkeypatch.setattr loguru.logger.remove" = 1
+"test_db.py#monkeypatch.setattr psycopg.connect" = 1

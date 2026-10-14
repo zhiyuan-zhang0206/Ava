@@ -26,13 +26,13 @@ from base.agents.sdk import call_policy
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
     SdkMember,
     SdkNamespace,
 )
-from tests.fixtures.log_capture import loguru_records as loguru_records
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 

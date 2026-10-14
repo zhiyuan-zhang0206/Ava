@@ -152,9 +152,9 @@ class TestPatternMatchesTheRealChannel:
         from fnmatch import fnmatchcase
 
         from base.cluster import inbound_channel, redis_channel_prefix
-        from services.agent_runner.agent_host.dispatcher import _INBOUND_PATTERN_SUFFIX
+        from services.agent_runner.agent_host.dispatcher import INBOUND_PATTERN_SUFFIX
 
-        pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
+        pattern = f"{redis_channel_prefix()}{INBOUND_PATTERN_SUFFIX}"
         for agent_id in (1, 42, 999999):
             channel = inbound_channel(agent_id)
             assert fnmatchcase(channel, pattern), f"{channel!r} not covered by {pattern!r}"

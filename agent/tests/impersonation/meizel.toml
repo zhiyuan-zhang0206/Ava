@@ -1,4 +1,9 @@
+exports = ["external_attachment.py"]
+
 [uses]
+"test_external_database_owner.py" = ["external_attachment.py"]
+"test_external_machine_owner.py" = ["external_attachment.py"]
+"test_external_mcp_lease.py" = ["external_attachment.py"]
 "test_impersonation_consent.py" = ["test_impersonation.py"]
 "test_impersonation_integration.py" = ["handoff_inputs.py"]
 "test_impersonation_part2.py" = ["test_impersonation.py"]
@@ -6,6 +11,80 @@
 "test_impersonation_transport_integration.py" = ["handoff_inputs.py"]
 "test_successor_lease_binding.py" = ["test_impersonation.py"]
 
+[debt.env-patch]
+"test_external_database_owner.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_external_database_owner.py#patch.dict os.environ" = 4
+"test_external_machine_owner.py#patch.dict os.environ" = 2
+"test_impersonation_introduction.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"external_attachment.py#monkeypatch.setattr agent.extensions.plugin_state_codec.load_snapshot" = 1
+"external_attachment.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"external_attachment.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
+"external_attachment.py#monkeypatch.setattr ava.impersonation.attachment.control.merge_plugin_delta" = 1
+"external_attachment.py#monkeypatch.setattr ava.impersonation.attachment.control.require_active" = 1
+"external_attachment.py#monkeypatch.setattr ava.impersonation.attachment.process_metadata" = 1
+"external_attachment.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
+"external_attachment.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"handoff_inputs.py#monkeypatch.setattr agent.impersonation.provider_anchor_states" = 1
+"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.ConfigBoot" = 1
+"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.control.require_active" = 1
+"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.process_clients" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.close_local_participant_admission" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.db.code_version_gate.ProcessDbGate.min_read_due" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.db.code_version_gate.time.monotonic" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
+"test_impersonation.py#monkeypatch.setattr agent.extensions.plugin_state_codec.decode_plugin_delta" = 1
+"test_impersonation.py#monkeypatch.setattr agent.impersonation.RELAY_READY_TIMEOUT_S" = 1
+"test_impersonation.py#monkeypatch.setattr agent.impersonation.establish_relay" = 2
+"test_impersonation.py#monkeypatch.setattr agent.impersonation.native_status" = 13
+"test_impersonation.py#monkeypatch.setattr agent.impersonation.provider_anchor_states" = 7
+"test_impersonation.py#monkeypatch.setattr agent.impersonation.stamp_relay_failure" = 4
+"test_impersonation.py#monkeypatch.setattr agent.impersonation.terminate_relay" = 4
+"test_impersonation.py#monkeypatch.setattr agent.impersonation_handoff.ensure_start_marker" = 2
+"test_impersonation.py#monkeypatch.setattr agent.impersonation_process.spawn_codex_relay" = 5
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.abort_lease" = 5
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.accept" = 1
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.activate" = 2
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.fail_acceptance" = 3
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.mark_plugin_applied" = 1
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.provision_relay" = 6
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.relay.record_degradation" = 7
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.relay_get" = 1
+"test_impersonation.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.live" = 1
+"test_impersonation_consent.py#monkeypatch.setattr agent.impersonation.native_status" = 2
+"test_impersonation_integration.py#monkeypatch.setattr agent.impersonation.establish_relay" = 5
+"test_impersonation_integration.py#monkeypatch.setattr agent.impersonation.provider_anchor_states" = 1
+"test_impersonation_integration.py#monkeypatch.setattr agent.impersonation_handoff.flush_checkpoint" = 2
+"test_impersonation_integration.py#monkeypatch.setattr base.agents.impersonation.history.workspace_dir" = 3
+"test_impersonation_introduction.py#monkeypatch.setattr agent.impersonation_handoff.flush_checkpoint" = 1
+"test_impersonation_introduction.py#monkeypatch.setattr agent.impersonation_handoff.publish_inbound_wake" = 2
+"test_impersonation_introduction.py#monkeypatch.setattr agent.impersonation_handoff.record_handoff_receipt" = 2
+"test_impersonation_introduction.py#monkeypatch.setattr agent.impersonation_handoff.save_document" = 2
+"test_impersonation_introduction.py#monkeypatch.setattr base.clock.Clock.from_settings" = 1
+"test_impersonation_introduction.py#monkeypatch.setattr base.config.settings.general.message_timestamps" = 1
+"test_impersonation_part2.py#monkeypatch.setattr agent.impersonation.native_status" = 1
+"test_impersonation_part2.py#monkeypatch.setattr base.agents.impersonation.activate" = 1
+"test_impersonation_transport.py#monkeypatch.setattr agent.impersonation.provider_anchor_states" = 1
+"test_impersonation_transport.py#monkeypatch.setattr agent.impersonation.terminate_relay" = 1
+"test_impersonation_transport.py#monkeypatch.setattr agent.impersonation_process.spawn_codex_relay" = 1
+"test_impersonation_transport.py#monkeypatch.setattr agent.impersonation_process.subprocess.Popen" = 1
+"test_impersonation_transport.py#monkeypatch.setattr base.agents.impersonation.terminal_notices.send_ended_notice" = 1
+"test_impersonation_transport.py#monkeypatch.setattr base.sessions.env_forwarding.forward_env_dict" = 1
+"test_impersonation_transport_integration.py#monkeypatch.setattr agent.impersonation.establish_relay" = 6
+"test_impersonation_transport_integration.py#monkeypatch.setattr agent.impersonation.provider_anchor_states" = 4
+"test_impersonation_transport_integration.py#monkeypatch.setattr agent.impersonation_handoff.publish_inbound_wake" = 2
+"test_impersonation_transport_integration.py#monkeypatch.setattr base.agents.impersonation._store.psutil.Process" = 1
+"test_impersonation_transport_integration.py#monkeypatch.setattr base.agents.impersonation.history.workspace_dir" = 4
+
 [debt.private-name]
 "test_impersonation_consent.py -> test_impersonation.py#_session" = 1
 "test_impersonation_part2.py -> test_impersonation.py#_notes" = 1
+
+[debt.third-party-patch]
+"child_undelivered_login.py#patch psycopg.connect" = 1
+
+[debt.unresolved-patch]
+"test_external_database_owner.py#monkeypatch.setattr prior.clients.database" = 1
+"test_external_database_owner.py#monkeypatch.setattr result.close" = 1

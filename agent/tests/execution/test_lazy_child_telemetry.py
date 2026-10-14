@@ -1,13 +1,13 @@
 """A zero-record exec child must exit without the telemetry / OTel imports (task #3816 M3).
 
-`agent.execution.child._finalize_telemetry()` is the clean-exit delivery path
+`agent.execution.child.finalize_telemetry()` is the clean-exit delivery path
 (sync queued SDK-call events, flush the OTLP backend). A child that never
 emitted a record has no `base.telemetry` queue to drain, so the helper must
 return before importing anything — and in particular must not import the OTel
 SDK stack that the old eager `telemetry_otlp.warmup()` brought up at boot.
 
 Probe mechanics mirror `test_lazy_lm_import.py`: clean subprocess, agent-launch
-env vars stripped, repo root forced onto `sys.path` under `-I`.
+env vars stripped; the probes live in `child_lazy_telemetry.py`.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -38,30 +39,14 @@ _CLEAN_ENV_STRIP = frozenset(
     }
 )
 
-_PROBE = """
-import json
-import sys
-
-sys.path.insert(0, {root!r})
-import agent.execution.child as exec_child  # the module under test
-
-exec_child._finalize_telemetry()  # the zero-record exit path
-
-watched = ("base.telemetry", "base.telemetry.otlp.telemetry_otlp")
-loaded = sorted(
-    name
-    for name in sys.modules
-    if name.startswith("opentelemetry") or name in watched
-)
-print(json.dumps(loaded))
-"""
+_PROBES = Path(__file__).with_name("child_lazy_telemetry.py")
 
 
-def test_zero_record_exit_does_not_import_telemetry_or_otel() -> None:
-    code = _PROBE.format(root=str(_REPO_ROOT))
+def _run_probe(probe: str) -> object:
+    """Run one probe of `child_lazy_telemetry.py` in a clean subprocess; return its JSON report."""
     env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-B", "-X", "utf8", "-c", code],
+        [sys.executable, "-I", "-B", "-X", "utf8", str(_PROBES), probe],
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,
@@ -70,68 +55,14 @@ def test_zero_record_exit_does_not_import_telemetry_or_otel() -> None:
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    loaded = json.loads(proc.stdout.strip().splitlines()[-1])
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_zero_record_exit_does_not_import_telemetry_or_otel() -> None:
+    loaded = _run_probe("zero_record_exit")
     assert loaded == [], (
         f"a zero-record child exit must not import the telemetry/OTel stacks, found: {loaded}"
     )
-
-
-def _forbidden_loader_probe(root: str) -> str:
-    """Probe body: the real identity-child arm path, then the exporter check.
-
-    `_init_logger` is the exact arm seam (file sink + event-pipeline sink +
-    deferred OTLP arm); `_emit_child_boot_timing` is the record that used to
-    bring the exporter stack up within the first drain tick. A writer receipt
-    observes that tick; the exporter's public flush reports the retained tail.
-    """
-    return f"""
-import json
-import sys
-import time
-
-sys.path.insert(0, {str(root)!r})
-import agent.execution.child as exec_child
-from base.agents.context.clients import ClientSet
-from base.telemetry.delivery.receipts import DrainStatus
-from base.telemetry.otlp import telemetry_otlp
-
-backends = []
-
-def writer(events, backend):
-    backends.append(backend)
-    backend.export_batch(events)
-
-pipeline = telemetry_otlp.ExportingEventPipeline(writer=writer, export_allowed=lambda: True)
-clients = ClientSet(pipeline_factory=lambda: pipeline)
-exec_child._init_logger(
-    999999,
-    producer=clients.event_pipeline,
-    machine_reader=lambda: "lazy-child-probe",
-)  # the real arm path (task #3816 M4b)
-# The boot clock is all the record reads; the SDK modules stay unimported.
-child = exec_child._ChildContext(ava=None, boot_started_at=time.perf_counter())
-exec_child._emit_child_boot_timing(child, clients=clients)
-assert pipeline.sync(timeout=5.0).status is DrainStatus.COMPLETED
-assert backends
-unfinished = backends[0].flush(timeout=0).status is DrainStatus.UNFINISHED
-deferred = clients.exports_deferred()
-pipeline.stop(timeout=5.0)
-
-FORBIDDEN = (
-    "opentelemetry.sdk._logs",
-    "opentelemetry.exporter",
-    "opentelemetry.proto",
-    "requests",
-    "urllib3",
-    "google.protobuf",
-)
-loaded = sorted(name for name in sys.modules if name.startswith(FORBIDDEN))
-print(json.dumps({{
-    "deferred": deferred,
-    "unfinished": unfinished,
-    "forbidden": loaded,
-}}))
-"""
 
 
 def test_identity_child_record_holds_without_exporter_imports() -> None:
@@ -143,19 +74,7 @@ def test_identity_child_record_holds_without_exporter_imports() -> None:
     life so the exporter memory is never paid at boot (task #3816 M4b). The
     record is still delivered: it sits in the backend's bounded hold (`held`).
     """
-    code = _forbidden_loader_probe(str(_REPO_ROOT))
-    env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
-    proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-B", "-X", "utf8", "-c", code],
-        cwd=_REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    result = json.loads(proc.stdout.strip().splitlines()[-1])
+    result = cast("dict[str, Any]", _run_probe("identity_child_record"))
     assert result["deferred"] is True, "the identity child must arm the deferral"
     assert result["unfinished"] is True, "the boot record must have reached the deferred hold"
     assert result["forbidden"] == [], (

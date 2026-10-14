@@ -4,5 +4,39 @@
 [external]
 "test_structure_codegen.py" = "executes the selector script embedded in the CI workflow"
 
+[debt.env-patch]
+"test_prepush_hooks.py#monkeypatch.delenv os.environ" = 1
+"test_prepush_hooks.py#monkeypatch.setenv os.environ.AVA_PREPUSH_LOCK_DIR" = 1
+"test_prepush_hooks.py#monkeypatch.setenv os.environ.AVA_PREPUSH_LOCK_WAIT_SECONDS" = 2
+"test_prepush_hooks.py#monkeypatch.setenv os.environ.AVA_PREPUSH_MAX_LOAD_PER_CORE" = 2
+"test_prepush_hooks.py#monkeypatch.setenv os.environ.PATH" = 2
+"test_prepush_selection.py#monkeypatch.delenv os.environ" = 1
+"test_prepush_selection.py#monkeypatch.setenv os.environ.AVA_PREPUSH_LOCK_DIR" = 1
+"test_prepush_selection.py#monkeypatch.setenv os.environ.AVA_PREPUSH_MAX_LOAD_PER_CORE" = 1
+"test_prepush_selection.py#monkeypatch.setenv os.environ.CALLS" = 1
+"test_prepush_selection.py#monkeypatch.setenv os.environ.PATH" = 1
+"test_prepush_selection.py#monkeypatch.setenv os.environ.TOOL_STATUS" = 2
+"test_pyright_test_environments.py#monkeypatch.delenv os.environ" = 1
+"test_structure_codegen.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.BLOCKING_NAMES" = 1
+"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.DEFINITION_DIRS" = 2
+"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.REPO_BLOCKING_HELPERS" = 2
+"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking._ROOT" = 2
+"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.ava_root_scope._REPO_ROOT" = 1
+"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.fixture_scope._REPO_ROOT" = 3
+"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.no_os_environ.settings_managed_aliases" = 2
+"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.plugins.no_plugin_wrap._REPO_ROOT" = 1
+
 [debt.restricted-python]
 "test_structure_codegen.py#string patch target" = 1
+
+[debt.stdlib-patch]
+"test_leak_guard_cost.py#monkeypatch.setattr signal.getsignal" = 1
+"test_structure_codegen.py#patch subprocess.check_output" = 1
+"test_structure_codegen.py#patch.dict sys.modules" = 1
+"test_structure_codegen.py#patch.object pathlib.Path.open" = 1
+
+[debt.third-party-patch]
+"test_structure_codegen.py#patch yaml.safe_load" = 2

@@ -158,10 +158,10 @@ def _guarded_by_has_domain(tree: ast.AST, node: ast.AST, domain: str) -> bool:
 
 def _settings_field_alias(domain: str, field: str) -> str | None:
     """Return the env alias for a settings field, or None if not found."""
-    from base.config import _FIELDS, field_alias
+    from base.config import FIELD_REFS, field_alias
 
     name = field  # field names are globally unique
-    if name not in _FIELDS:
+    if name not in FIELD_REFS:
         return None
     return field_alias(name)
 
@@ -244,13 +244,12 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
         # build_chat_model — agent-side only; the gateway reaches
         # base/lm/factory.py solely for validate_model_config, which reads
         # keys via get_field with a .env-file fallback (see
-        # base/lm/tests/test_lm_factory.py).
+        # base/packages/tests/lm/test_lm_factory.py).
         "base/lm/_providers.py",
-        # The two settings reads here live in chrome_mcp_socket() /
-        # permissions_helper_socket() — socket-path helpers called only by
-        # agent-runner-side services (browser MCP daemon, permissions helper).
-        # Verified 2026-08-06: no gateway-side caller in the import closure.
-        "base/paths/__init__.py",
+        # helper_client() reads the helper port to build the client for a spawn.
+        # The session backend takes it as a factory and only a spawn calls it —
+        # an agent-runner-side action; the gateway lists sessions and never spawns.
+        "base/sessions/helperproc.py",
     }
 )
 
@@ -373,7 +372,7 @@ def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
 def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
     """settings reads in base/ modules reachable from gateway-side code must
     not resolve to popped aliases, unless the module is agent-only at runtime."""
-    from base.config import _FIELDS, field_alias
+    from base.config import FIELD_REFS, field_alias
     from base.host.env.registry import agent_runner_cluster_aliases
 
     runner_cluster_aliases = agent_runner_cluster_aliases()
@@ -389,7 +388,7 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
             continue
         src = py_file.read_text(errors="replace")
         for domain, field in _extract_settings_reads(src):
-            if field not in _FIELDS:
+            if field not in FIELD_REFS:
                 continue
             alias = field_alias(field)
             if alias in runner_cluster_aliases:
@@ -607,7 +606,7 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(bringup, "db_delivery", delivery)
     monkeypatch.setattr(bringup, "api_delivery", token_delivery)
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
-    profile = root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
+    profile = root_driver.service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"
     assert profile == "agent"
 

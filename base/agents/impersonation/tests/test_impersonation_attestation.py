@@ -10,14 +10,14 @@ import psutil
 import pytest
 
 from base.agents.impersonation import _store as store
-from base.db import Database
-from base.native_process import ownership
-from tests.impersonation_support import (
+from base.agents.impersonation.tests.impersonation_support import (
     attested_caller,
     native_identity,
     recorded_tree,
     unrelated_caller,
 )
+from base.db import Database
+from base.native_process import ownership
 
 
 def _running_process(pid: int) -> SimpleNamespace:
@@ -81,7 +81,7 @@ def test_invalid_linux_anchor_cannot_attest_or_prove_death(
         field: value,
     }
     assert store.classify_anchor(anchor) == "unknown"
-    assert not store._same_process(anchor, dict(anchor))
+    assert not store.same_process(anchor, dict(anchor))
     with pytest.raises(store.ImpersonationError, match="anchor-unavailable"):
         store.verify_caller(_lease(anchor), dict(anchor))
 
@@ -147,8 +147,8 @@ def test_reboot_never_reattests_old_pid_and_ticks(monkeypatch: pytest.MonkeyPatc
     boot, current_boot = str(uuid4()), str(uuid4())
     anchor = {"pid": 42, "name": "codex", "created_at": 100.0, "starttime": 500, "boot_id": boot}
     monkeypatch.setattr(store, "native_boot_id", lambda: current_boot)
-    assert not store._same_process(anchor, dict(anchor))
-    assert not store._same_process(anchor, {**anchor, "boot_id": current_boot})
+    assert not store.same_process(anchor, dict(anchor))
+    assert not store.same_process(anchor, {**anchor, "boot_id": current_boot})
     assert store.classify_anchor(anchor) == "dead"
 
 
@@ -162,7 +162,7 @@ def test_unavailable_current_boot_is_unknown(
     anchor["starttime"] = 500
     monkeypatch.setattr(store, "native_boot_id", lambda: boot)
     assert store.classify_anchor(anchor) == "unknown"
-    assert not store._same_process(anchor, dict(anchor))
+    assert not store.same_process(anchor, dict(anchor))
 
 
 @pytest.mark.parametrize(

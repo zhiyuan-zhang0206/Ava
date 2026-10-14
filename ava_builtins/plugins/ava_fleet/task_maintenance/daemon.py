@@ -35,7 +35,7 @@ Usage:
 
 Kept alive by the root supervisor's health monitor through the `/healthz`
 identity probe of the plugin's `services()` entry — so the schema-drift exit in
-`_dispatch_loop` is revived on the next round instead of staying dead.
+`dispatch_loop` is revived on the next round instead of staying dead.
 """
 
 import asyncio
@@ -83,12 +83,12 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
 
 
-def _endpoint() -> ServiceEndpoint:
+def task_maintenance_endpoint() -> ServiceEndpoint:
     return ServiceEndpoints.from_settings().of("task_maintenance")
 
 
 def _pidfile() -> Path:
-    return _endpoint().pidfile
+    return task_maintenance_endpoint().pidfile
 
 
 _LIVENESS_TIMEOUT_S = 60.0
@@ -152,7 +152,7 @@ def _reminder_digest_message(tasks: list[tuple[int, str, int, int, str]]) -> str
     return "\n".join(lines)
 
 
-def _run_reminders(
+def run_reminders(
     pool: ConnectionPool,
     db: Database,
     bus: EventBus,
@@ -210,7 +210,7 @@ def announce_reminder(
 # ── Escalate pass ────────────────────────────────────────────────────────────
 
 
-def _run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: int) -> int:
+def run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: int) -> int:
     """Accept current escalation state atomically, then announce committed work."""
     from ava_builtins.plugins.ava_fleet.task_maintenance.escalation import accept_escalations
 
@@ -240,7 +240,7 @@ def _run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n:
 # ── Daemon lifecycle ─────────────────────────────────────────────────────────
 
 
-def _write_pidfile() -> None:
+def write_pidfile() -> None:
     if not acquire_pidfile(_pidfile(), "ava_builtins.plugins.ava_fleet.task_maintenance.daemon"):
         _log.info("[task_maintenance] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
@@ -269,7 +269,7 @@ async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
         remaining -= step
 
 
-async def _dispatch_loop(
+async def dispatch_loop(
     pool: ConnectionPool,
     db: Database,
     bus: EventBus,
@@ -289,8 +289,8 @@ async def _dispatch_loop(
     )
     while True:
         try:
-            _run_reminders(pool, db, bus, backoff_seconds)
-            _run_escalate(pool, db, bus, escalate_n)
+            run_reminders(pool, db, bus, backoff_seconds)
+            run_escalate(pool, db, bus, escalate_n)
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:
@@ -321,11 +321,11 @@ async def run(
         sys.exit(1)
 
     # Pidfile before the healthz bind — see services/restarter/daemon.py:run().
-    _write_pidfile()
+    write_pidfile()
     _log.info("[task-maintenance] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint()
+    endpoint = task_maintenance_endpoint()
     health = await start_health_server(
         "task_maintenance", endpoint.health_port, liveness=liveness, image=image
     )
@@ -334,7 +334,7 @@ async def run(
     db = database()
     pool = db.pool()
     try:
-        await _dispatch_loop(pool, db, EventBus.from_settings(), liveness, config=config)
+        await dispatch_loop(pool, db, EventBus.from_settings(), liveness, config=config)
     finally:
         pool.close()
         await stop_health_server(health)

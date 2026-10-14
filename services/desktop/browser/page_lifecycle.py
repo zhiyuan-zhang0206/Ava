@@ -201,7 +201,7 @@ class _PageDaemon(Protocol):
     ) -> tuple[types.CallToolResult, int | None]: ...
 
 
-def _text_of(result: types.CallToolResult) -> str:
+def text_of(result: types.CallToolResult) -> str:
     return "".join(c.text for c in result.content if isinstance(c, types.TextContent))
 
 
@@ -242,7 +242,7 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
         if result.is_error:
             logger.warning(
                 f"[browser-mcp] release of agent {agent_id} page {page_id} "
-                f"errored ({_text_of(result)!r}); clearing the slot"
+                f"errored ({text_of(result)!r}); clearing the slot"
             )
         daemon.pages.set_agent_page(agent_id, None)
         daemon.pages.drop_page_ttl(page_id)
@@ -397,7 +397,7 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
         listing = await daemon._call("list_pages", {})
         if listing.is_error:
             return 0  # upstream hiccup — retry on the next pass
-        page_urls = parse_page_listing(_text_of(listing))
+        page_urls = parse_page_listing(text_of(listing))
         closed = 0
         for page_id in expired:
             url = page_urls.get(page_id)
@@ -410,7 +410,7 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
             if result.is_error:
                 logger.warning(
                     f"[browser-mcp] TTL sweep could not close page {page_id} ({url}): "
-                    f"{_text_of(result)!r}"
+                    f"{text_of(result)!r}"
                 )
             daemon.pages.drop_page_ttl(page_id)
             owner = daemon.pages.clear_affinity_for_page(page_id)

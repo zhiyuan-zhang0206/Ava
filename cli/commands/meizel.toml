@@ -4,48 +4,11 @@ exports = ["agents", "cluster", "converge", "data_plane", "extensions", "lifecyc
 "_repo.py" = ["_setup.py"]
 "cluster" = ["_repo.py", "converge", "probe.py"]
 "converge" = ["_repo.py"]
-"data_plane" = ["converge", "tests"]
+"data_plane" = ["converge"]
 "extensions" = ["_repo.py", "converge"]
-"lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py", "tests"]
+"lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py"]
 "observability" = ["converge"]
 "tests" = ["_repo.py", "_setup.py", "data_plane", "extensions", "lifecycle", "observability", "probe.py"]
 
-[debt.manifest-cycle]
-"tests -> data_plane" = 1
-"tests -> lifecycle" = 1
-
 [debt.private-module]
 "tests/maintenance_cluster.py -> lifecycle/_pause_resume.py" = 1
-
-[debt.private-name]
-"cluster/health.py -> _repo.py#_roles_or_none" = 2
-"cluster/tests/test_cluster_health.py -> _repo.py#_roles_or_none" = 1
-"cluster/tests/test_cluster_service_probes.py -> _repo.py#_roles_or_none" = 8
-"converge/firewall_command.py -> _repo.py#_roles_or_none" = 2
-"extensions/plugins.py -> _repo.py#_repo_root" = 1
-"extensions/skill.py -> _repo.py#_repo_root" = 2
-"lifecycle/_start_readiness_preflight.py -> _repo.py#_roles_or_none" = 1
-"lifecycle/converge_host.py -> _repo.py#_repo_root" = 1
-"lifecycle/converge_host.py -> _repo.py#_roles_or_none" = 1
-"lifecycle/root_driver.py -> _repo.py#_ensure_frontend_deps" = 1
-"lifecycle/start.py -> _repo.py#_repo_root" = 1
-"lifecycle/status.py -> _repo.py#_repo_root" = 1
-"lifecycle/status.py -> _repo.py#_roles_or_none" = 1
-"lifecycle/stop.py -> _repo.py#_repo_root" = 1
-"lifecycle/stop.py -> _repo.py#_roles_or_none" = 1
-"lifecycle/tests/converge_host/test_converge.py -> _repo.py#_repo_root" = 1
-"lifecycle/tests/converge_host/test_converge.py -> _repo.py#_roles_or_none" = 1
-"lifecycle/tests/converge_host/test_converge.py -> converge/frontend_env.py#_FORBIDDEN_FRONTEND_ENV_FILES" = 1
-"lifecycle/tests/converge_host/test_converge.py -> converge/frontend_env.py#_next_public_keys_in_env_file" = 3
-"lifecycle/tests/converge_host/test_converge_firewall.py -> _repo.py#_roles_or_none" = 1
-"lifecycle/tests/identity/restart_inputs.py -> _repo.py#_ensure_frontend_deps" = 1
-"lifecycle/tests/identity/restart_inputs.py -> _repo.py#_roles_or_none" = 1
-"lifecycle/tests/identity/test_commands_restart_stop.py -> _repo.py#_roles_or_none" = 1
-"lifecycle/tests/startup/test_start_readiness_preflight.py -> _repo.py#_roles_or_none" = 2
-"lifecycle/tests/stop/test_stop.py -> _repo.py#_roles_or_none" = 1
-"lifecycle/tests/test_commands_status.py -> _repo.py#_roles_or_none" = 12
-"lifecycle/tests/test_pg_owner_authority.py -> data_plane/cluster_instance.py#_pg_bin" = 1
-"tests/test_frontend_deps.py -> _repo.py#_ensure_frontend_deps" = 13
-"tests/test_single_box.py -> data_plane/cluster_instance.py#_pg_bin" = 1
-"tests/test_single_box.py -> lifecycle/root_driver.py#_service_extra_env" = 1
-"tests/test_unit_capability_commands.py -> data_plane/bringup.py#_ensure_pooler" = 1

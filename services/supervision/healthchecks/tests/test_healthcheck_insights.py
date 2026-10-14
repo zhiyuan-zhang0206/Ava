@@ -64,7 +64,7 @@ def test_alive_when_the_socket_names_this_service_home_and_recorded_pid(served: 
     (served / "i.pid").write_text(f"{os.getpid()}\n")
     server, thread = _serve(served, _app())
     try:
-        assert insights._probe().alive
+        assert insights.insights_probe().alive
     finally:
         _stop(server, thread)
 
@@ -78,10 +78,10 @@ def test_not_alive_for_an_answer_that_is_not_ours(served: Path, app: FastAPI) ->
     (served / "i.pid").write_text(f"{os.getpid()}\n")
     server, thread = _serve(served, app)
     try:
-        assert not insights._probe().alive
+        assert not insights.insights_probe().alive
     finally:
         _stop(server, thread)
 
 
 def test_not_alive_without_a_listener(served: Path) -> None:
-    assert not insights._probe().alive
+    assert not insights.insights_probe().alive

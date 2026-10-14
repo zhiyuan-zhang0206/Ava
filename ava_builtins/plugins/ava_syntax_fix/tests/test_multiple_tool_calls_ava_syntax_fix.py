@@ -13,8 +13,8 @@ from langgraph.runtime import Runtime
 
 from agent.graph.exec.node import _exec_node_impl
 from agent.graph.interrupt import InterruptEvent
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from ava.boot import process_clients
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
@@ -22,12 +22,12 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import read_ava_kwargs
 from base.clock import Clock
 from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.configuration import snapshot_process_config
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:

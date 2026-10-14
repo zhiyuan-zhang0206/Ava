@@ -179,3 +179,19 @@ def test_the_warning_and_error_tiers_of_one_outage_share_a_query() -> None:
     """Two coexisting rules replace the old in-place escalation (inhibition has no file form)."""
     for warning, error in (("ava-ops-health-probe-warning", "ava-ops-health-probe-error"),):
         assert _query(_rules()[warning][1]) == _query(_rules()[error][1])
+
+
+def test_grafana_owns_five_minute_recovery_and_missing_series_grace() -> None:
+    """Quiet transitions must not mint new episodes or evict a peer's series early."""
+    for group, rule in _rules().values():
+        assert rule["keepFiringFor"] == "5m"
+        assert rule["missing_series_evals_to_resolve"] == (6 if group == "ava-ops" else 2)
+        assert "keep_firing_for" not in rule  # API spelling is ignored by file provisioning
+
+
+@pytest.mark.parametrize("diagnostic", ["venv", "brew-pin", "browser-reach"])
+def test_root_diagnostics_keep_the_machine_identity(diagnostic: str) -> None:
+    """One failing sample on each of two hosts must not meet a two-sample threshold."""
+    rule = _rules()["ava-ops-root-diagnostic-" + diagnostic][1]
+    assert "sum by (machine)" in _query(rule)
+    assert "{{ $labels.machine }}" in rule["annotations"]["summary"]

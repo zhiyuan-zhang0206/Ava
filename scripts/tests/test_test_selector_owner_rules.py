@@ -263,7 +263,7 @@ def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> N
     checkout = test_selector.load_checkout(_REPO_ROOT)
     for changed, readers in expectations.items():
         root = changed.split("/", maxsplit=1)[0]
-        assert set(readers) <= test_selector._referencing_tests(root, checkout), changed
+        assert set(readers) <= test_selector.referencing_tests(root, checkout), changed
     result = _select(_REPO_ROOT, ".github/workflows/ci.yml")
     if result.decision == "SELECTED":
         assert set(expectations[".github/workflows/ci.yml"]) <= set(result.tests)
@@ -272,6 +272,76 @@ def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> N
         assert result.reason in {"incomplete-impact", "subset-too-close", "no-durations"}
         if result.reason == "incomplete-impact":
             assert result.diagnostics
+
+
+def _manifest_repo(tmp_path: Path) -> Path:
+    """`_repo` plus meizel: a reader of each root manifest, the tests that import them, and a
+    module that only mentions the file in its docstring."""
+    repo_root = _repo(tmp_path)
+    _write(
+        repo_root,
+        "pyproject.toml",
+        "[tool.pytest.ini_options]\n"
+        'testpaths = ["tests", "base/**/tests", "cli/**/tests", "scripts/**/tests",'
+        ' "meizel/**/tests"]\n',
+    )
+    files = {
+        "meizel.toml": "[roles]\n",
+        "meizel.policy.toml": "",
+        "meizel/__init__.py": "",
+        "meizel/graph/__init__.py": "",
+        "meizel/graph/universe.py": 'MANIFEST = "meizel.toml"\n',
+        "meizel/roles.py": "from meizel.graph import universe\n",
+        "meizel/tests/test_roles.py": "from meizel import roles\n\ndef test_roles(): pass\n",
+        "scripts/lint/reader.py": 'POLICY = "meizel.policy.toml"\n',
+        "scripts/lint/tests/test_reader.py": "from scripts.lint import reader\n",
+        "base/lm/engine.py": '"""Mentions meizel.toml in prose only."""\n',
+    }
+    for relative_path, content in files.items():
+        _write(repo_root, relative_path, content)
+    timings = json.loads((repo_root / ".test_durations").read_text())
+    timings["meizel/tests/test_roles.py::test_roles"] = 1.0
+    timings["scripts/lint/tests/test_reader.py::test_reader"] = 1.0
+    _write(repo_root, ".test_durations", json.dumps(timings))
+    return repo_root
+
+
+@pytest.mark.parametrize("manifest", ["meizel.toml", "meizel.policy.toml"])
+def test_a_root_meizel_manifest_runs_its_readers_not_the_full_suite(
+    tmp_path: Path, manifest: str
+) -> None:
+    result = _select(_manifest_repo(tmp_path), manifest)
+
+    assert (result.decision, result.reason) == ("SELECTED", "owner-tests"), result.as_json()
+    assert "meizel/tests/test_roles.py" in result.tests  # meizel's own tests
+    assert _LINT in result.tests  # the pinned tree-scan family
+    if manifest == "meizel.policy.toml":
+        assert "scripts/lint/tests/test_reader.py" in result.tests  # a reader of this file
+    # A docstring that mentions the file reads nothing; unrelated tests stay out.
+    assert "base/lm/tests/test_lm.py" not in result.tests
+    assert "tests/unit/test_b.py" not in result.tests
+
+
+def test_nested_and_root_manifests_are_classified_apart(tmp_path: Path) -> None:
+    checkout = test_selector.load_checkout(_manifest_repo(tmp_path))
+
+    assert test_selector.classify_path("meizel.toml", checkout) is PathClass.MANIFEST
+    assert test_selector.classify_path("meizel.policy.toml", checkout) is PathClass.MANIFEST
+    _write(checkout.repo_root, "base/lm/meizel.toml")
+    assert test_selector.classify_path("base/lm/meizel.toml", checkout) is PathClass.PACKAGE
+
+
+def test_a_manifest_change_does_not_launder_a_data_file_change(tmp_path: Path) -> None:
+    """`ui/web/openapi.json`-style data keeps the unanchored-read rule even beside a manifest."""
+    repo_root = _manifest_repo(tmp_path)
+    _write(repo_root, "tests/support/helper.py", "def load(p):\n    return p.read_text()\n")
+    _write(repo_root, "tests/unit/test_b.py", "from tests.support import helper\n")
+
+    manifest_only = _select(repo_root, "meizel.toml")
+    with_data = _select(repo_root, "meizel.toml", "base/lm/schema.json")
+
+    assert "tests/unit/test_b.py" not in manifest_only.tests
+    assert "tests/unit/test_b.py" in with_data.tests
 
 
 def test_a_run_without_timings_keeps_the_full_suite(tmp_path: Path) -> None:

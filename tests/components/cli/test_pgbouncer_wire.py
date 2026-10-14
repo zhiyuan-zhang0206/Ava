@@ -38,10 +38,10 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import MIN_REFRESH_INTERVAL_S, ProcessDbGate
+from base.deploy.tests.containers import free_port, postgres, wait_port
 from base.events.live.bus import EventBus
 from base.host.db_authority.delivery import POOLER_ADMIN
 from cli.commands.data_plane.pgbouncer import pgbouncer_bin
-from tests._containers import _free_port, _wait_port, postgres
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -106,7 +106,7 @@ def pgbouncer_in_front(
     from base.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
     tmp = Path(tempfile.mkdtemp(prefix="ava-pgbouncer-test-"))
-    listen_port = _free_port()
+    listen_port = free_port()
     userlist = tmp / "userlist.txt"
     # Mirrors _render_ini: the admin console belongs to the pooler admin alone.
     userlist.write_text(f'"{role}" "{SECRET}"\n"{POOLER_ADMIN}" "{SECRET}"\n')
@@ -152,7 +152,7 @@ def pgbouncer_in_front(
         [pgbouncer_bin(), "-d", str(ini)], check=True, capture_output=True, text=True
     )
     try:
-        _wait_port(listen_port, host=listen_addr)
+        wait_port(listen_port, host=listen_addr)
         pooled = f"postgresql://{role}:{SECRET}@{listen_addr}:{listen_port}/{dbname}"
         # pgbouncer -d races the listener; wait for a real authenticated answer.
         deadline = time.monotonic() + 15
@@ -680,7 +680,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     import base.db as base_db
     from base import config
     from base.agents.inbox.chat_delivery import insert_chat_inbound_once
-    from gateway.schedules.router import _update_blocking
+    from gateway.schedules.router import update_blocking
 
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
@@ -722,7 +722,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
                 assert receipt.inserted
             # schedule stop UPDATE (POST /api/schedules/{id}/stop durable half:
             # SELECT ... FOR UPDATE then UPDATE ... RETURNING)
-            row, _enabled_changed = _update_blocking(pool, schedule_id, {"enabled": False})
+            row, _enabled_changed = update_blocking(pool, schedule_id, {"enabled": False})
             assert row[4] is False
         finally:
             pool.close()

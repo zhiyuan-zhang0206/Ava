@@ -14,7 +14,7 @@
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
-# throwaway native clusters via tests/_containers.py), and Playwright chromium
+# throwaway native clusters via base/deploy/tests/containers.py), and Playwright chromium
 # for e2e (browser dir cached; system deps installed per run).
 #
 # CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR
@@ -36,7 +36,7 @@
 #
 # TEST SELECTION (TEST_SELECTION_MODE, default enforce): when the runtime-impact
 # selector returns SELECTED for a real PR, backend-selected runs that
-# subset as the backend pytest gate and backend-shard (the 16-way fan-out) is
+# subset as the backend pytest gate and backend-shard (the 8-way fan-out) is
 # skipped. Every other decision — FULL, SKIP, selector failure — keeps the
 # full fan-out, and Trunk merge-tree branches (trunk-merge/*, trunk-temp/*)
 # always choose FULL by the selector's first rule, so branch protection, the
@@ -85,7 +85,7 @@ env:
   # Test-selection mode for PR CI — the single revert switch for the
   # enforcement decision (2026-09-11). enforce (default): a real PR whose
   # selector decision is SELECTED runs its selected backend subset as the
-  # backend pytest gate, and the 16-shard fan-out is skipped; every other
+  # backend pytest gate, and the 8-shard fan-out is skipped; every other
   # decision and every Trunk merge-tree branch keeps the full suite. shadow:
   # no PR gates on the subset — the full fan-out gates and the subset plus its
   # comparison report run informational beside it. Set back to "shadow" to
@@ -138,6 +138,7 @@ jobs:
       frontend: ${{ steps.decide.outputs.frontend }}
       backend: ${{ steps.decide.outputs.backend }}
       durations_key: ${{ steps.durations.outputs.key }}
+      skip_e2e: ${{ steps.e2e.outputs.skip }}
       selector: ${{ steps.selector.outcome }}
       mode: ${{ steps.selector.outputs.mode }}
       decision: ${{ steps.selector.outputs.decision }}
@@ -248,6 +249,29 @@ jobs:
           with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
               output.write("\n".join(lines) + "\n")
           PY
+
+      # The e2e jobs are the integration net for product behavior; a change that only edits
+      # unit tests inside packages cannot change it. The rule is fixed in scripts/ci/e2e_scope.py
+      # (enforced SELECTED subset, every changed path a package-internal test .py, never on a
+      # Trunk queue branch); an empty output (a selector failure, a non-PR event) keeps e2e.
+      - name: Decide whether e2e can be skipped
+        id: e2e
+        if: ${{ github.event_name == 'pull_request' && steps.decide.outputs.backend == 'true' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+          MODE: ${{ steps.selector.outputs.mode }}
+          DECISION: ${{ steps.selector.outputs.decision }}
+        run: |
+          SCOPE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ava-e2e-scope.XXXXXX")"
+          trap 'rm -rf "$SCOPE_TMP"' EXIT
+          git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)"...HEAD > "$SCOPE_TMP/changed.txt"
+          python3 scripts/ci/e2e_scope.py \
+            --changed-files "$SCOPE_TMP/changed.txt" \
+            --event pull_request \
+            --head-ref "$HEAD_REF" \
+            --mode "$MODE" \
+            --decision "$DECISION" | tee -a "$GITHUB_OUTPUT"
 
   repo-language:
     # The no-CJK gate must fire on EVERY PR, including docs-only and
@@ -715,16 +739,36 @@ jobs:
       - name: Locality gate (meizel check, whole repository)
         run: env -u VIRTUAL_ENV uv run python -m meizel check
 
-      - name: Recorded locality debt against the base (warns on growth)
+      - name: Recorded locality debt against the base (fails on growth)
         if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
+        # Strict-to-be debt may only shrink. The one waiver is decided by path: a pure rule change
+        # (meizel's rule code, plus the baselines and the allowance policy it moves, and nothing
+        # else) may grow the baselines, because widening a rule does. A change that also edits
+        # product code or tests is not waived, so a rule change gets its own PR. The tool applies
+        # it (--waive-if-changed and --waive-only-within, both must hold); nobody judges it by eye.
         run: |
-          set +e
-          out="$(env -u VIRTUAL_ENV uv run python -m meizel debt diff --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=warn 2>&1)"
-          status=$?
-          echo "$out"
-          if [ "$status" -ne 0 ]; then exit "$status"; fi
-          if grep -q "debt grew" <<<"$out"; then
-            echo "::warning title=Recorded locality debt grew::Strict-to-be debt may only shrink. Fix the new violation instead of running 'meizel debt record'; see docs/contributing.md (Locality gate)."
+          env -u VIRTUAL_ENV uv run python -m meizel debt diff \
+            --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \
+            --waive-if-changed ':(glob)meizel/**/*.py' ':(exclude,glob)meizel/**/tests/**' \
+            --waive-only-within ':(glob)meizel/**' ':(glob)**/meizel.toml' meizel.policy.toml
+
+      - name: Allowance policy changes (informational)
+        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
+        # meizel.policy.toml is the one closed list of allowances. A change to it is listed here and
+        # in the check summary so a reviewer sees it at once; this step reports and never fails.
+        run: |
+          changes="$(env -u VIRTUAL_ENV uv run python -m meizel policy diff --against "$LINT_STRUCTURE_BASELINE_BASE")"
+          if [ -n "$changes" ]; then
+            echo "::warning title=meizel.policy.toml changed::The allowance list changed. Read the entries in the log or the check summary."
+            echo "meizel.policy.toml changed:"
+            echo "$changes"
+            {
+              echo "### meizel.policy.toml changed"
+              echo
+              echo '```'
+              echo "$changes"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Save pre-commit environments
@@ -924,7 +968,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   backend-shard:
-    name: backend shard (${{ matrix.group }}/16)
+    name: backend shard (${{ matrix.group }}/8)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Skipped only on the enforced-subset path (mode==enforce and the selector
@@ -937,14 +981,19 @@ jobs:
     if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.classify.outputs.mode != 'enforce' || needs.classify.outputs.decision != 'SELECTED') }}
     strategy:
       fail-fast: false
-      # 16 shards (was 12): measured 2026-09-03 over 20 main-branch runs, the
-      # per-shard pytest step median was 213s at 12 shards x -n 4 (~113 min of
-      # serial test time); 16 shards scale the fan-out to ~160s + ~30s fixed
-      # toolchain per shard. Prior art dd2ab5c36 (8 -> 12) measured ~90s saved;
-      # observed peak repo concurrency was 47 jobs (2026-08-30), leaving
-      # headroom for the 4 extra jobs.
+      # 8 shards (was 16, 12 before that). The sizing metric is throughput, not queue
+      # wait: the hosted pool runs about 20 jobs at once and a CI run is ~38 jobs, so
+      # when PRs are waiting the pool is the bottleneck and a run's cost in job-minutes
+      # decides how many runs land per hour. Every shard repeats ~1.75 job-min of fixed
+      # work (~0.65 toolchain setup plus ~1.1 whole-repo collection that builds the file
+      # plan) against ~2.1 job-min of tests, so 16 shards cost ~62 job-min and 8 cost ~48
+      # (-14 of a ~110 job-min run, about +14% runs/hour). With the pool idle a single PR is
+      # ~2 min slower (shard ~6.0 vs ~3.9 min); once two PRs compete (<=10 slots each) the
+      # 8-way run is faster, as 16 shards no longer fit in one wave. Measured 2026-10-13 on
+      # queue run 38444981762. Sizing for waiting time alone (the #5425 decision) is what
+      # this replaces.
       matrix:
-        group: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -1008,7 +1057,7 @@ jobs:
                       "-c", "pyproject.toml", "--rootdir=.", "--collect-only", "-qq",
                       "--ignore=tests/e2e", "-m", "not flaky", "--omit-static-tests",
                       "-o", "junit_family=xunit1", "-o", "faulthandler_timeout=300",
-                      "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=16",
+                      "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=8",
                       "--file-shard-plan=tmp/file-shards/plan.json",
                   ]))
           PY
@@ -1463,7 +1512,7 @@ jobs:
           import subprocess
 
           from base.paths import permissions_helper_app_dir
-          from base.host.permissions_helper import client
+          from base.sessions.helperproc import helper_client
           from services.desktop.permissions_helper import lifecycle
 
           # Import the signing identity into the isolated keychain.
@@ -1479,7 +1528,7 @@ jobs:
                   "-s",
                   "-k",
                   "ci-ava-signing",
-                  str(lifecycle._keychain_path()),
+                  str(lifecycle.keychain_path()),
               ],
               check=True,
           )
@@ -1489,13 +1538,13 @@ jobs:
           # Report all codesigning identities, including invalid ones.
           subprocess.run(["security", "find-identity", "-p", "codesigning"], check=True)
           # Show whether the imported key and certificate are registered.
-          subprocess.run(["security", "dump-keychain", str(lifecycle._keychain_path())], check=True)
+          subprocess.run(["security", "dump-keychain", str(lifecycle.keychain_path())], check=True)
           # Show the keychain search list used by subsequent signing commands.
           subprocess.run(["security", "list-keychains"], check=True)
 
           # Report the keychain lock state without failing the lane.
           subprocess.run(
-              ["security", "show-keychain-info", str(lifecycle._keychain_path())],
+              ["security", "show-keychain-info", str(lifecycle.keychain_path())],
               check=False,
           )
           # Unlock again immediately before signing in case the import relocked it.
@@ -1505,7 +1554,7 @@ jobs:
                   "unlock-keychain",
                   "-p",
                   "ci-ava-signing",
-                  str(lifecycle._keychain_path()),
+                  str(lifecycle.keychain_path()),
               ],
               check=True,
           )
@@ -1515,11 +1564,11 @@ jobs:
           app = build_dir / "AvaPermissionsHelper.app"
           build_dir.mkdir(parents=True, exist_ok=True)
           binary = build_dir / "AvaPermissionsHelper"
-          lifecycle._run(["swiftc", "-O", str(lifecycle._SOURCE), "-o", str(binary)])
+          lifecycle._run(["swiftc", "-O", str(lifecycle.SOURCE), "-o", str(binary)])
           lifecycle._remove_app(app)
           exe = lifecycle._app_executable(app)
           exe.parent.mkdir(parents=True, exist_ok=True)
-          (app / "Contents" / "Info.plist").write_bytes(lifecycle._INFO_PLIST.read_bytes())
+          (app / "Contents" / "Info.plist").write_bytes(lifecycle.INFO_PLIST.read_bytes())
           exe.write_bytes(binary.read_bytes())
           exe.chmod(0o755)
 
@@ -1536,14 +1585,14 @@ jobs:
                   # keep this lane on the same signing policy so codesign
                   # validates the entitlements plist on every PR.
                   "--entitlements",
-                  str(lifecycle._ENTITLEMENTS),
+                  str(lifecycle.ENTITLEMENTS),
                   str(app),
               ]
           )
 
           # Keep designated-requirement readback on the real macOS codesign path. The
           # ad-hoc signature's DR has no "designated =>" line, so assert on the raw
-          # readback (lifecycle._read_dr parses the stable-identity DR shape and is
+          # readback (lifecycle.read_dr parses the stable-identity DR shape and is
           # covered by unit tests + the production preflight gate).
           dr_result = subprocess.run(
               ["codesign", "-d", "-r-", str(app)],
@@ -1573,7 +1622,7 @@ jobs:
           # Bootstrap failure intentionally fails this lane: the hosted runner's
           # user launchd chain is part of the production contract being tested.
           lifecycle.install_and_load(app, rebuilt=True)
-          assert client.ping()["pong"] is True
+          assert helper_client().ping()["pong"] is True
           PY
 
       - name: Two-section chain smoke (keeper semantics)
@@ -1592,7 +1641,7 @@ jobs:
         if: ${{ always() }}
         run: |
           export AVA_HOME="${AVA_HOME:-$RUNNER_TEMP/ava-home}"
-          label="$(uv run python -c 'from services.desktop.permissions_helper.lifecycle import _label; print(_label())' 2>/dev/null || true)"
+          label="$(uv run python -c 'from services.desktop.permissions_helper.lifecycle import label; print(label())' 2>/dev/null || true)"
           if [[ -n "$label" ]]; then
             launchctl bootout "gui/$(id -u)/$label" || true
           fi
@@ -1610,7 +1659,7 @@ jobs:
     # With a backend side, green iff the
     # static and native smoke jobs are green and the enforced pytest path is
     # green — the selected subset when mode==enforce and the selector returned
-    # SELECTED (shards skipped), the 16-shard fan-out in every other case.
+    # SELECTED (shards skipped), the 8-shard fan-out in every other case.
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -1620,7 +1669,7 @@ jobs:
       # Every coverage-data file the combine expects: all backend-shard matrix
       # groups plus the serial and static buckets. tests/scripts/test_ci_artifact_policy.py
       # pins this against the matrix.
-      COVERAGE_DATA_GROUPS: "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 serial static"
+      COVERAGE_DATA_GROUPS: "1 2 3 4 5 6 7 8 serial static"
     steps:
       - name: Verify backend job results
         env:
@@ -1754,7 +1803,7 @@ jobs:
     env:
       # Every count file the total expects: the backend-shard matrix groups and the
       # serial and static buckets. tests/ci/test_shard_counts.py pins this against the matrix.
-      COUNT_GROUPS: "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 serial static"
+      COUNT_GROUPS: "1 2 3 4 5 6 7 8 serial static"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -2018,8 +2067,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [classify]
-    # e2e is the integration net: it runs whenever EITHER side changed.
-    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    # e2e is the integration net: it runs whenever EITHER side changed, except for a change that
+    # only edits package unit tests (`skip_e2e`, scripts/ci/e2e_scope.py).
+    if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -2140,7 +2190,7 @@ jobs:
     needs: [classify]
     # Focused host acceptance scenarios alongside the complete e2e shards:
     # message flow, self-restart and self-terminate through the real daemon.
-    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -2239,7 +2289,7 @@ jobs:
   e2e-env-guard:
     # Trimmed per task #2446 (analysis #2411): the home-isolation leak detectors
     # only speak when something ran before them in the SAME pytest process, and
-    # their warmup minimum is (a) the e2e package fixture _e2e_process_env firing
+    # their warmup minimum is (a) the e2e package fixture e2e_process_env firing
     # and (b) one AVA_LLM_OVERRIDE scenario fixture (scenario_env) having run —
     # one representative scenario-marked test provides both. The alerts-desktop
     # test is the chosen representative: fast, process-shaped, drives gateway +
@@ -2252,7 +2302,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [classify]
-    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -2307,7 +2357,7 @@ jobs:
 
       - name: Run env-guard warmup + home-isolation in one serial process
         id: pytest-env-guard
-        # The whole point is ONE process: the package-scoped _e2e_process_env
+        # The whole point is ONE process: the package-scoped e2e_process_env
         # fixture must fire and its teardown must land BEFORE the isolation
         # detectors read the environment. One scenario-marked test covers the
         # warmup minimum (package fixture + AVA_LLM_OVERRIDE scenario fixture);
@@ -2354,7 +2404,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     needs: [classify, e2e-shard, e2e-hosted, e2e-env-guard]
-    if: ${{ !cancelled() && needs.classify.result == 'success' && (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') }}
+    if: ${{ !cancelled() && needs.classify.result == 'success' && (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     steps:
       - name: Verify shard results
         run: |

@@ -75,7 +75,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
     p = pool(gate=database_gate)
     try:
         with pytest.raises(asyncio.CancelledError):
-            await daemon._dispatch_loop(
+            await daemon.dispatch_loop(
                 p,
                 labeler_db(database_gate=database_gate),
                 event_bus,
@@ -208,7 +208,7 @@ async def test_failed_label_is_not_retried_but_new_agents_are_processed(
     p = pool(gate=database_gate)
     try:
         with pytest.raises(asyncio.CancelledError):
-            await daemon._dispatch_loop(
+            await daemon.dispatch_loop(
                 p,
                 labeler_db(database_gate=database_gate),
                 event_bus,

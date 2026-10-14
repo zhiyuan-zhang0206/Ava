@@ -14,13 +14,13 @@ import ava
 from ava.sdk_surface import install, process_context
 from ava_builtins.plugins.ava_code.tests.surface_support import code_registry
 from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
-    _load_ava_code_plugin as _load_ava_code_plugin,
-)
-from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
     get_injected_context_notes,
     make_git_repo,
     make_state_with_cwd,
     stub_understand_text_path,
+)
+from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
+    load_ava_code_plugin as load_ava_code_plugin,
 )
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices

@@ -10,10 +10,10 @@ import pytest
 import cli.commands.lifecycle.converge_host as cv
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.config.tests.configuration import snapshot_process_config
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
-from tests.fixtures.configuration import snapshot_process_config
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -55,7 +55,7 @@ def test_enabled_runs_preflight(
 
     monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(bp, "ensure_browser_profile", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-    cv._ensure_browser(ctx)
+    cv.ensure_browser(ctx)
 
 
 def test_capable_offers_profile_seed_with_tty_flag(
@@ -86,7 +86,7 @@ def test_capable_offers_profile_seed_with_tty_flag(
         "ensure_browser_profile",
         lambda *, interactive: seen.append(interactive),  # pyright: ignore[reportUnknownArgumentType]
     )
-    cv._ensure_browser(ctx)
+    cv.ensure_browser(ctx)
     assert seen == [False]  # stdout not a tty -> not interactive
 
 
@@ -114,7 +114,7 @@ def test_incapable_host_does_not_offer_profile_seed(
         raise AssertionError("profile seed offered on an incapable host")
 
     monkeypatch.setattr(bp, "ensure_browser_profile", _must_not_call)
-    cv._ensure_browser(ctx)  # warns + returns, no raise
+    cv.ensure_browser(ctx)  # warns + returns, no raise
 
 
 def test_enabled_but_incapable_warns_not_raises(
@@ -135,7 +135,7 @@ def test_enabled_but_incapable_warns_not_raises(
     )
     ctx.config.set_field("browser_enabled", True)
     monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: "no display")  # pyright: ignore[reportUnknownArgumentType]
-    cv._ensure_browser(ctx)
+    cv.ensure_browser(ctx)
     stderr = capsys.readouterr().err
     assert "not applicable" in stderr
     assert "Install Node.js" not in stderr
@@ -163,7 +163,7 @@ def test_enabled_with_missing_npx_prints_the_repair_box(
         "browser_incapability",
         lambda _chrome: "no npx (install Node.js for chrome-devtools-mcp)",  # pyright: ignore[reportUnknownArgumentType]
     )
-    cv._ensure_browser(ctx)
+    cv.ensure_browser(ctx)
     assert "Install Node.js" in capsys.readouterr().err
 
 
@@ -202,12 +202,12 @@ def test_steps_read_their_context_owner_and_later_overlay(
 
     monkeypatch.setattr(cv, "browser_incapability", capable)
     monkeypatch.setattr(profile, "ensure_browser_profile", seed)
-    cv._ensure_browser(first)
-    cv._ensure_browser(second)
+    cv.ensure_browser(first)
+    cv.ensure_browser(second)
     assert probed == [True]
     assert first.config is not second.config
     first.config.set_field("browser_enabled", True)
-    cv._ensure_browser(first)
+    cv.ensure_browser(first)
     assert probed == [True, True]
 
 
@@ -234,7 +234,7 @@ def test_context_read_failure_keeps_the_original_error(
         machine=command_runtime.machine,
     )
     with pytest.raises(RuntimeError) as caught:
-        cv._ensure_browser(ctx)
+        cv.ensure_browser(ctx)
     assert caught.value is error
 
 

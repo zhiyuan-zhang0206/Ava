@@ -1,0 +1,2 @@
+[debt.third-party-patch]
+"test_anthropic_thinking.py#monkeypatch.setattr langchain_anthropic.chat_models.ChatAnthropic._make_message_chunk_from_anthropic_event" = 1

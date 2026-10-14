@@ -1,5 +1,30 @@
 [uses]
 "backup" = ["test_backup.py"]
 
-[debt.private-name]
-"backup/test_run_with_progress_without_a_sink_defers.py -> test_backup.py#_dt" = 1
+[debt.first-party-patch]
+"test_backup.py#monkeypatch.setattr base.config.settings.general.timezone" = 4
+"test_backup.py#monkeypatch.setattr base.config.settings.services.backup_hour" = 1
+"test_backup.py#monkeypatch.setattr base.config.settings.services.backup_keep" = 1
+"test_backup.py#monkeypatch.setattr base.db.Database.connect" = 2
+"test_backup.py#monkeypatch.setattr services.backup.artifact.offsite.publish" = 3
+"test_backup.py#monkeypatch.setattr services.backup.dump.backup_dir" = 1
+"test_backup.py#monkeypatch.setattr services.backup.dump.passphrase_key_file" = 1
+"test_backup.py#monkeypatch.setattr services.backup.dump.pg_tool" = 1
+"test_backup.py#monkeypatch.setattr services.backup.dump.subprocess.run" = 9
+"test_backup_part2.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
+"test_backup_part2.py#monkeypatch.setattr services.backup.artifact.offsite.publish" = 1
+"test_backup_part2.py#monkeypatch.setattr services.backup.dump.backup_dir" = 1
+"test_backup_part2.py#monkeypatch.setattr services.backup.dump.pg_tool" = 1
+"test_backup_part2.py#monkeypatch.setattr services.backup.dump.subprocess.run" = 1
+"test_backup_snapshot.py#monkeypatch.setattr services.backup.dump.PROGRESS_INTERVAL_S" = 1
+"test_backup_snapshot.py#monkeypatch.setattr services.backup.dump.backup_dir" = 2
+"test_backup_snapshot.py#monkeypatch.setattr services.backup.dump.db_size_breakdown" = 2
+"test_backup_snapshot.py#monkeypatch.setattr services.backup.dump.pg_tool" = 2
+"test_config_readers.py#monkeypatch.setattr services.backup.dump.managed_dumps" = 2
+"test_restore_drill.py#monkeypatch.setattr base.config.settings.data_plane.db_sslmode" = 1
+"test_restore_drill.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 2
+"test_restore_drill.py#monkeypatch.setattr services.backup.artifact.offsite.publish" = 1
+"test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.Database" = 1
+"test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.backup.backup_dir" = 1
+"test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.run_drill" = 1
+"test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.shutil.disk_usage" = 1

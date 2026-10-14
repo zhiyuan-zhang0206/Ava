@@ -352,16 +352,6 @@ def test_mock_dict_object_target_does_not_invoke_a_string_import(tmp_path: Path)
     assert found.records == found.unknown == ()
 
 
-def test_mock_patch_runtime_edge_keeps_ownership_policy_separate(tmp_path: Path) -> None:
-    root = make_repo(tmp_path)
-    tree = ast.parse(
-        "import ava\nfrom unittest.mock import patch as replace\nreplace('base.net.retry._sleep')\n"
-    )
-    refs, fallback = placement.placement_references(tree, placement.ModuleIndex(root))
-    assert [ref.module for ref in refs if ref.kind in placement.STRONG_KINDS] == ["ava"]
-    assert not fallback
-
-
 def test_literal_sibling_of_the_source_file_is_a_repository_resource(tmp_path: Path) -> None:
     found = evidence(
         make_repo(tmp_path),

@@ -26,6 +26,6 @@ keeping an empty baseline or allowing new exemptions to be frozen.
 File, directory, complexity and nesting budgets have no baseline sections.
 These sections are retired and cannot be added again, even as empty objects.
 
-Patch-target exemptions are also retired. Every foreign-private patch fails
-directly; shards reject `patch_targets`, including an empty field, in the working
-tree and in the comparison revision. Only ambient-state site maps remain.
+Patch-target exemptions are retired with the patch-target lint: shards reject
+`patch_targets`, including an empty field, in the working tree and in the comparison
+revision. Only ambient-state site maps remain.

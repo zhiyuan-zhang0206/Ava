@@ -1,8 +1,8 @@
 """`services.agent_runner.agent_host.daemon` plugin-discovery watchdog (issue #170).
 
 The host loads external plugins exactly once per process, so a plugin
-installed after boot is invisible until a restart. `_plugins_fingerprint`
-and `_watch_plugins_for_restart` implement the ergonomic restart: on any
+installed after boot is invisible until a restart. `plugins_fingerprint`
+and `watch_plugins_for_restart` implement the ergonomic restart: on any
 change under $AVA_HOME/plugins the daemon SIGTERMs itself and the runner
 supervisor (watchdog -> healthcheck) brings it back with the new plugin
 loaded — a restart, not a reload (S4 dispose is unimplemented).
@@ -31,7 +31,7 @@ def test_fingerprint_empty_when_no_plugins_dir(
 ) -> None:
     """A missing plugins dir is a valid no-plugins state — empty, not an error."""
     monkeypatch.setattr(runtime_interpreter, "external_plugin_read_root", lambda: tmp_path / "nope")
-    assert daemon._plugins_fingerprint() == ""
+    assert daemon.plugins_fingerprint() == ""
 
 
 def test_fingerprint_tracks_plugin_add_change_remove(
@@ -41,29 +41,29 @@ def test_fingerprint_tracks_plugin_add_change_remove(
     or it is removed; unrelated files do not affect it."""
     monkeypatch.setattr(runtime_interpreter, "external_plugin_read_root", lambda: tmp_path)
 
-    assert daemon._plugins_fingerprint() == ""
+    assert daemon.plugins_fingerprint() == ""
     _make_plugin(tmp_path, "alpha")
-    f1 = daemon._plugins_fingerprint()
+    f1 = daemon.plugins_fingerprint()
     assert "alpha" in f1
 
     _make_plugin(tmp_path, "beta")
-    f2 = daemon._plugins_fingerprint()
+    f2 = daemon.plugins_fingerprint()
     assert f1 != f2 and "beta" in f2
 
     # touching a non-plugin file does not change the fingerprint
     (tmp_path / "notes.txt").write_text("hi", encoding="utf-8")
-    assert daemon._plugins_fingerprint() == f2
+    assert daemon.plugins_fingerprint() == f2
 
     # editing plugin.py changes it
     _make_plugin(tmp_path, "alpha", body="x = 2\n")
-    f3 = daemon._plugins_fingerprint()
+    f3 = daemon.plugins_fingerprint()
     assert f3 != f2
 
     # removing a plugin changes it (dir gone entirely, not renamed)
     import shutil as _shutil
 
     _shutil.rmtree(tmp_path / "beta")
-    f4 = daemon._plugins_fingerprint()
+    f4 = daemon.plugins_fingerprint()
     assert f4 != f3 and "beta" not in f4
 
 
@@ -74,7 +74,7 @@ async def test_watch_restarts_on_plugin_change(
     """A fingerprint change makes the watcher SIGTERM itself once, then stop —
     the supervisor restarts the host, which loads the new plugin at boot."""
     monkeypatch.setattr(runtime_interpreter, "external_plugin_read_root", lambda: tmp_path)
-    monkeypatch.setattr(daemon, "_PLUGINS_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(daemon, "PLUGINS_POLL_INTERVAL_S", 0.01)
 
     raised: list[signal.Signals] = []
 
@@ -83,7 +83,7 @@ async def test_watch_restarts_on_plugin_change(
 
     monkeypatch.setattr(daemon.signal, "raise_signal", _raise)
 
-    watcher = asyncio.create_task(daemon._watch_plugins_for_restart())
+    watcher = asyncio.create_task(daemon.watch_plugins_for_restart())
     await asyncio.sleep(0.05)  # first poll: empty == empty, no kill
     assert raised == []
 

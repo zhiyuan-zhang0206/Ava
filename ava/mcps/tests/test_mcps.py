@@ -18,7 +18,7 @@ import ava.mcps._remote as remote_mod
 from ava.mcps._tools import DiskCache, ServerProxy, call_raw, list_tools
 from ava.mcps.tests._mcps_helpers import (
     StoredTools,
-    _result,
+    call_tool_result,
     content_image,
     content_text,
     local_mcp_clients,
@@ -145,7 +145,7 @@ def test_proxy_dir_lists_tools_plus_raw(mock_session: MagicMock) -> None:
 def test_proxy_attribute_returns_callable(mock_session: MagicMock) -> None:
     """`proxy.read_file` returns a callable, calling it goes through call_tool."""
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("read_file", "Read a file")])
-    mock_session.call_tool.return_value = _result([content_text("file contents")])
+    mock_session.call_tool.return_value = call_tool_result([content_text("file contents")])
     proxy = ServerProxy("fs", mock_session.source)
     fn = proxy.read_file
     assert callable(fn)
@@ -160,7 +160,7 @@ def test_proxy_attribute_works_for_unknown_tool_too(mock_session: MagicMock) -> 
     """Tool names not in cache also return callable — MCP server side will reject wrong names,
     error message is more reliable."""
     mock_session.list_tools.return_value = MagicMock(tools=[])
-    mock_session.call_tool.return_value = _result([content_text("ok")])
+    mock_session.call_tool.return_value = call_tool_result([content_text("ok")])
     proxy = ServerProxy("fs", mock_session.source)
     fn = proxy.unknown_tool
     assert callable(fn)
@@ -169,14 +169,16 @@ def test_proxy_attribute_works_for_unknown_tool_too(mock_session: MagicMock) -> 
 
 def test_proxy_call_joins_text_blocks(mock_session: MagicMock) -> None:
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("do")])
-    mock_session.call_tool.return_value = _result([content_text("line 1"), content_text("line 2")])
+    mock_session.call_tool.return_value = call_tool_result(
+        [content_text("line 1"), content_text("line 2")]
+    )
     proxy = ServerProxy("fs", mock_session.source)
     assert proxy.do() == "line 1\nline 2"
 
 
 def test_proxy_call_raises_on_is_error(mock_session: MagicMock) -> None:
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("do")])
-    mock_session.call_tool.return_value = _result(
+    mock_session.call_tool.return_value = call_tool_result(
         [content_text("permission denied")], is_error=True
     )
     proxy = ServerProxy("fs", mock_session.source)
@@ -187,7 +189,7 @@ def test_proxy_call_raises_on_is_error(mock_session: MagicMock) -> None:
 def test_proxy_call_raises_on_non_text_content(mock_session: MagicMock) -> None:
     """tool returned image / other non-text content → guides to use .raw()."""
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("screenshot")])
-    mock_session.call_tool.return_value = _result([content_image("b64==")])
+    mock_session.call_tool.return_value = call_tool_result([content_image("b64==")])
     proxy = ServerProxy("fs", mock_session.source)
     with pytest.raises(mcps_mod.MCPCallError, match=r"\.raw"):
         proxy.screenshot()
@@ -195,7 +197,7 @@ def test_proxy_call_raises_on_non_text_content(mock_session: MagicMock) -> None:
 
 def test_proxy_call_empty_content_returns_empty_string(mock_session: MagicMock) -> None:
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("noop")])
-    mock_session.call_tool.return_value = _result([])
+    mock_session.call_tool.return_value = call_tool_result([])
     proxy = ServerProxy("fs", mock_session.source)
     assert proxy.noop() == ""
 
@@ -205,7 +207,7 @@ def test_proxy_call_empty_text_block_returns_empty_string(mock_session: MagicMoc
     with no open pages) is a legitimate "" — not a spurious
     'non-text content (kinds=[text])' error."""
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("list_pages")])
-    mock_session.call_tool.return_value = _result([content_text("")])
+    mock_session.call_tool.return_value = call_tool_result([content_text("")])
     proxy = ServerProxy("fs", mock_session.source)
     assert proxy.list_pages() == ""
 
@@ -214,7 +216,9 @@ def test_proxy_call_empty_text_with_image_still_raises(mock_session: MagicMock) 
     """An empty text block alongside a non-text block still points at .raw() —
     the real payload (image) can't be text-joined."""
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("shot")])
-    mock_session.call_tool.return_value = _result([content_text(""), content_image("b64==")])
+    mock_session.call_tool.return_value = call_tool_result(
+        [content_text(""), content_image("b64==")]
+    )
     proxy = ServerProxy("fs", mock_session.source)
     with pytest.raises(mcps_mod.MCPCallError, match=r"\.raw"):
         proxy.shot()
@@ -222,7 +226,7 @@ def test_proxy_call_empty_text_with_image_still_raises(mock_session: MagicMock) 
 
 def test_proxy_raw_returns_full_structure(mock_session: MagicMock) -> None:
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("do")])
-    mock_session.call_tool.return_value = _result(
+    mock_session.call_tool.return_value = call_tool_result(
         [content_text("ok"), content_image("xyz==")],
         is_error=False,
         structured={"counted": 42},
@@ -239,7 +243,7 @@ def test_proxy_raw_returns_full_structure(mock_session: MagicMock) -> None:
 def test_proxy_raw_does_not_raise_on_is_error(mock_session: MagicMock) -> None:
     """raw does not convert isError to raise — returns full structure for caller to decide."""
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("x")])
-    mock_session.call_tool.return_value = _result(
+    mock_session.call_tool.return_value = call_tool_result(
         [content_text("permission denied")], is_error=True
     )
     proxy = ServerProxy("fs", mock_session.source)
@@ -250,7 +254,7 @@ def test_proxy_raw_does_not_raise_on_is_error(mock_session: MagicMock) -> None:
 def test_proxy_call_structured_only_raises(mock_session: MagicMock) -> None:
     """Only returned structuredContent, no text → raise (guides to use .raw())."""
     mock_session.list_tools.return_value = MagicMock(tools=[make_tool("count")])
-    mock_session.call_tool.return_value = _result([], structured={"counted": 42})
+    mock_session.call_tool.return_value = call_tool_result([], structured={"counted": 42})
     proxy = ServerProxy("fs", mock_session.source)
     with pytest.raises(mcps_mod.MCPCallError, match="structuredContent"):
         proxy.count()
@@ -372,7 +376,7 @@ def test_daemon_socket_path_none_when_identity_unset(monkeypatch: pytest.MonkeyP
 def test_daemon_socket_path_none_when_socket_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(remote_mod, "_socket_path_for", lambda: str(tmp_path / "absent.sock"))
+    monkeypatch.setattr(remote_mod, "socket_path_for", lambda: str(tmp_path / "absent.sock"))
     assert remote_mod.daemon_socket_path() is None
 
 
@@ -381,7 +385,7 @@ def test_daemon_socket_path_returns_path_when_socket_present(
 ) -> None:
     sock = tmp_path / "present.sock"
     sock.touch()
-    monkeypatch.setattr(remote_mod, "_socket_path_for", lambda: str(sock))
+    monkeypatch.setattr(remote_mod, "socket_path_for", lambda: str(sock))
     assert remote_mod.daemon_socket_path() == str(sock)
 
 

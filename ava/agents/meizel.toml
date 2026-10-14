@@ -3,6 +3,3 @@ exports = ["compaction.py", "peers.py", "presets.py", "work.py"]
 [uses]
 "__init__.py" = ["compaction.py", "peers.py", "presets.py", "work.py"]
 "tests" = ["__init__.py"]
-
-[debt.private-name]
-"tests/test_agents_scan.py -> __init__.py#_client" = 2

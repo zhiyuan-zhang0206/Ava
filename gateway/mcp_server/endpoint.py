@@ -179,14 +179,14 @@ class _AuditMiddleware:
             _validate_mcp_identity_arguments(tool, args)
             result = await typed_call_next(typed_ctx)
         except Exception as exc:
-            await _record_tool_call(
+            await record_tool_call(
                 self._db,
                 caller,
                 payload | {"outcome": "error", "error": type(exc).__name__},
             )
             raise
         is_error = _tool_result_is_error(result)
-        await _record_tool_call(
+        await record_tool_call(
             self._db,
             caller,
             payload
@@ -199,7 +199,7 @@ class _AuditMiddleware:
         return result
 
 
-async def _record_tool_call(db: Database, caller: CallerIdentity, payload: dict[str, Any]) -> None:
+async def record_tool_call(db: Database, caller: CallerIdentity, payload: dict[str, Any]) -> None:
     """Record one MCP tool call in `audit_events`.
 
     The tool has already run, so a failed audit write must not turn it into a

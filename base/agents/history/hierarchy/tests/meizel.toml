@@ -4,3 +4,47 @@ exports = ["consumer_helpers.py"]
 "test_chunk_consumer.py" = ["consumer_helpers.py", "consumer_history.py"]
 "test_chunk_consumer_quiesced.py" = ["consumer_helpers.py"]
 "test_rebuild.py" = ["consumer_helpers.py"]
+
+[debt.first-party-patch]
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.POLL_SECONDS" = 1
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.agent_model_target" = 2
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.build_generation_llm" = 1
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.describe" = 6
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.load_segments" = 4
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.run_group_checks" = 2
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.run_job" = 1
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.settle_chunk_job" = 1
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.telemetry.emit" = 12
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunks.INSERT_CALL_SQL" = 1
+"test_chunk_consumer.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 2
+"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.POLL_SECONDS" = 1
+"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.backlog" = 1
+"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.claim_job" = 1
+"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.claim_rebuild" = 1
+"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.telemetry.emit" = 1
+"test_chunk_consumer_quiesced.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 1
+"test_chunk_generate.py#monkeypatch.setattr base.config.settings.general.message_timestamp_weekday" = 1
+"test_chunk_generate.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
+"test_group.py#monkeypatch.setattr base.config.settings.general.message_timestamp_weekday" = 1
+"test_group.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
+"test_group_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.group_consumer.MIN_CHECK_OPEN" = 3
+"test_group_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.group_consumer.agent_model_target" = 1
+"test_group_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.group_consumer.generate" = 4
+"test_group_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.group_consumer.generate_groups" = 3
+"test_group_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.group_consumer.group_model" = 1
+"test_group_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.group_consumer.telemetry.emit" = 1
+"test_hierarchy_units.py#monkeypatch.setattr base.agents.history.hierarchy.units.build_timeline_items" = 1
+"test_rebuild.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.run_rebuild" = 2
+"test_rebuild.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.telemetry.emit" = 1
+"test_rebuild.py#monkeypatch.setattr base.agents.history.hierarchy.chunks.telemetry.emit" = 2
+"test_rebuild.py#monkeypatch.setattr base.agents.history.hierarchy.group_consumer.MIN_CHECK_OPEN" = 1
+"test_rebuild.py#monkeypatch.setattr base.agents.history.hierarchy.group_consumer.generate_groups" = 1
+"test_rebuild.py#monkeypatch.setattr base.config.settings.agent.understanding_group_check_decay" = 1
+"test_rebuild.py#monkeypatch.setattr base.config.settings.agent.understanding_group_check_open" = 1
+"test_rebuild.py#monkeypatch.setattr base.config.settings.agent.understanding_group_model" = 1
+
+[debt.unresolved-patch]
+"test_group_consumer.py#monkeypatch.setattr policy.understanding_group_check_decay" = 5
+"test_group_consumer.py#monkeypatch.setattr policy.understanding_group_check_open" = 6
+"test_group_consumer.py#monkeypatch.setattr policy.understanding_group_model" = 2
+"test_group_consumer.py#monkeypatch.setattr policy.understanding_group_reasoning" = 1

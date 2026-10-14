@@ -99,7 +99,8 @@ those require a benchmark with representative conversations and actual model out
 
 Factory tests exercise the real LangChain and vendor SDKs with injected mock HTTP
 transports. They verify the Responses URL, `text.format.type="json_schema"`, `strict=true`,
-schema, reasoning settings and raw usage, and preserve the ordinary Anthropic request.
+schema, reasoning settings and raw usage. Separate construction assertions verify the
+ordinary Anthropic transport, endpoint, key and disabled-thinking configuration.
 
 Live compatibility probes on 2026-10-13 UTC used the official OpenAI SDK and LangChain
 against DeepSeek's endpoints. An ordinary draft with the reply schema succeeded. Adversarial

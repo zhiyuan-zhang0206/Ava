@@ -10,9 +10,3 @@ exports = ["agent_pause", "agents", "alerts.py", "cluster", "cluster_status", "d
 "pages.py" = ["rpc_schemas"]
 "pty_close_notices.py" = ["cluster_status", "rpc_schemas"]
 "tests" = ["agent_pause", "cluster", "cluster_status", "deploy_window.py", "env_audit.py", "host_config.py", "inventory.py", "pages.py", "pty_close_notices.py", "rpc_schemas"]
-
-[debt.private-name]
-"tests/test_cluster_rpc.py -> cluster/rpc.py#_default_idempotency_key" = 4
-"tests/test_cluster_rpc.py -> cluster/rpc.py#_retry_delay_s" = 5
-"tests/test_cluster_rpc.py -> cluster/rpc.py#_sleep" = 1
-"tests/test_deploy_window.py -> deploy_window.py#_read_deploy_states" = 10

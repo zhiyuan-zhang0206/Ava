@@ -4,11 +4,43 @@
 "test_exec_slot.py" = ["test_exec_child.py"]
 "test_resource_admission.py" = ["test_exec_owner_entry.py"]
 
+[debt.env-patch]
+"test_context_binding.py#patch.dict os.environ" = 3
+"test_exec_child.py#monkeypatch.delenv os.environ.AVA_CONFIG_BOOT" = 1
+"test_exec_child.py#monkeypatch.delenv os.environ.AVA_CONFIG_FETCH" = 2
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_AGENT_BIRTH_CONFIG" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_AGENT_CONFIG_OVERLAY" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_CONFIG_BOOT" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_EXEC_REQUEST_FILE" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_EXEC_RESULT_FILE" = 1
+"test_exec_child.py#patch.dict os.environ" = 1
+"test_resource_admission.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_exec_child.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
+"test_exec_child.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
+"test_exec_child.py#monkeypatch.setattr agent.execution.child.init_logger" = 1
+"test_exec_child.py#monkeypatch.setattr agent.execution.child.run_code" = 1
+"test_exec_child.py#monkeypatch.setattr agent.execution.child.time.perf_counter" = 1
+"test_exec_child.py#monkeypatch.setattr agent.graph.exec.protocol.read_request" = 1
+"test_exec_child.py#monkeypatch.setattr agent.graph.exec.protocol.write_result" = 2
+"test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_eval_isolation" = 1
+"test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_sdk_disable" = 1
+"test_exec_child.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"test_exec_child.py#monkeypatch.setattr ava.boot.ensure_plugins_loaded" = 1
+"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
+"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
+"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.line_buffered_output" = 1
+"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.pop_overlay_env" = 1
+"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.run_code" = 1
+"test_exec_child_signals.py#monkeypatch.setattr agent.graph.exec.protocol.read_request" = 1
+"test_exec_child_signals.py#monkeypatch.setattr agent.graph.exec.protocol.write_result" = 1
+"test_exec_child_signals.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"test_exec_child_signals.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
+"test_resource_admission.py#monkeypatch.setattr base.agents.incarnation.exec_owner_recovery.exec_run_dir" = 1
+
 [debt.private-name]
-"test_context_binding.py -> test_exec_child.py#_spawn" = 1
-"test_exec_child_signals.py -> test_exec_child.py#_AGENT_ID" = 1
-"test_exec_child_signals.py -> test_exec_child.py#_child_env" = 1
-"test_exec_slot.py -> test_exec_child.py#_spawn" = 1
-"test_resource_admission.py -> test_exec_owner_entry.py#_context" = 1
-"test_resource_admission.py -> test_exec_owner_entry.py#_ready" = 1
 "test_resource_admission.py -> test_exec_owner_entry.py#_start" = 1
+
+[debt.unresolved-patch]
+"test_delta_read_compat_agent.py#monkeypatch.setattr saver.aget_delta_channel_history" = 1

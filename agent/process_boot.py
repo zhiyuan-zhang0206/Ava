@@ -24,7 +24,7 @@ from base.log import logger
 from base.paths import workspace_dir
 
 
-def _apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], Any]) -> None:
+def apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], Any]) -> None:
     """Apply the per-agent sdk_disable list additively on the installed SDK surface.
 
     The env baseline ``AVA_SDK_DISABLE`` is applied by the SDK install while it
@@ -40,7 +40,7 @@ def _apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], Any]) -
     sdk_disable.apply_sdk_disable(list(configured))
 
 
-def _apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any]) -> None:
+def apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any]) -> None:
     """Apply the SDK and memory-pool boundaries for an isolated eval agent.
 
     This runs after plugins have registered their namespaces: the eval boundary

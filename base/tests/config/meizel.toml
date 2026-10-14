@@ -1,0 +1,47 @@
+[debt.env-patch]
+"test_cluster_tz.py#monkeypatch.delenv os.environ.TZ" = 2
+"test_config_boot_lite_base.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_config_env_values.py#monkeypatch.delitem os.environ" = 1
+"test_config_env_values.py#monkeypatch.delitem os.environ.AVA_TIMEZONE" = 1
+"test_config_env_values.py#monkeypatch.setenv os.environ.HOME" = 2
+"test_config_env_values.py#monkeypatch.setitem os.environ.AVA_IM_SEND_RETRY_DELAYS" = 1
+"test_config_env_values.py#monkeypatch.setitem os.environ.AVA_NATIVE_HELPER_PORT" = 1
+"test_config_env_values.py#monkeypatch.setitem os.environ.AVA_OPS_ALERTS_WEBHOOK_TOKEN" = 1
+"test_config_env_values.py#monkeypatch.setitem os.environ.AVA_PRIMARY_GATEWAY_URL" = 1
+"test_config_env_values.py#monkeypatch.setitem os.environ.AVA_SKIP_AUTH" = 1
+"test_config_env_values.py#monkeypatch.setitem os.environ.AVA_SKIP_SECURITY_SCAN" = 1
+"test_config_env_values.py#monkeypatch.setitem os.environ.AVA_SYSTEM_PROMPT_PROGRESS" = 1
+"test_config_env_values.py#monkeypatch.setitem os.environ.AVA_TIMEZONE" = 3
+"test_config_profiles.py#monkeypatch.delenv os.environ" = 1
+"test_config_profiles.py#monkeypatch.setenv os.environ" = 2
+"test_config_profiles.py#monkeypatch.setitem os.environ" = 1
+"test_config_surface.py#monkeypatch.delenv os.environ" = 3
+"test_config_surface.py#monkeypatch.delitem os.environ" = 1
+"test_config_surface.py#monkeypatch.setenv os.environ" = 3
+"test_config_surface.py#monkeypatch.setitem os.environ" = 1
+"test_dotenv_file.py#monkeypatch.setenv os.environ.TZ" = 1
+"test_home_resolution.py#monkeypatch.delenv os.environ.AVA_HOME" = 1
+"test_home_resolution.py#monkeypatch.setenv os.environ.AVA_HOME" = 6
+"test_home_resolution.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_paths.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+
+[debt.first-party-patch]
+"test_cluster_tz.py#monkeypatch.setattr base.config.settings.general" = 2
+"test_config_env_values.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 12
+"test_config_env_values.py#monkeypatch.setattr base.log.logger" = 1
+"test_config_profiles.py#monkeypatch.setattr base.config.config_registry.DOMAIN_MODELS" = 2
+"test_config_profiles.py#monkeypatch.setattr base.config.settings" = 3
+"test_config_registry.py#monkeypatch.setattr base.config.config_registry.DOMAIN_MODELS" = 1
+"test_config_registry.py#monkeypatch.setattr base.config.settings.sandbox.exec_timeout_seconds" = 1
+"test_dotenv_file.py#monkeypatch.setattr base.config.settings.general" = 1
+"test_dotenv_file.py#monkeypatch.setattr base.host.env.dotenv_file.write_private_bytes" = 1
+"test_dotenv_file.py#monkeypatch.setattr base.host.private_storage.os.replace" = 1
+"test_paths.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_runner_db_url_projection.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 5
+"test_runner_db_url_projection.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 5
+"test_runner_db_url_projection.py#monkeypatch.setattr base.log.logger.debug" = 1
+"test_runner_db_url_projection.py#monkeypatch.setattr base.log.logger.warning" = 1
+
+[debt.stdlib-patch]
+"test_cluster_tz.py#monkeypatch.setattr os.path.realpath" = 4
+"test_config_fetch_source.py#monkeypatch.setattr os.environ" = 1

@@ -1,0 +1,39 @@
+[uses]
+"test_override_resolution.py" = ["factory_support.py"]
+
+[debt.env-patch]
+"test_provider_construction.py#monkeypatch.delenv os.environ.DASHSCOPE_API_KEY" = 1
+"test_provider_construction.py#monkeypatch.delenv os.environ.DEEPSEEK_API_KEY" = 2
+"test_provider_construction.py#monkeypatch.delenv os.environ.GLM_API_KEY" = 1
+"test_provider_construction.py#monkeypatch.delenv os.environ.MIMO_API_KEY" = 1
+"test_provider_construction.py#monkeypatch.delenv os.environ.MOONSHOT_API_KEY" = 1
+"test_provider_construction.py#monkeypatch.delenv os.environ.OPENAI_API_KEY" = 1
+"test_provider_construction.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 1
+"test_provider_construction.py#monkeypatch.setenv os.environ.DASHSCOPE_API_KEY" = 5
+"test_provider_construction.py#monkeypatch.setenv os.environ.DEEPSEEK_API_KEY" = 2
+"test_provider_construction.py#monkeypatch.setenv os.environ.GEMINI_API_KEY" = 2
+"test_provider_construction.py#monkeypatch.setenv os.environ.GLM_API_KEY" = 3
+"test_provider_construction.py#monkeypatch.setenv os.environ.MIMO_API_KEY" = 2
+"test_provider_construction.py#monkeypatch.setenv os.environ.MOONSHOT_API_KEY" = 4
+"test_provider_construction.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 5
+"test_reasoning_effort_dispatch.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 15
+"test_reasoning_effort_dispatch.py#monkeypatch.setenv os.environ.DASHSCOPE_API_KEY" = 4
+"test_reasoning_effort_dispatch.py#monkeypatch.setenv os.environ.GEMINI_API_KEY" = 4
+"test_reasoning_effort_dispatch.py#monkeypatch.setenv os.environ.GLM_API_KEY" = 4
+"test_reasoning_effort_dispatch.py#monkeypatch.setenv os.environ.MIMO_API_KEY" = 5
+"test_reasoning_effort_dispatch.py#monkeypatch.setenv os.environ.MOONSHOT_API_KEY" = 3
+
+[debt.first-party-patch]
+"test_override_resolution.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 2
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.dashscope_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.dashscope_base_url" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 29
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.moonshot_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.openai_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.xiaomi_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.zhipu_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 3
+"test_reasoning_effort_dispatch.py#monkeypatch.setattr base.config.settings.lm.claude_thinking_budget_tokens" = 7
+"test_reasoning_effort_dispatch.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 20
+"test_reasoning_effort_dispatch.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 26

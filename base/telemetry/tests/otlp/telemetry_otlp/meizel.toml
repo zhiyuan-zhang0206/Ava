@@ -1,0 +1,17 @@
+[debt.env-patch]
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setenv os.environ.AVA_EXEC_REQUEST_FILE" = 1
+
+[debt.first-party-patch]
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 7
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.paths.logs_dir" = 1
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.telemetry.delivery.loss.append_jsonl" = 1
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.OtlpBackend" = 1
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.OtlpBackend._endpoint_reachable" = 3
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.OtlpBackend._ensure" = 1
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.append_jsonl" = 1
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.build_providers" = 3
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.emit" = 2
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.time.monotonic" = 1
+
+[debt.unresolved-patch]
+"test_backend_init_failure_isolated_and_waits_before.py#monkeypatch.setattr backend._queue" = 1

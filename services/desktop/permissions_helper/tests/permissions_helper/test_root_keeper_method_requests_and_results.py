@@ -19,19 +19,19 @@ from base.config import settings
 from base.host.converge.accessibility import AccessibilityState
 from base.host.converge.screen_capture import ScreenCaptureState
 from base.host.permissions_helper import client
-from base.host.permissions_helper.client import PermissionsHelperError
+from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
-    _argvs,
-    _fake_tools,
-    _FakeHelper,
-    _is_whitelisted_file_path,
-    _parse_strings,
-    _ping_reply,
-    _read_line,
-    _sign_command,
-    _stage_bundle,
-    _test_dr,
-    _write_current_build_state,
+    FakeHelper,
+    fake_tools,
+    is_whitelisted_file_path,
+    parse_strings,
+    ping_reply,
+    read_line,
+    recorded_argvs,
+    sign_command,
+    stage_bundle,
+    test_dr,
+    write_current_build_state,
 )
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_helper as fake_helper,
@@ -79,21 +79,21 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
         "env": {"AVA_TEST": "1"},
     }
 
-    seeded = client.seed_root(config, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    seeded = PermissionsHelperClient(path).seed_root(config)  # pyright: ignore[reportUnknownArgumentType]
     assert seeded["state"] == "running"
     assert seeded.get("pid") == 5150
     assert seen[0] == {"method": "root_seed", "config": config}
 
-    status = client.root_status(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(path).root_status()  # pyright: ignore[reportUnknownArgumentType]
     assert status["state"] == "conflict"
     assert status.get("conflict") == {"pid": 4090, "since": 1_700_000_000.0}
     assert seen[1] == {"method": "root_status"}
 
-    stopped = client.stop_root(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    stopped = PermissionsHelperClient(path).stop_root()  # pyright: ignore[reportUnknownArgumentType]
     assert stopped["state"] == "stopping"
     assert stopped["stop_requested"] is True
     assert seen[2] == {"method": "root_stop"}
-    shutdown = client.shutdown_helper(Path("/opt/ava/run"), sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    shutdown = PermissionsHelperClient(path).shutdown_helper(Path("/opt/ava/run"))  # pyright: ignore[reportUnknownArgumentType]
     assert shutdown == {"stopping": True, "pid": 4242, "run_dir": "/opt/ava/run"}
     assert seen[3] == {"method": "helper_shutdown", "run_dir": "/opt/ava/run"}
 
@@ -111,7 +111,7 @@ def test_file_method_mapping_and_list_result(fake_helper) -> None:
         }
 
     path = fake_helper(handler)
-    assert client.list_dir("/Users/ava/Downloads", sock_path=path) == entries  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).list_dir("/Users/ava/Downloads") == entries  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["file_list"]
 
 
@@ -128,7 +128,7 @@ def test_read_file_decodes_base64_content(fake_helper, content: bytes) -> None:
         }
 
     path = fake_helper(handler)
-    assert client.read_file("/Users/ava/Downloads/example.bin", sock_path=path) == content  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).read_file("/Users/ava/Downloads/example.bin") == content  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["file_read"]
 
 
@@ -140,10 +140,7 @@ def test_read_file_rejects_missing_or_malformed_content(
         return {"id": req["id"], "ok": True, "result": result}
 
     with pytest.raises(PermissionsHelperError, match="invalid file_read response"):
-        client.read_file(
-            "/Users/ava/Downloads/example.bin",
-            sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
-        )
+        PermissionsHelperClient(fake_helper(handler)).read_file("/Users/ava/Downloads/example.bin")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_file_operations_raise_server_errors(fake_helper) -> None:
@@ -153,9 +150,9 @@ def test_file_operations_raise_server_errors(fake_helper) -> None:
 
     path = fake_helper(handler)
     with pytest.raises(PermissionsHelperError, match="outside whitelist"):
-        client.list_dir("/private/secret", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).list_dir("/private/secret")  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(PermissionsHelperError, match="file too large"):
-        client.read_file("/Users/ava/Downloads/large.bin", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).read_file("/Users/ava/Downloads/large.bin")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
@@ -176,11 +173,11 @@ def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
     (downloads / "escape").symlink_to(outside, target_is_directory=True)
 
     roots = [downloads, desktop, incoming]
-    assert _is_whitelisted_file_path(nested_file, roots)
-    assert _is_whitelisted_file_path(nested_file.parent, roots)
-    assert not _is_whitelisted_file_path(sibling_prefix / "report.txt", roots)
-    assert not _is_whitelisted_file_path(downloads / "escape" / "secret.txt", roots)
-    assert not _is_whitelisted_file_path(Path("Downloads/report.txt"), roots)
+    assert is_whitelisted_file_path(nested_file, roots)
+    assert is_whitelisted_file_path(nested_file.parent, roots)
+    assert not is_whitelisted_file_path(sibling_prefix / "report.txt", roots)
+    assert not is_whitelisted_file_path(downloads / "escape" / "secret.txt", roots)
+    assert not is_whitelisted_file_path(Path("Downloads/report.txt"), roots)
 
 
 def test_gui_ops_wire_requests(fake_helper) -> None:
@@ -193,12 +190,12 @@ def test_gui_ops_wire_requests(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": {}}
 
     path = fake_helper(handler)
-    client.key(76, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.key(9, cmd=True, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.scroll(10, 20, -50, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.window_info("Notes", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.session_info(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.click(5, 6, double=True, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).key(76)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).key(9, cmd=True)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).scroll(10, 20, -50)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).window_info("Notes")  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).session_info()  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).click(5, 6, double=True)  # pyright: ignore[reportUnknownArgumentType]
     assert seen == [
         {"method": "key", "code": 76, "cmd": False},
         {"method": "key", "code": 9, "cmd": True},
@@ -242,51 +239,51 @@ def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_recv_reassembles_across_chunks(fake_helper) -> None:
     def raw(conn: socket.socket) -> None:
-        _read_line(conn)
+        read_line(conn)
         payload = json.dumps({"id": 1, "ok": True, "result": {"pong": True}}).encode() + b"\n"
         conn.sendall(payload[:5])
         time.sleep(0.05)
         conn.sendall(payload[5:])
 
-    assert client.ping(sock_path=fake_helper(raw=raw)) == {"pong": True}  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(fake_helper(raw=raw)).ping() == {"pong": True}  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_closed_without_response_raises(fake_helper) -> None:
     with pytest.raises(PermissionsHelperError, match="closed without a response"):
-        client.ping(
-            sock_path=fake_helper(raw=_read_line)  # pyright: ignore[reportUnknownArgumentType]
-        )  # read, then close, no reply
+        PermissionsHelperClient(
+            fake_helper(raw=read_line)  # pyright: ignore[reportUnknownArgumentType]
+        ).ping()  # read, then close, no reply
 
 
 def test_truncated_response_raises(fake_helper) -> None:
     def raw(conn: socket.socket) -> None:
-        _read_line(conn)
+        read_line(conn)
         conn.sendall(b'{"id":1,"ok":tr')  # partial JSON, no trailing newline
 
     with pytest.raises(PermissionsHelperError, match="truncated"):
-        client.ping(sock_path=fake_helper(raw=raw))  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client, "CALL_TIMEOUT_S", 0.2)
 
     def raw(conn: socket.socket) -> None:
-        _read_line(conn)
+        read_line(conn)
         time.sleep(1.0)  # accept, never reply
 
     with pytest.raises(PermissionsHelperError, match="did not respond"):
-        client.ping(sock_path=fake_helper(raw=raw))  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_line_limit_guard(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client, "LINE_LIMIT", 16)
 
     def raw(conn: socket.socket) -> None:
-        _read_line(conn)
+        read_line(conn)
         conn.sendall(b"x" * 64)  # oversized, newline-less
 
     with pytest.raises(PermissionsHelperError, match="exceeded line limit"):
-        client.ping(sock_path=fake_helper(raw=raw))  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -295,18 +292,18 @@ def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client, "CONNECT_DELAY_S", 0.1)
     path = f"/tmp/avah-retry{os.getpid()}.sock"  # noqa: S108 — short path for AF_UNIX
     Path(path).unlink(missing_ok=True)
-    holder: list[_FakeHelper] = []
+    holder: list[FakeHelper] = []
 
     def late_start() -> None:
         time.sleep(0.25)
         holder.append(
-            _FakeHelper(path, lambda req: {"id": req["id"], "ok": True, "result": {"pong": True}})
+            FakeHelper(path, lambda req: {"id": req["id"], "ok": True, "result": {"pong": True}})
         )
 
     t = threading.Thread(target=late_start, daemon=True)
     t.start()
     try:
-        assert client.ping(sock_path=path) == {"pong": True}
+        assert PermissionsHelperClient(path).ping() == {"pong": True}
     finally:
         t.join(timeout=2)
         for s in holder:
@@ -321,7 +318,7 @@ def test_label_is_per_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     from services.desktop.permissions_helper import lifecycle
 
     monkeypatch.setattr(paths, "ava_home", lambda: Path("/x/.ava-demo"))
-    assert lifecycle._label() == f"com.ava.permissions-helper.{home_slug(Path('/x/.ava-demo'))}"
+    assert lifecycle.label() == f"com.ava.permissions-helper.{home_slug(Path('/x/.ava-demo'))}"
 
 
 def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
@@ -329,16 +326,16 @@ def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
 
     def handler(req: dict) -> dict:
         seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
-        return _ping_reply(True)(req)
+        return ping_reply(True)(req)
 
-    status = client.check_screen_capture(sock_path=fake_helper(handler))  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(handler)).check_screen_capture()  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["ping"]  # measured in the helper, not in whoever is asking
     assert status.state is ScreenCaptureState.AVAILABLE
     assert status.available is True
 
 
 def test_screen_capture_probe_reports_no_grant(fake_helper) -> None:
-    status = client.check_screen_capture(sock_path=fake_helper(_ping_reply(False)))  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(ping_reply(False))).check_screen_capture()  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is ScreenCaptureState.NO_GRANT
     assert status.available is False
     # The fix is authorizing the helper, not restarting the cluster from a local
@@ -349,9 +346,8 @@ def test_screen_capture_probe_reports_no_grant(fake_helper) -> None:
 
 
 def test_screen_capture_probe_keeps_unreachable_distinct_from_denied() -> None:
-    status = client.check_screen_capture(
-        sock_path="/tmp/ava-native-does-not-exist.sock",  # noqa: S108 — nonexistent by design
-        settle_s=0.0,
+    status = PermissionsHelperClient("/tmp/ava-native-does-not-exist.sock").check_screen_capture(  # noqa: S108 — nonexistent by design
+        settle_s=0.0
     )
     assert status.state is ScreenCaptureState.HELPER_UNREACHABLE
     assert status.available is False
@@ -361,32 +357,38 @@ def test_screen_capture_probe_keeps_unreachable_distinct_from_denied() -> None:
     assert "System Settings" not in status.diagnostic
 
 
-def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    # launchd may have only just bootstrapped the helper, so one unreachable ping
-    # inside the settle window is a cold start rather than a dead daemon.
-    calls: list[int] = []
+class _ColdHelper(PermissionsHelperClient):
+    """The first ping finds the helper unreachable, as when launchd has only just bootstrapped it."""
 
-    def flaky(*, sock_path=None):
-        calls.append(1)
-        if len(calls) == 1:
+    def __init__(self) -> None:
+        super().__init__("/unused.sock")
+        self.calls = 0
+
+    def ping(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+        self.calls += 1
+        if self.calls == 1:
             raise PermissionsHelperError("permissions helper not reachable")
         return {"pong": True, "preflight_screen": True, "ax_trusted": True}
 
-    monkeypatch.setattr(client, "ping", flaky)  # pyright: ignore[reportUnknownArgumentType]
+
+def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    # launchd may have only just bootstrapped the helper, so one unreachable ping
+    # inside the settle window is a cold start rather than a dead daemon.
+    helper = _ColdHelper()
     monkeypatch.setattr(client, "PROBE_RETRY_DELAY_S", 0.01)
-    status = client.check_screen_capture(settle_s=2.0)
-    assert len(calls) == 2
+    status = helper.check_screen_capture(settle_s=2.0)
+    assert helper.calls == 2
     assert status.state is ScreenCaptureState.AVAILABLE
 
 
 def test_accessibility_probe_reads_the_helpers_grant(fake_helper) -> None:
-    status = client.check_accessibility(sock_path=fake_helper(_ping_reply(True, True)))  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(ping_reply(True, True))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is AccessibilityState.GRANTED
     assert status.available is True
 
 
 def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:
-    status = client.check_accessibility(sock_path=fake_helper(_ping_reply(True, False)))  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(ping_reply(True, False))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is AccessibilityState.NOT_GRANTED
     assert status.available is False
     assert "System Settings" in status.diagnostic
@@ -394,9 +396,8 @@ def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:
 
 
 def test_accessibility_probe_keeps_unreachable_distinct_from_missing_grant() -> None:
-    status = client.check_accessibility(
-        sock_path="/tmp/ava-native-does-not-exist.sock",  # noqa: S108 — nonexistent by design
-        settle_s=0.0,
+    status = PermissionsHelperClient("/tmp/ava-native-does-not-exist.sock").check_accessibility(  # noqa: S108 — nonexistent by design
+        settle_s=0.0
     )
     assert status.state is AccessibilityState.HELPER_UNREACHABLE
     assert status.available is False
@@ -430,8 +431,8 @@ def test_panel_locale_catalogs_are_symmetric() -> None:
         / "helper"
         / "locales"
     )
-    en = _parse_strings(locales / "en.lproj" / "Localizable.strings")
-    zh = _parse_strings(locales / "zh-Hans.lproj" / "Localizable.strings")
+    en = parse_strings(locales / "en.lproj" / "Localizable.strings")
+    zh = parse_strings(locales / "zh-Hans.lproj" / "Localizable.strings")
     assert en
     assert set(en) == set(zh)
     assert all(value.isascii() for value in en.values())
@@ -485,12 +486,12 @@ def test_read_dr_accepts_legacy_stderr_stream(
                 cmd,  # pyright: ignore[reportUnknownArgumentType]
                 0,
                 b"",
-                f"designated => {_test_dr()}\n".encode(),
+                f"designated => {test_dr()}\n".encode(),
             )
         raise AssertionError(f"unexpected call {cmd}")
 
     monkeypatch.setattr(lifecycle, "run_bounded", run)  # pyright: ignore[reportUnknownArgumentType]
-    assert lifecycle._read_dr(app) == _test_dr()
+    assert lifecycle.read_dr(app) == test_dr()
 
 
 def test_current_stable_signed_bundle_is_not_resigned(
@@ -500,13 +501,13 @@ def test_current_stable_signed_bundle_is_not_resigned(
     already holds, so the skip-if-up-to-date gate has to survive intact."""
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
-    _write_current_build_state(app, lifecycle._source_content_hash())
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    write_current_build_state(app, lifecycle.source_content_hash())
 
     assert lifecycle.build_and_sign() == (app, False)
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--force"] for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
+    assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
 
 
 def test_keychain_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -518,9 +519,9 @@ def test_keychain_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
         "permissions_helper_keychain",
         "/tmp/ci-signing.keychain-db",  # noqa: S108
     )
-    assert lifecycle._keychain_path() == Path("/tmp/ci-signing.keychain-db")  # noqa: S108
+    assert lifecycle.keychain_path() == Path("/tmp/ci-signing.keychain-db")  # noqa: S108
     monkeypatch.setattr(settings.services, "permissions_helper_keychain", None)
-    assert lifecycle._keychain_path() == Path.home() / "Library" / "Keychains" / "login.keychain-db"
+    assert lifecycle.keychain_path() == Path.home() / "Library" / "Keychains" / "login.keychain-db"
 
 
 def test_signing_cert_import_uses_supported_security_argv(
@@ -530,12 +531,14 @@ def test_signing_cert_import_uses_supported_security_argv(
     from services.desktop.permissions_helper import lifecycle
 
     keychain = tmp_path / "ci-signing.keychain-db"
-    monkeypatch.setattr(lifecycle, "_keychain_path", lambda: keychain)
-    recorded = _fake_tools(monkeypatch, authority=None, identity_output="0 identities found\n")
+    monkeypatch.setattr(lifecycle, "keychain_path", lambda: keychain)
+    recorded = fake_tools(monkeypatch, authority=None, identity_output="0 identities found\n")
 
     lifecycle.ensure_signing_cert()
 
-    import_argv = next(argv for argv in _argvs(recorded) if argv[:2] == ["security", "import"])
+    import_argv = next(
+        argv for argv in recorded_argvs(recorded) if argv[:2] == ["security", "import"]
+    )
     assert import_argv[:2] == ["security", "import"]
     assert import_argv[2].endswith("ident.p12")
     assert import_argv[3:] == [
@@ -557,13 +560,13 @@ def test_locked_keychain_does_not_fail_a_current_host(
     ACL, the other pre-sign check that reaches for it."""
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN, keychain_rc=1)
-    _write_current_build_state(app, lifecycle._source_content_hash())
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN, keychain_rc=1)
+    write_current_build_state(app, lifecycle.source_content_hash())
 
     assert lifecycle.build_and_sign() == (app, False)
-    assert not any(c[:2] == ["security", "show-keychain-info"] for c in _argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--sign"] for c in _argvs(recorded))
+    assert not any(c[:2] == ["security", "show-keychain-info"] for c in recorded_argvs(recorded))
+    assert not any(c[:2] == ["codesign", "--sign"] for c in recorded_argvs(recorded))
 
 
 def test_current_stable_signed_bundle_skips_signing_smoke(
@@ -571,9 +574,9 @@ def test_current_stable_signed_bundle_skips_signing_smoke(
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
-    _write_current_build_state(app, lifecycle._source_content_hash())
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    write_current_build_state(app, lifecycle.source_content_hash())
     smoke_calls: list[None] = []
     monkeypatch.setattr(lifecycle, "preflight_signing_smoke", lambda: smoke_calls.append(None))
 
@@ -586,31 +589,31 @@ def test_fresh_build_signs_with_the_stable_certificate(
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = _fake_tools(monkeypatch, authority=None)
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    recorded = fake_tools(monkeypatch, authority=None)
 
     assert lifecycle.build_and_sign() == (app, True)
-    assert _sign_command(recorded) == [
+    assert sign_command(recorded) == [
         "codesign",
         "--force",
         "--sign",
-        lifecycle._CERT_CN,
+        lifecycle.CERT_CN,
         # Hardened runtime: dyld ignores DYLD_* for the helper (review P2-A).
         "--options",
         "runtime",
         # AppleEvents: the entitlement tccd needs to build an attribution
         # chain for helper-spawned osascript/AE children.
         "--entitlements",
-        str(lifecycle._ENTITLEMENTS),
+        str(lifecycle.ENTITLEMENTS),
         "--identifier",
         lifecycle.HELPER_BUNDLE_ID,
         "--requirements",
-        f"=designated => {_test_dr()}",
+        f"=designated => {test_dr()}",
         str(app),
     ]
     state = json.loads((app.parent / "build-state.json").read_text())
-    assert state["source_hash"] == lifecycle._source_content_hash()
-    assert state["dr"] == _test_dr()
+    assert state["source_hash"] == lifecycle.source_content_hash()
+    assert state["dr"] == test_dr()
 
 
 def test_entitlements_request_apple_events_for_spawned_children() -> None:
@@ -638,12 +641,12 @@ def test_source_mtime_change_does_not_rebuild_identical_content(
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
-    _write_current_build_state(app, lifecycle._source_content_hash())
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    write_current_build_state(app, lifecycle.source_content_hash())
     exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
     newer = exe.stat().st_mtime + 60
-    os.utime(lifecycle._SOURCE, (newer, newer))
+    os.utime(lifecycle.SOURCE, (newer, newer))
 
     assert lifecycle.build_and_sign() == (app, False)
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))

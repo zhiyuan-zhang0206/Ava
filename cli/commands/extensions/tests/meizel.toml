@@ -1,0 +1,57 @@
+[debt.env-patch]
+"test_mcp_install.py#monkeypatch.setenv os.environ.UV_FROZEN" = 1
+"test_mcp_install.py#monkeypatch.setenv os.environ.UV_LOCKED" = 1
+"test_packages_refresh.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_packages_refresh.py#patch.dict os.environ" = 1
+"test_plugins_enable_disable.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_skills_sync.py#monkeypatch.setenv os.environ.AVA_CONVERGE_ALLOW_WORKTREE" = 1
+
+[debt.first-party-patch]
+"test_cli_pool_teardown.py#monkeypatch.setattr base.packages.extensions.adopt.adopt_local_installs" = 2
+"test_cli_pool_teardown.py#monkeypatch.setattr base.packages.extensions.materialize.materialize_skills" = 2
+"test_cli_pool_teardown.py#monkeypatch.setattr base.paths.skills_dir" = 4
+"test_external_skills.py#monkeypatch.setattr cli.commands.extensions.external_skills._SKILL_NAMES" = 1
+"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills._SKILL_NAMES" = 1
+"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.commit_activation" = 2
+"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.materialize_source_snapshot" = 2
+"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.rename_no_replace" = 9
+"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.stage_copy" = 3
+"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.uuid.uuid4" = 1
+"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.verify_marker" = 1
+"test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skill_host.cleanup.preserve_claimed_tree" = 1
+"test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skill_host.cleanup.verify_cleanup_file" = 2
+"test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skill_host.filesystem.os.fchmod" = 1
+"test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skill_host.filesystem.os.fstat" = 1
+"test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skill_host.filesystem.verify_cleanup_file" = 1
+"test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skills._SKILL_NAMES" = 1
+"test_external_skills_crash_safety.py#monkeypatch.setattr cli.commands.extensions.external_skills.rename_no_replace" = 11
+"test_manifest_gate.py#monkeypatch.setattr base.host.git.host_version.host_version" = 1
+"test_manifest_gate.py#monkeypatch.setattr cli.commands.extensions.mcp.uv_sync" = 1
+"test_mcp_enable.py#monkeypatch.setattr ava.mcps.config.display_available" = 1
+"test_mcp_install.py#monkeypatch.setattr cli.commands.extensions.mcp.uv_sync" = 1
+"test_packages_refresh.py#monkeypatch.setattr base.paths.repo_root" = 1
+"test_packages_refresh.py#monkeypatch.setattr cli.commands.extensions.packages.refresh.ConfigBoot" = 1
+"test_packages_refresh.py#monkeypatch.setattr cli.commands.extensions.packages.refresh.os_jobs_enabled" = 2
+"test_packages_refresh.py#monkeypatch.setattr cli.commands.extensions.packages.refresh.run_bounded" = 2
+"test_plugins_enable_disable.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_plugins_enable_disable.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_plugins_inspect.py#monkeypatch.setattr cli.commands.extensions.plugins_inspect.build_catalog" = 1
+"test_plugins_verify.py#monkeypatch.setattr ava.sdk_surface.extensions.load_extensions" = 1
+"test_plugins_verify.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_plugins_verify.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
+"test_plugins_verify.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_skill_update.py#monkeypatch.setattr base.paths.home.default_home" = 1
+"test_skills_sync.py#monkeypatch.setattr base.paths.home.default_home" = 2
+
+[debt.stdlib-patch]
+"test_external_skills_crash_safety.py#monkeypatch.setattr pathlib.Path.chmod" = 1
+"test_external_skills_crash_safety.py#monkeypatch.setattr pathlib.Path.unlink" = 1
+"test_plugins_install.py#monkeypatch.setattr shutil.copytree" = 2
+
+[debt.unresolved-patch]
+"test_external_skills.py#monkeypatch.setattr bridge.Path.home" = 1
+"test_external_skills.py#monkeypatch.setattr bridge._SKILL_NAMES" = 3
+"test_external_skills.py#monkeypatch.setattr bridge.rename_no_replace" = 2
+"test_external_skills.py#monkeypatch.setattr module.rename_no_replace" = 2
+"test_packages_refresh.py#monkeypatch.setattr pass_._process_git" = 1
+"test_packages_refresh.py#monkeypatch.setattr refresh_config.view.packages.refresh_enabled" = 2

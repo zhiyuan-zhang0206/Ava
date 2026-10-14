@@ -3,6 +3,13 @@ exports = ["unit_capability_support.py"]
 [uses]
 "test_unit_capability.py" = ["unit_capability_support.py"]
 
+[debt.env-patch]
+"unit_capability_support.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_generations.py#monkeypatch.setattr base.cluster.authority.roles.create_missing" = 2
+"test_generations.py#monkeypatch.setattr base.cluster.authority.roles.verify_generation" = 1
+"test_generations.py#monkeypatch.setattr base.host.db_authority.ledger.write_private_bytes" = 1
+
 [debt.private-name]
-"test_unit_capability.py -> unit_capability_support.py#_ENDPOINT" = 1
 "test_unit_capability.py -> unit_capability_support.py#_open" = 1

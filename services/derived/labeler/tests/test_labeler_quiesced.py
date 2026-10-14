@@ -34,7 +34,7 @@ async def test_a_quiesced_unit_borrows_no_connection(
     monkeypatch.setattr(daemon, "POLL_INTERVAL_S", 0.01)
     pool = MagicMock()
     task = asyncio.create_task(
-        daemon._dispatch_loop(
+        daemon.dispatch_loop(
             cast("ConnectionPool", pool),
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),

@@ -1,4 +1,4 @@
-"""ava-ops boot helpers — the leaf lookups `_main` needs before it can serve.
+"""ava-ops boot helpers — the leaf lookups `serve_ops_daemon` needs before it can serve.
 
 This definition owner holds registration, singleton resources and invocation
 executor/pool operations. It receives the root's config, runtime, authority and
@@ -166,7 +166,7 @@ def open_db_pool(
     TCP-retransmit timeout.
 
     A separate function only so a test can assert what the daemon really builds
-    without standing up the pidfile / health-server half of `_main`.
+    without standing up the pidfile / health-server half of `serve_ops_daemon`.
     """
     # check_connections=True: this is the longest-lived process on an agent-runner
     # and its borrows are rare, so pooled conns sit idle long enough for the
@@ -218,7 +218,7 @@ def is_running(config: ConfigBoot, *, runtime: Path) -> bool:
 #
 # `asyncio.run` closes by awaiting `loop.shutdown_default_executor()`, which JOINS
 # every default-executor thread. A wedged op arm — the 2026-08-12 shape — is a
-# thread that never finishes, so SIGTERM unwinds normally, `_main`'s finally runs
+# thread that never finishes, so SIGTERM unwinds normally, `serve_ops_daemon`'s finally runs
 # (health server stopped, pidfile removed, pool closed), and then the interpreter
 # sits in that join. Python 3.12 bounds it at `asyncio.constants.THREAD_JOIN_TIMEOUT`
 # (300 s) and then gives up with `shutdown(wait=False)`, so this is a five-minute

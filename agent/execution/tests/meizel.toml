@@ -1,0 +1,10 @@
+[debt.first-party-patch]
+"test_deadline_owner.py#monkeypatch.setattr agent.execution.owner_child.DeadlineWatchdog._wait_until_deadline" = 3
+"test_deadline_owner.py#monkeypatch.setattr agent.execution.owner_child.WATCHDOG_JOIN_S" = 1
+"test_deadline_owner.py#monkeypatch.setattr agent.execution.owner_child.sys.excepthook" = 2
+"test_exec_child_telemetry_delivery.py#monkeypatch.setattr base.telemetry.sync" = 2
+"test_sampling_shutdown.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
+
+[debt.unresolved-patch]
+"test_exec_child_telemetry_delivery.py#monkeypatch.setattr pipeline.finalize_exports" = 1
+"test_sampling_shutdown.py#monkeypatch.setattr sampling.stop" = 1

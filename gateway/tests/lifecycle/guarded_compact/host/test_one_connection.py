@@ -1,0 +1,53 @@
+"""Actual generation and saver paths do not retain a DB connection across network work."""
+
+import asyncio
+from dataclasses import replace
+from typing import Any
+
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+from psycopg_pool import AsyncConnectionPool
+
+from base.db.code_version_gate import ProcessDbGate
+from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddBindings
+from gateway.tests.lifecycle.guarded_compact.host.admission import admit
+from gateway.tests.test_idempotency import client as client
+from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel
+
+
+async def test_real_chain_pool_one_provider_can_borrow_only_connection(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    add_bindings: AddBindings,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    async with AsyncConnectionPool[psycopg.AsyncConnection](
+        db_conn.info.dsn, min_size=1, max_size=1, open=False
+    ) as pool:
+        queried: list[int] = []
+
+        class BorrowingModel(SummaryModel):
+            async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+                async with pool.connection(timeout=1) as conn:
+                    row = await (await conn.execute("SELECT 1")).fetchone()
+                    assert row is not None and row == (1,)
+                    queried.append(row[0])
+                return await super().ainvoke(*args, **kwargs)
+
+        model = BorrowingModel(responses=["Original source summary. " * 100])
+        binding = model_catalog.bindings["gpt-"]
+        model_catalog = add_bindings(
+            model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+        )
+        accepted = await admit(
+            db_conn, pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+        )
+        await asyncio.wait_for(accepted.host.run_turn(accepted.agent), 5)
+        assert accepted.status(client)["outcome"] == "applied"
+        assert queried == [1] and model.calls == 1

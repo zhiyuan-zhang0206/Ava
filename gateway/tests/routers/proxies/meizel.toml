@@ -1,0 +1,16 @@
+[debt.first-party-patch]
+"test_grafana_proxy.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_grafana_proxy.py#monkeypatch.setattr base.config.settings.gateway.cors_allowed_origins" = 1
+"test_grafana_proxy.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 1
+"test_grafana_proxy.py#monkeypatch.setattr base.config.settings.gateway.grafana_host" = 1
+"test_grafana_proxy.py#monkeypatch.setattr base.config.settings.gateway.grafana_port" = 1
+"test_grafana_proxy.py#monkeypatch.setattr base.config.settings.gateway.grafana_proxy_enabled" = 3
+"test_grafana_proxy.py#monkeypatch.setattr base.config.settings.services.frontend_healthcheck_url" = 1
+"test_grafana_proxy.py#monkeypatch.setattr gateway.routers.grafana.httpx.AsyncClient" = 1
+"test_insights_proxy.py#monkeypatch.setattr gateway.agents.eval_guard.caller_eval_isolation" = 1
+"test_pages_proxy.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_pages_proxy.py#monkeypatch.setattr gateway.routers.pages.display_language" = 1
+"test_pages_proxy.py#monkeypatch.setattr gateway.routers.pages.httpx.AsyncClient" = 1
+
+[debt.third-party-patch]
+"test_pages_proxy.py#monkeypatch.setattr httpx.AsyncClient.send" = 1

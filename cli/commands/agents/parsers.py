@@ -48,7 +48,7 @@ def _h_agents_timeline(args: argparse.Namespace) -> int:
     return cmd_agents_timeline(args.agent_id, args.limit, args.before)
 
 
-def _h_agents_send(args: argparse.Namespace) -> int:
+def h_agents_send(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import ProvenanceError, cmd_agents_send
 
     try:
@@ -110,7 +110,7 @@ def _h_agents_terminate(args: argparse.Namespace) -> int:
         return 2
 
 
-def _h_agents_kill(args: argparse.Namespace) -> int:
+def h_agents_kill(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import ProvenanceError, cmd_agents_kill
 
     try:
@@ -196,7 +196,7 @@ def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         action="store_true",
         help="mark this shell/watcher send as a platform completion (the agent's notice policy applies)",
     )
-    agents_send_p.set_defaults(func=_h_agents_send)
+    agents_send_p.set_defaults(func=h_agents_send)
 
 
 def _add_source_argument(*parsers: argparse.ArgumentParser) -> None:
@@ -272,7 +272,7 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "kill", help="hard-stop a stuck agent (kill the process + mark terminated)"
     )
     agents_kill_p.add_argument("agent_id", type=int, help="agent id to kill")
-    agents_kill_p.set_defaults(func=_h_agents_kill)
+    agents_kill_p.set_defaults(func=h_agents_kill)
 
     for lifecycle_end_parser in (agents_terminate_p, agents_kill_p):
         lifecycle_end_parser.add_argument(

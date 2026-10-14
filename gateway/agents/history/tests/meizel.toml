@@ -1,5 +1,0 @@
-[uses]
-"timeline" = ["test_timeline.py"]
-
-[debt.private-name]
-"timeline/test_timeline_skips_inbound_without_langgraph_state.py -> test_timeline.py#_items" = 1

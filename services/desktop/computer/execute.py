@@ -6,8 +6,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from base.host.permissions_helper import client as helper
-from base.host.permissions_helper import client_stateful as stateful
+from base.host.permissions_helper.client import PermissionsHelperClient
 
 from . import ax_act, ax_tools
 from . import ocr as ocr_mod
@@ -25,14 +24,14 @@ from .input import (
     tool_schema,
     validate_input,
 )
-from .ocr_text import _click_text_tool, _find_text_tool
+from .ocr_text import click_text_tool, find_text_tool
 from .screen import (
-    _capture_screen,
-    _current_scale,
-    _png_size,
-    _snapshot_path,
-    _to_logical,
     capture_region,
+    capture_screen,
+    current_scale,
+    png_size,
+    snapshot_path,
+    to_logical,
 )
 from .targets import (
     AppTarget,
@@ -57,7 +56,7 @@ _REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _priority(args: dict[str, Any]) -> str:
+def priority(args: dict[str, Any]) -> str:
     """The caller's queue priority — only "high" is special, anything else
     (absent, garbage) is normal. Resource coordination, not governance: this
     shifts order in the queue, it never grants or denies."""
@@ -164,7 +163,7 @@ def _keycode_for(key: str) -> int | None:
     return _KEYCODES.get(key.lower())
 
 
-def _mcp_result(result: dict[str, Any]) -> dict[str, Any]:
+def mcp_result(result: dict[str, Any]) -> dict[str, Any]:
     """Wrap a tool's plain-dict result in the MCP CallToolResult shape.
 
     The per-agent wrapper and the direct dial both validate the daemon's
@@ -177,7 +176,10 @@ def _mcp_result(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _snapshot_tool(
-    args: dict[str, Any], agent_id: int, ocr_cache: dict[str, Any] | None
+    helper: PermissionsHelperClient,
+    args: dict[str, Any],
+    agent_id: int,
+    ocr_cache: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if "region" in args and "target" in args:
         raise ComputerUseError("snapshot accepts region or target, not both")
@@ -186,14 +188,14 @@ def _snapshot_tool(
             raise ComputerUseError("include_ax is available only for a whole-screen snapshot")
         if "region" in args:
             region = CaptureRegion.parse(args["region"])
-            path, scale, (pw, ph) = capture_region(agent_id, region)
+            path, scale, (pw, ph) = capture_region(helper, agent_id, region)
             frame = CaptureFrame(CoordinateSpace.REGION_PIXELS, region.x, region.y, scale, pw, ph)
             source = "region"
         else:
             target = WindowTarget.parse(args["target"])
-            path = _snapshot_path(agent_id)
+            path = snapshot_path(agent_id)
             captured = helper.screencapture_window(target.pid, target.window_id, str(path))
-            pw, ph = _png_size(path)
+            pw, ph = png_size(path)
             if (pw, ph) != (captured["width"], captured["height"]):
                 raise ComputerUseError("window image dimensions do not match the helper response")
             frame = CaptureFrame.parse(
@@ -213,7 +215,7 @@ def _snapshot_tool(
             "pixels": {"width": pw, "height": ph},
         }
     else:
-        path, size, scale, (pw, ph) = _capture_screen(agent_id)
+        path, size, scale, (pw, ph) = capture_screen(helper, agent_id)
         result = {
             "path": str(path),
             "source": "screen",
@@ -246,23 +248,29 @@ def _snapshot_tool(
 
 
 def _logical_point(
-    x: float, y: float, frame: ObservationFrame | None, scale: float | None
+    helper: PermissionsHelperClient,
+    x: float,
+    y: float,
+    frame: ObservationFrame | None,
+    scale: float | None,
 ) -> tuple[float, float]:
     if frame is not None:
         return CaptureFrame.parse(frame).global_point(x, y)
-    scale = _current_scale(scale)
-    return _to_logical(x, scale), _to_logical(y, scale)
+    scale = current_scale(helper, scale)
+    return to_logical(x, scale), to_logical(y, scale)
 
 
-def _click_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+def _click_tool(
+    helper: PermissionsHelperClient, args: dict[str, Any], scale: float | None
+) -> dict[str, Any]:
     request = validate_input(ClickInput, args)
-    lx, ly = _logical_point(request.x, request.y, request.frame, scale)
+    lx, ly = _logical_point(helper, request.x, request.y, request.frame, scale)
     options = request.model_dump(exclude_unset=True, exclude={"x", "y", "frame"})
     options.setdefault("double", False)
     return dict(helper.click(lx, ly, **options))
 
 
-def _key_tool(args: dict[str, Any]) -> dict[str, Any]:
+def _key_tool(helper: PermissionsHelperClient, args: dict[str, Any]) -> dict[str, Any]:
     request = validate_input(KeyInput, args)
     code = request.keycode if request.keycode is not None else _keycode_for(request.key or "")
     if code is None:
@@ -275,44 +283,54 @@ def _key_tool(args: dict[str, Any]) -> dict[str, Any]:
     return {"pressed": echoed["key"], "cmd": echoed["cmd"]}
 
 
-def _drag_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+def _drag_tool(
+    helper: PermissionsHelperClient, args: dict[str, Any], scale: float | None
+) -> dict[str, Any]:
     request = validate_input(DragInput, args)
-    start = _logical_point(request.start_x, request.start_y, request.frame, scale)
-    end = _logical_point(request.end_x, request.end_y, request.frame, scale)
+    start = _logical_point(helper, request.start_x, request.start_y, request.frame, scale)
+    end = _logical_point(helper, request.end_x, request.end_y, request.frame, scale)
     options = request.model_dump(
         exclude_unset=True, exclude={"start_x", "start_y", "end_x", "end_y", "frame"}
     )
     return dict(helper.drag(*start, *end, **options))
 
 
-def _mouse_down_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+def _mouse_down_tool(
+    helper: PermissionsHelperClient, args: dict[str, Any], scale: float | None
+) -> dict[str, Any]:
     request = validate_input(MouseDownInput, args)
     options = request.model_dump(exclude_unset=True, exclude={"x", "y", "frame"})
     if request.x is None or request.y is None:
-        return dict(stateful.mouse_down(**options))
-    lx, ly = _logical_point(request.x, request.y, request.frame, scale)
-    return dict(stateful.mouse_down(lx, ly, **options))
+        return dict(helper.mouse_down(**options))
+    lx, ly = _logical_point(helper, request.x, request.y, request.frame, scale)
+    return dict(helper.mouse_down(lx, ly, **options))
 
 
-def _mouse_up_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+def _mouse_up_tool(
+    helper: PermissionsHelperClient, args: dict[str, Any], scale: float | None
+) -> dict[str, Any]:
     request = validate_input(MouseUpInput, args)
     options = request.model_dump(exclude_unset=True, exclude={"x", "y", "frame"})
     if request.x is None or request.y is None:
-        return dict(stateful.mouse_up(**options))
-    lx, ly = _logical_point(request.x, request.y, request.frame, scale)
-    return dict(stateful.mouse_up(lx, ly, **options))
+        return dict(helper.mouse_up(**options))
+    lx, ly = _logical_point(helper, request.x, request.y, request.frame, scale)
+    return dict(helper.mouse_up(lx, ly, **options))
 
 
-def _move_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+def _move_tool(
+    helper: PermissionsHelperClient, args: dict[str, Any], scale: float | None
+) -> dict[str, Any]:
     request = validate_input(MoveInput, args)
-    lx, ly = _logical_point(request.x, request.y, request.frame, scale)
+    lx, ly = _logical_point(helper, request.x, request.y, request.frame, scale)
     return dict(helper.move(lx, ly, modifiers=list(request.modifiers)))
 
 
-def _scroll_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+def _scroll_tool(
+    helper: PermissionsHelperClient, args: dict[str, Any], scale: float | None
+) -> dict[str, Any]:
     request = validate_input(ScrollInput, args)
     if request.x is not None and request.y is not None:
-        lx, ly = _logical_point(request.x, request.y, request.frame, scale)
+        lx, ly = _logical_point(helper, request.x, request.y, request.frame, scale)
     else:
         cursor = helper.cursor_position()
         lx, ly = cursor["x"], cursor["y"]
@@ -320,12 +338,12 @@ def _scroll_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
     return dict(helper.scroll(lx, ly, request.dy, **options))
 
 
-def _clipboard_write_tool(args: dict[str, Any]) -> dict[str, Any]:
+def _clipboard_write_tool(helper: PermissionsHelperClient, args: dict[str, Any]) -> dict[str, Any]:
     request = validate_input(ClipboardWriteInput, args)
-    return {"written": stateful.clipboard_write(request.text)["length"]}
+    return {"written": helper.clipboard_write(request.text)["length"]}
 
 
-def _window_info_tool(args: dict[str, Any]) -> dict[str, Any]:
+def _window_info_tool(helper: PermissionsHelperClient, args: dict[str, Any]) -> dict[str, Any]:
     # owner is optional — the caller usually wants the focused window, and
     # defaulting here saves a frontmost_app round trip.
     owner = args.get("owner") or helper.frontmost_app()["app"]
@@ -334,7 +352,9 @@ def _window_info_tool(args: dict[str, Any]) -> dict[str, Any]:
     return {**helper.window_info(str(owner))}
 
 
-def _application_tool(tool: str, args: dict[str, Any]) -> dict[str, Any]:
+def _application_tool(
+    helper: PermissionsHelperClient, tool: str, args: dict[str, Any]
+) -> dict[str, Any]:
     if tool == "list_apps":
         return dict(helper.list_apps())
     if tool == "list_windows":
@@ -346,7 +366,7 @@ def _application_tool(tool: str, args: dict[str, Any]) -> dict[str, Any]:
         )
         return dict(helper.focus_app(selector))
     if tool == "window_info":
-        return _window_info_tool(args)
+        return _window_info_tool(helper, args)
     if tool == "session_info":
         return {**helper.session_info()}
     if tool == "frontmost_app":
@@ -354,14 +374,16 @@ def _application_tool(tool: str, args: dict[str, Any]) -> dict[str, Any]:
     raise ComputerUseError(f"unknown application tool {tool!r}")
 
 
-def _clipboard_read_tool(args: dict[str, Any]) -> dict[str, Any]:
+def _clipboard_read_tool(helper: PermissionsHelperClient, args: dict[str, Any]) -> dict[str, Any]:
     if args.keys() - {"task_id", "priority"}:
         raise ComputerUseError("clipboard_read takes no arguments")
-    return dict(stateful.clipboard_read())
+    return dict(helper.clipboard_read())
 
 
 # Tools whose pointer arguments are physical pixels converted with the measured scale.
-_SCALED_TOOLS: dict[str, Callable[[dict[str, Any], float | None], dict[str, Any]]] = {
+_SCALED_TOOLS: dict[
+    str, Callable[[PermissionsHelperClient, dict[str, Any], float | None], dict[str, Any]]
+] = {
     "click": _click_tool,
     "drag": _drag_tool,
     "scroll": _scroll_tool,
@@ -370,7 +392,7 @@ _SCALED_TOOLS: dict[str, Callable[[dict[str, Any], float | None], dict[str, Any]
     "mouse_up": _mouse_up_tool,
 }
 # Tools that depend on nothing but their own arguments.
-_ARGS_ONLY_TOOLS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+_ARGS_ONLY_TOOLS: dict[str, Callable[[PermissionsHelperClient, dict[str, Any]], dict[str, Any]]] = {
     "key": _key_tool,
     "clipboard_read": _clipboard_read_tool,
     "clipboard_write": _clipboard_write_tool,
@@ -378,6 +400,7 @@ _ARGS_ONLY_TOOLS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
 
 
 def _execute(
+    helper: PermissionsHelperClient,
     tool: str,
     args: dict[str, Any],
     agent_id: int,
@@ -395,20 +418,20 @@ def _execute(
     del pointer  # Retain the internal call signature; cursor reads are now live.
     _require(tool, args)
     if tool == "snapshot":
-        return _snapshot_tool(args, agent_id, ocr_cache)
+        return _snapshot_tool(helper, args, agent_id, ocr_cache)
     if tool == "find_text":
-        return _find_text_tool(args, agent_id, ocr_cache)
+        return find_text_tool(helper, args, agent_id, ocr_cache)
     if tool in _SCALED_TOOLS:
-        return _SCALED_TOOLS[tool](args, scale)
+        return _SCALED_TOOLS[tool](helper, args, scale)
     if tool in _ARGS_ONLY_TOOLS:
-        return _ARGS_ONLY_TOOLS[tool](args)
+        return _ARGS_ONLY_TOOLS[tool](helper, args)
     if tool == "click_text":
-        return _click_text_tool(args, agent_id, ocr_cache)
+        return click_text_tool(helper, args, agent_id, ocr_cache)
     if tool == "type_text":
         return {"typed": helper.type_text(str(args["text"]))["typed"]}
     if tool == "cursor_position":
         position = helper.cursor_position()
-        current = _current_scale(scale)
+        current = current_scale(helper, scale)
         return {"x": position["x"] * current, "y": position["y"] * current, "scale": current}
     if tool in {
         "list_apps",
@@ -418,14 +441,15 @@ def _execute(
         "session_info",
         "frontmost_app",
     }:
-        return _application_tool(tool, args)
+        return _application_tool(helper, tool, args)
     raise ComputerUseError(f"unknown tool {tool!r}")
 
 
 _AX_TOOLS = {"ax_tree": ax_tools.ax_tree_tool, "ax_act": ax_act.ax_act_tool}
 
 
-def _execute_tool(
+def execute_tool(
+    helper: PermissionsHelperClient,
     tool: str,
     args: dict[str, Any],
     agent_id: int,
@@ -436,12 +460,12 @@ def _execute_tool(
 ) -> dict[str, Any]:
     """The daemon's entry: the accessibility tools, else `_execute`."""
     if tool in _AX_TOOLS:
-        return _AX_TOOLS[tool](args, agent_id, scale, ax_session or AxSession())
-    return _execute(tool, args, agent_id, pointer=pointer, scale=scale, ocr_cache=ocr_cache)
+        return _AX_TOOLS[tool](helper, args, agent_id, scale, ax_session or AxSession())
+    return _execute(helper, tool, args, agent_id, pointer=pointer, scale=scale, ocr_cache=ocr_cache)
 
 
 # MCP tool declarations (list_tools shape: name / description / input_schema).
-_TOOLS: list[dict[str, Any]] = [
+TOOLS: list[dict[str, Any]] = [
     {
         "name": "release_control",
         "description": (

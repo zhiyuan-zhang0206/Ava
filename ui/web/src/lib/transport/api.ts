@@ -708,7 +708,7 @@ export const api = {
 
   // --- alerts (the system→human alert store, Task #1224) ---
   // Alert instances in the Alertmanager webhook shape, separate from Notice.
-  // The SSE live tail (/api/alerts/stream) folds into the ["alerts"] cache;
+  // The SSE live tail (/api/alerts/stream) invalidates the ["alerts"] snapshots;
   // this fetch is the initial load + refetch fallback.
   getAlerts: (params: {
     window?: AlertsWindow;

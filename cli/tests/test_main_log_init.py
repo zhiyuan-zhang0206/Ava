@@ -42,8 +42,8 @@ from cli import parsers, preflight, start_identity, start_intent
 from cli.commands.lifecycle import stop
 from cli.database import OperatorDatabaseFactory, operator_database_factory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -199,7 +199,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     inputs: list[object] = []
 
     def build(
-        *, database: DatabaseFactory, machine: MachineIdentity, home: Path
+        *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
     ) -> telemetry.EventPipeline:
         factories.append(database)
         machines.append(machine)
@@ -347,7 +347,7 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
         return Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
 
     def build(
-        *, database: DatabaseFactory, machine: MachineIdentity, home: Path
+        *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
     ) -> telemetry.EventPipeline:
         factories.append(database)
 

@@ -1,0 +1,3 @@
+[debt.unresolved-patch]
+"test_websocket_owner.py#monkeypatch.setattr adapter._handle_event" = 1
+"test_websocket_owner.py#monkeypatch.setattr tasks.create_task" = 1

@@ -76,7 +76,7 @@ from meizel.roles import packages  # noqa: E402 - standalone script
 # Every tree that could reach agents_meta is covered, not just the ones that write it
 # today — `ava_builtins` currently only READS the table, and this is
 # what keeps a future write there from being the one site nobody was checking.
-_SCAN_DIRS = packages("application", "tooling")
+SCAN_DIRS = packages("application", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -302,9 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     # (the commit hook) under the same scope. The enum that defines the legal values is
     # an input: changing it re-judges every file.
     targets = (
-        [Path(a).resolve() for a in argv]
-        if argv
-        else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
     )
     scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_RULE_INPUTS)
     legal_sources = _termination_source_values()

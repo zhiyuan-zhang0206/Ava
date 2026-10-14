@@ -7,5 +7,4 @@ exports = ["check.py", "layout_assertions.py", "matrix.py"]
 "tests" = ["check.py", "fixtures.py", "layout_assertions.py", "matrix.py", "policy.py", "refresh_visual_baselines.py"]
 
 [debt.private-name]
-"tests/test_post_deploy_visual_check.py -> check.py#_cookie_file" = 1
 "tests/test_refresh_visual_baselines.py -> refresh_visual_baselines.py#_REPO_ROOT" = 5

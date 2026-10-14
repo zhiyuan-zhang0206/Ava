@@ -18,7 +18,12 @@ from base.agents.incarnation.resources import (
     complete_exec,
     register_exec,
 )
-from base.agents.incarnation.tests.test_resources import _admitted, _entry, _force, _process
+from base.agents.incarnation.tests.test_resources import (
+    _admitted,
+    _process,
+    exec_allocation_entry,
+    force_incarnation,
+)
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -35,7 +40,7 @@ async def test_successor_cannot_reset_unknown_or_unresolved_set(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     target = _admitted(db_conn)
-    entry = _entry()
+    entry = exec_allocation_entry()
     with db_conn.transaction():
         register_exec(db_conn, target, entry)
     successor = RuntimeIncarnation(target.agent_id, uuid4(), uuid4())
@@ -52,7 +57,7 @@ def test_exact_terminal_consumption_survives_force_but_replay_refuses(
     db_conn: psycopg.Connection,
 ) -> None:
     target = _admitted(db_conn)
-    entry = _entry()
+    entry = exec_allocation_entry()
     attached = entry.model_copy(
         update={
             "owner_process": _process(10, 1.0),
@@ -62,7 +67,7 @@ def test_exact_terminal_consumption_survives_force_but_replay_refuses(
     with db_conn.transaction():
         register_exec(db_conn, target, entry)
         attach_exec(db_conn, target, entry, attached)
-        command = _force(db_conn, target)
+        command = force_incarnation(db_conn, target)
     with pytest.raises(ResourceEvidenceError), db_conn.transaction():
         complete_exec(db_conn, target, attached.model_copy(update={"domain": uuid4()}))
     with db_conn.transaction():
@@ -93,11 +98,15 @@ async def test_malformed_never_downgrades_to_legacy(
 def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
-    from agent.tests.execution.test_exec_owner_entry import _context, _ready, _start
+    from agent.tests.execution.test_exec_owner_entry import (
+        _start,
+        exec_owner_context,
+        wait_for_owner_ready,
+    )
     from base.agents.incarnation import exec_owner_recovery
 
     target = _admitted(db_conn)
-    context = _context(tmp_path, target.agent_id)
+    context = exec_owner_context(tmp_path, target.agent_id)
     directory = tmp_path / str(target.agent_id) / "domains" / str(context.allocation.request)
     directory.mkdir(parents=True)
     request = directory / context.request_path.name
@@ -116,7 +125,7 @@ def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
         register_exec(db_conn, target, context.allocation)
     proc = _start(directory, context)
     try:
-        ready = _ready(directory, proc)
+        ready = wait_for_owner_ready(directory, proc)
         with db_conn.transaction():
             attach_exec(db_conn, target, context.allocation, ready.allocation)
         assert proc.stdin is not None

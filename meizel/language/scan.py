@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import ast
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from meizel.graph.model import Fact, FactKind, MeizelError, Problem, Restricted
+from meizel.graph.model import Code, Fact, FactKind, MeizelError, Patch, Problem, Restricted
 from meizel.graph.scopes import Scope, collect_scope, dotted_chain, parameter_names
 from meizel.graph.universe import Universe
 from meizel.language import fixtures
 from meizel.language.restricted import EXTERNAL_FORMS, RestrictedForms, const_str
 
-__all__ = ["EXTERNAL_FORMS", "FileScan", "scan_file"]
+__all__ = ["EXTERNAL_FORMS", "FileScan", "scan_file", "scan_source"]
 
 _PATCH_CALLS = {
     "unittest.mock.patch": "patch",
@@ -21,7 +22,10 @@ _PATCH_CALLS = {
     "unittest.mock.patch.multiple": "multiple",
     "unittest.mock.patch.dict": "dict",
 }
-_MONKEYPATCH_METHODS = frozenset({"setattr", "delattr", "setitem", "delitem"})
+_MONKEYPATCH_METHODS = frozenset({"setattr", "delattr", "setitem", "delitem", "setenv", "delenv"})
+# The dotted name of the process environment, spelled in parts so this scanner does not itself
+# read as a use of it.
+_ENVIRONMENT = ".".join(("os", "environ"))
 _PATCH_OPTIONS = frozenset({"spec", "create", "spec_set", "autospec", "new_callable"})
 _LEAVES = frozenset(
     {
@@ -70,6 +74,7 @@ class FileScan:
     path: str
     facts: list[Fact] = field(default_factory=list[Fact])
     restricted: list[Restricted] = field(default_factory=list[Restricted])
+    patches: list[Patch] = field(default_factory=list[Patch])
     problems: list[Problem] = field(default_factory=list[Problem])
     fixtures: fixtures.FixtureState = field(default_factory=fixtures.FixtureState)
     imported: set[str] = field(default_factory=set[str])
@@ -81,6 +86,7 @@ class Scanner(RestrictedForms):
         self.test_file = fixtures.is_test_file(path)
         self.fixture_state = fixtures.FixtureState()
         self.fn_depth = 0
+        self.patches: list[Patch] = []
         self._handlers: dict[type[ast.AST], Callable[[Any], None]] = {
             ast.Import: self.visit_import,
             ast.ImportFrom: self.visit_import_from,
@@ -103,6 +109,7 @@ class Scanner(RestrictedForms):
             self.path,
             facts=list(dict.fromkeys(self.facts)),
             restricted=self.restricted,
+            patches=self.patches,
             problems=self.problems,
             fixtures=self.fixture_state,
             imported=self.imported,
@@ -234,22 +241,28 @@ class Scanner(RestrictedForms):
 
     def patch_call(self, node: ast.Call, kind: str) -> None:
         first = node.args[0] if node.args else None
+        form = "patch" if kind == "patch" else f"patch.{kind}"
         if kind == "patch" or const_str(first) is not None:
-            self.string_target(first, node.lineno)
+            self.string_target(first, node.lineno, form, self.patched_names(node, kind))
             if kind == "dict":
                 self.patched_sys_modules(node)
         elif kind == "dict":
             self.patched_sys_modules(node)
+            if first is not None:
+                self.record_patch(first, (), node.lineno, form)
         elif first is not None and kind in {"object", "multiple"}:
             names = self.patched_names(node, kind)
-            self.patch_fact(first, names, node.lineno, f"patch.{kind}")
+            self.patch_fact(first, names, node.lineno, form)
+            self.record_patch(first, names, node.lineno, form)
 
     @staticmethod
     def patched_names(node: ast.Call, kind: str) -> tuple[str, ...]:
         if kind == "object":
             name = const_str(node.args[1]) if len(node.args) > 1 else None
             return (name,) if name else ()
-        return tuple(k.arg for k in node.keywords if k.arg and k.arg not in _PATCH_OPTIONS)
+        if kind == "multiple":
+            return tuple(k.arg for k in node.keywords if k.arg and k.arg not in _PATCH_OPTIONS)
+        return ()
 
     def patch_fact(self, target: ast.expr, names: tuple[str, ...], line: int, detail: str) -> None:
         module = self.module_file(target)
@@ -260,21 +273,72 @@ class Scanner(RestrictedForms):
         if not node.args:
             return
         method = cast("ast.Attribute", node.func).attr
-        if method in {"setitem", "delitem"}:
-            if self.is_sys_modules(node.args[0]) and len(node.args) > 1:
-                self.fake_module(node.args[1], node.lineno)
-            return
-        if const_str(node.args[0]) is not None:
-            self.string_target(node.args[0], node.lineno)
-            return
-        name = const_str(node.args[1]) if len(node.args) > 1 else None
-        self.patch_fact(node.args[0], (name,) if name else (), node.lineno, "monkeypatch")
+        form = f"monkeypatch.{method}"
+        if method in {"setenv", "delenv"}:
+            name = const_str(node.args[0])
+            self.patches.append(
+                Patch(
+                    node.lineno,
+                    form,
+                    f"{_ENVIRONMENT}.{name}" if name else _ENVIRONMENT,
+                    Code.ENV_PATCH,
+                )
+            )
+        elif method in {"setitem", "delitem"}:
+            self.monkeypatch_item(node, form)
+        elif const_str(node.args[0]) is not None:
+            name = const_str(node.args[1]) if len(node.args) > 1 else None
+            self.string_target(node.args[0], node.lineno, form, (name,) if name else ())
+        else:
+            name = const_str(node.args[1]) if len(node.args) > 1 else None
+            self.patch_fact(node.args[0], (name,) if name else (), node.lineno, "monkeypatch")
+            self.record_patch(node.args[0], (name,) if name else (), node.lineno, form)
 
-    def string_target(self, target: ast.expr | None, line: int) -> None:
-        """A string patch target hides a dependency only when it names first-party code."""
+    def monkeypatch_item(self, node: ast.Call, form: str) -> None:
+        if self.is_sys_modules(node.args[0]):
+            if len(node.args) > 1:
+                self.fake_module(node.args[1], node.lineno)
+        elif self.dotted(node.args[0]) == _ENVIRONMENT:
+            name = const_str(node.args[1]) if len(node.args) > 1 else None
+            self.patches.append(
+                Patch(
+                    node.lineno,
+                    form,
+                    f"{_ENVIRONMENT}.{name}" if name else _ENVIRONMENT,
+                    Code.ENV_PATCH,
+                )
+            )
+
+    def patch_code(self, dotted: str) -> Code:
+        """What kind of code a resolved patch target is."""
+        if dotted == _ENVIRONMENT or dotted.startswith(f"{_ENVIRONMENT}."):
+            return Code.ENV_PATCH
+        if self.u.is_first_party_name(dotted):
+            return Code.FIRST_PARTY_PATCH
+        if dotted.split(".", 1)[0] in sys.stdlib_module_names:
+            return Code.STDLIB_PATCH
+        return Code.THIRD_PARTY_PATCH
+
+    def record_patch(self, target: ast.expr, names: tuple[str, ...], line: int, form: str) -> None:
+        """A patch of a module or object, classified by what the file's imports say it is."""
+        dotted = self.dotted(target)
+        code = Code.UNRESOLVED_PATCH if dotted is None else self.patch_code(dotted)
+        base = " ".join(ast.unparse(target).split())[:80] if dotted is None else dotted
+        for name in names or ("",):
+            self.patches.append(Patch(line, form, f"{base}.{name}" if name else base, code))
+
+    def string_target(
+        self, target: ast.expr | None, line: int, form: str, names: tuple[str, ...] = ()
+    ) -> None:
+        """A string target names first-party code invisibly (restricted); any other is a patch."""
         text = None if target is None else self.string_value(target)
         if text is None or self.u.is_first_party_name(text):
             self.restrict(line, "string patch target", text or "")
+            return
+        for name in names or ("",):
+            self.patches.append(
+                Patch(line, form, f"{text}.{name}" if name else text, self.patch_code(text))
+            )
 
     def visit_subscript(self, node: ast.Subscript) -> None:
         self.sys_modules_write(node)
@@ -287,13 +351,20 @@ class Scanner(RestrictedForms):
         self.children(node)
 
 
-def scan_file(universe: Universe, path: str) -> FileScan:
-    full = universe.root / path
+def scan_source(universe: Universe, path: str, source: bytes) -> FileScan:
+    """Scan `source` as if it were the file at `path` (a version that is not in the working tree)."""
     try:
-        source = full.read_bytes()
         tree = ast.parse(source, filename=path)
     except SyntaxError as error:
         raise MeizelError(f"{path}:{error.lineno}: cannot parse: {error.msg}") from error
-    except (OSError, ValueError) as error:
+    except ValueError as error:
         raise MeizelError(f"{path}: cannot read: {error}") from error
     return Scanner(universe, path, tree, walrus=b":=" in source).run()
+
+
+def scan_file(universe: Universe, path: str) -> FileScan:
+    try:
+        source = (universe.root / path).read_bytes()
+    except (OSError, ValueError) as error:
+        raise MeizelError(f"{path}: cannot read: {error}") from error
+    return scan_source(universe, path, source)

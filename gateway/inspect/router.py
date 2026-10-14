@@ -30,7 +30,7 @@ from gateway.inspect.schemas import (
     PluginMetricResult,
 )
 from gateway.schemas.stats import StatsWindowHours
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import ShellInfo
 
 router = APIRouter()
@@ -106,14 +106,14 @@ async def _probe_agent_shells(
     empty set. Malformed successful responses fail rather than invent data.
     """
     try:
-        result = await _cluster_rpc.dispatch_to_machine(
+        result = await cluster_rpc.dispatch_to_machine(
             database,
             machine,
             "shell_probe",
             {"agent_id": agent_id},
             timeout_s=_SHELL_PROBE_TIMEOUT_S,
         )
-    except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed) as exc:
+    except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
         _shell_probe_failures.add(1, {"reason": type(exc).__name__})
         _log.warning(
             "shell observation unavailable agent_id=%s reason=%s", agent_id, type(exc).__name__

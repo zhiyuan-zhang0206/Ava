@@ -14,9 +14,6 @@ exports = ["authority", "dataplane", "derive.py", "machine", "machine_exclusions
 "tests" = ["__init__.py", "dataplane", "derive.py", "machine", "machine_exclusions.py", "machines.py", "ownership.py", "port_preflight.py", "ports.py", "postgres.py", "provision.py", "rate_limit.py", "transport_encryption.py"]
 
 [debt.private-name]
-"tests/security/test_rate_limit_trim.py -> rate_limit.py#_MAX_ENTRIES" = 1
 "tests/test_storage_ownership.py -> postgres.py#_boot" = 1
 "tests/test_storage_ownership.py -> postgres.py#_pidfile" = 2
 "tests/test_storage_ownership.py -> postgres.py#_read" = 6
-"tests/test_storage_ownership.py -> postgres.py#_spawn" = 4
-"tests/test_storage_ownership.py -> postgres.py#_write" = 5

@@ -1,14 +1,101 @@
 exports = ["bootstrap"]
 
 [uses]
-"_commands_helpers.py" = ["bootstrap"]
-"extensions" = ["bootstrap"]
-"test_cluster_health_parser.py" = ["bootstrap"]
-"test_main_log_init.py" = ["bootstrap"]
-"test_plugin_scaffold.py" = ["bootstrap"]
-"test_start_gate.py" = ["bootstrap"]
-"test_stop_parser.py" = ["bootstrap"]
 "test_unit_capability_cli.py" = ["bootstrap"]
+
+[debt.env-patch]
+"test_fleet_update.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_fleet_update.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 1
+"test_fleet_update.py#monkeypatch.setenv os.environ.HOME" = 2
+"test_install_unit.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_install_unit.py#patch.dict os.environ" = 1
+"test_lite_verbs.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 2
+"test_lite_verbs.py#monkeypatch.delenv os.environ.AVA_CONFIG_FETCH" = 3
+"test_lite_verbs.py#monkeypatch.delenv os.environ.AVA_LAUNCHER_PROFILE" = 2
+"test_lite_verbs.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 2
+"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_CONFIG_FETCH" = 2
+"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_LAUNCHER_PROFILE" = 1
+"test_lite_verbs.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_lite_verbs.py#monkeypatch.setitem os.environ.AVA_HOME" = 2
+"test_main_dispatch.py#monkeypatch.delenv os.environ" = 1
+"test_main_dispatch.py#monkeypatch.setenv os.environ" = 1
+"test_main_dispatch.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
+"test_main_dispatch.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_plugin_scaffold.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_pty_commands.py#monkeypatch.delenv os.environ.AVA_CONFIG_FETCH" = 1
+"test_pty_commands.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_start_gate.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
+"test_start_gate.py#patch.dict os.environ" = 1
+"test_unit_capability_cli.py#monkeypatch.setitem os.environ.AVA_MACHINE_SERVE_GATEWAY" = 1
+"test_unit_capability_cli.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_cluster_health_parser.py#monkeypatch.setattr cli.commands.cluster.health.cmd_health_probe" = 1
+"test_fleet_alert_silence.py#monkeypatch.setattr base.config.settings.alerts.grafana_admin_password" = 2
+"test_fleet_alert_silence.py#monkeypatch.setattr base.config.settings.observability.telemetry_grafana_url" = 1
+"test_fleet_alert_silence.py#monkeypatch.setattr cli.fleet_alert_silence.colocated_grafana" = 4
+"test_fleet_update.py#monkeypatch.setattr cli.fleet_update.REPO" = 1
+"test_fleet_update.py#monkeypatch.setattr cli.fleet_update.ssh" = 2
+"test_fleet_update.py#monkeypatch.setattr cli.fleet_update.time" = 1
+"test_install_unit.py#monkeypatch.setattr base.cluster.port_free" = 1
+"test_install_unit.py#monkeypatch.setattr base.host.db_authority.unit.install_bundle" = 1
+"test_install_unit.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1
+"test_lite_verbs.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_lite_verbs.py#monkeypatch.setattr base.host.db_authority.unit.consume_unit" = 2
+"test_lite_verbs.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 2
+"test_lite_verbs.py#monkeypatch.setattr cli.parsers.build_parser" = 3
+"test_logs_rotate.py#monkeypatch.setattr cli.commands.observability.logs.cmd_logs_rotate" = 1
+"test_logs_rotate.py#monkeypatch.setattr cli.commands.observability.logs.shutil.copyfile" = 1
+"test_main_dispatch.py#monkeypatch.setattr cli.commands.agents.control.cmd_agents_restart" = 1
+"test_main_dispatch.py#monkeypatch.setattr cli.parsers.build_parser" = 8
+"test_main_dispatch.py#monkeypatch.setattr cli.start_identity.require_initialized" = 2
+"test_main_log_init.py#monkeypatch.setattr base.config.settings.observability.lgtm_storage_dir" = 1
+"test_main_log_init.py#monkeypatch.setattr base.db.Database.connect" = 1
+"test_main_log_init.py#monkeypatch.setattr base.db.Database.from_settings" = 1
+"test_main_log_init.py#monkeypatch.setattr base.packages.dashboard_supply.render_dashboard_json" = 1
+"test_main_log_init.py#monkeypatch.setattr base.telemetry.build_pipeline" = 5
+"test_main_log_init.py#monkeypatch.setattr base.telemetry.init_telemetry" = 1
+"test_main_log_init.py#monkeypatch.setattr base.telemetry.process_logging.init_cli_process" = 2
+"test_main_log_init.py#monkeypatch.setattr cli.commands.lifecycle.status.cmd_status" = 1
+"test_main_log_init.py#monkeypatch.setattr cli.commands.lifecycle.stop.cmd_stop" = 1
+"test_main_log_init.py#monkeypatch.setattr cli.database.operator_database_factory" = 1
+"test_main_log_init.py#monkeypatch.setattr cli.parsers.build_parser" = 3
+"test_main_log_init.py#monkeypatch.setattr cli.parsers.parse_args" = 3
+"test_main_log_init.py#monkeypatch.setattr cli.preflight.require_own_checkout" = 3
+"test_main_log_init.py#monkeypatch.setattr cli.start_identity.require_initialized" = 1
+"test_main_log_init.py#monkeypatch.setattr cli.start_intent.run_start" = 1
+"test_plugin_scaffold.py#monkeypatch.setattr base.deploy.git.memory_repo.run_bounded" = 1
+"test_plugin_scaffold.py#monkeypatch.setattr base.host.proc.run_bounded" = 1
+"test_plugin_scaffold.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_plugin_scaffold.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
+"test_plugin_scaffold.py#monkeypatch.setattr cli.commands.lifecycle.converge_host.is_default_home" = 1
+"test_pty_commands.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.resume" = 1
+"test_schedules_parser.py#monkeypatch.setattr cli.commands.management.schedules.h_schedules_update" = 1
+"test_start_gate.py#monkeypatch.setattr base.cluster.port_free" = 1
+"test_start_gate.py#monkeypatch.setattr cli.commands.cluster.unit_join.join_gateway" = 1
+"test_start_gate.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.complete_boot_start" = 1
+"test_start_gate.py#monkeypatch.setattr cli.commands.lifecycle.start.cmd_start" = 1
+"test_start_gate.py#monkeypatch.setattr cli.start_intent.checkout" = 1
+"test_start_gate.py#monkeypatch.setattr cli.startup_support.init_cli_logging" = 1
+"test_unit_capability_cli.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_unit_capability_cli.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
+"test_unit_capability_cli.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1
+"test_unit_capability_cli.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
+"test_unit_capability_cli.py#monkeypatch.setattr cli.start_intent.checkout" = 1
 
 [debt.private-module]
 "test_unit_capability_cli.py -> bootstrap/_init_identity.py" = 1
+
+[debt.stdlib-patch]
+"test_main_dispatch.py#monkeypatch.setattr os.environ" = 2
+"test_plugin_scaffold.py#monkeypatch.setattr subprocess.run" = 1
+"test_pty_commands.py#monkeypatch.setattr urllib.request.urlopen" = 1
+
+[debt.third-party-patch]
+"test_pty_commands.py#monkeypatch.setattr psycopg.connect" = 1
+"test_pty_commands.py#monkeypatch.setattr redis.Redis.execute_command" = 1
+
+[debt.unresolved-patch]
+"test_main_dispatch.py#monkeypatch.setattr module" = 1

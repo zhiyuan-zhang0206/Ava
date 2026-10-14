@@ -38,7 +38,7 @@ from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 from base.telemetry.otlp.telemetry_otlp_metrics import strip_unit_suffix, unit_for
 from tests.scripts.test_alert_rules_signals import SIGNALS
 
-_RULES = (
+RULES = (
     Path(__file__).resolve().parent.parent.parent
     / "deploy/lgtm/config/grafana/provisioning/alerting/rules.yml"
 )
@@ -95,7 +95,7 @@ _EXPECTED_UIDS = {
 # collector side (a receiver swap, a unit change that moves the Prometheus
 # suffix) silently turns a rule into a permanent NoData — which is invisible,
 # because noDataState is OK by design.
-_INFRA_RULE_METRICS = {
+INFRA_RULE_METRICS = {
     "ava-ops-host-cpu-saturated": "system_cpu_utilization_ratio",
     "ava-ops-host-memory-pressure": "system_memory_utilization_ratio",
     "ava-ops-host-disk-watermark": "system_filesystem_utilization_ratio",
@@ -107,7 +107,7 @@ _INFRA_RULE_METRICS = {
 
 
 def _load_groups() -> list[dict[str, Any]]:
-    doc = yaml.safe_load(_RULES.read_text(encoding="utf-8"))
+    doc = yaml.safe_load(RULES.read_text(encoding="utf-8"))
     assert doc is not None
     groups = doc["groups"]
     assert len(groups) == 2
@@ -118,12 +118,12 @@ def _load_groups() -> list[dict[str, Any]]:
     return groups
 
 
-def _load_rules() -> list[dict[str, Any]]:
+def load_rules() -> list[dict[str, Any]]:
     groups = _load_groups()
     return [rule for group in groups for rule in group["rules"]]
 
 
-def _exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:
+def rule_query_exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:
     """The expr strings of one rule's datasource queries (loki/prometheus)."""
     return [
         d["model"]["expr"]
@@ -132,7 +132,7 @@ def _exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:
     ]
 
 
-def _threshold_params(rule: dict[str, Any]) -> list[list[Any]]:
+def threshold_params(rule: dict[str, Any]) -> list[list[Any]]:
     """Keyed on the node TYPE, not on a refId letter — the threshold node is
     not always `D` and a letter-keyed lookup silently returns nothing."""
     return [
@@ -143,7 +143,7 @@ def _threshold_params(rule: dict[str, Any]) -> list[list[Any]]:
 
 
 def test_rules_have_expected_uids() -> None:
-    rules = _load_rules()
+    rules = load_rules()
     assert {r["uid"] for r in rules} == _EXPECTED_UIDS | set(SIGNALS)
 
 
@@ -154,7 +154,7 @@ def test_rule_uids_fit_grafana_40_char_limit() -> None:
     (42 chars) broke Grafana startup after a rollout; the two slow-route UIDs
     were renamed to `ava-ops-gw-latency-slow-*`. This lock keeps future
     additions under the limit at review time instead of at deploy time."""
-    for rule in _load_rules():
+    for rule in load_rules():
         assert len(rule["uid"]) <= 40, (
             f"uid {rule['uid']!r} is {len(rule['uid'])} chars — Grafana caps "
             "alert-rule UIDs at 40 and fails the whole provisioning file"
@@ -181,7 +181,7 @@ def test_low_cost_rules_use_the_slow_group() -> None:
 def test_rules_never_query_postgres() -> None:
     """The whole point of the migration: no rule may query the `ops` PG
     datasource — the events-table read path is retired (#1197)."""
-    for rule in _load_rules():
+    for rule in load_rules():
         for d in rule["data"]:
             if d.get("datasourceUid") == "__expr__":
                 continue  # reduce/math/threshold nodes carry no datasource
@@ -197,7 +197,7 @@ def test_rules_never_query_postgres() -> None:
 def test_severity_is_critical_warning_error() -> None:
     """severity must be one of critical/warning/error — the alert-system
     vocabulary (Task #1224): all three push to IM, no gate."""
-    for rule in _load_rules():
+    for rule in load_rules():
         severity = rule["labels"].get("severity")
         assert severity in {"critical", "warning", "error"}, (
             f"{rule['uid']}: severity {severity!r} not in the new vocabulary"
@@ -211,8 +211,8 @@ def test_loki_rules_match_event_labels_in_the_selector() -> None:
     level/category/attributes filters only. (Legacy chunks without the index
     labels expired after the cutover's grace (2026-08-26), so a pipeline-form
     event filter would silently match nothing.)"""
-    for rule in _load_rules():
-        for expr in _exprs(rule, "loki"):
+    for rule in load_rules():
+        for expr in rule_query_exprs(rule, "loki"):
             assert "| json" in expr, f"{rule['uid']}: no | json stage:\n{expr}"
             assert "unknown_service" in expr, f"{rule['uid']}: wrong stream selector"
             selector = expr.split("| json")[0]
@@ -229,8 +229,8 @@ def test_loki_rules_match_event_labels_in_the_selector() -> None:
 def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
     """The one LGTM host serves prod; co-located cluster events must never
     affect its alerts, including the whole-stream freshness probe."""
-    for rule in _load_rules():
-        for expr in _exprs(rule, "loki"):
+    for rule in load_rules():
+        for expr in rule_query_exprs(rule, "loki"):
             normalized = " ".join(expr.split())
             assert '| json | cluster=".ava"' in normalized, (
                 f"{rule['uid']}: missing prod cluster filter after json:\n{expr}"
@@ -250,8 +250,8 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
 def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> None:
     """The event_name matcher sits in the stream selector (before `| json`);
     category stays a json-stage filter (it is not a stream label)."""
-    rules = {r["uid"]: r for r in _load_rules()}
-    exprs = _exprs(rules[uid], "loki")
+    rules = {r["uid"]: r for r in load_rules()}
+    exprs = rule_query_exprs(rules[uid], "loki")
     assert any(event_filter in e for e in exprs)
     assert any(event_filter in e.split("| json")[0] for e in exprs), (
         f"{uid}: event_name matcher must be a stream selector, got:\n{exprs}"
@@ -266,8 +266,8 @@ def test_drop_backlog_rule_unwraps_payload_n() -> None:
     5s / per flush) carrying the delta in n, so counting rows understates
     the backlog by the aggregation factor (audit-round2 events-obs P1; the
     retired ops_metrics rollup summed the same way)."""
-    rules = {r["uid"]: r for r in _load_rules()}
-    exprs = _exprs(rules["ava-ops-sse-drop-backlog"], "loki")
+    rules = {r["uid"]: r for r in load_rules()}
+    exprs = rule_query_exprs(rules["ava-ops-sse-drop-backlog"], "loki")
     assert any("unwrap attributes_n" in e for e in exprs), (
         f"R2 must unwrap attributes_n, got:\n{exprs[0]}"
     )
@@ -277,8 +277,8 @@ def test_drop_backlog_rule_unwraps_payload_n() -> None:
 def test_level_rule_scopes_to_observability_categories() -> None:
     """R1 (level-based) must scope to telemetry+log — audit rows are info-only
     by construction and were never part of the old agent_events alert."""
-    rules = {r["uid"]: r for r in _load_rules()}
-    exprs = _exprs(rules["ava-ops-warning-error-spike"], "loki")
+    rules = {r["uid"]: r for r in load_rules()}
+    exprs = rule_query_exprs(rules["ava-ops-warning-error-spike"], "loki")
     assert any('category=~"telemetry|log"' in e for e in exprs)
     assert any('level=~"warning|error|critical"' in e for e in exprs)
     # the spike shape: current 5m vs prior-15m, offset window for the prior
@@ -291,18 +291,18 @@ def test_freshness_rule_is_absent_over_time() -> None:
     absent_over_time — the Postgres max(ts) freshness probe is retired with
     the events table, and the rule now fires when no event of ANY kind
     reached Loki in 5m (emitter stall or broken export path alike)."""
-    rules = {r["uid"]: r for r in _load_rules()}
-    exprs = _exprs(rules["ava-ops-events-freshness"], "loki")
+    rules = {r["uid"]: r for r in load_rules()}
+    exprs = rule_query_exprs(rules["ava-ops-events-freshness"], "loki")
     assert any("absent_over_time" in e for e in exprs)
     assert any("[5m]" in e for e in exprs)
-    assert _threshold_params(rules["ava-ops-events-freshness"]) == [[0]]
+    assert threshold_params(rules["ava-ops-events-freshness"]) == [[0]]
 
 
 def test_events_low_water_rule_detects_partial_write_loss() -> None:
-    rules = {r["uid"]: r for r in _load_rules()}
+    rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-events-low-water"]
 
-    assert _exprs(rule, "loki") == [
+    assert rule_query_exprs(rule, "loki") == [
         'sum(count_over_time({service_name="unknown_service"} | json | '
         'cluster=".ava" [5m])) or vector(0)'
     ]
@@ -315,7 +315,7 @@ def test_events_low_water_rule_detects_partial_write_loss() -> None:
         "metric": "events_freshness",
         "team": "ava-ops",
     }
-    assert _threshold_params(rule) == [[150]]
+    assert threshold_params(rule) == [[150]]
     threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
     assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "lt"
 
@@ -323,10 +323,12 @@ def test_events_low_water_rule_detects_partial_write_loss() -> None:
 def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
     """The gateway-exporter blind spot is watched through Prometheus itself,
     independently of events reaching Loki."""
-    rules = {r["uid"]: r for r in _load_rules()}
+    rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-gateway-metrics-silent"]
-    assert _exprs(rule, "prometheus") == ["absent_over_time(ava_gateway_latency_count_total[5m])"]
-    assert _threshold_params(rule) == [[0]]
+    assert rule_query_exprs(rule, "prometheus") == [
+        "absent_over_time(ava_gateway_latency_count_total[5m])"
+    ]
+    assert threshold_params(rule) == [[0]]
     assert rule["for"] == "5m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
@@ -339,16 +341,16 @@ def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
     historical/current set subtraction so one silent gateway or runner is
     named, while a retired root home naturally leaves the 24-hour set.
     """
-    rules = {r["uid"]: r for r in _load_rules()}
+    rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-root-health-stale"]
-    expr = _exprs(rule, "prometheus")[0]
+    expr = rule_query_exprs(rule, "prometheus")[0]
     assert "ava_root_health_tick_last_tick_timestamp_seconds" in expr
     assert "max_over_time" in expr
     assert "ava_root_health_expected_expected_since_timestamp_seconds[24h]" in expr
     assert "[3m]" in expr
     assert "unless on(machine, home_id, process)" in expr
     assert "max by (machine, home_id, process)" in expr
-    assert _threshold_params(rule) == [[0]]
+    assert threshold_params(rule) == [[0]]
     assert rule["for"] == "0m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
@@ -358,19 +360,19 @@ def test_latency_rule_uses_prometheus_histogram() -> None:
     """R4's p95 now comes from the OTLP metric mirror: histogram_quantile
     over the ava_llm_usage_latency_ms histogram (the same read the Ops
     panel uses), threshold 60000 ms."""
-    rules = {r["uid"]: r for r in _load_rules()}
-    exprs = _exprs(rules["ava-ops-llm-latency-p95"], "prometheus")
+    rules = {r["uid"]: r for r in load_rules()}
+    exprs = rule_query_exprs(rules["ava-ops-llm-latency-p95"], "prometheus")
     assert len(exprs) == 1
     expr = exprs[0]
     assert "histogram_quantile(0.95" in expr
     assert "ava_llm_usage_latency_milliseconds_bucket" in expr
     assert "[10m]" in expr
-    assert _threshold_params(rules["ava-ops-llm-latency-p95"]) == [[60000]]
+    assert threshold_params(rules["ava-ops-llm-latency-p95"]) == [[60000]]
 
 
 def test_checkpoint_blobs_high_water_rules() -> None:
     """OTLP table-size gauges warn before bloat reaches the disk emergency."""
-    rules = {r["uid"]: r for r in _load_rules()}
+    rules = {r["uid"]: r for r in load_rules()}
     expectations: dict[str, tuple[str, int, str]] = {
         "ava-ops-checkpoint-blobs-warning": (
             "warning",
@@ -386,13 +388,13 @@ def test_checkpoint_blobs_high_water_rules() -> None:
 
     for uid, (severity, threshold, expected_expr) in expectations.items():
         rule = rules[uid]
-        exprs = _exprs(rule, "prometheus")
+        exprs = rule_query_exprs(rule, "prometheus")
         assert exprs == [expected_expr]
-        assert _exprs(rule, "loki") == []
+        assert rule_query_exprs(rule, "loki") == []
         assert rule["for"] == "2h"
         assert rule["noDataState"] == "OK"
         assert rule["execErrState"] == "OK"
-        assert _threshold_params(rule) == [[threshold]]
+        assert threshold_params(rule) == [[threshold]]
         assert rule["labels"] == {
             "severity": severity,
             "ruleUID": uid,
@@ -414,15 +416,15 @@ def test_checkpoint_blobs_freshness_guard() -> None:
     8.5h outlier), samples otherwise refresh every export cycle (~15s), and
     the name-level selector is immune to the per-restart instance label churn.
     """
-    rules = {r["uid"]: r for r in _load_rules()}
+    rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-checkpoint-blobs-freshness"]
-    exprs = _exprs(rule, "prometheus")
+    exprs = rule_query_exprs(rule, "prometheus")
     assert exprs == ["absent_over_time(ava_checkpoint_table_sizes_blobs_bytes_ratio[2h])"]
-    assert _exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "loki") == []
     assert rule["for"] == "5m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
-    assert _threshold_params(rule) == [[0]]
+    assert threshold_params(rule) == [[0]]
     assert rule["labels"] == {
         "severity": "warning",
         "ruleUID": "ava-ops-checkpoint-blobs-freshness",
@@ -439,18 +441,18 @@ def test_checkpoint_blobs_growth_tier() -> None:
     gauge, calibrated on the 2026-09-13/15 burst (quiet baseline within MB/6h,
     peak +10.3 GiB/6h). Warn at +1 GiB/6h with a 1h hold; a vacuum/repack
     shrink is a negative delta and stays resolved."""
-    rules = {r["uid"]: r for r in _load_rules()}
+    rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-checkpoint-blobs-growth"]
-    exprs = _exprs(rule, "prometheus")
+    exprs = rule_query_exprs(rule, "prometheus")
     assert exprs == [
         "max(ava_checkpoint_table_sizes_blobs_bytes_ratio) - "
         "max(ava_checkpoint_table_sizes_blobs_bytes_ratio offset 6h)"
     ]
-    assert _exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "loki") == []
     assert rule["for"] == "1h"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
-    assert _threshold_params(rule) == [[1073741824]]
+    assert threshold_params(rule) == [[1073741824]]
     assert rule["labels"] == {
         "severity": "warning",
         "ruleUID": "ava-ops-checkpoint-blobs-growth",
@@ -578,7 +580,7 @@ def _emitted_metric_names() -> dict[str, str]:
 def _rule_metric_tokens() -> set[str]:
     """The ava_* metric tokens referenced in the rule query exprs."""
     tokens: set[str] = set()
-    for rule in _load_rules():
+    for rule in load_rules():
         for query in rule["data"]:
             expr = query["model"].get("expr")
             if isinstance(expr, str):
@@ -653,18 +655,18 @@ def test_trace_watermark_rule_filters_degradation_action() -> None:
     action, scoped to telemetry — the one event that means the observability
     pipeline silently stopped recording. Any occurrence in the trailing 24h
     is the condition (chronic-condition semantics, threshold > 0)."""
-    rules = {r["uid"]: r for r in _load_rules()}
-    exprs = _exprs(rules["ava-ops-trace-disk-watermark"], "loki")
+    rules = {r["uid"]: r for r in load_rules()}
+    exprs = rule_query_exprs(rules["ava-ops-trace-disk-watermark"], "loki")
     assert any('attributes_action="recording_disabled_disk_watermark"' in e for e in exprs)
     assert any('category="telemetry"' in e for e in exprs)
     assert any("[24h]" in e for e in exprs)
-    assert _threshold_params(rules["ava-ops-trace-disk-watermark"]) == [[0]]
+    assert threshold_params(rules["ava-ops-trace-disk-watermark"]) == [[0]]
 
 
 # ─── infrastructure rules (issue #46) ────────────────────────────────────────
 
 
-def _assert_latency_query_scopes_to_route_class(expr: str, route_class: str) -> None:
+def assert_latency_query_scopes_to_route_class(expr: str, route_class: str) -> None:
     assert 'event_name="gateway_latency"' in expr
     assert f'| attributes_route_class="{route_class}"' in expr
     assert "attributes_route !~" not in expr
@@ -672,7 +674,7 @@ def _assert_latency_query_scopes_to_route_class(expr: str, route_class: str) -> 
     assert "max by (attributes_route)" in expr
 
 
-def _assert_reduce_keeps_route_label(rule: dict[str, Any]) -> None:
+def assert_reduce_keeps_route_label(rule: dict[str, Any]) -> None:
     reduce_node = next(d for d in rule["data"] if d["model"].get("type") == "reduce")
     assert reduce_node["model"].get("mode") == "byLabels"
     assert "attributes_route" in reduce_node["model"].get("includeLabels", [])

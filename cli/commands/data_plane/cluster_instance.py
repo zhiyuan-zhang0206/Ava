@@ -102,7 +102,7 @@ def pg_data_dir() -> Path:
     return ava_home() / "pg"
 
 
-def _pg_template_dir() -> Path:
+def pg_template_dir() -> Path:
     """Cached `initdb` output, copied so a new instance is a directory copy rather
     than a multi-second init. Kept in the home, beside the data directory it seeds."""
     return ava_home() / "pg-template-17"
@@ -129,7 +129,7 @@ def redis_cli_bin() -> str:
     return _redis_bin("redis-cli")
 
 
-def _pg_bin(name: str) -> str:
+def pg_bin(name: str) -> str:
     return str(pg_tool(name)) if is_macos() else str(PG_BIN_LINUX / name)
 
 
@@ -259,7 +259,7 @@ def initdb(target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
-            _pg_bin("initdb"),
+            pg_bin("initdb"),
             "-D",
             str(target),
             "-U",
@@ -280,7 +280,7 @@ def ensure_pg_data() -> Path:
     data = pg_data_dir()
     if (data / "PG_VERSION").exists():
         return data
-    template = _pg_template_dir()
+    template = pg_template_dir()
     if not (template / "PG_VERSION").exists():
         initdb(template)
     shutil.copytree(template, data)
@@ -305,7 +305,7 @@ def pg_admin_url(pg_port: int) -> str:
 def pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
     try:
         out = subprocess.run(
-            [_pg_bin("pg_isready"), "-h", host, "-p", str(pg_port)],
+            [pg_bin("pg_isready"), "-h", host, "-p", str(pg_port)],
             capture_output=True,
             check=False,
             timeout=_PG_PROBE_TIMEOUT_S,
@@ -351,7 +351,7 @@ def start_pg(
         data,
         pg_port,
         [
-            _pg_bin("postgres"),
+            pg_bin("postgres"),
             "-D",
             str(data),
             "-p",

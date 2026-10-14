@@ -41,7 +41,7 @@ from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.backup.artifact import passphrase
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -107,7 +107,7 @@ def _teardown(born: Born) -> None:
         pooler.stop_pgbouncer(force=True)
     finally:
         subprocess.run(
-            [ci._pg_bin("pg_ctl"), "-D", str(born.home / "pg"), "-m", "immediate", "stop"],
+            [ci.pg_bin("pg_ctl"), "-D", str(born.home / "pg"), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )
@@ -125,7 +125,7 @@ def _configure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, distinct_free_ports: Callable[[int], list[int]]
 ) -> Born:
     """A configured-but-unprovisioned single-box home (minted cluster secret)."""
-    from cli.start_identity import IdentityInput, _gateway_values
+    from cli.start_identity import IdentityInput, gateway_values
 
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
@@ -138,7 +138,7 @@ def _configure(
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", ports), gateway_home=str(home), created_at="test"
     )
-    values = _gateway_values(
+    values = gateway_values(
         record,
         IdentityInput(
             home,
@@ -483,7 +483,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
 def test_launched_services_receive_their_class_login_only(
     born: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands.lifecycle.root_driver import _service_extra_env, root_child_env
+    from cli.commands.lifecycle.root_driver import root_child_env, service_extra_env
     from services.supervision.roster.service_spec import ServiceSpec
 
     # The launcher's settings-free serve-gateway read (a born single box).
@@ -498,16 +498,16 @@ def test_launched_services_receive_their_class_login_only(
     frontend = ServiceSpec(
         session="frontend", cmd="x", capabilities=frozenset({"gateway"}), requires_db=False
     )
-    assert _service_extra_env(gateway)["AVA_DB_URL"] == born.dsn("gateway")
-    assert _service_extra_env(runner)["AVA_DB_URL"] == born.dsn("runner")
-    assert _service_extra_env(runner)[delivery.GENERATION_ENV] == "0"
-    assert "AVA_DB_URL" not in _service_extra_env(frontend)
+    assert service_extra_env(gateway)["AVA_DB_URL"] == born.dsn("gateway")
+    assert service_extra_env(runner)["AVA_DB_URL"] == born.dsn("runner")
+    assert service_extra_env(runner)[delivery.GENERATION_ENV] == "0"
+    assert "AVA_DB_URL" not in service_extra_env(frontend)
     # The born single box authenticates its API: each service is delivered its class
     # token, the database-free frontend included, and never the root itself.
     tokens = ledger.read_secret(born.home, delivery.active_generation(born.home)).api
-    assert _service_extra_env(gateway)[API_TOKEN_ENV] == tokens.gateway
-    assert _service_extra_env(runner)[API_TOKEN_ENV] == tokens.runner
-    assert _service_extra_env(frontend)[API_TOKEN_ENV] == tokens.gateway
+    assert service_extra_env(gateway)[API_TOKEN_ENV] == tokens.gateway
+    assert service_extra_env(runner)[API_TOKEN_ENV] == tokens.runner
+    assert service_extra_env(frontend)[API_TOKEN_ENV] == tokens.gateway
     root = root_child_env()
     assert "AVA_DB_URL" not in root and delivery.GENERATION_ENV not in root
     assert API_TOKEN_ENV not in root

@@ -42,7 +42,7 @@ def _is_browser_user_agent(user_agent: str) -> bool:
 
 # Task #1635 / PR #610 stopped new bundles from blind-retrying 401'd SSE streams;
 # Task #1694 treats SSE 401s as stale old-bundle tabs: expected reconnect noise.
-# Uvicorn access logs are WARNING-gated (`base/log/__init__.py` `_install_stdlib_intercept`),
+# Uvicorn access logs are WARNING-gated (`base/log/__init__.py` `install_stdlib_intercept`),
 # so without this explicit log 401s are invisible. DEBUG keeps the forensic gateway.log
 # trail out of events/Loki (only INFO+ derives). Non-stream sources stay visible at
 # WARNING once per (client, path) per 300s while flood repeats are downgraded to DEBUG.

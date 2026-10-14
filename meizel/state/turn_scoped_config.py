@@ -66,7 +66,7 @@ import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from meizel import lint_common
+from meizel import allowances, lint_common
 
 __all__ = ["main"]
 
@@ -82,21 +82,15 @@ _SCAN_DIRS = (
 # Turn-adjacent `base` modules that execute inside agent turns.
 _EXTRA_FILES = ("base/packages/plugins/activation.py",)
 
-_ALLOWED_FILES = frozenset(
-    {
-        # The slices resolve a field's live default off the singleton by design.
-        "base/host/env/agent_slices.py",
-    }
-)
+# Both lists are in meizel.policy.toml under [turn-scoped-config], each entry with its reason.
+_POLICY = allowances.load(_REPO_ROOT)
 
-# The two files that ARE the plugin-config mechanism: the registry owns the
-# process-global map, the view layers an agent's overrides over it.
-_PLUGIN_MECHANISM_FILES = frozenset(
-    {
-        "base/packages/plugins/config_registration.py",
-        "base/packages/plugins/config_view.py",
-    }
-)
+# Files that resolve a field's live default off the singleton by design.
+_ALLOWED_FILES = frozenset(_POLICY.reasons("turn-scoped-config", "files"))
+
+# The files that ARE the plugin-config mechanism: the registry owns the process-global map, the
+# view layers an agent's overrides over it.
+_PLUGIN_MECHANISM_FILES = frozenset(_POLICY.reasons("turn-scoped-config", "plugin-mechanism-files"))
 
 _SETTINGS_ATTR = re.compile(r"\bsettings\.([a-z_]+)\.([a-z_]+)")
 # A per-agent field read through the model layering or `get_field` by its literal name; the first

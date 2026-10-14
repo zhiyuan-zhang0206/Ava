@@ -108,7 +108,7 @@ def _converge_skills_step(ctx: ConvergeCtx) -> None:
         print(f"  ! skills: {warning}", file=sys.stderr)
 
 
-def _ensure_browser(ctx: ConvergeCtx) -> None:
+def ensure_browser(ctx: ConvergeCtx) -> None:
     """Preflight the shared headed Chrome.
 
     chrome's MCP config ships in `<repo>/ava_builtins/mcps/chrome/.mcp.json` (a built-in
@@ -153,7 +153,7 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
     converge()
 
 
-def _ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
+def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
     """Probe the configured cross-machine transfer backend; warn, never block.
 
     Cross-machine file transfer no longer hard-requires a shared Google Drive
@@ -187,7 +187,7 @@ def _ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
         )
 
 
-def _ensure_github_pr(ctx: ConvergeCtx) -> None:
+def ensure_github_pr(ctx: ConvergeCtx) -> None:
     """Fail fast when this agent-runner cannot open+merge PRs on the memory repo.
 
     The memory pool is consolidated nightly by agents that push their machine
@@ -219,7 +219,7 @@ def _ensure_github_pr(ctx: ConvergeCtx) -> None:
         )
 
 
-def _ensure_screen_capture(ctx: ConvergeCtx) -> None:
+def ensure_screen_capture(ctx: ConvergeCtx) -> None:
     """Preflight OS-level screen capture on agent-runner hosts.
 
     Asks the permissions helper — the process that actually performs
@@ -238,9 +238,9 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:
         clear_status()
         return
 
-    from base.host.permissions_helper.client import check_screen_capture
+    from base.sessions.helperproc import helper_client
 
-    status = check_screen_capture()
+    status = helper_client().check_screen_capture()
     if status.available:
         # Drop any stale "unavailable" file so a fixed host does not fire a
         # false notification on the next agent startup.
@@ -250,7 +250,7 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:
     print(f"  ! {status.headline}: {status.diagnostic}", file=sys.stderr)
 
 
-def _ensure_accessibility(ctx: ConvergeCtx) -> None:
+def ensure_accessibility(ctx: ConvergeCtx) -> None:
     """Preflight Accessibility on agent-runner hosts.
 
     Accessibility gates the helper's synthetic clicks and keystrokes; macOS
@@ -267,9 +267,9 @@ def _ensure_accessibility(ctx: ConvergeCtx) -> None:
         clear_accessibility_status()
         return
 
-    from base.host.permissions_helper.client import check_accessibility
+    from base.sessions.helperproc import helper_client
 
-    status = check_accessibility()
+    status = helper_client().check_accessibility()
     if status.available:
         clear_accessibility_status()
         return
@@ -277,7 +277,7 @@ def _ensure_accessibility(ctx: ConvergeCtx) -> None:
     print(f"  ! {status.headline}: {status.diagnostic}", file=sys.stderr)
 
 
-def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Operator-visible warning when migrations/ holds files git does not track.
 
     The applier skips untracked migrations with a log warning (Task #998); this
@@ -364,7 +364,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # the only trace. Gateway-only: the gateway is the single schema writer.
     ConvergeStep(
         "untracked migrations warning",
-        _warn_untracked_migrations,
+        warn_untracked_migrations,
         roles=frozenset({"gateway"}),
     ),
     # Plugin config images are read only by agent processes, which run on
@@ -393,7 +393,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("lgtm native backends", ensure_lgtm_native_step, services=frozenset(BACKENDS)),
     ConvergeStep(
         "browser capability",
-        _ensure_browser,
+        ensure_browser,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
         services=frozenset({"browser", "browser-mcp"}),
@@ -405,13 +405,13 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ),
     ConvergeStep(
         "cross-machine transfer backend",
-        _ensure_cross_machine_transfer,
+        ensure_cross_machine_transfer,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),
     ConvergeStep(
         "github PR capability",
-        _ensure_github_pr,
+        ensure_github_pr,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),
@@ -429,13 +429,13 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("local Git hook pointers", ensure_local_git_hooks),
     ConvergeStep(
         "screen capture availability",
-        _ensure_screen_capture,
+        ensure_screen_capture,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),
     ConvergeStep(
         "accessibility availability",
-        _ensure_accessibility,
+        ensure_accessibility,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),
@@ -588,8 +588,8 @@ def cmd_converge(
 
     admission.require_start_allowed(operation)
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
-    repo = _repo._repo_root()
-    roles = _repo._roles_or_none(machine=command.machine)
+    repo = _repo.repo_root()
+    roles = _repo.roles_or_none(machine=command.machine)
     print(f"[ava converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}")
 
     converge_host(

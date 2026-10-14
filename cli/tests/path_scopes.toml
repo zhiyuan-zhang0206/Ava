@@ -13,8 +13,8 @@
     "test_stop_parser.py",
 ]
 "tests.fixtures.unit.generation" = ["."]
-"tests.fixtures.unit.homes" = ["."]
-"tests.fixtures.log_capture" = [
+"base.paths.tests.homes" = ["."]
+"base.log.tests.log_records" = [
     "test_plugin_scaffold.py",
 ]
 "tests.fixtures.unit.sdk" = [

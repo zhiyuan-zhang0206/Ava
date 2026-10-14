@@ -586,4 +586,4 @@ def test_stall_verdict_closes_run_row(
     sr.stall_action(Database.from_settings(gate=database_gate), sid, "stalled in foo", run_id)
 
     assert exited == [1]
-    assert _runs(db_conn, sid) == [(False, f"stalled ({sr._stall_timeout_s():.0f}s)")]
+    assert _runs(db_conn, sid) == [(False, f"stalled ({sr.schedule_stall_timeout_seconds():.0f}s)")]

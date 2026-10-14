@@ -1,0 +1,4 @@
+[debt.first-party-patch]
+"test_observed_metrics.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_no_pipeline" = 1
+"test_observed_metrics.py#monkeypatch.setattr base.telemetry.metrics.observed_metrics.event_row" = 1
+"test_observed_metrics.py#monkeypatch.setattr base.telemetry.metrics.observed_metrics.write_observations" = 1

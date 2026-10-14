@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.impersonation.test_impersonation import gate_ctx as gate_ctx
 from agent.tests.impersonation.test_impersonation import incarnation as incarnation
 from agent.tests.impersonation.test_impersonation import relays as relays
+from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.agents.incarnation.resources import ResourceProcess
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -19,7 +20,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller, recorded_tree
 
 
 async def test_successor_admission_ends_an_active_lease_without_restoring_the_dead_owner(
@@ -38,8 +38,8 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_de
     admission closes it, and the close does not restore the dead incarnation."""
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases
+    from base.agents.tests.units import spawn_agent
     from base.api_contracts.caller_identity import CallerIdentity
-    from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(
         catalog=model_catalog,

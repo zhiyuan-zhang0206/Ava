@@ -24,16 +24,20 @@ from cli.commands.cluster.tests.health_probe_inputs import (
     signals as signals,
 )
 from cli.commands.cluster.tests.test_cluster_health import (
-    _home as _home,
+    isolated_cluster_home as isolated_cluster_home,
 )
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 @pytest.mark.parametrize(
     "health", ["healthy", "gateway", "population", "service", "disk", "provider"]
 )
 def test_repeated_observations_never_mutate_release_state(
-    probe: Probe, all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch, health: str
+    probe: Probe,
+    all_checks_pass: None,
+    isolated_cluster_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    health: str,
 ) -> None:
     """Repeated good/bad rounds ignore prior rollback and promotion counters."""
     legacy_state = {
@@ -41,7 +45,7 @@ def test_repeated_observations_never_mutate_release_state(
         "health_probe_pending_lkg_passes": "candidate\n999",
     }
     for name, content in legacy_state.items():
-        (_home / name).write_text(content)
+        (isolated_cluster_home / name).write_text(content)
 
     def forbidden(*_args: Any, **_kwargs: Any) -> Any:
         pytest.fail("health observation attempted a release effect")
@@ -78,13 +82,15 @@ def test_repeated_observations_never_mutate_release_state(
 
     for _round in range(5):
         assert probe() == (0 if health == "healthy" else 1)
-    assert {name: (_home / name).read_text() for name in legacy_state} == legacy_state
+    assert {
+        name: (isolated_cluster_home / name).read_text() for name in legacy_state
+    } == legacy_state
 
 
 def test_full_disk_is_reported_when_gateway_is_down(
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
     capsys: pytest.CaptureFixture[str],

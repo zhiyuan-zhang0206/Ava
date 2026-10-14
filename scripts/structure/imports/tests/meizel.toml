@@ -1,0 +1,6 @@
+[debt.first-party-patch]
+"test_facts.py#monkeypatch.setattr scripts.structure.imports.executed.inputs" = 1
+
+[debt.stdlib-patch]
+"test_bindings.py#monkeypatch.setattr ast.iter_child_nodes" = 1
+"test_cache.py#monkeypatch.setattr pathlib.Path.read_text" = 1

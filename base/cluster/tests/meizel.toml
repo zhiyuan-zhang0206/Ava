@@ -1,7 +1,49 @@
 [uses]
 "test_machines.py" = ["machines"]
 
-[debt.private-name]
-"test_machines.py -> machines/setup.py#_db" = 1
-"test_machines.py -> machines/setup.py#_machine_setup" = 1
-"test_machines.py -> machines/setup.py#_truncate_machines" = 1
+[debt.env-patch]
+"test_machine.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
+"test_machine.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_machines.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_native_layout.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_cluster_identity.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 3
+"test_cluster_identity.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
+"test_cluster_own_instance.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_cluster_own_instance.py#monkeypatch.setattr base.config.settings.data_plane.redis_admin_password" = 2
+"test_cluster_own_instance.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 2
+"test_cluster_provision.py#monkeypatch.setattr base.cluster.provision.checkpoint_schema_versions" = 1
+"test_listener_discovery_failure.py#monkeypatch.setattr base.cluster.port_preflight.lsof_argv" = 1
+"test_listener_discovery_failure.py#monkeypatch.setattr base.cluster.port_preflight.os.access" = 1
+"test_listener_discovery_failure.py#monkeypatch.setattr base.cluster.port_preflight.shutil.which" = 1
+"test_listener_discovery_failure.py#monkeypatch.setattr base.host.proc.run_bounded" = 3
+"test_machine.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_machine.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 4
+"test_machines.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 8
+"test_native_layout.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
+"test_port_preflight.py#monkeypatch.setattr base.cluster.port_preflight.lsof_argv" = 4
+"test_port_preflight.py#monkeypatch.setattr base.cluster.port_preflight.os.access" = 3
+"test_port_preflight.py#monkeypatch.setattr base.cluster.port_preflight.shutil.which" = 3
+"test_port_preflight.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 3
+"test_port_preflight.py#monkeypatch.setattr base.host.proc.run_bounded" = 8
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.port_preflight.capture_tree" = 1
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.port_preflight.strict_listeners_on" = 1
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.OwnedProcess.capture" = 3
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.OwnedProcess.live" = 4
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.OwnedProcess.send_signal" = 2
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres._read" = 2
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.capture_tree" = 1
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.observe" = 3
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.os.getsid" = 2
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.psutil.Process" = 1
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.psutil.process_iter" = 1
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.require_closed" = 3
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.require_listener" = 1
+"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.subprocess.Popen" = 2
+
+[debt.third-party-patch]
+"test_cluster_provision.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.setup" = 1
+"test_cluster_provision.py#monkeypatch.setattr psycopg.connect" = 2
+"test_listener_discovery_failure.py#monkeypatch.setattr psutil.net_connections" = 3
+"test_port_preflight.py#monkeypatch.setattr psutil.net_connections" = 8

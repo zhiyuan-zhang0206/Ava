@@ -17,13 +17,13 @@ from base.cluster import postgres as pg
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.dataplane.pg_admin import pg_socket_dir
 from base.cluster.machine import MachineIdentity
+from base.deploy.tests.containers import redis_server
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
-from tests._containers import redis_server
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -188,14 +188,14 @@ def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
 
 def _private_pg_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, int]:
     from base.config import settings
-    from tests._containers import _free_port
+    from base.deploy.tests.containers import free_port
 
     home, data = tmp_path / "home", tmp_path / "home/pg"
     home.mkdir()
-    port = _free_port()
+    port = free_port()
     monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(settings.data_plane, "db_url", f"postgresql://test@127.0.0.1:{port}/test")
-    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
+    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{free_port()}")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
     return data, port
@@ -308,8 +308,8 @@ def test_pg_native_signal_failure_is_not_reported_as_stopped(
 ) -> None:
     import asyncio
 
+    from base.deploy.tests.containers import free_port
     from cli.commands.data_plane import maintenance_stop as plane
-    from tests._containers import _free_port
 
     owner = OwnedProcess(123, 100.0, 456)
     seen: list[OwnedProcess | None] = []
@@ -328,7 +328,7 @@ def test_pg_native_signal_failure_is_not_reported_as_stopped(
         raise RuntimeError("native custody lost")
 
     monkeypatch.setattr(plane.owned_postgres, "stop", fail)
-    client = AsyncRedis(port=_free_port())
+    client = AsyncRedis(port=free_port())
     with pytest.raises(RuntimeError, match="native custody lost"):
         asyncio.run(
             plane.request_stop(

@@ -28,7 +28,7 @@ from base.agents.incarnation.resources import ExecAllocation, ResourceProcess
 from tests.fixtures.pin_agent import exec_context
 
 
-def _context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:
+def exec_owner_context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:
     identity = uuid4()
     request = tmp_path / f"req-{identity.hex}.json"
     write_request(
@@ -83,7 +83,7 @@ def _start(tmp_path: Path, context: OwnerContext) -> subprocess.Popen[bytes]:
     )
 
 
-def _ready(tmp_path: Path, proc: subprocess.Popen[bytes]) -> OwnerReady:
+def wait_for_owner_ready(tmp_path: Path, proc: subprocess.Popen[bytes]) -> OwnerReady:
     until = time.monotonic() + 15
     path = tmp_path / "owner.ready"
     while not path.exists():
@@ -94,10 +94,10 @@ def _ready(tmp_path: Path, proc: subprocess.Popen[bytes]) -> OwnerReady:
 
 
 def test_eof_closes_exact_domain_before_user_code(tmp_path: Path) -> None:
-    context = _context(tmp_path)
+    context = exec_owner_context(tmp_path)
     proc = _start(tmp_path, context)
     try:
-        ready = _ready(tmp_path, proc)
+        ready = wait_for_owner_ready(tmp_path, proc)
         assert ready.allocation.owner_process is not None
         validate_native_ready(ready, ResourceProcess.capture(psutil.Process(proc.pid)))
         assert ready.allocation.root_process is not None
@@ -121,10 +121,10 @@ def test_eof_closes_exact_domain_before_user_code(tmp_path: Path) -> None:
 
 def test_ready_receipt_refuses_a_different_native_launcher(tmp_path: Path) -> None:
     """A valid owner receipt cannot authorize a different captured launcher."""
-    context = _context(tmp_path)
+    context = exec_owner_context(tmp_path)
     proc = _start(tmp_path, context)
     try:
-        ready = _ready(tmp_path, proc)
+        ready = wait_for_owner_ready(tmp_path, proc)
         launcher = ResourceProcess.capture(psutil.Process(proc.pid))
         different = launcher.model_copy(
             update={"starttime": launcher.starttime + 1}
@@ -141,7 +141,7 @@ def test_ready_receipt_refuses_a_different_native_launcher(tmp_path: Path) -> No
 
 def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: Path) -> None:
     """Normal completion must not leave a daemon holding buffered stdin at exit."""
-    context = _context(tmp_path)
+    context = exec_owner_context(tmp_path)
     write_request(
         context.request_path,
         code="import sys; assert sys.dont_write_bytecode",
@@ -161,7 +161,7 @@ def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: 
     )
     proc = _start(tmp_path, context)
     try:
-        ready = _ready(tmp_path, proc)
+        ready = wait_for_owner_ready(tmp_path, proc)
         assert proc.stdin is not None
         permit = OwnerControl(
             request=ready.allocation.request, domain=ready.allocation.domain, action="permit"
@@ -190,7 +190,7 @@ def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: 
 
 
 def test_owner_relays_output_larger_than_a_pipe_before_publishing_closed(tmp_path: Path) -> None:
-    context = _context(tmp_path)
+    context = exec_owner_context(tmp_path)
     write_request(
         context.request_path,
         code="import os; os.write(1, b'x' * 262144); os.write(1, b'final-tail')",
@@ -210,7 +210,7 @@ def test_owner_relays_output_larger_than_a_pipe_before_publishing_closed(tmp_pat
     )
     proc = _start(tmp_path, context)
     try:
-        ready = _ready(tmp_path, proc)
+        ready = wait_for_owner_ready(tmp_path, proc)
         assert proc.stdin is not None
         permit = OwnerControl(
             request=ready.allocation.request, domain=ready.allocation.domain, action="permit"
@@ -268,10 +268,10 @@ def test_control_pipe_is_bounded_and_owned_by_calling_loop(ending: str) -> None:
 
 
 def test_wrong_permit_never_publishes_success(tmp_path: Path) -> None:
-    context = _context(tmp_path)
+    context = exec_owner_context(tmp_path)
     proc = _start(tmp_path, context)
     try:
-        _ready(tmp_path, proc)
+        wait_for_owner_ready(tmp_path, proc)
         assert proc.stdin is not None
         wrong = OwnerControl(request=uuid4(), domain=context.allocation.domain, action="permit")
         proc.stdin.write(wrong.model_dump_json().encode() + b"\n")
@@ -286,10 +286,10 @@ def test_wrong_permit_never_publishes_success(tmp_path: Path) -> None:
 
 
 def test_owner_death_is_not_a_terminal_receipt(tmp_path: Path) -> None:
-    context = _context(tmp_path)
+    context = exec_owner_context(tmp_path)
     proc = _start(tmp_path, context)
     try:
-        ready = _ready(tmp_path, proc)
+        ready = wait_for_owner_ready(tmp_path, proc)
         assert ready.allocation.owner_process is not None
         owner = psutil.Process(ready.allocation.owner_process.pid)
         assert ready.allocation.owner_process.same_birth(ResourceProcess.capture(owner))
@@ -304,7 +304,7 @@ def test_owner_death_is_not_a_terminal_receipt(tmp_path: Path) -> None:
 
 
 def test_context_unknown_fields_and_symlink_refuse(tmp_path: Path) -> None:
-    context = _context(tmp_path)
+    context = exec_owner_context(tmp_path)
     path = tmp_path / "owner.json"
     publish_owner_message(path, context)
     with pytest.raises(FileExistsError):
@@ -343,7 +343,7 @@ def test_real_host_death_closes_active_managed_child(
     tmp_path: Path, record_property: Callable[[str, object], None]
 ) -> None:
     """A separate host dies; its child cannot keep the control writer alive."""
-    context = _context(tmp_path)
+    context = exec_owner_context(tmp_path)
     active = tmp_path / "active"
     code = (
         "import os, time\nfrom pathlib import Path\n"

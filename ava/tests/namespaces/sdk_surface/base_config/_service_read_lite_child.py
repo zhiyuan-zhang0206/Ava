@@ -18,7 +18,7 @@ def import_stays_lite() -> None:
     sys.stdout.write(
         json.dumps(
             {
-                "boot": c._boot_state(),
+                "boot": c.boot_state(),
                 "pydantic_settings": "pydantic_settings" in sys.modules,
                 "config_modules": sorted(m for m in sys.modules if m.startswith("base.config")),
             }

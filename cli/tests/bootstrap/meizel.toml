@@ -1,10 +1,64 @@
-exports = ["command_inputs.py"]
 
 [uses]
-"test_checkout_guard.py" = ["command_inputs.py"]
-"test_command_runtime.py" = ["command_inputs.py"]
 "test_python_install.py" = ["_python_install_fixture.py"]
-"test_start_identity.py" = ["_init_identity.py", "command_inputs.py"]
+"test_start_identity.py" = ["_init_identity.py"]
 
 [loads]
 "_logging_entry_child.py" = ["services/agent_runner/agent_ops"]
+
+[debt.env-patch]
+"test_checkout_guard.py#monkeypatch.delenv os.environ.AVA_HOME" = 1
+"test_checkout_guard.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
+"test_checkout_guard.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.delitem os.environ" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.delitem os.environ.AVA_PROCESS_PROFILE" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.AVA_APP_PORT" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.AVA_PROCESS_PROFILE" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.AVA_REDIS_URL" = 1
+"test_init.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_init.py#patch.dict os.environ" = 1
+"test_python_install.py#monkeypatch.delenv os.environ" = 1
+"test_python_install.py#monkeypatch.setenv os.environ" = 1
+"test_python_install.py#monkeypatch.setenv os.environ.PIP_CONFIG_FILE" = 1
+"test_python_install.py#monkeypatch.setenv os.environ.XDG_CONFIG_HOME" = 1
+"test_start_identity.py#monkeypatch.delenv os.environ.AVA_CLUSTER_SECRET" = 1
+"test_start_identity.py#monkeypatch.delenv os.environ.AVA_DB_CAPABILITY_KEY" = 1
+"test_start_identity.py#monkeypatch.delenv os.environ.AVA_SERVICE_PATH" = 2
+"test_start_identity.py#monkeypatch.setenv os.environ.AVA_CLUSTER_SECRET" = 1
+"test_start_identity.py#monkeypatch.setenv os.environ.AVA_DB_URL" = 1
+"test_start_identity.py#monkeypatch.setenv os.environ.AVA_HOME" = 10
+"test_start_identity.py#monkeypatch.setenv os.environ.AVA_SERVICE_PATH" = 1
+"test_start_identity.py#monkeypatch.setenv os.environ.PATH" = 3
+"test_start_identity.py#monkeypatch.setenv os.environ.VIRTUAL_ENV" = 1
+"test_start_identity.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_checkout_guard.py#monkeypatch.setattr cli.init_intent.initialize_home" = 1
+"test_checkout_guard.py#monkeypatch.setattr cli.start_intent.checkout" = 3
+"test_checkout_guard.py#monkeypatch.setattr cli.start_intent.require_initialized" = 1
+"test_command_runtime.py#monkeypatch.setattr base.config.ConfigBoot.prepare" = 1
+"test_init.py#monkeypatch.setattr base.cluster.port_free" = 1
+"test_init.py#monkeypatch.setattr cli.start_identity.upsert_env" = 3
+"test_init.py#monkeypatch.setattr cli.start_intent.checkout" = 1
+"test_python_install.py#monkeypatch.setattr cli._python_index.sys.platform" = 1
+"test_redis_binary_selection.py#monkeypatch.setattr base.config.settings.data_plane.redis_bin_dir" = 2
+"test_redis_binary_selection.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
+"test_start_boot_attempts.py#monkeypatch.setattr base.host.system.boot_policy.is_macos" = 4
+"test_start_boot_attempts.py#monkeypatch.setattr base.host.system.boot_policy.psutil.boot_time" = 1
+"test_start_boot_attempts.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_start_boot_attempts.py#monkeypatch.setattr cli.start_intent._home" = 1
+"test_start_boot_attempts.py#monkeypatch.setattr cli.start_intent._run_boot_attempt" = 1
+"test_start_boot_attempts.py#monkeypatch.setattr cli.start_intent.start_once" = 1
+"test_start_identity.py#monkeypatch.setattr base.cluster.port_free" = 2
+"test_start_identity.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.clear_serving" = 1
+"test_start_identity.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1
+"test_start_identity.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.complete_boot_start" = 2
+"test_start_identity.py#monkeypatch.setattr cli.commands.lifecycle.start.cmd_start" = 3
+"test_start_identity.py#monkeypatch.setattr cli.init_intent.local_addresses" = 1
+"test_start_identity.py#monkeypatch.setattr cli.start_identity.upsert_env" = 6
+"test_start_identity.py#monkeypatch.setattr cli.start_intent.checkout" = 10
+
+[debt.stdlib-patch]
+"test_start_identity.py#monkeypatch.setattr socket.getaddrinfo" = 1

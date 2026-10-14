@@ -1,6 +1,6 @@
 """Schedule manager daemon — keeps one resident session alive per enabled schedule.
 
-Two resident sequential loops under one `TaskGroup` (`_run_loops`):
+Two resident sequential loops under one `TaskGroup` (`run_loops`):
 
 - `reconcile` (`ScheduleManager.reconcile`): every few seconds, desired (enabled
   `schedules` rows) against actual (live `ava-schedule-<id>` sessions) — launch
@@ -111,7 +111,7 @@ async def provision_builtins(pool: ConnectionPool[Any]) -> None:
         _log.warning("built-in schedule provisioning failed", exc_info=True)
 
 
-async def _run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
+async def run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
     """Own the two resident loops; one that raises ends the process."""
     manager = ScheduleManager(pool)
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
@@ -167,7 +167,7 @@ async def run(
         # Automatic seeding is explicit configuration; unseeded previews still use
         # the schedule APIs without launching background workloads.
         await provision_builtins(pool)
-        await _run_loops(pool, liveness)
+        await run_loops(pool, liveness)
     finally:
         pool.close()
         await stop_health_server(health)

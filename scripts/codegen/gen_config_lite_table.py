@@ -126,7 +126,7 @@ if __name__ == "__main__":
 _ensure_index_present()
 
 from base.config.config_registry import (  # noqa: E402 — must follow the bootstrap above
-    _build_registry,
+    build_registry,
     field_alias,
     schema_extra,
 )
@@ -176,7 +176,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
     LiteField(
         "db_pool_acquire_timeout_seconds", "literal", None, "agent/db/__init__.py:28 module level"
     ),
-    LiteField("eval_isolation", "literal", None, "process_boot._apply_per_agent_eval_isolation"),
+    LiteField("eval_isolation", "literal", None, "process_boot.apply_per_agent_eval_isolation"),
     LiteField(
         "eval_network_allowlist",
         "factory_empty_list",
@@ -210,7 +210,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "sdk_disable",
         "factory_empty_list",
         None,
-        "exec child boot: _apply_per_agent_sdk_disable reads it after the overlay",
+        "exec child boot: apply_per_agent_sdk_disable reads it after the overlay",
     ),
 )
 
@@ -341,7 +341,7 @@ def _collect() -> tuple[
     list[str],
 ]:
     """Validate the manifest against the live registry and collect every table row."""
-    reg = _build_registry()
+    reg = build_registry()
     seen: set[str] = set()
     lite: list[tuple[str, _LiteRow]] = []
     for row in LITE_MANIFEST:

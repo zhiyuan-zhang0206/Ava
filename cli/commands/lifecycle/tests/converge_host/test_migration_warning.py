@@ -10,7 +10,7 @@ from base.deploy.schema import migrations
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import converge_host
 from cli.commands.lifecycle.tests.converge_host.context_inputs import converge_context as _ctx
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -31,7 +31,7 @@ class TestWarnUntrackedMigrations:
             "untracked_migration_files",
             lambda: ["20260808T010000_add-foo.sql"],
         )
-        converge_host._warn_untracked_migrations(
+        converge_host.warn_untracked_migrations(
             _ctx(
                 tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline
             )
@@ -50,7 +50,7 @@ class TestWarnUntrackedMigrations:
         operator_pipeline: Callable[[], EventPipeline],
     ) -> None:
         monkeypatch.setattr(migrations, "untracked_migration_files", list)
-        converge_host._warn_untracked_migrations(
+        converge_host.warn_untracked_migrations(
             _ctx(
                 tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline
             )

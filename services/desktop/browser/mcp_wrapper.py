@@ -20,7 +20,8 @@ one resident wrapper process per agent:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from mcp import types
@@ -44,7 +45,7 @@ def _retryable_rejection(exc: Exception) -> bool:
     return isinstance(exc, RuntimeError) and _UPSTREAM_DOWN_MSG in str(exc)
 
 
-class _Link(SocketLink):
+class Link(SocketLink):
     def __init__(
         self,
         reader: asyncio.StreamReader,
@@ -61,17 +62,27 @@ class _Link(SocketLink):
         )
 
 
-async def _connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    return await dial_unix_socket(str(chrome_mcp_socket()), service_label="chrome MCP daemon")
+def _connector(
+    socket_path: Path,
+) -> Callable[[], Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]]]:
+    async def connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        return await dial_unix_socket(str(socket_path), service_label="chrome MCP daemon")
+
+    return connect
 
 
 class _ReconnectingLink(ReconnectingLink):
     def __init__(
-        self, *, timeout_reader: Callable[[], float], max_retries: int = 5, base_delay: float = 1.0
+        self,
+        *,
+        socket_path: Path,
+        timeout_reader: Callable[[], float],
+        max_retries: int = 5,
+        base_delay: float = 1.0,
     ) -> None:
         super().__init__(
-            _connect,
-            lambda reader, writer: _Link(reader, writer, timeout_reader=timeout_reader),
+            _connector(socket_path),
+            lambda reader, writer: Link(reader, writer, timeout_reader=timeout_reader),
             max_attempts=max_retries + 1,
             base_delay=base_delay,
             retryable_rejection=_retryable_rejection,
@@ -79,8 +90,8 @@ class _ReconnectingLink(ReconnectingLink):
         )
 
 
-async def _serve(*, timeout_reader: Callable[[], float]) -> None:
-    link = _ReconnectingLink(timeout_reader=timeout_reader)
+async def _serve(*, socket_path: Path, timeout_reader: Callable[[], float]) -> None:
+    link = _ReconnectingLink(socket_path=socket_path, timeout_reader=timeout_reader)
 
     async def _list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
         tools = await link.request({"method": "list_tools"})
@@ -104,7 +115,12 @@ async def _serve(*, timeout_reader: Callable[[], float]) -> None:
 def main() -> None:
     config = ConfigBoot()
     config.boot()
-    asyncio.run(_serve(timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds))
+    asyncio.run(
+        _serve(
+            socket_path=chrome_mcp_socket(config.view.services.browser_cdp_port),
+            timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
+        )
+    )
 
 
 if __name__ == "__main__":

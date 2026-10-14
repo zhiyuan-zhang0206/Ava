@@ -12,10 +12,11 @@ from base.lm.catalog import ModelCatalog
 from base.lm.factory import validate_model_config
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources
+from base.packages.tests.model_catalog import AddModels
 from services.agent_runner.agent_host import dispatcher, settlement
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
-from services.agent_runner.agent_host.runtime import _config_fingerprint
+from services.agent_runner.agent_host.runtime import config_fingerprint
 from services.agent_runner.agent_host.tests.runtime.host_support import Build, Model, Row
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     host_plugin as host_plugin,
@@ -24,7 +25,6 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
     wired as wired,
 )
 from tests.components.base.poll_until import poll_until_async
-from tests.fixtures.model_catalog import AddModels
 
 
 class TestRejectedModelConfig:
@@ -469,7 +469,7 @@ class TestSchedulerIntegration:
 
         report = next(r for r in records if r.get("event") == "host_turn_crashed")
         assert report["exception_type"] == "ValueError"
-        assert report["config_fingerprint"] == _config_fingerprint(overlay, None)
+        assert report["config_fingerprint"] == config_fingerprint(overlay, None)
 
     async def test_a_wake_race_during_a_hosted_turn_still_runs_the_agent(
         self, wired: Build

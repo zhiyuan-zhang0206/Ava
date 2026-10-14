@@ -1,8 +1,48 @@
 exports = ["test_mcp_endpoint.py"]
 
-[uses]
-"test_mcp_guarded_creation.py" = ["test_mcp_endpoint.py"]
-"test_mcp_message_source.py" = ["test_mcp_endpoint.py"]
+[debt.env-patch]
+"test_mcp_endpoint.py#patch.dict os.environ" = 1
+"test_plugin_ui.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_schedule_runner.py#monkeypatch.delenv os.environ.AVA_SCHEDULE_ID" = 1
+"test_ui_contributions.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
-[debt.private-name]
-"test_mcp_guarded_creation.py -> test_mcp_endpoint.py#_enable_endpoint" = 1
+[debt.first-party-patch]
+"test_guarded_tool_admission.py#monkeypatch.setattr gateway.mcp_server.endpoint.build_manager" = 1
+"test_guide.py#monkeypatch.setattr gateway.routers.guide.create_and_launch_agent" = 1
+"test_inventory_router.py#monkeypatch.setattr gateway.cluster.snapshots.read_all_blocking" = 1
+"test_inventory_router.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 3
+"test_mcp_endpoint.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_mcp_endpoint.py#monkeypatch.setattr base.config.settings.gateway.mcp_endpoint_enabled" = 1
+"test_mcp_endpoint.py#monkeypatch.setattr gateway.agents.creation.create_and_launch_agent" = 1
+"test_mcp_endpoint.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
+"test_mcp_endpoint.py#monkeypatch.setattr gateway.mcp_server.endpoint.roster.list_directory" = 1
+"test_mcp_guarded_creation.py#monkeypatch.setattr gateway.agents.creation.create_and_launch_agent" = 2
+"test_mcp_guarded_creation.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
+"test_mcp_guarded_creation.py#monkeypatch.setattr gateway.agents.creation.spawn_prechecks_blocking" = 1
+"test_mcp_message_source.py#monkeypatch.setattr base.config.settings.gateway.mcp_endpoint_enabled" = 1
+"test_packages.py#monkeypatch.setattr gateway.extensions.packages.create_and_launch_agent" = 1
+"test_pages.py#monkeypatch.setattr base.config.settings.daemon.page_default_ttl_seconds" = 1
+"test_pages.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 1
+"test_plugin_ui.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_plugin_ui.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
+"test_plugin_ui.py#monkeypatch.setattr gateway.app.build_model_catalog" = 1
+"test_schedule_draft.py#monkeypatch.setattr gateway.schedules.router.create_and_launch_agent" = 1
+"test_schedule_runner.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 2
+"test_schedule_runner.py#monkeypatch.setattr base.config.settings.gateway.schedule_stall_timeout_seconds" = 2
+"test_schedule_runner.py#monkeypatch.setattr services.wake.schedule_manager.engine.Database.connect" = 2
+"test_schedule_runner.py#monkeypatch.setattr services.wake.schedule_manager.engine.base.host.proc.kill_process_tree" = 1
+"test_schedule_runner.py#monkeypatch.setattr services.wake.schedule_manager.engine.faulthandler.dump_traceback_later" = 1
+"test_schedule_runner.py#monkeypatch.setattr services.wake.schedule_manager.engine.os._exit" = 1
+"test_schedule_stall_guard.py#monkeypatch.setattr base.config.settings.gateway.schedule_stall_timeout_seconds" = 2
+"test_schedule_stall_guard.py#monkeypatch.setattr services.wake.schedule_manager.engine.stall_action" = 2
+"test_schedules_api.py#monkeypatch.setattr base.config.settings.display.schedules_runs_default_limit" = 1
+"test_schedules_api.py#monkeypatch.setattr gateway.schedules.session_control.capture" = 2
+"test_schedules_api.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 3
+"test_ui.py#monkeypatch.setattr ava.gateway_client.register_page" = 3
+"test_ui.py#monkeypatch.setattr ava.ui.page_host" = 1
+"test_ui_contributions.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_ui_contributions.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
+"test_ui_contributions.py#monkeypatch.setattr gateway.app.build_model_catalog" = 1
+
+[debt.stdlib-patch]
+"test_schedule_runner.py#monkeypatch.setattr sys.argv" = 1

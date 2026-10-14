@@ -22,6 +22,12 @@ from agent.extensions.plugin_state_codec import (
     decode_plugin_delta,
     encode_plugin_delta,
 )
+from agent.tests.impersonation.external_attachment import (
+    ExampleMessagesPlugin,
+    ExamplePlugin,
+    ExampleState,
+)
+from agent.tests.impersonation.external_attachment import attached_runtime as attached_runtime
 from ava import boot, gateway_client, impersonation
 from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import agent_identity, process_context
@@ -31,10 +37,8 @@ from base import telemetry
 from base.config import settings
 from base.db import Database
 from base.packages.plugin_providers import build_model_catalog
+from base.telemetry.otlp.tests.external_flush import HANDSHAKE_BOUND_S as _HANDSHAKE_BOUND_S
 from base.telemetry.otlp.tests.external_flush import paused_otlp_record as paused_otlp_record
-from tests.factories.external_attachment import HANDSHAKE_BOUND_S as _HANDSHAKE_BOUND_S
-from tests.factories.external_attachment import ExampleMessagesPlugin, ExamplePlugin, ExampleState
-from tests.factories.external_attachment import attached_runtime as attached_runtime
 
 
 def _skip_local_capture(event: telemetry.Event, **_kwargs: Any) -> telemetry.Event:
@@ -184,7 +188,7 @@ def _borrowed_agent_id() -> int | None:
 def _assert_detached() -> None:
     """After a detach the process holds no exec slot and no attached config."""
     assert not process_context.in_exec_turn()
-    assert _settings._attached() is None
+    assert _settings.attached_agent_view() is None
 
 
 def test_attach_refuses_inside_an_exec_turn(
@@ -515,7 +519,7 @@ def test_external_delta_rejects_full_history_reset_before_any_mutation(
             # A persisted envelope must pass the same check before native replay.
             import base64
 
-            encoding, payload = plugin_state_codec._serializer().dumps_typed(delta)
+            encoding, payload = plugin_state_codec.serializer().dumps_typed(delta)
             decode_plugin_delta(
                 {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")},
                 ExampleState,

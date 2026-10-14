@@ -38,11 +38,12 @@ def probe_protocol(protocol: Callable[[], bool | DaemonProbe]) -> DaemonProbe:
 
 
 def _observe(service: str) -> DaemonProbe:
+    from base.config import settings
     from base.paths import chrome_mcp_socket, computer_mcp_socket, mcp_daemon_shared_socket
     from base.sessions.pty.paths import service_socket_path
 
     sockets = {
-        "browser-mcp": chrome_mcp_socket,
+        "browser-mcp": lambda: chrome_mcp_socket(settings.services.browser_cdp_port),
         "computer-mcp": computer_mcp_socket,
         "mcp-daemon": mcp_daemon_shared_socket,
         "pty-sessions": service_socket_path,
@@ -50,13 +51,13 @@ def _observe(service: str) -> DaemonProbe:
     if service in sockets:
         return ping(sockets[service]())
     if service == "insights":
-        from services.supervision.healthchecks.insights import _probe as insights_probe
+        from services.supervision.healthchecks.insights import insights_probe as insights_probe
 
         return probe_protocol(insights_probe)
     if service == "memory-search":
-        from services.supervision.healthchecks.memory_search import _probe
+        from services.supervision.healthchecks.memory_search import memory_search_probe
 
-        return probe_protocol(_probe)
+        return probe_protocol(memory_search_probe)
     raise ValueError(f"unsupported protocol probe: {service}")
 
 

@@ -12,6 +12,7 @@ import pytest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig, db_config_from_boot
@@ -19,7 +20,6 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
 from services.agent_runner.agent_ops import daemon
-from tests.fixtures.configuration import snapshot_process_config
 
 
 class _ExitError(Exception):
@@ -122,7 +122,7 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
 
     monkeypatch.setattr(daemon, "install_graceful_shutdown", install_shutdown)
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
-    monkeypatch.setattr(daemon, "_main", run)
+    monkeypatch.setattr(daemon, "serve_ops_daemon", run)
     monkeypatch.setattr(daemon, "_hard_exit", hard_exit)
     try:
         with pytest.raises(_ExitError) as exited:

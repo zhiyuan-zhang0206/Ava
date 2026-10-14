@@ -191,7 +191,7 @@ def _passwordless_conninfo(db_url: str) -> tuple[str, str]:
     return conninfo, password if isinstance(password, str) else ""
 
 
-def _key_file(directory: Path) -> Path:
+def passphrase_key_file(directory: Path) -> Path:
     """A private temporary key file holding the pinned logical-backup passphrase."""
     return backup_passphrase.write_key_file(directory)
 
@@ -204,7 +204,7 @@ def decrypt_artifact(artifact: Path, custom_dump: Path) -> None:
     """
     custom_dump.touch(mode=0o600, exist_ok=False)
     custom_dump.chmod(0o600)
-    key_file = _key_file(custom_dump.parent)
+    key_file = passphrase_key_file(custom_dump.parent)
     try:
         proc = subprocess.run(  # noqa: S603
             [
@@ -352,7 +352,7 @@ def run_backup(
         # in-process snapshot's plaintext never waits for another snapshot.
         for swept in dict.fromkeys((backup_dir(), directory)):
             sweep_closed_partials(ensure_private_dir(swept))
-        target = _run_backup(
+        target = run_locked_backup(
             now,
             db=db,
             is_remote_reader=is_remote_reader,
@@ -441,7 +441,7 @@ def _log_written(target: Path, removed: list[Path]) -> None:
     )
 
 
-def _run_backup(
+def run_locked_backup(
     now: datetime | None = None,
     *,
     db: Database,
@@ -525,7 +525,7 @@ def _dump_and_encrypt(
 
     encrypted_partial.touch(mode=0o600, exist_ok=False)
     encrypted_partial.chmod(0o600)
-    key_file = _key_file(dump_partial.parent)
+    key_file = passphrase_key_file(dump_partial.parent)
     try:
         proc = run_with_progress(
             [
@@ -553,7 +553,7 @@ def _dump_and_encrypt(
             key_file.unlink(missing_ok=True)
 
 
-def _main(argv: list[str] | None = None) -> int:
+def run_offsite_publisher(argv: list[str] | None = None) -> int:
     """Run the detached, best-effort off-site backup publisher."""
     # Standalone runs leave the module's INFO records to lastResort (WARNING+
     # only): without this the store-verified publish ACK never appears, so a
@@ -594,4 +594,4 @@ def _main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(_main())
+    raise SystemExit(run_offsite_publisher())

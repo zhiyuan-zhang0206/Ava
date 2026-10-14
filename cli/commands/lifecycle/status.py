@@ -21,7 +21,7 @@ from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import service_selection
-from cli.commands._repo import _repo_root
+from cli.commands._repo import repo_root
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.bringup import print_data_plane_status
 from cli.commands.lifecycle.hold_report import print_hold_section
@@ -35,10 +35,10 @@ def root_tree_units() -> dict[str, dict[str, object]]:
     """Read one root snapshot; an unreachable root claims no running services."""
     from cli.commands.lifecycle import root_driver
 
-    status = root_driver._root_status(root_driver.root_client())
+    status = root_driver.root_status(root_driver.root_client())
     if status is None:
         return {}
-    return root_driver._root_units(status)
+    return root_driver.root_units(status)
 
 
 def _status_roster(
@@ -68,8 +68,8 @@ def cmd_status(
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands._repo as _repo_commands
 
-    repo = _repo_root()
-    roles = _repo_commands._roles_or_none(machine=machine)
+    repo = repo_root()
+    roles = _repo_commands.roles_or_none(machine=machine)
     print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
     print_hold_section()
     print()

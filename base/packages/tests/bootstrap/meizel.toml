@@ -1,0 +1,9 @@
+[debt.first-party-patch]
+"test_bootstrap_values.py#monkeypatch.setattr base.config.settings.agent.skills_to_inject_into_system_prompt" = 1
+"test_bootstrap_values.py#monkeypatch.setattr base.config.settings.general.machine_host" = 3
+"test_bootstrap_values.py#monkeypatch.setattr base.config.settings.observability.trace_retention_days" = 1
+"test_bootstrap_values.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 5
+"test_provider_keys.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
+
+[debt.unresolved-patch]
+"test_bootstrap_values.py#monkeypatch.setattr dp.db_url" = 1

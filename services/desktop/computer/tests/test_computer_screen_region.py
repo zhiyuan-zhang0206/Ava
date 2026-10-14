@@ -7,18 +7,36 @@ from pathlib import Path
 
 import pytest
 
-from base.host.permissions_helper.client import ScreenSize
+from base.host.permissions_helper.client import PermissionsHelperClient, ScreenSize
 
 from .. import screen
 from ..errors import ComputerUseError
 from ..targets import CaptureRegion
 
 
+class _Display(PermissionsHelperClient):
+    """A main display at (-400,-100) 800x600; a capture writes a PNG of `png` pixels."""
+
+    def __init__(self) -> None:
+        super().__init__("/nonexistent-test-helper.sock")
+        self.png: tuple[int, int] | None = (400, 200)
+        self.captured: list[tuple[int, int, int, int]] = []
+
+    def screen_size(self) -> ScreenSize:
+        return {"x": -400, "y": -100, "w": 800, "h": 600, "scale": 99}
+
+    def screencapture_region(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, x: int, y: int, w: int, h: int, path: str
+    ) -> None:
+        if self.png is None:
+            pytest.fail("out-of-display capture must not run")
+        self.captured.append((x, y, w, h))
+        _png(path, *self.png)
+
+
 @pytest.fixture
-def main_display(monkeypatch: pytest.MonkeyPatch) -> ScreenSize:
-    size: ScreenSize = {"x": -400, "y": -100, "w": 800, "h": 600, "scale": 99}
-    monkeypatch.setattr(screen.helper, "screen_size", lambda: size)
-    return size
+def helper() -> _Display:
+    return _Display()
 
 
 def _png(path: str, width: int, height: int) -> None:
@@ -28,23 +46,20 @@ def _png(path: str, width: int, height: int) -> None:
 
 
 def test_capture_preserves_origin_and_measures_retina_scale(
-    main_display: ScreenSize, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    helper: _Display, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "capture.png"
 
     def capture_path(_agent_id: int) -> Path:
         return path
 
-    monkeypatch.setattr(screen, "_snapshot_path", capture_path)
-    captured: list[tuple[int, int, int, int]] = []
-
-    def capture(x: int, y: int, w: int, h: int, output: str) -> None:
-        captured.append((x, y, w, h))
-        _png(output, 400, 200)
-
-    monkeypatch.setattr(screen.helper, "screencapture_region", capture)
-    assert screen.capture_region(7, CaptureRegion(-350, -50, 200, 100)) == (path, 2, (400, 200))
-    assert captured == [(-350, -50, 200, 100)]
+    monkeypatch.setattr(screen, "snapshot_path", capture_path)
+    assert screen.capture_region(helper, 7, CaptureRegion(-350, -50, 200, 100)) == (
+        path,
+        2,
+        (400, 200),
+    )
+    assert helper.captured == [(-350, -50, 200, 100)]
 
 
 @pytest.mark.parametrize(
@@ -56,28 +71,19 @@ def test_capture_preserves_origin_and_measures_retina_scale(
         CaptureRegion(0, 495, 10, 10),
     ],
 )
-def test_outside_main_display_fails_before_capture(
-    main_display: ScreenSize, region: CaptureRegion, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def forbidden_capture(*_args: object) -> None:
-        pytest.fail("out-of-display capture must not run")
-
-    monkeypatch.setattr(screen.helper, "screencapture_region", forbidden_capture)
+def test_outside_main_display_fails_before_capture(helper: _Display, region: CaptureRegion) -> None:
+    helper.png = None
     with pytest.raises(ComputerUseError, match="main display"):
-        screen.capture_region(7, region)
+        screen.capture_region(helper, 7, region)
 
 
 def test_unexpected_clipping_is_an_error(
-    main_display: ScreenSize, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    helper: _Display, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def capture_path(_agent_id: int) -> Path:
         return tmp_path / "capture.png"
 
-    monkeypatch.setattr(screen, "_snapshot_path", capture_path)
-
-    def clipped_capture(x: int, y: int, w: int, h: int, output: str) -> None:
-        _png(output, 400, 170)
-
-    monkeypatch.setattr(screen.helper, "screencapture_region", clipped_capture)
+    monkeypatch.setattr(screen, "snapshot_path", capture_path)
+    helper.png = (400, 170)
     with pytest.raises(ComputerUseError, match="dimensions"):
-        screen.capture_region(7, CaptureRegion(0, 0, 200, 100))
+        screen.capture_region(helper, 7, CaptureRegion(0, 0, 200, 100))

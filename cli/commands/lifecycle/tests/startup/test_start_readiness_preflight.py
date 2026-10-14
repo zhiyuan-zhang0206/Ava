@@ -26,7 +26,7 @@ from cli.commands import probe
 from cli.commands.lifecycle import _start_readiness_preflight as preflight
 from cli.commands.lifecycle import root_driver
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 class _Backend:
@@ -55,10 +55,10 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("logs", "workspaces", "memory"):
         (home / name).mkdir(parents=True)
     monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setattr(commands_repo, "_roles_or_none", read_roles)
+    monkeypatch.setattr(commands_repo, "roles_or_none", read_roles)
     monkeypatch.setattr(
         root_driver,
-        "_root_tree_roster",
+        "root_tree_roster",
         lambda *_a, **_k: (),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(migrations, "unreadable_migration_files", list)
@@ -120,7 +120,7 @@ def test_machine_role_missing_skips_ports_as_an_observation(
         del machine
         return None
 
-    monkeypatch.setattr(commands_repo, "_roles_or_none", read_roles)
+    monkeypatch.setattr(commands_repo, "roles_or_none", read_roles)
 
     assert _run(repo, command_runtime=command_runtime) == 0
 

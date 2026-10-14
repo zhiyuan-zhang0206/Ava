@@ -70,7 +70,7 @@ def replace_script(pool: Any, schedule_id: int, script: str, expected_sha256: st
     # First-generation bootstrap must use the already installed versioned writer.
     # Calling a newly introduced public owner would require deploying it first.
     # This narrow coupling is covered on 44d and current source; no SQL is copied.
-    from gateway.schedules.router import _update_blocking, fetch_full_blocking
+    from gateway.schedules.router import fetch_full_blocking, update_blocking
 
     previous = fetch_full_blocking(pool, schedule_id)
     actual = script_sha256(previous[9])
@@ -81,7 +81,7 @@ def replace_script(pool: Any, schedule_id: int, script: str, expected_sha256: st
         raise RuntimeError(
             f"schedule {schedule_id}: expected old script {expected_sha256}, found {actual}"
         )
-    row, _needs_sync = _update_blocking(pool, schedule_id, {"script": script})
+    row, _needs_sync = update_blocking(pool, schedule_id, {"script": script})
     # _FULL_COLS: identity/config/status/history facts precede updated_at/script.
     if row[:8] != previous[:8] or row[9] != script:
         raise RuntimeError(f"schedule {schedule_id}: installed writer changed protected fields")

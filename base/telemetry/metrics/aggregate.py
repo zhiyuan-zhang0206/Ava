@@ -96,6 +96,7 @@ class EventAggregate:
     ]  # (model, calls, in, out, cached, reasoning)
     llm_position: dict[str, tuple[int, int]]  # third -> (cache_read, in_total)
     llm_costs: dict[int | None, dict[str, LlmCostSums]]
+    llm_cache_input: dict[int | None, int]
     turn_total: int
     turn_ok: int
     turn_durations: list[float]
@@ -189,6 +190,7 @@ def fetch_aggregate(
         llm_by_model=_llm_by_model(data["llm_per_agent"]),
         llm_position=data["llm_position"],
         llm_costs=data["llm_costs"],
+        llm_cache_input=data["llm_cache_input"],
         turn_total=_total(rows, "turn_total"),
         turn_ok=_total(rows, "turn_ok"),
         turn_durations=lengths["turn_dur"],
@@ -219,7 +221,9 @@ def fetch_agent_rollups(
     raw: dict[int | None, dict[str, Any]] = data["per_agent"]
     per_agent = _per_agent_aggs(raw, datetime.now(UTC))
     total = sum(int(r["events"]) for r in raw.values())
-    return total, agent_rollups(per_agent, _llm_by_agent(data["llm_per_agent"]), data["llm_costs"])
+    return total, agent_rollups(
+        per_agent, _llm_by_agent(data["llm_per_agent"]), data["llm_costs"], data["llm_cache_input"]
+    )
 
 
 def _cost_totals(rows: Iterable[tuple[str, LlmCostSums]]) -> tuple[float, int]:
@@ -296,9 +300,10 @@ def _data_exec(agg: EventAggregate) -> dict[str, Any]:
 def _data_llm_turns(agg: EventAggregate) -> dict[str, Any]:
     """The `llm_turns` section data."""
     totals = _llm_totals_from_models(agg.llm_by_model, agg.llm_costs)
+    cache_input = sum(agg.llm_cache_input.values())
     # position thirds over each agent's llm_usage rows: (cache_read, in_total) sums.
     pos_hit = {
-        b: round(c / i * 100, 1) if i else 0.0
+        b: round(c / i * 100, 1) if i else (None if totals.tin else 0.0)
         for b, (c, i) in ((b, agg.llm_position.get(b, (0, 0))) for b in ("early", "mid", "late"))
     }
     turns_per_agent = [row.turn_total for row in agg.per_agent.values()]
@@ -308,7 +313,9 @@ def _data_llm_turns(agg: EventAggregate) -> dict[str, Any]:
         "tokens_out": totals.tout,
         "tokens_cached": totals.tcached,
         "tokens_reasoning": totals.treason,
-        "cache_hit_pct": round(totals.tcached / totals.tin * 100, 1) if totals.tin else 0.0,
+        "cache_hit_pct": round(totals.tcached / cache_input * 100, 1)
+        if cache_input
+        else (None if totals.tin else 0.0),
         "cache_hit_pct_by_position": pos_hit,
         "cost_usd": round(totals.cost, 4),
         "cost_unpriced_calls": totals.unpriced,
@@ -430,6 +437,7 @@ def agent_rollups(
     per_agent: dict[int | None, _PerAgentAgg],
     per_agent_llm: dict[int | None, list[tuple[str, int, int, int, int]]],
     costs: dict[int | None, dict[str, LlmCostSums]],
+    cache_inputs: dict[int | None, int],
 ) -> dict[int, dict[str, Any]]:
     """Per-agent headline counters for `/api/metrics/agents` (service rows excluded)."""
     out: dict[int, dict[str, Any]] = {}
@@ -441,6 +449,7 @@ def agent_rollups(
         tin = sum(r[2] for r in usage)
         tout = sum(r[3] for r in usage)
         tcached = sum(r[4] for r in usage)
+        cache_input = cache_inputs.get(aid, 0)
         cost, _unpriced = _cost_totals(costs.get(aid, {}).items())
         out[aid] = {
             "events": row.events,
@@ -449,7 +458,9 @@ def agent_rollups(
             "tokens_in": tin,
             "tokens_out": tout,
             "tokens_cached": tcached,
-            "cache_hit_pct": round(tcached / tin * 100, 1) if tin else 0.0,
+            "cache_hit_pct": round(tcached / cache_input * 100, 1)
+            if cache_input
+            else (None if tin else 0.0),
             "turn_ok": row.turn_ok,
             "turn_total": row.turn_total,
             "exec_ok": row.exec_ok,

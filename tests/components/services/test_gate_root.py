@@ -21,7 +21,7 @@ from base import paths
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.native_process.root_control.client import owned_process
-from services.entrypoints.gate.tests.test_gate import FakeApp, FakeGateway, Servers, _request
+from services.entrypoints.gate.tests.test_gate import FakeApp, FakeGateway, Servers, gate_request
 from services.entrypoints.gate.tests.test_gate import servers as servers
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.server import ControlServer
@@ -109,7 +109,7 @@ def test_gate_health_is_independent_of_auth_and_application(servers: Servers) ->
     from base.paths import ava_home
 
     FakeGateway.down = True
-    status, body, headers = _request(servers["gate"] + "/__ava/healthz")
+    status, body, headers = gate_request(servers["gate"] + "/__ava/healthz")
     assert status == 200
     assert headers["Cache-Control"] == "no-store"
     assert json.loads(body) == {"name": "gate", "home": str(ava_home()), "pid": os.getpid()}
@@ -118,7 +118,7 @@ def test_gate_health_is_independent_of_auth_and_application(servers: Servers) ->
 
 
 def test_gate_health_rejects_post(servers: Servers) -> None:
-    status, _body, headers = _request(servers["gate"] + "/__ava/healthz", method="POST")
+    status, _body, headers = gate_request(servers["gate"] + "/__ava/healthz", method="POST")
     assert status == 405
     assert headers["Allow"] == "GET"
     assert FakeGateway.requests == 0

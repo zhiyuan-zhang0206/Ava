@@ -19,7 +19,7 @@ effect (Task #961).
 A central DB pool is shared across all ops; each op manages its connection
 lifetime via `pool.connection()`. Threading: `spawn` / `lifecycle` run on the
 event loop; every other arm is synchronous on this daemon's own pool
-(`_dispatch_sync`, the thin binding of `services.agent_runner.agent_ops.dispatch_sync`) —
+(`bind_dispatch_sync`, the thin binding of `services.agent_runner.agent_ops.dispatch_sync`) —
 none may hold the loop (see that module; `_hard_exit` skips interpreter
 teardown).
 """
@@ -134,7 +134,7 @@ async def run_arm(
         future = loop.run_in_executor(
             executor,
             functools.partial(
-                _dispatch_sync,
+                bind_dispatch_sync,
                 kind,
                 payload,
                 pool=pool,
@@ -151,7 +151,7 @@ async def run_arm(
             active_ops.pop(kind)
 
 
-def _dispatch_sync(
+def bind_dispatch_sync(
     kind: str,
     payload: dict[str, Any],
     *,
@@ -549,7 +549,7 @@ async def ops_route(
     )
 
 
-async def _main(
+async def serve_ops_daemon(
     *,
     database: Callable[[], Database],
     image: LoadedCommit,
@@ -691,7 +691,11 @@ def main(*, argv: list[str] | None = None) -> None:
         install_graceful_shutdown("ops")
         runner = asyncio.Runner()
         try:
-            runner.run(_main(database=database, image=image, local_machine=machine, config=config))
+            runner.run(
+                serve_ops_daemon(
+                    database=database, image=image, local_machine=machine, config=config
+                )
+            )
         except KeyboardInterrupt as exc:
             primary = exc
             _log.info("[ops] interrupted, shutting down")
@@ -701,7 +705,7 @@ def main(*, argv: list[str] | None = None) -> None:
                 code = 1
         except Exception as exc:
             primary = exc
-            _log.exception("[ops] daemon crashed — uncaught exception escaped _main()")
+            _log.exception("[ops] daemon crashed — uncaught exception escaped serve_ops_daemon()")
             code = 1
     finally:
         failure = primary if primary is not None else sys.exception()

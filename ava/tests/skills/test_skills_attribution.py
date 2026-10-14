@@ -9,8 +9,8 @@ import pytest
 import ava.skills as skills_mod
 from ava.sdk_surface import agent_identity
 from ava.sdk_surface.installation import Installation
-from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
+from ava.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_enabled
 from ava.tests.skills._skills_helpers import write_skill
 from base import telemetry
 from base.agents.context import AvaContext
@@ -369,7 +369,7 @@ def test_consuming_a_skill_lands_a_skill_invoked_row(
     `skill_invoked` row in `audit_events` for the consuming agent, carrying the
     `loaded` depth the self-evolution collector scores — one row per
     consumption, written at the call, with nothing held in this process."""
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     agent_id = spawn_agent(

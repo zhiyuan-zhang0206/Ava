@@ -1,0 +1,22 @@
+[debt.first-party-patch]
+"test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr ops.cluster.operations.cluster_status_op" = 1
+"test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr ops.host_config.config_audit_read_op" = 1
+"test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr ops.host_config.config_read_op" = 1
+"test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr ops.host_config.config_write_op" = 2
+"test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr ops.inventory.inventory_read_op" = 1
+"test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr ops.inventory.inventory_write_op" = 1
+"test_dispatch_resource_binding.py#monkeypatch.setattr ops.cluster.operations.cluster_status_op" = 1
+"test_idempotent_connection_retry.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon._sleep" = 3
+"test_idempotent_connection_retry.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.dispatch_idempotent_pass" = 3
+"test_idempotent_receipts.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.DEDUP_WAIT_ATTEMPTS" = 2
+"test_idempotent_receipts.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.DEDUP_WAIT_STEP_S" = 2
+"test_idempotent_receipts.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon._dispatch" = 2
+"test_idempotent_receipts.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.lifecycle.launch_agent_op" = 3
+"test_idempotent_receipts.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.lifecycle.lifecycle_op" = 1
+"test_ops_route_non_json_values_degrade_to.py#monkeypatch.setattr base.cluster.machines.register_self" = 2
+"test_ops_route_non_json_values_degrade_to.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon._dispatch" = 4
+"test_ops_route_non_json_values_degrade_to.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.bind_dispatch_sync" = 1
+"test_ops_route_non_json_values_degrade_to.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.lifecycle.launch_agent_op" = 2
+
+[debt.unresolved-patch]
+"test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr op_executor.shutdown" = 1

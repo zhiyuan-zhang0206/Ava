@@ -1,0 +1,19 @@
+[debt.env-patch]
+"test_manager_pty.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_manager_pty.py#monkeypatch.setitem os.environ.AVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_manager_pty.py#monkeypatch.setattr services.wake.schedule_manager.manager.REPO_ROOT" = 1
+"test_requests.py#monkeypatch.setattr gateway.schedules.session_control.CONSUME_WAIT_S" = 1
+"test_requests.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 2
+"test_revision_recovery.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
+"test_revision_recovery.py#monkeypatch.setattr base.deploy.maintenance.admission.held" = 1
+"test_revision_recovery.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.current_generation" = 1
+"test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.get_shell_backend" = 1
+"test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.telemetry.emit" = 1
+"test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.time.monotonic" = 1
+"test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.revisions.client.list_sessions" = 3
+
+[debt.unresolved-patch]
+"test_manager_pty.py#monkeypatch.setattr mgr._mark_running" = 1
+"test_revision_recovery.py#monkeypatch.setattr backend.new_session" = 3

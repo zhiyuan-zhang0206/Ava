@@ -2,17 +2,48 @@ exports = ["claim"]
 
 [uses]
 "compact" = ["claim", "test_compact.py"]
-"history" = ["claim"]
-"impersonation" = ["_fakes.py"]
 "state_slot" = ["test_state_slot.py"]
+"test_external.py" = ["impersonation"]
 
 [external]
 "test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 
+[debt.env-patch]
+"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONIOENCODING" = 1
+"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONPATH" = 1
+"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONUTF8" = 1
+"test_external.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+"test_external_integration_agent.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+"test_resource_admission.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_compact_part2.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
+"test_external.py#monkeypatch.setattr ava.boot.ensure_plugins_loaded" = 1
+"test_external.py#monkeypatch.setattr ava.gateway_client.send_message" = 2
+"test_external.py#monkeypatch.setattr ava.impersonation.attachment.control.require_active" = 3
+"test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.capture_local_event" = 2
+"test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
+"test_external.py#monkeypatch.setattr base.agents.impersonation.manifest.seal_local_participant" = 3
+"test_external.py#monkeypatch.setattr base.telemetry.sync" = 3
+"test_external_integration_agent.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"test_external_integration_agent.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
+"test_external_integration_agent.py#monkeypatch.setattr ava.impersonation.attachment.process_metadata" = 3
+"test_external_integration_agent.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1
+"test_hosted_ownership_agent.py#monkeypatch.setattr agent.ownership.hosted.publish_agent_updated" = 1
+"test_hosted_ownership_agent.py#monkeypatch.setattr agent.ownership.hosted_cleanup.publish_agent_updated" = 1
+
 [debt.private-name]
-"compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_ava_compact_loaded" = 1
 "compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_config" = 1
-"state_slot/test_exec_node_preserves_state_update_on_lifecycle.py -> test_state_slot.py#_reset_state_slot" = 1
 
 [debt.restricted-python]
 "test_compact.py#string patch target 'agent.graph.hooks.compact.resolve_context_budget'" = 1
+
+[debt.stdlib-patch]
+"test_exec_subprocess.py#monkeypatch.setattr time.monotonic" = 1
+
+[debt.third-party-patch]
+"test_checkpoint_serde.py#monkeypatch.setattr langgraph.checkpoint.serde.jsonplus._warned_unregistered_types" = 1
+"test_exec_subprocess.py#monkeypatch.setattr psutil.Process" = 2
+
+[debt.unresolved-patch]
+"test_external.py#monkeypatch.setattr attachment.flush" = 4

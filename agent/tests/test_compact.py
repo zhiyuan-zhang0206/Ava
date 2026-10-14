@@ -441,7 +441,7 @@ async def test_auto_compact_hook_emits_compact_done_on_success(
 
 
 @pytest.fixture
-def _ava_compact_loaded():
+def ava_compact_loaded():
     """Compact is built-in (Issue #1284). The wrapper function lives in
     agent.graph.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
@@ -453,10 +453,10 @@ def _ava_compact_loaded():
 
 
 async def test_compact_reminder_passthrough_none(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """inner auto_compact_for_llm returns None (under threshold) → wrap also returns None."""
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, wrap_fn = ava_compact_loaded
 
     patch_compact_config(monkeypatch, auto_compact_tokens=1_000_000)
     state = state_cls(
@@ -478,12 +478,12 @@ def _over_threshold_messages() -> list[AnyMessage]:
 
 
 async def test_compact_reminder_zero_to_one(
-    _ava_compact_loaded: tuple[type[AgentState], object],
+    ava_compact_loaded: tuple[type[AgentState], object],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     """First compact successful → compact.version increments from 0 to 1, dict contains messages."""
-    state_cls, _ = _ava_compact_loaded
+    state_cls, _ = ava_compact_loaded
     wrap_fn = auto_compact_for_llm
 
     patch_compact_config(monkeypatch, auto_compact_tokens=1)
@@ -501,12 +501,12 @@ async def test_compact_reminder_zero_to_one(
 
 
 async def test_compact_reminder_increments_from_existing(
-    _ava_compact_loaded: tuple[type[AgentState], object],
+    ava_compact_loaded: tuple[type[AgentState], object],
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     """Not first compact: state already has compact.version=5 → wrap increments to 6."""
-    state_cls, _ = _ava_compact_loaded
+    state_cls, _ = ava_compact_loaded
     wrap_fn = auto_compact_for_llm
 
     patch_compact_config(monkeypatch, auto_compact_tokens=1)

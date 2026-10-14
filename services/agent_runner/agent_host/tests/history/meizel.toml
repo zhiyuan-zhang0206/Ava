@@ -3,9 +3,26 @@ exports = ["test_hosted_compact_failure.py"]
 [uses]
 "compaction" = ["test_hosted_compact_failure.py"]
 
-[debt.private-name]
-"compaction/helpers.py -> test_hosted_compact_failure.py#_prepare_graph" = 1
+[debt.first-party-patch]
+"test_checkpoint_parent_guard.py#monkeypatch.setattr base.config.settings.agent.checkpoint_interval" = 2
+"test_hosted_checkpoint_diagnostics.py#monkeypatch.setattr base.config.settings.agent.checkpoint_interval" = 1
+"test_hosted_cold_history.py#monkeypatch.setattr services.agent_runner.agent_host.host.admit_stored_model" = 1
+"test_hosted_cold_history.py#monkeypatch.setattr services.agent_runner.agent_host.host.close_hosted_turn" = 1
+"test_hosted_cold_history.py#monkeypatch.setattr services.agent_runner.agent_host.host.publish_agent_updated" = 1
+"test_hosted_cold_history.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.boot_agent_scope" = 1
+"test_hosted_trace_checkpoint.py#monkeypatch.setattr services.agent_runner.agent_host.host.turn_span" = 1
+"test_pooled_checkpoint.py#monkeypatch.setattr base.config.settings.agent.checkpoint_interval" = 1
 
 [debt.restricted-python]
 "test_hosted_compact_failure.py#string patch target 'agent.graph.hooks.compact.generate_summary'" = 1
 "test_hosted_compact_failure.py#string patch target 'services.agent_runner.agent_host.runtime.validate_model_config'" = 1
+
+[debt.third-party-patch]
+"test_pooled_checkpoint.py#monkeypatch.setattr psycopg.Capabilities.has_pipeline" = 1
+
+[debt.unresolved-patch]
+"test_hosted_cold_history.py#monkeypatch.setattr host._drive_turns" = 1
+"test_hosted_cold_history.py#monkeypatch.setattr saver.aget_delta_channel_history" = 1
+"test_hosted_compact_failure.py#monkeypatch.setattr host._drive_turns" = 1
+"test_hosted_compact_failure.py#monkeypatch.setattr host._runtime_for" = 1
+"test_pooled_checkpoint.py#monkeypatch.setattr saver.SELECT_SQL" = 1

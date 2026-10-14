@@ -279,8 +279,9 @@ a declared edge would go:
 - edge violations (`undeclared-edge`, `not-exported`, `private-module`,
   `private-name`) belong to the lowest common directory of the fact edge;
 - file violations (`restricted-python`) belong to the directory of the file;
-- a cycle is recorded as the declared edges allowed to close it: the local graph
-  without them must be acyclic.
+- a cycle is recorded as the facts on the declared edges that close it
+  (`cycle-edge`, counted per source and target file); the local graph without
+  those edges must be acyclic.
 
 Entries are keyed by code, source, target or name, with a count and no line
 number, so moving code does not rewrite the baseline. Tables are sorted and one
@@ -314,3 +315,119 @@ The tool provides mechanisms: `record` can raise a baseline, and `diff` leaves
 fail-or-warn to its caller (the flag is required). How a repository wires the
 depths into hooks and CI, and whether growth fails or warns, is repository
 policy and is decided with the gate that turns meizel on, not here.
+
+## Addendum (2026-10-13): patching first-party code is a diagnostic
+
+The Decision says that tests "inject collaborators or patch through the object
+form", and keeps the object forms legal. That is withdrawn. A test that needs
+`monkeypatch` or `patch` to replace first-party code shows a dependency that was
+not injected: the code under test reaches its collaborator through a module or
+class attribute instead of receiving it. A better patch does not fix that. The
+fix is structural: a public facade over an implementation whose dependencies are
+explicit parameters, and a test that passes the fake in directly.
+
+Meizel therefore reports `first-party-patch` for these calls when their target
+resolves, through the file's imports, to a first-party module or object:
+
+- `mock.patch.object`, `mock.patch.multiple` (one site per patched name) and
+  `mock.patch.dict`;
+- `monkeypatch.setattr` and `monkeypatch.delattr`.
+
+String targets stay `restricted-python`, since they hide the dependency from
+the checker; they are not counted twice.
+
+**Boundary.** The rule covers first-party targets only. Patching the standard
+library or a third-party package (`time.sleep`, `requests.get`, `os.environ`),
+`monkeypatch.setenv`/`delenv`, `setitem`/`delitem` on first-party dicts, and
+targets the file cannot resolve to an import (a class defined in the same file,
+an argument, `self.attr`) are not reported. Whether to widen the rule to any of
+these is a separate decision.
+
+The diagnostic is recorded and repaid like any other. Its debt is owned by the
+directory of the patching file and keyed by form and dotted target without a line
+number, so the existing patches enter the baselines of their directories and the
+rule fails every new one. Widening a rule is the one case in which a baseline
+legitimately grows at the moment the rule is introduced; the gate's `debt diff`
+step reports that growth like any other.
+
+## Addendum (2026-10-13): cycle debt is counted per fact
+
+The first form of cycle debt recorded the declared edges that were allowed to
+close a cycle. That is a projected edge, so every new import between the two
+children rode on the existing record, which is the opposite of strict-to-be.
+Cycle debt is now recorded like every other: as facts. `cycle-edge` entries are
+keyed by source and target file with a count, and the edges they project onto are
+the back-edges, so a new file or another import line on a back-edge fails, and
+the recorded facts can only shrink. The declared graph without the back-edges must
+still be acyclic (`manifest-cycle`), and an edge that closes no cycle any more, or
+is no longer declared, makes its entries `debt-paid`. The totals reported by
+`debt` rise, since a back-edge used by many files now carries many entries; that
+is the true size of the debt.
+
+## Addendum (2026-10-14): narrowed endpoints
+
+The declaration `a -> b` joins two children of a directory, and the rule judges a
+fact by the lowest common directory of its ends. Some invariants are narrower
+than that: the kernel may be used by one service and by no other. A child-level
+edge cannot say it, and without a way to say it a second tool has to keep
+guarding it (import-linter's `services` / `agent` contract).
+
+An endpoint of an edge in `[uses]` may now be any tracked path below the
+directory, relative to it: `"services/agent_runner/agent_host" = ["agent/process_boot.py"]`.
+A fact is covered when its source lies under a declared source and its target
+under that pair's target; a plain child name means the child itself, so
+existing manifests are unchanged. The graph on which cycles are checked is the
+projection onto direct children, so the model, the acyclicity at every level and
+the declared-edge-per-directory review stay as they were. A narrowed pair that no
+fact matches is stale like any other, and `sync --declare` never widens one: a
+fact from a source the narrowing does not authorise stays an error for a person
+to judge. This is the same idea as visibility in Bazel, applied in the directory
+where the two sides meet.
+
+## Addendum (2026-10-14): hard-coded allowances
+
+Rules that rely on reviewers noticing are not rules. Everything a rule lets pass
+by someone's say-so is now either in the baselines, which only shrink and which
+CI refuses to grow, or in one file.
+
+- **One list.** `meizel.policy.toml` holds every allowance: the `[external]` sites
+  with their reason, the `[loads]` sites with their directories, and a closed,
+  empty `[default-arguments]`. A manifest that uses one of these forms at a site
+  the file does not list is an error (`unlisted-allowance`); the reason written in
+  the manifest no longer counts. The initial content is today's sites. A change to
+  the file is listed by `policy diff` in the CI log and check summary; it informs,
+  it does not block.
+- **Patching is debt of every kind.** The earlier boundary (patching the standard
+  library, a third-party package or the environment, and targets that do not
+  resolve, were not reported) is withdrawn. `stdlib-patch`, `third-party-patch`,
+  `env-patch` (`monkeypatch.setenv/delenv`, `os.environ`) and `unresolved-patch`
+  join `first-party-patch`, each recordable and shrink-only. An unresolved target
+  is not a way around the rule: only what is already in the baseline passes.
+- **Growth fails.** CI runs `debt diff` with `--on-growth=fail`. The one waiver is
+  decided by path, not by a reader: a change that edits meizel's rule code (Python
+  files under `meizel/` outside tests) reports growth as a warning, because
+  widening a rule legitimately grows the baselines.
+- **Default-argument injection** stays closed. If it is ever opened, the allowed
+  values go into `[default-arguments]` and the tool checks them.
+
+## Addendum (2026-10-14): the waiver is for pure rule changes, and the lints' exemptions join the policy
+
+Two gaps in the hard-coded allowances, found when a rename in another line happened to edit
+an allowlist inside `meizel/`.
+
+- **The waiver is for a pure rule change.** The earlier test (the change edits Python under
+  `meizel/` outside tests) let any pull request that touched one such file, for any reason, grow
+  the baselines. Now both conditions must hold: the change edits meizel's rule code, and every
+  file it changes is under `meizel/`, a `meizel.toml` baseline or `meizel.policy.toml`
+  (`debt diff --waive-if-changed ... --waive-only-within ...`). A change that also edits product
+  code or tests is not waived, so a rule change gets its own pull request and its reviewer sees at
+  once what it is. Baselines and the policy are part of a rule change because widening a rule
+  moves them; they alone, without rule code, are not.
+- **Every exemption is in the policy.** The lint rules in `meizel/` kept their own lists of what
+  they let through: the ambient-state facades, wiring and pure callees, the clock-lattice
+  exemptions, the single-owner `postgres-dial` exemptions, the `os.environ` files and variables,
+  the per-agent settings files, the `TYPE_CHECKING` files. They now live in `meizel.policy.toml`,
+  one table per rule, each entry with its reason, and the rule modules only read them
+  (`meizel/allowances.py` owns the format). `policy diff` reports a change to any of them in CI, so
+  rule code holds no exemption of its own. The lists in `scripts/` outside `meizel/` are not moved
+  by this change.

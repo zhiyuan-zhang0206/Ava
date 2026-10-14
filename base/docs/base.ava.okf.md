@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`base/` is the foundational library layer shared by all subsystems in the Ava project. It defines cross-process data contracts, a unified abstraction for LLM providers, cluster management primitives, structured logging, and system-level metrics. According to import-linter's layer constraints, `base` is the bottom layer—agent, gateway, cli can all import it, but it does not import any upper-layer modules.
+`base/` is the foundational library layer shared by all subsystems in the Ava project. It defines cross-process data contracts, a unified abstraction for LLM providers, cluster management primitives, structured logging, and system-level metrics. According to the layering in the root manifest, `base` is the bottom layer—agent, gateway, cli can all import it, but it does not import any upper-layer modules.
 
 ## Core responsibilities
 

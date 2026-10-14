@@ -16,11 +16,11 @@ from base.agents.context.clients import DatabaseFactory
 from base.telemetry import EventPipeline
 from cli.commands._setup import collect_setup_values as _real_collect_setup_values
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
-    _hermetic_start as _hermetic_start,
+    hermetic_start as hermetic_start,
 )
 from cli.database.runtime import CommandRuntime
-from cli.tests._commands_helpers import _FakeResult, _git_aware
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_fakes import FakeResult, git_aware
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.roster.service_spec import ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
@@ -44,7 +44,7 @@ def test_cmd_start_needs_no_tty(
     monkeypatch.setattr(
         subprocess,
         "run",
-        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
+        git_aware(lambda *_a, **_kw: FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert (
         _start_commands.cmd_start(
@@ -77,7 +77,7 @@ def test_root_launch_uses_the_start_callers_child_owner(
         owner_at_launch.append(retained_children)
         return _root_driver_commands.LaunchOutcome(roster, ())
 
-    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
+    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
     assert (
         _start_commands.cmd_start(
             retained_children=children,
@@ -105,7 +105,7 @@ def test_cmd_start_aborts_when_schema_mismatched(
 
     _ = tmp_path
     launch = MagicMock()
-    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
+    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
     monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 1)
 
     rc = _start_commands.cmd_start(
@@ -287,7 +287,7 @@ def test_start_refuses_capabilities_that_differ_from_the_ones_init_recorded(
     )
     monkeypatch.setattr(paths, "ava_home", lambda: home)
     launch = MagicMock()
-    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
+    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
 
     # The hermetic start resolves a gateway-only unit; the intent says agent-runner.
     assert (

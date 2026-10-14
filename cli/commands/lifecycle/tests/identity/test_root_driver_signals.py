@@ -81,11 +81,11 @@ def test_signals_reject_reuse_inside_legacy_birth_tolerance(
     monkeypatch.setattr(OwnedProcess, "live", live)
     monkeypatch.setattr(OwnedProcess, "capture", staticmethod(capture))
     monkeypatch.setattr(OwnedProcess, "birth_matches", legacy_match)
-    monkeypatch.setattr(driver, "_require_root_owner", owned)
-    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: False)
+    monkeypatch.setattr(driver, "require_root_owner", owned)
+    monkeypatch.setattr(driver, "helper_spawn_committed", lambda: False)
     with pytest.raises(RuntimeError, match="identity changed"):
         snapshot = {"root": {"pid": old.pid, "create_time": old.birth, "starttime": old.starttime}}
-        driver._stop_root_process(tmp_path, object(), snapshot, timeout_s=0)
+        driver.stop_root_process(tmp_path, object(), snapshot, timeout_s=0)
     assert signals == []
 
 
@@ -126,11 +126,11 @@ def test_root_signals_use_start_ticks_when_wall_birth_moves(
     monkeypatch.setattr(psutil, "Process", process)
     monkeypatch.setattr(OwnedProcess, "capture", staticmethod(capture))
     monkeypatch.setattr(OwnedProcess, "live", live)
-    monkeypatch.setattr(driver, "_require_root_owner", ignore)
-    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: False)
-    monkeypatch.setattr(driver, "_root_status", ignore)
+    monkeypatch.setattr(driver, "require_root_owner", ignore)
+    monkeypatch.setattr(driver, "helper_spawn_committed", lambda: False)
+    monkeypatch.setattr(driver, "root_status", ignore)
     snapshot = {"root": {"pid": captured.pid, "create_time": captured.birth, "starttime": 100}}
-    driver._stop_root_process(tmp_path, object(), snapshot, timeout_s=1)
+    driver.stop_root_process(tmp_path, object(), snapshot, timeout_s=1)
     assert signals == ["term"]
 
 
@@ -149,18 +149,18 @@ def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(
 
     def await_status(_client: object, _run_dir: Path, **_kwargs: object) -> dict[str, Any]:
         if readiness_fails:
-            raise driver._RootDriverError("readiness failed")
+            raise driver.RootDriverError("readiness failed")
         return status()
 
-    monkeypatch.setattr(driver, "_root_argv", command)
-    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: False)
-    monkeypatch.setattr(driver, "_await_root_status", await_status)
+    monkeypatch.setattr(driver, "root_argv", command)
+    monkeypatch.setattr(driver, "helper_spawn_committed", lambda: False)
+    monkeypatch.setattr(driver, "await_root_status", await_status)
     children: list[subprocess.Popen[bytes]] = []
     try:
-        driver._bring_up_root(
+        driver.bring_up_root(
             tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=children
         )
-    except driver._RootDriverError:
+    except driver.RootDriverError:
         assert readiness_fails
     else:
         assert not readiness_fails

@@ -1,6 +1,6 @@
 """The standalone `--publish-offsite` entry: success and failure both leave evidence on stderr.
 
-Each case runs `services.backup.dump._main` in a fresh interpreter (`child_offsite_entry.py`)
+Each case runs `services.backup.dump.run_offsite_publisher` in a fresh interpreter (`child_offsite_entry.py`)
 against the in-memory OSS fake of `services/backup/artifact/tests/oss_fake.py`.
 """
 

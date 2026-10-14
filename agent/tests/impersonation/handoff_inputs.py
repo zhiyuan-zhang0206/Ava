@@ -35,6 +35,7 @@ from base.agents.history.checkpoint_postgres_walks import (
 )
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.impersonation.notes import HandoffNotes
+from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
@@ -42,6 +43,7 @@ from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -49,9 +51,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from tests.impersonation_support import attested_caller, recorded_tree
 
 __all__ = [
     "HandoffState",
@@ -422,7 +422,7 @@ async def stop_takeover_with_lost_relay(
     relays: RelaySupervision,
 ) -> str:
     """Observe unknown legacy relay custody without revoking the executor lease."""
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     session = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert session is not None
     await impersonation.supervise_relay(

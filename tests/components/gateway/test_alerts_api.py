@@ -49,7 +49,7 @@ def native_sender(callback: Callable[[str], bool]) -> Callable[[int], bool]:
     return send
 
 
-def _alert(
+def alert(
     *,
     status: str = "firing",
     alertname: str = "test-rule",
@@ -76,19 +76,19 @@ def _alert(
     }
 
 
-def _webhook(
+def webhook(
     status: str = "firing",
     alerts: list[dict[str, Any]] | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": status,
-        "alerts": alerts or [_alert(status=status, **extra)],
+        "alerts": alerts or [alert(status=status, **extra)],
     }
     return payload
 
 
-def _ingest(
+def ingest(
     client: TestClient,
     payload: dict[str, Any],
     token: str = "test-token",  # noqa: S107 — test token fixture value
@@ -109,7 +109,7 @@ def client() -> Any:
 
 
 @pytest.fixture(autouse=True)
-def _alerts_auth_and_im(monkeypatch: pytest.MonkeyPatch) -> None:
+def alerts_auth_and_im(monkeypatch: pytest.MonkeyPatch) -> None:
     """Webhook token set (loopback trust off) + IM fan-out mocked."""
 
     monkeypatch.setattr(settings.alerts, "webhook_token", SecretStr("test-token"))
@@ -128,7 +128,7 @@ def test_ingest_firing_inserts_row_and_notifies(db_conn: psycopg.Connection) -> 
     """A firing webhook inserts one row (unresolved), notifies IM once, stamps
     notified_at."""
     with TestClient(app) as client:
-        resp = _ingest(client, _webhook())
+        resp = ingest(client, webhook())
         assert resp.status_code == 200
         assert resp.json() == {"processed": 1, "inserted": 1, "updated": 0, "notified": 1}
 
@@ -149,8 +149,8 @@ def test_ingest_dedups_same_instance(db_conn: psycopg.Connection) -> None:
     duplicate it — and a still-firing instance that already notified stays
     silent on IM."""
     with TestClient(app) as client:
-        _ingest(client, _webhook())
-        resp = _ingest(client, _webhook(summary="updated summary"))
+        ingest(client, webhook())
+        resp = ingest(client, webhook(summary="updated summary"))
         assert resp.json()["inserted"] == 0
         assert resp.json()["updated"] == 1
         assert resp.json()["notified"] == 0
@@ -169,8 +169,8 @@ def test_ingest_severity_escalation_updates_instance_and_renotifies(
 ) -> None:
     """Escalation is a new firing transition on the existing instance."""
     with TestClient(app) as client:
-        warning = _ingest(client, _webhook(severity="warning"))
-        error = _ingest(client, _webhook(severity="error"))
+        warning = ingest(client, webhook(severity="warning"))
+        error = ingest(client, webhook(severity="error"))
 
     assert warning.json()["notified"] == 1
     assert error.json()["notified"] == 1
@@ -185,8 +185,8 @@ def test_ingest_severity_downgrade_does_not_renotify(
 ) -> None:
     """A lower class carries no new urgent information for the owner."""
     with TestClient(app) as client:
-        error = _ingest(client, _webhook(severity="error"))
-        warning = _ingest(client, _webhook(severity="warning"))
+        error = ingest(client, webhook(severity="error"))
+        warning = ingest(client, webhook(severity="warning"))
 
     assert error.json()["notified"] == 1
     assert warning.json()["notified"] == 0
@@ -200,10 +200,10 @@ def test_ingest_resolved_flips_row_and_notifies_recovery(db_conn: psycopg.Connec
     """A resolved webhook for a notified firing flips status + sets ends_at
     and notifies the recovery line."""
     with TestClient(app) as client:
-        _ingest(client, _webhook())
-        resp = _ingest(
+        ingest(client, webhook())
+        resp = ingest(
             client,
-            _webhook(status="resolved", ends_at="2026-08-04T11:00:00Z"),
+            webhook(status="resolved", ends_at="2026-08-04T11:00:00Z"),
         )
         assert resp.json()["notified"] == 1
 
@@ -226,9 +226,9 @@ def test_ingest_resolved_without_prior_notify_is_silent(db_conn: psycopg.Connect
                 " '{}', '{}', '2026-08-04T10:00:00+00:00', 'abc123')"
             )
         db_conn.commit()
-        resp = _ingest(
+        resp = ingest(
             client,
-            _webhook(status="resolved", ends_at="2026-08-04T11:00:00Z"),
+            webhook(status="resolved", ends_at="2026-08-04T11:00:00Z"),
         )
         assert resp.json()["notified"] == 0
 
@@ -237,11 +237,11 @@ def test_ingest_severity_parsing(db_conn: psycopg.Connection) -> None:
     """critical/warning/error parse; an unknown/absent severity normalizes to
     warning (the quietest default)."""
     with TestClient(app) as client:
-        _ingest(client, _webhook(alerts=[_alert(severity="critical", fingerprint="f1")]))
-        _ingest(client, _webhook(alerts=[_alert(severity="warning", fingerprint="f2")]))
-        _ingest(client, _webhook(alerts=[_alert(severity="error", fingerprint="f3")]))
-        _ingest(client, _webhook(alerts=[_alert(severity="BOGUS", fingerprint="f8")]))
-        _ingest(client, _webhook(alerts=[_alert(severity=None, fingerprint="f9")]))
+        ingest(client, webhook(alerts=[alert(severity="critical", fingerprint="f1")]))
+        ingest(client, webhook(alerts=[alert(severity="warning", fingerprint="f2")]))
+        ingest(client, webhook(alerts=[alert(severity="error", fingerprint="f3")]))
+        ingest(client, webhook(alerts=[alert(severity="BOGUS", fingerprint="f8")]))
+        ingest(client, webhook(alerts=[alert(severity=None, fingerprint="f9")]))
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT fingerprint, severity FROM alerts ORDER BY fingerprint")
@@ -266,9 +266,9 @@ def test_ingest_every_severity_notifies() -> None:
 
     with TestClient(app) as client, pytest.MonkeyPatch.context() as mp:
         mp.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
-        _ingest(client, _webhook(alerts=[_alert(severity="critical", fingerprint="c1")]))
-        _ingest(client, _webhook(alerts=[_alert(severity="warning", fingerprint="w1")]))
-        _ingest(client, _webhook(alerts=[_alert(severity="error", fingerprint="e1")]))
+        ingest(client, webhook(alerts=[alert(severity="critical", fingerprint="c1")]))
+        ingest(client, webhook(alerts=[alert(severity="warning", fingerprint="w1")]))
+        ingest(client, webhook(alerts=[alert(severity="error", fingerprint="e1")]))
     assert len(notified) == 3
     # default template language is zh (user ruling 2026-08-13: IM copy follows
     # user_settings display.language, default zh) — the en path is covered by
@@ -300,7 +300,7 @@ def test_ingest_notify_im_false_stores_and_publishes_without_im(
     record_publishes(monkeypatch, published)
 
     with TestClient(app) as client:
-        resp = _ingest(client, _webhook(notify_im="false"))
+        resp = ingest(client, webhook(notify_im="false"))
     assert resp.json() == {"processed": 1, "inserted": 1, "updated": 0, "notified": 0}
     assert notified == []
 
@@ -329,10 +329,10 @@ def test_ingest_notify_im_false_firing_and_resolution_stay_silent(
     monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
 
     with TestClient(app) as client:
-        firing = _ingest(client, _webhook(notify_im="false"))
-        resolved = _ingest(
+        firing = ingest(client, webhook(notify_im="false"))
+        resolved = ingest(
             client,
-            _webhook(
+            webhook(
                 status="resolved",
                 ends_at="2026-08-04T11:00:00Z",
                 notify_im="false",
@@ -362,7 +362,7 @@ def test_ingest_notify_im_non_gating_value_still_notifies(
     monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
 
     with TestClient(app) as client:
-        resp = _ingest(client, _webhook(notify_im="true"))
+        resp = ingest(client, webhook(notify_im="true"))
     assert resp.json()["notified"] == 1
     assert len(notified) == 1
 
@@ -380,19 +380,19 @@ def test_ingest_notify_im_false_resends_and_refire_stay_silent(
     monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
 
     with TestClient(app) as client:
-        firing = _ingest(client, _webhook(notify_im="false"))
-        resend = _ingest(client, _webhook(notify_im="false"))
-        resolved = _ingest(
+        firing = ingest(client, webhook(notify_im="false"))
+        resend = ingest(client, webhook(notify_im="false"))
+        resolved = ingest(
             client,
-            _webhook(
+            webhook(
                 status="resolved",
                 ends_at="2026-08-04T11:00:00Z",
                 notify_im="false",
             ),
         )
-        refire = _ingest(
+        refire = ingest(
             client,
-            _webhook(
+            webhook(
                 starts_at="2026-08-04T12:00:00Z",
                 notify_im="false",
             ),
@@ -433,7 +433,7 @@ def test_ingest_uses_display_language_setting(db_conn: psycopg.Connection) -> No
 
     with TestClient(app) as client, pytest.MonkeyPatch.context() as mp:
         mp.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
-        _ingest(client, _webhook())
+        ingest(client, webhook())
     assert len(notified) == 1
     assert (
         "⚠️ ALERT [ERROR] test-rule"  # emoji-ok: asserting the user-designated IM format
@@ -445,7 +445,7 @@ def test_ingest_zero_ends_at_stored_null(db_conn: psycopg.Connection) -> None:
     """Alertmanager's zero time endsAt (0001-01-01T00:00:00Z) is NULL."""
 
     with TestClient(app) as client:
-        _ingest(client, _webhook(ends_at="0001-01-01T00:00:00Z"))
+        ingest(client, webhook(ends_at="0001-01-01T00:00:00Z"))
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT ends_at FROM alerts")
@@ -461,7 +461,7 @@ def test_ingest_im_failure_does_not_fail_ingest(
     NULL) and answers 200."""
     monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(lambda _text: False))  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
-        resp = _ingest(client, _webhook())
+        resp = ingest(client, webhook())
         assert resp.status_code == 200
         assert resp.json()["notified"] == 0
 
@@ -479,10 +479,10 @@ def test_ingest_firing_retries_notify_after_failed_attempt(
     the IM."""
     monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(lambda _text: False))  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
-        _ingest(client, _webhook())
+        ingest(client, webhook())
     monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(lambda _text: True))  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
-        resp = _ingest(client, _webhook())
+        resp = ingest(client, webhook())
         assert resp.json()["notified"] == 1
 
     with db_conn.cursor() as cur:
@@ -497,11 +497,11 @@ def test_ingest_refire_after_resolution_notifies_again(db_conn: psycopg.Connecti
     """A resolved row that fires again (new starts_at) is a new episode — a
     fresh row + a fresh IM."""
     with TestClient(app) as client:
-        _ingest(client, _webhook())
-        _ingest(client, _webhook(status="resolved", ends_at="2026-08-04T11:00:00Z"))
-        resp = _ingest(
+        ingest(client, webhook())
+        ingest(client, webhook(status="resolved", ends_at="2026-08-04T11:00:00Z"))
+        resp = ingest(
             client,
-            _webhook(starts_at="2026-08-04T12:00:00Z", ends_at=""),
+            webhook(starts_at="2026-08-04T12:00:00Z", ends_at=""),
         )
         assert resp.json()["inserted"] == 1
         assert resp.json()["notified"] == 1
@@ -518,8 +518,8 @@ def test_ingest_computes_fingerprint_when_absent(db_conn: psycopg.Connection) ->
     its labels — stable across sends (dedup holds), and equal to Grafana's
     hash for the same label set."""
     with TestClient(app) as client:
-        _ingest(client, _webhook(alerts=[_alert(fingerprint="")]))
-        resp = _ingest(client, _webhook(alerts=[_alert(fingerprint="")]))
+        ingest(client, webhook(alerts=[alert(fingerprint="")]))
+        resp = ingest(client, webhook(alerts=[alert(fingerprint="")]))
         assert resp.json()["inserted"] == 0
 
     with db_conn.cursor() as cur:
@@ -547,10 +547,10 @@ def test_ingest_alertmanager_v4_envelope_tolerated(db_conn: psycopg.Connection) 
         "commonAnnotations": {"summary": "test summary"},
         "externalURL": "http://localhost:3002/",
         "status": "firing",
-        "alerts": [_alert()],
+        "alerts": [alert()],
     }
     with TestClient(app) as client:
-        resp = _ingest(client, payload)
+        resp = ingest(client, payload)
         assert resp.status_code == 200
         assert resp.json()["inserted"] == 1
 
@@ -570,7 +570,7 @@ def test_ingest_grafana_flat_payload_tolerated(db_conn: psycopg.Connection) -> N
         ],
     }
     with TestClient(app) as client:
-        resp = _ingest(client, payload)
+        resp = ingest(client, payload)
         assert resp.status_code == 200
         assert resp.json()["inserted"] == 1
     with db_conn.cursor() as cur:
@@ -590,11 +590,11 @@ def test_ingest_publishes_sse_frames(
 
     record_publishes(monkeypatch, published)
     with TestClient(app) as client:
-        _ingest(
+        ingest(
             client,
-            _webhook(alerts=[_alert(fingerprint="p1"), _alert(fingerprint="p2", alertname="r2")]),
+            webhook(alerts=[alert(fingerprint="p1"), alert(fingerprint="p2", alertname="r2")]),
         )
-        _ingest(client, _webhook())  # duplicate re-send — still publishes (update)
+        ingest(client, webhook())  # duplicate re-send — still publishes (update)
 
     assert len(published) == 3
     for channel, frame in published:
@@ -610,7 +610,7 @@ def test_ingest_publishes_sse_frames(
 def test_ingest_requires_webhook_token(client: TestClient) -> None:
     """No/wrong token -> 401; correct token -> 200; the legacy header name
     no longer authenticates (removed with task #1173)."""
-    payload = _webhook()
+    payload = webhook()
     without_credentials(client)  # the cluster secret is itself a valid webhook credential
     assert client.post("/api/alerts", json=payload).status_code == 401
     assert (
@@ -636,7 +636,7 @@ def test_ingest_bearer_cluster_secret_accepted(
 ) -> None:
     """Cluster-secret Bearer is an alternative webhook credential."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "supersecret")
-    payload = _webhook()
+    payload = webhook()
     resp = client.post(
         "/api/alerts",
         json=payload,
@@ -651,7 +651,7 @@ def test_ingest_bearer_webhook_token_accepted(client: TestClient) -> None:
     Authorization fields (custom headers are stored in plaintext by the 13
     provisioning schema), so the gateway accepts the scoped webhook token on
     the Bearer path."""
-    payload = _webhook()
+    payload = webhook()
     resp = client.post(
         "/api/alerts",
         json=payload,
@@ -685,7 +685,7 @@ def test_ingest_loopback_trust_when_no_token(monkeypatch: pytest.MonkeyPatch) ->
 # -- list --------------------------------------------------------------------
 
 
-def _seed(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
+def seed_alert_rows(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
     with db.cursor() as cur:
         for r in rows:
             cur.execute(
@@ -710,7 +710,7 @@ def _seed(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
 # -- one IM per notification group --------------------------------------------
 
 
-def _capture_im(monkeypatch: pytest.MonkeyPatch, *, ok: bool = True) -> list[str]:
+def capture_im(monkeypatch: pytest.MonkeyPatch, *, ok: bool = True) -> list[str]:
     sent: list[str] = []
 
     def _capture(text: str) -> bool:
@@ -732,10 +732,10 @@ def test_native_groups_recover_original_group_and_new_members_without_sent_fact(
         return False
 
     monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(unavailable))
-    a, b, c = [_alert(fingerprint=fp, summary=fp) for fp in ("a", "b", "c")]
+    a, b, c = [alert(fingerprint=fp, summary=fp) for fp in ("a", "b", "c")]
     with TestClient(app) as client:
-        first = _ingest(client, _webhook(alerts=[a, b]))
-        second = _ingest(client, _webhook(alerts=[a, b, c]))
+        first = ingest(client, webhook(alerts=[a, b]))
+        second = ingest(client, webhook(alerts=[a, b, c]))
         assert first.json() == {"processed": 2, "inserted": 2, "updated": 0, "notified": 0}
         assert second.json() == {"processed": 3, "inserted": 1, "updated": 2, "notified": 0}
     assert len(sent) == 3
@@ -763,10 +763,10 @@ def test_shadow_keeps_input_order_missing_start_resolution(
         return False
 
     monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(unavailable))
-    first = _alert(fingerprint="same")
-    later = _alert(fingerprint="same", starts_at="", summary="later")
+    first = alert(fingerprint="same")
+    later = alert(fingerprint="same", starts_at="", summary="later")
     with TestClient(app) as client:
-        response = _ingest(client, _webhook(alerts=[first, later]))
+        response = ingest(client, webhook(alerts=[first, later]))
     assert response.json() == {"processed": 2, "inserted": 1, "updated": 1, "notified": 0}
     assert len(sent) == 1
     assert "later" not in sent[0]  # The original source body is immutable.

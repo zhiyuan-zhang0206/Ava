@@ -7,7 +7,7 @@ The runtime guards the maintenance daemon needs and that are easy to regress:
     DB error does not become a tight hot-loop against Postgres;
   - the hourly pass ALWAYS runs the rollup + blob vacuum.
 
-All driven directly (no DB): `_run_maintenance` / `maintenance_with_liveness` are
+All driven directly (no DB): `run_maintenance` / `maintenance_with_liveness` are
 monkeypatched, so these are pure asyncio-loop tests.
 """
 
@@ -44,13 +44,13 @@ from services.upkeep.events_maintenance.tests.slices import (
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
-# The pool is never touched — `_run_maintenance` / `maintenance_with_liveness` are faked.
+# The pool is never touched — `run_maintenance` / `maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
 
 
 class _FakePool:
     """A pool whose `connection()` returns a working no-op context manager — the
-    maintenance-pass tests fake every slice, but `_run_maintenance` opens a
+    maintenance-pass tests fake every slice, but `run_maintenance` opens a
     `with pool.connection()` wrapper around each one."""
 
     class _Cursor:
@@ -147,8 +147,8 @@ async def test_failed_rollup_still_waits_before_retry(
         slept.append(total_s)
         raise asyncio.CancelledError  # break the otherwise-infinite loop after one sleep
 
-    monkeypatch.setattr(daemon, "_run_maintenance", boom)
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", fake_sleep)
+    monkeypatch.setattr(daemon, "run_maintenance", boom)
+    monkeypatch.setattr(daemon, "sleep_with_liveness", fake_sleep)
 
     progress = LoopProgress("dispatch", timeout_s=5.0)
     beat_at: list[float] = []
@@ -162,7 +162,7 @@ async def test_failed_rollup_still_waits_before_retry(
     config = events_maintenance_config(process_config)
     async with asyncio.TaskGroup() as tasks:
         with pytest.raises(asyncio.CancelledError):
-            await daemon._dispatch_loop(
+            await daemon.dispatch_loop(
                 _FAKE_POOL,
                 progress,
                 config,
@@ -198,11 +198,11 @@ async def test_wedged_dispatch_parks_without_entering_retry_sleep(
 
     monkeypatch.setattr(daemon, "maintenance_with_liveness", wedge)
     monkeypatch.setattr(daemon.asyncio, "sleep", forbidden_park)
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", forbidden_retry_sleep)
+    monkeypatch.setattr(daemon, "sleep_with_liveness", forbidden_retry_sleep)
 
     progress = LoopProgress("dispatch", timeout_s=1.0)
     async with asyncio.TaskGroup() as tasks:
-        await daemon._dispatch_loop(
+        await daemon.dispatch_loop(
             _FAKE_POOL,
             progress,
             events_maintenance_config(process_config),
@@ -237,7 +237,7 @@ def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
 def _instrument_maintenance_slices(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, _CallRecorder]:
-    """Replace every slice `_run_maintenance` can invoke with a recorder. The
+    """Replace every slice `run_maintenance` can invoke with a recorder. The
     fake results are the shapes the pass's logging branches read (empty/zero so
     nothing logs)."""
     rec = {
@@ -278,7 +278,7 @@ def test_maintenance_pass_runs_unconditional_slices(
 
     monkeypatch.setattr(progress, "beat", counting_beat)
 
-    daemon._run_maintenance(
+    daemon.run_maintenance(
         cast(ConnectionPool, _FakePool()),
         progress,
         events_maintenance_config(process_config),
@@ -330,7 +330,7 @@ def test_maintenance_pass_does_not_rebuild_missed_observations(
     _instrument_maintenance_slices(monkeypatch)
 
     for _ in range(2):
-        daemon._run_maintenance(
+        daemon.run_maintenance(
             cast(ConnectionPool, _ConnPool(db_conn)),
             LoopProgress("dispatch", timeout_s=60.0),
             events_maintenance_config(process_config),
@@ -482,7 +482,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
@@ -496,7 +496,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(
 
     monkeypatch.setattr(
         daemon,
-        "_endpoint",
+        "events_maintenance_endpoint",
         endpoint_for_entry,
     )
 
@@ -504,7 +504,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(
         return pool
 
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
-    monkeypatch.setattr(daemon, "_dispatch_loop", dispatch)
+    monkeypatch.setattr(daemon, "dispatch_loop", dispatch)
     monkeypatch.setattr(daemon, "resolution_loop", resolution)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", gauge)
 
@@ -582,7 +582,7 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         return closed.append("pidfile")
@@ -595,7 +595,7 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
         return _RunPool()
 
     monkeypatch.setattr(daemon.Database, "pool", pool)
-    monkeypatch.setattr(daemon, "_dispatch_loop", loop("dispatch"))
+    monkeypatch.setattr(daemon, "dispatch_loop", loop("dispatch"))
     monkeypatch.setattr(daemon, "resolution_loop", loop("resolution"))
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", loop("registry_gauge"))
 
@@ -654,7 +654,7 @@ def _run_with_alert_loop(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
@@ -668,7 +668,7 @@ def _run_with_alert_loop(
 
     monkeypatch.setattr(
         daemon,
-        "_endpoint",
+        "events_maintenance_endpoint",
         endpoint_for_entry,
     )
 
@@ -676,7 +676,7 @@ def _run_with_alert_loop(
         return _RunPool()
 
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
-    monkeypatch.setattr(daemon, "_dispatch_loop", parked)
+    monkeypatch.setattr(daemon, "dispatch_loop", parked)
     monkeypatch.setattr(daemon, "resolution_loop", parked)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", parked)
     monkeypatch.setattr(daemon.alert_reconciler, "reconciliation_loop", alert_loop)

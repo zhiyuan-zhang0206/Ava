@@ -3,5 +3,40 @@
 "test_agents_internals_lifecycle.py" = ["resurrection_setup.py"]
 "test_resurrection_fences.py" = ["resurrection_setup.py"]
 
+[debt.env-patch]
+"test_termination_message.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_termination_message.py#monkeypatch.setenv os.environ.HOME" = 1
+
+[debt.first-party-patch]
+"test_agent_launch_runner.py#monkeypatch.setattr base.lm.factory.validate_model_config" = 1
+"test_agent_launch_runner.py#monkeypatch.setattr ops.lifecycle.launch.publish_inbound_wake" = 1
+"test_operations.py#monkeypatch.setattr base.agents.model.model_config.validate_spawn_model_config" = 1
+"test_operations.py#monkeypatch.setattr base.config.settings" = 3
+"test_operations.py#monkeypatch.setattr ops.lifecycle.get_agent_status" = 3
+"test_operations.py#monkeypatch.setattr ops.lifecycle.kill_agent_shells" = 1
+"test_operations.py#monkeypatch.setattr ops.lifecycle.launch.latest_checkpoint_id" = 3
+"test_operations.py#monkeypatch.setattr ops.lifecycle.publish_inbound_arrived" = 1
+"test_operations.py#monkeypatch.setattr ops.lifecycle.resurrect_agent" = 1
+"test_operations.py#monkeypatch.setattr ops.lifecycle.resurrect_agent_op" = 1
+"test_operations.py#monkeypatch.setattr ops.lifecycle.terminate_agent_op" = 1
+"test_operations_part2.py#monkeypatch.setattr base.lm.factory.validate_model_config" = 1
+"test_operations_part2.py#monkeypatch.setattr ops.lifecycle.cancel_hosted_turn_best_effort" = 1
+"test_operations_part2.py#monkeypatch.setattr ops.lifecycle.force_mark_terminated" = 1
+"test_operations_part2.py#monkeypatch.setattr ops.lifecycle.publish_page_closed" = 1
+"test_operations_part2.py#monkeypatch.setattr ops.lifecycle.terminate_force_blocking" = 1
+"test_resurrection_fences.py#monkeypatch.setattr ops.lifecycle.termination.publish_inbound_wake" = 3
+"test_termination_message.py#monkeypatch.setattr ops.lifecycle.cancel_hosted_turn_best_effort" = 3
+"test_termination_message.py#monkeypatch.setattr ops.lifecycle.get_agent_status" = 1
+"test_termination_message.py#monkeypatch.setattr ops.lifecycle.kill_agent_shells" = 2
+"test_termination_message.py#monkeypatch.setattr ops.lifecycle.termination.insert_pending_termination_message" = 1
+"test_termination_message.py#monkeypatch.setattr ops.lifecycle.termination.insert_termination_pair" = 3
+"test_termination_message.py#monkeypatch.setattr ops.lifecycle.termination.telemetry.emit_prepared" = 1
+"test_termination_recovery_wake.py#monkeypatch.setattr ops.agents.wake.publish_inbound_wake" = 1
+"test_termination_recovery_wake.py#monkeypatch.setattr ops.lifecycle.termination.record_audit" = 1
+
 [debt.private-name]
 "operations/test_resurrect_if_terminated_placement.py -> test_operations.py#_db" = 1
+
+[debt.third-party-patch]
+"test_agents_internals_lifecycle.py#monkeypatch.setattr psycopg.Cursor.execute" = 1
+"test_agents_internals_lifecycle.py#monkeypatch.setattr psycopg.Cursor.fetchone" = 1

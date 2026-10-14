@@ -8,14 +8,14 @@ import struct
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.host.permissions_helper import client as helper
+from base.host.permissions_helper.client import PermissionsHelperClient, ScreenSize
 from base.paths import logs_dir
 
 from .errors import ComputerUseError
 from .targets import CaptureRegion
 
 
-def _png_size(path: Path) -> tuple[int, int]:
+def png_size(path: Path) -> tuple[int, int]:
     """Physical pixel size of a PNG from its IHDR (signature + 4-byte length +
     'IHDR' + width + height, big-endian). No image library needed."""
     with Path(path).open("rb") as f:
@@ -26,7 +26,7 @@ def _png_size(path: Path) -> tuple[int, int]:
     return width, height
 
 
-def _to_logical(value: float, scale: float) -> float:
+def to_logical(value: float, scale: float) -> float:
     """Physical-pixel coordinate -> helper's logical-point space (divide by the
     measured backing scale; scale 1 (1x display) is a no-op there)."""
     return value / scale if scale > 1 else value
@@ -45,7 +45,7 @@ def _pixel_scale(pixels_w: int, logical_w: float) -> float:
     return pixels_w / logical_w
 
 
-def _current_scale(measured: float | None) -> float:
+def current_scale(helper: PermissionsHelperClient, measured: float | None) -> float:
     """The physical->logical scale for coordinate conversion.
 
     Prefers the daemon's own measurement (last snapshot, ``_pixel_scale``);
@@ -56,7 +56,7 @@ def _current_scale(measured: float | None) -> float:
     return float(helper.screen_size()["scale"])
 
 
-def _snapshot_path(agent_id: int | None) -> Path:
+def snapshot_path(agent_id: int | None) -> Path:
     """A fresh capture path under $AVA_HOME/logs/computer/snapshots/."""
     directory = logs_dir() / "computer" / "snapshots"
     directory.mkdir(parents=True, exist_ok=True)
@@ -64,7 +64,9 @@ def _snapshot_path(agent_id: int | None) -> Path:
     return directory / f"agent-{agent_id or 0}-{stamp}.png"
 
 
-def _capture_screen(agent_id: int) -> tuple[Path, helper.ScreenSize, float, tuple[int, int]]:
+def capture_screen(
+    helper: PermissionsHelperClient, agent_id: int
+) -> tuple[Path, ScreenSize, float, tuple[int, int]]:
     """One full-screen capture: (PNG path, helper screen report, measured
     scale, physical pixel size).
 
@@ -74,14 +76,16 @@ def _capture_screen(agent_id: int) -> tuple[Path, helper.ScreenSize, float, tupl
     the PNG is the ground truth callers click against; the helper's reported
     scale can be stale (see _pixel_scale).
     """
-    path = _snapshot_path(agent_id)
+    path = snapshot_path(agent_id)
     size = helper.screen_size()
     helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
-    pw, ph = _png_size(path)
+    pw, ph = png_size(path)
     return path, size, _pixel_scale(pw, size["w"]), (pw, ph)
 
 
-def capture_region(agent_id: int, region: CaptureRegion) -> tuple[Path, float, tuple[int, int]]:
+def capture_region(
+    helper: PermissionsHelperClient, agent_id: int, region: CaptureRegion
+) -> tuple[Path, float, tuple[int, int]]:
     """Capture a main-display rectangle without changing whole-screen state.
 
     The helper's region capture can clip out-of-display rectangles silently.
@@ -97,9 +101,9 @@ def capture_region(agent_id: int, region: CaptureRegion) -> tuple[Path, float, t
         and region.y + region.h <= screen["y"] + screen["h"]
     ):
         raise ComputerUseError("region must be wholly inside the main display")
-    path = _snapshot_path(agent_id)
+    path = snapshot_path(agent_id)
     helper.screencapture_region(region.x, region.y, region.w, region.h, str(path))
-    pw, ph = _png_size(path)
+    pw, ph = png_size(path)
     scale = _pixel_scale(pw, region.w)
     if abs(ph - region.h * scale) > 1:
         raise ComputerUseError("captured region dimensions do not match the requested rectangle")

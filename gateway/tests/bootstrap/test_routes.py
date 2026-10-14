@@ -543,3 +543,24 @@ def test_dashboard_leaves_out_values_that_are_not_numbers(
         body = client.get("/api/stats/dashboard").json()
     assert body["tokens"]["input"] == 10
     assert body["cost_usd"] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("cached", [None, 0, 800])
+def test_dashboard_cache_rate_only_uses_metered_input(
+    db_conn: psycopg.Connection, event_rows: _EventRows, cached: int | None
+) -> None:
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "in_total": 1000,
+            "cost_usd": 1,
+            **({"cache_read": cached} if cached is not None else {}),
+        },
+    )
+    event_rows.add(event="llm_usage", payload={"in_total": 5000, "cost_usd": 2})
+    db_conn.commit()
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard").json()
+    assert body["tokens"]["input"] == 6000
+    assert body["cost_usd"] == 3
+    assert body["tokens"]["cache_hit_pct"] == (None if cached is None else cached / 10)

@@ -67,7 +67,7 @@ _previous_secret = ""
 def mint_credentials(home: Path) -> E2ECredentials:
     """Seed `home`'s ledger with an active generation and mint its human secret, which
     becomes this process's configured cluster secret until `forget_credentials`."""
-    global _current, _previous_secret  # noqa: PLW0603 — package-scoped, set once by `_e2e_process_env`
+    global _current, _previous_secret  # noqa: PLW0603 — package-scoped, set once by `e2e_process_env`
     tokens = seed_active_generation(home).api
     _previous_secret = settings.data_plane.cluster_secret
     _current = E2ECredentials(
@@ -81,7 +81,7 @@ def mint_credentials(home: Path) -> E2ECredentials:
 
 def current_credentials() -> E2ECredentials:
     if _current is None:
-        raise RuntimeError("the e2e credentials are minted by the `_e2e_process_env` fixture")
+        raise RuntimeError("the e2e credentials are minted by the `e2e_process_env` fixture")
     return _current
 
 
@@ -111,13 +111,18 @@ def gateway_client_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
 
 def _gateway_serving() -> bool:
     """True once the gateway answers HTTP. The retained listening socket accepts
-    connections before any process serves them, so only a response proves it."""
+    connections before any process serves them, so only a response proves it.
+
+    A session that never minted credentials runs without the stack (the
+    visual-baselines workflow renders its stubbed pages standalone), so there is
+    nothing to log in to, and the probe must answer without a request: the
+    autouse client-credential hook intercepts this probe's own call and would
+    fail it for the missing mint.
+    """
+    if _current is None:
+        return False
     try:
-        # Health is public. An explicit empty header keeps the autouse client
-        # credential wrapper from requiring a stack that mocked pages never start.
-        return httpx.get(
-            f"{GATEWAY_URL}/api/health", headers={"Authorization": ""}, timeout=1.0
-        ).is_success
+        return httpx.get(f"{GATEWAY_URL}/api/health", timeout=1.0).is_success
     except httpx.HTTPError:
         return False
 

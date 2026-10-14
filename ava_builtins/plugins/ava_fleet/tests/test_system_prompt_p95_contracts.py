@@ -10,7 +10,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from agent.graph.prompt.system_prompt import _sdk_expand_section
+from agent.graph.prompt.system_prompt import sdk_expand_section
 from ava.sdk_surface import install
 from ava.sdk_surface.installation import installed
 from base.config import FIELD_INFOS, settings
@@ -18,10 +18,10 @@ from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ExtensionRegistry
-from tests.fixtures.model_catalog import add_bindings as add_bindings
-from tests.fixtures.model_catalog import add_models as add_models
-from tests.fixtures.model_catalog import model_catalog as model_catalog
-from tests.fixtures.model_catalog import set_prices as set_prices
+from base.packages.tests.model_catalog import add_bindings as add_bindings
+from base.packages.tests.model_catalog import add_models as add_models
+from base.packages.tests.model_catalog import model_catalog as model_catalog
+from base.packages.tests.model_catalog import set_prices as set_prices
 from tests.fixtures.unit.config_authority import config_authority as config_authority
 
 
@@ -63,7 +63,7 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         authority=config_authority,
     )
 
-    text = _sdk_expand_section(
+    text = sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),

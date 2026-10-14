@@ -346,13 +346,13 @@ def test_stuck_pointer_scan_reports_torn_commands(
     )
     db_conn.commit()
 
-    assert lifecycle_fences._scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 1
+    assert lifecycle_fences.scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 1
     assert emitted
     assert emitted[-1][1]["event_name"] == "lifecycle_pointer_stuck"
 
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
-    assert lifecycle_fences._scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 0
+    assert lifecycle_fences.scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 0
 
 
 def test_a_force_nobody_observed_is_alerted_not_settled(
@@ -366,7 +366,7 @@ def test_a_force_nobody_observed_is_alerted_not_settled(
     emitted = _capture_telemetry(monkeypatch)
     aid = _stuck_force_fence(db_conn, machine="ghost")
 
-    assert lifecycle_fences._scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 1
+    assert lifecycle_fences.scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 1
 
     assert emitted[-1][1]["event_name"] == "lifecycle_pointer_stuck"
     assert emitted[-1][1]["attributes"] == {"count": 1, "samples": str(aid)}
@@ -391,5 +391,5 @@ def test_a_fresh_or_unapplied_force_is_not_alerted(
     _stuck_force_fence(db_conn, machine="macmini", applied_ago="30 seconds")
     _stuck_force_fence(db_conn, machine="macmini", applied_ago=None)
 
-    assert lifecycle_fences._scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 0
+    assert lifecycle_fences.scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 0
     assert emitted == []

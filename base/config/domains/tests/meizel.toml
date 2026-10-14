@@ -1,1 +1,4 @@
 exports = ["test_display_config.py"]
+
+[debt.env-patch]
+"test_display_config.py#monkeypatch.setenv os.environ" = 1

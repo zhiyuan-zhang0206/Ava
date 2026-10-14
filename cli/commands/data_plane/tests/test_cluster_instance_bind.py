@@ -23,8 +23,8 @@ from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup as _dp
 from cli.commands.data_plane import cluster_instance as _ci
 from cli.commands.data_plane import pgbouncer
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -453,7 +453,7 @@ def test_start_probes_receive_the_url_hosts(
         calls.append(cmd)
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
-    monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
+    monkeypatch.setattr(_ci, "pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", _no_native_effect)
     monkeypatch.setattr(_ci.subprocess, "run", _run)
 
@@ -489,7 +489,7 @@ def _wire_pg_start(
     ) -> None:
         calls.append(argv)
 
-    monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
+    monkeypatch.setattr(_ci, "pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", start)
     return calls
 
@@ -679,7 +679,7 @@ def test_the_postmaster_inherits_no_ava_authority(
     ) -> None:
         envs.append(env)
 
-    monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
+    monkeypatch.setattr(_ci, "pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", start)
 
     assert _ci.start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
@@ -717,7 +717,7 @@ def test_start_pg_hands_the_built_start_env_to_owned_launch(
     ) -> None:
         envs.append(env)
 
-    monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
+    monkeypatch.setattr(_ci, "pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", start)
 
     assert _ci.start_pg(5433, retained_children=retained_children, machine=command_machine) == 0

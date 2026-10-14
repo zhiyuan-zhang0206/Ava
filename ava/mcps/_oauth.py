@@ -46,7 +46,7 @@ _OAUTH_CALLBACK_PATH = "/callback"
 # How long an authorization flow may take (the user has to click through a
 # browser). Longer than the generic connect timeout on purpose: an in-flight
 # authorization must not be cut off by the request path's own timeout.
-_OAUTH_FLOW_TIMEOUT_S = 600.0
+OAUTH_FLOW_TIMEOUT_S = 600.0
 
 # OAuth client identity registered with authorization servers (RFC 7591).
 _CLIENT_NAME = "Ava MCP Daemon"
@@ -183,7 +183,7 @@ class CallbackServer:
 
         server = await asyncio.start_server(_handle, "127.0.0.1", self.port)
         try:
-            return await asyncio.wait_for(self._result, timeout=_OAUTH_FLOW_TIMEOUT_S)
+            return await asyncio.wait_for(self._result, timeout=OAUTH_FLOW_TIMEOUT_S)
         finally:
             server.close()
             try:

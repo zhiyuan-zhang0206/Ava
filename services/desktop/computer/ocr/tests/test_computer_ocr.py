@@ -65,7 +65,7 @@ def _force_rebuild(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str) -
     src_path.write_text("// source")
     future = time.time() + 7200
     os.utime(src_path, (future, future))
-    monkeypatch.setattr(ocr_mod, "_SOURCE", src_path)
+    monkeypatch.setattr(ocr_mod, "SOURCE", src_path)
     monkeypatch.setattr(ocr_mod, "bin_path", lambda: bin_path)
 
 

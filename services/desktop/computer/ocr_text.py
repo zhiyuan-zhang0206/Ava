@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import services.desktop.computer.ocr as ocr_mod
-from base.host.permissions_helper import client as helper
+from base.host.permissions_helper.client import PermissionsHelperClient
 from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.screen import _capture_screen, _to_logical
+from services.desktop.computer.screen import capture_screen, to_logical
 
 
 def _ocr_screen(path: Path, ocr_cache: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -29,7 +29,7 @@ def _ocr_screen(path: Path, ocr_cache: dict[str, Any] | None) -> list[dict[str, 
     return items
 
 
-def _validate_text_query(query: str, mode: str) -> None:
+def validate_text_query(query: str, mode: str) -> None:
     """Shared argument validation for the OCR text tools.
 
     A blank query or an unknown match mode is a caller bug — fail fast with a
@@ -41,7 +41,7 @@ def _validate_text_query(query: str, mode: str) -> None:
         raise ComputerUseError(f"match must be 'contains' or 'exact', got {mode!r}")
 
 
-def _match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list[dict[str, Any]]:
+def match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list[dict[str, Any]]:
     """OCR boxes matching ``query``, in reading order (top-to-bottom, then
     left-to-right).
 
@@ -76,8 +76,11 @@ def _match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list
     return matches
 
 
-def _find_text_tool(
-    args: dict[str, Any], agent_id: int, ocr_cache: dict[str, Any] | None
+def find_text_tool(
+    helper: PermissionsHelperClient,
+    args: dict[str, Any],
+    agent_id: int,
+    ocr_cache: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """find_text: OCR the screen and return the boxes matching ``text``.
 
@@ -89,16 +92,16 @@ def _find_text_tool(
     """
     query = str(args.get("text") or "")
     mode = str(args.get("match") or "contains")
-    _validate_text_query(query, mode)
+    validate_text_query(query, mode)
     cached_items = ocr_cache.get("items") if ocr_cache is not None else None
     if not args.get("snapshot_fresh", True) and cached_items:
         items: list[dict[str, Any]] = cached_items  # the screen the caller last saw
         fresh = False
     else:
-        path, _size, _scale, _pixels = _capture_screen(agent_id)
+        path, _size, _scale, _pixels = capture_screen(helper, agent_id)
         items = _ocr_screen(path, ocr_cache)
         fresh = True
-    matches = _match_ocr_boxes(items, query, mode)
+    matches = match_ocr_boxes(items, query, mode)
     return {
         "query": query,
         "match": mode,
@@ -108,8 +111,11 @@ def _find_text_tool(
     }
 
 
-def _click_text_tool(
-    args: dict[str, Any], agent_id: int, ocr_cache: dict[str, Any] | None
+def click_text_tool(
+    helper: PermissionsHelperClient,
+    args: dict[str, Any],
+    agent_id: int,
+    ocr_cache: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """click_text: OCR -> locate -> click, one audited action.
 
@@ -122,11 +128,11 @@ def _click_text_tool(
     query = str(args.get("text") or "")
     mode = str(args.get("match") or "contains")
     index = int(args.get("index", 0))
-    _validate_text_query(query, mode)
+    validate_text_query(query, mode)
     if index < 0:
         raise ComputerUseError("index must be >= 0")
-    path, _size, scale, _pixels = _capture_screen(agent_id)
-    matches = _match_ocr_boxes(_ocr_screen(path, ocr_cache), query, mode)
+    path, _size, scale, _pixels = capture_screen(helper, agent_id)
+    matches = match_ocr_boxes(_ocr_screen(path, ocr_cache), query, mode)
     if not matches:
         raise ComputerUseError(f"no on-screen text matching {query!r} (match={mode})")
     if index >= len(matches):
@@ -135,8 +141,8 @@ def _click_text_tool(
         )
     box = matches[index]
     clicked = helper.click(
-        _to_logical(box["cx"], scale),
-        _to_logical(box["cy"], scale),
+        to_logical(box["cx"], scale),
+        to_logical(box["cy"], scale),
         double=False,
     )
     return {

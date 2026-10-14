@@ -24,7 +24,7 @@ from base.host.net.resilience import Policy, aretry
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
 # line; lift the stream buffer cap well above StreamReader's 64KiB default
 # (same limit as the wrapper and the browser daemon).
-_LINE_LIMIT = 64 * 1024 * 1024
+LINE_LIMIT = 64 * 1024 * 1024
 
 # The browser-mcp service is a supervised daemon that should already be up; a
 # fresh agent may still race it on a cold cluster start, so retry the connect
@@ -169,7 +169,7 @@ async def _dial_browser_mcp(
     )
 
     async def once() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
+        return await asyncio.open_unix_connection(path=sock, limit=LINE_LIMIT)
 
     last: OSError | None = None
     try:
@@ -187,9 +187,10 @@ async def connect_browser_direct() -> tuple[BrowserLineSession, AsyncExitStack]:
     the session's CURRENT socket: on a desync the session re-dials internally,
     so the original writer may no longer be the live one.
     """
+    from base.config import settings
     from base.paths import chrome_mcp_socket
 
-    sock = str(chrome_mcp_socket())
+    sock = str(chrome_mcp_socket(settings.services.browser_cdp_port))
     reader, writer = await _dial_browser_mcp(sock)
     session = BrowserLineSession(reader, writer, sock=sock)
     stack = AsyncExitStack()
@@ -218,10 +219,13 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
     TTL sweep (24h by default).
     """
     try:
+        from base.config import settings
         from base.paths import chrome_mcp_socket
 
         return await asyncio.wait_for(
-            _release_roundtrip(str(chrome_mcp_socket()), agent_id),
+            _release_roundtrip(
+                str(chrome_mcp_socket(settings.services.browser_cdp_port)), agent_id
+            ),
             timeout=_RELEASE_TIMEOUT_S,
         )
     except (OSError, TimeoutError):
@@ -230,7 +234,7 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
 
 async def _release_roundtrip(sock: str, agent_id: int) -> bool:
     """One dial -> request -> reply round-trip; the caller owns the timeout."""
-    reader, writer = await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
+    reader, writer = await asyncio.open_unix_connection(path=sock, limit=LINE_LIMIT)
     try:
         writer.write(
             (

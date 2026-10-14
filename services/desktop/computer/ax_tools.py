@@ -17,14 +17,13 @@ from __future__ import annotations
 import re
 from typing import Any, Literal, NamedTuple, cast
 
-from base.host.permissions_helper import client as helper
-from base.host.permissions_helper.client import AxNode, AxTreeResult
+from base.host.permissions_helper.client import AxNode, AxTreeResult, PermissionsHelperClient
 
 from . import ax_gap
 from .ax_gap import Frame
 from .ax_ids import AxSession
 from .errors import ComputerUseError
-from .screen import _current_scale
+from .screen import current_scale
 from .targets import AppTarget, app_selector
 
 Mode = Literal["interactive", "text", "full"]
@@ -366,7 +365,7 @@ def _args(args: dict[str, Any]) -> TreeArgs:
     )
 
 
-def require_helper_support(capability: str, tool: str) -> None:
+def require_helper_support(helper: PermissionsHelperClient, capability: str, tool: str) -> None:
     """Fail with the rebuild instruction when the running helper lacks `tool`."""
     if not helper.ping().get(capability):
         raise ComputerUseError(
@@ -404,14 +403,18 @@ def _visual_gap(
 
 
 def ax_tree_tool(
-    args: dict[str, Any], agent_id: int, scale: float | None, session: AxSession
+    helper: PermissionsHelperClient,
+    args: dict[str, Any],
+    agent_id: int,
+    scale: float | None,
+    session: AxSession,
 ) -> dict[str, Any]:
     """`ax_tree`: read a window's accessibility tree as filtered text."""
     wanted = _args(args)
-    app, target = _app_request(args)
+    app, target = _app_request(helper, args)
     table_app = app
-    require_helper_support("ax_tree_v1", "ax_tree")
-    require_helper_support("ax_target_v1", "ax_tree")
+    require_helper_support(helper, "ax_tree_v1", "ax_tree")
+    require_helper_support(helper, "ax_target_v1", "ax_tree")
     raw_scope: int | None = None
     scope_fp: str | None = None
     if wanted.scope is not None:
@@ -447,10 +450,10 @@ def ax_tree_tool(
     session.visual = {}  # px: entries belong to the latest call only
     if not nodes:
         return out
-    factor = _current_scale(scale)
+    factor = current_scale(helper, scale)
     visual_block = ""
     if wanted.ocr_gap:
-        read = ax_gap.read_screen(agent_id)
+        read = ax_gap.read_screen(helper, agent_id)
         factor = read.scale  # the capture's measured scale: one space for tree and px:
         visual_block, report = _visual_gap(nodes, read, session)
         out.update(report)
@@ -462,7 +465,9 @@ def ax_tree_tool(
     return out
 
 
-def _app_request(args: dict[str, Any]) -> tuple[str | None, dict[str, object] | None]:
+def _app_request(
+    helper: PermissionsHelperClient, args: dict[str, Any]
+) -> tuple[str | None, dict[str, object] | None]:
     if "target" in args:
         if "app" in args:
             raise ComputerUseError("ax_tree takes exactly one of app or target")

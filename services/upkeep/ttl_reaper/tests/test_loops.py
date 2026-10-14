@@ -80,7 +80,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     _park_or_crash(monkeypatch, crashing=crashing, cancelled=cancelled)
 
     with pytest.raises(ExceptionGroup) as raised:
-        await daemon._run_loops(
+        await daemon.run_loops(
             pool,
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
@@ -98,7 +98,7 @@ async def test_each_loop_reports_its_own_progress(
     _park_or_crash(monkeypatch, crashing="sweep", cancelled=[])
 
     with pytest.raises(ExceptionGroup):
-        await daemon._run_loops(
+        await daemon.run_loops(
             pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), liveness
         )
 
@@ -143,7 +143,7 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch.setattr(daemon, "start_health_server", start_health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     monkeypatch.setattr(daemon.Database, "pool", make_pool)
-    monkeypatch.setattr(daemon, "_run_loops", crashing_loops)
+    monkeypatch.setattr(daemon, "run_loops", crashing_loops)
 
     with pytest.raises(ExceptionGroup):
         await daemon.run(
@@ -202,7 +202,7 @@ def _count_slow_phases(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
         return 0
 
     monkeypatch.setattr(sweep, "prune_schedule_fire_log_blocking", prune)
-    monkeypatch.setattr(sweep, "_scan_stuck_lifecycle_pointers_blocking", stuck)
+    monkeypatch.setattr(sweep, "scan_stuck_lifecycle_pointers_blocking", stuck)
     return calls
 
 

@@ -11,15 +11,25 @@ from meizel import roles as role_api
 from meizel.contracts import enumerations, generated
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
+from meizel.contracts.debt_carry import carry as carry_debt
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
-from meizel.contracts.debt_report import diff, summarize
+from meizel.contracts.debt_report import (
+    by_target,
+    changed_outside,
+    changed_under,
+    diff,
+    summarize,
+)
+from meizel.contracts.debt_sites import format_sites, sites
 from meizel.contracts.declare import declare
 from meizel.contracts.explain import explain
 from meizel.contracts.ledger import debts_in
+from meizel.contracts.policy import changes as policy_changes
+from meizel.contracts.policy import load_policy, policy_at
 from meizel.contracts.sync import prune
 from meizel.graph.model import Diagnostic, MeizelError
-from meizel.graph.universe import toplevel
+from meizel.graph.universe import load_universe, toplevel
 
 __all__ = ["main", "relative_target"]
 
@@ -125,6 +135,10 @@ def build_parser() -> argparse.ArgumentParser:
     seed = commands.add_parser("bootstrap", help="generate manifests from current facts")
     seed.add_argument("--out", type=Path, required=True, help="directory to mirror manifests into")
     add_debt_parser(commands)
+    policy = commands.add_parser("policy", help="the allowance lists in meizel.policy.toml")
+    policy_modes = policy.add_subparsers(dest="policy_mode", required=True)
+    policy_diff = policy_modes.add_parser("diff", help="list the entries changed against a git ref")
+    policy_diff.add_argument("--against", required=True, metavar="ref")
     declared = commands.add_parser("roles", help="the declared top-level packages and their copies")
     modes = declared.add_subparsers(dest="mode", required=True)
     listing = modes.add_parser("list", help="print the top-level directories of the given roles")
@@ -147,17 +161,108 @@ def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser
     )
     recording.add_argument("paths", nargs="+")
     modes.add_parser("prune", help="remove recorded debt that no longer occurs")
+    moving = modes.add_parser(
+        "carry", help="move recorded debt to where renamed files, targets and symbols now are"
+    )
+    moving.add_argument(
+        "--rename-target",
+        action="append",
+        default=[],
+        metavar="OLD=NEW",
+        help="a patch target that was renamed (a symbol, not a file); repeatable",
+    )
+    moving.add_argument(
+        "--move-symbol",
+        action="append",
+        default=[],
+        metavar="OLD_FILE::NAME=NEW_FILE",
+        help="a top-level function or class that moved to another file; repeatable",
+    )
+    moving.add_argument(
+        "--base",
+        metavar="ref",
+        help="compare with this ref (default: the branch point with origin/main)",
+    )
+    listing = modes.add_parser(
+        "sites", help="list the places in the source that a patch code names"
+    )
+    listing.add_argument("--code", required=True, help="a patch code, e.g. first-party-patch")
+    listing.add_argument(
+        "--target-prefix",
+        action="append",
+        default=[],
+        metavar="prefix",
+        help="only patches whose dotted target is this or inside it; repeatable",
+    )
+    listing.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
+    listing.add_argument("paths", nargs="*", help="only files under these paths")
     growth = modes.add_parser("diff", help="compare recorded totals with a git ref")
     growth.add_argument("--against", required=True, metavar="ref")
     growth.add_argument("--on-growth", required=True, choices=["fail", "warn"])
+    growth.add_argument(
+        "--by-target",
+        action="store_true",
+        help="also list the recorded patch debt per target group: what the change paid down or added",
+    )
+    growth.add_argument(
+        "--target-prefix",
+        action="append",
+        default=[],
+        metavar="prefix",
+        help="with --by-target: a group, as a dotted target prefix; repeatable (default: by --depth)",
+    )
+    growth.add_argument(
+        "--depth",
+        type=int,
+        default=3,
+        help="with --by-target and no prefix: how many dotted names of a target form a group",
+    )
+    growth.add_argument(
+        "--waive-if-changed",
+        nargs="+",
+        default=[],
+        metavar="pathspec",
+        help="a waiver needs the change to touch these git pathspecs (the rule code)",
+    )
+    growth.add_argument(
+        "--waive-only-within",
+        nargs="+",
+        default=[],
+        metavar="pathspec",
+        help="a waiver needs every changed file to match these git pathspecs (a pure rule change)",
+    )
 
 
-def _run_diff(root: Path, ref: str, on_growth: str) -> int:
+def _waiver(root: Path, ref: str, touches: list[str], within: list[str]) -> tuple[bool, str]:
+    """Whether the change is a pure rule change, and the sentence that says why not or why."""
+    if not (touches or within):
+        return False, ""
+    rules = changed_under(root, ref, touches) if touches else []
+    if touches and not rules:
+        return False, ""
+    outside = changed_outside(root, ref, within) if within else []
+    if outside:
+        shown = ", ".join(outside[:3]) + (" ..." if len(outside) > 3 else "")
+        return False, f"not waived: the change also edits files outside the rules ({shown})"
+    return True, f"this change edits only the rules ({', '.join(rules[:3])})"
+
+
+def _run_diff(root: Path, ref: str, on_growth: str, args: argparse.Namespace) -> int:
     lines, grew = diff(root, ref)
     print("\n".join(lines))
+    if args.by_target:
+        print()
+        print("\n".join(by_target(root, ref, args.target_prefix, args.depth)))
+        print()
     if not grew:
         print(f"meizel: no growth against {ref}")
         return 0
+    waived, why = _waiver(root, ref, args.waive_if_changed, args.waive_only_within)
+    if waived and on_growth == "fail":
+        print(f"meizel: growth is reported, not failed: {why}")
+        on_growth = "warn"
+    elif why:
+        print(f"meizel: growth {why}")
     warning = "" if on_growth == "fail" else " warning:"
     print(f"meizel:{warning} recorded debt grew against {ref}", file=sys.stderr)
     return 1 if on_growth == "fail" else 0
@@ -194,8 +299,23 @@ def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None)
         for line in prune_debt(root, jobs):
             print(line)
         return 0
+    if mode == "sites":
+        universe = load_universe(root)
+        scopes = [relative_target(root, base, p) for p in args.paths]
+        found = sites(universe, args.code, args.target_prefix, scopes, jobs)
+        print(format_sites(found, as_json=args.as_json))
+        return 0
     if mode == "diff":
-        return _run_diff(root, args.against, args.on_growth)
+        return _run_diff(root, args.against, args.on_growth, args)
+    if mode == "carry":
+        lines = carry_debt(root, args.base, args.rename_target, args.move_symbol)
+        for line in lines:
+            print(f"meizel: carried {line}")
+        if not lines:
+            print(
+                "meizel: nothing to carry: no renamed file, target or moved symbol has recorded debt"
+            )
+        return 0
     return _run_record(root, [relative_target(root, base, p) for p in args.paths], jobs)
 
 
@@ -204,16 +324,18 @@ def run_sync(root: Path, base: Path, args: argparse.Namespace) -> int:
         raise MeizelError("sync needs --prune or --declare")
     if args.paths and not args.declare:
         raise MeizelError("paths narrow --declare only")
+    for line in prune(root, args.jobs):
+        print(line)
     left: list[str] = []
     if args.declare:
+        for line in prune_debt(root, args.jobs):
+            print(line)
         targets = [relative_target(root, base, p) for p in args.paths] if args.paths else None
         lines, left = declare(root, targets, args.jobs)
         for line in lines:
             print(line)
         for line in left:
             print(line)
-    for line in prune(root, args.jobs):
-        print(line)
     if left:
         print(
             f"meizel: {len(left)} dependencies need a code change, not a declaration",
@@ -251,6 +373,12 @@ def main(argv: list[str] | None = None) -> int:
             return run_check(root, base, args.paths, args.limit, args.jobs, args.changed)
         if args.command == "debt":
             return run_debt(root, base, args, args.jobs)
+        if args.command == "policy":
+            for line in policy_changes(
+                policy_at(root, args.against), load_policy(load_universe(root))[0]
+            ):
+                print(line)
+            return 0
         if args.command == "explain":
             print(explain(analyze(root, jobs=args.jobs), relative_target(root, base, args.path)))
             return 0

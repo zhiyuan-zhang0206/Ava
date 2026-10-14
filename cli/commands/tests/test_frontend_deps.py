@@ -1,4 +1,4 @@
-"""`_ensure_frontend_deps` unit tests -- lockfile-drift reinstall logic.
+"""`ensure_frontend_deps` unit tests -- lockfile-drift reinstall logic.
 
 Regression guard: after the fleet update pulls a package-lock.json with new dependencies,
 it must re-run `npm ci`; otherwise `npm run build` fails immediately due to missing
@@ -54,7 +54,7 @@ def fake_npm_ci(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
 
 def test_installs_when_node_modules_missing(tmp_path: Path, fake_npm_ci: list[Path]) -> None:
     repo = _make_repo(tmp_path, '{"lock": 1}')
-    _repo._ensure_frontend_deps(repo)
+    _repo.ensure_frontend_deps(repo)
     assert fake_npm_ci == [repo / "ui" / "web"]
     # stamp written so the next call is a noop
     assert (repo / "ui" / "web" / "node_modules" / ".ava-lock-hash").is_file()
@@ -85,7 +85,7 @@ def test_npm_ci_injects_toolchain_path_from_a_minimal_non_login_shell(
     monkeypatch.setattr(env_forwarding.os, "environ", {"PATH": "/usr/bin:/bin"})
     monkeypatch.setattr(_repo.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
 
-    _repo._ensure_frontend_deps(repo)
+    _repo.ensure_frontend_deps(repo)
 
     assert captured["PATH"].split(":")[:4] == [
         "/opt/homebrew/bin",
@@ -97,19 +97,19 @@ def test_npm_ci_injects_toolchain_path_from_a_minimal_non_login_shell(
 
 def test_skips_when_stamp_matches_lockfile(tmp_path: Path, fake_npm_ci: list[Path]) -> None:
     repo = _make_repo(tmp_path, '{"lock": 1}')
-    _repo._ensure_frontend_deps(repo)  # first install writes the stamp
+    _repo.ensure_frontend_deps(repo)  # first install writes the stamp
     fake_npm_ci.clear()
-    _repo._ensure_frontend_deps(repo)  # lockfile unchanged → skip
+    _repo.ensure_frontend_deps(repo)  # lockfile unchanged → skip
     assert fake_npm_ci == []
 
 
 def test_reinstalls_when_lockfile_changed(tmp_path: Path, fake_npm_ci: list[Path]) -> None:
     repo = _make_repo(tmp_path, '{"lock": 1}')
-    _repo._ensure_frontend_deps(repo)  # installs against lock v1
+    _repo.ensure_frontend_deps(repo)  # installs against lock v1
     fake_npm_ci.clear()
     # The fleet update pulls a lockfile that added a dependency
     (repo / "ui" / "web" / "package-lock.json").write_text('{"lock": 2, "added": "dep"}')
-    _repo._ensure_frontend_deps(repo)
+    _repo.ensure_frontend_deps(repo)
     assert fake_npm_ci == [repo / "ui" / "web"]
 
 
@@ -120,7 +120,7 @@ def test_reinstalls_when_node_modules_exists_without_stamp(
     once so the stamp gets written; a bare node_modules is no longer trusted."""
     repo = _make_repo(tmp_path, '{"lock": 1}')
     (repo / "ui" / "web" / "node_modules").mkdir()  # exists, but no .ava-lock-hash
-    _repo._ensure_frontend_deps(repo)
+    _repo.ensure_frontend_deps(repo)
     assert fake_npm_ci == [repo / "ui" / "web"]
 
 
@@ -132,10 +132,10 @@ def test_reinstalls_when_foreign_package_manager_marker_present(
     ^1.2.10 → 1.2.18 under the converged stamp and shipped a minifier-emptied
     function to prod)."""
     repo = _make_repo(tmp_path, '{"lock": 1}')
-    _repo._ensure_frontend_deps(repo)  # npm ci, writes the stamp
+    _repo.ensure_frontend_deps(repo)  # npm ci, writes the stamp
     fake_npm_ci.clear()
     (repo / "ui" / "web" / "node_modules" / ".pnpm").mkdir(parents=True)
-    _repo._ensure_frontend_deps(repo)
+    _repo.ensure_frontend_deps(repo)
     assert fake_npm_ci == [repo / "ui" / "web"]
 
 
@@ -149,12 +149,12 @@ def test_reinstalls_when_installed_version_drifts_from_lockfile(
         '{"lock": 1, "packages": {"node_modules/dep": {"version": "1.0.0"}}}',
         '{"dependencies": {"dep": "^1.0.0"}}',
     )
-    _repo._ensure_frontend_deps(repo)
+    _repo.ensure_frontend_deps(repo)
     fake_npm_ci.clear()
     installed = repo / "ui" / "web" / "node_modules" / "dep"
     installed.mkdir(parents=True)
     (installed / "package.json").write_text('{"version": "2.0.0"}')
-    _repo._ensure_frontend_deps(repo)
+    _repo.ensure_frontend_deps(repo)
     assert fake_npm_ci == [repo / "ui" / "web"]
 
 
@@ -168,10 +168,10 @@ def test_skips_when_installed_versions_match_lockfile(
         '{"lock": 1, "packages": {"node_modules/dep": {"version": "1.0.0"}}}',
         '{"dependencies": {"dep": "^1.0.0"}}',
     )
-    _repo._ensure_frontend_deps(repo)
+    _repo.ensure_frontend_deps(repo)
     fake_npm_ci.clear()
     installed = repo / "ui" / "web" / "node_modules" / "dep"
     installed.mkdir(parents=True)
     (installed / "package.json").write_text('{"version": "1.0.0"}')
-    _repo._ensure_frontend_deps(repo)
+    _repo.ensure_frontend_deps(repo)
     assert fake_npm_ci == []

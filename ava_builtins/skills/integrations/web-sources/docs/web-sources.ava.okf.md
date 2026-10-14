@@ -19,5 +19,5 @@ A set of skills (`$AVA_HOME/skills/web-sources/`) to fetch content from any inte
 
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[ava/docs/web.ava.okf.md|ava.web]] — fetching lands on `ava.web.search/fetch`
+- [[ava/web/docs/web.ava.okf.md|ava.web]] — fetching lands on `ava.web.search/fetch`
 - [[ava_builtins/skills/integrations/audio-transcribe/docs/audio-transcribe.ava.okf.md|audio-transcribe]] — transcription of audio/video items without subtitles relies on it

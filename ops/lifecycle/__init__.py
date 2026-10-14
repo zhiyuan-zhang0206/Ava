@@ -44,7 +44,7 @@ from ops.agents.resurrection_retry import (
     resurrect_refusal_reason,
 )
 from ops.agents.wake import ResurrectTriggerStaleError
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import kill_agent_shells
 from ops.lifecycle import termination
 
@@ -80,10 +80,10 @@ from ops.lifecycle.resurrect_gates import (
     system_notice_source_of_trigger as system_notice_source_of_trigger,
 )
 from ops.lifecycle.termination import (
-    _force_terminate_transaction as _force_terminate_transaction,
+    force_mark_terminated as force_mark_terminated,
 )
 from ops.lifecycle.termination import (
-    force_mark_terminated as force_mark_terminated,
+    force_terminate_transaction as force_terminate_transaction,
 )
 from ops.lifecycle.termination import (
     publish_force_terminate_inbound as publish_force_terminate_inbound,
@@ -224,7 +224,7 @@ def terminate_force_blocking(
     db_pool: ConnectionPool,
 ) -> tuple[AgentStatus, int | None, list[str], int, int]:
     """Commit the force fence before publishing its wake and lifecycle hint."""
-    old_status, pid, killed_page_names, inbound_id, cutoff = _force_terminate_transaction(
+    old_status, pid, killed_page_names, inbound_id, cutoff = force_terminate_transaction(
         agent_id,
         db_pool,
         source=body.source,
@@ -244,7 +244,7 @@ def _terminate_graceful_blocking(
     db_pool: ConnectionPool,
 ) -> tuple[int | None, int | None]:
     """Return a durable command ID, or an already-terminated shell cutoff."""
-    return termination._enqueue_termination_inbounds(
+    return termination.enqueue_termination_inbounds(
         db,
         bus,
         agent_id,
@@ -339,14 +339,14 @@ async def resurrect_if_terminated(
                 "trigger_inbound_id": trigger_inbound_id,
                 "trigger_inbound_kind": trigger_inbound_kind,
             }
-            forwarded = await _cluster_rpc.dispatch_to_machine(
+            forwarded = await cluster_rpc.dispatch_to_machine(
                 db,
                 target_machine=home,
                 kind="lifecycle",
                 payload=lifecycle_payload,
             )
             result_status = ResurrectAgentResponse.model_validate(forwarded).status
-        except _cluster_rpc.ClusterOpUnreachable:
+        except cluster_rpc.ClusterOpUnreachable:
             if home == local_machine:
                 # Local ops server not reachable (test / single-process):
                 # fall back to in-process resurrect.
@@ -366,7 +366,7 @@ async def resurrect_if_terminated(
         if result_status == ResurrectResult.SPAWNED:
             await asyncio.to_thread(clear_wake_suppression, db, agent_id)
             status = await asyncio.to_thread(get_agent_status, db, agent_id)
-    except _cluster_rpc.ClusterOpUnreachable as exc:
+    except cluster_rpc.ClusterOpUnreachable as exc:
         _log.info(
             "resurrect_if_terminated: agent %s home machine unreachable, skipping "
             "auto-resurrect (%s); inbound queued — the next delivery or a manual "
@@ -376,7 +376,7 @@ async def resurrect_if_terminated(
         )
     except (ResurrectError, MachinePaused) as exc:
         report_auto_resurrect_failure(agent_id, exc)
-    except _cluster_rpc.ClusterOpFailed as exc:
+    except cluster_rpc.ClusterOpFailed as exc:
         if resurrect_refusal_reason(exc) is None:
             raise
         report_auto_resurrect_failure(agent_id, exc)

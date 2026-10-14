@@ -1,7 +1,7 @@
 exports = ["allowlist.py"]
 
 [uses]
-"__init__.py" = ["allowlist.py", "bundle.py", "busrule.py", "clockrule.py", "dbhandle.py", "endpointrule.py", "scan.py", "sliced.py"]
+"__init__.py" = ["allowlist.py", "bundle.py", "busrule.py", "clockrule.py", "dbhandle.py", "endpointrule.py", "roots.py", "scan.py", "sliced.py"]
 "allowlist.py" = ["roots.py"]
 "bundle.py" = ["scan.py"]
 "busrule.py" = ["rootrule.py"]

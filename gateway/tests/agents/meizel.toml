@@ -6,3 +6,46 @@ exports = ["gateway_auth.py"]
 "test_agents_sdk_queries.py" = ["sdk_support.py"]
 "test_agents_sdk_system_note.py" = ["sdk_support.py"]
 "test_external_agent_source.py" = ["gateway_auth.py"]
+
+[debt.first-party-patch]
+"sdk_support.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"sdk_support.py#monkeypatch.setattr base.cluster.machines.is_paused" = 1
+"sdk_support.py#monkeypatch.setattr base.cluster.machines.lookup_role" = 1
+"sdk_support.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"sdk_support.py#monkeypatch.setattr base.config.settings.lm" = 1
+"sdk_support.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
+"sdk_support.py#monkeypatch.setattr gateway.agents.forward.enqueue_lifecycle" = 1
+"sdk_support.py#monkeypatch.setattr gateway.app.ConfigBoot" = 1
+"test_agent_events_query.py#monkeypatch.setattr base.config.settings.display.events_default_limit" = 1
+"test_agent_events_query.py#monkeypatch.setattr gateway.events.telemetry_rows.query_events" = 2
+"test_agent_messages.py#monkeypatch.setattr base.agents.history.checkpoint_postgres_walks.HistoryPostgresSaver.get_tuple" = 1
+"test_agent_messages.py#monkeypatch.setattr base.config.settings.display.messages_default_limit" = 1
+"test_agent_neighbors.py#monkeypatch.setattr base.config.settings.display.neighbors_default_limit" = 1
+"test_agent_shell.py#monkeypatch.setattr base.config.settings.display.shell_capture_default_lines" = 1
+"test_agent_shell.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 10
+"test_agents_sdk.py#monkeypatch.setattr ava.__plugin_installation__" = 5
+"test_agents_sdk.py#monkeypatch.setattr ava.gateway_client.send_message" = 4
+"test_agents_sdk.py#monkeypatch.setattr ava.gateway_client.spawn" = 5
+"test_agents_sdk.py#monkeypatch.setattr ava.gateway_client.terminate" = 4
+"test_agents_sdk_queries.py#monkeypatch.setattr ava.AGENT_ID" = 5
+"test_agents_sdk_queries.py#monkeypatch.setattr ava.__plugin_installation__" = 5
+"test_agents_sdk_queries.py#monkeypatch.setattr ava.gateway_client.get" = 2
+"test_agents_sdk_queries.py#monkeypatch.setattr ava.gateway_client.get_neighbors" = 1
+"test_agents_sdk_queries.py#monkeypatch.setattr ava.gateway_client.list_agents" = 2
+"test_agents_sdk_queries.py#monkeypatch.setattr ava.gateway_client.raise_from_response" = 2
+"test_agents_sdk_queries.py#monkeypatch.setattr ava.gateway_client.resurrect" = 3
+"test_agents_sdk_queries.py#monkeypatch.setattr ava.gateway_client.spawn" = 3
+"test_agents_sdk_queries.py#monkeypatch.setattr base.config.settings.display.neighbors_default_depth" = 1
+"test_agents_sdk_queries.py#monkeypatch.setattr base.config.settings.display.neighbors_default_limit" = 1
+"test_agents_system_note_restart.py#monkeypatch.setattr gateway.agents.system_note.insert_inbound_message_in_transaction" = 1
+"test_agents_system_note_restart.py#monkeypatch.setattr gateway.app.build_model_catalog" = 1
+"test_conversation_snapshot.py#monkeypatch.setattr base.agents.history.checkpoint_postgres_walks.HistoryPostgresSaver.get_tuple" = 1
+"test_conversation_snapshot.py#monkeypatch.setattr gateway.agents.history.timeline.load_checkpoint_messages" = 1
+"test_conversation_snapshot.py#monkeypatch.setattr gateway.agents.state.load_checkpoint_messages" = 1
+"test_external_agent_source.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
+"test_external_agent_source.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
+"test_external_agent_source.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_external_agent_source.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
+
+[debt.third-party-patch]
+"gateway_auth.py#monkeypatch.setattr starlette.testclient.TestClient.__init__" = 2

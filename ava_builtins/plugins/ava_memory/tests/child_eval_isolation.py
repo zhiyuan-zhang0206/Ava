@@ -8,7 +8,7 @@ import sys
 from types import SimpleNamespace
 
 import ava
-from agent.process_boot import _apply_per_agent_eval_isolation
+from agent.process_boot import apply_per_agent_eval_isolation
 from ava.sdk_surface import install
 from ava_builtins.plugins.ava_memory import plugin
 from base.agents.context import AvaContext
@@ -18,7 +18,7 @@ from base.packages.plugins.extensions import ExtensionRegistry
 
 
 def _apply() -> None:
-    _apply_per_agent_eval_isolation(
+    apply_per_agent_eval_isolation(
         default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
     )
 

@@ -6374,7 +6374,7 @@
     "/api/health": {
       "get": {
         "summary": "Get Health",
-        "description": "Liveness probe over the private network (the gateway is unauthenticated). DB ping\nincluded — a gateway that can serve HTTP but cannot reach Postgres is not\n\"healthy\" enough for the watchdog to leave alone.\n\nThe identity fields answer the questions a 200 alone cannot: `name` is\nwhich *service* answered, `home` this gateway's `$AVA_HOME` (its cluster\nidentity), `machine` its host, `started_at` this process's birth, and `sha`\nthe code frozen at boot. A 200 on this port only proves *something* listens\nthere, so the watchdog verifies the stable identity too rather than the status\ncode alone — see `services/supervision/healthchecks/gateway.py`. The start and code facts\nalso let read-only post-deploy checks detect a new serving generation without\nconsulting disk state. Each field was additive to the `{\"status\": \"ok\"}` contract.\n\nLiveness must fail faster than the resource it protects: this uses the\ncontrol-plane pool and a 1-2 second database budget rather than waiting up\nto 30 seconds for the data-plane pool. A 503 therefore means the process is\nalive but Postgres is degraded; the watchdog's consecutive-failure policy\ndecides whether that merits a respawn.\n\n`name` is a constant naming the service this route belongs to — the point being\nthat an impostor answering here reports its own name, or none. No probe reads it\nyet; `base.daemon.health._probe_home` gains the `name` arm only once every\ndeployed gateway emits the field, and that ordering is load-bearing (#1038).",
+        "description": "Liveness probe over the private network (the gateway is unauthenticated). DB ping\nincluded — a gateway that can serve HTTP but cannot reach Postgres is not\n\"healthy\" enough for the watchdog to leave alone.\n\nThe identity fields answer the questions a 200 alone cannot: `name` is\nwhich *service* answered, `home` this gateway's `$AVA_HOME` (its cluster\nidentity), `machine` its host, `started_at` this process's birth, and `sha`\nthe code frozen at boot. A 200 on this port only proves *something* listens\nthere, so the watchdog verifies the stable identity too rather than the status\ncode alone — see `services/supervision/healthchecks/gateway.py`. The start and code facts\nalso let read-only post-deploy checks detect a new serving generation without\nconsulting disk state. Each field was additive to the `{\"status\": \"ok\"}` contract.\n\nLiveness must fail faster than the resource it protects: this uses the\ncontrol-plane pool and a 1-2 second database budget rather than waiting up\nto 30 seconds for the data-plane pool. A 503 therefore means the process is\nalive but Postgres is degraded; the watchdog's consecutive-failure policy\ndecides whether that merits a respawn.\n\n`name` is a constant naming the service this route belongs to — the point being\nthat an impostor answering here reports its own name, or none. No probe reads it\nyet; `base.daemon.health.probe_unit_home` gains the `name` arm only once every\ndeployed gateway emits the field, and that ordering is load-bearing (#1038).",
         "operationId": "get_health_api_health_get",
         "responses": {
           "200": {
@@ -6830,7 +6830,7 @@
     "/api/fleet/graph": {
       "get": {
         "summary": "Get Fleet Graph",
-        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\n`total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10];\nomitted = the configured default ``display.fleet_graph_decay_lambda`` -\n0.5 out of the box) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` rows in the window. `total_tokens` is the sum of\nthe same two fields over the retained 7d window. Both are read in parts\n(`gateway/routers/_fleet_tokens.py`): raw rows of the newest two days, the\nday-grain ledger before them, and for the all-time score the folded\n`agent_model_tokens_total`, so the read does not scan history.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
+        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\n`total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10];\nomitted = the configured default ``display.fleet_graph_decay_lambda`` -\n0.5 out of the box) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` rows in the window. `total_tokens` is the sum of\nthe same two fields over the retained 7d window. Both are read in parts\n(`gateway/routers/fleet_tokens.py`): raw rows of the newest two days, the\nday-grain ledger before them, and for the all-time score the folded\n`agent_model_tokens_total`, so the read does not scan history.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
         "operationId": "get_fleet_graph_api_fleet_graph_get",
         "parameters": [
           {
@@ -8116,9 +8116,16 @@
             "title": "Tokens Reasoning"
           },
           "cache_hit_pct": {
-            "type": "number",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Cache Hit Pct"
           }
         },
@@ -8134,7 +8141,7 @@
           "cache_hit_pct"
         ],
         "title": "AgentCost",
-        "description": "LLM spend + token usage for one agent over the requested window (whole\nlife = historical daily evidence + persisted observed facts; every `llm_usage` event under its\nagent_id — the agent's \"session\", which spans restarts/resurrects since\nagent_id is stable). `cost_usd` sums the rows' usage-time price snapshots\nonly — never re-priced against the current registry. Calls without a\nsnapshot (unpriced model) contribute 0 to cost and are counted in\n`unpriced_calls`. `cache_hit_pct` = cache_read / input * 100; input=0\ndegrades to 0."
+        "description": "LLM spend + token usage for one agent over the requested window (whole\nlife = historical daily evidence + persisted observed facts; every `llm_usage` event under its\nagent_id — the agent's \"session\", which spans restarts/resurrects since\nagent_id is stable). `cost_usd` sums the rows' usage-time price snapshots\nonly — never re-priced against the current registry. Calls without a\nsnapshot (unpriced model) contribute 0 to cost and are counted in\n`unpriced_calls`. `cache_hit_pct` uses only input with cache metering;\nnonzero input with no cache metering produces null. input=0\ndegrades to 0."
       },
       "AgentDirectoryPage": {
         "properties": {
@@ -8659,9 +8666,16 @@
             "title": "Tokens Cached"
           },
           "cache_hit_pct": {
-            "type": "number",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Cache Hit Pct"
           },
           "turn_ok": {
@@ -8702,7 +8716,7 @@
           "exec_failed"
         ],
         "title": "AgentMetricsItem",
-        "description": "One agent's row in the fleet metrics breakdown — headline counters\naggregated over its events within the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` prices each call via `base.lm.pricing.cost_usd`; calls on an\nunpriced model contribute 0. `cache_hit_pct` = cached / in * 100 (in=0\ndegrades to 0). `exec_failed` is every exec outcome other than plain\n`exec` — same exec-ok/exec-failed split as the metrics report."
+        "description": "One agent's row in the fleet metrics breakdown — headline counters\naggregated over its events within the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.\n`cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero\ninput has no cache metering. `exec_failed` is every exec outcome other than plain\n`exec` — same exec-ok/exec-failed split as the metrics report."
       },
       "AgentMetricsReport": {
         "properties": {
@@ -17793,9 +17807,16 @@
             "title": "Cache Read"
           },
           "cache_hit_pct": {
-            "type": "number",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Cache Hit Pct"
           }
         },
@@ -17807,7 +17828,7 @@
           "cache_hit_pct"
         ],
         "title": "StatsTokens",
-        "description": "`/api/stats/dashboard` token sub-section — windowed LLM usage aggregation.\n\n`cache_hit_pct` = cache_read / input * 100, rounded to 2 decimals;\ninput=0 degrades to 0 to avoid div-by-zero."
+        "description": "`/api/stats/dashboard` token sub-section — windowed LLM usage aggregation.\n\n`cache_hit_pct` uses only input with cache metering, rounded to 2 decimals;\nnonzero input with no cache metering produces null.\ninput=0 degrades to 0 to avoid div-by-zero."
       },
       "StatsWindowHours": {
         "type": "integer",

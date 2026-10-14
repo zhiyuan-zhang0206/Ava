@@ -17,7 +17,7 @@ from base import telemetry
 from base.api_contracts.caller_identity import CallerIdentity
 from base.db import Database
 from base.telemetry import audit_events
-from gateway.mcp_server.endpoint import _record_tool_call
+from gateway.mcp_server.endpoint import record_tool_call
 
 
 def _caller() -> CallerIdentity:
@@ -29,7 +29,7 @@ async def test_a_tool_call_is_recorded_with_its_outcome(
 ) -> None:
     caller = _caller()
 
-    await _record_tool_call(database, caller, {"tool": "spawn_agent", "outcome": "ok"})
+    await record_tool_call(database, caller, {"tool": "spawn_agent", "outcome": "ok"})
 
     rows = db_conn.execute(
         "SELECT agent_id, attributes FROM audit_events "
@@ -58,7 +58,7 @@ async def test_a_failed_audit_write_does_not_fail_the_tool_call(
 
     monkeypatch.setattr(telemetry, "emit", emit)
 
-    await _record_tool_call(database, caller, {"tool": "spawn_agent", "outcome": "ok"})
+    await record_tool_call(database, caller, {"tool": "spawn_agent", "outcome": "ok"})
 
     assert reported == ["mcp_tool_call"]
     count = db_conn.execute(

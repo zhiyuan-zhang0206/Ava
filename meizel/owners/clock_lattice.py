@@ -33,13 +33,13 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
    reference to a clock registered in `base.deploy.timing.CLOCKS`
    (e.g. `_ROLLOUT_STALL_TIMEOUT_S: float = NO_PROGRESS_TIMEOUT_S`). The value is
    still defined once; the alias is just a local name.
-3. **Explicitly exempt** in `_INDEPENDENT_CLOCKS` below — the constant is either
+3. **Explicitly exempt** in `INDEPENDENT_CLOCKS` below — the constant is either
    not a clock at all (a flag name, a SQL key, a collection) or a genuinely
    independent clock with no lattice neighbour, each with a stated reason.
 
 The allowlists must stay current: a full scan (no path arguments, as pre-commit
-and CI run it) also fails when a `_FAMILY_MODULES` file or an
-`_INDEPENDENT_CLOCKS` file is gone, or an exempted constant is no longer defined
+and CI run it) also fails when a `FAMILY_MODULES` file or an
+`INDEPENDENT_CLOCKS` file is gone, or an exempted constant is no longer defined
 at module level in its file — an exemption for a deleted symbol would silently
 pre-approve whatever next takes that name.
 
@@ -58,12 +58,12 @@ import re
 import sys
 from pathlib import Path
 
-from meizel import lint_common
+from meizel import allowances, lint_common
 from meizel.roles import packages
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_SCAN_DIRS = packages("application", "tooling")
+SCAN_DIRS = packages("application", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -87,14 +87,11 @@ _LATTICE_TERMS = (
     "REAP_INTERVAL",
 )
 
-# The lattice family modules: lattice vocabulary may be DEFINED here (and only
-# here).
-_FAMILY_MODULES = (
-    "base/deploy/timing.py",
-    "base/deploy/progress_timeout.py",
-    "base/native_process/stop_timing.py",
-    "base/deploy/schedule_timing.py",
-)
+_POLICY = allowances.load(_REPO_ROOT)
+
+# The lattice family modules: lattice vocabulary may be DEFINED here (and only here). Listed in
+# meizel.policy.toml under [clock-lattice].
+FAMILY_MODULES = _POLICY.names("clock-lattice", "family-modules")
 
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 
@@ -129,66 +126,14 @@ def _registered_clock_names() -> frozenset[str]:
     return REGISTERED_CLOCKS
 
 
-# Explicit exemptions: `(relative_path, NAME)` -> why this lattice-vocabulary
-# constant may live outside the family modules. Either it is not a clock at all
-# (a flag, a key, a collection), or it is a genuinely independent clock with no
-# lattice neighbour. Every entry states which.
-_INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
-    (
-        "agent/graph/node_log.py",
-        "_STALL_GUARD_EXEMPT",
-    ): "frozenset of exempt node kinds, not a clock",
-    (
-        "base/native_process/exec_domain.py",
-        "KILL_GRACE_S",
-    ): "independent: SIGINT/SIGTERM -> SIGKILL grace ladder for the exec child, no lattice neighbour",
-    (
-        "base/host/proc.py",
-        "_TERMINATE_GRACE_S",
-    ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
-    (
-        "services/backup/scheduler/operation/staging.py",
-        "TERMINATE_GRACE_S",
-    ): "independent: bounded TERM grace for a scheduled worker to unwind private cleanup; "
-    "no family-disappearance proof or lattice neighbour",
-    (
-        "base/host/proc.py",
-        "_REAP_TIMEOUT_S",
-    ): "independent: single wait_procs bound when reaping a process tree, no lattice neighbour",
-    (
-        "cli/commands/lifecycle/service_stop.py",
-        "_TERMINAL_STOP_GRACE_S",
-    ): "independent: HUP/TERM -> SIGKILL grace of a normal stop's terminal closure "
-    "(docs/decisions/runtime/processes/shutdown/2026-09-28-stop-escalates-to-sigkill.md); the stop's own deadline caps it "
-    "and nothing orders against it, no lattice neighbour",
-    (
-        "base/events/live/redis_listener.py",
-        "_CONSUME_ABANDON_GRACE",
-    ): "independent: pubsub consume-abandon window, no lattice neighbour",
-    (
-        "base/events/contract.py",
-        "DELIVERY_STALLED_KEYS",
-    ): "SQL key set for the delivery_stalled view, not a clock",
-    (
-        "ava_builtins/plugins/lm_anthropic/provider.py",
-        "_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET",
-    ): "LLM thinking-token budget, not a wall-clock constant",
-    (
-        "base/daemon/schedules/watcher.py",
-        "AT_SESSION_TTL_GRACE_SECONDS",
-    ): "independent: the at-watcher session's post-fire reclamation window (wake delivery + "
-    "exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — "
-    "no lattice neighbour and no ordering safety depends on this value",
-    (
-        "ava_builtins/skills/platform/ava-guide/external-agents/scripts/watch_work.py",
-        "STALL_SECONDS",
-    ): "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour",
-    (
-        "services/desktop/computer/mcp_daemon.py",
-        "_WATCHDOG_MIN_STALL_S",
-    ): "not a clock: a sanity floor on the operator-configured loop-stall window "
-    "(settings.daemon.computer_use_loop_stall_s) — it only keeps a below-floor "
-    "misconfiguration from restart-looping a healthy daemon, no lattice neighbour",
+# Explicit exemptions: `(relative_path, NAME)` -> why this lattice-vocabulary constant may live
+# outside the family modules. Either it is not a clock at all (a flag, a key, a collection), or it
+# is a genuinely independent clock with no lattice neighbour. Every entry states which, in
+# meizel.policy.toml under [clock-lattice.independent-clocks] (`path::NAME`).
+INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
+    (path, name): why
+    for site, why in _POLICY.reasons("clock-lattice", "independent-clocks").items()
+    for path, _, name in [site.partition("::")]
 }
 
 
@@ -196,9 +141,9 @@ def _is_unregistered_clock(rel: str, name: str, value: ast.expr | None) -> bool:
     """A lattice-vocabulary constant outside the family modules, not exempt and not an alias."""
     if not _CONST_NAME.match(name) or not any(term in name for term in _LATTICE_TERMS):
         return False
-    if rel in _FAMILY_MODULES:
+    if rel in FAMILY_MODULES:
         return False  # rule 1: the lattice's homes
-    if (rel, name) in _INDEPENDENT_CLOCKS:
+    if (rel, name) in INDEPENDENT_CLOCKS:
         return False  # rule 3: explicit exemption
     # rule 2: alias of a registered clock
     return not (isinstance(value, ast.Name) and value.id in _registered_clock_names())
@@ -237,17 +182,17 @@ def _module_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
-def _stale_allowlist_entries() -> list[str]:
+def stale_allowlist_entries() -> list[str]:
     """Allowlist entries whose file or exempted constant no longer exists."""
     errors: list[str] = []
-    for rel in _FAMILY_MODULES:
+    for rel in FAMILY_MODULES:
         if not (_REPO_ROOT / rel).is_file():
-            errors.append(f"{rel}: stale _FAMILY_MODULES entry — the file no longer exists")
-    for rel, name in _INDEPENDENT_CLOCKS:
+            errors.append(f"{rel}: stale FAMILY_MODULES entry — the file no longer exists")
+    for rel, name in INDEPENDENT_CLOCKS:
         path = _REPO_ROOT / rel
         if not path.is_file():
             errors.append(
-                f"{rel}: stale _INDEPENDENT_CLOCKS entry {name} — the file no longer exists"
+                f"{rel}: stale INDEPENDENT_CLOCKS entry {name} — the file no longer exists"
             )
             continue
         try:
@@ -256,7 +201,7 @@ def _stale_allowlist_entries() -> list[str]:
             continue  # unreadable or a syntax error the compiler owns: cannot judge
         if name not in _module_level_names(tree):
             errors.append(
-                f"{rel}: stale _INDEPENDENT_CLOCKS entry {name} — no module-level {name} "
+                f"{rel}: stale INDEPENDENT_CLOCKS entry {name} — no module-level {name} "
                 "is defined there any more; drop the exemption"
             )
     return errors
@@ -290,16 +235,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     paths = (
-        [Path(a).resolve() for a in argv]
-        if argv
-        else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
     )
     # `--only` (the commit hook) judges the changed files under the default scope; the
     # lattice's own family modules are inputs: editing one re-judges every file.
-    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_FAMILY_MODULES)
+    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=FAMILY_MODULES)
     errors = _scan(paths, scope)
     if not argv:
-        errors.extend(_stale_allowlist_entries())
+        errors.extend(stale_allowlist_entries())
     for err in errors:
         print(err, file=sys.stderr)
     return 1 if errors else 0

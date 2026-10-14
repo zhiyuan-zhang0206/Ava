@@ -30,7 +30,7 @@ Scope: `gateway/` and `ops/` — the event-loop surfaces. Tests (any `tests/`
 directory, including a package's own `gateway/**/tests/` and `ops/**/tests/`),
 cli, base, agent and services are not scanned (they do not run the gateway loop).
 
-The repo-helper names must stay current: each one in `_REPO_BLOCKING_HELPERS`
+The repo-helper names must stay current: each one in `REPO_BLOCKING_HELPERS`
 must still be defined (`def` / `async def`) somewhere in the source tree, or
 the lint fails. A name left behind by a deleted helper would silently flag an
 unrelated future function that reuses it.
@@ -49,10 +49,10 @@ sys.path.insert(0, str(_ROOT))
 from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
-_SCAN_DIRS = ("gateway", "ops")
+SCAN_DIRS = ("gateway", "ops")
 
 # Sync library/method surfaces that must not appear un-awaited in an async body.
-_LIBRARY_BLOCKING_NAMES = {
+LIBRARY_BLOCKING_NAMES = {
     # psycopg surface
     "connection",
     "cursor",
@@ -72,8 +72,8 @@ _LIBRARY_BLOCKING_NAMES = {
 }
 
 # Sync helpers defined in this repo. Every name must still be defined somewhere
-# in `_DEFINITION_DIRS` (see `_stale_repo_helpers`).
-_REPO_BLOCKING_HELPERS = {
+# in `DEFINITION_DIRS` (see `stale_repo_helpers`).
+REPO_BLOCKING_HELPERS = {
     # DB helpers (sync psycopg on a fresh connection)
     "insert_inbound_message",
     "insert_inbound_message_in_transaction",
@@ -110,11 +110,11 @@ _REPO_BLOCKING_HELPERS = {
     "process_alive",
 }
 
-_BLOCKING_NAMES = _LIBRARY_BLOCKING_NAMES | _REPO_BLOCKING_HELPERS
+BLOCKING_NAMES = LIBRARY_BLOCKING_NAMES | REPO_BLOCKING_HELPERS
 
 # Where a repo helper may be defined (the non-test source tree; a test's own
 # helper never keeps an entry alive).
-_DEFINITION_DIRS = packages("application")
+DEFINITION_DIRS = packages("application")
 
 # Module-qualified sync calls (any attribute of these modules).
 _BLOCKING_MODULES = {"shutil", "subprocess", "psutil"}
@@ -165,7 +165,7 @@ class _Linter(ast.NodeVisitor):
             return
 
         reason: str | None = None
-        if name in _BLOCKING_NAMES:
+        if name in BLOCKING_NAMES:
             reason = f"sync call {name}()"
         elif name.endswith("_blocking"):
             reason = f"{name}() is a sync helper — must run via asyncio.to_thread"
@@ -184,11 +184,11 @@ class _Linter(ast.NodeVisitor):
         self.errors.append((line, f"{reason}: {snippet}"))
 
 
-def _stale_repo_helpers() -> list[str]:
-    """`_REPO_BLOCKING_HELPERS` names no longer defined anywhere in the source tree."""
-    remaining = set(_REPO_BLOCKING_HELPERS)
+def stale_repo_helpers() -> list[str]:
+    """`REPO_BLOCKING_HELPERS` names no longer defined anywhere in the source tree."""
+    remaining = set(REPO_BLOCKING_HELPERS)
     pattern = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*[\[(]", re.MULTILINE)
-    for directory in _DEFINITION_DIRS:
+    for directory in DEFINITION_DIRS:
         for path in (_ROOT / directory).rglob("*.py"):
             if "__pycache__" in path.parts or lint_common.is_repo_test_file(path, _ROOT):
                 continue
@@ -208,7 +208,7 @@ def _scanned_files(scope: frozenset[str] | None) -> list[Path]:
         lint_common.restrict(
             (
                 p
-                for d in _SCAN_DIRS
+                for d in SCAN_DIRS
                 for p in (_ROOT / d).rglob("*.py")
                 if "__pycache__" not in p.parts and not lint_common.is_repo_test_file(p, _ROOT)
             ),
@@ -222,11 +222,11 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     _, only = lint_common.split_only(argv)
     scope = lint_common.changed_scope(only, _ROOT)
-    stale = _stale_repo_helpers()
+    stale = stale_repo_helpers()
     if stale:
         for name in stale:
             print(
-                f"scripts/lint/async_no_sync_blocking.py: stale _REPO_BLOCKING_HELPERS "
+                f"scripts/lint/async_no_sync_blocking.py: stale REPO_BLOCKING_HELPERS "
                 f"entry {name!r} — no `def {name}` exists in the source tree any more; "
                 "drop it"
             )

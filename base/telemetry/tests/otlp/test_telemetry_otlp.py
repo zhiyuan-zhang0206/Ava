@@ -22,13 +22,13 @@ AGENT = 8902
 
 
 @pytest.fixture(autouse=True)
-def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Most cases exercise an allowed production backend; gate tests override it."""
     monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
 
 
-def _event(
+def otlp_test_event(
     *,
     event_name: str = "llm_usage",
     category: str = "telemetry",
@@ -88,7 +88,7 @@ def otlp_backend(monkeypatch):
     backend.shutdown()
 
 
-def _metrics(metric_reader: Any) -> dict[str, Any]:
+def collected_metrics(metric_reader: Any) -> dict[str, Any]:
     """{metric name: Metric} from the in-memory reader ({} when none)."""
     data = metric_reader.get_metrics_data()
     out: dict[str, Any] = {}
@@ -141,7 +141,7 @@ def test_log_mapping_full_record_shape(otlp_backend) -> None:
     JSON body in the mirror shape, and trace/span ids as the correlation
     fields."""
     backend, log_exporter, _ = otlp_backend
-    event = _event(
+    event = otlp_test_event(
         event_name="exec",
         category="log",
         level="warning",
@@ -174,7 +174,7 @@ def test_flush_groups_each_event_name_under_its_matching_resource(otlp_backend) 
 
     backend, log_exporter, _ = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
-        [_event(event_name=name) for name in ("llm_usage", "node_exit", "log")]
+        [otlp_test_event(event_name=name) for name in ("llm_usage", "node_exit", "log")]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
 
@@ -253,7 +253,7 @@ def test_metric_mapping_int_counter_float_histogram(otlp_backend) -> None:
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
-            _event(
+            otlp_test_event(
                 event_name="llm_usage",
                 attributes={
                     "model": "claude-sonnet",
@@ -264,14 +264,14 @@ def test_metric_mapping_int_counter_float_histogram(otlp_backend) -> None:
                     "body": "x" * 500,
                 },
             ),
-            _event(
+            otlp_test_event(
                 event_name="turn_end",
                 attributes={"ok": True, "duration_seconds": 4.0},
             ),
         ]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
-    metrics = _metrics(metric_reader)
+    metrics = collected_metrics(metric_reader)
 
     _assert_int_payload_maps_to_counter_without_body_label(metrics)
     _assert_float_payload_maps_to_histogram_with_unit(metrics)
@@ -283,7 +283,7 @@ def test_compaction_completed_maps_size_samples_and_frequency_counter(otlp_backe
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
-            _event(
+            otlp_test_event(
                 event_name="compaction_completed",
                 attributes={
                     "compact_kind": "auto",
@@ -297,7 +297,7 @@ def test_compaction_completed_maps_size_samples_and_frequency_counter(otlp_backe
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
 
-    metrics = _metrics(metric_reader)
+    metrics = collected_metrics(metric_reader)
     count = metrics["ava_compaction_completed_compactions"].data.data_points[0]
     assert count.value == 1
     assert _attrs_of(count)["compact_kind"] == "auto"
@@ -325,7 +325,7 @@ def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
-            _event(
+            otlp_test_event(
                 event_name="resolution_status",
                 attributes={
                     "unresolved_warnings": 9,
@@ -335,7 +335,7 @@ def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
                     "window": "6h",
                 },
             ),
-            _event(
+            otlp_test_event(
                 event_name="resolution_status",
                 attributes={
                     "unresolved_warnings": 2,
@@ -349,7 +349,7 @@ def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
 
-    metrics = _metrics(metric_reader)
+    metrics = collected_metrics(metric_reader)
     warning = metrics["ava_resolution_status_unresolved_warnings"]
     error = metrics["ava_resolution_status_unresolved_errors"]
     dismissed_warning = metrics["ava_resolution_status_dismissed_warnings"]
@@ -367,11 +367,11 @@ def test_root_health_tick_uses_latest_timestamp_gauge(otlp_backend) -> None:
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
-            _event(
+            otlp_test_event(
                 event_name="root_health_tick",
                 attributes={"last_tick_timestamp_seconds": 1_725_000_000.0},
             ),
-            _event(
+            otlp_test_event(
                 event_name="root_health_tick",
                 attributes={"last_tick_timestamp_seconds": 1_725_000_060.0},
             ),
@@ -379,7 +379,7 @@ def test_root_health_tick_uses_latest_timestamp_gauge(otlp_backend) -> None:
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
 
-    tick = _metrics(metric_reader)["ava_root_health_tick_last_tick_timestamp"]
+    tick = collected_metrics(metric_reader)["ava_root_health_tick_last_tick_timestamp"]
     assert tick.unit == "s"
     assert tick.data.data_points[0].value == 1_725_000_060.0
 
@@ -389,21 +389,21 @@ def test_root_health_gauges_keep_separate_home_identity_and_expected_only(otlp_b
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
-            _event(
+            otlp_test_event(
                 event_name="root_health_expected",
                 attributes={
                     "home_id": "a" * 64,
                     "expected_since_timestamp_seconds": 100.0,
                 },
             ),
-            _event(
+            otlp_test_event(
                 event_name="root_health_expected",
                 attributes={
                     "home_id": "b" * 64,
                     "expected_since_timestamp_seconds": 120.0,
                 },
             ),
-            _event(
+            otlp_test_event(
                 event_name="root_health_tick",
                 attributes={
                     "home_id": "a" * 64,
@@ -413,7 +413,7 @@ def test_root_health_gauges_keep_separate_home_identity_and_expected_only(otlp_b
         ]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
-    metrics = _metrics(metric_reader)
+    metrics = collected_metrics(metric_reader)
     expected = metrics["ava_root_health_expected_expected_since_timestamp"]
     assert {point.attributes["home_id"] for point in expected.data.data_points} == {
         "a" * 64,
@@ -431,7 +431,7 @@ def test_metric_disposition_cost_counter_price_excluded(otlp_backend) -> None:
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
-            _event(
+            otlp_test_event(
                 event_name="llm_usage",
                 attributes={
                     "model": "claude-sonnet",
@@ -443,14 +443,14 @@ def test_metric_disposition_cost_counter_price_excluded(otlp_backend) -> None:
                     "price_out": 15.0,
                 },
             ),
-            _event(
+            otlp_test_event(
                 event_name="llm_usage",
                 attributes={"model": "claude-sonnet", "calls": 1, "cost_usd": 0.375},
             ),
         ]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
-    metrics = _metrics(metric_reader)
+    metrics = collected_metrics(metric_reader)
 
     cost = metrics["ava_llm_usage_cost_usd"]
     assert cost.data.is_monotonic  # a Counter, not a Histogram
@@ -475,7 +475,7 @@ def test_metric_views_shape_latency_histograms() -> None:
     hist = meter.create_histogram("ava_llm_usage_latency", unit="ms")
     hist.record(45000.0, {"model": "m", "agent_id": 7, "machine": "x", "process": "p"})
 
-    dp = _metrics(reader)["ava_llm_usage_latency"].data.data_points[0]
+    dp = collected_metrics(reader)["ava_llm_usage_latency"].data.data_points[0]
     assert list(dp.explicit_bounds) == list(telemetry_otlp.LLM_LATENCY_BUCKETS_MS)
     assert "agent_id" not in _attrs_of(dp)
     assert _attrs_of(dp)["model"] == "m"
@@ -492,7 +492,7 @@ def test_metric_views_shape_gateway_event_loop_lag_histogram() -> None:
     hist = meter.create_histogram("ava_gateway_event_loop_lag", unit="ms")
     hist.record(45000.0, {"machine": "x", "process": "gateway"})
 
-    dp = _metrics(reader)["ava_gateway_event_loop_lag"].data.data_points[0]
+    dp = collected_metrics(reader)["ava_gateway_event_loop_lag"].data.data_points[0]
     assert list(dp.explicit_bounds) == list(telemetry_otlp.EVENT_LOOP_LAG_BUCKETS_MS)
 
 
@@ -501,15 +501,15 @@ def test_gateway_runtime_and_sse_absolute_metrics_use_gauges(otlp_backend) -> No
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
-            _event(
+            otlp_test_event(
                 event_name="sse",
                 attributes={"mode": "filtered", "active_connections": 2, "opened": 1},
             ),
-            _event(
+            otlp_test_event(
                 event_name="sse",
                 attributes={"mode": "filtered", "active_connections": 1, "closed": 1},
             ),
-            _event(
+            otlp_test_event(
                 event_name="gateway_process",
                 attributes={
                     "cpu_percent": 12.5,
@@ -517,7 +517,7 @@ def test_gateway_runtime_and_sse_absolute_metrics_use_gauges(otlp_backend) -> No
                     "fd_count": 23,
                 },
             ),
-            _event(
+            otlp_test_event(
                 event_name="gateway_event_loop",
                 attributes={"lag_ms": 250.0, "slow_ticks": 1},
             ),
@@ -525,7 +525,7 @@ def test_gateway_runtime_and_sse_absolute_metrics_use_gauges(otlp_backend) -> No
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
 
-    metrics = _metrics(metric_reader)
+    metrics = collected_metrics(metric_reader)
     active = metrics["ava_sse_active_connections"].data.data_points[0]
     assert active.value == 1.0
     assert _attrs_of(active)["mode"] == "filtered"
@@ -544,10 +544,10 @@ def test_metric_mapping_skips_long_string_attributes(otlp_backend) -> None:
     """Strings over the attribute length cap are dropped (cardinality guard)."""
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
-        [_event(event_name="llm_usage", attributes={"model": "m" * 100, "in_total": 1})]
+        [otlp_test_event(event_name="llm_usage", attributes={"model": "m" * 100, "in_total": 1})]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
-    dp = _metrics(metric_reader)["ava_llm_usage_in_total"].data.data_points[0]
+    dp = collected_metrics(metric_reader)["ava_llm_usage_in_total"].data.data_points[0]
     assert "model" not in _attrs_of(dp)
 
 
@@ -560,7 +560,7 @@ def test_metric_mapping_excludes_loguru_decoration_extras(otlp_backend) -> None:
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
-            _event(
+            otlp_test_event(
                 event_name="llm_usage",
                 attributes={
                     "model": "deepseek-v4-flash",
@@ -576,7 +576,7 @@ def test_metric_mapping_excludes_loguru_decoration_extras(otlp_backend) -> None:
         ]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
-    dp = _metrics(metric_reader)["ava_llm_usage_in_total"].data.data_points[0]
+    dp = collected_metrics(metric_reader)["ava_llm_usage_in_total"].data.data_points[0]
     a = _attrs_of(dp)
     assert a["model"] == "deepseek-v4-flash"
     assert "msg" not in a
@@ -589,8 +589,8 @@ def test_non_telemetry_events_produce_no_metrics(otlp_backend) -> None:
     backend, log_exporter, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
-            _event(event_name="exec", category="log", attributes={"n": 3, "ok": True}),
-            _event(event_name="status_change", category="audit", attributes={"code": 0}),
+            otlp_test_event(event_name="exec", category="log", attributes={"n": 3, "ok": True}),
+            otlp_test_event(event_name="status_change", category="audit", attributes={"code": 0}),
         ]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
@@ -600,7 +600,7 @@ def test_non_telemetry_events_produce_no_metrics(otlp_backend) -> None:
             break
         time.sleep(0.01)
     assert len(log_exporter.get_finished_logs()) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    assert _metrics(metric_reader) == {}
+    assert collected_metrics(metric_reader) == {}
 
 
 def test_warmup_initializes_enabled_backend(
@@ -622,10 +622,10 @@ def test_export_batch_builds_backend_once(
     """The first record brings the backend up; later batches reuse it (idempotent)."""
     backend, _log_exporter, _metric_reader = otlp_backend
 
-    backend.export_batch([_event()])
+    backend.export_batch([otlp_test_event()])
     first = backend._logs  # pyright: ignore[reportUnknownMemberType]
     assert first is not None
-    backend.export_batch([_event()])
+    backend.export_batch([otlp_test_event()])
     assert backend._logs is first  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -650,7 +650,7 @@ def test_flag_off_disables_export(otlp_backend: Any, monkeypatch: pytest.MonkeyP
         pytest.fail("flag-off must not emit backend status events")
 
     monkeypatch.setattr(telemetry, "emit", fail_emit)
-    backend.export_batch([_event()])
+    backend.export_batch([otlp_test_event()])
     assert backend._logs is None  # never brought up
     assert backend._queue.empty()
     assert log_exporter.get_finished_logs() == ()
@@ -674,7 +674,7 @@ def test_flag_defaults_on_with_standard_endpoint(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _bind_telemetry(db_conn: psycopg.Connection, database: Database) -> Iterator[None]:
+def bind_telemetry(db_conn: psycopg.Connection, database: Database) -> Iterator[None]:
     pipeline = telemetry.build_pipeline(
         database=lambda: database, machine=machine_identity(), home=Path(".ava")
     )

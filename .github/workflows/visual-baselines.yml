@@ -248,7 +248,10 @@ jobs:
             exit 1
           fi
           mkdir -p "tests/e2e/visual/__snapshots__/$PREVIEW_CAPTURES"
-          cp "$ARTIFACT_ROOT/$PREVIEW_CAPTURES"/*-golden-[12].png "tests/e2e/visual/__snapshots__/$PREVIEW_CAPTURES/"
+          # Captures stay nested by route domain (captures/<surface>/<crop>-golden-N.png);
+          # the exact-set checks above already bound the artifact's captures tree to the
+          # 44 golden PNGs, so copy it as it sits rather than flattening it to a fixed depth.
+          cp -R "$ARTIFACT_ROOT/$PREVIEW_CAPTURES"/. "tests/e2e/visual/__snapshots__/$PREVIEW_CAPTURES/"
           cp "$ARTIFACT_ROOT/preview-gate/meta.json" "tests/e2e/visual/__snapshots__/preview-gate/meta.json"
 
       - name: Commit and push to the dispatched PR head
@@ -264,22 +267,77 @@ jobs:
             -m 'Co-authored-by: Ava #5814'
           git push origin "HEAD:refs/heads/$BRANCH"
 
-      - name: Approve the pull_request CI run spawned by the bot push
+      - name: Approve the pull_request CI runs spawned by the bot push
         if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ needs.render.outputs.branch }}
         run: |
-          # The bot push synchronizes a pull_request CI run that GitHub parks
-          # pending approval. Approve it so the PR check status can go green;
-          # the explicit workflow_dispatch run below stays the authoritative
-          # green signal.
-          RUN_ID="$(gh run list --workflow=ci.yml --branch "$BRANCH" --event pull_request \
-            --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -n "$RUN_ID" ]; then
-            gh api --method POST \
-              "repos/${{ github.repository }}/actions/runs/$RUN_ID/approve" \
-              >/dev/null || echo "approve unavailable — approve the run manually"
+          # The bot push synchronizes pull_request CI runs on this branch that
+          # GitHub parks pending approval - the PR-triggered workflows whose
+          # path filters the pull request's diff matches (ci.yml always; App CI
+          # for tests/ui or ui/app changes; and so on). Approve every held run
+          # so the PR check status can go green; the explicit workflow_dispatch
+          # run below stays the authoritative green signal.
+          #
+          # The held runs appear a few seconds after the push, so an immediate
+          # lookup reads the branch's previous runs and the approve calls fail
+          # with "This workflow run is not waiting for approval" (HTTP 403: a
+          # state error, not an authorization error; observed on run
+          # 38430429569, 2026-10-13). Poll for the held runs on the commit the
+          # push just created and approve each once. Eighteen attempts five
+          # seconds apart bound the wait to ~90s; the --limit 20 page covers
+          # every PR-triggered workflow that could park for one head; three
+          # quiet attempts after the last approval let slightly later runs land.
+          HEAD_SHA="$(git rev-parse HEAD)"
+          approved=""
+          quiet=0
+          for attempt in {1..18}; do
+            RUN_IDS="$(gh run list --branch "$BRANCH" --event pull_request \
+              --commit "$HEAD_SHA" --status action_required \
+              --limit 20 --json databaseId --jq '.[].databaseId' || true)"
+            pending=""
+            for RUN_ID in $RUN_IDS; do
+              case " $approved " in
+                *" $RUN_ID "*) ;;
+                *) pending="$pending $RUN_ID" ;;
+              esac
+            done
+            if [ -z "$pending" ]; then
+              if [ -n "$approved" ]; then
+                quiet=$((quiet + 1))
+                if [ "$quiet" -ge 3 ]; then
+                  echo "All pending CI runs for $HEAD_SHA are approved:${approved}"
+                  exit 0
+                fi
+              fi
+            else
+              quiet=0
+              for RUN_ID in $pending; do
+                if gh api --method POST \
+                  "repos/${GITHUB_REPOSITORY}/actions/runs/$RUN_ID/approve" >/dev/null; then
+                  echo "Approved pending CI run $RUN_ID for $HEAD_SHA"
+                  approved="$approved $RUN_ID"
+                else
+                  echo "Approval for pending run $RUN_ID failed; will retry"
+                fi
+              done
+            fi
+            if [ "$attempt" -lt 18 ]; then
+              sleep 5
+            fi
+          done
+          remaining="$(gh run list --branch "$BRANCH" --event pull_request \
+            --commit "$HEAD_SHA" --status action_required \
+            --limit 20 --json databaseId --jq '[.[].databaseId] | join(" ")' 2>/dev/null || true)"
+          if [ -n "$remaining" ]; then
+            echo "::warning title=visual baselines::run(s) $remaining for $HEAD_SHA are still waiting for approval;" \
+              "approve them manually: gh api --method POST repos/${GITHUB_REPOSITORY}/actions/runs/<id>/approve"
+          elif [ -z "$approved" ]; then
+            echo "::warning title=visual baselines::no approval-held pull_request run appeared for" \
+              "$HEAD_SHA in 90s; approve it manually if the bot push parked one"
+          else
+            echo "All pending CI runs for $HEAD_SHA are approved:${approved}"
           fi
 
       - name: Re-run CI for the updated PR head

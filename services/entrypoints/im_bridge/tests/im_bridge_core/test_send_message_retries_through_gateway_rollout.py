@@ -19,13 +19,13 @@ from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     FakeGateway,
     FakePlainAdapter,
     FakeTypingAdapter,
-    _core,
-    _text,
     assert_effort_layer_after_pro,
     assert_model_layer_after_coder,
     assert_preset_layer,
+    create_test_core,
     models_data,
     preset,
+    reply_text,
     row,
 )
 from services.entrypoints.im_bridge.types import (
@@ -89,7 +89,7 @@ async def test_list_on_button_channel_is_text_one_liner_plus_buttons() -> None:
                 row(999, label="gone", status="terminated"),  # filtered out
             ]
         )
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
         core.register(adapter)
         out = await core._cmd_list("telegram")
@@ -110,7 +110,7 @@ async def test_list_on_plain_channel_keeps_full_text_list() -> None:
     there or it would be unusable."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(agents=[row(405, label="Ava \u8d1f\u8d23\u4eba")])
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         core.register(FakePlainAdapter())
         out = await core._cmd_list("weixin")
         assert isinstance(out, Reply)
@@ -130,7 +130,7 @@ async def test_chat_typing_starts_and_stops_on_agent_reply(
         monkeypatch.setattr(core_mod, "TYPING_INTERVAL_S", 0.01)
         monkeypatch.setattr(core_mod, "TYPING_MAX_S", 60.0)
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
         core.register(adapter)
         state = ChatState("telegram", "12345")
@@ -171,7 +171,7 @@ async def test_typing_skipped_for_plain_adapters() -> None:
     still land as new messages."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         adapter = FakePlainAdapter()
         core.register(adapter)
         state = ChatState("weixin", "67890")
@@ -208,7 +208,7 @@ async def test_one_typing_loop_per_chat(monkeypatch: pytest.MonkeyPatch) -> None
 
         monkeypatch.setattr(core_mod, "TYPING_INTERVAL_S", 0.01)
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
         core.register(adapter)
         state = ChatState("telegram", "12345")
@@ -235,7 +235,7 @@ async def test_typing_gives_up_after_timeout(monkeypatch: pytest.MonkeyPatch) ->
         monkeypatch.setattr(core_mod, "TYPING_INTERVAL_S", 0.01)
         monkeypatch.setattr(core_mod, "TYPING_MAX_S", 0.05)
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
         core.register(adapter)
         state = ChatState("telegram", "12345")
@@ -259,7 +259,7 @@ async def test_spawn_menu_layers_render_with_summary_button() -> None:
             presets=[preset(1, "coder"), preset(2, "reviewer", label="Code Reviewer")],
             models=models_data(),
         )
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
 
         assert_preset_layer(await core._cmd_spawn(state))
@@ -275,7 +275,7 @@ async def test_spawn_menu_effort_fallback_without_model_options() -> None:
     """A model without reasoning_effort_options gets the generic set."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(presets=[], models=models_data())
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         await core._cmd_spawn(state)
         await core._handle_spawn_menu(state, "spawn:preset:none")
@@ -292,7 +292,7 @@ async def test_spawn_menu_every_layer_completable() -> None:
     both create the agent with the chosen config."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(presets=[preset(1, "coder")], models=models_data())
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
 
         # layer 1, tap Spawn directly -> cluster defaults, no preset
@@ -320,7 +320,7 @@ async def test_spawn_menu_every_layer_completable() -> None:
 async def test_spawn_menu_provider_default_effort_means_unset() -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(presets=[preset(1, "coder")], models=models_data())
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         await core._cmd_spawn(state)
         await core._handle_spawn_menu(state, "spawn:preset:1")
@@ -334,7 +334,7 @@ async def test_spawn_skips_preset_layer_when_no_presets() -> None:
     """No presets configured — /spawn jumps straight to the model layer."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(presets=[], models=models_data())
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         out = await core._cmd_spawn(state)
         assert isinstance(out, Reply)
@@ -344,7 +344,7 @@ async def test_spawn_skips_preset_layer_when_no_presets() -> None:
 async def test_spawn_menu_stale_preset_reports_error() -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(presets=[preset(1, "coder")], models=models_data())
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         await core._cmd_spawn(state)
         out = await core._handle_spawn_menu(state, "spawn:preset:99")
@@ -354,9 +354,9 @@ async def test_spawn_menu_stale_preset_reports_error() -> None:
 
 async def test_commands_lists_everything() -> None:
     async with owned_tasks() as _owned_tasks:
-        core = _core(FakeGateway(), tasks=_owned_tasks)
+        core = create_test_core(FakeGateway(), tasks=_owned_tasks)
         out = core._cmd_help()  # sync — no gateway call
-        text = _text(out)
+        text = reply_text(out)
         assert "/list" in text and "/spawn" in text
         assert "/status" in text and "/commands" in text
         assert "/switch" not in text  # /list buttons switch now (user ruling 2026-08-04)
@@ -380,7 +380,7 @@ async def test_commands_lists_ava_slash_catalog_as_buttons() -> None:
                 "instruction_hint": "<goal>",
             },
         ]
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         core.register(FakeTypingAdapter())  # can_buttons = True
         out = await core._cmd_commands("telegram")
         assert isinstance(out, Reply)
@@ -403,7 +403,7 @@ async def test_commands_plain_channel_keeps_text_only() -> None:
     """WeChat/Feishu render no buttons — /commands stays a text list."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         core.register(FakePlainAdapter())
         out = await core._cmd_commands("weixin")
         assert isinstance(out, Reply)
@@ -415,9 +415,9 @@ async def test_commands_empty_catalog() -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
         gateway.commands = []
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         out = await core._cmd_commands("telegram")
-        assert _text(out) == copy.NO_COMMANDS_REGISTERED
+        assert reply_text(out) == copy.NO_COMMANDS_REGISTERED
 
 
 async def test_unknown_slash_command_forwards_to_current_agent() -> None:
@@ -425,7 +425,7 @@ async def test_unknown_slash_command_forwards_to_current_agent() -> None:
     claim node expands registered commands like the web composer does."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         state.current_agent_id = 405
         out = await core._handle_command(state, "/audio-transcribe go")
@@ -436,11 +436,11 @@ async def test_unknown_slash_command_forwards_to_current_agent() -> None:
 async def test_unknown_slash_command_without_agent_errors() -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         out = await core._handle_command(state, "/audio-transcribe go")
         assert out is not None
-        assert copy.NO_AGENT_SWITCHED in _text(out)
+        assert copy.NO_AGENT_SWITCHED in reply_text(out)
         assert gateway.sent == []
 
 
@@ -454,7 +454,7 @@ async def test_weixin_push_failure_emits_the_failed_event(
     """
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         wx = FakeFailingWeixinAdapter()
         core.register(wx)
         wx.push_failures = 2
@@ -464,7 +464,7 @@ async def test_weixin_push_failure_emits_the_failed_event(
         async def _record(seconds: float) -> None:
             sleeps.append(seconds)
 
-        monkeypatch.setattr(push_watchdog, "_sleep", _record)
+        monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _record)
 
         await core._send("weixin", "o9cq804", Reply("hello"))
 
@@ -479,14 +479,14 @@ async def test_weixin_healed_retry_emits_no_failed_event(
 ) -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         wx = FakeFlakyWeixinAdapter([])
         core.register(wx)
 
         async def _no_sleep(seconds: float) -> None:
             del seconds
 
-        monkeypatch.setattr(push_watchdog, "_sleep", _no_sleep)
+        monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _no_sleep)
         await core._send("weixin", "o9cq804", Reply("hello"))
         assert not [r for r in loguru_records if r["extra"].get("event") == "im_push_failed"]
 
@@ -496,7 +496,7 @@ async def test_weixin_push_recovery_hints_on_next_inbound() -> None:
     the next inbound reply carries a 'recovered' hint (Task #829)."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         wx = FakeFailingWeixinAdapter()
         core.register(wx)
         # simulate: push had failed, then a user message refreshed the token and
@@ -538,7 +538,7 @@ async def test_push_retry_sleeps_backoff_before_retrying(monkeypatch: pytest.Mon
     alert fires."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         events: list[str] = []
 
         async def _sleep(seconds: float) -> None:
@@ -547,7 +547,7 @@ async def test_push_retry_sleeps_backoff_before_retrying(monkeypatch: pytest.Mon
             assert base <= seconds <= base + jitter
             events.append("sleep")
 
-        monkeypatch.setattr(push_watchdog, "_sleep", _sleep)
+        monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _sleep)
         wx = FakeFlakyWeixinAdapter(events)
         tg = FakeTypingAdapter()
         core.register(wx)
@@ -588,7 +588,7 @@ async def test_restore_subscriptions_skips_disabled_channels(
     async with owned_tasks() as _owned_tasks:
         monkeypatch.setenv("AVA_HOME", str(tmp_path))
         gateway = FakeGateway(agents=[row(405, label="Ava \u8d1f\u8d23\u4eba")])
-        core = _core(
+        core = create_test_core(
             gateway, im_disabled_adapters=(), tasks=_owned_tasks
         )  # nothing disabled: both subscribe
         for channel, chat_id in (("weixin", "wx123"), ("telegram", "12345")):
@@ -597,7 +597,9 @@ async def test_restore_subscriptions_skips_disabled_channels(
             assert (channel, chat_id) in core._subscriptions
 
         # daemon restart with weixin disabled: its subscription is not restored
-        core2 = _core(FakeGateway(agents=[]), im_disabled_adapters=("weixin",), tasks=_owned_tasks)
+        core2 = create_test_core(
+            FakeGateway(agents=[]), im_disabled_adapters=("weixin",), tasks=_owned_tasks
+        )
         assert core2._disabled_channels == {"weixin"}
         await core2.restore_subscriptions()
         assert ("weixin", "wx123") not in core2._subscriptions
@@ -612,7 +614,7 @@ async def test_push_snapshot_watermark_compares_numerically() -> None:
     items: the id-only fallback that unstamped items and legacy rows use."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
         core.register(adapter)
         state = ChatState("telegram", "12345")
@@ -652,7 +654,7 @@ async def test_sse_reconnect_log_does_not_kill_subscription_loop() -> None:
     pushes — died. The loop must survive a stream error and its log call."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(stream_failures=1)
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         state.current_agent_id = 405
 
@@ -676,7 +678,7 @@ async def test_handle_inbound_reports_unconfirmed_delivery_when_gateway_stays_do
     async with owned_tasks() as _owned_tasks:
         monkeypatch.setenv("AVA_HOME", str(tmp_path))
         gateway = FakeGateway(send_failures=10)
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
         core.register(adapter)
         state = core._get_or_create_state("telegram", "12345")

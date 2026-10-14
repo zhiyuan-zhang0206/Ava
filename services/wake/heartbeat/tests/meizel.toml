@@ -4,3 +4,52 @@
 "test_heartbeat_daemon.py" = ["heartbeat_support.py"]
 "test_heartbeat_liveness.py" = ["machine_probe_setup.py"]
 "test_machine_probe_failure_signal.py" = ["machine_probe_setup.py"]
+
+[debt.first-party-patch]
+"test_completion_digest.py#monkeypatch.setattr services.wake.heartbeat.completion_digest.deliver_chat_inbound" = 1
+"test_heartbeat_checkin_retry.py#monkeypatch.setattr services.wake.heartbeat.daemon._sweep_backoff_resets" = 1
+"test_heartbeat_checkin_retry.py#monkeypatch.setattr services.wake.heartbeat.daemon.send_heartbeat_checkin" = 1
+"test_heartbeat_checkin_retry.py#monkeypatch.setattr services.wake.heartbeat.daemon.sleep_with_liveness" = 1
+"test_heartbeat_checkin_retry.py#monkeypatch.setattr services.wake.heartbeat.daemon.time" = 1
+"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon._sweep_backoff_resets" = 1
+"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.backoff_deadlines" = 1
+"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.reconcile_checkin_outcomes" = 1
+"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.run_liveness_pass" = 1
+"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.select_idle_agents_needing_heartbeat" = 1
+"test_heartbeat_failure_budget.py#monkeypatch.setattr services.wake.heartbeat.daemon.sleep_with_liveness" = 1
+"test_heartbeat_liveness.py#monkeypatch.setattr base.config.settings.gateway.status_probe_timeout_seconds" = 1
+"test_heartbeat_liveness.py#monkeypatch.setattr services.wake.heartbeat.liveness.publish_agent_updated_sync" = 1
+"test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.completion_digest.flush_once" = 2
+"test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon._is_running" = 1
+"test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon._remove_pidfile" = 1
+"test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.completion_digest.completion_digest_loop" = 1
+"test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.dispatch_loop" = 1
+"test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.liveness_loop" = 1
+"test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.start_health_server" = 1
+"test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.stop_health_server" = 1
+"test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.write_pidfile" = 1
+"test_heartbeat_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
+"test_heartbeat_quiesced.py#monkeypatch.setattr services.wake.heartbeat.completion_digest.FLUSH_INTERVAL_S" = 1
+"test_heartbeat_quiesced.py#monkeypatch.setattr services.wake.heartbeat.completion_digest.flush_once" = 1
+"test_heartbeat_quiesced.py#monkeypatch.setattr services.wake.heartbeat.daemon.run_liveness_pass" = 1
+"test_heartbeat_quiesced.py#monkeypatch.setattr services.wake.heartbeat.daemon.sleep_with_liveness" = 1
+"test_heartbeat_snapshots.py#monkeypatch.setattr services.wake.heartbeat.daemon.run_liveness_pass" = 2
+"test_heartbeat_snapshots.py#monkeypatch.setattr services.wake.heartbeat.daemon.sleep_with_liveness" = 2
+"test_impersonation_heartbeat.py#monkeypatch.setattr agent.extensions.plugin_state_codec.load_snapshot" = 1
+"test_impersonation_heartbeat.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"test_impersonation_heartbeat.py#monkeypatch.setattr ava.impersonation.attachment.process_metadata" = 1
+"test_impersonation_heartbeat.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_machine_probe_failure_signal.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_station_healthcheck.py#monkeypatch.setattr base.config.settings.observability.observability_url" = 6
+"test_station_healthcheck.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_port" = 1
+"test_station_healthcheck.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
+"test_station_healthcheck.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
+"test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.Database.from_settings" = 2
+"test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe._station_answers" = 3
+"test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.build_pipeline" = 2
+"test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.init_gateway_process" = 2
+"test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.resolve_target" = 1
+"test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.settings.observability.telemetry_otlp_port" = 1
+
+[debt.stdlib-patch]
+"test_station_healthcheck.py#monkeypatch.setattr urllib.request.urlopen" = 4

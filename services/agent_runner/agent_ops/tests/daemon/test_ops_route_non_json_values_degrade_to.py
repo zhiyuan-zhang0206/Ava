@@ -21,6 +21,7 @@ from psycopg_pool import ConnectionPool
 import base.cluster.machines as cluster_machines
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
@@ -32,7 +33,6 @@ from services.agent_runner.agent_ops.tests.test_daemon import (
 from services.agent_runner.agent_ops.tests.test_daemon import (
     ops_pool as ops_pool,
 )
-from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _CHILD = Path(__file__).resolve().parents[1] / "child_daemon_exit.py"
@@ -365,7 +365,7 @@ async def test_ops_route_semaphore_caps_concurrency(
 
 
 def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> None:
-    """A crash escaping `_main` still reaches the log with its traceback and still
+    """A crash escaping `serve_ops_daemon` still reaches the log with its traceback and still
     leaves a non-zero code for the supervisor.
 
     Driven in a subprocess because `main` ends in shared `hard_exit` and never
@@ -686,7 +686,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
         release.wait(timeout=30)
         return "completed", {}
 
-    monkeypatch.setattr(daemon, "_dispatch_sync", _wedged)
+    monkeypatch.setattr(daemon, "bind_dispatch_sync", _wedged)
 
     task = asyncio.ensure_future(
         daemon._dispatch(

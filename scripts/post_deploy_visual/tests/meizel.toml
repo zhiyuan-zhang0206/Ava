@@ -1,0 +1,12 @@
+[debt.first-party-patch]
+"test_post_deploy_visual_check.py#monkeypatch.setattr scripts.post_deploy_visual.check.assert_gate_origin" = 1
+"test_post_deploy_visual_check.py#monkeypatch.setattr scripts.post_deploy_visual.check.inherited_process_env" = 1
+"test_post_deploy_visual_check.py#monkeypatch.setattr scripts.post_deploy_visual.matrix.LOGIN_REDIRECT_POLL_MS" = 1
+"test_post_deploy_visual_check.py#monkeypatch.setattr scripts.post_deploy_visual.matrix.LOGIN_REDIRECT_WATCH_MS" = 1
+"test_post_deploy_visual_check.py#monkeypatch.setattr scripts.post_deploy_visual.matrix.inspect_combination" = 2
+"test_refresh_visual_baselines.py#monkeypatch.setattr scripts.post_deploy_visual.refresh_visual_baselines._REPO_ROOT" = 5
+"test_refresh_visual_baselines.py#monkeypatch.setattr scripts.post_deploy_visual.refresh_visual_baselines.subprocess.run" = 1
+"test_visual_gate_delayed_mounts.py#monkeypatch.setattr scripts.post_deploy_visual.matrix.DELAYED_MOUNT_WAIT_MS" = 1
+
+[debt.stdlib-patch]
+"test_post_deploy_visual_check.py#monkeypatch.setattr urllib.request.urlopen" = 7

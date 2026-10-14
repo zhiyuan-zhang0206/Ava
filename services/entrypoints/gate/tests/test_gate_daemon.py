@@ -13,6 +13,7 @@ import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
+from base.config.tests.configuration import snapshot_process_config
 from base.daemon import shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -23,7 +24,6 @@ from base.telemetry.delivery import reporting
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
 from services.entrypoints.gate import daemon
-from tests.fixtures.configuration import snapshot_process_config
 
 
 @dataclass

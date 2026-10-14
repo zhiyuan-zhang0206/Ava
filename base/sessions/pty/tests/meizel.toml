@@ -2,3 +2,12 @@ exports = ["job_wait.py"]
 
 [uses]
 "test_pty_job_wait.py" = ["job_wait.py"]
+
+[debt.env-patch]
+"test_pty_allocation_freeze.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_closure.py#monkeypatch.setattr base.sessions.pty.process_groups.signal" = 2
+
+[debt.stdlib-patch]
+"test_closure.py#monkeypatch.setattr os.killpg" = 1

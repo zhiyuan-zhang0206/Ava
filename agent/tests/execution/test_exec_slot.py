@@ -113,7 +113,7 @@ def test_child_clients_are_lazy_and_released_when_the_process_ends(tmp_path: Pat
     """A connection the child's code never touches is never built; one it touches is closed by the
     child itself before it exits."""
     from agent.graph.exec.protocol import read_result
-    from agent.tests.execution.test_exec_child import _spawn
+    from agent.tests.execution.test_exec_child import spawn_real_child
 
     marker = tmp_path / "closed"
     code = f"""
@@ -133,7 +133,7 @@ ava.DB.closed
 print("after:", ava.DB.__class__.__name__)
 print("marker before exit:", Path({str(marker)!r}).exists())
 """
-    proc, _request, result = _spawn(tmp_path, code)
+    proc, _request, result = spawn_real_child(tmp_path, code)
 
     assert proc.returncode == 0, proc.stderr
     assert read_result(result).kind == "done"

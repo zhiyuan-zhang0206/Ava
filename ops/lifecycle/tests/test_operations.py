@@ -236,8 +236,8 @@ async def test_restart_agent_op_terminated_short_circuits(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
+    from base.agents.tests.units import spawn_agent
     from ops.tests.pool_support import make_test_pool
-    from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(
         catalog=model_catalog,

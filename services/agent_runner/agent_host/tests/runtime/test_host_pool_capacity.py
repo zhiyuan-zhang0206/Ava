@@ -21,8 +21,8 @@ from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.deploy.tests.containers import postgres
 from services.agent_runner.agent_host.pools import build_control_pool, build_shared_pool
-from tests._containers import postgres
 from tests.components.cli.test_pgbouncer_wire import (
     admin_console_url,
     pgbouncer_available,

@@ -16,14 +16,14 @@ from pathlib import Path
 
 from cli.commands.converge.spec import ConvergeCtx
 
-_FORBIDDEN_FRONTEND_ENV_FILES = (".env", ".env.local", ".env.production", ".env.production.local")
+FORBIDDEN_FRONTEND_ENV_FILES = (".env", ".env.local", ".env.production", ".env.production.local")
 
 _NEXT_PUBLIC_ENV_LINE = re.compile(
     r"^\s*(?:export\s+)?(NEXT_PUBLIC_[A-Za-z0-9_]+)\s*=", re.MULTILINE
 )
 
 
-def _next_public_keys_in_env_file(path: Path) -> list[str]:
+def next_public_keys_in_env_file(path: Path) -> list[str]:
     """NEXT_PUBLIC_* var names assigned in a dotenv-style file (empty if absent)."""
     if not path.exists():
         return []
@@ -48,7 +48,7 @@ def ensure_no_frontend_env_overrides(ctx: ConvergeCtx) -> None:
       (base.cluster.fe_build_env), never read from .env.
     """
     frontend = ctx.repo / "ui" / "web"
-    present = [name for name in _FORBIDDEN_FRONTEND_ENV_FILES if (frontend / name).exists()]
+    present = [name for name in FORBIDDEN_FRONTEND_ENV_FILES if (frontend / name).exists()]
     if present:
         raise RuntimeError(
             f"build-time env override(s) under {frontend}: {', '.join(present)} — "
@@ -57,7 +57,7 @@ def ensure_no_frontend_env_overrides(ctx: ConvergeCtx) -> None:
             "(e.g. add a .bak suffix) and rerun."
         )
     unit_env = ctx.ava_home / ".env"
-    leaked = _next_public_keys_in_env_file(unit_env)
+    leaked = next_public_keys_in_env_file(unit_env)
     if leaked:
         raise RuntimeError(
             f"NEXT_PUBLIC_* override(s) in {unit_env}: {', '.join(leaked)} — the whole "

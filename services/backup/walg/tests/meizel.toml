@@ -13,3 +13,38 @@ exports = ["support.py"]
 "test_state.py" = ["support.py"]
 "test_tick.py" = ["support.py"]
 "test_verify.py" = ["support.py"]
+
+[debt.env-patch]
+"support.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_runner.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
+"test_runner.py#monkeypatch.setenv os.environ.AVA_TEST_ONLY_SECRET" = 1
+"test_runner.py#monkeypatch.setenv os.environ.OSS_ACCESS_KEY_SECRET" = 1
+"test_walg_config_boot_owner.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_walg_config_boot_owner.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_walg_config_boot_owner.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"support.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.installed_problem" = 1
+"support.py#monkeypatch.setattr base.config.settings.walg.walg_config_file" = 1
+"test_check.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.installed_problem" = 1
+"test_check.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 2
+"test_drill.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.connect" = 1
+"test_drill.py#monkeypatch.setattr services.backup.walg.drill.read_source_facts" = 1
+"test_drill.py#monkeypatch.setattr services.backup.walg.drill.select_throwaway_base" = 1
+"test_drill.py#monkeypatch.setattr services.backup.walg.restore.tempfile.mkdtemp" = 1
+"test_probe.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.connect" = 1
+"test_probe.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.local_owner_authority" = 1
+"test_probe.py#monkeypatch.setattr services.backup.walg.probe.RPO_OBJECTIVE_S" = 2
+"test_probe.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 4
+"test_probe.py#monkeypatch.setattr services.backup.walg.probe.read_archiver_state" = 1
+"test_probe.py#monkeypatch.setattr services.backup.walg.state.read_state" = 1
+"test_restore.py#monkeypatch.setattr services.backup.walg.restore.RESTORE_TIMEOUT_S" = 1
+"test_restore.py#monkeypatch.setattr services.backup.walg.restore.control_settings" = 1
+"test_restore.py#monkeypatch.setattr services.backup.walg.restore.tempfile.mkdtemp" = 1
+"test_tick.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.connect" = 2
+"test_tick.py#monkeypatch.setattr services.backup.walg.tick.deploy_window_reason" = 3
+"test_tick.py#monkeypatch.setattr services.backup.walg.tick.drill.drill_due" = 3
+"test_tick.py#monkeypatch.setattr services.backup.walg.tick.drill.run_drill" = 2
+"test_tick.py#monkeypatch.setattr services.backup.walg.tick.pg_target" = 2
+"test_tick.py#monkeypatch.setattr services.backup.walg.tick.postgres_accepts_connections" = 5
+"test_tick.py#monkeypatch.setattr services.backup.walg.tick.verify_chain" = 1

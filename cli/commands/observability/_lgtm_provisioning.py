@@ -20,7 +20,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.telemetry import EventPipeline
 from cli.commands.converge.rendered_file import write_rendered_guarded
 
-from .observatory_urls import _atomic_write
+from .observatory_urls import atomic_write
 
 # The one provisioning file converge generates instead of copying verbatim
 # (task #3697 S3): rendered from the metric registries, so plugin
@@ -80,7 +80,7 @@ def _render_ava_ops_dashboard(
         _record_rendered_hash(hashes_path, key, digest)
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(dest, rendered)
+    atomic_write(dest, rendered)
     _record_rendered_hash(hashes_path, key, digest)
     print(f"  lgtm native: ava-ops dashboard re-rendered (sha256 {digest[:12]})")
 
@@ -145,7 +145,7 @@ def render_provisioning(
             hashes_path,
             rel.as_posix(),
             surface="lgtm-provisioning",
-            writer=_atomic_write,
+            writer=atomic_write,
         )
         if warning is not None:
             print(f"  ! lgtm native: {warning}", file=sys.stderr)

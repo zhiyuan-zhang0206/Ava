@@ -25,10 +25,10 @@ from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 from services.desktop.browser import gateway_session, page_lifecycle, session
 from services.desktop.browser.mcp_daemon import (
     ChromeMcpDaemon,
-    _handle_client,
-    _no_page_result,
-    _selected_id,
-    _text_of,
+    handle_client,
+    no_page_result,
+    selected_id,
+    text_of,
 )
 from services.desktop.browser.page_lifecycle import (
     PageRegistry,
@@ -129,27 +129,27 @@ def new_daemon(upstream: Any, tab_groups: AgentTabGroups | None = None) -> Chrom
     return ChromeMcpDaemon(upstream, PageRegistry(), tab_groups or NoTabGroups())
 
 
-def _daemon() -> tuple[ChromeMcpDaemon, FakeUpstream]:
+def browser_daemon_with_fake_upstream() -> tuple[ChromeMcpDaemon, FakeUpstream]:
     up = FakeUpstream()
     return new_daemon(up), up
 
 
 async def test_two_connections_do_not_clobber() -> None:
     """A's op lands on A's page even though B selected its own page last."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     _, a_page = await d.call_tool("new_page", {"url": "a"}, None)
     _, b_page = await d.call_tool("new_page", {"url": "b"}, None)
     assert (a_page, b_page) == (1, 2)
     assert up.selected == 2  # B selected last
 
     res, a_page = await d.call_tool("take_snapshot", {}, a_page)
-    assert _text_of(res) == "ran take_snapshot on page 1"  # re-pinned to A, not B
+    assert text_of(res) == "ran take_snapshot on page 1"  # re-pinned to A, not B
     assert a_page == 1
 
 
 async def test_navigate_cold_start_from_no_page() -> None:
     """navigate_page from a connection with no page opens one (new_page)."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     res, page = await d.call_tool("navigate_page", {"url": "x"}, None)
     assert not res.is_error
     assert page == 1
@@ -159,18 +159,18 @@ async def test_navigate_cold_start_from_no_page() -> None:
 async def test_page_scoped_no_current_refuses_to_touch_global() -> None:
     """A page-scoped op from a page-less connection returns the no-page error and
     does NOT reach the upstream (forwarding would hit another client's tab)."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     await d.call_tool("new_page", {"url": "other"}, None)  # some OTHER connection's tab
     up.calls.clear()
 
     res, page = await d.call_tool("take_snapshot", {}, None)
-    assert res.is_error and "No page selected" in _text_of(res)
+    assert res.is_error and "No page selected" in text_of(res)
     assert page is None
     assert up.calls == []  # upstream never touched
 
 
 async def test_select_and_close_track_current() -> None:
-    d, _ = _daemon()
+    d, _ = browser_daemon_with_fake_upstream()
     await d.call_tool("new_page", {"url": "a"}, None)  # page 1
     _, page = await d.call_tool("new_page", {"url": "b"}, None)  # page 2
     _, page = await d.call_tool("select_page", {"pageId": 1}, page)
@@ -185,7 +185,7 @@ async def test_select_page_accepts_integral_float_page_id() -> None:
     """The MCP schema declares pageId as a number, so a JSON client sends 1.0
     for page 1; the connection's current page must still move -- the int-only
     check left it behind, and the next page-scoped call read as no-page."""
-    d, _ = _daemon()
+    d, _ = browser_daemon_with_fake_upstream()
     await d.call_tool("new_page", {"url": "a"}, None)  # page 1
     _, page = await d.call_tool("new_page", {"url": "b"}, None)  # page 2
     _, page = await d.call_tool("select_page", {"pageId": 1.0}, page)
@@ -195,17 +195,17 @@ async def test_select_page_accepts_integral_float_page_id() -> None:
 async def test_repin_failure_falls_back_to_no_page() -> None:
     """If the pinned page vanished, re-pin errors -> treat as page-less rather
     than run the op against whatever is globally selected."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     await d.call_tool("new_page", {"url": "real"}, None)  # page 1, selected
     res, page = await d.call_tool("take_snapshot", {}, 99)  # 99 never existed
-    assert res.is_error and "No page selected" in _text_of(res)
+    assert res.is_error and "No page selected" in text_of(res)
     assert page is None
     assert "take_snapshot" not in [c[0] for c in up.calls]  # op never ran
 
 
 async def test_list_pages_is_not_repinned() -> None:
     """Management tools forward without an injected select_page."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     _, page = await d.call_tool("new_page", {"url": "a"}, None)
     up.calls.clear()
     await d.call_tool("list_pages", {}, page)
@@ -213,8 +213,8 @@ async def test_list_pages_is_not_repinned() -> None:
 
 
 def test_selected_id_parses_marked_line() -> None:
-    assert _selected_id(_ok("  1: https://a\n  2: https://b [selected]")) == 2
-    assert _selected_id(_ok("  1: https://a")) is None
+    assert selected_id(_ok("  1: https://a\n  2: https://b [selected]")) == 2
+    assert selected_id(_ok("  1: https://a")) is None
 
 
 def test_selected_id_parses_isolated_context_suffix() -> None:
@@ -222,19 +222,19 @@ def test_selected_id_parses_isolated_context_suffix() -> None:
     same line; the id must still parse -- the drift left the page with no TTL
     slot and the affinity on the previous tab."""
     text = "  29: Discord (https://discord.com/app) [selected] isolatedContext=reg-7"
-    assert _selected_id(_ok(text)) == 29
+    assert selected_id(_ok(text)) == 29
     # A line without the marker parses to None, isolated suffix or not.
-    assert _selected_id(_ok("  1: https://a\n  2: https://b isolatedContext=x")) is None
+    assert selected_id(_ok("  1: https://a\n  2: https://b isolatedContext=x")) is None
 
 
 def test_selected_id_rejects_marker_inside_title() -> None:
     """A title containing a literal `[selected]` followed by more title text is
     not the marker: the suffix grammar admits only `key=value` tokens, so such
     a line must parse to None (a false pick would mis-affinity the page)."""
-    assert _selected_id(_ok("  3: my [selected] title (https://url)")) is None
+    assert selected_id(_ok("  3: my [selected] title (https://url)")) is None
     # The real marker stays parseable when a title contains the literal too.
     line = "  3: my [selected] title (https://url) [selected] isolatedContext=reg-7"
-    assert _selected_id(_ok(line)) == 3
+    assert selected_id(_ok(line)) == 3
 
 
 def test_next_page_select_normalizes_page_id() -> None:
@@ -250,8 +250,8 @@ def test_next_page_select_normalizes_page_id() -> None:
 
 
 def test_no_page_result_is_marked_error() -> None:
-    res = _no_page_result()
-    assert res.is_error and "No page selected" in _text_of(res)
+    res = no_page_result()
+    assert res.is_error and "No page selected" in text_of(res)
 
 
 def test_text_of_ignores_non_text_blocks() -> None:
@@ -263,7 +263,7 @@ def test_text_of_ignores_non_text_blocks() -> None:
         ],
         is_error=False,
     )
-    assert _text_of(result) == "ab"
+    assert text_of(result) == "ab"
 
 
 class DeadUpstream:
@@ -360,7 +360,7 @@ async def test_socket_in_use_false_when_nobody_listens() -> None:
 
     d, sock, cleanup = _short_sock_dir()
     try:
-        assert await mcp_daemon._socket_in_use(sock) is False
+        assert await mcp_daemon.socket_in_use(sock) is False
     finally:
         cleanup(d)
 
@@ -373,7 +373,7 @@ async def test_socket_in_use_true_when_listener_present() -> None:
     d, sock, cleanup = _short_sock_dir()
     server = await asyncio.start_unix_server(lambda _r, w: w.close(), path=str(sock))
     try:
-        assert await mcp_daemon._socket_in_use(sock) is True
+        assert await mcp_daemon.socket_in_use(sock) is True
     finally:
         server.close()
         await server.wait_closed()
@@ -387,7 +387,7 @@ async def test_agent_affinity_shares_page_across_connections() -> None:
     """Agent 7's page selection survives a fresh connection: the second
     connection resolves the page from the per-agent registry, not from any
     per-connection tracking — the exec-subprocess shape."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     # connection 1: the agent opens its tab
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
     assert d.pages.get_agent_page(7) == 1
@@ -402,7 +402,7 @@ async def test_agent_affinity_shares_page_across_connections() -> None:
 async def test_agent_affinity_isolated_between_agents() -> None:
     """Two agents keep separate pages: agent 7's snapshot re-pins to 7's tab
     even though agent 8's tab is the globally selected one."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
     await d.call_tool_for_agent("new_page", {"url": "b"}, 8)  # page 2, global
     res = await d.call_tool_for_agent("take_snapshot", {}, 7)
@@ -414,7 +414,7 @@ async def test_agent_affinity_repin_failure_drops_slot() -> None:
     """The agent's tab vanished underneath (crashed / closed elsewhere): the
     slot drops to no-page, and the call refuses to touch the global selection
     (which could be another agent's tab)."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
     up.pages.clear()
     up.selected = None
@@ -426,7 +426,7 @@ async def test_agent_affinity_repin_failure_drops_slot() -> None:
 async def test_agent_affinity_management_tools_update_slot() -> None:
     """new_page / select_page / close_page update the per-agent slot exactly
     like the per-connection path updates its local."""
-    d, _up = _daemon()
+    d, _up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # -> page 1
     await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # -> page 2
     assert d.pages.get_agent_page(7) == 2
@@ -440,7 +440,7 @@ async def test_agent_affinity_accepts_integral_float_page_id() -> None:
     """The incident shape: select_page(1.0) must move the per-agent slot to
     page 1; the int-only check kept slot 2 and the following page-scoped call
     re-pinned to the wrong tab (no-page)."""
-    d, _up = _daemon()
+    d, _up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
     await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # page 2
     await d.call_tool_for_agent("select_page", {"pageId": 1.0}, 7)
@@ -451,7 +451,7 @@ async def test_agent_affinity_isolated_context_suffix_registers_page() -> None:
     """An isolated-context new_page (suffix after `[selected]`) must update the
     agent's slot AND register the page's TTL slot; the drift left the slot on
     the old page and the page unmanaged (never auto-closed)."""
-    d, _up = _daemon()
+    d, _up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent(
         "new_page", {"url": "https://discord.com/app", "isolatedContext": "reg-7"}, 7
     )
@@ -462,7 +462,7 @@ async def test_agent_affinity_isolated_context_suffix_registers_page() -> None:
 async def test_agent_close_with_integral_float_drops_ttl_slot() -> None:
     """close_page(2.0) must drop page 2's TTL slot like an integer close --
     the int-only guard left the slot for the sweep to clean up late."""
-    d, _up = _daemon()
+    d, _up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
     await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # page 2
     assert 2 in d.pages.ttl_deadlines
@@ -481,7 +481,7 @@ async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
     # macOS unix sockets cap at ~104-char paths; pytest tmp dirs blow past it.
     sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
-        lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
+        lambda r, w: handle_client(r, w, daemon_ref), path=sock_path
     )
     assert sock_path.exists()
 
@@ -530,7 +530,7 @@ async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
 async def test_release_agent_page_closes_only_that_agent() -> None:
     """Releasing agent 7 closes exactly 7's page — agent 8's tab survives even
     though it is the upstream's current global selection; 7's slot is cleared."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
     await d.call_tool_for_agent("new_page", {"url": "b"}, 8)  # page 2, selected
     up.calls.clear()
@@ -548,7 +548,7 @@ async def test_release_agent_page_closes_only_that_agent() -> None:
 async def test_release_agent_page_idempotent_and_no_slot() -> None:
     """A second release is a no-op (slot already cleared) and an agent that
     never opened a page is a no-op — no second close_page reaches upstream."""
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
     up.calls.clear()
 
@@ -579,7 +579,7 @@ async def test_release_agent_page_wire_method() -> None:
     daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
     sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
-        lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
+        lambda r, w: handle_client(r, w, daemon_ref), path=sock_path
     )
     assert sock_path.exists()
 
@@ -682,7 +682,7 @@ async def test_gateway_origin_navigation_is_an_ordinary_navigation(
     monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: gateway)
     monkeypatch.setattr(gateway_session, "inject_session_cookie", forbidden)
     monkeypatch.setattr(session, "gateway_session_login", forbidden)
-    d, up = _daemon()
+    d, up = browser_daemon_with_fake_upstream()
 
     opened = await d.call_tool_for_agent("navigate_page", {"url": f"{gateway}/pages/1"}, 7)
     again = await d.call_tool_for_agent("navigate_page", {"url": f"{gateway}/pages/2"}, 7)

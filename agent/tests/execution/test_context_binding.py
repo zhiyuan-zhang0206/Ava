@@ -158,9 +158,9 @@ with ThreadPoolExecutor(max_workers=4) as workers:
     values = list(workers.map(lambda _: ava.files.read({str(sample)!r}), range(24)))
 assert len(values) == 24
 """
-    from agent.tests.execution.test_exec_child import _spawn
+    from agent.tests.execution.test_exec_child import spawn_real_child
 
-    proc, _request, result = _spawn(tmp_path, code)
+    proc, _request, result = spawn_real_child(tmp_path, code)
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)
     assert payload.kind == "done", payload.exc_msg

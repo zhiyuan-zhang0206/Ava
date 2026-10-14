@@ -25,10 +25,10 @@ from base.config import ConfigBoot, settings
 from base.host import resource_sample
 from base.native_process.root_control import client
 from cli.database.runtime import CommandRuntime
-from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
-from cli.tests._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
-from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_fakes import FakeResponse, FakeResult, _sess, patch_gateway_http
+from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
+from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
@@ -46,7 +46,7 @@ def _local_status_boundary(
 
     from base.native_process.root_control.client import RootClientError
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def _unreachable(*_args: object, **_kwargs: object) -> None:
         raise httpx.ConnectError("isolated status test")
@@ -157,7 +157,7 @@ def test_status_runs_without_error(
     _ = capsys
 
     def fake_run(_args, **_kwargs):
-        return _FakeResult(returncode=0, stdout="")
+        return FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
@@ -182,10 +182,10 @@ def test_status_gateway_excludes_ops(
         del machine
         return frozenset({"gateway"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_run(_args, **_kwargs):
-        return _FakeResult(returncode=0, stdout="")
+        return FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
@@ -210,7 +210,7 @@ def test_status_agent_runner_shows_ops(
         del machine
         return frozenset({"agent-runner"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     rc = _status_commands.cmd_status(
         database_factory=operator_database,
@@ -238,7 +238,7 @@ def test_status_shows_browser_skip_reason(
         del machine
         return frozenset({"agent-runner"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(settings.services, "browser_enabled", True)
     monkeypatch.setattr(
         roster_spec,
@@ -247,7 +247,7 @@ def test_status_shows_browser_skip_reason(
     )
 
     def fake_run(_args, **_kwargs):
-        return _FakeResult(returncode=0, stdout="")
+        return FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
@@ -278,7 +278,7 @@ def test_status_shows_the_gate_entry_row(
     import cli.commands.probe as probe_module
     from cli.commands.probe import ServiceProbe
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(status_module, "root_tree_units", lambda: {"gate": {"state": "running"}})
     monkeypatch.setattr(
         probe_module,
@@ -316,7 +316,7 @@ def test_status_shows_the_end_to_end_redis_bridge_row(
 
     import cli.commands.lifecycle.status as status_mod
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def print_bridge(*, machine: MachineIdentity, config: ConfigBoot) -> None:
         assert machine is command_runtime.machine
@@ -351,7 +351,7 @@ def test_status_runner_only_has_no_gate_section(
         del machine
         return frozenset({"agent-runner"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     rc = _status_commands.cmd_status(
         database_factory=operator_database,
@@ -377,7 +377,7 @@ def test_status_reads_root_units(
         del machine
         return frozenset({"gateway", "agent-runner"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     class _Client:
         def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
@@ -397,7 +397,7 @@ def test_status_reads_root_units(
     monkeypatch.setattr(client, "RootClient", _Client)
 
     def fake_run(_args, **_kwargs):
-        return _FakeResult(returncode=0, stdout="")
+        return FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
@@ -427,7 +427,7 @@ def test_status_root_mode_survives_an_unreachable_root(
         del machine
         return frozenset({"gateway"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     class _Down:
         def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
@@ -441,7 +441,7 @@ def test_status_root_mode_survives_an_unreachable_root(
     monkeypatch.setattr(client, "RootClient", _Down)
 
     def fake_run(_args, **_kwargs):
-        return _FakeResult(returncode=0, stdout="")
+        return FakeResult(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _status_commands.cmd_status(
@@ -544,7 +544,7 @@ def test_cmd_status_warns_on_prod_source_drift(
         del machine
         return frozenset({"agent-runner"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: "ava-7/fix")
     rc = _status_commands.cmd_status(
         database_factory=operator_database,
@@ -573,7 +573,7 @@ def test_cmd_status_detached_prod_source_is_not_a_warning(
         del machine
         return frozenset({"agent-runner"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: "HEAD")
     rc = _status_commands.cmd_status(
         database_factory=operator_database,
@@ -597,7 +597,7 @@ def _quiet_status(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
         del machine
         return frozenset({"agent-runner"})
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
     monkeypatch.setattr(paths, "ava_home", lambda: home)
 
@@ -635,11 +635,11 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
 ) -> None:
     """`ava status` (no flag) runs local probes AND prints the gateway snapshot."""
 
-    _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]
+    patch_gateway_http(monkeypatch)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "httpx.get",
-        lambda *_a, **_kw: _FakeResponse(  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_a, **_kw: FakeResponse(  # pyright: ignore[reportUnknownArgumentType]
             {
                 "machine_name": "test-host",
                 "serve_gateway": True,
@@ -670,8 +670,8 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
     """A down gateway prints inline; `ava status` still returns 0 (local probes ran)."""
     import httpx
 
-    _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]
+    patch_gateway_http(monkeypatch)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]
 
     def _boom(*_a, **_kw):
         raise httpx.ConnectError("connection refused")
@@ -704,7 +704,7 @@ def test_status_prints_a_live_host_reading(
     """
     from cli.commands.lifecycle import status as status_mod
 
-    monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(status_mod, "repo_root", lambda: "/repo")
     monkeypatch.setattr(status_mod, "source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
     monkeypatch.setattr(status_mod, "print_gateway_cluster_status", lambda: None)
@@ -740,7 +740,7 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     the reading degrades to its own reason line, it does not abort the verb."""
     from cli.commands.lifecycle import status as status_mod
 
-    monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(status_mod, "repo_root", lambda: "/repo")
     monkeypatch.setattr(status_mod, "source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
     monkeypatch.setattr(status_mod, "print_gateway_cluster_status", lambda: None)

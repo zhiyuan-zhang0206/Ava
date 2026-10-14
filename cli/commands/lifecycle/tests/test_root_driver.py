@@ -44,7 +44,7 @@ def status(*, pid: int = 100, state: str = "running") -> dict[str, Any]:
 
 @pytest.mark.parametrize("verdict", [None, "unavailable", "down", "port-taken"])
 def test_no_missing_or_failed_health_is_ready(verdict: str | None) -> None:
-    assert not driver._unit_ready({"state": "running"}, verdict)
+    assert not driver.unit_ready({"state": "running"}, verdict)
 
 
 def test_readiness_probes_now_instead_of_believing_cached_health(
@@ -57,8 +57,8 @@ def test_readiness_probes_now_instead_of_believing_cached_health(
     def read_status(_client: object) -> dict[str, Any]:
         return snapshot
 
-    monkeypatch.setattr(driver, "_root_status", read_status)
-    result = driver._wait_for_root_services_ready(
+    monkeypatch.setattr(driver, "root_status", read_status)
+    result = driver.wait_for_root_services_ready(
         (spec(probe=lambda: DaemonProbe.down("unready")),), 0
     )
     assert result.unready
@@ -73,9 +73,7 @@ def test_raising_identity_probe_reads_unavailable_and_warns() -> None:
     records: list[str] = []
     sink = logger.add(lambda message: records.append(str(message)), level="WARNING")
     try:
-        assert driver._health_verdicts((spec(probe=broken),), status()) == {
-            "gateway": "unavailable"
-        }
+        assert driver.health_verdicts((spec(probe=broken),), status()) == {"gateway": "unavailable"}
     finally:
         logger.remove(sink)
     assert len(records) == 1
@@ -89,8 +87,8 @@ def test_readiness_uses_one_status_observation(monkeypatch: pytest.MonkeyPatch) 
     def read_status(_client: object) -> dict[str, Any]:
         return next(snapshots)
 
-    monkeypatch.setattr(driver, "_root_status", read_status)
-    result = driver._wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
+    monkeypatch.setattr(driver, "root_status", read_status)
+    result = driver.wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
     assert not result.unready
     assert next(snapshots)["units"][0]["pid"] == 101
 
@@ -101,8 +99,8 @@ def test_fresh_ready_generation_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     def read_status(_client: object) -> dict[str, Any]:
         return status()
 
-    monkeypatch.setattr(driver, "_root_status", read_status)
-    result = driver._wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
+    monkeypatch.setattr(driver, "root_status", read_status)
+    result = driver.wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
     assert not result.unready
 
 
@@ -124,9 +122,9 @@ def test_optional_failure_does_not_delay_a_ready_core(monkeypatch: pytest.Monkey
         raise AssertionError("optional services must not delay a ready core")
 
     monkeypatch.setattr(driver, "root_client", object)
-    monkeypatch.setattr(driver, "_root_status", read_status)
-    monkeypatch.setattr(driver, "_poll_sleep", no_optional_wait)
-    result = driver._wait_for_root_services_ready(
+    monkeypatch.setattr(driver, "root_status", read_status)
+    monkeypatch.setattr(driver, "poll_sleep", no_optional_wait)
+    result = driver.wait_for_root_services_ready(
         (spec(probe=lambda: DaemonProbe.up("ready")), background),
         100,
     )
@@ -137,10 +135,10 @@ def test_optional_failure_does_not_delay_a_ready_core(monkeypatch: pytest.Monkey
 def test_mac_helper_protocol_refuses_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
-    monkeypatch.setattr(driver, "_helper_wire_ok", lambda: False)
+    monkeypatch.setattr(driver, "helper_spawn_committed", lambda: True)
+    monkeypatch.setattr(driver, "helper_wire_ok", lambda: False)
     with pytest.raises(RuntimeError, match="root_stop_intent_v1"):
-        driver._bring_up_root(
+        driver.bring_up_root(
             tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=[]
         )
 
@@ -152,8 +150,12 @@ def test_helper_admission_requires_normal_retirement_protocol(
     capabilities = {"root_stop_intent_v1": True, "helper_shutdown_v1": True}
     if missing is not None:
         del capabilities[missing]
-    monkeypatch.setattr(permissions_helper_client, "ping", lambda: capabilities)
-    assert driver._helper_wire_ok() is (missing is None)
+    monkeypatch.setattr(
+        permissions_helper_client.PermissionsHelperClient,
+        "ping",
+        lambda _self: capabilities,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert driver.helper_wire_ok() is (missing is None)
 
 
 def test_collector_config_bytes_change_the_live_unit_generation(
@@ -171,10 +173,10 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     rows = cast("list[dict[str, object]]", before["units"])
     unit = UnitManifest.from_mapping(rows[0], origin="test")
     live = {"units": [{"id": unit.id, "manifest_digest": unit.digest()}]}
-    assert not driver._changed_units(before, live)
+    assert not driver.changed_units(before, live)
     config.write_text("receivers: {otlp: {protocols: {http: {}}}}\n")
     after = driver.tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
-    assert driver._changed_units(after, live) == {"otel-collector"}
+    assert driver.changed_units(after, live) == {"otel-collector"}
 
 
 def test_obsolete_custody_records_do_not_block_an_absent_root(
@@ -202,7 +204,7 @@ def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None
     manifest = load_manifests(path).units[0]
     snapshot = status()
     snapshot["units"][0]["manifest_digest"] = manifest.digest()
-    assert not driver._changed_units(json.loads(path.read_text()), snapshot)
+    assert not driver.changed_units(json.loads(path.read_text()), snapshot)
     generate(
         path,
         capabilities={"gateway"},
@@ -210,7 +212,7 @@ def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None
         specs=[spec()],
         environments={"gateway": {"AVA_PROCESS_PROFILE": "agent"}},
     )
-    assert driver._changed_units(json.loads(path.read_text()), snapshot) == {"gateway"}
+    assert driver.changed_units(json.loads(path.read_text()), snapshot) == {"gateway"}
     assert path.stat().st_mode & 0o777 == 0o600
 
 
@@ -220,8 +222,8 @@ def test_missing_root_ipc_is_unknown_not_positive_exit(monkeypatch: pytest.Monke
     def unavailable(_client: object) -> None:
         return None
 
-    monkeypatch.setattr(driver, "_root_status", unavailable)
-    outcome = driver._wait_for_root_services_ready((spec(),), 0)
+    monkeypatch.setattr(driver, "root_status", unavailable)
+    outcome = driver.wait_for_root_services_ready((spec(),), 0)
     assert outcome.unready and not outcome.sessions_gone
 
 
@@ -233,8 +235,8 @@ def test_a_stopped_core_unit_is_not_ready_even_if_its_endpoint_answers(
     def read_status(_client: object) -> dict[str, Any]:
         return status(state="stopped")
 
-    monkeypatch.setattr(driver, "_root_status", read_status)
-    result = driver._wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
+    monkeypatch.setattr(driver, "root_status", read_status)
+    result = driver.wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
     assert result.unready and result.sessions_gone
 
 
@@ -247,14 +249,16 @@ def test_helper_seed_is_durable_before_wire_start(
 
     monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
 
-    def seed(config: client.RootSeedConfig) -> client.RootStatus:
+    def seed(
+        _self: client.PermissionsHelperClient, config: client.RootSeedConfig
+    ) -> client.RootStatus:
         path = tmp_path / "seed.json"
         assert json.loads(path.read_text()) == config
         assert path.stat().st_mode & 0o777 == 0o600
         return {"state": "running", "seeded": True, "restarts": 0, "stop_requested": False}
 
-    monkeypatch.setattr(client, "seed_root", seed)
-    driver._seed_via_helper(
+    monkeypatch.setattr(client.PermissionsHelperClient, "seed_root", seed)
+    driver.seed_via_helper(
         tmp_path, tmp_path, tmp_path / "manifests.json", {"AVA_HOME": str(tmp_path)}
     )
 
@@ -264,21 +268,21 @@ def test_stop_without_root_ipc_cancels_pending_helper_restart(
 ) -> None:
     from base.host.permissions_helper import client
 
-    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
-    monkeypatch.setattr(driver, "_helper_wire_ok", lambda: True)
+    monkeypatch.setattr(driver, "helper_spawn_committed", lambda: True)
+    monkeypatch.setattr(driver, "helper_wire_ok", lambda: True)
     monkeypatch.setattr(driver, "require_root_absent", lambda: None)
     calls: list[str] = []
 
-    def keeper() -> client.RootStatus:
+    def keeper(_self: client.PermissionsHelperClient) -> client.RootStatus:
         return {"state": "backoff", "seeded": True, "restarts": 1, "stop_requested": False}
 
-    def stop() -> client.RootStatus:
+    def stop(_self: client.PermissionsHelperClient) -> client.RootStatus:
         calls.append("durable stop")
         return {"state": "stopped", "seeded": True, "restarts": 1, "stop_requested": True}
 
-    monkeypatch.setattr(client, "root_status", keeper)
-    monkeypatch.setattr(client, "stop_root", stop)
-    driver._stop_dormant_helper_root(float("inf"))
+    monkeypatch.setattr(client.PermissionsHelperClient, "root_status", keeper)
+    monkeypatch.setattr(client.PermissionsHelperClient, "stop_root", stop)
+    driver.stop_dormant_helper_root(float("inf"))
     assert calls == ["durable stop"]
 
 
@@ -310,11 +314,11 @@ def test_linux_root_launch_never_consults_a_helper(
     def await_status(_client: object, _run_dir: Path, **_kwargs: object) -> dict[str, Any]:
         return status()
 
-    monkeypatch.setattr(driver, "_spawn_direct", spawn)
-    monkeypatch.setattr(driver, "_helper_wire_ok", helper)
-    monkeypatch.setattr(driver, "_await_root_status", await_status)
+    monkeypatch.setattr(driver, "spawn_direct", spawn)
+    monkeypatch.setattr(driver, "helper_wire_ok", helper)
+    monkeypatch.setattr(driver, "await_root_status", await_status)
     assert (
-        driver._bring_up_root(
+        driver.bring_up_root(
             tmp_path, tmp_path, tmp_path / "manifest", object(), {}, retained_children=children
         )
         == status()
@@ -362,10 +366,10 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     monkeypatch.setattr(driver, "root_child_env", dict)
     monkeypatch.setattr(driver, "tree_manifest", tree)
     monkeypatch.setattr(driver, "root_client", object)
-    monkeypatch.setattr(driver, "_root_status", snapshot_now)
-    monkeypatch.setattr(driver, "_require_root_owner", owned)
-    monkeypatch.setattr(driver, "_stop_root_process", no_stop)
-    result = driver._ensure_root_service_tree(
+    monkeypatch.setattr(driver, "root_status", snapshot_now)
+    monkeypatch.setattr(driver, "require_root_owner", owned)
+    monkeypatch.setattr(driver, "stop_root_process", no_stop)
+    result = driver.ensure_root_service_tree(
         requested, tmp_path, roles=frozenset({"gateway"}), reconcile=True, retained_children=[]
     )
     assert result.failed
@@ -397,10 +401,10 @@ def test_root_launch_digest_controls_reuse(tmp_path: Path) -> None:
     snapshot["root"]["launch_digest"] = digest
     path = write_manifest(tmp_path / "manifest.json", manifest)
     before = path.read_bytes()
-    driver._require_same_generation(manifest, snapshot, requested, reconcile=True)
+    driver.require_same_generation(manifest, snapshot, requested, reconcile=True)
     manifest["launch_digest"] = "0" * 64
     with pytest.raises(RuntimeError, match="root launch inputs"):
-        driver._require_same_generation(manifest, snapshot, requested, reconcile=True)
+        driver.require_same_generation(manifest, snapshot, requested, reconcile=True)
     assert path.read_bytes() == before
     assert b"test-private-value" not in before
 
@@ -513,21 +517,21 @@ def test_unusable_helper_socket_requires_positive_native_absence(
     from base.host.permissions_helper import client
     from services.desktop.permissions_helper import launchd_job
 
-    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
+    monkeypatch.setattr(driver, "helper_spawn_committed", lambda: True)
 
-    def unavailable() -> client.RootStatus:
+    def unavailable(_self: client.PermissionsHelperClient) -> client.RootStatus:
         raise client.PermissionsHelperError("AF_UNIX path too long")
 
     def query(_target: str, _deadline: float) -> str | None:
         return "state = spawn scheduled" if loaded else None
 
-    monkeypatch.setattr(client, "root_status", unavailable)
+    monkeypatch.setattr(client.PermissionsHelperClient, "root_status", unavailable)
     monkeypatch.setattr(launchd_job, "retirement_query", query)
     if loaded:
         with pytest.raises(RuntimeError, match="custody is unavailable"):
-            driver._stop_dormant_helper_root(float("inf"))
+            driver.stop_dormant_helper_root(float("inf"))
     else:
-        driver._stop_dormant_helper_root(float("inf"))
+        driver.stop_dormant_helper_root(float("inf"))
 
 
 def test_plugin_birth_config_is_part_of_the_existing_unit_generation(
@@ -592,9 +596,9 @@ def test_an_operator_start_brings_up_a_unit_whose_restart_budget_is_spent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Explicit `ava start` is the operator's way to revive an exhausted unit."""
-    monkeypatch.setattr(driver, "_root_status", _no_refresh)
+    monkeypatch.setattr(driver, "root_status", _no_refresh)
     client = _UnitClient()
-    driver._reconcile_units((spec(),), client, _spent_budget_status())
+    driver.reconcile_units((spec(),), client, _spent_budget_status())
     assert client.up_calls == ["gateway"]
 
 
@@ -602,9 +606,9 @@ def test_a_boot_attempt_leaves_a_unit_down_whose_restart_budget_is_spent(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The boot job's retried start must not spend root's budget again."""
-    monkeypatch.setattr(driver, "_root_status", _no_refresh)
+    monkeypatch.setattr(driver, "root_status", _no_refresh)
     client = _UnitClient()
-    driver._reconcile_units((spec(),), client, _spent_budget_status(), honor_restart_budget=True)
+    driver.reconcile_units((spec(),), client, _spent_budget_status(), honor_restart_budget=True)
     assert client.up_calls == []
     assert "spent its restart budget" in capsys.readouterr().out
 
@@ -612,11 +616,11 @@ def test_a_boot_attempt_leaves_a_unit_down_whose_restart_budget_is_spent(
 def test_a_boot_attempt_still_brings_up_a_unit_with_budget_left(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(driver, "_root_status", _no_refresh)
+    monkeypatch.setattr(driver, "root_status", _no_refresh)
     client = _UnitClient()
     down = status(state="exited")
     down["health"] = {"gateway": {"restart_limit_reached": False}}
-    driver._reconcile_units((spec(),), client, down, honor_restart_budget=True)
+    driver.reconcile_units((spec(),), client, down, honor_restart_budget=True)
     assert client.up_calls == ["gateway"]
 
 
@@ -634,11 +638,11 @@ def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
         "last_exit": {"kind": "crash", "code": 1, "at": 0.0},
     }
 
-    def seed_root(_config: object) -> dict[str, Any]:
+    def seed_root(_self: object, _config: object) -> dict[str, Any]:
         return exited
 
-    monkeypatch.setattr(client, "seed_root", seed_root)
-    with pytest.raises(driver._RootDriverError, match="stopped restarting"):
-        driver._seed_via_helper(
+    monkeypatch.setattr(client.PermissionsHelperClient, "seed_root", seed_root)
+    with pytest.raises(driver.RootDriverError, match="stopped restarting"):
+        driver.seed_via_helper(
             tmp_path, tmp_path, tmp_path / "manifests.json", {"AVA_HOME": str(tmp_path)}
         )

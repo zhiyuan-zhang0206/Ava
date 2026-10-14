@@ -49,7 +49,7 @@ def env_entries() -> list[str]:
     return [e.strip() for e in _os.environ.get("AVA_SDK_DISABLE", "").split(",") if e.strip()]
 
 
-class _DisabledSDKModule(_types.ModuleType):
+class DisabledSDKModule(_types.ModuleType):
     """Stand-in for a module removed by AVA_SDK_DISABLE.
 
     Returned by `import ava.<name>` after `<name>` is in the disable list so a
@@ -135,7 +135,7 @@ def _refuse_framework_module(entry: str) -> None:
     registered later), stays disable-able."""
     name = entry.split(".", 1)[0]
     surface = getattr(ava_module(), "__all_for_ava__", None) or []
-    if name in surface or isinstance(_sys.modules.get(f"ava.{name}"), _DisabledSDKModule):
+    if name in surface or isinstance(_sys.modules.get(f"ava.{name}"), DisabledSDKModule):
         return  # agent-facing, or already disabled by an earlier entry
     bound = getattr(ava_module(), name, None)
     owner = bound.__name__ if inspect.ismodule(bound) else f"ava.{name}"
@@ -153,7 +153,7 @@ def _disable_top_level_module(name: str) -> None:
     pkg = ava_module()
     if hasattr(pkg, name):
         delattr(pkg, name)
-    _sys.modules[f"ava.{name}"] = _DisabledSDKModule(f"ava.{name}")
+    _sys.modules[f"ava.{name}"] = DisabledSDKModule(f"ava.{name}")
     surface = getattr(pkg, "__all_for_ava__", None)
     if surface is not None and name in surface:
         surface.remove(name)
@@ -177,4 +177,4 @@ def _disable_dotted_entry(entry: str) -> None:
         return
     delattr(parent, leaf)
     if inspect.ismodule(target):
-        _sys.modules[f"ava.{entry}"] = _DisabledSDKModule(f"ava.{entry}")
+        _sys.modules[f"ava.{entry}"] = DisabledSDKModule(f"ava.{entry}")

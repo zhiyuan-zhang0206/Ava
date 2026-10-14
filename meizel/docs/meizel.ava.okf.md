@@ -38,7 +38,7 @@ three or more, so a new package is declared in one place or the check says where
   the universe of tracked files, graph algorithms, name scopes and import
   access; `language/` the restricted Python forms, pytest fixture requests and
   the file scanner that composes them with import access; `contracts/` the
-  `meizel.toml` manifests, the rule, analysis, recorded debt and the commands
+  `meizel.toml` manifests, the rule, analysis, recorded debt, the policy file and the commands
   (`python -m meizel`). The layers form a DAG: `contracts` -> `language` -> `graph`.
 
 - `lint_common.py` — the shared scan vocabulary of the standalone lints: the
@@ -50,7 +50,8 @@ three or more, so a new package is declared in one place or the check says where
   (`directory_budget.py`). `scripts/lint/code_structure.py` drives them.
 - `owners/` — one owner per external capability: `decisions.py` holds Rule 5
   (`DECISIONS`: each design decision has exactly one owning module, every other
-  site is a bypass, and a listed exemption that goes stale fails) and
+  site is a bypass, and a listed exemption that goes stale fails; the exemptions
+  are in `meizel.policy.toml`) and
   `clock_lattice.py` keeps lattice-vocabulary timing constants in the
   clock-lattice family modules or as aliases of a registered clock.
 - `state/` — dependency injection rules: `ambient_state/` (Rule 9, module-level

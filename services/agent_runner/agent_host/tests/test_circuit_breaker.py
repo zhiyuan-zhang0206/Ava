@@ -11,16 +11,17 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
-from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
-from agent.state import AgentState, CircuitState
-from agent.tests.claim.claim_support import (
-    _fake_llm,
+from agent.graph.claim.tests.claim_support import (
     insert_inbound_kind,
+    make_fake_llm,
     make_runtime,
     thread_config,
 )
+from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
+from agent.state import AgentState, CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -41,7 +42,6 @@ from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures im
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 # ── breaker open (runloop `_handle_fatal_llm_error`) ──
 
@@ -362,7 +362,7 @@ async def test_heartbeat_while_breaker_open_parks(
     insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = overflow_state(breaker_reason=reason)
-    fake_llm = _fake_llm(LONG_SUMMARY)
+    fake_llm = make_fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         state,
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
@@ -402,7 +402,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
         content = "real user work" if kind == "chat" else "Heartbeat."
         inbound_ids[kind] = insert_inbound_kind(db_conn, tid, content, kind, source="user")
 
-    fake_llm = _fake_llm(LONG_SUMMARY)
+    fake_llm = make_fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         overflow_state(breaker_reason="billing"),
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
@@ -508,7 +508,7 @@ async def test_heartbeat_normal_when_breaker_closed(
     insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = overflow_state()  # breaker closed
-    fake_llm = _fake_llm(LONG_SUMMARY)
+    fake_llm = make_fake_llm(LONG_SUMMARY)
     cmd = await claim_node(
         state,
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),

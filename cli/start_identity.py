@@ -164,7 +164,7 @@ def _new_record(inputs: IdentityInput) -> cluster.ClusterRecord:
     )
 
 
-def _gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[str, str]:
+def gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[str, str]:
     vals = inputs.values
     # Every cluster is born with a human secret: an explicit input wins, else one
     # is minted. The API is always authenticated.
@@ -297,7 +297,7 @@ def _create_claim(inputs: IdentityInput) -> None:
         ).lower()
     rec = _new_record(inputs) if "gateway" in inputs.roles else None
     if rec is not None:
-        values = _gateway_values(
+        values = gateway_values(
             rec, IdentityInput(inputs.home, inputs.checkout, inputs.roles, values)
         )
     data = {

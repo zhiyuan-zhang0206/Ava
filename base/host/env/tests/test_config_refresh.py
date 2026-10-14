@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from base import config
-from tests.fixtures.units import use_env_files
+from base.host.env.tests.env_files import use_env_files
 
 _IDENTITY_LINES = [
     f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
@@ -30,7 +30,7 @@ _IDENTITY_LINES = [
 
 
 @pytest.fixture(autouse=True)
-def _restore_authority_env() -> Iterator[None]:
+def restore_authority_env() -> Iterator[None]:
     """`_enforce_cluster_env_authority` mutates os.environ directly (pop /
     force-assign) — snapshot the keys it touches and restore them after each
     test (same fixture as test_dotenv_boot.py)."""

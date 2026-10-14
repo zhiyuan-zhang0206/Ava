@@ -12,7 +12,7 @@ from pydantic import SecretStr
 
 
 @pytest.fixture(autouse=True)
-def _mock_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+def mock_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set all API keys to dummy values so spawn validation passes."""
     from base.config import settings as _settings
 

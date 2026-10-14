@@ -20,8 +20,8 @@ from agent import impersonation, impersonation_handoff, impersonation_process
 from agent.extensions import plugin_state_codec
 from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
+from agent.hooks.tests.fakes import placeholder_runtime
 from agent.state import BaseAgentState
-from agent.tests._fakes import placeholder_runtime
 from base.agents.context import AvaContext
 from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes
@@ -30,13 +30,13 @@ from base.agents.observation.relay_supervision import RelayChild, RelaySupervisi
 from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.pin_agent import exec_context, pin_agent
 
 
@@ -448,7 +448,7 @@ def test_establish_relay_codex_readiness_timeout_rolls_back(
     )
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", Mock(return_value=child))
     terminate = Mock()
-    monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
+    monkeypatch.setattr(impersonation, "terminate_relay", terminate)
     fail = Mock()
     monkeypatch.setattr(agents_impersonation, "fail_acceptance", fail)
     monkeypatch.setattr(impersonation, "RELAY_READY_TIMEOUT_S", 0.0)
@@ -483,7 +483,7 @@ async def test_missing_snapshot_cannot_kill_a_replacement_relay(
     db = MagicMock()
     db.connect.return_value.__enter__.return_value = conn
     terminate = Mock()
-    monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
+    monkeypatch.setattr(impersonation, "terminate_relay", terminate)
     await impersonation.supervise_relay(
         db,
         MagicMock(),
@@ -509,7 +509,7 @@ async def test_delayed_snapshot_cannot_retire_replacement_sender(
         "lease-1" if same_lease else "lease-2", process, "new-token", 0.0, 2
     )
     terminate = Mock()
-    monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
+    monkeypatch.setattr(impersonation, "terminate_relay", terminate)
     await impersonation.supervise_relay(
         MagicMock(),
         MagicMock(),
@@ -537,13 +537,13 @@ async def test_claim_gate_records_a_stale_relay_as_degraded_and_never_replaces_i
 
     session = _relay_session("active", relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5))
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     old = MagicMock()
     old.poll.return_value = None if running else 1
     if owned:
         native_gate_ctx.relays.children[42] = RelayChild("lease-1", old, "token", 0.0, 1)
     terminated = Mock()
-    monkeypatch.setattr(impersonation, "_terminate_relay", terminated)
+    monkeypatch.setattr(impersonation, "terminate_relay", terminated)
     provision = Mock(return_value={"relay_generation": 2})
     monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     spawn = Mock()
@@ -602,7 +602,7 @@ async def test_confirmed_child_exit_is_degraded_at_once_without_replacement(
         "lease-1", old, "old-token", impersonation.time.monotonic(), 1
     )
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     provision = Mock(return_value={"relay_generation": 2})
     monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     spawn = Mock()
@@ -624,7 +624,7 @@ async def test_stale_session_relay_retains_authority_with_visible_unsupported_re
     native_gate_ctx: AvaContext,
 ) -> None:
     session = _relay_session("active", provider="claude")
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
@@ -648,7 +648,7 @@ async def test_claim_gate_stops_the_lease_when_the_executor_anchors_are_gone(
     even with a fresh relay heartbeat (task #3998)."""
     fresh = _relay_session("active", relay_heartbeat_at=datetime.now(UTC))
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=fresh))
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=list(states)))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=list(states)))
     abort = Mock(return_value={"id": "lease-1"})
     monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     from agent.nodes import END
@@ -669,7 +669,7 @@ async def test_repeated_unknown_executor_evidence_keeps_original_authority(
     )
     before = dict(session)
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["denied"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["denied"]))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
     abort = Mock()
@@ -688,7 +688,7 @@ async def test_claim_gate_records_unknown_without_recorded_anchors(
     """Absent legacy evidence is unknown, never folded into all-dead authority."""
     session = _relay_session("active", relay_heartbeat_at=datetime.now(UTC))
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=[]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=[]))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
     abort = Mock(return_value={"id": "lease-1"})
@@ -717,7 +717,7 @@ async def test_unknown_relay_exit_evidence_degrades_only_when_the_heartbeat_is_s
     )
     before = dict(session)
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     monkeypatch.setattr(OwnedProcess, "live", Mock(side_effect=RuntimeError("birth unavailable")))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)

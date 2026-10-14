@@ -105,7 +105,7 @@ def clear_helper_stop_intent(home: Path) -> None:
 
 def retirement_query(target: str, deadline: float) -> str | None:
     """Absence is one positive launchd result; all other failures are unknown."""
-    result = _retirement_command(["print", target], deadline)
+    result = retirement_command(["print", target], deadline)
     if result.returncode == 113 and b"Could not find service" in result.stderr:
         return None
     if result.returncode:
@@ -113,7 +113,7 @@ def retirement_query(target: str, deadline: float) -> str | None:
     return result.stdout.decode()
 
 
-def _retirement_command(args: list[str], deadline: float) -> subprocess.CompletedProcess[bytes]:
+def retirement_command(args: list[str], deadline: float) -> subprocess.CompletedProcess[bytes]:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("helper retirement deadline expired; registry must be retained")
@@ -139,7 +139,7 @@ def require_retired_helper(executable: Path) -> None:
         blocker = f"launchd still has {helper_job_domain()}/{helper_job_label()} loaded"
     elif plist.exists() or plist.is_symlink():
         blocker = f"its job definition {plist} is still registered"
-    elif pids := _executable_pids(executable):
+    elif pids := executable_pids(executable):
         blocker = f"pid {', '.join(map(str, pids))} still runs {executable}"
     else:
         return
@@ -149,7 +149,7 @@ def require_retired_helper(executable: Path) -> None:
     )
 
 
-def _executable_pids(executable: Path) -> list[int]:
+def executable_pids(executable: Path) -> list[int]:
     """Live processes whose image was loaded from the file at ``executable``.
 
     A process whose executable path the kernel does not report (another user's,
@@ -164,7 +164,7 @@ def _executable_pids(executable: Path) -> list[int]:
     )
 
 
-def _retirement_plist(path: Path, home: Path, socket_path: Path) -> tuple[bytes, str]:
+def retirement_plist(path: Path, home: Path, socket_path: Path) -> tuple[bytes, str]:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
         raise RuntimeError(f"helper plist is not an owned immutable input: {path}")
@@ -189,8 +189,8 @@ def _retirement_plist(path: Path, home: Path, socket_path: Path) -> tuple[bytes,
     return original, argv[0]
 
 
-def _retirement_owner(state: str, socket_path: Path, executable: str) -> OwnedProcess:
-    from base.host.permissions_helper import client
+def retirement_owner(state: str, socket_path: Path, executable: str) -> OwnedProcess:
+    from base.host.permissions_helper.client import PermissionsHelperClient
 
     match = re.search(r"^\s*pid = (\d+)\s*$", state, re.MULTILINE)
     if match is None:
@@ -203,7 +203,7 @@ def _retirement_owner(state: str, socket_path: Path, executable: str) -> OwnedPr
         raise RuntimeError("loaded helper executable does not match its home job")
     if leader_owns_pids(owner, {os.getpid()}):
         raise RuntimeError("cannot unregister the caller's permissions-helper ancestor")
-    reply = client.ping(sock_path=socket_path)
+    reply = PermissionsHelperClient(socket_path).ping()
     if (
         reply.get("pid") != owner.pid
         or reply.get("root_stop_intent_v1") is not True
@@ -215,14 +215,15 @@ def _retirement_owner(state: str, socket_path: Path, executable: str) -> OwnedPr
 
 
 def _require_empty_helper(owner: OwnedProcess, socket_path: Path) -> None:
-    from base.host.permissions_helper import client
+    from base.host.permissions_helper.client import PermissionsHelperClient
 
-    root = client.root_status(sock_path=socket_path)
+    client = PermissionsHelperClient(socket_path)
+    root = client.root_status()
     stopped = root["state"] == "stopped" and root["stop_requested"] is True
     unseeded = root["state"] == "unseeded" and root["seeded"] is False
     if root.get("pid") is not None or not (stopped or unseeded):
         raise RuntimeError("helper still owns an active or uncertain root")
-    if client.session_list(sock_path=socket_path) or capture_tree(owner) != {owner}:
+    if client.session_list() or capture_tree(owner) != {owner}:
         raise RuntimeError("helper still owns native children; stop them before unregistering")
 
 
@@ -255,7 +256,7 @@ def unregister_helper(
 
 
 def _request_helper_shutdown(home: Path, port: int, deadline: float) -> bytes | None:
-    from base.host.permissions_helper import client
+    from base.host.permissions_helper.client import PermissionsHelperClient
 
     target = f"{helper_job_domain()}/{helper_job_label(home)}"
     state = retirement_query(target, deadline)
@@ -263,17 +264,17 @@ def _request_helper_shutdown(home: Path, port: int, deadline: float) -> bytes | 
         return None
     path = helper_job_plist_path(home)
     socket_path = home / "run" / f"permissions-helper.{port}.sock"
-    original, executable = _retirement_plist(path, home, socket_path)
+    original, executable = retirement_plist(path, home, socket_path)
     if _job_pid(state) is None:
         _require_idle_job(state, home)
         return original
-    owner = _retirement_owner(state, socket_path, executable)
+    owner = retirement_owner(state, socket_path, executable)
     if path.is_symlink() or path.read_bytes() != original:
         raise RuntimeError("helper definition changed before shutdown")
-    reply = client.shutdown_helper(home / "run" / "ava-root", sock_path=socket_path)
+    reply = PermissionsHelperClient(socket_path).shutdown_helper(home / "run" / "ava-root")
     if reply != {"stopping": True, "pid": owner.pid, "run_dir": str(home / "run" / "ava-root")}:
         raise RuntimeError("helper shutdown did not acknowledge exact-home native custody")
-    _wait_retirement_owner(owner, deadline)
+    wait_retirement_owner(owner, deadline)
     while (latest := retirement_query(target, deadline)) is not None:
         if _job_pid(latest) is None:
             _require_idle_job(latest, home)
@@ -304,7 +305,7 @@ def _unregister_stopped_helper(
     if state is None and not path.exists() and not path.is_symlink():
         _require_absent_socket(socket_path, deadline)
         return
-    original, executable = _retirement_plist(path, home, socket_path)
+    original, executable = retirement_plist(path, home, socket_path)
     if expected is not None and original != expected:
         raise RuntimeError("helper definition changed during shutdown; preserving it")
     if state is None:
@@ -319,14 +320,14 @@ def _unregister_stopped_helper(
     if _job_pid(state) is not None:
         if not force:
             raise RuntimeError("helper retirement still has a native owner; custody retained")
-        owner = _retirement_owner(state, socket_path, executable)
+        owner = retirement_owner(state, socket_path, executable)
         latest = retirement_query(target, deadline)
         latest_pid = _job_pid(latest)
         if path.is_symlink() or path.read_bytes() != original or latest_pid != owner.pid:
             raise RuntimeError("helper job changed before retirement")
         # Explicit force revokes native restart authority before any escalation.
         _bootout_stopped_helper(target, deadline)
-        _force_retirement_owner(owner, deadline)
+        force_retirement_owner(owner, deadline)
     else:
         _require_idle_job(state, home)
         _require_absent_socket(socket_path, deadline)
@@ -339,7 +340,7 @@ def _job_pid(state: str | None) -> int | None:
     return None if match is None or int(match[1]) <= 0 else int(match[1])
 
 
-def _force_retirement_owner(owner: OwnedProcess, deadline: float) -> None:
+def force_retirement_owner(owner: OwnedProcess, deadline: float) -> None:
     # A fresh native birth check is required at each signal, without the legacy
     # tolerance used for older persisted process records elsewhere.
     if deadline <= time.monotonic():
@@ -356,7 +357,7 @@ def _force_retirement_owner(owner: OwnedProcess, deadline: float) -> None:
         raise TimeoutError("helper did not exit; definition and custody retained") from exc
 
 
-def _wait_retirement_owner(owner: OwnedProcess, deadline: float) -> None:
+def wait_retirement_owner(owner: OwnedProcess, deadline: float) -> None:
     try:
         process = psutil.Process(owner.pid)
         if OwnedProcess.capture(process) != owner:
@@ -369,7 +370,7 @@ def _wait_retirement_owner(owner: OwnedProcess, deadline: float) -> None:
 
 
 def _bootout_stopped_helper(target: str, deadline: float) -> None:
-    result = _retirement_command(["bootout", target], deadline)
+    result = retirement_command(["bootout", target], deadline)
     if result.returncode:
         raise RuntimeError(f"helper bootout failed; custody retained: {result.stderr!r}")
     while retirement_query(target, deadline) is not None:

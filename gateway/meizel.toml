@@ -2,40 +2,20 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 
 [uses]
 "__main__.py" = ["app.py"]
-"agents" = ["app.py", "http", "inspect", "schemas", "tests"]
+"agents" = ["http", "inspect", "schemas"]
 "alerts" = ["events", "http"]
 "app.py" = ["agents", "alerts", "cluster", "events", "extensions", "http", "inspect", "lgtm", "mcp_server", "routers", "schedules", "upload_delivery"]
-"cluster" = ["agents", "app.py", "events", "http", "schemas"]
+"cluster" = ["agents", "events", "http", "schemas"]
 "events" = ["agents", "http"]
-"extensions" = ["agents", "app.py", "cluster"]
+"extensions" = ["agents", "cluster"]
 "http" = ["schemas"]
 "inspect" = ["lgtm", "schemas"]
-"mcp_server" = ["agents", "app.py", "cluster", "http", "tests"]
-"routers" = ["agents", "alerts", "app.py", "cluster", "http", "lgtm", "schedules", "schemas", "tests"]
-"schedules" = ["agents", "app.py", "http", "routers"]
-"tests" = ["agents", "app.py", "cluster", "events", "extensions", "http", "inspect", "lgtm", "mcp_server", "routers", "schedules", "schemas", "upload_delivery"]
+"mcp_server" = ["agents", "cluster", "http"]
+"routers" = ["agents", "http", "lgtm", "schemas"]
+"schedules" = ["agents", "http", "routers"]
+"tests" = ["agents", "alerts", "app.py", "cluster", "events", "extensions", "http", "inspect", "lgtm", "mcp_server", "routers", "schedules", "schemas", "upload_delivery"]
 "upload_delivery" = ["agents", "http", "routers"]
-
-[debt.manifest-cycle]
-"agents -> app.py" = 1
-"agents -> tests" = 1
-"cluster -> app.py" = 1
-"extensions -> app.py" = 1
-"mcp_server -> app.py" = 1
-"mcp_server -> tests" = 1
-"routers -> app.py" = 1
-"routers -> tests" = 1
-"schedules -> app.py" = 1
-"schedules -> routers" = 1
 
 [debt.private-module]
 "tests/observability/test_inspect_event_metrics.py -> inspect/_event_metrics.py" = 5
 "tests/observability/test_inspect_event_metrics.py -> inspect/_plugin_metrics.py" = 4
-
-[debt.private-name]
-"mcp_server/tests/test_guarded_tool_admission.py -> tests/extensions/test_mcp_endpoint.py#_enable_endpoint" = 1
-"tests/agents/test_agents_system_note_restart.py -> agents/system_note.py#_system_note_blocking" = 1
-"tests/observability/test_ops_monitor.py -> cluster/ops_series.py#_bucket_starts" = 1
-"tests/receipts/tasks/test_task_patch_tree.py -> routers/tests/test_tasks_router.py#_status" = 1
-"tests/receipts/test_system_note_idempotency.py -> agents/system_note.py#_system_note_blocking" = 1
-"tests/test_agent_inspect.py -> inspect/router.py#_cluster_rpc" = 1

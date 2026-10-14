@@ -1,2 +1,0 @@
-[uses]
-"test_override_resolution.py" = ["factory_support.py"]

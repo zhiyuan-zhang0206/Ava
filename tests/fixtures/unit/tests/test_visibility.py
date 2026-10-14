@@ -33,11 +33,11 @@ def test_optin_fixtures_are_not_visible_to_unrelated_collectors(
     request: pytest.FixtureRequest, name: str
 ) -> None:
     assert not request._fixturemanager.getfixturedefs(name, request._pyfuncitem)
-    assert request.config.pluginmanager.get_plugin("tests.fixtures.units") is None
+    assert request.config.pluginmanager.get_plugin("base.agents.tests.units") is None
     assert request.config.pluginmanager.get_plugin("tests.fixtures.unit.gateway") is None
-    assert request.config.pluginmanager.get_plugin("agent.graph.llm.tests.cancel_fixture") is None
-    assert request.config.pluginmanager.get_plugin("tests.fixtures.model_catalog") is None
-    assert request.config.pluginmanager.get_plugin("tests.fixtures.log_capture") is None
+    assert request.config.pluginmanager.get_plugin("agent.graph.tests.cancel_fixture") is None
+    assert request.config.pluginmanager.get_plugin("base.packages.tests.model_catalog") is None
+    assert request.config.pluginmanager.get_plugin("base.log.tests.log_records") is None
     assert request.config.pluginmanager.get_plugin("base.host.net.tests.retry_waits") is None
     assert (
         request.config.pluginmanager.get_plugin("base.deploy.lifecycle.tests.serving_root") is None

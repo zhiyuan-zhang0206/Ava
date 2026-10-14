@@ -24,7 +24,7 @@ from cli.start_identity import require_initialized
 from cli.start_runtime import StartRuntime
 
 
-def _checkout() -> Path:
+def checkout() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
@@ -34,7 +34,7 @@ def _home() -> Path:
     A home that carries its own `<home>/source` checkout starts only from that
     checkout (`base.paths.home.home_checkout_error`).
     """
-    error = home_checkout_error(_checkout())
+    error = home_checkout_error(checkout())
     if error is not None:
         raise ValueError(error)
     return resolve_ava_home().resolve()
@@ -143,7 +143,7 @@ def start_once(
 ) -> int:
     try:
         if runtime is None:
-            runtime = StartRuntime.development(_checkout())
+            runtime = StartRuntime.development(checkout())
         home = _home()
         runtime.validate()
         # Refuse before anything is created: a start never makes a home, so the
@@ -154,7 +154,7 @@ def start_once(
             require_initialized(home)
             _enter_home(home)
             from base.telemetry.process_logging import init_cli_process
-            from cli.main import init_cli_logging
+            from cli.startup_support import init_cli_logging
 
             def initialize(name: str) -> None:
                 init_cli_process(
@@ -184,7 +184,7 @@ def start_once(
         from pydantic import ValidationError
 
         if isinstance(exc, ValidationError):
-            from cli.main import print_settings_load_failure
+            from cli.startup_support import print_settings_load_failure
 
             return print_settings_load_failure(exc)
         print(f"ava start: {exc}", file=sys.stderr)

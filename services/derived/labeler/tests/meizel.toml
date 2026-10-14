@@ -4,3 +4,49 @@ exports = ["slices.py"]
 "test_labeler_backoff.py" = ["slices.py"]
 "test_labeler_failure_boundary.py" = ["slices.py"]
 "test_labeler_validity.py" = ["slices.py"]
+
+[debt.env-patch]
+"test_labeler_config.py#patch.dict os.environ" = 2
+
+[debt.first-party-patch]
+"test_labeler_backoff.py#monkeypatch.setattr base.config.settings.lm.labeler_model" = 1
+"test_labeler_backoff.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1
+"test_labeler_backoff.py#monkeypatch.setattr services.derived.labeler.daemon.POLL_INTERVAL_S" = 1
+"test_labeler_backoff.py#monkeypatch.setattr services.derived.labeler.daemon.asyncio.sleep" = 1
+"test_labeler_backoff.py#monkeypatch.setattr services.derived.labeler.daemon.generate_label_async" = 2
+"test_labeler_config.py#monkeypatch.setattr base.config.settings.lm.labeler_model" = 1
+"test_labeler_config.py#monkeypatch.setattr base.config.settings.services.labeler_max_chars" = 1
+"test_labeler_config.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 2
+"test_labeler_config.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.ConfigBoot" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.Database" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.Database.pool" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.LoadedCommit.capture" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon._hard_exit" = 2
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon._is_running" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon._remove_pidfile" = 3
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.asyncio.Runner" = 2
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.build_model_catalog" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.build_pipeline" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.dispatch_loop" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.init_gateway_process" = 2
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.install_graceful_shutdown" = 2
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.labeler_endpoint" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.run" = 2
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.start_health_server" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.stop_health_server" = 1
+"test_labeler_config.py#monkeypatch.setattr services.derived.labeler.daemon.write_pidfile" = 1
+"test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.daemon.POLL_INTERVAL_S" = 2
+"test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.daemon.generate_label_async" = 1
+"test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.daemon.select_unlabeled" = 2
+"test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.labeler.build_chat_model" = 2
+"test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.labeler.publish_label_updated" = 1
+"test_labeler_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
+"test_labeler_quiesced.py#monkeypatch.setattr services.derived.labeler.daemon.POLL_INTERVAL_S" = 1
+"test_labeler_validity.py#monkeypatch.setattr services.derived.labeler.labeler.build_chat_model" = 5
+
+[debt.third-party-patch]
+"test_labeler_validity.py#monkeypatch.setattr redis.asyncio.Redis.publish" = 1
+
+[debt.unresolved-patch]
+"test_labeler_failure_boundary.py#monkeypatch.setattr owner" = 2

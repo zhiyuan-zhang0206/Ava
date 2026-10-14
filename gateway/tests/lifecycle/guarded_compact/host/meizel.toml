@@ -1,0 +1,35 @@
+exports = ["admission.py"]
+
+[uses]
+"restart" = ["admission.py"]
+"test_application_proof.py" = ["admission.py"]
+"test_claim_response.py" = ["admission.py"]
+"test_closing_anchor.py" = ["admission.py", "faults.py"]
+"test_cold_input.py" = ["admission.py"]
+"test_complete_chain.py" = ["faults.py"]
+"test_generation_cancel.py" = ["admission.py", "test_late_cancel.py"]
+"test_generation_faults.py" = ["admission.py", "faults.py"]
+"test_late_cancel.py" = ["admission.py"]
+"test_late_inputs.py" = ["admission.py"]
+"test_one_connection.py" = ["admission.py"]
+"test_pre_attempt.py" = ["admission.py"]
+"test_retained_wake.py" = ["admission.py"]
+"test_runner_authority.py" = ["admission.py"]
+
+[debt.env-patch]
+"admission.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1
+"test_complete_chain.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1
+
+[debt.first-party-patch]
+"admission.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"faults.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.apply.acknowledge" = 1
+"faults.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.apply.flush_checkpoint" = 1
+"faults.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.execute.save_result" = 1
+"test_application_proof.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.apply.acknowledge" = 1
+"test_claim_response.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.execute.claim_attempt" = 1
+"test_complete_chain.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_generation_faults.py#monkeypatch.setattr services.agent_runner.agent_host.host.recover_native_cancel" = 1
+"test_late_cancel.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.apply" = 1
+"test_late_inputs.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.apply.acknowledge" = 1
+"test_late_inputs.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.apply.authorize" = 1
+"test_pre_attempt.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 1

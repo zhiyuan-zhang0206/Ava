@@ -20,17 +20,17 @@ import pytest
 import ava
 from ava.sdk_surface.installation import Installation
 from base import telemetry
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config import set_field, settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddModels
 from base.paths import ava_home
-from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 @pytest.fixture

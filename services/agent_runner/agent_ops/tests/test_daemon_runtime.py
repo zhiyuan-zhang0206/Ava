@@ -12,12 +12,12 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import boot, daemon
-from tests.fixtures.configuration import snapshot_process_config
 
 
 def _assert_live_saturation(inputs: dict[str, object], config: ConfigBoot) -> None:
@@ -148,7 +148,7 @@ async def test_server_failure_releases_owned_resources(
     )  # the port table still names the ops slot
 
     with pytest.raises(RuntimeError, match="ops server crashed"):
-        await daemon._main(
+        await daemon.serve_ops_daemon(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,

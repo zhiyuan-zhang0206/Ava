@@ -9,8 +9,8 @@ tags:
 
 # CLI entries
 
-- `cli/main.py:entry()` — fresh executable logger preparation; `main()` — embeddable dispatch preserving caller sinks; `cli.parsers` — `build_parser` for construction, `parse_args` for syntax, `command_options` for documentation.
-- `cli/init_intent.py:run_init()` — the first-start inputs; `cli/start_intent.py:run_start()` — start admission and the full home lifecycle lock; `cli/start_identity.py` — durable initialization journal and the start gate (`require_initialized`); `cli/unit_join.py` — a runner's gateway join.
+- `cli/main.py:entry()` — fresh executable logger preparation; `main()` — embeddable dispatch preserving caller sinks, which runs `run_command(argv, retained_children=, producer_factory=)` with the operator event pipeline as the producer factory (a caller that needs another producer, such as a different flush interval, calls `run_command` with its own factory); `cli.parsers` — `build_parser` for construction, `parse_args` for syntax, `command_options` for documentation.
+- `cli/init_intent.py:run_init()` — the first-start inputs; `cli/start_intent.py:run_start()` — start admission and the full home lifecycle lock; `cli/start_identity.py` — durable initialization journal and the start gate (`require_initialized`); `cli/commands/cluster/unit_join.py` — a runner's gateway join.
 - `cli/commands/cluster/home.py` — `destroy` (confirmed at a terminal), exact cleanup before marking the home detached; `start.py` / `status.py` / `data_plane/cluster_instance.py` — runtime operations.
 
 

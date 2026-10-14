@@ -1,0 +1,12 @@
+[debt.env-patch]
+"test_hierarchy_config_inputs.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_checkpoint_postgres_walks.py#monkeypatch.setattr base.agents.history.checkpoint_postgres_walks.version" = 1
+"test_timeline_dispatch.py#monkeypatch.setattr base.agents.history.timeline.ai_message_items" = 1
+
+[debt.third-party-patch]
+"test_checkpoint_postgres_walks.py#monkeypatch.setattr langgraph.checkpoint.postgres.base.BasePostgresSaver._try_advance_walks" = 2
+
+[debt.unresolved-patch]
+"test_delta_read_compat.py#monkeypatch.setattr saver.aget_delta_channel_history" = 1

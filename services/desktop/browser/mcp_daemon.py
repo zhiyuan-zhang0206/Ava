@@ -83,21 +83,21 @@ from base.telemetry.process_logging import init_gateway_process
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.gateway_session import GatewaySession, stop_on_signals
 from services.desktop.browser.mcp_upstream import (
-    _await_stop_or_timeout,
-    _bounded,
-    _bounded_stack_close,
-    _create_upstream,
-    _StoppingError,
+    StoppingError,
+    await_stop_or_timeout,
+    bounded,
+    bounded_stack_close,
     contained,
+    create_upstream,
 )
 from services.desktop.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
     PageRegistry,
-    _text_of,
     expired_page_reaper,
     handle_release_agent_page,
     renew_agent_page,
     renew_page_tool_dump,
+    text_of,
 )
 from services.desktop.browser.protocol import Request, Response
 from services.desktop.browser.tab_groups.grouping import AgentTabGroups
@@ -156,9 +156,9 @@ _UPSTREAM_WATCHDOG_INTERVAL_S = 30.0
 _UPSTREAM_WATCHDOG_TIMEOUT_S = 10.0
 
 
-def _selected_id(result: types.CallToolResult) -> int | None:
+def selected_id(result: types.CallToolResult) -> int | None:
     """The `[selected]` page id in a page-list result, or None on format drift."""
-    m = _SELECTED_RE.search(_text_of(result))
+    m = _SELECTED_RE.search(text_of(result))
     return int(m.group(1)) if m else None
 
 
@@ -189,7 +189,7 @@ def _in_isolated_context(args: dict[str, Any]) -> bool:
     return args.get("isolatedContext") is not None
 
 
-def _no_page_result() -> types.CallToolResult:
+def no_page_result() -> types.CallToolResult:
     """The upstream's own no-page error, returned for a page-scoped call from a
     connection that owns no page -- forwarding it would touch another client's
     tab via the shared global selection."""
@@ -327,7 +327,7 @@ class ChromeMcpDaemon:
         if repin.is_error:
             logger.warning(
                 f"[browser-mcp] re-pin to page {current_page} failed "
-                f"({_text_of(repin)!r}); dropping affinity"
+                f"({text_of(repin)!r}); dropping affinity"
             )
             return None
         return current_page
@@ -353,7 +353,7 @@ class ChromeMcpDaemon:
         before = await self.tab_groups.snapshot() if group else None
         result = await self._call("new_page", args)
         if not result.is_error:
-            self.pages.register_created_page(_selected_id(result))
+            self.pages.register_created_page(selected_id(result))
             if group and agent_id is not None:
                 await self.tab_groups.group_new_page(agent_id, before)
         return result
@@ -365,8 +365,8 @@ class ChromeMcpDaemon:
         fast instead of touching another client's tab."""
         if name == "navigate_page" and isinstance(args.get("url"), str):
             result = await self._new_page(args, agent_id)
-            return result, (_selected_id(result) or None)
-        return _no_page_result(), None
+            return result, (selected_id(result) or None)
+        return no_page_result(), None
 
     async def _affinity_call(
         self,
@@ -404,7 +404,7 @@ class ChromeMcpDaemon:
         if result.is_error:
             return current_page
         if name == "new_page":
-            return _selected_id(result) or current_page  # the freshly opened tab
+            return selected_id(result) or current_page  # the freshly opened tab
         if name == "select_page":
             pid = _page_id(args.get("pageId"))
             return pid if pid is not None else current_page
@@ -497,7 +497,7 @@ async def _serve_line(
     return conn_page
 
 
-async def _handle_client(
+async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     daemon_ref: list[ChromeMcpDaemon | None],
@@ -556,10 +556,10 @@ async def _upstream_watchdog(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> No
             if stop.is_set():
                 return
             logger.warning(f"[browser-mcp] upstream watchdog ping failed: {e!r}; retrying")
-        await _await_stop_or_timeout(stop, _UPSTREAM_WATCHDOG_INTERVAL_S)
+        await await_stop_or_timeout(stop, _UPSTREAM_WATCHDOG_INTERVAL_S)
 
 
-async def _socket_in_use(path: Path) -> bool:
+async def socket_in_use(path: Path) -> bool:
     """True when a live process is already listening on ``path``.
 
     A successful connect proves an occupant; ``FileNotFoundError`` /
@@ -587,14 +587,14 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
     death ends the process; no browser action or session is automatically replayed.
     """
     browser_url = f"http://127.0.0.1:{browser_cdp_port}"
-    sock = chrome_mcp_socket()
+    sock = chrome_mcp_socket(browser_cdp_port)
     # Single-instance guard: the old code unlinked the socket unconditionally,
     # so a second daemon (watchdog misjudged the first dead and respawned)
     # stole the socket out from under the live instance — its clients all
     # disconnected and the first process became an orphan (audit round 2, P1).
     # Probe before unlink: a live listener means an instance is already
     # serving; refuse to start instead of stealing.
-    if await _socket_in_use(sock):
+    if await socket_in_use(sock):
         logger.error(
             "[browser-mcp] socket {} is already served by a live daemon — "
             "refusing to start a second instance",
@@ -604,12 +604,12 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
     with suppress(OSError):
         sock.unlink()
 
-    # Mutable reference so _handle_client always sees the current daemon across
+    # Mutable reference so handle_client always sees the current daemon across
     # initial upstream connection. None while starting.
     daemon_ref: list[ChromeMcpDaemon | None] = [None]
 
     server = await asyncio.start_unix_server(
-        lambda r, w: _handle_client(r, w, daemon_ref), path=str(sock), limit=_LINE_LIMIT
+        lambda r, w: handle_client(r, w, daemon_ref), path=str(sock), limit=_LINE_LIMIT
     )
     logger.info(f"[browser-mcp] listening on {sock} (upstream {browser_url})")
 
@@ -629,10 +629,10 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
         current_stack: AsyncExitStack | None = None
         try:
             try:
-                session, current_stack = await _create_upstream(
+                session, current_stack = await create_upstream(
                     browser_url, stop, connect_timeout_reader=connect_timeout_reader
                 )
-            except _StoppingError:
+            except StoppingError:
                 return
             daemon = ChromeMcpDaemon(session, pages, tab_groups)
             daemon_ref[0] = daemon
@@ -647,9 +647,9 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
             # Two bounded steps, so the daemon may keep closing for up to
             # `shutdown_budget.SHUTDOWN_CEILING_S`; ava-root's window for this unit
             # is derived from that total.
-            await _bounded_stack_close(current_stack, "upstream stack close during shutdown")
+            await bounded_stack_close(current_stack, "upstream stack close during shutdown")
             server.close()
-            await _bounded(server.wait_closed(), "server close")
+            await bounded(server.wait_closed(), "server close")
             with suppress(OSError):
                 sock.unlink()
 

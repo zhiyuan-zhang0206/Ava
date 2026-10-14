@@ -30,6 +30,7 @@ from base.cluster import machines as _machines
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -40,11 +41,10 @@ from gateway.app import app
 from gateway.cluster.process_boot import GatewayProcess
 from ops.lifecycle import launch_agent_op, lifecycle_op
 from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
-from tests.fixtures.configuration import snapshot_process_config
 
 # One definition shared with the ava and integration modules; imported here so it
 # registers for this module's paths.
-from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
+from tests.path_scoped.api_keys import mock_api_keys as mock_api_keys
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +71,7 @@ def gateway_config_owner(
 
 
 @pytest.fixture(autouse=True)
-def _local_spawn_in_process(
+def local_spawn_in_process(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,

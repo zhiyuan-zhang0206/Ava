@@ -55,7 +55,7 @@ def _require_same_host(state: IncarnationResources, host: ResourceProcess) -> No
         raise ResourceEvidenceError("same owner changed its actual host process")
 
 
-def _next(
+def next_incarnation_resources(
     row: tuple[Any, ...],
     target: RuntimeIncarnation,
     host: ResourceProcess,
@@ -106,7 +106,9 @@ async def admit_resources_async(
                 await conn.execute(_PREDECESSOR, (target.agent_id, state.generation, state.owner))
             ).fetchone()
             predecessor = receipt is not None
-    value = _next(row, target, host, predecessor=predecessor, exited_predecessor=exited_predecessor)
+    value = next_incarnation_resources(
+        row, target, host, predecessor=predecessor, exited_predecessor=exited_predecessor
+    )
     if value is not None:
         await conn.execute(_STORE, (Jsonb(value.model_dump(mode="json")), target.agent_id))
 

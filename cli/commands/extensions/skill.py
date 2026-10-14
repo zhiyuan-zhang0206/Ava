@@ -38,7 +38,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from base.paths import ava_home
-from cli.commands.extensions.skills_sync import _Source
+from cli.commands.extensions.skills_sync import Source
 
 _REFUSAL_ADVICE = (
     "  Refusing to install. Read the package yourself — these patterns are how a\n"
@@ -302,22 +302,22 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
 # ─── update / upgrade (R5 design, task #1013) ───────────────────────────────
 
 
-def _repo_native_sources(repo: Path | None = None) -> list[_Source]:
+def _repo_native_sources(repo: Path | None = None) -> list[Source]:
     """The repo-native skill sources of the running checkout (builtin skills
     from `ava_builtins/skills/` and builtin-plugin skills) — the set `ava
     skill update` syncs. `.agents/skills/` project skills are excluded (they
     reach agents through the project-local mount, not the load dir; issue
     #146). Installed-plugin skills are excluded too (they update via
     `ava plugins upgrade`)."""
-    from cli.commands._repo import _repo_root
+    from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import iter_sources
 
-    sources, _conflicts = iter_sources(repo or _repo_root())
+    sources, _conflicts = iter_sources(repo or repo_root())
     return [s for s in sources if s.bootstrap_only]
 
 
 def _land_repo_copy(
-    s: _Source,
+    s: Source,
     skills_root: Path,
     registry: reg.Registry,
     now: str,
@@ -351,7 +351,7 @@ def _land_repo_copy(
 
 
 def _adopt_user_residue(
-    s: _Source,
+    s: Source,
     skills_root: Path,
     registry: reg.Registry,
     now: str,
@@ -402,7 +402,7 @@ def _adopt_user_residue(
 
 
 def _update_tracked(
-    s: _Source,
+    s: Source,
     skills_root: Path,
     registry: reg.Registry,
     now: str,
@@ -433,7 +433,7 @@ def _update_tracked(
 
 
 def _update_one(
-    s: _Source,
+    s: Source,
     skills_root: Path,
     registry: reg.Registry,
     now: str,
@@ -520,7 +520,7 @@ def _update_one(
     )
 
 
-def _selected_sources(repo: Path, names: list[str] | None) -> list[_Source]:
+def _selected_sources(repo: Path, names: list[str] | None) -> list[Source]:
     """The repo-native sources to sync: all of them, or the named ones (unknown names warn)."""
     sources = _repo_native_sources(repo)
     if names:
@@ -589,10 +589,10 @@ def cmd_skill_update(
 
     from base import paths
     from base.packages.extensions import install_registry as reg
-    from cli.commands._repo import _repo_root
+    from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import assert_repo_source_bound
 
-    repo = repo or _repo_root()
+    repo = repo or repo_root()
     try:
         assert_repo_source_bound(repo, ava_home())
     except RuntimeError as e:

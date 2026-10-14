@@ -20,21 +20,21 @@ from ava.mcps.tests.test_daemon import (
     ORIG_REAP,
     FakeProc,
     FakeWriter,
-    _write_config,
     is_daemon_cmdline_cases,
     make_reader,
     make_session,
     wait_for_daemon_socket,
+    write_config,
     writer_arg,
-)
-from ava.mcps.tests.test_daemon import (
-    _no_reap_stale_daemons as _no_reap_stale_daemons,
 )
 from ava.mcps.tests.test_daemon import (
     daemon_wide as daemon_wide,
 )
 from ava.mcps.tests.test_daemon import (
     fake_home as fake_home,
+)
+from ava.mcps.tests.test_daemon import (
+    no_reap_stale_daemons as no_reap_stale_daemons,
 )
 from ava.mcps.tests.test_daemon import (
     scope as scope,
@@ -299,7 +299,7 @@ async def test_connect_server_enforces_requires_before_connecting(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A server whose `requires` is unmet raises BEFORE any stdio launch."""
-    _write_config(fake_home, {"chrome": {"command": "npx", "requires": {"display": True}}})
+    write_config(fake_home, {"chrome": {"command": "npx", "requires": {"display": True}}})
     import ava.mcps.config as _cfg
 
     # display_available is imported into mcp_config from base.host.system.probes;
@@ -310,10 +310,12 @@ async def test_connect_server_enforces_requires_before_connecting(
     def _boom(*_a: object, **_k: object) -> None:
         nonlocal called
         called = True
+        raise AssertionError("an unmet requirement is reported before any child is spawned")
 
-    monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
     with pytest.raises(_cfg.MCPError, match="requires a display"):
-        await daemon_mod.connect_server("chrome", {}, timeout_seconds=lambda: 15.0)
+        await daemon_mod.connect_server(
+            "chrome", {}, timeout_seconds=lambda: 15.0, stdio_client=_boom
+        )
     assert called is False
 
 
@@ -333,7 +335,7 @@ async def test_overlay_error_or_disabled_server_never_starts_a_process(
 ) -> None:
     import mcp.client.stdio
 
-    _write_config(fake_home, {"fs": {"command": "must-not-run"}})
+    write_config(fake_home, {"fs": {"command": "must-not-run"}})
     (fake_home / "mcp_enabled.json").write_text(overlay)
     launch = MagicMock(side_effect=AssertionError("server startup must not be reached"))
     monkeypatch.setattr(mcp.client.stdio, "stdio_client", launch)
@@ -348,39 +350,39 @@ async def test_overlay_error_or_disabled_server_never_starts_a_process(
 
 
 def test_is_transport_error_broken_pipe() -> None:
-    assert daemon_mod._is_transport_error(BrokenPipeError()) is True
+    assert daemon_mod.is_mcp_transport_error(BrokenPipeError()) is True
 
 
 def test_is_transport_error_connection_reset() -> None:
-    assert daemon_mod._is_transport_error(ConnectionResetError()) is True
+    assert daemon_mod.is_mcp_transport_error(ConnectionResetError()) is True
 
 
 def test_is_transport_error_timeout_error() -> None:
-    assert daemon_mod._is_transport_error(TimeoutError()) is True
+    assert daemon_mod.is_mcp_transport_error(TimeoutError()) is True
 
 
 def test_is_transport_error_oserror_epipe() -> None:
-    assert daemon_mod._is_transport_error(OSError(32, "Broken pipe")) is True
+    assert daemon_mod.is_mcp_transport_error(OSError(32, "Broken pipe")) is True
 
 
 def test_is_transport_error_oserror_econnreset() -> None:
     assert (
-        daemon_mod._is_transport_error(OSError(errno.ECONNRESET, "Connection reset by peer"))
+        daemon_mod.is_mcp_transport_error(OSError(errno.ECONNRESET, "Connection reset by peer"))
         is True
     )
 
 
 def test_is_transport_error_oserror_other() -> None:
     """OSError with a non-transport errno (e.g. ENOENT) is not a transport error."""
-    assert daemon_mod._is_transport_error(OSError(2, "No such file")) is False
+    assert daemon_mod.is_mcp_transport_error(OSError(2, "No such file")) is False
 
 
 def test_is_transport_error_value_error() -> None:
-    assert daemon_mod._is_transport_error(ValueError("not transport")) is False
+    assert daemon_mod.is_mcp_transport_error(ValueError("not transport")) is False
 
 
 def test_is_transport_error_runtime_error() -> None:
-    assert daemon_mod._is_transport_error(RuntimeError("not transport")) is False
+    assert daemon_mod.is_mcp_transport_error(RuntimeError("not transport")) is False
 
 
 def test_is_transport_error_mcp_error_wraps_transport() -> None:
@@ -390,14 +392,14 @@ def test_is_transport_error_mcp_error_wraps_transport() -> None:
     inner = BrokenPipeError()
     exc = MCPError(-1, "wrapped")
     exc.__cause__ = inner
-    assert daemon_mod._is_transport_error(exc) is True
+    assert daemon_mod.is_mcp_transport_error(exc) is True
 
 
 def test_is_transport_error_mcp_error_no_cause() -> None:
     """MCPError without __cause__ is not a transport error."""
     from mcp import MCPError
 
-    assert daemon_mod._is_transport_error(MCPError(-1, "no cause")) is False
+    assert daemon_mod.is_mcp_transport_error(MCPError(-1, "no cause")) is False
 
 
 def test_is_transport_error_mcp_error_connection_closed_no_cause() -> None:
@@ -408,7 +410,9 @@ def test_is_transport_error_mcp_error_connection_closed_no_cause() -> None:
     from mcp import MCPError
     from mcp.types import CONNECTION_CLOSED
 
-    assert daemon_mod._is_transport_error(MCPError(CONNECTION_CLOSED, "Connection closed")) is True
+    assert (
+        daemon_mod.is_mcp_transport_error(MCPError(CONNECTION_CLOSED, "Connection closed")) is True
+    )
 
 
 def test_is_transport_error_mcp_error_request_timeout_no_cause() -> None:
@@ -417,7 +421,7 @@ def test_is_transport_error_mcp_error_request_timeout_no_cause() -> None:
     from mcp import MCPError
     from mcp.types import REQUEST_TIMEOUT
 
-    assert daemon_mod._is_transport_error(MCPError(REQUEST_TIMEOUT, "Timed out")) is True
+    assert daemon_mod.is_mcp_transport_error(MCPError(REQUEST_TIMEOUT, "Timed out")) is True
 
 
 def test_is_transport_error_mcp_error_tool_code_no_cause() -> None:
@@ -426,21 +430,21 @@ def test_is_transport_error_mcp_error_tool_code_no_cause() -> None:
     from mcp import MCPError
     from mcp.types import INVALID_PARAMS
 
-    assert daemon_mod._is_transport_error(MCPError(INVALID_PARAMS, "Bad args")) is False
+    assert daemon_mod.is_mcp_transport_error(MCPError(INVALID_PARAMS, "Bad args")) is False
 
 
 def test_is_transport_error_anyio_broken_resource() -> None:
     """The required transport dependency supplies the concrete exception type."""
     from anyio import BrokenResourceError
 
-    assert daemon_mod._is_transport_error(BrokenResourceError()) is True
+    assert daemon_mod.is_mcp_transport_error(BrokenResourceError()) is True
 
 
 async def test_invalidate_session_removes_cached_session_and_closes_stack(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """Session is removed from both dicts and its stack is aclose()'d."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session()
     stack = MagicMock()
     stack.aclose = AsyncMock()
@@ -465,7 +469,7 @@ async def test_handle_client_retries_on_transport_error_and_succeeds(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """Safe tool listing still retries after a transport failure."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     call_count = 0
@@ -500,7 +504,7 @@ async def test_handle_client_does_not_retry_non_transport_error(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """ValueError is not a transport error → no retry, error propagates."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
 
     call_count = 0
 
@@ -533,7 +537,7 @@ async def test_handle_client_gives_up_after_max_retries(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """After 3 transport errors, error propagates."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     call_count = 0
@@ -567,7 +571,7 @@ async def test_handle_client_retry_reconnects_after_invalidation(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """A safe list_tools retry rebuilds the dead session."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     connect_count = 0
@@ -601,7 +605,7 @@ async def test_handle_client_retries_on_mcp_error_connection_closed(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """A listing retries SDK CONNECTION_CLOSED after rebuilding its session."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     from mcp import MCPError
@@ -644,7 +648,7 @@ async def test_handle_client_does_not_retry_tool_level_mcp_error(
     """A server-returned JSON-RPC error (MCPError with INVALID_PARAMS) is not a
     transport death: no invalidate / no retry, so a side-effectful tool is never
     double-run."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     from mcp import MCPError

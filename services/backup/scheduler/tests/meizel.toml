@@ -2,3 +2,54 @@
 "shutdown_daemon.py" = ["test_scheduler_shutdown.py"]
 "shutdown_worker.py" = ["test_scheduler_shutdown.py"]
 "test_operation_worker.py" = ["operation_support.py"]
+
+[debt.env-patch]
+"test_backup_scheduler_daemon.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"operation_support.py#monkeypatch.setattr services.backup.scheduler.operation.worker_process.subprocess.Popen" = 1
+"test_backup_scheduler_daemon.py#monkeypatch.setattr base.config.settings.services.backup_hour" = 1
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.dump.backup_dir" = 1
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.dump.backup_lock" = 1
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.dump.prune" = 2
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.asyncio.sleep" = 1
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.cluster_tz" = 2
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.datetime" = 1
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.is_due" = 3
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.load_local_dump_restore_success" = 3
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.local_dump_restore_due" = 2
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.record_local_dump_restore_success" = 2
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.run_due_local_dump_restore" = 1
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.run_job" = 6
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.sleep_in_chunks" = 4
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.sleep_until_next_backup_hour" = 2
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.telemetry.emit" = 3
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.time.monotonic" = 3
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.daemon.time.time" = 4
+"test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.scheduler.worker.os.link" = 2
+"test_operation_worker.py#monkeypatch.setattr services.backup.scheduler.worker.ava_home" = 1
+"test_operation_worker.py#monkeypatch.setattr services.backup.scheduler.worker.commit_scheduled_backup" = 1
+"test_recovery_drill_schedule.py#monkeypatch.setattr services.backup.scheduler.recovery_drill.cluster_tz" = 1
+"test_scheduler_shutdown.py#monkeypatch.setattr services.backup.scheduler.worker.ava_home" = 1
+"test_scheduler_shutdown.py#monkeypatch.setattr services.backup.scheduler.worker.run_operation" = 1
+"test_scheduler_shutdown.py#patch.object base.config.settings.data_plane.pg_throwaway_base" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.artifact.offsite.publish" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.dump.backup_dir" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.dump.db_size_breakdown" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.dump.dump_source" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.dump.passphrase_key_file" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.dump.pg_tool" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.dump.run_with_progress" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.restore_drill.run_drill" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon._is_running" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon._remove_pidfile" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.backup_loop" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.is_due" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.load_local_dump_restore_success" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.local_dump_restore_due" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.record_local_dump_restore_success" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.start_health_server" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.stop_health_server" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.write_pidfile" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.worker.ava_home" = 1
+"test_scheduler_shutdown.py#patch.object services.backup.scheduler.worker.run_operation" = 1

@@ -7,6 +7,7 @@ import json
 import threading
 import time
 import urllib.error
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -15,12 +16,14 @@ import pytest
 from pydantic import SecretStr
 
 import ava
-from ava import web
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.sdk_surface.installation import Installation
-from ava.tests.web._web_helpers import FakeResp
-from ava.web import SearchError, WebError
+from ava.sdk_surface.settings import config_authority
+from ava.tests.web._web_helpers import FakeResp, WebHarness
+from ava.tests.web._web_helpers import web_harness as web_harness
+from ava.web import SearchError, WebError, wiring
 from base.config import settings
+from base.config.service_read import ConfigAuthority
 
 # Retry backoff waits are recorded, not slept, so retry-path tests run instantly; the retry
 # loop itself is still exercised (call counts).
@@ -31,14 +34,14 @@ def _make_brave_response(results: list[dict]) -> bytes:
     return json.dumps({"web": {"results": results}}).encode()
 
 
-def test_raises_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.web, "brave_api_key", None)
+def test_raises_when_api_key_missing(web_harness: WebHarness) -> None:
+    web_harness.set_brave(api_key=None)
     with pytest.raises(SearchError, match="BRAVE_API_KEY"):
-        ava.web.search(["anything"])
+        web_harness.search(["anything"])
 
 
-def test_parses_brave_response_into_dataclass(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+def test_parses_brave_response_into_dataclass(web_harness: WebHarness) -> None:
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     payload = _make_brave_response(
         [
             {
@@ -53,8 +56,8 @@ def test_parses_brave_response_into_dataclass(monkeypatch: pytest.MonkeyPatch) -
             },
         ]
     )
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
-        results = ava.web.search(["python asyncio"])
+    with web_harness.urlopen_returns(return_value=FakeResp(payload)):
+        results = web_harness.search(["python asyncio"])
     assert len(results) == 1
     assert len(results[0]) == 2
     assert isinstance(results[0][0], ava.web.SearchResult)
@@ -64,32 +67,30 @@ def test_parses_brave_response_into_dataclass(monkeypatch: pytest.MonkeyPatch) -
     assert results[0][0].kind == "web"
 
 
-def test_empty_results_returns_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+def test_empty_results_returns_empty_list(web_harness: WebHarness) -> None:
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     payload = _make_brave_response([])
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
-        assert ava.web.search(["nonsense query qqqq"]) == [[]]
+    with web_harness.urlopen_returns(return_value=FakeResp(payload)):
+        assert web_harness.search(["nonsense query qqqq"]) == [[]]
 
 
-def test_missing_web_section_returns_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_web_section_returns_empty_list(web_harness: WebHarness) -> None:
     """Brave response missing the `web` key — per API docs only `type` and `query`
     are guaranteed; `web` and other result-type keys appear only when relevant
     data is available. Missing `web` = no web results → return empty list."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
-    with patch.object(
-        web.urllib.request,
-        "urlopen",
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
+    with web_harness.urlopen_returns(
         return_value=FakeResp(
             b'{"type": "search", "query": {"original": "q"}, "news": {"results": []}}'
-        ),
+        )
     ):
-        results = ava.web.search(["query"])
+        results = web_harness.search(["query"])
     assert results == [[]]
 
 
-def test_collects_results_from_all_sections(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collects_results_from_all_sections(web_harness: WebHarness) -> None:
     """search() collects from web, news, videos — each tagged with kind."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     payload = json.dumps(
         {
             "web": {"results": [{"title": "W", "url": "https://a.com", "description": "d"}]},
@@ -97,8 +98,8 @@ def test_collects_results_from_all_sections(monkeypatch: pytest.MonkeyPatch) -> 
             "videos": {"results": [{"title": "V", "url": "https://c.com", "description": "d"}]},
         }
     ).encode()
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
-        results = ava.web.search(["query"])
+    with web_harness.urlopen_returns(return_value=FakeResp(payload)):
+        results = web_harness.search(["query"])
     assert len(results) == 1
     assert len(results[0]) == 3
     assert {r.kind for r in results[0]} == {"web", "news", "videos"}
@@ -107,10 +108,10 @@ def test_collects_results_from_all_sections(monkeypatch: pytest.MonkeyPatch) -> 
     assert results[0][2].kind == "videos"
 
 
-def test_http_error_raises_with_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_http_error_raises_with_detail(web_harness: WebHarness) -> None:
     """API returns 422/429/500 etc., must include upstream body in traceback — agent can
     diagnose (rate limit / invalid param / expired key)."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     http_err = urllib.error.HTTPError(
         url=settings.web.web_brave_search_endpoint,
         code=429,
@@ -119,26 +120,26 @@ def test_http_error_raises_with_detail(monkeypatch: pytest.MonkeyPatch) -> None:
         fp=io.BytesIO(b'{"error": "rate limit exceeded"}'),
     )
     with (
-        patch.object(web.urllib.request, "urlopen", side_effect=http_err),
+        web_harness.urlopen_returns(side_effect=http_err),
         pytest.raises(SearchError, match="Brave Search HTTP 429"),
     ):
-        ava.web.search(["query"])
+        web_harness.search(["query"])
 
 
-def test_network_error_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+def test_network_error_raises(web_harness: WebHarness) -> None:
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     url_err = urllib.error.URLError("nodename nor servname provided")
     with (
-        patch.object(web.urllib.request, "urlopen", side_effect=url_err),
+        web_harness.urlopen_returns(side_effect=url_err),
         pytest.raises(WebError, match="connection failed"),
     ):
-        ava.web.search(["query"])
+        web_harness.search(["query"])
 
 
-def test_transient_429_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_transient_429_retries_then_succeeds(web_harness: WebHarness) -> None:
     """A transient 429 is retried (R2-D): the search succeeds once the
     upstream recovers — pre-R2 a 429 failed the whole search."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     http_err = urllib.error.HTTPError(
         url=settings.web.web_brave_search_endpoint,
         code=429,
@@ -156,16 +157,16 @@ def test_transient_429_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) ->
             _make_brave_response([{"title": "t", "url": "https://a.com", "description": "d"}])
         )
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_flaky):
-        results = ava.web.search(["query"])
+    with web_harness.urlopen_returns(side_effect=_flaky):
+        results = web_harness.search(["query"])
     assert calls["n"] == 3
     assert results[0][0].title == "t"
 
 
-def test_persistent_429_exhausts_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_persistent_429_exhausts_retries(web_harness: WebHarness) -> None:
     """A persistent 429 exhausts the budget and surfaces as SearchError —
     never silently swallowed (R2-D D3: idempotent reads fail loud)."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     http_err = urllib.error.HTTPError(
         url=settings.web.web_brave_search_endpoint,
         code=429,
@@ -180,65 +181,61 @@ def test_persistent_429_exhausts_retries(monkeypatch: pytest.MonkeyPatch) -> Non
         raise http_err
 
     with (
-        patch.object(web.urllib.request, "urlopen", side_effect=_always),
+        web_harness.urlopen_returns(side_effect=_always),
         pytest.raises(SearchError, match="Brave Search HTTP 429"),
     ):
-        ava.web.search(["query"])
+        web_harness.search(["query"])
     assert calls["n"] == 3  # max_attempts
 
 
-def test_malformed_json_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+def test_malformed_json_raises(web_harness: WebHarness) -> None:
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     with (
-        patch.object(
-            web.urllib.request,
-            "urlopen",
-            return_value=FakeResp(b"not json at all"),
-        ),
+        web_harness.urlopen_returns(return_value=FakeResp(b"not json at all")),
         pytest.raises(WebError, match="non-JSON"),
     ):
-        ava.web.search(["query"])
+        web_harness.search(["query"])
 
 
-def test_count_clamped_to_brave_max(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_count_clamped_to_brave_max(web_harness: WebHarness) -> None:
     """count > 20 would be rejected by Brave with 422; we clamp to 20 beforehand."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     captured: dict[str, str] = {}
 
     def _capture(req: Any, timeout: Any):
         captured["url"] = req.full_url
         return FakeResp(_make_brave_response([]))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
-        ava.web.search(["x"], count=100)
+    with web_harness.urlopen_returns(side_effect=_capture):
+        web_harness.search(["x"], count=100)
     assert "count=20" in captured["url"]
 
 
-def test_count_floor_at_one(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_count_floor_at_one(web_harness: WebHarness) -> None:
     """count <= 0 clamped to 1 — Brave returns 422 for count=0."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     captured: dict[str, str] = {}
 
     def _capture(req: Any, timeout: Any):
         captured["url"] = req.full_url
         return FakeResp(_make_brave_response([]))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
-        ava.web.search(["x"], count=0)
+    with web_harness.urlopen_returns(side_effect=_capture):
+        web_harness.search(["x"], count=0)
     assert "count=1" in captured["url"]
 
 
-def test_subscription_token_header_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_subscription_token_header_sent(web_harness: WebHarness) -> None:
     """Brave authentication uses `X-Subscription-Token` header — missing it gets 401, must verify."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("my-secret-key"))
+    web_harness.set_brave(api_key=SecretStr("my-secret-key"))
     captured: dict[str, Any] = {}
 
     def _capture(req: Any, timeout: Any):
         captured["headers"] = dict(req.headers)
         return FakeResp(_make_brave_response([]))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
-        ava.web.search(["x"])
+    with web_harness.urlopen_returns(side_effect=_capture):
+        web_harness.search(["x"])
     # urllib capitalizes header names; Brave accepts `X-Subscription-Token`
     assert captured["headers"].get("X-subscription-token") == "my-secret-key"
 
@@ -249,7 +246,7 @@ def test_search_result_str_format() -> None:
     assert str(r) == "[web] Foo\n  https://example.com\n  A foo page."
 
 
-def test_endpoint_defaults_pin_before_literals() -> None:
+def test_endpoint_defaults_pin_before_literals(web_harness: WebHarness) -> None:
     """The settings defaults must stay byte-identical to the URLs the module
     used to hard-code — a future default drift breaks the 'behavior unchanged'
     contract that the other endpoint tests assume (they reference the settings
@@ -257,16 +254,14 @@ def test_endpoint_defaults_pin_before_literals() -> None:
     assert (
         settings.web.web_brave_search_endpoint == "https://api.search.brave.com/res/v1/web/search"
     )
-    assert settings.web.web_jina_reader_base == "https://r.jina.ai/"
+    assert web_harness.deps.jina.reader_base == "https://r.jina.ai/"
 
 
-def test_search_hits_configured_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_hits_configured_endpoint(web_harness: WebHarness) -> None:
     """The Brave endpoint is configurable (`AVA_WEB_BRAVE_SEARCH_ENDPOINT`) —
     the request must dial the configured URL, not a baked-in literal."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
-    monkeypatch.setattr(
-        settings.web, "web_brave_search_endpoint", "https://search.relay.example/api"
-    )
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
+    web_harness.set_brave(endpoint="https://search.relay.example/api")
     captured: dict[str, str] = {}
 
     def _capture(req: Any, timeout: Any):
@@ -275,17 +270,16 @@ def test_search_hits_configured_endpoint(monkeypatch: pytest.MonkeyPatch) -> Non
             _make_brave_response([{"title": "t", "url": "https://a.com", "description": "d"}])
         )
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
-        ava.web.search(["query"])
+    with web_harness.urlopen_returns(side_effect=_capture):
+        web_harness.search(["query"])
     assert captured["url"].startswith("https://search.relay.example/api?")
 
 
 def test_search_uses_two_owned_boots_and_live_updates(
-    monkeypatch: pytest.MonkeyPatch, model_installation: Installation, tmp_path: Path
+    model_installation: Installation, tmp_path: Path
 ) -> None:
-    """SDK configuration follows its installation, including later owner writes."""
+    """The deps follow the configuration owner they are built from, including later owner writes."""
     import os
-    from dataclasses import replace
 
     from base.config import ConfigBoot
     from base.config.service_read import ConfigAuthority
@@ -296,32 +290,33 @@ def test_search_uses_two_owned_boots_and_live_updates(
         observed.append((req.full_url, req.get_header("X-subscription-token"), timeout))
         return FakeResp(_make_brave_response([]))
 
+    def search(authority: ConfigAuthority) -> list[list[ava.web.SearchResult]]:
+        harness = WebHarness(wiring.web_deps_for(authority))
+        with harness.urlopen_returns(side_effect=capture):
+            return harness.search(["q"], count=20)
+
     try:
-        with (
-            patch.dict(os.environ),
-            patch.object(web.urllib.request, "urlopen", side_effect=capture),
-        ):
+        with patch.dict(os.environ):
             first, second = ConfigBoot(), ConfigBoot()
-            installations: list[Installation] = []
+            authorities: list[ConfigAuthority] = []
             for index, boot in enumerate((first, second), start=1):
                 boot.set_field("brave_api_key", SecretStr(f"key-{index}"))
                 boot.set_field("web_brave_search_endpoint", f"https://search-{index}.example/api")
                 boot.set_field("web_search_timeout_seconds", float(index + 10))
                 boot.set_field("web_max_search_results", index)
-                authority = ConfigAuthority.deferred(
-                    runtime=boot.view,
-                    build_all_domains=boot.ensure_eager,
-                    env_path=tmp_path / f"config-{index}.env",
+                authorities.append(
+                    ConfigAuthority.deferred(
+                        runtime=boot.view,
+                        build_all_domains=boot.ensure_eager,
+                        env_path=tmp_path / f"config-{index}.env",
+                    )
                 )
-                installations.append(replace(model_installation, authority=authority))
                 assert not boot.is_full()
-            for installation in installations:
-                monkeypatch.setattr(ava, "__plugin_installation__", installation)
-                assert ava.web.search(["q"], count=20) == [[]]
+            for authority in authorities:
+                assert search(authority) == [[]]
             first.set_field("brave_api_key", SecretStr("key-updated"))
             first.set_field("web_search_timeout_seconds", 31.0)
-            monkeypatch.setattr(ava, "__plugin_installation__", installations[0])
-            assert ava.web.search(["q"], count=20) == [[]]
+            assert search(authorities[0]) == [[]]
             assert observed == [
                 ("https://search-1.example/api?q=q&count=1", "key-1", 11.0),
                 ("https://search-2.example/api?q=q&count=2", "key-2", 12.0),
@@ -331,60 +326,51 @@ def test_search_uses_two_owned_boots_and_live_updates(
         time.tzset()
 
 
-def test_search_keeps_key_and_retry_timeout_read_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The key check/header and each retry retain their original read points."""
-    from base.config.service_read import ConfigAuthority
+@dataclass(frozen=True, slots=True)
+class _RecordingAuthority(ConfigAuthority):
+    """A configuration owner that records which fields were read from it."""
 
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
-    original_read = ConfigAuthority.service_field_value
-    reads: list[str] = []
+    reads: list[str] = field(default_factory=list[str])
 
-    def record(authority: ConfigAuthority, field: str) -> Any:
-        reads.append(field)
-        return original_read(authority, field)
+    def service_field_value(self, name: str) -> Any:
+        self.reads.append(name)
+        return ConfigAuthority.service_field_value(self, name)
 
-    monkeypatch.setattr(ConfigAuthority, "service_field_value", record)
-    with patch.object(
-        web.urllib.request,
-        "urlopen",
-        side_effect=[
-            urllib.error.URLError("temporary failure"),
-            FakeResp(_make_brave_response([])),
-        ],
-    ):
-        assert ava.web.search(["q"]) == [[]]
-    assert reads == [
-        "brave_api_key",
-        "web_max_search_results",
-        "web_brave_search_endpoint",
-        "brave_api_key",
-        "web_search_timeout_seconds",
-        "web_search_timeout_seconds",
-    ]
+
+def test_web_deps_read_each_setting_once(web_harness: WebHarness) -> None:
+    """One call reads each web setting once, when its deps are built: not per use or per retry."""
+    base = config_authority()
+    authority = _RecordingAuthority(base.runtime, base.all_domains, base.env_path)
+    wiring.web_deps_for(authority)
+    assert sorted(authority.reads) == sorted(set(authority.reads))
+    assert {"brave_api_key", "web_search_timeout_seconds", "jina_api_key"} <= set(authority.reads)
+
+
+def test_search_reads_the_installation_it_is_called_under(web_harness: WebHarness) -> None:
+    """`ava.web.search` builds its deps from the SDK installation of the process."""
+    assert wiring.web_deps().brave == web_harness.deps.brave
 
 
 # ─── search signature ───
 
 
-def test_search_requires_list() -> None:
+def test_search_requires_list(web_harness: WebHarness) -> None:
     """search() only accepts list[str]. Passing a bare string raises TypeError."""
     with pytest.raises(TypeError, match=r"list of query strings"):
-        ava.web.search("not a list")  # type: ignore[arg-type]
+        web_harness.search("not a list")  # type: ignore[arg-type]
 
 
-def test_search_rejects_non_string_elements() -> None:
+def test_search_rejects_non_string_elements(web_harness: WebHarness) -> None:
     with pytest.raises(TypeError, match=r"must be a str"):
-        ava.web.search(["ok", 123])  # type: ignore[list-item]
+        web_harness.search(["ok", 123])  # type: ignore[list-item]
 
 
 # ─── batch search (concurrency) ───
 
 
-def test_search_batch_returns_results_in_input_order(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_search_batch_returns_results_in_input_order(web_harness: WebHarness) -> None:
     """Multiple queries: results come back in the same order as the input list."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
 
     call_order: list[str] = []
 
@@ -405,8 +391,8 @@ def test_search_batch_returns_results_in_input_order(
             )
         return FakeResp(_make_brave_response([]))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_side_effect):
-        results = ava.web.search(["a", "b", "c"])
+    with web_harness.urlopen_returns(side_effect=_side_effect):
+        results = web_harness.search(["a", "b", "c"])
 
     assert len(results) == 3
     assert results[0][0].title == "A"
@@ -415,11 +401,9 @@ def test_search_batch_returns_results_in_input_order(
     assert len(call_order) == 3
 
 
-def test_search_batch_runs_concurrently(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_search_batch_runs_concurrently(web_harness: WebHarness) -> None:
     """Batch search must run in parallel — total time close to one search latency."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
 
     barrier = threading.Barrier(3, timeout=5)
 
@@ -427,9 +411,9 @@ def test_search_batch_runs_concurrently(
         barrier.wait()
         return FakeResp(_make_brave_response([]))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_slow_search):
+    with web_harness.urlopen_returns(side_effect=_slow_search):
         t0 = time.monotonic()
-        results = ava.web.search(["q1", "q2", "q3"])
+        results = web_harness.search(["q1", "q2", "q3"])
         elapsed = time.monotonic() - t0
 
     assert results == [[], [], []]
@@ -445,28 +429,28 @@ def test_search_signature_includes_max_concurrent() -> None:
     assert sig.parameters["max_concurrent"].default == DEFAULT_BATCH_MAX_CONCURRENT
 
 
-def test_search_batch_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_batch_empty_list(web_harness: WebHarness) -> None:
     """Empty queries list returns empty results list."""
-    results = ava.web.search([])
+    results = web_harness.search([])
     assert results == []
 
 
-def test_search_max_concurrent_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_max_concurrent_validation(web_harness: WebHarness) -> None:
     """max_concurrent must be a positive int or None — bad values fail fast
     before any search call."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
     with pytest.raises(ValueError, match="at least 1"):
-        ava.web.search(["q"], max_concurrent=0)
+        web_harness.search(["q"], max_concurrent=0)
     with pytest.raises(ValueError, match="at least 1"):
-        ava.web.search(["q"], max_concurrent=-3)
+        web_harness.search(["q"], max_concurrent=-3)
     with pytest.raises(TypeError, match="int or None"):
-        ava.web.search(["q"], max_concurrent=2.5)  # type: ignore[arg-type]
+        web_harness.search(["q"], max_concurrent=2.5)  # type: ignore[arg-type]
 
 
-def test_search_max_concurrent_caps_inflight(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_max_concurrent_caps_inflight(web_harness: WebHarness) -> None:
     """max_concurrent=N keeps at most N searches in flight — the observed peak
     never exceeds the ceiling, and results still come back in input order."""
-    monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
+    web_harness.set_brave(api_key=SecretStr("fake-key"))
 
     lock = threading.Lock()
     inflight = 0
@@ -482,7 +466,7 @@ def test_search_max_concurrent_caps_inflight(monkeypatch: pytest.MonkeyPatch) ->
             inflight -= 1
         return FakeResp(_make_brave_response([]))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_tracking_search):
-        results = ava.web.search(["q1", "q2", "q3", "q4", "q5", "q6"], max_concurrent=2)
+    with web_harness.urlopen_returns(side_effect=_tracking_search):
+        results = web_harness.search(["q1", "q2", "q3", "q4", "q5", "q6"], max_concurrent=2)
     assert results == [[], [], [], [], [], []]
     assert peak == 2, f"peak in-flight {peak} exceeded ceiling 2"

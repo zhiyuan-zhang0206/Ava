@@ -11,7 +11,13 @@ from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
-from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
+from agent.graph.claim.tests.claim_support import (
+    await_inbound_visible,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
+)
+from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import (
     _set_agent_status,
@@ -19,13 +25,8 @@ from agent.tests.claim.claim_status_support import (
     committed_publishes,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
-from agent.tests.claim.claim_support import (
-    await_inbound_visible,
-    insert_inbound_kind,
-    make_runtime,
-    thread_config,
-)
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -33,7 +34,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 async def test_claim_restart_completed_kind_appends_marker_and_continues(

@@ -1,2 +1,40 @@
 [external]
 "test_self_evolution_evaluate.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
+
+[debt.env-patch]
+"test_agent_identity.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 6
+"test_agent_identity.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 6
+"test_attachment_transport.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_files.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_files.py#patch.dict os.environ" = 2
+"test_self_machine_spec.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_turn_identity_ava.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_turn_identity_ava.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 1
+
+[debt.first-party-patch]
+"test_agent_identity.py#monkeypatch.setattr ava.DB.cursor" = 1
+"test_agent_identity.py#monkeypatch.setattr ava.gateway_client.post" = 1
+"test_attachment_transport.py#monkeypatch.setattr ava.__plugin_installation__" = 9
+"test_attachment_transport.py#monkeypatch.setattr ava.files.agent_identity.agent_id" = 1
+"test_attachment_transport.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 6
+"test_core.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_security.py#monkeypatch.setattr ava.security.logger.warning" = 1
+"test_security.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 1
+"test_self_evolution_evaluate.py#monkeypatch.setattr ava.agents.spawn" = 1
+"test_self_machine_spec.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.DB.cursor" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.DB.transaction" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.sdk_surface.agent_identity.assert_self_action" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.ui.page_host" = 3
+"test_validation_ava.py#monkeypatch.setattr base.telemetry.audit_events.record_audit" = 1
+
+[debt.stdlib-patch]
+"test_files.py#monkeypatch.setattr os.fdopen" = 1
+"test_files.py#monkeypatch.setattr pathlib.Path.replace" = 1
+
+[debt.unresolved-patch]
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate._eval_dir" = 1
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate._leak_paths" = 2
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate.collect_one" = 2
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate.poll" = 2
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate.scores" = 2

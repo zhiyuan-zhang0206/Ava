@@ -12,7 +12,7 @@ from typing import Any
 from loguru import logger
 
 
-class _StdlibInterceptHandler(logging.Handler):
+class StdlibInterceptHandler(logging.Handler):
     """Route stdlib logging through loguru so every `_log = logging.getLogger(...)`
     callsite in the codebase lands in the loguru sinks (stderr / file / the unified stream)
     without per-file rewrites.
@@ -66,7 +66,7 @@ class _StdlibInterceptHandler(logging.Handler):
             self.handleError(record)
 
 
-# Top-level logger names for our own code. `_install_stdlib_intercept` raises
+# Top-level logger names for our own code. `install_stdlib_intercept` raises
 # these back to DEBUG so a controller's
 # `_log.debug(...)` (e.g. `ops.controllers.respawn`'s gateway-health
 # deferral line, #1126) reaches the file sink instead of being dropped at
@@ -75,7 +75,7 @@ class _StdlibInterceptHandler(logging.Handler):
 # (`Logger.getEffectiveLevel`) — nothing to register per-module. Third-party
 # libraries (httpx / psycopg / urllib3 / langchain / uvicorn / ...) are
 # deliberately absent, so their un-audited DEBUG volume stays behind the
-# root floor; see `_install_stdlib_intercept`.
+# root floor; see `install_stdlib_intercept`.
 FIRST_PARTY_LOGGER_NAMES = (
     "ops",
     "services",
@@ -117,7 +117,7 @@ class GenaiEmptyPartsWarningFilter(logging.Filter):
     i.e. for every sub-logger the library emits under. `record.msg` (the raw
     format string) is matched instead of `record.getMessage()`, whose
     %-formatting can raise and would then throw into the logging call site
-    (see `_StdlibInterceptHandler.emit`).
+    (see `StdlibInterceptHandler.emit`).
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -128,7 +128,7 @@ class GenaiEmptyPartsWarningFilter(logging.Filter):
         return not (isinstance(record.msg, str) and _GENAI_EMPTY_PARTS_MARKER in record.msg)
 
 
-def _install_stdlib_intercept() -> None:
+def install_stdlib_intercept() -> None:
     """Install the intercept handler on the root logger. Idempotent — the
     `init_*` functions can call it on every startup; we replace the
     handler list rather than appending, so reinit doesn't accumulate.
@@ -141,14 +141,14 @@ def _install_stdlib_intercept() -> None:
     `add_event_sink`'s own threshold. `FIRST_PARTY_LOGGER_NAMES` then
     raises that floor back to DEBUG for our own code only, so a controller's
     or daemon's `_log.debug(...)` still reaches the file sink (which is
-    itself level=DEBUG — see `_add_file_sink`) the way a native
+    itself level=DEBUG — see `add_file_sink`) the way a native
     `from base.log import logger; logger.debug(...)` call always has.
     Before this, EVERY stdlib DEBUG record was dropped at the root before
     reaching loguru at all — #1126: 68 days of `restarter.log` had zero
     occurrences of a line that fires every time the respawn controller's
     gateway-health gate defers a restart.
     """
-    intercept_handler = _StdlibInterceptHandler()
+    intercept_handler = StdlibInterceptHandler()
     # #3317: the langchain-google-genai 'no Gemini parts' chatter is dropped at
     # this stdlib→loguru boundary — see `GenaiEmptyPartsWarningFilter`.
     intercept_handler.addFilter(GenaiEmptyPartsWarningFilter())
@@ -268,7 +268,7 @@ def rotate_by_size_or_day(message: Any, file: Any) -> bool:
     return message.record["time"].astimezone(datetime.UTC).date() > created
 
 
-def _add_file_sink(path: Path) -> int:
+def add_file_sink(path: Path) -> int:
     """Add a JSONL file sink (`serialize=True` makes loguru serialize
     the entire record into a single JSON line — for jq / programmatic
     consumption), rotating at 100 MB or once per day and keeping 7 days.

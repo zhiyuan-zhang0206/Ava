@@ -41,7 +41,7 @@ Usage:
 
 Kept alive by the root supervisor's health monitor through the roster's
 `/healthz` identity probe, so the schema-drift exit in
-`_dispatch_loop` is revived on the next round instead of staying dead. Each loop
+`dispatch_loop` is revived on the next round instead of staying dead. Each loop
 logs an unexpected failed pass and waits out its interval; after five failures in a
 row (`base.daemon.round_loop.RoundFailureBudget`) it raises and the process exits for
 the supervisor. A pass skipped because the database is unreachable does not count.
@@ -102,7 +102,7 @@ from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 from services.upkeep.events_maintenance.token_totals import fold_totals
 
-_log = logging.getLogger("services.upkeep.events_maintenance.daemon")
+events_maintenance_log = logging.getLogger("services.upkeep.events_maintenance.daemon")
 
 
 def events_maintenance_config(config: ConfigBoot) -> EventsMaintenanceConfig:
@@ -122,13 +122,13 @@ def events_maintenance_config(config: ConfigBoot) -> EventsMaintenanceConfig:
     )
 
 
-def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+def events_maintenance_endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
     runtime.mkdir(parents=True, exist_ok=True)
     return ServiceEndpoints.from_boot(config, runtime=runtime).of("events_maintenance")
 
 
 def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
-    return _endpoint(config, runtime=runtime).pidfile
+    return events_maintenance_endpoint(config, runtime=runtime).pidfile
 
 
 _LIVENESS_BEAT_STEP_S = 30.0
@@ -163,14 +163,14 @@ class _MaintenancePass:
             # deadline expires that caller parks, so this terminal boundary owns
             # the late traceback. The loop remains permanently unhealthy.
             if self.expired:
-                _log.exception(
+                events_maintenance_log.exception(
                     "[events-maintenance] %s pass failed after its hard deadline", self.name
                 )
             return exc
         return None
 
 
-def _run_maintenance(
+def run_maintenance(
     pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig, db: Database
 ) -> None:
     """One hourly pass: the telemetry mirror replay, the
@@ -186,18 +186,22 @@ def _run_maintenance(
         with pool.connection() as conn:
             replayed = recover_telemetry_events(conn)
         if replayed:
-            _log.info("[events-maintenance] replayed %d telemetry events from the mirror", replayed)
+            events_maintenance_log.info(
+                "[events-maintenance] replayed %d telemetry events from the mirror", replayed
+            )
     except Exception:
-        _log.exception("[events-maintenance] telemetry events replay incomplete")
+        events_maintenance_log.exception("[events-maintenance] telemetry events replay incomplete")
     progress.beat()
     with pool.connection() as conn:
         result = compute_rollup(conn, now_utc=now)
         folded = fold_totals(conn, today=now.date())
     progress.beat()
     if folded:
-        _log.info("[events-maintenance] folded settled ledger days into %d agent totals", folded)
+        events_maintenance_log.info(
+            "[events-maintenance] folded settled ledger days into %d agent totals", folded
+        )
     if result.start_day is not None:
-        _log.info(
+        events_maintenance_log.info(
             "[events-maintenance] rolled %s..%s — %d metric rows, %d token rows",
             result.start_day,
             result.end_day,
@@ -217,7 +221,7 @@ def _run_maintenance(
     vacuum_result = run_blob_vacuum(db, timezone=config.timezone)
     progress.beat()
     if vacuum_result.ran:
-        _log.info("[events-maintenance] blob vacuum: %s", vacuum_result.summary())
+        events_maintenance_log.info("[events-maintenance] blob vacuum: %s", vacuum_result.summary())
     progress.mark_success()
 
 
@@ -234,11 +238,11 @@ def _run_resolution(
     progress.mark_success()
 
 
-def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(
         _pidfile(config, runtime=runtime), "services.upkeep.events_maintenance.daemon"
     ):
-        _log.info(
+        events_maintenance_log.info(
             "[events_maintenance] daemon already running (pidfile=%s), exiting",
             _pidfile(config, runtime=runtime),
         )
@@ -296,7 +300,7 @@ def loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
     return records
 
 
-async def _sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
+async def sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
     """Sleep `total_s`, beating progress every `_LIVENESS_BEAT_STEP_S` so the long
     inter-poll wait keeps /healthz fresh instead of reading as a wedged loop."""
     remaining = total_s
@@ -332,7 +336,7 @@ async def maintenance_with_liveness(
         raise failure
 
 
-async def _dispatch_loop(
+async def dispatch_loop(
     pool: ConnectionPool,
     progress: LoopProgress,
     config: EventsMaintenanceConfig,
@@ -347,7 +351,7 @@ async def _dispatch_loop(
     against Postgres (the rollup is idempotent and self-catching-up — the next run
     re-probes dirty days — so there is no value in an immediate retry)."""
     interval = config.events_maintenance_interval_seconds
-    _log.info(
+    events_maintenance_log.info(
         "[events-maintenance] daemon started, pid=%s, interval=%.0fs",
         os.getpid(),
         interval,
@@ -359,20 +363,20 @@ async def _dispatch_loop(
                 await maintenance_with_liveness(
                     pool,
                     progress,
-                    lambda target_pool: _run_maintenance(target_pool, progress, config, db),
+                    lambda target_pool: run_maintenance(target_pool, progress, config, db),
                     tasks=tasks,
                 )
                 failures.succeeded()
         except asyncio.CancelledError:
             raise
         except WedgedPassError:
-            _log.critical(
+            events_maintenance_log.critical(
                 "[events-maintenance] rollup pass wedged — parking for watchdog respawn",
                 exc_info=True,
             )
             break
         except psycopg.ProgrammingError:
-            _log.critical(
+            events_maintenance_log.critical(
                 "[events-maintenance] schema / syntax error — code<->DB drift; "
                 "retry will not self-heal, daemon exiting, restart after fix",
                 exc_info=True,
@@ -380,12 +384,14 @@ async def _dispatch_loop(
             raise
         except psycopg.OperationalError as exc:
             progress.mark_error(str(exc))
-            _log.warning("[events-maintenance] rollup skipped: database unavailable", exc_info=True)
+            events_maintenance_log.warning(
+                "[events-maintenance] rollup skipped: database unavailable", exc_info=True
+            )
         except Exception as exc:
             progress.mark_error(str(exc))
-            _log.exception("[events-maintenance] rollup iteration failed")
+            events_maintenance_log.exception("[events-maintenance] rollup iteration failed")
             failures.failed(exc)
-        await _sleep_with_liveness(progress, interval)
+        await sleep_with_liveness(progress, interval)
 
 
 async def resolution_loop(
@@ -404,7 +410,7 @@ async def resolution_loop(
 
     cadence = AutoDismissCadence()
     interval = config.events_resolution_interval_seconds
-    _log.info(
+    events_maintenance_log.info(
         "[events-maintenance] resolution loop started, pid=%s, interval=%ds",
         os.getpid(),
         interval,
@@ -423,13 +429,13 @@ async def resolution_loop(
         except asyncio.CancelledError:
             raise
         except WedgedPassError:
-            _log.critical(
+            events_maintenance_log.critical(
                 "[events-maintenance] resolution pass wedged — parking for watchdog respawn",
                 exc_info=True,
             )
             break
         except psycopg.ProgrammingError:
-            _log.critical(
+            events_maintenance_log.critical(
                 "[events-maintenance] resolution schema / syntax error — "
                 "code<->DB drift; retry will not self-heal, restart after fix",
                 exc_info=True,
@@ -437,14 +443,14 @@ async def resolution_loop(
             raise
         except psycopg.OperationalError as exc:
             progress.mark_error(str(exc))
-            _log.warning(
+            events_maintenance_log.warning(
                 "[events-maintenance] resolution skipped: database unavailable", exc_info=True
             )
         except Exception as exc:
             progress.mark_error(str(exc))
-            _log.exception("[events-maintenance] resolution iteration failed")
+            events_maintenance_log.exception("[events-maintenance] resolution iteration failed")
             failures.failed(exc)
-        await _sleep_with_liveness(progress, interval)
+        await sleep_with_liveness(progress, interval)
 
 
 async def run(
@@ -456,15 +462,17 @@ async def run(
 ) -> None:
     """Start healthz, register per-loop progress, then enter all resident loops."""
     if _is_running(process_config, runtime=runtime):
-        _log.info(
+        events_maintenance_log.info(
             "[events-maintenance] daemon already running (pidfile=%s), exiting",
             _pidfile(process_config, runtime=runtime),
         )
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
-    _write_pidfile(process_config, runtime=runtime)
-    _log.info("[events-maintenance] pidfile written: %s", _pidfile(process_config, runtime=runtime))
+    write_pidfile(process_config, runtime=runtime)
+    events_maintenance_log.info(
+        "[events-maintenance] pidfile written: %s", _pidfile(process_config, runtime=runtime)
+    )
 
     config = events_maintenance_config(process_config)
     liveness = LivenessGroup()
@@ -473,7 +481,7 @@ async def run(
         "resolution", config.events_maintenance_resolution_deadline_s
     )
     gauge_progress = liveness.register("registry_gauge", _REGISTRY_GAUGE_LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint(process_config, runtime=runtime)
+    endpoint = events_maintenance_endpoint(process_config, runtime=runtime)
     # Only a unit holding the Grafana credential reconciles alerts; one without it
     # carries no such loop (and no tracker to read as idle).
     reconcile_alerts = alert_reconciler.grafana_reconciliation_configured(config)
@@ -489,7 +497,9 @@ async def run(
         components=lambda: loop_components(liveness),
         image=image,
     )
-    _log.info("[events-maintenance] healthz listening on :%s", endpoint.health_port)
+    events_maintenance_log.info(
+        "[events-maintenance] healthz listening on :%s", endpoint.health_port
+    )
 
     db = database()
     pool = db.pool()
@@ -499,7 +509,7 @@ async def run(
         # the process. Stop cancels its async proxy; main's hard exit never joins
         # the blocking executor thread.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_dispatch_loop(pool, dispatch_progress, config, db, tasks=loops))
+            loops.create_task(dispatch_loop(pool, dispatch_progress, config, db, tasks=loops))
             loops.create_task(resolution_loop(pool, resolution_progress, config, tasks=loops))
             loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
             if alert_progress is not None:
@@ -516,7 +526,7 @@ async def run(
         pool.close()
         await stop_health_server(health)
         _remove_pidfile(process_config, runtime=runtime)
-        _log.info("[events-maintenance] daemon stopped")
+        events_maintenance_log.info("[events-maintenance] daemon stopped")
 
 
 def main() -> None:
@@ -572,17 +582,19 @@ def main() -> None:
         )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
-        _log.info("[events-maintenance] interrupted, shutting down")
+        events_maintenance_log.info("[events-maintenance] interrupted, shutting down")
         # The signal path skips Runner's own cancellation, so drain the loop's
         # tasks explicitly: run()'s finally still closes the pool, stops the
         # health server and removes the pidfile. The executor is deliberately
         # NOT drained.
         failures = cancel_and_drain(runner)
         if failures:
-            _log.error("[events-maintenance] async shutdown failed: %r", failures)
+            events_maintenance_log.error("[events-maintenance] async shutdown failed: %r", failures)
             code = 1
     except Exception:
-        _log.exception("[events-maintenance] daemon crashed — uncaught exception escaped run()")
+        events_maintenance_log.exception(
+            "[events-maintenance] daemon crashed — uncaught exception escaped run()"
+        )
         code = 1
     finally:
         _remove_pidfile(machine_config, runtime=process_home / "run")

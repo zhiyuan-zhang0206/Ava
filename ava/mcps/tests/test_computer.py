@@ -129,7 +129,7 @@ async def test_dial_computer_exhaustion_has_no_trailing_sleep(
     async def fail(*, path: str, limit: int) -> None:
         nonlocal calls
         calls += 1
-        assert (path, limit) == ("test.sock", computer_mod._LINE_LIMIT)
+        assert (path, limit) == ("test.sock", computer_mod.LINE_LIMIT)
         raise failure("offline")
 
     monkeypatch.setattr(computer_mod.asyncio, "open_unix_connection", fail)

@@ -11,7 +11,7 @@ import sys
 from collections.abc import Callable
 
 from base.log import logger
-from base.log.sinks import HUMAN_FORMAT, _add_file_sink, _install_stdlib_intercept, add_sink
+from base.log.sinks import HUMAN_FORMAT, add_file_sink, add_sink, install_stdlib_intercept
 
 __all__ = ["init_subprocess_logger", "start_process_logging"]
 
@@ -26,7 +26,7 @@ __all__ = ["init_subprocess_logger", "start_process_logging"]
 # Make init functions idempotent (process-level singleton) — later
 # repeated calls silent-skip, matching their docstring "called once
 # at startup" contract.
-_init_done = False
+init_done = False
 
 
 def init_subprocess_logger(*, agent_id: int) -> None:
@@ -39,17 +39,17 @@ def init_subprocess_logger(*, agent_id: int) -> None:
     to; `process_role="subprocess"` marks these records.
 
     Idempotent — repeat in the same process silent-skips (see
-    ``_init_done`` at module top).
+    ``init_done`` at module top).
     """
-    global _init_done  # noqa: PLW0603
-    if _init_done:
+    global init_done  # noqa: PLW0603
+    if init_done:
         return
     from base.paths import logs_dir
 
     logger.configure(extra={"agent_id": str(agent_id), "process_role": "subprocess"})
-    _add_file_sink(logs_dir() / f"agent-{agent_id}.log")
-    _install_stdlib_intercept()
-    _init_done = True
+    add_file_sink(logs_dir() / f"agent-{agent_id}.log")
+    install_stdlib_intercept()
+    init_done = True
 
 
 def _add_stderr_sink_before_settings() -> None:
@@ -75,17 +75,17 @@ def start_process_logging(
     The caller (telemetry owns the event pipeline) supplies ``attach_events`` so this
     module never imports it; ``announce`` runs after the sinks are live (a boot log line).
     Agent id is the ``-`` sentinel (no agent). Idempotent — a repeat in the same process
-    silent-skips (see ``_init_done``)."""
-    global _init_done  # noqa: PLW0603
-    if _init_done:
+    silent-skips (see ``init_done``)."""
+    global init_done  # noqa: PLW0603
+    if init_done:
         return
     logger.configure(extra={"agent_id": "-"})
     _add_stderr_sink_before_settings()
     from base.paths import logs_dir
 
-    _add_file_sink(logs_dir() / f"{name}.log")
+    add_file_sink(logs_dir() / f"{name}.log")
     attach_events()
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     if announce is not None:
         announce()
-    _init_done = True
+    init_done = True

@@ -251,7 +251,7 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
         *(len(f"{m.name} (staging)") if m.is_staging else len(m.name) for m in roster),
         len("name"),
     )
-    lines = _schema_mismatch_banner(roster)
+    lines = schema_mismatch_banner(roster)
     lines += [
         f"{'name'.ljust(name_w)}  {'role':<{_ROLE_COL_W}} {'paused':<7} {'status':<10} "
         f"{'code':<10} up since",
@@ -275,7 +275,7 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
     return lines
 
 
-def _schema_mismatch_banner(roster: list[MachineStatus]) -> list[str]:
+def schema_mismatch_banner(roster: list[MachineStatus]) -> list[str]:
     """Show schema disagreement or unavailable evidence even while ops is online."""
     lines: list[str] = []
     for machine in roster:
@@ -430,8 +430,8 @@ def cmd_db_authority_install_unit(*, bundle: str) -> int:
     from base.host.db_authority.model import AuthorityRefusedError
     from base.host.env.bootstrap import BootstrapFetchError
     from base.paths.home import resolve_ava_home
+    from cli.commands.cluster.unit_join import join_gateway
     from cli.start_identity import require_initialized, stored_values
-    from cli.unit_join import join_gateway
 
     home = resolve_ava_home().resolve()
     try:

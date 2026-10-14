@@ -1,0 +1,4 @@
+[debt.first-party-patch]
+"test_audit_in_transaction.py#monkeypatch.setattr base.agents.inbox.compact.emit_prepared_event" = 1
+"test_audit_in_transaction.py#monkeypatch.setattr base.agents.inbox.insert.record_audit" = 1
+"test_chat_transaction.py#monkeypatch.setattr base.telemetry.emit_prepared" = 3

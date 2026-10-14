@@ -109,7 +109,7 @@ def legacy_hmac_cookie() -> str:
 
 
 @pytest.fixture(autouse=True)
-def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run every test in this module against a known secret.
 
     This module tests authentication itself, so its clients are anonymous: they

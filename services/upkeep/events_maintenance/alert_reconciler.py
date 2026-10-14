@@ -149,7 +149,7 @@ def _reconcile_from_pool(
     return rows
 
 
-async def _reconcile_once(
+async def reconcile_once(
     db_pool: ConnectionPool,
     grafana_client: httpx.AsyncClient,
     publish_rows: PublishRows,
@@ -198,7 +198,7 @@ async def reconciliation_round(
     complete snapshot (fail closed), otherwise resolve the omissions."""
 
     try:
-        resolved = await _reconcile_once(db_pool, grafana_client, publish_rows, config)
+        resolved = await reconcile_once(db_pool, grafana_client, publish_rows, config)
     except (httpx.HTTPError, GrafanaSnapshotError) as exc:
         progress.mark_error(str(exc))
         _log.warning("alerts: Grafana reconciliation failed: %r", exc)

@@ -1,0 +1,25 @@
+[debt.env-patch]
+"test_ambient_state_gate.py#monkeypatch.setenv os.environ.LINT_STRUCTURE_BASELINE_BASE" = 1
+"test_baseline_shard_validity_gate.py#monkeypatch.setenv os.environ.LINT_STRUCTURE_BASELINE_BASE" = 1
+"test_directory_budget_entries.py#monkeypatch.setenv os.environ.LINT_STRUCTURE_BASELINE_BASE" = 1
+"test_lint_code_structure.py#monkeypatch.delenv os.environ.LINT_STRUCTURE_BASELINE_BASE" = 2
+"test_lint_code_structure.py#monkeypatch.setenv os.environ.LINT_STRUCTURE_BASELINE_BASE" = 3
+"test_locality_gate.py#monkeypatch.setenv os.environ.LINT_STRUCTURE_BASELINE_BASE" = 1
+"test_path_imports_lint.py#monkeypatch.setenv os.environ.LINT_STRUCTURE_BASELINE_BASE" = 1
+"test_rename_aware_baseline.py#monkeypatch.setenv os.environ.LINT_STRUCTURE_BASELINE_BASE" = 1
+"test_tests_dir_scope.py#monkeypatch.setenv os.environ.LINT_STRUCTURE_BASELINE_BASE" = 1
+
+[debt.first-party-patch]
+"test_ambient_state_gate.py#monkeypatch.setattr meizel.state.ambient_state.allow.ALLOWED" = 1
+"test_ambient_state_gate.py#monkeypatch.setattr meizel.state.ambient_state.allow.SINK_FACADES" = 1
+"test_lint_code_structure.py#monkeypatch.setattr scripts.structure.budgets.quality_budget.ComplexityVisitor.from_ast" = 1
+"test_lint_code_structure.py#monkeypatch.setattr scripts.structure.budgets.quality_budget.measure_quality" = 1
+"test_lint_fixture_scope.py#monkeypatch.setattr scripts.lint.fixture_scope._REPO_ROOT" = 4
+
+[debt.stdlib-patch]
+"test_lint_code_structure.py#monkeypatch.setattr ast.parse" = 1
+
+[debt.unresolved-patch]
+"test_lint_only_mode.py#monkeypatch.setattr lint" = 2
+"test_lint_only_mode.py#monkeypatch.setattr lint._tracked_files" = 1
+"test_lint_only_mode.py#monkeypatch.setattr name" = 1

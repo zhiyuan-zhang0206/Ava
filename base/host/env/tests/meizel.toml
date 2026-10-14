@@ -1,5 +1,73 @@
-[uses]
-"test_dotenv_boot_launcher_context.py" = ["test_dotenv_boot.py"]
+exports = ["env_files.py"]
 
-[debt.private-name]
-"test_dotenv_boot_launcher_context.py -> test_dotenv_boot.py#_restore_authority_env" = 1
+[uses]
+"test_config_refresh.py" = ["env_files.py"]
+"test_dotenv_boot.py" = ["env_files.py"]
+"test_dotenv_boot_launcher_context.py" = ["env_files.py", "test_dotenv_boot.py"]
+
+[debt.env-patch]
+"env_files.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_agent_slices.py#patch.dict os.environ" = 1
+"test_bootstrap_fetch.py#monkeypatch.delitem os.environ" = 1
+"test_bootstrap_fetch.py#monkeypatch.delitem os.environ.AVA_DB_URL" = 2
+"test_bootstrap_fetch.py#monkeypatch.delitem os.environ.AVA_GATEWAY_HEALTH_URL" = 1
+"test_bootstrap_fetch.py#monkeypatch.delitem os.environ.AVA_GATEWAY_PORT" = 1
+"test_bootstrap_fetch.py#monkeypatch.delitem os.environ.AVA_GATEWAY_URL" = 2
+"test_bootstrap_fetch.py#monkeypatch.delitem os.environ.AVA_MACHINE_SERVE_AGENT_RUNNER" = 2
+"test_bootstrap_fetch.py#monkeypatch.delitem os.environ.AVA_MACHINE_SERVE_GATEWAY" = 5
+"test_bootstrap_fetch.py#monkeypatch.setitem os.environ" = 1
+"test_bootstrap_fetch.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
+"test_bootstrap_fetch.py#monkeypatch.setitem os.environ.AVA_GATEWAY_HEALTH_URL" = 1
+"test_bootstrap_fetch.py#monkeypatch.setitem os.environ.AVA_GATEWAY_URL" = 10
+"test_bootstrap_fetch.py#monkeypatch.setitem os.environ.AVA_HOME" = 5
+"test_bootstrap_fetch.py#monkeypatch.setitem os.environ.AVA_MACHINE_SERVE_AGENT_RUNNER" = 1
+"test_bootstrap_fetch.py#monkeypatch.setitem os.environ.AVA_MACHINE_SERVE_GATEWAY" = 5
+"test_bootstrap_fetch.py#monkeypatch.setitem os.environ.DEEPSEEK_API_KEY" = 2
+"test_dotenv_boot.py#monkeypatch.delenv os.environ" = 1
+"test_dotenv_boot.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_dotenv_boot.py#monkeypatch.delitem os.environ" = 2
+"test_dotenv_boot.py#monkeypatch.delitem os.environ.AVA_PROCESS_PROFILE" = 4
+"test_dotenv_boot.py#monkeypatch.delitem os.environ.DEEPSEEK_API_KEY" = 2
+"test_dotenv_boot.py#monkeypatch.delitem os.environ.TESTP_API_KEY" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_AGENT_HOST_HEALTH_PORT" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_APP_PORT" = 4
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 7
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_EVENTS_CHANNEL" = 2
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_GATEWAY_URL" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_LLM_OVERRIDE" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_MACHINE_NAME" = 2
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_MACHINE_SERVE_AGENT_RUNNER" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_MACHINE_SERVE_GATEWAY" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_MEMORY_REMOTE" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_MEMORY_SEARCH_PORT" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_PROCESS_PROFILE" = 7
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_REDIS_ADMIN_PASSWORD" = 2
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_REDIS_PASSWORD" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_REDIS_URL" = 2
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_SERVICE_PATH" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_TEMPO_ENDPOINT" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_TEMPO_QUERY_URL" = 2
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.AVA_TIMEZONE" = 1
+"test_dotenv_boot.py#monkeypatch.setitem os.environ.TESTP_API_KEY" = 1
+"test_dotenv_boot_launcher_context.py#monkeypatch.delitem os.environ.AVA_PROCESS_PROFILE" = 3
+"test_dotenv_boot_launcher_context.py#monkeypatch.setitem os.environ" = 3
+"test_dotenv_boot_launcher_context.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 2
+"test_dotenv_boot_launcher_context.py#monkeypatch.setitem os.environ.AVA_REDIS_URL" = 1
+"test_registry.py#monkeypatch.delenv os.environ" = 1
+"test_registry.py#monkeypatch.setenv os.environ.ALL_PROXY" = 1
+"test_registry.py#monkeypatch.setenv os.environ.HTTPS_PROXY" = 1
+"test_registry.py#monkeypatch.setenv os.environ.LOGNAME" = 1
+"test_registry.py#monkeypatch.setenv os.environ.USER" = 1
+"test_registry.py#monkeypatch.setenv os.environ.no_proxy" = 1
+"test_registry.py#monkeypatch.setitem os.environ.AVA_CLUSTER_SECRET" = 1
+
+[debt.first-party-patch]
+"test_agent_slices.py#monkeypatch.setattr base.config.settings.agent.history_dump_keep" = 1
+"test_bootstrap_fetch.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 4
+"test_bootstrap_fetch.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 18
+"test_config_refresh.py#monkeypatch.setattr base.config.settings.env_boot" = 1
+"test_file_lock_bounded.py#monkeypatch.setattr base.host.env.dotenv_file.env_file_path" = 2
+
+[debt.unresolved-patch]
+"test_file_lock_bounded.py#monkeypatch.setattr module.file_lock" = 1

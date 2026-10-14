@@ -15,33 +15,33 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
-from .f12 import _f12_finish, _f12_point
+from .f12 import f12_finish, f12_point
 from .support import (
-    _ROOT_SOCKET,
-    _ROOT_WAIT_S,
-    _UNIT_IDS,
-    _UNIT_PROBE,
+    ROOT_SOCKET,
+    ROOT_WAIT_S,
+    UNIT_IDS,
+    UNIT_PROBE,
     SmokeError,
-    _bootout,
-    _fail,
-    _job_pid,
-    _kill,
-    _launchctl_domain,
-    _pid_alive,
-    _ping_or_none,
-    _ppid_of,
-    _ps_line,
-    _refusal,
-    _relaunched_helper,
-    _root_call,
     _run,
     _save,
-    _status_if_conflict,
-    _status_if_keeper_running,
-    _status_if_running,
-    _tail,
-    _unit_entry,
-    _wait_for,
+    bootout,
+    fail,
+    job_pid,
+    kill,
+    launchctl_domain,
+    pid_alive,
+    ping_or_none,
+    ppid_of,
+    ps_line,
+    refusal,
+    relaunched_helper,
+    root_call,
+    status_if_conflict,
+    status_if_keeper_running,
+    status_if_running,
+    tail,
+    unit_entry,
+    wait_for,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -100,13 +100,15 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     recorded_pids: set[int] = set()
     phases: list[str] = []
 
-    from base.host.permissions_helper import client as helper_client
+    from base.host.permissions_helper.client import PermissionsHelperClient
+
+    helper_client = PermissionsHelperClient(helper_sock)
 
     def root_status() -> dict[str, Any]:
-        return _root_call(run_dir, "status")
+        return root_call(run_dir, "status")
 
     def helper_root_status() -> dict[str, Any]:
-        return cast("dict[str, Any]", helper_client.root_status(sock_path=helper_sock))
+        return cast("dict[str, Any]", helper_client.root_status())
 
     def phase_pass(name: str, detail: str) -> None:
         phases.append(name)
@@ -171,7 +173,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         ]:
             stale.unlink(missing_ok=True)
         probe = workdir / "unit_probe.py"
-        probe.write_text(_UNIT_PROBE)
+        probe.write_text(UNIT_PROBE)
         manifests = workdir / "manifests.json"
         manifests.write_text(
             json.dumps(
@@ -188,7 +190,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                             "restart": "always",
                             "attach": "root",
                         }
-                        for unit_id in _UNIT_IDS
+                        for unit_id in UNIT_IDS
                     ]
                 }
             )
@@ -232,22 +234,22 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
 
     def launch_helper() -> int:
         # ---- launch --------------------------------------------------------
-        _bootout(label)
+        bootout(label)
         helper_sock.unlink(missing_ok=True)
-        _run(["launchctl", "bootstrap", _launchctl_domain(), str(plist_path)], timeout=60.0)
-        _wait_for("helper socket", helper_sock.exists, _HELPER_WAIT_S, "launch")
-        ping = _wait_for(
+        _run(["launchctl", "bootstrap", launchctl_domain(), str(plist_path)], timeout=60.0)
+        wait_for("helper socket", helper_sock.exists, _HELPER_WAIT_S, "launch")
+        ping = wait_for(
             "helper ping",
-            lambda: _ping_or_none(helper_client, helper_sock),
+            lambda: ping_or_none(helper_client),
             _HELPER_WAIT_S,
             "launch",
         )
-        helper_pid = _wait_for("helper job pid", lambda: _job_pid(label), _HELPER_WAIT_S, "launch")
+        helper_pid = wait_for("helper job pid", lambda: job_pid(label), _HELPER_WAIT_S, "launch")
         recorded_pids.add(helper_pid)
         _save(
             evidence,
             "launchctl-print.txt",
-            _run(["launchctl", "print", f"{_launchctl_domain()}/{label}"], check=False).stdout,
+            _run(["launchctl", "print", f"{launchctl_domain()}/{label}"], check=False).stdout,
         )
         phase_pass("launch", f"helper pid {helper_pid}, ping={ping}")
 
@@ -255,31 +257,31 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
 
     def check_chain() -> tuple[int, dict[str, int]]:
         # ---- chain ---------------------------------------------------------
-        _wait_for("root socket", (run_dir / _ROOT_SOCKET).exists, _ROOT_WAIT_S, "chain")
-        status = _wait_for(
-            "root running", lambda: _status_if_running(root_status), _ROOT_WAIT_S, "chain"
+        wait_for("root socket", (run_dir / ROOT_SOCKET).exists, ROOT_WAIT_S, "chain")
+        status = wait_for(
+            "root running", lambda: status_if_running(root_status), ROOT_WAIT_S, "chain"
         )
         root_pid = int(status["root"]["pid"])
         recorded_pids.add(root_pid)
-        initial_units = {unit_id: int(_unit_entry(status, unit_id)["pid"]) for unit_id in _UNIT_IDS}
+        initial_units = {unit_id: int(unit_entry(status, unit_id)["pid"]) for unit_id in UNIT_IDS}
         recorded_pids.update(initial_units.values())
 
-        helper_ppid = _ppid_of(helper_pid)
-        root_ppid = _ppid_of(root_pid)
+        helper_ppid = ppid_of(helper_pid)
+        root_ppid = ppid_of(root_pid)
         if root_ppid != helper_pid:
-            _fail("chain", f"root ppid {root_ppid} != helper pid {helper_pid}")
+            fail("chain", f"root ppid {root_ppid} != helper pid {helper_pid}")
         if helper_ppid != 1:
-            _fail("chain", f"helper ppid {helper_ppid} is not launchd(1)")
+            fail("chain", f"helper ppid {helper_ppid} is not launchd(1)")
         for unit_id, unit_pid in initial_units.items():
-            unit_ppid = _ppid_of(unit_pid)
+            unit_ppid = ppid_of(unit_pid)
             if unit_ppid != root_pid:
-                _fail("chain", f"unit {unit_id} ppid {unit_ppid} != root pid {root_pid}")
+                fail("chain", f"unit {unit_id} ppid {unit_ppid} != root pid {root_pid}")
         _save(
             evidence,
             "ps-chain.txt",
-            _ps_line(helper_pid, root_pid, *initial_units.values())
+            ps_line(helper_pid, root_pid, *initial_units.values())
             + f"\nhelper ppid={helper_ppid} root ppid={root_ppid}"
-            + "".join(f" {unit_id} ppid={_ppid_of(pid)}" for unit_id, pid in initial_units.items()),
+            + "".join(f" {unit_id} ppid={ppid_of(pid)}" for unit_id, pid in initial_units.items()),
         )
         _save(evidence, "root-status-initial.json", json.dumps(status, indent=2))
         _save(evidence, "keeper-status-initial.json", json.dumps(helper_root_status(), indent=2))
@@ -300,13 +302,13 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                     matched = found
                     break
             if matched is None:
-                _fail(
+                fail(
                     "attribute",
                     f"no AUTHREQ_ATTRIBUTION line for unit {unit_id} pid {unit_pid}; "
                     "see evidence/tccd-attribution-window.txt",
                 )
             if int(matched.group("responsible_pid")) != helper_pid:
-                _fail(
+                fail(
                     "attribute",
                     f"unit {unit_id} attributed to pid {matched.group('responsible_pid')} "
                     f"({matched.group('responsible_id')}), not helper {helper_pid}",
@@ -323,19 +325,19 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             unit_results = {}
             for unit_id in initial_units:
                 results_path = workdir / f"unit-results-{unit_id}.json"
-                _wait_for(
+                wait_for(
                     f"unit {unit_id} preflight results", results_path.exists, 30.0, "attribute"
                 )
                 unit_results[unit_id] = json.loads(results_path.read_text())
             time.sleep(2.0)
             for unit_id, results in unit_results.items():
                 if int(results["ppid"]) != root_pid:
-                    _fail(
+                    fail(
                         "attribute", f"unit {unit_id} ppid {results['ppid']} != root pid {root_pid}"
                     )
                 _save(evidence, f"unit-results-{unit_id}.json", json.dumps(results, indent=2))
                 _save(
-                    evidence, f"unit-log-{unit_id}.txt", _tail(run_dir / "logs" / f"{unit_id}.log")
+                    evidence, f"unit-log-{unit_id}.txt", tail(run_dir / "logs" / f"{unit_id}.log")
                 )
             log_text = _run(
                 [
@@ -358,7 +360,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 if "AUTHREQ_PROMPTING" in line and re.search(rf"pid={helper_pid}\b", line)
             ]
             if prompting:
-                _fail("attribute", f"unexpected permission prompt line: {prompting[0][:200]}")
+                fail("attribute", f"unexpected permission prompt line: {prompting[0][:200]}")
             phase_pass(
                 "attribute", f"units resolve to helper {helper_pid} ({', '.join(attributed)})"
             )
@@ -376,87 +378,87 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         ab_units = list(initial_units.items())
         ab_chain = [helper_pid, root_pid, *initial_units.values()]
         if args.sample_conflict:
-            conflict_f12["points"]["h0"] = _f12_point(workdir, "h0", ab_units, ab_chain)
-        _kill(helper_pid, signal.SIGKILL)
+            conflict_f12["points"]["h0"] = f12_point(workdir, "h0", ab_units, ab_chain)
+        kill(helper_pid, signal.SIGKILL)
         if args.sample_conflict:
             conflict_f12["kill_ts"] = round(time.time(), 3)
-            conflict_f12["points"]["h1"] = _f12_point(workdir, "h1", ab_units, ab_chain)
-        new_helper_pid = _wait_for(
+            conflict_f12["points"]["h1"] = f12_point(workdir, "h1", ab_units, ab_chain)
+        new_helper_pid = wait_for(
             "helper relaunched",
-            lambda: _relaunched_helper(label, helper_pid),
+            lambda: relaunched_helper(label, helper_pid),
             _HELPER_WAIT_S,
             "conflict",
         )
         recorded_pids.add(new_helper_pid)
-        conflict = _wait_for(
+        conflict = wait_for(
             "keeper conflict",
-            lambda: _status_if_conflict(helper_root_status),
-            _ROOT_WAIT_S,
+            lambda: status_if_conflict(helper_root_status),
+            ROOT_WAIT_S,
             "conflict",
         )
         if int(conflict["conflict"]["pid"]) != root_pid:
-            _fail("conflict", f"conflict pid {conflict['conflict']['pid']} != orphan {root_pid}")
+            fail("conflict", f"conflict pid {conflict['conflict']['pid']} != orphan {root_pid}")
         _save(evidence, "keeper-status-conflict.json", json.dumps(conflict, indent=2))
         if args.sample_conflict:
-            conflict_f12["points"]["h2"] = _f12_point(
+            conflict_f12["points"]["h2"] = f12_point(
                 workdir, "h2", ab_units, [new_helper_pid, *ab_chain]
             )
 
         # The helper never signals a root it did not seed: a plain stop and a
         # forced one (raw wire -- the client has no force) are both refused.
         refusals = (
-            _refusal(lambda: helper_client.stop_root(sock_path=helper_sock)),
-            _refusal(lambda: helper_client._call("root_stop", force=True, sock_path=helper_sock)),
+            refusal(helper_client.stop_root),
+            refusal(lambda: helper_client.call("root_stop", force=True)),
         )
         if "native recovery is required" not in refusals[0] or "force" not in refusals[1]:
-            _fail("conflict", f"root_stop over the orphan root was not refused: {refusals}")
+            fail("conflict", f"root_stop over the orphan root was not refused: {refusals}")
         _save(evidence, "conflict-refusals.txt", "\n".join(refusals))
 
         # Native recovery: the orphan closes its own tree through its control
         # socket; once the run dir is free the keeper seeds a fresh root itself.
-        if _root_call(run_dir, "shutdown") != {"shutdown_requested": True}:
-            _fail("conflict", "the orphan root did not accept its own shutdown")
+        if root_call(run_dir, "shutdown") != {"shutdown_requested": True}:
+            fail("conflict", "the orphan root did not accept its own shutdown")
         orphan_tree = [root_pid, *initial_units.values()]
-        _wait_for(
+        wait_for(
             "orphan tree closed",
-            lambda: not any(_pid_alive(pid) for pid in orphan_tree),
+            lambda: not any(pid_alive(pid) for pid in orphan_tree),
             _RESTART_WAIT_S,
             "conflict",
         )
         if args.sample_conflict:
-            conflict_f12["points"]["h3"] = _f12_point(
+            conflict_f12["points"]["h3"] = f12_point(
                 workdir, "h3", ab_units, [new_helper_pid, *ab_chain]
             )
-        reseeded = _wait_for(
+        reseeded = wait_for(
             "reseeded root",
-            lambda: _status_if_keeper_running(helper_root_status),
-            _ROOT_WAIT_S,
+            lambda: status_if_keeper_running(helper_root_status),
+            ROOT_WAIT_S,
             "conflict",
         )
         reseeded_pid = int(reseeded["pid"])
         recorded_pids.add(reseeded_pid)
-        reseeded_status = _wait_for(
+        reseeded_status = wait_for(
             "reseeded tree",
-            lambda: _status_if_running(root_status, excluding=root_pid),
-            _ROOT_WAIT_S,
+            lambda: status_if_running(root_status, excluding=root_pid),
+            ROOT_WAIT_S,
             "conflict",
         )
         reseeded_units = {
-            unit_id: int(_unit_entry(reseeded_status, unit_id)["pid"]) for unit_id in _UNIT_IDS
+            unit_id: int(unit_entry(reseeded_status, unit_id)["pid"]) for unit_id in UNIT_IDS
         }
         recorded_pids.update(reseeded_units.values())
-        if _ppid_of(reseeded_pid) != new_helper_pid:
-            _fail("conflict", "reseeded root is not the relaunched helper's child")
+        if ppid_of(reseeded_pid) != new_helper_pid:
+            fail("conflict", "reseeded root is not the relaunched helper's child")
         _save(evidence, "keeper-status-reseeded.json", json.dumps(reseeded, indent=2))
         _save(
             evidence,
             "conflict-reseed.txt",
-            _ps_line(new_helper_pid, reseeded_pid, *reseeded_units.values())
+            ps_line(new_helper_pid, reseeded_pid, *reseeded_units.values())
             + f"\nreseeded root {reseeded_pid} is child of helper {new_helper_pid}",
         )
         if args.sample_conflict:
             time.sleep(_F12_STABLE_S)
-            conflict_f12["points"]["h4"] = _f12_point(
+            conflict_f12["points"]["h4"] = f12_point(
                 workdir,
                 "h4",
                 [*ab_units, *reseeded_units.items()],
@@ -470,7 +472,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                     "reseeded": reseeded_units,
                 }
             )
-            _f12_finish(
+            f12_finish(
                 evidence,
                 conflict_f12,
                 "f12-conflict",
@@ -484,17 +486,17 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
 
     def cleanup() -> None:
-        _bootout(label)
+        bootout(label)
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
-            alive = [pid for pid in recorded_pids if _pid_alive(pid)]
+            alive = [pid for pid in recorded_pids if pid_alive(pid)]
             if not alive:
                 break
             for pid in alive:
-                _kill(pid, signal.SIGTERM)
+                kill(pid, signal.SIGTERM)
             time.sleep(0.25)
-        for pid in [pid for pid in recorded_pids if _pid_alive(pid)]:
-            _kill(pid, signal.SIGKILL)
+        for pid in [pid for pid in recorded_pids if pid_alive(pid)]:
+            kill(pid, signal.SIGKILL)
         if args.cleanup:
             shutil.rmtree(workdir, ignore_errors=True)
 
@@ -512,15 +514,15 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         print(str(failure))
         if helper_sock.exists():
             with contextlib.suppress(OSError, RuntimeError):
-                helper_client.stop_root(sock_path=helper_sock)
-        print(f"helper stderr tail:\n{_tail(workdir / 'helper.stderr.log')}")
-        print(f"root stderr tail:\n{_tail(workdir / 'root.stderr.log')}")
+                helper_client.stop_root()
+        print(f"helper stderr tail:\n{tail(workdir / 'helper.stderr.log')}")
+        print(f"root stderr tail:\n{tail(workdir / 'root.stderr.log')}")
         print(f"evidence retained at: {evidence}")
         return 1
     except Exception as unexpected:  # top-level smoke guard
         print(f"FAIL(phase=unexpected): {unexpected!r}")
-        print(f"helper stderr tail:\n{_tail(workdir / 'helper.stderr.log')}")
-        print(f"root stderr tail:\n{_tail(workdir / 'root.stderr.log')}")
+        print(f"helper stderr tail:\n{tail(workdir / 'helper.stderr.log')}")
+        print(f"root stderr tail:\n{tail(workdir / 'root.stderr.log')}")
         print(f"evidence retained at: {evidence}")
         return 1
     finally:

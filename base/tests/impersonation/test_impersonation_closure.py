@@ -8,6 +8,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -20,7 +21,6 @@ from base.tests.impersonation.support import (
     request_controller,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller
 
 
 @pytest.mark.parametrize("ending", ["released", "expired"])
@@ -37,7 +37,7 @@ def test_closure_restores_six_native_owners(
     local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import reap_impersonations
     from base.db import pool
-    from base.deploy.maintenance.cohort import RuntimeRow, _classify
+    from base.deploy.maintenance.cohort import RuntimeRow, classify
     from base.deploy.maintenance.state import MaintenanceHold
 
     host = uuid4()
@@ -106,7 +106,7 @@ def test_closure_restores_six_native_owners(
         "WHERE id=ANY(%s)",
         (owners,),
     ).fetchall()
-    hold = _classify([RuntimeRow(*row) for row in rows], MaintenanceHold(), host, set())
+    hold = classify([RuntimeRow(*row) for row in rows], MaintenanceHold(), host, set())
     assert set(hold.commands) == set(owners)
 
 

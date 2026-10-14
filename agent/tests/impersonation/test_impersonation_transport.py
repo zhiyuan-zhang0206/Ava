@@ -66,13 +66,13 @@ def active_codex_lease(
     from uuid import uuid4
 
     from base.agents import impersonation as leases
+    from base.agents.impersonation.tests.impersonation_support import recorded_tree
     from base.agents.impersonation.tests.test_host_transport import FakeAppServer
     from base.api_contracts.caller_identity import CallerIdentity
     from base.db import create_agent
     from base.db.test_db_guard import assert_test_db_url
     from base.native_process.runtime_incarnation import RuntimeIncarnation
     from base.sessions import env_forwarding
-    from tests.impersonation_support import recorded_tree
 
     # The real relay boots this test-owned unit instead of inheriting cluster secrets.
     url = config_authority.runtime.data_plane.db_url
@@ -144,8 +144,8 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
     machine_identity: MachineIdentity,
 ) -> None:
     from base.agents import impersonation as leases
+    from base.agents.impersonation.tests.impersonation_support import attested_caller
     from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
-    from tests.impersonation_support import attested_caller
 
     session, owner = active_codex_lease
     assert leases.provision_relay(database, session["id"], owner, "old-private") is not None
@@ -158,7 +158,7 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
     db_conn.commit()
     current = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert current is not None
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     spawn = Mock()
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     relays = RelaySupervision()
@@ -199,7 +199,7 @@ async def test_ended_lease_notice_is_submitted_once_and_a_failure_is_reported_no
     conn.execute.return_value.fetchone.return_value = ("expired",)
     db = MagicMock()
     db.connect.return_value.__enter__.return_value = conn
-    monkeypatch.setattr(impersonation, "_terminate_relay", Mock())
+    monkeypatch.setattr(impersonation, "terminate_relay", Mock())
     send = Mock(return_value=error)
     monkeypatch.setattr(terminal_notices, "send_ended_notice", send)
     # Every later pass finds no child left to announce for: there is no retry.

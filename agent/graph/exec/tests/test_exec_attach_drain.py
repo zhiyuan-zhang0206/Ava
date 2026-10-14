@@ -20,8 +20,8 @@ from langgraph.runtime import Runtime
 from agent.graph.exec import node
 from agent.graph.exec._result import ExecDone
 from agent.graph.exec.node import _exec_node_impl
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState, AttachState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType
 from base.clock import Clock

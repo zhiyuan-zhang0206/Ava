@@ -14,8 +14,8 @@ from base.config import settings
 from base.db.tests.fakes import patch_database
 from cli import start_identity
 from cli.commands.data_plane import cluster_instance as _ci
-from cli.commands.tests.data_plane_records import cluster_record
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.commands.data_plane.tests.data_plane_records import cluster_record
+from cli.database.tests.command_inputs import command_machine as command_machine
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
@@ -64,7 +64,7 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     monkeypatch.setattr(bringup, "prepare_memory_vectors", record("memory-vectors"))
     monkeypatch.setattr(bringup, "admin_session", admin)
     monkeypatch.setattr(bringup, "db_endpoint", lambda: "postgresql://ava@127.0.0.1:6433/ava")
-    monkeypatch.setattr(bringup, "_ensure_pooler", record("pooler"))
+    monkeypatch.setattr(bringup, "ensure_pooler", record("pooler"))
     monkeypatch.setattr(bringup, "prove_generation_logins", record("prove-logins"))
     monkeypatch.setattr(bringup, "adopt_gateway_login", record("adopt"))
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs

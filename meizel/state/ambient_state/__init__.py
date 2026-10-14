@@ -53,7 +53,7 @@ import ast
 import re
 from pathlib import Path
 
-from meizel import lint_common
+from meizel import allowances, lint_common
 from meizel.roles import packages
 from meizel.state.ambient_state import allowlist as allow
 from meizel.state.ambient_state import (
@@ -65,6 +65,7 @@ from meizel.state.ambient_state import (
     scan,
     sliced,
 )
+from meizel.state.ambient_state.roots import ROOTS_FILE
 
 SECTION = "ambient_state"
 # The rule module path used by integration-test repository fixtures.
@@ -77,7 +78,7 @@ _SKILL_SCRIPTS = re.compile(r"^ava_builtins/(skills/|plugins/[^/]+/(.*/)?skills/
 _STATE_FIX = (
     "inject what is read to decide: build it in a composition root and hand it to the "
     "component that uses it. A write-only facade (logger, meter, tracer) may stay "
-    "global — add its file to SINK_FACADES in meizel/state/ambient_state/allowlist.py with a reason"
+    "global — list its file under [ambient-state.sink-facades] in meizel.policy.toml with a reason"
 )
 _BACKGROUND_FIX = (
     "background work must be durable or re-derivable from durable state and run as its own "
@@ -97,8 +98,8 @@ _FIXES: dict[str, str] = {
     scan.GLOBAL_REBIND: f"a function rebinds a module global — {_STATE_FIX}",
     scan.FOREIGN: "rebinds an attribute of another module — give the owner a setter or inject the value",
     scan.CLASS_CONTAINER: "mutable container shared through a class attribute — make it per-instance state",
-    scan.SINGLETON: f"a zero-argument cache is a hidden singleton — {_STATE_FIX}; a memoized pure derivation goes in ALLOWED with a reason",
-    scan.CACHE: "a memoized function is state unless it is pure — a pure derivation goes in ALLOWED in meizel/state/ambient_state/allowlist.py with a reason",
+    scan.SINGLETON: f"a zero-argument cache is a hidden singleton — {_STATE_FIX}; a memoized pure derivation is listed under [ambient-state.sites] with a reason",
+    scan.CACHE: "a memoized function is state unless it is pure — a pure derivation is listed under [ambient-state.sites] in meizel.policy.toml with a reason",
     scan.CALL: "a call that runs at import (a registry fill or side effect) — register from a composition root, not at import",
     dbhandle.AMBIENT_DB: f"an ambient database dial in a package that holds a Database handle — {dbhandle.FIX}",
     clockrule.AMBIENT_CLOCK: f"the cluster clock built outside a root — {clockrule.FIX}",
@@ -181,18 +182,18 @@ def allowlist_errors(tree: ast.Module, rel: str, repo_root: Path) -> list[tuple[
         errors.append(
             (
                 1,
-                f"stale SINK_FACADES entry — the file holds no module-level state; remove it from {_LIST_FILE}",
+                f"stale [ambient-state.sink-facades] entry — the file holds no module-level state; remove it from {_LIST_FILE}",
             )
         )
     return errors
 
 
-_LIST_FILE = "meizel/state/ambient_state/allowlist.py"
+_LIST_FILE = allowances.POLICY
 
 
 def _missing_roots(repo_root: Path, table: str, registry: dict[str, frozenset[str]]) -> list[str]:
     return [
-        f"{_LIST_FILE}:1: stale {table} entry {package} — {path} does not exist; fix or remove it"
+        f"{package}/{ROOTS_FILE}:1: stale {table} entry {package} — {path} does not exist; fix or remove it"
         for package, roots in sorted(registry.items())
         for path in sorted(roots)
         if not (repo_root / path).is_file()
@@ -214,7 +215,7 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
         for path in (f"{package}/config.py", *sorted(roots)):
             if not (repo_root / path).is_file():
                 errors.append(
-                    f"{_LIST_FILE}:1: stale SLICED_PACKAGES entry {package} — {path} does not exist; fix or remove it"
+                    f"{package}/{ROOTS_FILE}:1: stale SLICED_PACKAGES entry {package} — {path} does not exist; fix or remove it"
                 )
     for table, registry in (
         ("DB_HANDLE_PACKAGES", allow.DB_HANDLE_PACKAGES),
@@ -228,7 +229,7 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
         path = repo_root.joinpath(*owner.split(".")).with_suffix(".py")
         if not path.is_file() or f"def {name}(" not in path.read_text(encoding="utf-8"):
             errors.append(
-                f"{_LIST_FILE}:1: stale PURE_REPO_CALLEES entry {callee} — no such function; remove it"
+                f"{_LIST_FILE}:1: stale [ambient-state.pure-repo-callees] entry {callee} — no such function; remove it"
             )
     return errors
 

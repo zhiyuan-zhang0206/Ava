@@ -7,3 +7,87 @@ exports = ["stop_support.py"]
 "test_stop_close_notices.py" = ["stop_support.py"]
 "test_stop_escalation_report.py" = ["stop_support.py"]
 "test_stop_terminals.py" = ["stop_support.py"]
+
+[debt.env-patch]
+"stop_support.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"stop_support.py#monkeypatch.setenv os.environ.HOME" = 2
+"stop_support.py#monkeypatch.setitem os.environ.AVA_HOME" = 1
+"test_stop.py#monkeypatch.setenv os.environ.HOME" = 4
+"test_stop.py#monkeypatch.setitem os.environ.AVA_HOME" = 4
+"test_stop_terminals.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
+"test_stop_terminals.py#monkeypatch.setitem os.environ.AVA_HOME" = 2
+
+[debt.first-party-patch]
+"stop_support.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
+"stop_support.py#monkeypatch.setattr base.sessions.hosting.hosting_supervised_session" = 1
+"stop_support.py#monkeypatch.setattr cli.commands.lifecycle._stop_extras" = 1
+"stop_support.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.announce_stopping" = 1
+"stop_support.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.build_services" = 1
+"stop_support.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.ops_quiescent" = 1
+"stop_support.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.pause_agents" = 1
+"stop_support.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_tree_plan" = 2
+"stop_support.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_tree_selection" = 1
+"stop_support.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.stop_root_service_tree" = 4
+"stop_support.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.close_via_service" = 1
+"stop_support.py#monkeypatch.setattr ops.pty_close_notices.write_notices" = 1
+"test_data_plane_stop.py#monkeypatch.setattr base.cluster.dataplane.pooler.ava_home" = 1
+"test_data_plane_stop.py#monkeypatch.setattr base.cluster.ownership.redis_data_dir" = 2
+"test_data_plane_stop.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_data_plane_stop.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+"test_data_plane_stop.py#monkeypatch.setattr base.config.settings.data_plane.redis_admin_password" = 2
+"test_data_plane_stop.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 9
+"test_data_plane_stop.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 2
+"test_data_plane_stop.py#monkeypatch.setattr cli.commands.data_plane.maintenance_stop.OwnedPooler.stop" = 2
+"test_data_plane_stop.py#monkeypatch.setattr cli.commands.data_plane.maintenance_stop.Redis" = 1
+"test_data_plane_stop.py#monkeypatch.setattr cli.commands.data_plane.maintenance_stop.capture_postgres" = 1
+"test_data_plane_stop.py#monkeypatch.setattr cli.commands.data_plane.maintenance_stop.pooler.pid_is_our_pooler" = 1
+"test_data_plane_stop.py#monkeypatch.setattr cli.commands.data_plane.maintenance_stop.psutil.process_iter" = 1
+"test_data_plane_stop.py#monkeypatch.setattr cli.commands.data_plane.maintenance_stop.report_pooler_clients" = 1
+"test_data_plane_stop.py#monkeypatch.setattr cli.commands.data_plane.pgbouncer.pg_socket_dir" = 1
+"test_maintenance_stop_report.py#monkeypatch.setattr base.native_process.ownership.sys" = 1
+"test_stop.py#monkeypatch.setattr base.db.Database.connect" = 1
+"test_stop.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.is_serving" = 4
+"test_stop.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 3
+"test_stop.py#monkeypatch.setattr base.host.proc.hosting_exec_domain" = 1
+"test_stop.py#monkeypatch.setattr cli.commands._repo.preflight_probes" = 1
+"test_stop.py#monkeypatch.setattr cli.commands._repo.roles_or_none" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._start_readiness_preflight.preflight_start_readiness" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._stop_extras" = 2
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.announce_stopping" = 3
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.begin" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.close_terminals" = 2
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.finish" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.pause_agents" = 3
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop_browser" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop_data_plane" = 2
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop_extras" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.subprocess.run" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.stop_root_service_tree" = 3
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle.start.cmd_start_body" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle.stop.force_stop" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle.stop.require_restart_runtime" = 1
+"test_stop.py#monkeypatch.setattr cli.commands.lifecycle.stop.restart_runtime" = 1
+"test_stop.py#monkeypatch.setattr ops.agent_pause.host_identity" = 1
+"test_stop.py#monkeypatch.setattr ops.agent_pause.publish_inbound_wake" = 1
+"test_stop.py#monkeypatch.setattr ops.cluster_status.pause.unpause_local_cluster" = 2
+"test_stop_close_notices.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.stop_data_plane" = 1
+"test_stop_close_notices.py#monkeypatch.setattr ops.pty_close_notices.write_notices" = 3
+"test_stop_close_notices.py#monkeypatch.setattr tests.path_scoped.pty_shells.screen" = 1
+"test_stop_extras.py#monkeypatch.setattr base.native_process.os_platform.is_macos" = 2
+"test_stop_extras.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_stop_extras.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.unregister_helper" = 2
+"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.close_terminals" = 1
+"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.pause_agents" = 2
+"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.TERMINAL_KILL_WAIT_S" = 1
+"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop._TERMINAL_STOP_GRACE_S" = 1
+"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.await_no_terminals" = 1
+"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.close_via_service" = 1
+"test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.live_terminals" = 2
+"test_stop_terminals.py#monkeypatch.setattr services.agent_runner.pty_sessions.ledger.SWEEP_HANGUP_WAIT_S" = 1
+
+[debt.stdlib-patch]
+"test_data_plane_stop.py#monkeypatch.setattr pathlib.Path.read_text" = 1
+
+[debt.unresolved-patch]
+"test_stop.py#monkeypatch.setattr command_runtime.machine.role" = 2

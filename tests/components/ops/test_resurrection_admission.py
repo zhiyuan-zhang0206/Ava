@@ -164,7 +164,7 @@ def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
     )
     db_conn.commit()
     with db_conn.cursor() as cur, pytest.raises(ResurrectError, match="0 rows"):
-        wake._transition_terminated_to_unclaimed_idling(
+        wake.transition_terminated_to_unclaimed_idling(
             cur,
             aid,
             None,
@@ -448,7 +448,7 @@ def _unowned_idle(db: psycopg.Connection, aid: int) -> bool:
     return row == ("idling", None, None, None, None)
 
 
-async def _admitted(
+async def admit_hosted_incarnation(
     pool: AsyncConnectionPool,
     aid: int,
     database_gate: ProcessDbGate,
@@ -505,7 +505,9 @@ async def _resurrected(
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    await _admitted(pool, aid, database_gate=database_gate, machine_identity=machine_identity)
+    await admit_hosted_incarnation(
+        pool, aid, database_gate=database_gate, machine_identity=machine_identity
+    )
     db.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
         (aid,),
@@ -538,7 +540,7 @@ async def restarted(
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    owner = await _admitted(
+    owner = await admit_hosted_incarnation(
         pool, aid, database_gate=database_gate, machine_identity=machine_identity
     )
     insert_inbound_message(
@@ -577,7 +579,7 @@ async def managed_restarted(
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    owner = await _admitted(
+    owner = await admit_hosted_incarnation(
         pool, aid, database_gate=database_gate, machine_identity=machine_identity
     )
     insert_inbound_message(
@@ -649,7 +651,7 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
 
     assert _unowned_idle(db_conn, aid)
     assert wakes == [(aid, "0")]
-    assert await _admitted(
+    assert await admit_hosted_incarnation(
         aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
     )
 
@@ -699,7 +701,7 @@ async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
         database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
     )
 
-    successor = await _admitted(
+    successor = await admit_hosted_incarnation(
         aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
     )
     admitted = decode_resources(resources(db_conn, aid))

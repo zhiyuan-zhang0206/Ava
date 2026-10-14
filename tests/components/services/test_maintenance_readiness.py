@@ -16,6 +16,7 @@ from base import config
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
@@ -30,7 +31,6 @@ from gateway.app import app
 from gateway.tests.agents.gateway_auth import without_credentials
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
-from tests.fixtures.configuration import snapshot_process_config
 
 
 @pytest.fixture(autouse=True)
@@ -181,7 +181,7 @@ def test_a_runners_first_join_reaches_a_held_gateway(
     middleware stack."""
     from base.host.db_authority import unit
     from base.host.env import bootstrap
-    from cli import unit_join
+    from cli.commands.cluster import unit_join
 
     secret = _authenticated(monkeypatch)
     complete = settings if settings.profile is None else config.Settings(profile=None)

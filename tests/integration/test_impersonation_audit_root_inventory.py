@@ -26,7 +26,7 @@ _INVENTORY: dict[str, str] = {
     "ava_builtins/plugins/ava_fleet/_task_update.py::_log_task_update": "local",
     "base/agents/tasks/creation.py::insert_task": "local",
     "gateway/agents/router.py::_patch_label_blocking": "central",
-    "gateway/mcp_server/endpoint.py::_record_tool_call": "ineligible",
+    "gateway/mcp_server/endpoint.py::record_tool_call": "ineligible",
     "base/agents/birth/transaction.py::record_birth_event": "central",
     "ops/agents/wake.py::_stage_resurrect_event": "central",
     "ops/lifecycle/termination.py::_stage_termination_event": "central",

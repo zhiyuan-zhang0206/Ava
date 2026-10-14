@@ -156,7 +156,7 @@ def test_unit_dial_url_agrees_across_both_writers(monkeypatch: pytest.MonkeyPatc
     which one wrote last. Asserted on the identical capability set both pass.
     """
     from base.cluster.machine.boot import machine_from_boot
-    from tests.fixtures.configuration import snapshot_process_config
+    from base.config.tests.configuration import snapshot_process_config
 
     config = snapshot_process_config()
     config.set_field("machine_name", "split-runner")

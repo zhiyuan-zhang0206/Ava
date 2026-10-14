@@ -7,40 +7,33 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "cluster" = ["api_contracts", "config", "db", "host", "log", "native_process", "paths"]
 "config" = ["api_contracts", "host", "log", "native_process", "paths"]
 "daemon" = ["cluster", "config", "db", "deploy", "host", "log", "native_process", "paths", "telemetry"]
-"db" = ["config", "host", "log", "native_process"]
+"db" = ["config", "host", "log", "native_process", "paths"]
 "deploy" = ["agents", "clock", "cluster", "config", "db", "events", "host", "log", "native_process", "paths", "sessions", "telemetry"]
 "events" = ["cluster", "config", "host", "log"]
 "host" = ["config", "log", "native_process", "paths"]
-"lm" = ["config", "host", "log", "paths", "telemetry"]
+"lm" = ["config", "host", "log", "telemetry"]
 "log" = ["paths"]
 "native_process" = ["log", "paths"]
 "packages" = ["api_contracts", "cluster", "config", "db", "host", "lm", "log", "native_process", "paths", "telemetry"]
-"paths" = ["config"]
 "sessions" = ["cluster", "config", "host", "log", "native_process", "paths"]
 "telemetry" = ["api_contracts", "clock", "cluster", "config", "db", "events", "host", "log", "native_process", "paths"]
 "tests" = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "db", "deploy", "events", "host", "lm", "log", "native_process", "packages", "paths", "sessions", "telemetry"]
 
-[debt.manifest-cycle]
-"host -> config" = 1
-"paths -> config" = 1
+[debt.cycle-edge]
+"host/env/tests/_env_import_child.py -> config/__init__.py" = 2
+"host/env/tests/test_agent_slices.py -> config/__init__.py" = 1
+"host/env/tests/test_agent_slices.py -> config/agent_pins.py" = 1
+"host/env/tests/test_agent_slices.py -> config/config_registry.py" = 3
+"host/env/tests/test_config_refresh.py -> config/__init__.py" = 7
+"host/env/tests/test_dotenv_boot.py -> config/__init__.py" = 1
+"host/env/tests/test_file_lock_bounded.py -> config/runtime_config.py" = 6
+"host/env/tests/test_registry.py -> config/__init__.py" = 1
+"host/system/tests/test_packages_job.py -> config/__init__.py" = 3
+"host/system/tests/test_walg_job.py -> config/__init__.py" = 1
 
 [debt.private-module]
 "tests/config/bootstrap/_lite_parity_child.py -> config/_full.py" = 1
 "tests/config/bootstrap/_lite_parity_child.py -> config/_lite.py" = 3
 
 [debt.private-name]
-"agents/tests/test_log_sink.py -> log/__init__.py#_StdlibInterceptHandler" = 1
-"agents/tests/test_log_sink.py -> log/__init__.py#_install_stdlib_intercept" = 1
 "agents/tests/test_log_sink.py -> telemetry/process_logging.py#_event_sink" = 1
-"host/env/tests/test_registry.py -> config/__init__.py#_FIELDS" = 1
-"telemetry/tests/process_logging/test_log_init_idempotent.py -> log/process.py#_add_file_sink" = 11
-"telemetry/tests/process_logging/test_log_init_idempotent.py -> log/process.py#_init_done" = 2
-"tests/config/_config_child.py -> config/__init__.py#_boot_state" = 2
-"tests/config/test_config_lifecycle.py -> config/config_registry.py#_build_registry" = 3
-"tests/config/test_config_profiles.py -> config/__init__.py#_FIELDS" = 1
-"tests/config/test_config_profiles.py -> config/config_registry.py#_build_registry" = 6
-"tests/config/test_config_registry.py -> config/config_registry.py#_build_registry" = 3
-"tests/config/test_home_resolution.py -> host/env/bootstrap.py#_snapshot_path" = 1
-"tests/impersonation/test_impersonation_closure.py -> deploy/maintenance/cohort.py#_classify" = 1
-"tests/test_checkpoint_message_history.py -> agents/history/checkpoint_postgres_walks.py#_body_batches" = 1
-"tests/test_unit_capability_base.py -> cluster/authority/tests/unit_capability_support.py#_ENDPOINT" = 1

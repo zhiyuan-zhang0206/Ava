@@ -5,11 +5,5 @@ exports = ["audit", "ci", "codegen", "data_plane_ops", "lint", "model_registry",
 "ci" = ["structure"]
 "codegen" = ["structure"]
 "content_lint" = ["audit", "codegen"]
-"lint" = ["codegen", "content_lint", "structure"]
-"tests" = ["ci", "lint", "structure", "verify"]
-
-[debt.private-name]
-"tests/test_pr_flow_export.py -> ci/pull_requests/pr_flow_export.py#_emit_events" = 1
-"tests/test_test_selector.py -> ci/test_selector.py#_selection_mode" = 2
-"tests/test_test_selector_owner_rules.py -> ci/test_selector.py#_referencing_tests" = 1
-"tests/test_understanding_replay_entry.py -> verify/understanding_replay.py#_report" = 1
+"lint" = ["content_lint", "structure"]
+"tests" = ["ci", "lint", "verify"]

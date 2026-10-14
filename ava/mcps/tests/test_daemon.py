@@ -2,7 +2,7 @@
 
 Does not start real MCP servers (requires external npm/uvx packages) nor long-running daemon processes.
 Three layers of mock:
-- `ava_home()` → tmpdir, so `_load_config()` reads a fake `mcp.json`
+- `ava_home()` → tmpdir, so `load_config()` reads a fake `mcp.json`
 - `connect_server` → returns a MagicMock session, bypassing stdio_client / ClientSession
 - `handle_client` runs with in-memory `asyncio.StreamReader` + a custom fake writer
 
@@ -86,7 +86,7 @@ ORIG_REAP = daemon_mod.reap_stale_daemons
 
 
 @pytest.fixture(autouse=True)
-def _no_reap_stale_daemons(monkeypatch: pytest.MonkeyPatch) -> None:
+def no_reap_stale_daemons(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep run_daemon tests from scanning the real process table.
 
     `reap_stale_daemons` walks psutil.process_iter on every daemon start; the
@@ -116,7 +116,7 @@ def scope(daemon_wide: daemon_mod.DaemonWide) -> daemon_mod.Scope:
 
 @pytest.fixture
 def fake_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point `ava_home()` to tmpdir, so `_load_config()` reads a fake mcp.json.
+    """Point `ava_home()` to tmpdir, so `load_config()` reads a fake mcp.json.
 
     Patches builtin_mcp_paths to list so tests expecting empty config are
     not surprised by the repo's mcps/chrome/.mcp.json built-in.
@@ -127,7 +127,7 @@ def fake_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return unit_home
 
 
-def _write_config(home: Path, servers: dict[str, dict[str, Any]]) -> Path:
+def write_config(home: Path, servers: dict[str, dict[str, Any]]) -> Path:
     cfg = home / "mcp.json"
     cfg.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
     return cfg
@@ -157,7 +157,7 @@ def tool(name: str, description: str = "", schema: dict | None = None) -> MagicM
     return t
 
 
-def _content(payload: dict[str, Any]) -> MagicMock:
+def content(payload: dict[str, Any]) -> MagicMock:
     c = MagicMock()
     c.model_dump = MagicMock(return_value=payload)
     return c
@@ -173,22 +173,22 @@ def call_result(
     return r
 
 
-# ─── _load_config (delegates to the shared loader) ───────────────────────
+# ─── load_config (delegates to the shared loader) ───────────────────────
 
 
 def test_load_config_empty_when_no_file(fake_home: Path) -> None:
-    assert daemon_mod._load_config() == {}
+    assert daemon_mod.load_config() == {}
 
 
 def test_load_config_empty_when_no_mcp_servers_key(fake_home: Path) -> None:
     """File exists but lacks mcpServers section → empty dict (tolerates empty settings file)."""
     (fake_home / "mcp.json").write_text(json.dumps({"other": {}}), encoding="utf-8")
-    assert daemon_mod._load_config() == {}
+    assert daemon_mod.load_config() == {}
 
 
 def test_load_config_returns_parsed_servers(fake_home: Path) -> None:
-    _write_config(fake_home, {"fs": {"command": "x"}, "chrome": {"command": "y"}})
-    cfg = daemon_mod._load_config()
+    write_config(fake_home, {"fs": {"command": "x"}, "chrome": {"command": "y"}})
+    cfg = daemon_mod.load_config()
     assert set(cfg.keys()) == {"fs", "chrome"}
     assert cfg["fs"] == {"command": "x"}
 
@@ -200,7 +200,7 @@ async def test_get_session_lazy_inits_and_caches(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """First get calls connect_server once, second directly returns cached (no further call)."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session()
     stack = MagicMock()
     connect = AsyncMock(return_value=(session, stack))
@@ -218,7 +218,7 @@ async def test_get_session_raises_on_unknown_server(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """server not configured in mcp.json → ValueError immediately blows up (fail-fast, no silent connect)."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod, "connect_server", AsyncMock())
     with pytest.raises(ValueError, match="nope"):
         await daemon_mod.get_session("nope", scope)
@@ -231,7 +231,7 @@ async def test_get_session_concurrent_calls_share_one_connect(
 
     Simulate two clients simultaneously listing tools for the same server without duplicate subprocess launch.
     """
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session()
     stack = MagicMock()
     call_count = 0
@@ -263,7 +263,7 @@ async def test_get_session_concurrent_calls_share_one_connect(
 async def test_handle_client_lists_tools(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session(
         tools=[tool("read_file", "Read a file", {"type": "object"}), tool("write_file")]
     )
@@ -295,10 +295,10 @@ async def test_handle_client_lists_tools(
 async def test_handle_client_call_tool_returns_content(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session(
         call_result=call_result(
-            [_content({"type": "text", "text": "hi"})],
+            [content({"type": "text", "text": "hi"})],
             is_error=False,
             structured={"k": 1},
         ),
@@ -341,9 +341,9 @@ async def test_handle_client_call_tool_carries_is_error_true(
 
     Consistent with the ava.mcps client contract: daemon layer only transports,
     semantic layer (`is_error → raise`) is implemented on the client side."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session(
-        call_result=call_result([_content({"type": "text", "text": "denied"})], is_error=True),
+        call_result=call_result([content({"type": "text", "text": "denied"})], is_error=True),
     )
     monkeypatch.setattr(
         daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
@@ -370,7 +370,7 @@ async def test_handle_client_call_tool_unknown_content_block_raises_type_error(
 
     fail-fast prevents daemon from silently swallowing into {"type":"unknown"}; agent sees the error
     and can check if MCP SDK was upgraded."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
 
     class _BadBlock:
         """No model_dump deliberately triggers TypeError branch."""
@@ -417,7 +417,7 @@ async def test_handle_client_continues_after_bad_json(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """After bad JSON, the next good list_tools still responds normally — line-by-line resync, no broken connection."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session(tools=[tool("ok")])
     monkeypatch.setattr(
         daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
@@ -496,7 +496,7 @@ async def test_handle_client_call_tool_session_call_failure_propagates_as_error(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """upstream session.call_tool raise → outer try → ok=False (daemon does not die)."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session(call_error=RuntimeError("upstream boom"))
     monkeypatch.setattr(
         daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
@@ -524,7 +524,7 @@ async def test_handle_client_default_server_param_empty_string(
 
     Verify the default path does not silently swallow errors — empty server name treated as unconfigured.
     """
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
 
     req = {"id": 5, "method": "list_tools", "params": {}}  # didn't pass server
     reader = make_reader([(json.dumps(req) + "\n").encode()])
@@ -544,7 +544,7 @@ async def test_handle_client_response_content_empty_when_no_blocks(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """tool returns empty content → ok=True with empty list (no raise)."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session(call_result=call_result([], structured=None))
     monkeypatch.setattr(
         daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
@@ -639,7 +639,7 @@ async def test_run_daemon_full_lifecycle_via_unix_socket(
       here real socket integration)
     - stale file cleaned before binding again
     """
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session(tools=[tool("ping")])
     monkeypatch.setattr(
         daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))

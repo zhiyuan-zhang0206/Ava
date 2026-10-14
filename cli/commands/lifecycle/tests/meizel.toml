@@ -2,3 +2,107 @@ exports = ["converge_host", "startup", "stop"]
 
 [uses]
 "identity" = ["test_root_driver.py"]
+
+[debt.env-patch]
+"test_collector_admission.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 3
+"test_collector_admission.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_commands_status.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
+"test_commands_status.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
+"test_pg_owner_authority.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
+"test_root_driver.py#monkeypatch.delenv os.environ" = 1
+"test_root_driver.py#monkeypatch.setenv os.environ" = 2
+"test_root_driver.py#monkeypatch.setenv os.environ.PATH" = 2
+"test_unit_capability_lifecycle.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_collector_admission.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_client" = 1
+"test_collector_admission.py#monkeypatch.setattr cli.commands.observability.otel_collector.ensure_otel_collector" = 4
+"test_commands_cluster_status_lifecycle.py#monkeypatch.setattr cli.commands.cluster.control.fetch_gateway_cluster_status" = 1
+"test_commands_status.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_commands_status.py#monkeypatch.setattr base.config.settings.services.browser_enabled" = 1
+"test_commands_status.py#monkeypatch.setattr base.deploy.git.cluster_drift.checkout_head_sha" = 1
+"test_commands_status.py#monkeypatch.setattr base.deploy.git.cluster_drift.prod_source_branch_drift" = 5
+"test_commands_status.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.read_selection" = 1
+"test_commands_status.py#monkeypatch.setattr base.host.resource_sample.resource_sample" = 1
+"test_commands_status.py#monkeypatch.setattr base.native_process.root_control.client.RootClient" = 3
+"test_commands_status.py#monkeypatch.setattr base.paths.ava_home" = 2
+"test_commands_status.py#monkeypatch.setattr cli.commands._repo.roles_or_none" = 12
+"test_commands_status.py#monkeypatch.setattr cli.commands.lifecycle.status.print_data_plane_status" = 3
+"test_commands_status.py#monkeypatch.setattr cli.commands.lifecycle.status.print_gateway_cluster_status" = 2
+"test_commands_status.py#monkeypatch.setattr cli.commands.lifecycle.status.print_redis_bridge_status" = 1
+"test_commands_status.py#monkeypatch.setattr cli.commands.lifecycle.status.print_service_row" = 2
+"test_commands_status.py#monkeypatch.setattr cli.commands.lifecycle.status.repo_root" = 2
+"test_commands_status.py#monkeypatch.setattr cli.commands.lifecycle.status.root_tree_units" = 1
+"test_commands_status.py#monkeypatch.setattr cli.commands.lifecycle.status.source_identity_line" = 2
+"test_commands_status.py#monkeypatch.setattr cli.commands.probe.probe_service" = 1
+"test_commands_status.py#monkeypatch.setattr services.supervision.roster.spec.browser_incapability" = 1
+"test_lgtm_toggle.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.read_selection" = 1
+"test_lgtm_toggle.py#monkeypatch.setattr cli.commands.lifecycle.lgtm_toggle.lgtm_host_marker" = 1
+"test_lgtm_toggle.py#monkeypatch.setattr cli.commands.lifecycle.start.cmd_start" = 2
+"test_lgtm_toggle.py#monkeypatch.setattr services.supervision.roster.build_services" = 1
+"test_maintenance_failure_gates.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.is_serving" = 1
+"test_maintenance_failure_gates.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"test_maintenance_failure_gates.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+"test_maintenance_failure_gates.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
+"test_maintenance_failure_gates.py#monkeypatch.setattr ops.agent_pause.publish_inbound_wake" = 1
+"test_pg_owner_authority.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.get_record" = 2
+"test_pg_owner_authority.py#monkeypatch.setattr base.cluster.get_record" = 2
+"test_pg_owner_authority.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 3
+"test_pg_owner_authority.py#monkeypatch.setattr base.config.settings.services.memory_search_backend" = 2
+"test_remote_data_plane.py#monkeypatch.setattr base.cluster.get_record" = 1
+"test_remote_data_plane.py#monkeypatch.setattr cli.commands.data_plane.bringup.remote_pg_reachable" = 2
+"test_remote_data_plane.py#monkeypatch.setattr cli.commands.data_plane.bringup.remote_redis_reachable" = 1
+"test_remote_data_plane.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.ensure_cluster_storage" = 2
+"test_rollout_robustness.py#monkeypatch.setattr base.deploy.maintenance.admission.snapshot" = 2
+"test_rollout_robustness.py#monkeypatch.setattr base.deploy.state.host_deploy_state.read" = 2
+"test_rollout_robustness.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
+"test_rollout_robustness.py#monkeypatch.setattr base.events.live.bus.EventBus.from_settings" = 1
+"test_rollout_robustness.py#monkeypatch.setattr cli.commands._repo.preflight_probes" = 3
+"test_rollout_robustness.py#monkeypatch.setattr cli.commands.lifecycle._start_readiness_preflight.preflight_start_readiness" = 2
+"test_rollout_robustness.py#monkeypatch.setattr cli.commands.lifecycle.start.cmd_start_body" = 2
+"test_rollout_robustness.py#monkeypatch.setattr cli.commands.lifecycle.stop.do_stop" = 3
+"test_rollout_robustness.py#monkeypatch.setattr cli.commands.lifecycle.stop.release_self_heal_pause" = 1
+"test_rollout_robustness.py#monkeypatch.setattr ops.agent_pause.publish_inbound_wake" = 1
+"test_rollout_robustness.py#monkeypatch.setattr ops.cluster_status.pause.unpause_local_cluster" = 2
+"test_root_driver.py#monkeypatch.setattr base.host.permissions_helper.client.PermissionsHelperClient.ping" = 1
+"test_root_driver.py#monkeypatch.setattr base.host.permissions_helper.client.PermissionsHelperClient.root_status" = 2
+"test_root_driver.py#monkeypatch.setattr base.host.permissions_helper.client.PermissionsHelperClient.seed_root" = 2
+"test_root_driver.py#monkeypatch.setattr base.host.permissions_helper.client.PermissionsHelperClient.stop_root" = 1
+"test_root_driver.py#monkeypatch.setattr base.paths.root_manifests_path" = 1
+"test_root_driver.py#monkeypatch.setattr base.paths.root_run_dir" = 2
+"test_root_driver.py#monkeypatch.setattr cli.commands.data_plane.bringup.api_delivery" = 1
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.await_root_status" = 1
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.helper_spawn_committed" = 3
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.helper_wire_ok" = 3
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.poll_sleep" = 1
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.require_root_absent" = 1
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.require_root_owner" = 1
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_child_env" = 3
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_client" = 8
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_status" = 10
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.settings.general.service_path" = 5
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.spawn_direct" = 1
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.stop_root_process" = 1
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.sys.platform" = 2
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.tree_manifest" = 1
+"test_root_driver.py#monkeypatch.setattr cli.commands.lifecycle.start_generation.source_digest" = 2
+"test_root_driver.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.retirement_query" = 1
+"test_root_driver.py#monkeypatch.setattr services.supervision.roster.otel_collector_config" = 1
+"test_root_driver.py#monkeypatch.setattr services.supervision.roster.plugin_services.plugin_services" = 1
+"test_start_data_plane.py#monkeypatch.setattr base.cluster.get_record" = 3
+"test_start_data_plane.py#monkeypatch.setattr base.cluster.redis_password_from_env" = 1
+"test_start_data_plane.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_start_data_plane.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+"test_start_data_plane.py#monkeypatch.setattr base.config.settings.data_plane.redis_admin_password" = 1
+"test_start_data_plane.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
+"test_start_data_plane.py#monkeypatch.setattr base.host.db_authority.api.publish_telemetry_token" = 1
+"test_start_data_plane.py#monkeypatch.setattr base.host.db_authority.ledger.load_ledger" = 2
+"test_start_data_plane.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.ensure_cluster_storage" = 3
+"test_start_data_plane.py#monkeypatch.setattr cli.start_identity.needs_provision" = 1
+"test_unit_capability_lifecycle.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 1
+
+[debt.stdlib-patch]
+"test_commands_status.py#monkeypatch.setattr subprocess.run" = 7
+
+[debt.third-party-patch]
+"test_commands_status.py#monkeypatch.setattr httpx.get" = 5

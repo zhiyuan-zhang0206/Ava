@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from base.host.env import dotenv_boot
+from base.host.env.tests.env_files import use_env_files
 from base.paths.home import resolve_ava_home
-from tests.fixtures.units import use_env_files
 
 _NO_DATA_PLANE_IDENTITY_LINES = (
     f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
@@ -45,7 +45,7 @@ def test_cli_entry_records_launcher_profile_and_keeps_undeclared_projections(
     records it, and the later authority pass — reading the recorded context —
     keeps both undeclared launcher projections. This is the health-probe flow
     that was red: agent child -> CLI pop -> drop -> sentinel (env-class)."""
-    from cli.main import _normalize_process_profile
+    from cli.main import normalize_process_profile
 
     monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
     # The entry helper records the launcher profile next. Register the absent key (setitem)
@@ -67,7 +67,7 @@ def test_cli_entry_records_launcher_profile_and_keeps_undeclared_projections(
     # same pass — the exemption must not spill.
     monkeypatch.setitem(os.environ, "AVA_APP_PORT", "3001")
 
-    _normalize_process_profile()
+    normalize_process_profile()
 
     assert "AVA_PROCESS_PROFILE" not in os.environ
     assert os.environ[dotenv_boot.LAUNCHER_PROFILE_ENV_KEY] == "agent"

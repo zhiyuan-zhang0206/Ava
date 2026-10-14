@@ -31,7 +31,9 @@ files included), it writes what the rule asks for:
   creating the manifest if there is none;
 - the missing `exports` entries along the path to the target.
 
-It then does the work of `--prune`. Existing entries are merged and comments
+It first does the work of `--prune` and `debt prune`, so a stale edge or a paid
+back-edge does not block a new edge in the opposite direction, and then declares.
+Existing entries are merged and comments
 outside the touched lists stay. A manifest it creates must be staged (`git add`)
 before `check` sees it, because `check` reads tracked files only.
 

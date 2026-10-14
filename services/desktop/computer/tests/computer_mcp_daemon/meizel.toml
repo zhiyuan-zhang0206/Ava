@@ -1,0 +1,6 @@
+[debt.first-party-patch]
+"test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr base.agents.impersonation.manifest.emit_recorded_central_event" = 1
+"test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.asyncio.start_unix_server" = 1
+"test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.logger.warning" = 1
+"test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.socket_in_use" = 1
+"test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr services.desktop.computer.screen.snapshot_path" = 4

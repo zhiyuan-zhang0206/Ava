@@ -1,3 +1,32 @@
 [uses]
 "test_upload_delivery_faults.py" = ["test_upload_delivery_recovery.py"]
 "test_upload_delivery_lifecycle.py" = ["test_upload_delivery_recovery.py"]
+
+[debt.first-party-patch]
+"test_upload_delivery_faults.py#monkeypatch.setattr base.agents.upload_delivery.source.validate_pending" = 1
+"test_upload_delivery_faults.py#monkeypatch.setattr base.agents.upload_delivery.source.write_transaction" = 4
+"test_upload_delivery_faults.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_upload_delivery_faults.py#monkeypatch.setattr gateway.upload_delivery.worker.dispatch_to_machine" = 3
+"test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.MAX_AGENT_UPLOAD_BYTES" = 1
+"test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.agent_upload_dir" = 2
+"test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.current_unit" = 2
+"test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.http_get" = 3
+"test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.write_transaction" = 2
+"test_upload_delivery_faults.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.is_op_kind" = 1
+"test_upload_delivery_lifecycle.py#monkeypatch.setattr base.agents.upload_delivery.source.validate_pending" = 1
+"test_upload_delivery_lifecycle.py#monkeypatch.setattr base.agents.upload_delivery.storage.publish" = 2
+"test_upload_delivery_lifecycle.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_upload_delivery_lifecycle.py#monkeypatch.setattr gateway.upload_delivery.worker.UploadRecovery.copy_proof" = 2
+"test_upload_delivery_lifecycle.py#monkeypatch.setattr gateway.upload_delivery.worker.business_paused" = 1
+"test_upload_delivery_lifecycle.py#monkeypatch.setattr gateway.upload_delivery.worker.publish_inbound_wake" = 1
+"test_upload_delivery_lifecycle.py#monkeypatch.setattr gateway.upload_delivery.worker.telemetry.emit" = 1
+"test_upload_delivery_recovery.py#monkeypatch.setattr base.agents.upload_delivery.storage.publish" = 2
+"test_upload_delivery_recovery.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_upload_delivery_recovery.py#monkeypatch.setattr gateway.routers.upload.router.MAX_AGENT_UPLOAD_BYTES" = 1
+"test_upload_delivery_recovery.py#monkeypatch.setattr gateway.upload_delivery.worker.UploadRecovery.start" = 1
+"test_upload_delivery_recovery.py#monkeypatch.setattr ops.upload_delivery.MAX_AGENT_UPLOAD_BYTES" = 1
+"test_upload_delivery_recovery.py#monkeypatch.setattr ops.upload_delivery.current_unit" = 2
+
+[debt.stdlib-patch]
+"test_upload_delivery_lifecycle.py#monkeypatch.setattr pathlib.Path.home" = 1
+"test_upload_delivery_recovery.py#monkeypatch.setattr pathlib.Path.home" = 1

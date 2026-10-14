@@ -1,0 +1,4 @@
+[debt.first-party-patch]
+"test_watcher.py#monkeypatch.setattr ava.shell.background.cli_path" = 4
+"test_watcher.py#monkeypatch.setattr ava.shell.background.output_dir" = 1
+"test_watcher.py#monkeypatch.setattr ava.shell.sessions.forward_env_dict" = 1

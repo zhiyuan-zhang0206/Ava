@@ -1,5 +1,4 @@
-// foldAlert — the SSE frame → cache folding logic: upsert by id and keep the
-// badge's unresolved count exact.
+// SSE notifications reconcile authoritative snapshots, including capped pages.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -7,7 +6,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
-import { AlertsProvider, foldAlert, useAlerts, useAlertsSection } from "@/lib/notifications/use-alerts";
+import { AlertsProvider, useAlerts, useAlertsSection } from "@/lib/notifications/use-alerts";
 import type { Alert, AlertsResponse } from "@/lib/contracts/types";
 
 const mocks = vi.hoisted(() => ({ getAlerts: vi.fn(), checkAuth: vi.fn() }));
@@ -42,29 +41,6 @@ function resp(alerts: Alert[], unresolved: number): AlertsResponse {
     meta: { window: "24h", total: alerts.length, unresolved_count: unresolved },
   };
 }
-
-describe("foldAlert", () => {
-  it("prepends a new firing row and bumps the unresolved count", () => {
-    const prev = resp([row({ id: 2, status: "resolved" })], 0);
-    const next = foldAlert(prev, row({ id: 1 }));
-    expect(next.alerts.map((a) => a.id)).toEqual([1, 2]);
-    expect(next.meta.unresolved_count).toBe(1);
-  });
-
-  it("replaces an existing row and applies transition deltas", () => {
-    const prev = resp([row({ id: 1 })], 1);
-    const next = foldAlert(prev, row({ id: 1, status: "resolved", ends_at: "2026-08-12T21:00:00Z" }));
-    expect(next.alerts).toHaveLength(1);
-    expect(next.alerts[0].status).toBe("resolved");
-    expect(next.meta.unresolved_count).toBe(0);
-  });
-
-  it("seeds a cache from a single frame when nothing is cached yet", () => {
-    const next = foldAlert(undefined, row({ id: 5, status: "resolved" }));
-    expect(next.alerts.map((a) => a.id)).toEqual([5]);
-    expect(next.meta.unresolved_count).toBe(0);
-  });
-});
 
 describe("useAlertsSection", () => {
   it("pins the section query to the 24h window named by its empty state", async () => {
@@ -230,6 +206,49 @@ describe("AlertsProvider connection auth gating", () => {
     expect(invalidateSpy).not.toHaveBeenCalledWith({
       queryKey: ["alerts", "section"],
     });
+  });
+
+  it("repeated frames outside the page cannot inflate the uncapped count", async () => {
+    mocks.getAlerts.mockResolvedValue(resp([row({ id: 2 })], 13));
+    const { result } = renderHook(() => useAlerts(), { wrapper: alertsWrapper() });
+    await waitForInstance();
+    await waitFor(() => expect(result.current.data?.meta.unresolved_count).toBe(13));
+    const reads = mocks.getAlerts.mock.calls.length;
+    act(() => expectInstance().fireMessage(JSON.stringify(row({ id: 999 }))));
+    await waitFor(() => expect(mocks.getAlerts.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    expect(result.current.data?.meta.unresolved_count).toBe(13);
+    expect(result.current.data?.alerts.map((a) => a.id)).toEqual([2]);
+
+    const nextReads = mocks.getAlerts.mock.calls.length;
+    act(() => expectInstance().fireMessage(JSON.stringify(row({ id: 999 }))));
+    await waitFor(() => expect(mocks.getAlerts.mock.calls.length).toBeGreaterThan(nextReads));
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    expect(result.current.data?.meta.unresolved_count).toBe(13);
+  });
+
+  it("a resolution outside the page updates counts and preserves server ordering", async () => {
+    mocks.getAlerts.mockResolvedValue(resp([row({ id: 2 })], 13));
+    const { result } = renderHook(() => useAlerts(), { wrapper: alertsWrapper() });
+    await waitForInstance();
+    await waitFor(() => expect(result.current.data?.meta.unresolved_count).toBe(13));
+    mocks.getAlerts.mockResolvedValue(resp([row({ id: 2 }), row({ id: 3, status: "resolved" })], 12));
+    act(() => expectInstance().fireMessage(JSON.stringify(row({ id: 999, status: "resolved" }))));
+    await waitFor(() => expect(result.current.data?.meta.unresolved_count).toBe(12));
+    expect(result.current.data?.alerts.map((a) => a.id)).toEqual([2, 3]);
+  });
+
+  it("heartbeats and malformed frames do not fetch alert snapshots", async () => {
+    const { result } = renderHook(() => useAlerts(), { wrapper: alertsWrapper() });
+    await waitForInstance();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const reads = mocks.getAlerts.mock.calls.length;
+    act(() => {
+      expectInstance().fireMessage(JSON.stringify({ role: "heartbeat" }));
+      expectInstance().fireMessage("bad-json");
+      expectInstance().fireMessage(JSON.stringify({ id: "invalid" }));
+    });
+    expect(mocks.getAlerts).toHaveBeenCalledTimes(reads);
   });
 
   it("CLOSED with an invalid session → auth becomes unauthenticated and never reopens", async () => {

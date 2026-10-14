@@ -1,1 +1,51 @@
 exports = ["pool_support.py"]
+
+[debt.first-party-patch]
+"test_agent_skill_view.py#monkeypatch.setattr ava.mcps.config.load_mcp_config" = 3
+"test_agent_skill_view.py#monkeypatch.setattr ava.skills.composer_commands.external_plugin_read_root" = 1
+"test_agent_skill_view.py#monkeypatch.setattr ava.skills.composer_commands.repo_plugins_dir" = 1
+"test_agent_skill_view.py#monkeypatch.setattr ava.skills.composer_commands.repo_root" = 1
+"test_agent_skill_view.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 2
+"test_agent_skill_view.py#monkeypatch.setattr base.packages.plugins.mcp_enabled.read_enabled" = 3
+"test_agent_skill_view.py#monkeypatch.setattr ops.cluster.operations.agent_skill_view_inputs" = 9
+"test_cluster_pause.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.is_serving" = 1
+"test_cluster_pause.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"test_cluster_pause.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+"test_cluster_pause.py#monkeypatch.setattr base.deploy.state.host_deploy_state.read" = 2
+"test_cluster_pause.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
+"test_cluster_pause.py#monkeypatch.setattr base.sessions.backend.get_backend" = 1
+"test_cluster_pause.py#monkeypatch.setattr ops.agent_pause.host_identity" = 2
+"test_cluster_pause.py#monkeypatch.setattr ops.agent_pause.host_running" = 3
+"test_cluster_pause.py#monkeypatch.setattr ops.cluster_status.pause.unpause_local_cluster" = 1
+"test_cluster_rpc.py#monkeypatch.setattr base.config.settings.gateway.cluster_rpc_max_retries" = 1
+"test_cluster_rpc.py#monkeypatch.setattr base.config.settings.gateway.cluster_rpc_timeout_seconds" = 1
+"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.default_idempotency_key" = 1
+"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.httpx.AsyncClient" = 4
+"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.lookup_machine_url" = 5
+"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.random.uniform" = 2
+"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.rpc_sleep" = 1
+"test_cluster_status_op.py#monkeypatch.setattr ops.cluster.operations.status_snapshot" = 1
+"test_deploy_window.py#monkeypatch.setattr base.cluster.machine_exclusions.list_excluded_machines" = 7
+"test_deploy_window.py#monkeypatch.setattr base.cluster.machines.list_all" = 2
+"test_deploy_window.py#monkeypatch.setattr ops.deploy_window.read_deploy_states" = 10
+"test_env_audit.py#monkeypatch.setattr base.config.admin.metadata.get_config_metadata" = 1
+"test_env_audit.py#monkeypatch.setattr base.config.config_registry.fields" = 3
+"test_env_audit.py#monkeypatch.setattr base.config.current_field_values" = 1
+"test_env_audit.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
+"test_env_audit.py#monkeypatch.setattr base.telemetry.emit_prepared" = 1
+"test_env_audit.py#monkeypatch.setattr ops.env_audit.load_alias_metadata" = 5
+"test_env_audit.py#monkeypatch.setattr ops.env_audit.psutil.Process" = 1
+"test_hosted_lifecycle_agent.py#monkeypatch.setattr ops.cluster_status.kill_agent_shells" = 1
+"test_inventory_ops.py#monkeypatch.setattr ava.mcps.config.display_available" = 1
+"test_inventory_ops.py#monkeypatch.setattr ava.mcps.config.load_mcp_config" = 1
+"test_operations_config.py#monkeypatch.setattr base.host.config_validators.read_time_capability" = 2
+"test_operations_config.py#monkeypatch.setattr base.host.config_validators.validate" = 7
+"test_operations_config.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
+"test_operations_config.py#monkeypatch.setattr ops.host_config.panel_metadata" = 1
+"test_operations_config.py#monkeypatch.setattr ops.host_config.panel_overrides" = 1
+"test_shell_kill_contract.py#monkeypatch.setattr ops.cluster.operations.kill_shell" = 2
+"test_shell_kill_contract.py#monkeypatch.setattr ops.cluster_status.agent_shell_sessions" = 1
+
+[debt.unresolved-patch]
+"test_deploy_window.py#monkeypatch.setattr broken" = 1
+"test_pty_close_notices.py#monkeypatch.setattr database.connect" = 2

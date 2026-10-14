@@ -22,7 +22,7 @@ The mutation point is `cli/commands/update.py` (`_run_gateway_local_update`):
 `git checkout --force -B main <sha>` + `uv sync` happen **in the same directory the
 running processes import from**.
 
-- `cli/commands/_repo.py:_repo_root()` = `Path(__file__).resolve().parents[2]` — the
+- `cli/commands/_repo.py:repo_root()` = `Path(__file__).resolve().parents[2]` — the
   code root is "wherever the running `.py` lives." (This is *favorable* for releases;
   see below.)
 - The lazy-import drift hazard is already known: `ava start` is run as a **fresh

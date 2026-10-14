@@ -24,7 +24,7 @@ from cli import start_runtime
 from cli.commands.lifecycle import converge_host, start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.roster.service_spec import GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
@@ -73,7 +73,7 @@ def roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None], 
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_start(
+def hermetic_start(
     db_url: str,
     serving_root: RootBirth,
     monkeypatch: pytest.MonkeyPatch,
@@ -122,7 +122,7 @@ def _hermetic_start(
     monkeypatch.setattr(_repo_commands, "register_machine_or_die", _ignoring_args(lambda: 0))
     monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 0)
     monkeypatch.setattr(_repo_commands, "probe_gateway_or_die", _ignoring_args(lambda: 0))
-    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", _launched)
+    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", _launched)
     monkeypatch.setattr(
         _probe_commands,
         "probe_service",
@@ -263,7 +263,7 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
     )
     monkeypatch.setattr(
         _root_driver_commands,
-        "_launch_service_tree",
+        "launch_service_tree",
         _ignoring_args(lambda: pytest.fail("no launch")),
     )
     assert (
@@ -293,7 +293,7 @@ def test_failed_launch_never_becomes_serving(
     def failed(roster: tuple[ServiceSpec, ...], *_a: object, **_kw: object) -> LaunchOutcome:
         return LaunchOutcome(roster, ("ava-gateway",))
 
-    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", failed)
+    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", failed)
     assert (
         _start_commands.cmd_start(
             retained_children=[],
@@ -381,7 +381,7 @@ def test_only_service_persists_for_repeated_start(
         launched.append(tuple(spec.session for spec in roster))
         return LaunchOutcome(roster, ())
 
-    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
+    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
     assert (
         _start_commands.cmd_start(
             only_services=("gateway",),
@@ -413,7 +413,7 @@ def test_invalid_selection_never_launches(
 ) -> None:
     monkeypatch.setattr(
         _root_driver_commands,
-        "_launch_service_tree",
+        "launch_service_tree",
         _ignoring_args(lambda: pytest.fail("launched invalid roster")),
     )
     with pytest.raises(ValueError, match="unknown"):
@@ -457,7 +457,7 @@ def test_storage_schema_migration_grants_pooler_precede_application(
         steps.append("root")
         return LaunchOutcome(roster, ())
 
-    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
+    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
     assert (
         _start_commands.cmd_start(
             retained_children=[],

@@ -88,14 +88,14 @@ if sys.platform == "darwin":
 # set on a fixture, so the subprocesses tests spawn (`ava` CLI, e2e gateway)
 # inherit the same home.
 _SESSION_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
-_TEST_AVA_HOME = Path(tempfile.mkdtemp(prefix=f"ava_test_home_{_SESSION_SUFFIX}_"))
-os.environ["AVA_HOME"] = str(_TEST_AVA_HOME)
+TEST_AVA_HOME = Path(tempfile.mkdtemp(prefix=f"ava_test_home_{_SESSION_SUFFIX}_"))
+os.environ["AVA_HOME"] = str(TEST_AVA_HOME)
 # CI keeps the vendored Postgres tree (zonky + pgvector, put in place by
 # scripts/ci/vendor_pg_runtime.py) outside the per-session home; linking it in
 # makes `pg_tool` resolve the production server build instead of a host apt one.
 _CI_VENDORED_RUNTIME_ROOT = os.environ.get("CI_VENDORED_RUNTIME_ROOT")
 if _CI_VENDORED_RUNTIME_ROOT:
-    (_TEST_AVA_HOME / "runtime").symlink_to(_CI_VENDORED_RUNTIME_ROOT, target_is_directory=True)
+    (TEST_AVA_HOME / "runtime").symlink_to(_CI_VENDORED_RUNTIME_ROOT, target_is_directory=True)
 # Persist the same worker-local channel through settings refresh and child boot.
 # A mutation of settings.data_plane alone is lost when a rollout rebuilds it.
 _TEST_EVENTS_CHANNEL = f"ava:events:test:{_SESSION_SUFFIX}"
@@ -177,8 +177,8 @@ os.environ["AVA_OS_JOBS_ENABLED"] = "false"
 # the sentinel even with no AVA_DB_URL in the environment (CI / a fresh clone),
 # and a stray connection that bypasses a provisioning fixture fails loudly
 # instead of hitting a real database. load_dotenv(override=False) won't clobber
-# these. The real per-session URLs are injected by the `_provisioned_db` /
-# `_provisioned_redis` fixtures, which start throwaway native pg/redis (tests/_containers.py).
+# these. The real per-session URLs are injected by the `provisioned_db` /
+# `provisioned_redis` fixtures, which start throwaway native pg/redis (base/deploy/tests/containers.py).
 UNPROVISIONED_DB_URL = "postgresql://unprovisioned@127.0.0.1:1/unprovisioned"
 UNPROVISIONED_REDIS_URL = "redis://127.0.0.1:1/0"
 os.environ["AVA_DB_URL"] = UNPROVISIONED_DB_URL
@@ -197,7 +197,7 @@ os.environ["AVA_TRANSPORT_ENCRYPTION"] = "overlay"
 # The suite's data-plane identity is `ava_citest`, carried entirely by the URLs
 # the provisioning fixtures write (names-as-data — Settings keeps the URL
 # verbatim, credentials included). The throwaway pg/redis provide the
-# `ava_citest` role/db/ACL user (tests/_containers.py), while the prod-db guard
+# `ava_citest` role/db/ACL user (base/deploy/tests/containers.py), while the prod-db guard
 # (tests/path_scoped/ava_tests.py, which refuses `ava`/`ava_main`) still fires if a test
 # ever points at the real production database.
 
@@ -363,7 +363,7 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
 # test home's .env as well, so the file declares what the env carries and the
 # authority pass takes the force branch. Subprocess tests that spawn the real
 # CLI inherit this home, so they read the same declarations.
-(_TEST_AVA_HOME / ".env").write_text(
+(TEST_AVA_HOME / ".env").write_text(
     "\n".join(
         [
             # Cluster-scope pin carried by both channels (see the block above):
@@ -447,7 +447,7 @@ from dotenv import dotenv_values
 os.environ.update(
     {
         key: value
-        for key, value in dotenv_values(_TEST_AVA_HOME / ".env").items()
+        for key, value in dotenv_values(TEST_AVA_HOME / ".env").items()
         if value is not None
     }
 )
@@ -464,7 +464,7 @@ os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 def _reserve_distinct_ports(count: int) -> list[int]:
     """`count` different free localhost ports: every socket stays bound until all
     are chosen, so the kernel cannot hand the same number out twice. The small race
-    before a server binds one is the same that tests/_containers.py accepts for
+    before a server binds one is the same that base/deploy/tests/containers.py accepts for
     pg/redis."""
     with contextlib.ExitStack() as stack:
         socks: list[socket.socket] = []
@@ -481,7 +481,7 @@ def _pin_setting(field: str, value: object) -> None:
     """Deliver a session pin before Settings construction, including child boots."""
     key = f"AVA_{field.upper()}"
     os.environ[key] = str(value)
-    tests._test_env_file.rewrite_line(_TEST_AVA_HOME / ".env", key, str(value))
+    tests._test_env_file.rewrite_line(TEST_AVA_HOME / ".env", key, str(value))
 
 
 _HEALTH_PORT_FIELDS = tuple(
@@ -581,7 +581,7 @@ def session_ports() -> dict[str, int]:
 def process_config():
     """Prepare configuration only for a consumer, before its function-scoped home."""
     from base.config import set_field
-    from tests.fixtures.configuration import snapshot_process_config
+    from base.config.tests.configuration import snapshot_process_config
 
     set_field("permissions_helper_port", permissions_helper_port)
     return snapshot_process_config()

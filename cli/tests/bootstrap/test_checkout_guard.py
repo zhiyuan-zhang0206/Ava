@@ -21,7 +21,7 @@ from base.paths.home import home_checkout_error
 from cli import fleet_update, init_intent, preflight, start_intent
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
@@ -179,7 +179,7 @@ def test_start_refuses_a_foreign_checkout_before_reading_the_home(
         operator_database, machine=command_runtime.machine, home=ava_home()
     )
     home = _home_with_source(tmp_path, monkeypatch)
-    monkeypatch.setattr(start_intent, "_checkout", lambda: tmp_path / "dev")
+    monkeypatch.setattr(start_intent, "checkout", lambda: tmp_path / "dev")
 
     def _never_reached(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a refused start must not reach the home's admission")
@@ -202,7 +202,7 @@ def test_init_refuses_a_foreign_checkout_before_writing_anything(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     home = _home_with_source(tmp_path, monkeypatch)
-    monkeypatch.setattr(start_intent, "_checkout", lambda: tmp_path / "dev")
+    monkeypatch.setattr(start_intent, "checkout", lambda: tmp_path / "dev")
 
     def _never_reached(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a refused init must not reach the identity phase")
@@ -219,7 +219,7 @@ def test_a_test_home_is_taken_from_any_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(start_intent, "_checkout", lambda: tmp_path / "dev")
+    monkeypatch.setattr(start_intent, "checkout", lambda: tmp_path / "dev")
     assert start_intent._home() == (tmp_path / "home").resolve()
 
 

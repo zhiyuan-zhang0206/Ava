@@ -25,10 +25,14 @@ import pytest
 
 import base.paths as base_paths
 from base.host.permissions_helper import client
-from base.host.permissions_helper.client import PermissionsHelperError, UserAbortError
+from base.host.permissions_helper.client import (
+    PermissionsHelperClient,
+    PermissionsHelperError,
+    UserAbortError,
+)
 
 
-def _read_line(conn: socket.socket) -> bytes:
+def read_line(conn: socket.socket) -> bytes:
     data = b""
     while not data.endswith(b"\n"):
         chunk = conn.recv(65536)
@@ -38,7 +42,7 @@ def _read_line(conn: socket.socket) -> bytes:
     return data
 
 
-class _FakeHelper:
+class FakeHelper:
     """A pure-Python Unix-socket server speaking the helper's JSON-line protocol.
 
     `handler` maps a request dict to a response dict (the common path). `raw`
@@ -72,7 +76,7 @@ class _FakeHelper:
                     self._raw(conn)
                     continue
                 assert self._handler is not None  # pyright: ignore[reportUnknownMemberType]
-                resp = self._handler(json.loads(_read_line(conn)))  # pyright: ignore[reportUnknownMemberType]
+                resp = self._handler(json.loads(read_line(conn)))  # pyright: ignore[reportUnknownMemberType]
                 conn.sendall((json.dumps(resp) + "\n").encode())
 
     def close(self) -> None:
@@ -83,7 +87,7 @@ class _FakeHelper:
 
 @pytest.fixture
 def fake_helper():
-    servers: list[_FakeHelper] = []
+    servers: list[FakeHelper] = []
     paths: list[str] = []
 
     def start(
@@ -95,7 +99,7 @@ def fake_helper():
         # what pytest's tmp_path would produce.
         path = f"/tmp/avah{os.getpid()}-{len(servers)}.sock"  # noqa: S108
         Path(path).unlink(missing_ok=True)
-        servers.append(_FakeHelper(path, handler, raw))
+        servers.append(FakeHelper(path, handler, raw))
         paths.append(path)
         return path
 
@@ -114,7 +118,7 @@ def test_call_echoes_method_and_returns_result(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": {"path": req["path"], "bytes": 42}}
 
     path = fake_helper(handler)
-    out = client.screencapture_region(1, 2, 3, 4, "out.png", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    out = PermissionsHelperClient(path).screencapture_region(1, 2, 3, 4, "out.png")  # pyright: ignore[reportUnknownArgumentType]
     assert out == {"path": "out.png", "bytes": 42}
     assert seen["method"] == "screencapture_region"
     assert (seen["x"], seen["y"], seen["w"], seen["h"]) == (1, 2, 3, 4)
@@ -123,7 +127,7 @@ def test_call_echoes_method_and_returns_result(fake_helper) -> None:
 def test_ok_false_raises_with_server_error(fake_helper) -> None:
     path = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})
     with pytest.raises(PermissionsHelperError, match="no focused window"):
-        client.ax_window_info("Finder", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).ax_window_info("Finder")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_user_abort_reply_raises_its_own_error(fake_helper) -> None:
@@ -136,27 +140,25 @@ def test_user_abort_reply_raises_its_own_error(fake_helper) -> None:
         }
     )
     with pytest.raises(UserAbortError, match="stopped by the user") as raised:
-        client.click(1, 2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).click(1, 2)  # pyright: ignore[reportUnknownArgumentType]
     # Existing handlers of helper failures still see it as one.
     assert isinstance(raised.value, PermissionsHelperError)
     # Any other failure stays a plain helper error.
     other = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})
     with pytest.raises(PermissionsHelperError) as plain:
-        client.click(1, 2, sock_path=other)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(other).click(1, 2)  # pyright: ignore[reportUnknownArgumentType]
     assert not isinstance(plain.value, UserAbortError)
 
 
 def test_unreachable_socket_raises() -> None:
     with pytest.raises(PermissionsHelperError, match="not reachable"):
-        client.ping(sock_path="/tmp/ava-native-does-not-exist.sock")  # noqa: S108 — nonexistent path, asserts the unreachable error
+        PermissionsHelperClient("/tmp/ava-native-does-not-exist.sock").ping()  # noqa: S108 — nonexistent path, asserts the unreachable error
 
 
 def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
     from base import paths
-    from base.config import settings
 
-    monkeypatch.setattr(settings.services, "permissions_helper_port", 9999)
-    assert paths.permissions_helper_socket().name == "permissions-helper.9999.sock"
+    assert paths.permissions_helper_socket(9999).name == "permissions-helper.9999.sock"
 
 
 def test_permissions_helper_app_dir_is_stable_under_ava_home(
@@ -177,9 +179,9 @@ def test_method_name_mapping(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": {}}
 
     path = fake_helper(handler)
-    client.type_text("hi", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.click(1, 2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.ping(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).type_text("hi")  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).click(1, 2)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).ping()  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["type", "click", "ping"]
 
 
@@ -196,7 +198,7 @@ def test_indicator_stop_needs_the_helper_capability(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": results[req["method"]]}
 
     path = fake_helper(handler)
-    assert client.indicator_stop(sock_path=path)["stopped"] is True  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).indicator_stop()["stopped"] is True  # pyright: ignore[reportUnknownArgumentType]
     assert seen == [{"method": "ping"}, {"method": "indicator_stop"}]
     # The helper shows the badge itself; there is no client call that asks it to.
     assert not hasattr(client, "indicator_hold")
@@ -204,7 +206,7 @@ def test_indicator_stop_needs_the_helper_capability(fake_helper) -> None:
     capable[0] = False
     seen.clear()
     with pytest.raises(PermissionsHelperError, match="capture_indicator_v1"):
-        client.indicator_stop(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).indicator_stop()  # pyright: ignore[reportUnknownArgumentType]
     assert seen == [{"method": "ping"}]
 
 
@@ -222,21 +224,20 @@ def test_nursery_method_requests_and_results(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": results[req["method"]]}
 
     path = fake_helper(handler)
-    assert client.spawn_process(
+    assert PermissionsHelperClient(path).spawn_process(  # pyright: ignore[reportUnknownArgumentType]
         "agent-demo",
         ["/usr/bin/env", "python"],
         {"AVA_HOME": "/Users/ava/.ava"},
         "/Users/ava/work",
         "/Users/ava/logs/stdout.log",
         "/Users/ava/logs/stderr.log",
-        sock_path=path,  # pyright: ignore[reportUnknownArgumentType]
     ) == {"pid": 4123, "reused": False}
-    assert client.session_list("agent-", sock_path=path) == [  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).session_list("agent-") == [  # pyright: ignore[reportUnknownArgumentType]
         {"name": "agent-demo", "pid": 4123, "alive": True}
     ]
-    assert client.session_has("agent-demo", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    assert client.signal_session(name="agent-demo", sig=2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    assert client.signal_session(pid=4123, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).session_has("agent-demo")  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).signal_session(name="agent-demo", sig=2)  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).signal_session(pid=4123)  # pyright: ignore[reportUnknownArgumentType]
 
     assert seen == [
         {
@@ -259,14 +260,13 @@ def test_spawn_process_preserves_reused_result(fake_helper) -> None:
     def handler(req: dict) -> dict:
         return {"id": req["id"], "ok": True, "result": {"pid": 4123, "reused": True}}
 
-    assert client.spawn_process(
+    assert PermissionsHelperClient(fake_helper(handler)).spawn_process(  # pyright: ignore[reportUnknownArgumentType]
         "agent-demo",
         ["/usr/bin/env", "python"],
         {},
         "/Users/ava/work",
         "/Users/ava/logs/stdout.log",
         "/Users/ava/logs/stderr.log",
-        sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
     ) == {"pid": 4123, "reused": True}
 
 
@@ -373,13 +373,13 @@ def test_root_seed_env_rejects_a_non_string_map() -> None:
 )
 def test_signal_session_requires_exactly_one_target(name: str | None, pid: int | None) -> None:
     with pytest.raises(ValueError, match="exactly one"):
-        client.signal_session(name=name, pid=pid)
+        PermissionsHelperClient("/unused.sock").signal_session(name=name, pid=pid)
 
 
 # SECURITY SYNC: mirrors the resolved-string boundary check in
 # services/desktop/permissions_helper/helper/main.swift::resolvedWhitelistedFilePath.
 # Update both implementations together whenever whitelist containment changes.
-def _is_whitelisted_file_path(path: Path, roots: list[Path]) -> bool:
+def is_whitelisted_file_path(path: Path, roots: list[Path]) -> bool:
     if not path.is_absolute():
         return False
     resolved_path = str(path.resolve())
@@ -395,7 +395,7 @@ def _is_whitelisted_file_path(path: Path, roots: list[Path]) -> bool:
 # reads it from the helper; the calling process's own grant is a different fact.
 
 
-def _ping_reply(preflight_screen: bool, ax_trusted: bool = True) -> Callable[[dict], dict]:
+def ping_reply(preflight_screen: bool, ax_trusted: bool = True) -> Callable[[dict], dict]:
     return lambda req: {
         "id": req["id"],
         "ok": True,
@@ -415,7 +415,7 @@ def _ping_reply(preflight_screen: bool, ax_trusted: bool = True) -> Callable[[di
 # --- Bundle content -------------------------------------------------------
 
 
-def _parse_strings(path: Path) -> dict[str, str]:
+def parse_strings(path: Path) -> dict[str, str]:
     entries: dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -432,10 +432,10 @@ def _parse_strings(path: Path) -> dict[str, str]:
 # is never an acceptable substitute -- and a current bundle is never re-signed.
 
 
-_TEST_CERT_SHA1 = "0123456789ABCDEF0123456789ABCDEF01234567"
+TEST_CERT_SHA1 = "0123456789ABCDEF0123456789ABCDEF01234567"
 
 
-def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool) -> Path:
+def stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool) -> Path:
     from services.desktop.permissions_helper import launchd_job, lifecycle
 
     src = tmp_path / "main.swift"
@@ -458,27 +458,27 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     zh_lproj = locales / "zh-Hans.lproj"
     zh_lproj.mkdir()
     (zh_lproj / "Localizable.strings").write_text('"panel.title" = "zh";')
-    monkeypatch.setattr(lifecycle, "_SOURCE", src)
-    monkeypatch.setattr(lifecycle, "_INFO_PLIST", info)
-    monkeypatch.setattr(lifecycle, "_ENTITLEMENTS", entitlements)
-    monkeypatch.setattr(lifecycle, "_LOCALES", locales)
+    monkeypatch.setattr(lifecycle, "SOURCE", src)
+    monkeypatch.setattr(lifecycle, "INFO_PLIST", info)
+    monkeypatch.setattr(lifecycle, "ENTITLEMENTS", entitlements)
+    monkeypatch.setattr(lifecycle, "LOCALES", locales)
     monkeypatch.setattr(base_paths, "permissions_helper_app_dir", lambda: build)
     return app
 
 
-def _test_dr() -> str:
+def test_dr() -> str:
     return (
         'identifier "com.ava.permissions-helper" and certificate leaf = '
-        f'H"{_TEST_CERT_SHA1.lower()}"'
+        f'H"{TEST_CERT_SHA1.lower()}"'
     )
 
 
-def _write_current_build_state(app: Path, source_hash: str, *, dr: str | None = None) -> None:
+def write_current_build_state(app: Path, source_hash: str, *, dr: str | None = None) -> None:
     (app.parent / "build-state.json").write_text(
         json.dumps(
             {
                 "source_hash": source_hash,
-                "dr": dr or _test_dr(),
+                "dr": dr or test_dr(),
                 "signed_at": "2026-09-05T00:00:00+00:00",
             }
         )
@@ -494,7 +494,7 @@ class _Call(NamedTuple):
 
 @dataclass(frozen=True)
 class _FakeToolOutputs:
-    """What the stand-in swiftc / codesign / security answer, per `_fake_tools`'s arguments."""
+    """What the stand-in swiftc / codesign / security answer, per `fake_tools`'s arguments."""
 
     authority: str | None
     keychain_rc: int
@@ -537,7 +537,7 @@ class _FakeToolOutputs:
     def _find_identity(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         from services.desktop.permissions_helper import lifecycle
 
-        output = self.identity_output or f'  1) {_TEST_CERT_SHA1} "{lifecycle._CERT_CN}"\n'
+        output = self.identity_output or f'  1) {TEST_CERT_SHA1} "{lifecycle.CERT_CN}"\n'
         return subprocess.CompletedProcess(cmd, 0, output.encode(), b"")
 
     def _list_keychains(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -545,7 +545,7 @@ class _FakeToolOutputs:
 
         output = self.list_keychains_output
         if output is None:
-            output = f'    "{lifecycle._keychain_path()}"\n'.encode()
+            output = f'    "{lifecycle.keychain_path()}"\n'.encode()
         return subprocess.CompletedProcess(
             cmd,
             self.list_keychains_rc,
@@ -556,7 +556,7 @@ class _FakeToolOutputs:
     def _designated_requirement(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         if self.dr_streams is not None:
             return subprocess.CompletedProcess(cmd, 0, *self.dr_streams)
-        dr = self.designated_requirement or _test_dr()
+        dr = self.designated_requirement or test_dr()
         # Real codesign on current macOS emits the DR line on stdout
         # (stderr carries `Executable=...`); the reader accepts either.
         return subprocess.CompletedProcess(cmd, 0, f"designated => {dr}\n".encode(), b"")
@@ -568,7 +568,7 @@ class _FakeToolOutputs:
         return subprocess.CompletedProcess(cmd, rc, b"", stderr)
 
 
-def _fake_tools(
+def fake_tools(
     monkeypatch: pytest.MonkeyPatch,
     *,
     authority: str | None,
@@ -629,11 +629,11 @@ def _fake_tools(
     return recorded
 
 
-def _argvs(recorded: list[_Call]) -> list[list[str]]:
+def recorded_argvs(recorded: list[_Call]) -> list[list[str]]:
     return [c.argv for c in recorded]
 
 
-def _sign_command(recorded: list[_Call]) -> list[str]:
+def sign_command(recorded: list[_Call]) -> list[str]:
     return next(c.argv for c in recorded if c.argv[:2] == ["codesign", "--force"])
 
 
@@ -649,7 +649,7 @@ def _sign_command(recorded: list[_Call]) -> list[str]:
 # --- Install, in-place upgrade, and launchd repair ------------------------
 
 
-def _install_env(
+def install_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
@@ -669,13 +669,13 @@ def _install_env(
     log = tmp_path / "logs" / "permissions-helper.log"
     socket_path = tmp_path / "run" / "permissions-helper.sock"
     monkeypatch.setattr(lifecycle.base.paths, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(lifecycle, "_refuse_foreign_label_jobs", lambda: None)
-    monkeypatch.setattr(lifecycle, "_label", lambda: "com.ava.permissions-helper.test")
-    monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
-    monkeypatch.setattr(lifecycle, "_plist_path", lambda: plist_path)
-    monkeypatch.setattr(lifecycle, "_is_loaded", lambda: loaded)
+    monkeypatch.setattr(lifecycle, "refuse_foreign_label_jobs", lambda: None)
+    monkeypatch.setattr(lifecycle, "label", lambda: "com.ava.permissions-helper.test")
+    monkeypatch.setattr(lifecycle, "launchd_domain", lambda: "gui/501")
+    monkeypatch.setattr(lifecycle, "plist_path", lambda: plist_path)
+    monkeypatch.setattr(lifecycle, "is_loaded", lambda: loaded)
     monkeypatch.setattr(lifecycle, "logs_dir", lambda: log.parent)
-    monkeypatch.setattr(lifecycle, "permissions_helper_socket", lambda: socket_path)
+    monkeypatch.setattr(lifecycle, "helper_socket", lambda: socket_path)
     run_calls: list[list[str]] = []
     probe_calls: list[list[str]] = []
 
@@ -687,7 +687,7 @@ def _install_env(
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
     monkeypatch.setattr(lifecycle, "_run", run)
-    monkeypatch.setattr(lifecycle, "_probe", probe)
+    monkeypatch.setattr(lifecycle, "run_readonly_query", probe)
     if matching_plist:
         plist_path.parent.mkdir(parents=True)
         plist_path.write_bytes(
@@ -720,7 +720,7 @@ def _skip_sleep(_seconds: float) -> None:
 # home's own KeepAlive job for it.
 
 
-def _write_agent_plist(
+def write_agent_plist(
     agents: Path, label: str, sock: str, env_key: str = "AVA_PERMISSIONS_HELPER_SOCKET"
 ) -> Path:
     p = agents / f"{label}.plist"
@@ -736,7 +736,7 @@ def _write_agent_plist(
     return p
 
 
-def _retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 9223) -> Path:
+def retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 9223) -> Path:
     """Point the retire machinery at a fake home: current socket, agents dir,
     launchd domain."""
     from services.desktop.permissions_helper import lifecycle
@@ -745,9 +745,7 @@ def _retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 
     agents.mkdir(parents=True)
     run = tmp_path / "run"
     run.mkdir(parents=True)
-    monkeypatch.setattr(lifecycle, "_agents_dir", lambda: agents)
-    monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
-    monkeypatch.setattr(
-        lifecycle, "permissions_helper_socket", lambda: run / f"permissions-helper.{port}.sock"
-    )
+    monkeypatch.setattr(lifecycle, "agents_dir", lambda: agents)
+    monkeypatch.setattr(lifecycle, "launchd_domain", lambda: "gui/501")
+    monkeypatch.setattr(lifecycle, "helper_socket", lambda: run / f"permissions-helper.{port}.sock")
     return agents

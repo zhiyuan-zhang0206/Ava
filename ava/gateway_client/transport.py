@@ -78,7 +78,7 @@ def _inputs(context: AvaContext | None = None) -> GatewayTransportInputs:
     return owner.clients.get(GatewayTransportInputs)
 
 
-def _http(context: AvaContext | None = None) -> GatewayHandle:
+def gateway_http(context: AvaContext | None = None) -> GatewayHandle:
     """The bound context's gateway client, built on first use so importing the SDK in a no-config
     context does not require the gateway URL to be resolvable until an actual call is made. Its
     timeout is `Settings.gateway_client_http_timeout_seconds` (env override
@@ -99,16 +99,16 @@ def use_client(client: Any) -> Generator[Any]:
 
 
 # Gateway cold start ~0.6s (measured). Default 3 retries, base interval 1s —
-# bounded exponential backoff 1s → 2s → 4s → 8s cap (see `_retry_delay_seconds`),
+# bounded exponential backoff 1s → 2s → 4s → 8s cap (see `retry_delay_seconds`),
 # a much larger window than the restart time and well within the 10s timeout.
 # env override: `AVA_GATEWAY_MAX_RETRIES` / `AVA_GATEWAY_RETRY_DELAY_SECONDS`.
 
 
-def _max_retries(context: AvaContext | None = None) -> int:
+def request_max_retries(context: AvaContext | None = None) -> int:
     return _inputs(context).max_retries_reader()
 
 
-def _base_retry_delay_s(context: AvaContext | None = None) -> float:
+def base_retry_delay_s(context: AvaContext | None = None) -> float:
     return _inputs(context).retry_delay_reader()
 
 
@@ -119,12 +119,12 @@ def _base_retry_delay_s(context: AvaContext | None = None) -> float:
 
 # Bounded exponential backoff: attempt i sleeps the base delay multiplied by
 # the backoff factor raised to i, capped at `_RETRY_MAX_DELAY_S`, plus a
-# deterministic per-agent jitter offset (`_agent_jitter_seconds`) that
+# deterministic per-agent jitter offset (`agent_jitter_seconds`) that
 # de-phases retry waves across the fleet (heartbeat-daemon pattern, see below).
 _RETRY_BACKOFF_FACTOR = 2.0
 _RETRY_MAX_DELAY_S = 8.0
 # Span of the per-agent jitter offset, seconds.
-_JITTER_SPAN_S = 5.0
+JITTER_SPAN_S = 5.0
 
 # ── memory search: its own timeout and retry budget ──
 # `/api/memory/search` stands apart from the other routes: the gateway gives
@@ -143,7 +143,7 @@ MEMORY_SEARCH_MAX_RETRIES = 2
 # client ReadTimeout that beats it converts the error into a generic
 # GatewayUnavailable — the exact "caller reads out first" case the deadline
 # setting's description warns about.
-_MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
+MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
 
 
 def memory_search_timeout(context: AvaContext | None = None) -> TransportTimeout:
@@ -151,12 +151,12 @@ def memory_search_timeout(context: AvaContext | None = None) -> TransportTimeout
     search deadline plus the margin, so the server's deadline fires first."""
     import httpx
 
-    budget = _inputs(context).memory_deadline_reader() + _MEMORY_SEARCH_TIMEOUT_MARGIN_S
+    budget = _inputs(context).memory_deadline_reader() + MEMORY_SEARCH_TIMEOUT_MARGIN_S
     return httpx.Timeout(budget)
 
 
-def _agent_jitter_seconds(context: AvaContext | None = None) -> float:
-    """Deterministic per-agent offset in [0, _JITTER_SPAN_S); 0 when no agent id.
+def agent_jitter_seconds(context: AvaContext | None = None) -> float:
+    """Deterministic per-agent offset in [0, JITTER_SPAN_S); 0 when no agent id.
 
     The heartbeat daemon's per-agent due-time jitter pattern
     (services/wake/heartbeat/daemon.py): a correlated gateway outage hits every
@@ -172,14 +172,14 @@ def _agent_jitter_seconds(context: AvaContext | None = None) -> float:
     ident = agent_id(context)
     if ident is None:
         return 0.0
-    return _JITTER_SPAN_S * (ident % 1000) / 1000.0
+    return JITTER_SPAN_S * (ident % 1000) / 1000.0
 
 
-def _retry_delay_seconds(attempt: int, context: AvaContext | None = None) -> float:
+def retry_delay_seconds(attempt: int, context: AvaContext | None = None) -> float:
     """Sleep before retry `attempt` (0-based): bounded exponential backoff
     plus the deterministic per-agent jitter offset."""
-    base = min(_base_retry_delay_s(context) * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
-    return base + _agent_jitter_seconds(context)
+    base = min(base_retry_delay_s(context) * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
+    return base + agent_jitter_seconds(context)
 
 
 def raise_from_response(resp: TransportResponse) -> None:
@@ -300,11 +300,11 @@ def _request_with_retry(
     if attempts < 1:
         # Preserve the old range(attempts) behavior for a zero/negative override.
         raise GatewayUnavailable(
-            f"Gateway transport error at {_http(context).base_url} (after {attempts} retries): None"
+            f"Gateway transport error at {gateway_http(context).base_url} (after {attempts} retries): None"
         )
     policy = Policy(
         max_attempts=attempts,
-        backoff=lambda attempt: _retry_delay_seconds(attempt, context),
+        backoff=lambda attempt: retry_delay_seconds(attempt, context),
         jitter="none",  # backoff already includes the exact agent-only phase
         classify=classify,
         respect_retry_after=False,
@@ -317,11 +317,11 @@ def _request_with_retry(
     except transport_errors as exc:
         if not retryable and not isinstance(exc, pre_send_errors):
             raise GatewayUnavailable(
-                f"Gateway transport error at {_http(context).base_url} "
+                f"Gateway transport error at {gateway_http(context).base_url} "
                 f"(no retry: non-idempotent request; result unknown, may have been delivered): {exc!s}"
             ) from exc
         raise GatewayUnavailable(
-            f"Gateway transport error at {_http(context).base_url} (after {attempts} retries): {exc!s}"
+            f"Gateway transport error at {gateway_http(context).base_url} (after {attempts} retries): {exc!s}"
         ) from exc
 
 
@@ -351,7 +351,7 @@ def post(
     these happen before the request can be sent. Other transport failures
     leave the result unknown and must not cause a second POST. Retries use
     bounded exponential backoff + per-agent jitter
-    (`_retry_delay_seconds`), then either raises `GatewayUnavailable`
+    (`retry_delay_seconds`), then either raises `GatewayUnavailable`
     (transport) or returns the last response (HTTP: the caller's
     `raise_from_response` produces the wire error / `HTTPStatusError` — the
     loud failure carries the full status + body).
@@ -374,7 +374,7 @@ def post(
     client's configured timeout" — there is deliberately no way to ask for an
     unbounded request.
 
-    `max_retries` overrides the module-wide attempt count (`_max_retries()`) for
+    `max_retries` overrides the module-wide attempt count (`request_max_retries()`) for
     this one call. The default fits routes the gateway works on directly, but
     a call whose failure mode is a *modelled, already-spent* response (e.g.
     memory search, where the gateway answers 503 only after consuming its own
@@ -404,9 +404,9 @@ def post(
         else None
     )
 
-    retries = _max_retries(context) if max_retries is None else max_retries
+    retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
-        lambda: _http(context).post(
+        lambda: gateway_http(context).post(
             path, json=json or {}, params=params, timeout=per_call, headers=headers
         ),
         retries,
@@ -438,9 +438,11 @@ def get(
     import httpx
 
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else cast(httpx.Timeout, timeout)
-    retries = _max_retries(context) if max_retries is None else max_retries
+    retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
-        lambda: _http(context).get(path, params=params, timeout=per_call), retries, context=context
+        lambda: gateway_http(context).get(path, params=params, timeout=per_call),
+        retries,
+        context=context,
     )
 
 
@@ -465,7 +467,7 @@ def patch(
         else None
     )
     return _request_with_retry(
-        lambda: _http().patch(path, json=json or {}, headers=headers),
-        _max_retries(),
+        lambda: gateway_http().patch(path, json=json or {}, headers=headers),
+        request_max_retries(),
         retryable=keyed or semantics is Idempotency.IDEMPOTENT,
     )

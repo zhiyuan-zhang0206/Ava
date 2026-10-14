@@ -90,7 +90,7 @@ def set_table_to(
 
 
 @pytest.fixture(autouse=True)
-def _reset_schema_migrations_state(db_url: str) -> Iterator[None]:
+def reset_schema_migrations_state(db_url: str) -> Iterator[None]:
     """Rebuild schema_migrations to the canonical baselined state before/after each
     test. Rebuilds the table itself (not just TRUNCATE) so a cutover test that
     swapped it to the legacy shape cannot leak into the next test or module.

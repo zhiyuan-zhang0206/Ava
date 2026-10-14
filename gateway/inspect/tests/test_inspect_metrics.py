@@ -411,3 +411,45 @@ def test_replayed_turns_with_missing_duration_cannot_replace_historical_histogra
     assert result.stats is not None
     assert result.stats.turn_p50_seconds == 3
     assert result.metadata.turns.duration_precision == "one_second_buckets"
+
+
+@pytest.mark.parametrize("full_day", [False, True])
+@pytest.mark.parametrize("cached", [None, 0, 800])
+def test_observed_cache_rate_uses_only_metered_calls(
+    db_conn: psycopg.Connection, cached: int | None, full_day: bool
+) -> None:
+    start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+    end = start + timedelta(days=1) if full_day else start + timedelta(hours=1)
+    aid = _agent(db_conn, start)
+    write_observations(
+        [
+            MetricObservation(
+                1,
+                aid,
+                start + timedelta(seconds=1),
+                "usage",
+                usage_calls=1,
+                tokens_in=1000,
+                tokens_cached=cached or 0,
+                tokens_cache_input=0 if cached is None else 1000,
+                cost_usd=Decimal(1),
+            ),
+            MetricObservation(
+                2,
+                aid,
+                start + timedelta(seconds=2),
+                "usage",
+                usage_calls=1,
+                tokens_in=5000,
+                tokens_cache_input=0,
+                cost_usd=Decimal(2),
+            ),
+        ],
+        db=db_conn,
+    )
+    snapshot = _read(db_conn, aid, start, end)
+    assert snapshot.cost is not None
+    assert snapshot.cost.tokens_in == 6000
+    assert snapshot.cost.llm_calls == 2
+    assert snapshot.cost.cost_usd == 3
+    assert snapshot.cost.cache_hit_pct == (None if cached is None else cached / 10)

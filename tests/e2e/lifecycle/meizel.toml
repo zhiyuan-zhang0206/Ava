@@ -1,0 +1,2 @@
+[debt.env-patch]
+"test_self_resurrect.py#monkeypatch.setenv os.environ" = 1

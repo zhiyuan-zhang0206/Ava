@@ -40,11 +40,11 @@ from base.telemetry import EventPipeline
 from cli.commands.lifecycle import start as start_mod
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
-    _hermetic_start as _base_start,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
+    hermetic_start as _base_start,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
 from cli.commands.probe import ReadinessWait
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.roster.service_spec import AGENT_RUNNER, GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
@@ -193,7 +193,7 @@ _REAL_GATE = start_mod.refuse_occupied_health_ports
 
 
 @pytest.fixture
-def _hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+def hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
     request.getfixturevalue("_base_start")
     monkeypatch.setattr(start_mod, "refuse_occupied_health_ports", _REAL_GATE)
     monkeypatch.setattr(
@@ -227,14 +227,14 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
         launched.extend(s.session for s in roster)
         return LaunchOutcome(roster, ())
 
-    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
+    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
     return launched
 
 
 def test_start_refuses_and_launches_nothing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    _hermetic_start: None,
+    hermetic_start: None,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -260,7 +260,7 @@ def test_start_refuses_and_launches_nothing(
 
 def test_a_clear_roster_starts_normally(
     monkeypatch: pytest.MonkeyPatch,
-    _hermetic_start: None,
+    hermetic_start: None,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -282,7 +282,7 @@ def test_a_clear_roster_starts_normally(
 
 def test_a_disabled_service_cannot_block_start(
     monkeypatch: pytest.MonkeyPatch,
-    _hermetic_start: None,
+    hermetic_start: None,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -307,7 +307,7 @@ def test_a_disabled_service_cannot_block_start(
 
 def test_optional_port_conflict_does_not_block_core_start(
     monkeypatch: pytest.MonkeyPatch,
-    _hermetic_start: None,
+    hermetic_start: None,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,

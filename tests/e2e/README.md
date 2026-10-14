@@ -10,7 +10,7 @@ Design doc: see `docs/superpowers/specs/2026-05-07-e2e-happy-path-design.md`
 What is (and is not) covered, feature by feature, lives in [FEATURES.md](FEATURES.md).
 
 
-The stack authenticates like a started cluster (`_credentials.py`). `_e2e_process_env`
+The stack authenticates like a started cluster (`_credentials.py`). `e2e_process_env`
 gives the e2e home a cluster secret and an active write generation in its private
 ledger (the one `ava start` births at first start). The gateway is delivered its
 gateway-class machine API token, the ops daemon and the agent host the runner-class
@@ -20,16 +20,12 @@ accepted. The test process reaches the gateway with the human secret as a Bearer
 every browser context the suite creates logs in through `/api/auth/login` (`install_browser_login`), as a user's browser does. No product admission rule is
 bypassed.
 
-Browser login first probes the public `/api/health` endpoint without credentials.
-Mocked visual pages that start only the frontend need no cluster credentials or login;
-contexts created after a gateway becomes ready still use the authenticated login path.
-
 
 ## Running
 
 ```bash
 # Prerequisites: have Postgres/Redis server binaries locally (each worker runs
-# independent temporary native clusters via tests/_containers.py, no Docker needed),
+# independent temporary native clusters via base/deploy/tests/containers.py, no Docker needed),
 # npm install (frontend)
 uv sync
 .venv/bin/playwright install chromium
@@ -99,8 +95,10 @@ multi-chunk.
   `python -m uvicorn --fd` entry; normal gateway lifespan is unchanged. Each previous fixture process
   must exit before replacement; readiness requires HTTP plus the new PID/birth's native listener.
   Fixed-port listener diagnostics retain native identities and unknown visibility on failure.
-  Next's frontend port still uses a released kernel allocation and has a separate reservation gap;
-  dynamic allocation alone is not a zero-collision guarantee. Postgres/Redis use tests/_containers.py
+  Next cannot inherit a socket, so its frontend port is a reservation from a block below the kernel's
+  ephemeral range (one candidate per xdist worker slot), held through the build and released only right
+  before `next start` is spawned: no `bind(0)` and no outgoing connection's source port can take it, and
+  workers never share one. Postgres/Redis use base/deploy/tests/containers.py
   for independent native clusters per worker. This gateway FD path targets the existing POSIX E2E CI.
 - **dev and e2e can run simultaneously** — ports/databases/channels are all separate
   (see `_ports.py` + `conftest.py` env override section).

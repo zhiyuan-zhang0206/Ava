@@ -20,7 +20,7 @@ cached); and LangGraph / Pydantic introspect type hints at runtime via
 `get_type_hints()` / `inspect.signature`, so a name imported only under
 `TYPE_CHECKING` raises NameError. The genuine exceptions — a real circular
 import, or an `import torch`-class heavy dependency on a path that does not use
-the type — go in `_TYPE_CHECKING_ALLOWED` with a one-line reason.
+the type — are listed under `[type-checking.files]` in `meizel.policy.toml` with a one-line reason.
 
 ### Rule 3: retired ambient machine-role reader
 
@@ -29,25 +29,11 @@ composition root. The retired machine_role() call is rejected in every governed
 production module; there is no per-file allowance. Capability guards read the
 owner's role() and retain the single gateway routing contract (issue #216).
 
-### Rule 4: package doors (locality)
+### Rule 4: retired
 
-A `_`-prefixed module or name is private to the package that owns it, resolved
-the way Python resolves it: when `<prefix>.py` exists the name is package-private
-to that module's package (a same-named docs folder beside it changes nothing);
-otherwise the prefix is the package owning the private submodule. Reaching it from
-outside that package, by import or by attribute access on an imported module
-(`import ava.x as m; m._y`), bypasses the package door: the importer depends on an
-implementation detail the owner never promised to keep. Fix: use a public name
-through the owner's `__init__.py`, or promote the name into the owner's contract
-on purpose (export it / drop the underscore) so the widened contract is visible in
-the diff. No per-site allowlist: a name another package needs is contract by
-definition. `ava` is no exception: agent visibility there is the
-`__all_for_ava__` whitelist, not the underscore. A module alias rebound anywhere
-in the file (a parameter such as `self`, a local) is not followed.
-
-Test files (any `tests/` directory: the top-level one or a package's own, see
-`lint_common.is_test_path`) are exempt from Rules 1, 3, 4, 5 and 6; only budgets apply
-(patch targets in tests: `scripts/lint/patch_targets.py`).
+Reaching another package's `_`-prefixed module or name is reported by meizel
+(`private-name`, `private-module`, with the `meizel.toml` exports deciding what is a
+public door); see `meizel/docs/checker/checker.ava.okf.md`. This script no longer measures it.
 
 ### Rule 5: single decision owners (locality)
 
@@ -57,11 +43,10 @@ one owning module; any other module making that decision is a bypass. Today:
 connect`) or a construction of a psycopg_pool pool or of this repo's own
 `*ConnectionPool` subclass belongs to `base/db/connections.py`, which owns the
 transport posture. A site that genuinely cannot go through the owner goes in that
-decision's `allowed` map with a one-line reason; an allowed module that stops
+decision's `[single-owner.<decision>]` table in `meizel.policy.toml` with a one-line reason; an allowed module that stops
 bypassing, or no longer exists, fails as stale.
 
-Rules 4 and 5 have no baseline allowances. Every measured reach-in or decision-owner
-bypass fails directly. Owner resolution stays in scripts/structure/locality.py and
+Rule 5 has no baseline allowance. Every measured decision-owner bypass fails directly. Owner resolution stays in scripts/structure/locality.py and
 the decision contracts live in meizel/owners/decisions.py; see docs/conventions/python-conventions.md.
 
 ### Rule 6: no path imports under ava_builtins/ (package doors)
@@ -76,7 +61,7 @@ fails directly; no baseline can permit it. The one narrow exception (a within-sk
 
 `meizel/state/ambient_state/`: module-level state read to decide and free-floating
 background work fail, except what the closed lists in `allowlist.py` allow. Frozen as
-`path::rule:name -> site count`, exact and shrink-only like Rules 4-6; also governs `schedules/`.
+`path::rule:name -> site count`, exact and shrink-only like Rules 5-6; also governs `schedules/`.
 
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
@@ -127,7 +112,7 @@ __all__ = ["main"]
 _SITE_SECTIONS = (*locality.EXTERNAL_SECTIONS, ambient_state.SECTION)
 _MEASURED_SECTIONS = (*locality.SECTIONS, path_imports.SECTION, ambient_state.SECTION)
 
-# AST rules track [tool.importlinter] root_packages; budgets also cover tooling/tests.
+# AST rules track the application packages; budgets also cover tooling/tests.
 _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
 _AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9 governs
 _STRUCTURE_DIRS = packages("application", "tests", "tooling")
@@ -260,9 +245,6 @@ def _section_guard(
 ) -> list[str]:
     errors: list[str] = []
     additions = current.keys() - previous.keys()
-    paired = kind in locality.SECTIONS
-    if paired:
-        additions = set(locality.unpaired_additions(current, previous))
     for name in sorted(additions):
         moved_to = _renamed_to(name, renames or {})
         if moved_to is not None:
@@ -273,14 +255,8 @@ def _section_guard(
                 f"{baseline_shards.shard_path(kind, new_key)} with the same value"
             )
             continue
-        rule = (
-            "baseline is shrink-only"
-            if not paired
-            else "added key without a same-file removal of the same private name: a split, "
-            "move or swap cannot carry a frozen site — route it through the door or owner"
-        )
         errors.append(
-            f"{baseline_shards.shard_path(kind, name)}: added {kind} entry {name} — {rule}"
+            f"{baseline_shards.shard_path(kind, name)}: added {kind} entry {name} — baseline is shrink-only"
         )
     for name in sorted(current.keys() & previous.keys()):
         if current[name] > previous[name]:
@@ -336,10 +312,10 @@ def _ast_rule_files(argv: list[str], repo_root: Path) -> set[Path]:
 
 
 def _collect_locality(
-    tree: ast.Module, rel: str, sites: dict[str, locality.Sites], scanned: set[str], repo_root: Path
+    tree: ast.Module, rel: str, sites: dict[str, locality.Sites], scanned: set[str]
 ) -> None:
     scanned.add(rel)
-    for kind, found in locality.measure(tree, rel, _SCAN_DIRS, repo_root).items():
+    for kind, found in locality.measure(tree, rel, _SCAN_DIRS).items():
         sites[kind].update(found)
     sites[path_imports.SECTION].update(path_imports.measure(tree, rel))
 
@@ -361,7 +337,6 @@ def _check_ast_and_quality(
 ) -> list[str]:
     files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
     ast_files = _ast_rule_files(argv, repo_root)
-    locality.reset_caches()
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
     sites: dict[str, locality.Sites] = {kind: {} for kind in _MEASURED_SECTIONS}
     scanned: set[str] = set()
@@ -383,7 +358,7 @@ def _check_ast_and_quality(
             errors.extend(
                 f"{rel}:{line}: {message}" for line, message in _scan_file(path, rel, tree)
             )
-            _collect_locality(tree, rel, sites, scanned, repo_root)
+            _collect_locality(tree, rel, sites, scanned)
         if ambient:
             errors.extend(ambient_state.collect(tree, rel, repo_root, sites, scanned))
         if path in files:

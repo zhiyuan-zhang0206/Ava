@@ -73,7 +73,7 @@ all); a test moved elsewhere gets its file named in the destination directory's 
 |------|------|
 | `base/packages/plugins/manifest.py` | `base/packages/plugins/tests/test_manifest.py` |
 | `agent/graph/exec/node.py` | `agent/graph/exec/tests/test_exec_output.py` |
-| `gateway/agents/history/timeline.py` | `gateway/agents/history/tests/test_timeline.py` |
+| `gateway/agents/history/timeline.py` | `gateway/tests/history/test_timeline.py` |
 | `ava/shell.py` | `ava/tests/namespaces/shell/test_shell.py` |
 
 If adding a new sub-module (e.g., `ava/new_module.py`), create `test_new_module.py` in
@@ -172,7 +172,7 @@ see the [hook runbook](../docs/conventions/runbook.md#git-hooks-pre-commit--pre-
 
 ## `.test_durations` — pytest-split duration data
 
-The backend shards (16 whole-file groups) and the e2e shards (`--splits 4`) are
+The backend shards (8 whole-file groups) and the e2e shards (`--splits 4`) are
 balanced by per-test durations from the repo-root `.test_durations`, an untracked
 file: the daily measurement saves it as a GitHub Actions cache and CI restores it
 (a run without one splits by test count and warns). A test without an entry is
@@ -240,7 +240,7 @@ keeps running with the layered values. Enforced by
 1. **`scope="session"` outside `tests/fixtures/provisioning.py` may not mutate a process global**
    (`os.environ`, a `settings` field, a module global). That plugin is the one
    exemption — the repo-root conftest loads it once per process, so "the session" and "my directory" are the same blast radius,
-   but resource lifetime does not require permanent URL delivery: `_provisioned_db`
+   but resource lifetime does not require permanent URL delivery: `provisioned_db`
    owns the instance, while the requesting function restores `AVA_DB_URL`, Settings
    and the private `.env` on teardown. Deeper
    than that, narrow the scope or return the owned value. A session
@@ -255,7 +255,7 @@ keeps running with the layered values. Enforced by
    test directory here with an `__init__.py`, and that file exists for exactly this
    reason — it is load-bearing, not cruft.
 
-Both rules come from one incident: `tests/e2e/conftest.py:_e2e_process_env` layers ten
+Both rules come from one incident: `tests/e2e/conftest.py:e2e_process_env` layers ten
 env vars and was `scope="session"`, so `tests/harness/test_home_isolation.py` — which sorts
 after `tests/e2e/` and exists to notice precisely this — failed on every serial run
 while CI stayed green (the backend job passes `--ignore=tests/e2e`, and `-n auto` puts

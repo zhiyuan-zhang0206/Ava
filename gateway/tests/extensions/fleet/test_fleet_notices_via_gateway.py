@@ -58,7 +58,7 @@ def sdk_via_inprocess_gateway(
 
 
 @pytest.fixture
-def _load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Install Fleet with a valid local sampling policy; uninstall after the test."""
     from base.agents.sdk import call_policy
 
@@ -98,7 +98,7 @@ def _assert_second_notice_supersedes_first(nid: Any, nid2: Any) -> None:
 
 
 def test_notify_inserts_fyi_and_snapshot_counts_unread(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
@@ -135,7 +135,7 @@ def test_notify_inserts_fyi_and_snapshot_counts_unread(
 
 
 def test_notify_require_response_rides_awaiting_worklist(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
@@ -192,7 +192,7 @@ def _notice_task_id(db: psycopg.Connection, agent_id: int) -> int | None:
 
 
 def test_notify_records_task_id_and_rides_snapshot(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     """notify(task=...) writes the task link, and a require_response notice carries
     it out on the snapshot's notices_awaiting_response."""
@@ -215,7 +215,7 @@ def test_notify_records_task_id_and_rides_snapshot(
 
 
 def test_notify_without_task_leaves_task_id_null(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
@@ -225,7 +225,7 @@ def test_notify_without_task_leaves_task_id_null(
 
 
 def test_notify_nonexistent_task_raises(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
@@ -234,7 +234,7 @@ def test_notify_nonexistent_task_raises(
 
 
 def test_edit_notice_partial_update(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
@@ -272,7 +272,7 @@ def test_edit_notice_partial_update(
 
 def test_response_notice_content_edits_publish_refreshed_snapshot(
     sdk_via_inprocess_gateway: None,
-    _load_activity_plugin: None,
+    load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -330,7 +330,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
 
 
 def test_edit_notice_validation_and_guards(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
@@ -351,7 +351,7 @@ def test_edit_notice_validation_and_guards(
 
 
 def test_dismiss_notice_withdraws(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
@@ -385,7 +385,7 @@ def test_dismiss_notice_withdraws(
 
 def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
     sdk_via_inprocess_gateway: None,
-    _load_activity_plugin: None,
+    load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ):

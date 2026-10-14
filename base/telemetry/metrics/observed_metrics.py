@@ -32,7 +32,10 @@ from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 
 @dataclass(frozen=True)
 class MetricObservation:
-    """One source event reduced to a typed additive measurement."""
+    """One additive measurement; a null cache-input counter preserves legacy input scope.
+
+    Current event projections always set that counter, including zero for unmetered input.
+    """
 
     event_id: int
     agent_id: int
@@ -44,6 +47,7 @@ class MetricObservation:
     tokens_in: int = 0
     tokens_out: int = 0
     tokens_cached: int = 0
+    tokens_cache_input: int | None = None
     tokens_reasoning: int = 0
     cost_usd: Decimal = Decimal(0)
     turn_total: int = 0
@@ -121,7 +125,12 @@ def _usage(base: _MetricIdentity, attributes: Mapping[str, Any]) -> MetricObserv
         unpriced_calls=int(unpriced),
         tokens_in=_count(attributes.get("in_total", 0)),
         tokens_out=_count(attributes.get("out_total", 0)),
-        tokens_cached=_count(attributes.get("cache_read", 0)),
+        tokens_cached=_count(attributes["cache_read"])
+        if attributes.get("cache_read") is not None
+        else 0,
+        tokens_cache_input=_count(attributes.get("in_total", 0))
+        if attributes.get("cache_read") is not None
+        else 0,
         tokens_reasoning=_count(attributes.get("reasoning", 0)),
         cost_usd=price,
     )
@@ -194,6 +203,7 @@ _COUNTERS = (
     "tokens_in",
     "tokens_out",
     "tokens_cached",
+    "tokens_cache_input",
     "tokens_reasoning",
     "turn_total",
     "turn_ok",
@@ -221,6 +231,18 @@ _DAY_FIELDS = (
 )
 # Insert and aggregate in one statement: ON CONFLICT returns only novel facts,
 # including when two processes concurrently replay the same source batch.
+_DAY_SUMS = ", ".join(
+    "sum(coalesce(tokens_cache_input, tokens_in))"
+    if name == "tokens_cache_input"
+    else f"sum({name})"
+    for name in _SUMS
+)
+_DAY_UPDATES = ", ".join(
+    "tokens_cache_input = coalesce(agent_metric_days.tokens_cache_input, agent_metric_days.tokens_in) + EXCLUDED.tokens_cache_input"
+    if name == "tokens_cache_input"
+    else f"{name} = agent_metric_days.{name} + EXCLUDED.{name}"
+    for name in _SUMS
+)
 _WRITE_SQL = f"""
 WITH inserted AS (
     INSERT INTO agent_metric_observations ({_FIELDS})
@@ -232,13 +254,13 @@ WITH inserted AS (
 ), rolled_up AS (
     INSERT INTO agent_metric_days ({_DAY_FIELDS})
     SELECT agent_id, (occurred_at AT TIME ZONE 'UTC')::date,
-        {", ".join(f"sum({name})" for name in _SUMS)},
+        {_DAY_SUMS},
         coalesce(sum(turn_duration_seconds), 0),
         min(turn_duration_seconds), max(turn_duration_seconds), max(observed_at)
     FROM inserted GROUP BY agent_id, (occurred_at AT TIME ZONE 'UTC')::date
     ORDER BY agent_id, (occurred_at AT TIME ZONE 'UTC')::date
     ON CONFLICT (agent_id, day) DO UPDATE SET
-        {", ".join(f"{name} = agent_metric_days.{name} + EXCLUDED.{name}" for name in _SUMS)},
+        {_DAY_UPDATES},
         turn_duration_sum = agent_metric_days.turn_duration_sum + EXCLUDED.turn_duration_sum,
         turn_duration_min = least(agent_metric_days.turn_duration_min, EXCLUDED.turn_duration_min),
         turn_duration_max = greatest(agent_metric_days.turn_duration_max, EXCLUDED.turn_duration_max),

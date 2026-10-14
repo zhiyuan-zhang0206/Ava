@@ -18,7 +18,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from gateway.schemas.shell import ShellCaptureResponse
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 
 router = APIRouter()
 
@@ -68,19 +68,19 @@ async def get_agent_shell(
     machine = await asyncio.to_thread(_agent_machine_blocking, request.app.state.db_pool, agent_id)
 
     try:
-        result = await _cluster_rpc.dispatch_to_machine(
+        result = await cluster_rpc.dispatch_to_machine(
             request.app.state.db,
             machine,
             "shell_capture",
             {"agent_id": agent_id, "session_id": session_id, "lines": lines},
             timeout_s=_CAPTURE_TIMEOUT_S,
         )
-    except _cluster_rpc.ClusterOpUnreachable as exc:
+    except cluster_rpc.ClusterOpUnreachable as exc:
         raise HTTPException(
             status_code=503,
             detail=f"machine {machine!r} ops server unreachable for shell_capture: {exc!s}",
         ) from exc
-    except _cluster_rpc.ClusterOpFailed as exc:
+    except cluster_rpc.ClusterOpFailed as exc:
         # The op ran on the agent's machine and reported failure — the usual
         # cause is "no live shell with that id" (capture_shell's
         # ShellNotFoundError) or the session dying mid-capture. Either way the

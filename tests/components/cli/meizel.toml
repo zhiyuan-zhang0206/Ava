@@ -1,1 +1,53 @@
 exports = ["test_pgbouncer_wire.py"]
+
+[debt.env-patch]
+"test_otel_bootstrap_relay.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_otel_bootstrap_relay.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+"test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.gateway.gateway_port" = 1
+"test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 1
+"test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.observability.lgtm_listen_host" = 2
+"test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.observability.telemetry_tempo_endpoint" = 1
+"test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.observability.telemetry_tempo_query_url" = 1
+"test_converge_lgtm_contract.py#monkeypatch.setattr base.packages.dashboard_supply.render_dashboard_json" = 1
+"test_converge_lgtm_contract.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform.machine" = 1
+"test_converge_lgtm_contract.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform.system" = 1
+"test_converge_lgtm_contract.py#monkeypatch.setattr cli.commands.observability.lgtm_native.verify_loki" = 1
+"test_converge_redis_bridge.py#monkeypatch.setattr base.cluster.dataplane.redis_bridge.get_record" = 1
+"test_converge_redis_bridge.py#monkeypatch.setattr cli.commands.converge.redis_bridge.bootout_and_wait" = 1
+"test_converge_redis_bridge.py#monkeypatch.setattr cli.commands.converge.redis_bridge.job_loaded" = 1
+"test_converge_redis_bridge.py#monkeypatch.setattr cli.commands.converge.redis_bridge.launchctl" = 1
+"test_converge_redis_bridge.py#monkeypatch.setattr cli.commands.converge.redis_bridge.launchd_plist_path" = 2
+"test_converge_redis_bridge.py#monkeypatch.setattr cli.commands.converge.redis_bridge.redis_bridge_endpoint" = 2
+"test_converge_redis_bridge.py#monkeypatch.setattr cli.commands.converge.redis_bridge.sys.platform" = 5
+"test_maintenance_readiness.py#monkeypatch.setattr cli.commands.probe.probe_service" = 1
+"test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.db_pool_max_size" = 1
+"test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 3
+"test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.pgbouncer_enabled" = 2
+"test_operator_database.py#monkeypatch.setattr base.db.Database.__init__" = 1
+"test_operator_database.py#monkeypatch.setattr base.db.Database.from_settings" = 4
+"test_operator_database.py#monkeypatch.setattr base.telemetry.build_pipeline" = 1
+"test_otel_bootstrap_relay.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_otel_bootstrap_relay.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
+"test_otel_bootstrap_relay.py#monkeypatch.setattr base.config.settings.observability" = 1
+"test_otel_bootstrap_relay.py#monkeypatch.setattr base.config.settings.observability.gateway_otlp_endpoint" = 1
+"test_otel_bootstrap_relay.py#monkeypatch.setattr base.host.db_authority.unit.load_unit_capability" = 1
+"test_otel_bootstrap_relay.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
+"test_otel_bootstrap_relay.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_otel_bootstrap_relay.py#monkeypatch.setattr gateway.app.ConfigBoot" = 1
+"test_pgbouncer_config.py#monkeypatch.setattr base.cluster.dataplane.direct_url.get_record" = 1
+"test_pgbouncer_config.py#monkeypatch.setattr base.cluster.get_record" = 1
+"test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.ConnectionPool" = 1
+"test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
+"test_pgbouncer_config.py#monkeypatch.setattr services.backup.dump.local_owner_authority" = 1
+"test_pgbouncer_wire.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 7
+
+[debt.third-party-patch]
+"test_converge_redis_bridge.py#monkeypatch.setattr redis.Redis.from_url" = 3
+
+[debt.unresolved-patch]
+"test_converge_redis_bridge.py#monkeypatch.setattr command_runtime.machine.host" = 1
+"test_converge_redis_bridge.py#monkeypatch.setattr machine.host" = 1
+"test_pgbouncer_wire.py#monkeypatch.setattr dp.db_url" = 2

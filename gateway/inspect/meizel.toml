@@ -12,6 +12,3 @@ exports = ["neighbors.py", "okf_graph.py", "router.py", "schemas.py"]
 [external]
 "_plugin_metrics.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "_plugin_widgets.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
-
-[debt.private-name]
-"tests/test_inspect_metrics_health.py -> _metrics_health.py#_historical" = 1

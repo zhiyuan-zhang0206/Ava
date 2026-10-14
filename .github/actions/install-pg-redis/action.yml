@@ -1,7 +1,7 @@
 name: Install Postgres 17 + Redis + PgBouncer
 description: >
   Server binaries on PATH for the self-provisioned test clusters
-  (tests/_containers.py). Redis and PgBouncer are the pinned production builds;
+  (base/deploy/tests/containers.py). Redis and PgBouncer are the pinned production builds;
   the Postgres server a test cluster runs is the vendored zonky tree, put in
   place by scripts/ci/vendor_pg_runtime.py after the Python deps install (this
   action only supplies the host client tools). Every network phase degrades instead of failing: the

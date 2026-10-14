@@ -59,16 +59,34 @@ violations pass, anything new fails, and the debt may only shrink
   legal new dependencies of your changed files and prunes stale ones). An edge
   that closes a cycle, a private name, an underscore module or a restricted form
   is not declared; change the code. Run `python -m meizel debt prune` for
-  `debt-paid`.
+  `debt-paid`. After moving a file, stage the move and run `python -m meizel debt
+  carry` so its recorded debt follows it (it relocates entries, never adds one).
 - `python -m meizel debt record` is for a deliberate exception that has been
   discussed with the maintainers and is explained in the PR. It is never the way
   to make a failing check pass.
 - When a change pays debt down, run `python -m meizel debt prune` in the same
   change so the baseline drops with the fix. `python -m meizel debt` shows what
   is left.
-- CI warns when the recorded total grows against the base
-  (`debt diff --on-growth=warn`). It does not fail yet; growth without a
-  discussed reason is still not accepted.
+- CI fails when the recorded total grows against the base (`debt diff --on-growth=fail`).
+  The one waiver is decided by path, not by a reader: a pure rule change reports growth as a
+  warning, because widening a rule grows the baselines. Pure means it edits meizel's own rule code
+  (Python under `meizel/` outside tests) and touches nothing but `meizel/`, the `meizel.toml`
+  baselines and `meizel.policy.toml`. A change that also edits product code or tests is not waived,
+  so a rule change gets its own PR.
+- Patching is debt of every kind: `first-party-patch`, `stdlib-patch`, `third-party-patch`,
+  `env-patch` and `unresolved-patch` (a target the imports do not resolve). Do not add one;
+  pass the dependency in as an explicit parameter
+  ([patching](../meizel/docs/checker/patching.ava.okf.md)). When a symbol is renamed, `debt carry
+  --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,
+  `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. `debt sites --code <patch code>
+  --target-prefix <prefix>` lists where a target is patched (file, line, form), and `debt diff
+  --by-target` reports what a change paid down per target; a codemod PR pastes the latter.
+- `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
+  `[loads]` sites, default-argument injections) and every exemption of the lint rules in
+  `meizel/` (ambient state, clock lattice, single owners, `os.environ`, per-agent settings,
+  `TYPE_CHECKING`). Rule code holds no exemption of its own. Do not edit the file unless the task
+  names the entry; CI prints every change to it
+  ([the policy file](../meizel/docs/checker/policy.ava.okf.md)).
 
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes

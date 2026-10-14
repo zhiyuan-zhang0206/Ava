@@ -6,12 +6,6 @@ exports = ["daemon.py", "labeler.py", "tests"]
 "tests" = ["config.py", "daemon.py", "labeler.py"]
 
 [debt.private-name]
-"tests/test_labeler_backoff.py -> daemon.py#_dispatch_loop" = 2
-"tests/test_labeler_config.py -> daemon.py#_dispatch_loop" = 1
-"tests/test_labeler_config.py -> daemon.py#_endpoint" = 1
 "tests/test_labeler_config.py -> daemon.py#_hard_exit" = 2
 "tests/test_labeler_config.py -> daemon.py#_is_running" = 1
 "tests/test_labeler_config.py -> daemon.py#_remove_pidfile" = 3
-"tests/test_labeler_config.py -> daemon.py#_write_pidfile" = 1
-"tests/test_labeler_failure_boundary.py -> daemon.py#_dispatch_loop" = 2
-"tests/test_labeler_quiesced.py -> daemon.py#_dispatch_loop" = 1

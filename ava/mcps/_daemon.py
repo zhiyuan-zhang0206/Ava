@@ -50,10 +50,10 @@ from base.config import settings
 from base.log.sinks import add_sink
 from base.paths import ava_home
 
-from ._oauth import _OAUTH_FLOW_TIMEOUT_S
+from ._oauth import OAUTH_FLOW_TIMEOUT_S
 
 
-def _load_config() -> dict[str, dict[str, Any]]:
+def load_config() -> dict[str, dict[str, Any]]:
     """Merged MCP server map (machine `$AVA_HOME/mcp.json` + plugin-bundled `.mcp.json`).
 
     Same loader the in-process tool surface reads, so both agree on the server set.
@@ -78,7 +78,7 @@ def _load_config() -> dict[str, dict[str, Any]]:
 
 def shared_kind(server: str) -> Any:
     """The server's `shared` declaration: `"browser"`, True, or falsy (none)."""
-    cfg = _load_config()
+    cfg = load_config()
     spec = cfg.get(server)
     return spec.get("shared") if spec else None
 
@@ -167,7 +167,7 @@ class SerialSession:
             return await self._session.call_tool(name, args)
 
 
-def _is_transport_error(exc: BaseException) -> bool:
+def is_mcp_transport_error(exc: BaseException) -> bool:
     """Return True when *exc* indicates the MCP server process or stdio pipe
     died and a reconnect + retry is appropriate.
 
@@ -205,27 +205,34 @@ async def invalidate_session(
                 )
 
 
+def open_stdio_client(params: Any, *, errlog: Any) -> Any:
+    """The MCP SDK's stdio transport for `params`; the SDK is imported on first use."""
+    from mcp.client.stdio import stdio_client
+
+    return stdio_client(params, errlog=errlog)
+
+
 async def connect_server(
     server: str,
     oauth_locks: dict[str, asyncio.Lock],
     *,
     timeout_seconds: Callable[[], float],
+    stdio_client: Callable[..., Any] = open_stdio_client,
 ) -> Any:
     """Start MCP server and return (session, AsyncExitStack).
 
     A `"shared": "browser"` server needs no child process: the daemon dials
     the per-machine browser-mcp service directly. Everything else spawns a
-    stdio child. On failure the local stack is closed so no resources
-    (subprocess, pipes, fds) leak. The caller is responsible for the returned
-    stack."""
+    stdio child through `stdio_client(params, errlog=)`. On failure the local
+    stack is closed so no resources (subprocess, pipes, fds) leak. The caller
+    is responsible for the returned stack."""
     from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
 
     from ava.mcps.config import server_cwd
 
     from ._browser import connect_browser_direct
 
-    cfg = _load_config()
+    cfg = load_config()
     spec = cfg[server]
     assert_requirements(spec)
     url = server_url(spec)
@@ -307,7 +314,7 @@ async def connect_http(
     local_stack = AsyncExitStack()
     # An OAuth authorization flow involves the user clicking through a browser,
     # so the connect envelope is far more generous there than for stdio/static-auth.
-    timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else timeout_seconds()
+    timeout = OAUTH_FLOW_TIMEOUT_S if oauth else timeout_seconds()
     try:
         if oauth:
             from ._oauth import oauth_http_client
@@ -372,7 +379,7 @@ async def _handle_call_tool(
     try:
         result = await session.call_tool(tool, args)
     except Exception as e:
-        if not _is_transport_error(e):
+        if not is_mcp_transport_error(e):
             raise
         await invalidate_session(server, scope)
         raise MCPCallError(
@@ -440,7 +447,7 @@ async def dispatch_with_retry(
             try:
                 return await _dispatch_request(req, req_id, method, params, server, scope)
             except Exception as e:
-                if _attempt == 2 or not _is_transport_error(e):
+                if _attempt == 2 or not is_mcp_transport_error(e):
                     raise
                 logger.opt(exception=True).warning(
                     "MCP server {} transport error (attempt {}); dropping its session and retrying",
@@ -491,7 +498,7 @@ async def get_session(
     buckets and are wrapped in a serializing session, so every connection
     shares one stdio child instead of spawning its own; non-shared servers
     keep the per-connection isolation contract."""
-    cfg = _load_config()
+    cfg = load_config()
     if server not in cfg:
         raise ValueError(f"Server {server!r} not configured")
     shared = cfg[server].get("shared")
@@ -505,7 +512,7 @@ async def get_session(
         buckets.locks[server] = lock
 
     async with lock:
-        cfg = _load_config()
+        cfg = load_config()
         if server not in cfg:
             raise ValueError(f"Server {server!r} not configured")
         if server in buckets.sessions:

@@ -12,11 +12,11 @@ import base.config as base_config
 from base.deploy.release import collector_artifact as artifact
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.tests.test_converge_otel_collector import (
-    _ChunkedResp,
-    _render_real_template,
+    ChunkedResp,
+    render_real_template,
 )
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
@@ -31,7 +31,7 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
     Agent main logs begin with identical telemetry banners, so admitting them
     to either receiver would restore the fingerprint-collision re-watch storm.
     """
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         operator_database=operator_database,
@@ -76,7 +76,7 @@ def test_runner_forwards_to_authenticated_gateway_ingress_with_stable_exporter_i
     """A pure runner relays all signals to the gateway collector, never to
     loopback backends. Exporter IDs stay byte-for-byte stable across the
     direct-backend -> relay cutover so collector self-metrics keep their series."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"agent-runner"}),
         operator_database=operator_database,
@@ -108,7 +108,7 @@ def test_gateway_has_separate_authenticated_reachable_receiver(
 ) -> None:
     """A split gateway keeps local producers on loopback/no-auth and accepts
     remote relays only on its declared reachable address with bearer auth."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         operator_database=operator_database,
@@ -146,7 +146,7 @@ def test_station_has_separate_authenticated_reachable_receiver(
     """A pure observability-station exposes the same bearer-authenticated
     remote OTLP ingress a gateway does — the surface remote gateway
     collectors relay to (WP4, task #1946)."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"observability-station"}),
         operator_database=operator_database,
@@ -188,7 +188,7 @@ def test_remote_observatory_gateway_relays_to_station_single_ingress(
     relays every signal to the station's single bearer-authenticated OTLP
     ingress with the cluster bearer — it never dials the station's
     loopback-bound backends directly (WP4, task #1946)."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         observability_url="http://10.0.0.46",
@@ -219,7 +219,7 @@ def test_remote_observatory_relay_without_secret_fails_closed(
     """A remote observatory with no cluster secret cannot authenticate the
     relay — converge must fail, not ship an unauthenticated fan-out."""
     with pytest.raises(RuntimeError, match="telemetry token"):
-        _render_real_template(
+        render_real_template(
             monkeypatch,
             frozenset({"gateway", "agent-runner"}),
             cluster_secret="",
@@ -239,7 +239,7 @@ def test_station_otlp_ingress_port_follows_single_source(
     its remote receiver bind the SAME port — AVA_TELEMETRY_OTLP_PORT is the
     single knob for both (WP4, task #1946)."""
     monkeypatch.setattr(base_config.settings.observability, "telemetry_otlp_port", 4321)
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"observability-station"}),
         operator_database=operator_database,
@@ -269,7 +269,7 @@ def test_local_ingress_port_does_not_change_gateway_projection(
 ) -> None:
     """Local receivers follow this unit's port; relay targets follow bootstrap."""
     monkeypatch.setattr(base_config.settings.observability, "telemetry_otlp_port", 4319)
-    gateway_cfg = _render_real_template(
+    gateway_cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         operator_database=operator_database,
@@ -279,7 +279,7 @@ def test_local_ingress_port_does_not_change_gateway_projection(
     assert gateway_cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == (
         "10.0.0.10:4319"
     )
-    runner_cfg = _render_real_template(
+    runner_cfg = render_real_template(
         monkeypatch,
         frozenset({"agent-runner"}),
         operator_database=operator_database,
@@ -297,7 +297,7 @@ def test_hybrid_gateway_runner_still_serves_remote_runners(
 ) -> None:
     """Gateway capability plus a non-empty secret is the cross-machine posture
     even when the same host also runs agents (the production Mac mini shape)."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         operator_database=operator_database,
@@ -314,7 +314,7 @@ def test_gateway_ipv6_receiver_uses_unambiguous_bracketed_bind(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         gateway_url="http://[fd7a:115c:a1e0::10]:8000",
@@ -334,7 +334,7 @@ def test_runner_ipv6_gateway_url_uses_unambiguous_bracketed_exporter_endpoint(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"agent-runner"}),
         gateway_url="http://[fd7a:115c:a1e0::10]:8000",
@@ -353,7 +353,7 @@ def test_single_box_keeps_every_otlp_listener_on_loopback(
     command_runtime: CommandRuntime,
 ) -> None:
     """The zero-config combined role has no cross-machine ingress or secret."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         gateway_url="http://localhost:8000",
@@ -381,7 +381,7 @@ def test_secret_set_single_box_still_collapses_remote_ingress_to_loopback(
     """A secret can be enabled on a combined single box. Its loopback machine
     host still means there are no remote runners, so converge must not invent
     a reachable receiver or fail the otherwise-valid local topology."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
         gateway_url="http://localhost:8000",
@@ -407,7 +407,7 @@ def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
     and converge does not fail, exactly like the combined single-box unit.
     Only a wildcard host (a malformed identity) fails closed."""
     for roles in (frozenset({"gateway"}), frozenset({"observability-station"})):
-        no_secret = _render_real_template(
+        no_secret = render_real_template(
             monkeypatch,
             roles,
             cluster_secret="",
@@ -418,7 +418,7 @@ def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
         assert "otlp/remote" not in no_secret["receivers"]
         assert "bearertokenauth/cluster" not in no_secret["extensions"]
 
-        loopback = _render_real_template(
+        loopback = render_real_template(
             monkeypatch,
             roles,
             cluster_secret="cluster-token",  # noqa: S106 — fixture token
@@ -497,7 +497,7 @@ def test_split_topology_fails_closed_when_ingress_identity_is_incomplete(
     command_runtime: CommandRuntime,
 ) -> None:
     with pytest.raises(RuntimeError, match=message):
-        _render_real_template(
+        render_real_template(
             monkeypatch,
             roles,
             gateway_url=gateway_url,
@@ -516,7 +516,7 @@ def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
 ) -> None:
     """The collector's own queue depth/capacity/enqueue-failure counters ride
     the infra pipeline, so a recovered path carries evidence of the outage."""
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"agent-runner"}),
         operator_database=operator_database,
@@ -582,13 +582,13 @@ def test_stream_download_writes_all_chunks(
     size; no heartbeat fires for a fast download."""
     payload = b"x" * (1 << 20)  # 1 MiB
 
-    def _fake_urlopen(_url: str, **kw: object) -> _ChunkedResp:
-        return _ChunkedResp([payload] * 4, {"Content-Length": str(4 << 20)})
+    def _fake_urlopen(_url: str, **kw: object) -> ChunkedResp:
+        return ChunkedResp([payload] * 4, {"Content-Length": str(4 << 20)})
 
     monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
     dest = tmp_path / "t.tar.gz"
 
-    artifact._stream_download("https://example.invalid/t.tar.gz", dest)
+    artifact.stream_download("https://example.invalid/t.tar.gz", dest)
 
     assert dest.read_bytes() == payload * 4
     out = capsys.readouterr().out
@@ -609,7 +609,7 @@ def test_stream_download_honors_socket_timeout(
 
     monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
     with pytest.raises(TimeoutError):
-        artifact._stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
+        artifact.stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
     assert seen["timeout"] == artifact.DOWNLOAD_SOCKET_TIMEOUT_S
 
 
@@ -635,7 +635,7 @@ def test_gateway_and_runner_exporters_drop_newest_after_bounded_retry(
     retry exhaustion drops the batch through the collector's counted failure
     path. Metrics keep their existing 15-minute retry policy in memory.
     """
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch, roles, operator_database=operator_database, command_runtime=command_runtime
     )
     exporters = cfg["exporters"]

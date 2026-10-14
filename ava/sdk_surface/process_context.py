@@ -14,7 +14,7 @@ reads the graph `state` argument and returns an update dict.
 
 Lifecycle of the exec-turn state slot (framework side): before agent code runs, the exec child
 (after loading plugins) sets `set_state(<snapshot validated from the request envelope>)` and
-`set_state_update({})` (`agent/execution/child.py:_build_state_slot`). `PluginStateHandle.read`
+`set_state_update({})` (`agent/execution/child.py:build_state_slot`). `PluginStateHandle.read`
 reads the state; `.update` synchronously mutates its working copy and accumulates the raw delta
 into the update dict. When the child exits it writes the update dict into its result envelope;
 exec_node reads it from there and merges it into `Command(update=...)`, going through the

@@ -49,7 +49,7 @@ def _labels(text: str) -> dict[str, str]:
     return {match.group("key"): match.group("value") for match in _LABEL.finditer(text)}
 
 
-def _is_alive() -> bool:
+def is_alive() -> bool:
     """A valid OTLP/JSON request accepted by the local pipeline = alive."""
     try:
         req = urllib.request.Request(
@@ -66,7 +66,7 @@ def _is_alive() -> bool:
 
 def probe_collector() -> DaemonProbe:
     """Observe whether the collector accepts a valid OTLP trace request."""
-    if _is_alive():
+    if is_alive():
         return DaemonProbe.up("collector accepts OTLP trace requests")
     return DaemonProbe.down("collector does not accept a valid OTLP trace request")
 

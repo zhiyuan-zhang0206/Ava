@@ -87,13 +87,13 @@ def labeler_model_overrides(*, profile: str | None, lm: LmSettings) -> ModelOver
     )
 
 
-def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+def labeler_endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
     runtime.mkdir(parents=True, exist_ok=True)
     return ServiceEndpoints.from_boot(config, runtime=runtime).of("labeler")
 
 
 def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
-    return _endpoint(config, runtime=runtime).pidfile
+    return labeler_endpoint(config, runtime=runtime).pidfile
 
 
 # The inbound condition a label prompt may come from: a chat peer message,
@@ -148,7 +148,7 @@ def select_unlabeled(cur: psycopg.Cursor, attempted: list[int]) -> list[tuple[in
     return cur.fetchall()
 
 
-def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(_pidfile(config, runtime=runtime), "services.derived.labeler.daemon"):
         _log.info(
             "[labeler] daemon already running (pidfile=%s), exiting",
@@ -171,7 +171,7 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
-async def _dispatch_loop(
+async def dispatch_loop(
     pool: ConnectionPool,
     db: Database,
     bus: EventBus,
@@ -240,11 +240,11 @@ async def run(
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
-    _write_pidfile(process_config, runtime=runtime)
+    write_pidfile(process_config, runtime=runtime)
     _log.info("[labeler] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     liveness = Liveness(LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint(process_config, runtime=runtime)
+    endpoint = labeler_endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "labeler", endpoint.health_port, liveness=liveness, image=image
     )
@@ -253,7 +253,7 @@ async def run(
     db = database()
     pool = db.pool()
     try:
-        await _dispatch_loop(
+        await dispatch_loop(
             pool,
             db,
             EventBus.from_settings(),

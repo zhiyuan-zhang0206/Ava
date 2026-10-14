@@ -22,15 +22,14 @@ import pytest
 
 from base.config import settings
 from base.host.atomic_io import write_text_atomic
-from base.lm.catalog import ModelCatalog
 from base.lm.pricing import cost_usd
+from base.packages.plugin_providers import build_model_catalog
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record, scratch_root
 from tests.e2e.fakes.scenarios.budget_handoff import BUDGET_MODEL
 from tests.fixtures.gateway_config import post_spawn
-from tests.fixtures.model_catalog import model_catalog as model_catalog
 
 _OBSERVER = (
     Path(__file__).resolve().parents[3]
@@ -89,10 +88,10 @@ def _terminate(agent_id: int) -> None:
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.budget_handoff:build")
 @pytest.mark.parametrize("role", ["goal supervisor", "dynamic workflow orchestrator"])
 def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
-    budget_agent: int, budget_world: Path, role: str, *, model_catalog: ModelCatalog
+    budget_agent: int, budget_world: Path, role: str
 ) -> None:
     owner = budget_agent
-    usd_limit = cost_usd(BUDGET_MODEL, 50, 25, 0, prices=model_catalog.prices)
+    usd_limit = cost_usd(BUDGET_MODEL, 50, 25, 0, prices=build_model_catalog().prices)
     assert usd_limit is not None and usd_limit > 0
     root = budget_world
     (root / "role").write_text(role)

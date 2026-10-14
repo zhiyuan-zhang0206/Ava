@@ -157,7 +157,7 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
         return "completed", {}
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        monkeypatch.setattr(daemon, "_dispatch_sync", arm)
+        monkeypatch.setattr(daemon, "bind_dispatch_sync", arm)
         tasks = [
             asyncio.create_task(
                 daemon.run_arm(
@@ -331,7 +331,7 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
         return "completed", {}
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        monkeypatch.setattr(daemon, "_dispatch_sync", arm)
+        monkeypatch.setattr(daemon, "bind_dispatch_sync", arm)
         tasks = [
             asyncio.create_task(
                 daemon.run_arm(
@@ -414,7 +414,7 @@ async def test_op_invocations_dispatch_on_their_own_executor(
         assert pool is dispatch_pool
         return "completed", {"thread": threading.current_thread().name}
 
-    monkeypatch.setattr(daemon, "_dispatch_sync", arm)
+    monkeypatch.setattr(daemon, "bind_dispatch_sync", arm)
     with (
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="first-owner") as first,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="second-owner") as second,

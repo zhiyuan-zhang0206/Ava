@@ -18,8 +18,8 @@ from base.native_process.os_platform import LockTimeoutError
 from services.backup import dump as backup
 from services.backup.artifact import offsite
 from services.backup.tests.test_backup import (
-    _dt,
     await_backup_lock_holder,
+    cluster_instant,
     disable_offsite,
     spawn_backup_lock_holder,
 )
@@ -152,7 +152,7 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
     lines: list[str] = []
 
     path = backup.run_backup(
-        _dt(2026, 9, 14, 21, 0),
+        cluster_instant(2026, 9, 14, 21, 0),
         db_url="dbname=whatever",
         progress=lines.append,
         db=database,
@@ -244,13 +244,13 @@ def test_run_backup_serializes_dump_creation(
         finally:
             events.append("lock-exit")
 
-    def _run_backup(_now: datetime | None = None, **_kwargs: object) -> Path:
+    def run_locked_backup(_now: datetime | None = None, **_kwargs: object) -> Path:
         events.append("backup-body")
         artifact.write_bytes(b"encrypted")
         return artifact
 
     monkeypatch.setattr(backup, "backup_lock", _backup_lock)
-    monkeypatch.setattr(backup, "_run_backup", _run_backup)
+    monkeypatch.setattr(backup, "run_locked_backup", run_locked_backup)
 
     def _record(name: str, result: object = None) -> Callable[[Path], object]:
         def record(_path: Path, **_kwargs: object) -> object:
@@ -264,7 +264,7 @@ def test_run_backup_serializes_dump_creation(
 
     assert (
         backup.run_backup(
-            _dt(2026, 8, 8, 3, 0),
+            cluster_instant(2026, 8, 8, 3, 0),
             db_url="dbname=whatever",
             db=database,
             is_remote_reader=lambda: settings.data_plane.is_remote,

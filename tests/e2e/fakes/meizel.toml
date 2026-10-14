@@ -10,3 +10,10 @@ exports = ["scenario_recording.py", "scenarios"]
 
 [external]
 "child_budget_writer.py" = "executes the generated scenario program passed on its command line"
+
+[debt.env-patch]
+"test_recording.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_watcher_resurrection.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_budget_handoff.py#monkeypatch.setattr tests.e2e.fakes.scenarios.budget_handoff.scratch_root" = 1

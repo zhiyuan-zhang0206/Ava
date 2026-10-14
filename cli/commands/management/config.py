@@ -52,7 +52,7 @@ def _home_gateway_base() -> str | None:
     return None
 
 
-def _gateway_base() -> str:
+def gateway_base() -> str:
     """Resolve the configured gateway without constructing ``Settings``.
 
     Explicit env wins (deliberate cross-cluster intent). Otherwise the
@@ -122,7 +122,7 @@ def get_config(machine: str | None) -> ConfigView:
 
     params = {"machine": machine} if machine else None
     resp = dial_get(
-        f"{_gateway_base()}/api/config",
+        f"{gateway_base()}/api/config",
         params=params,
         timeout=_HTTP_TIMEOUT_S,
         headers=_auth_headers(),
@@ -138,7 +138,7 @@ def get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
     if machine:
         params["machine"] = machine
     resp = dial_get(
-        f"{_gateway_base()}/api/config/audit",
+        f"{gateway_base()}/api/config/audit",
         params=params,
         timeout=_HTTP_TIMEOUT_S,
         headers=_auth_headers(),
@@ -150,10 +150,10 @@ def get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
 def put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
     from base.host.net.http_dial import put as dial_put
 
-    _guard_gateway_write(_gateway_base())
+    _guard_gateway_write(gateway_base())
     params = {"machine": machine} if machine else None
     resp = dial_put(
-        f"{_gateway_base()}/api/config",
+        f"{gateway_base()}/api/config",
         json=body,
         params=params,
         timeout=_HTTP_TIMEOUT_S,

@@ -244,7 +244,7 @@ def _synthetic_deb() -> bytes:
     """A minimal deb-shaped ar archive carrying data.tar.xz with the three
     pgvector files at the PGDG install paths for the pinned major. Members
     carry the `./` prefix like a real dpkg-deb data tar."""
-    major = rb._PG_VERSION.split(".", 1)[0]
+    major = rb.PG_VERSION.split(".", 1)[0]
     payloads = {
         f"./usr/lib/postgresql/{major}/lib/vector.so": b"SO",
         f"./usr/share/postgresql/{major}/extension/vector.control": b"CTRL",
@@ -266,8 +266,8 @@ def _synthetic_deb() -> bytes:
 def _synthetic_bottle() -> bytes:
     """A minimal bottle-shaped gzipped tar with the pgvector members at the
     formula install paths for the pinned major."""
-    major = rb._PG_VERSION.split(".", 1)[0]
-    prefix = f"pgvector/{rb._PGVECTOR_VERSION}/"
+    major = rb.PG_VERSION.split(".", 1)[0]
+    prefix = f"pgvector/{rb.PGVECTOR_VERSION}/"
     payloads = {
         f"{prefix}lib/postgresql@{major}/vector.dylib": b"DYLIB",
         f"{prefix}share/postgresql@{major}/extension/vector.control": b"CTRL",
@@ -300,7 +300,7 @@ def test_pgvector_bottle_extraction_layout() -> None:
 
 def test_pgvector_extraction_fails_fast_on_missing_member() -> None:
     """A renamed upstream layout must fail loudly, never inject a partial set."""
-    major = rb._PG_VERSION.split(".", 1)[0]
+    major = rb.PG_VERSION.split(".", 1)[0]
     data_tar = io.BytesIO()
     with tarfile.open(fileobj=data_tar, mode="w") as tar:
         info = tarfile.TarInfo(f"./usr/lib/postgresql/{major}/lib/vector.so")

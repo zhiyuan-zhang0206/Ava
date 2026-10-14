@@ -19,9 +19,9 @@ from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
+from base.config.tests.configuration import snapshot_process_config
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
-from tests.fixtures.configuration import snapshot_process_config
 
 
 @pytest.fixture

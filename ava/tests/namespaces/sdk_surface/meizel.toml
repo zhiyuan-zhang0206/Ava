@@ -1,2 +1,59 @@
 [external]
 "test_help_renderer.py" = "executes generated module source to render help for it"
+
+[debt.env-patch]
+"test_install.py#patch.dict os.environ" = 1
+"test_metering.py#patch.dict os.environ" = 5
+"test_process_clients.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
+"test_process_clients.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 3
+"test_process_clients.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 2
+"test_process_clients.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_impersonation_capture_rebinding.py#monkeypatch.setattr ava.__all_for_ava__" = 1
+"test_impersonation_capture_rebinding.py#monkeypatch.setattr ava.receipt_probe" = 1
+"test_impersonation_capture_rebinding.py#monkeypatch.setattr ava.skills.names" = 1
+"test_impersonation_capture_rebinding.py#monkeypatch.setattr base.agents.impersonation.manifest.append_source_event" = 1
+"test_impersonation_capture_rebinding.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_injection_check.py#monkeypatch.setattr ava.sdk_surface.agent_identity.agent_id" = 1
+"test_injection_check.py#monkeypatch.setattr ava.sdk_surface.settings.model_catalog" = 2
+"test_injection_check.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 2
+"test_injection_check.py#monkeypatch.setattr base.config.settings.web.web_fetch_injection_check_enabled" = 1
+"test_injection_check.py#monkeypatch.setattr base.config.settings.web.web_fetch_injection_model" = 1
+"test_injection_check.py#monkeypatch.setattr base.config.settings.web.web_fetch_injection_threshold" = 2
+"test_injection_check.py#monkeypatch.setattr base.lm.decision.call.decide" = 1
+"test_install.py#monkeypatch.setattr ava.sdk_surface.plugins.install_member" = 1
+"test_install.py#monkeypatch.setattr ava.sdk_surface.plugins.install_namespace" = 1
+"test_install.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_install.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
+"test_install.py#monkeypatch.setattr base.packages.plugins.config_registration.bind_plugin_config" = 2
+"test_install.py#monkeypatch.setattr base.packages.plugins.load_report.report_plugin_load_failure" = 1
+"test_log_agent_attribution.py#monkeypatch.setattr base.log.process.init_done" = 2
+"test_log_agent_attribution.py#patch.object base.log.process.add_file_sink" = 2
+"test_log_agent_attribution.py#patch.object base.log.process.install_stdlib_intercept" = 2
+"test_log_agent_attribution.py#patch.object base.log.process.logger.add" = 2
+"test_log_agent_attribution.py#patch.object base.log.process.logger.configure" = 1
+"test_log_agent_attribution.py#patch.object base.log.process.logger.info" = 2
+"test_log_agent_attribution.py#patch.object base.native_process.loaded_commit.capture_commit" = 1
+"test_log_agent_attribution.py#patch.object base.telemetry.process_logging.add_event_sink" = 2
+"test_metering.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"test_metering.py#monkeypatch.setattr ava.mcps.__dir__" = 1
+"test_metering.py#monkeypatch.setattr ava.sdk_surface.metering.instrument_targets" = 2
+"test_metering.py#monkeypatch.setattr ava.skills.__dir__" = 1
+"test_metering.py#monkeypatch.setattr base.agents.messages.external_caller.external_caller" = 1
+"test_metering.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 4
+"test_metering.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
+"test_metering.py#monkeypatch.setattr base.agents.sdk.telemetry.time.monotonic" = 1
+"test_metering.py#monkeypatch.setattr base.telemetry.emit" = 2
+"test_wraps.py#monkeypatch.setattr base.packages.plugins.activation.emit" = 1
+"test_wraps.py#monkeypatch.setattr base.packages.plugins.activation.record" = 1
+
+[debt.stdlib-patch]
+"test_install.py#patch.dict sys.modules" = 1
+
+[debt.third-party-patch]
+"test_process_clients.py#monkeypatch.setattr psycopg.connect" = 1
+
+[debt.unresolved-patch]
+"test_metering.py#monkeypatch.setattr type(ava.skills).__all_for_ava__" = 1
+"test_wraps.py#monkeypatch.setattr namespace.target" = 1

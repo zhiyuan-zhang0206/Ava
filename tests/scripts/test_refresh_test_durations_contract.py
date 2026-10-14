@@ -24,7 +24,7 @@ def test_shard_counts_track_both_workflow_matrices() -> None:
 
     Drift here is how the nightly refresh went red for eight nights (September
     2026): ci.yml and the refresh workflow moved the backend suite to 16 shards
-    while ``_BACKEND_SHARDS`` stayed 12, so groups 13-16 were rejected at
+    while ``BACKEND_SHARDS`` stayed 12, so groups 13-16 were rejected at
     measure time and the merge never ran (task #2956).
     """
     ci_backend = _workflow_matrix_groups("ci.yml", "backend-shard")
@@ -32,8 +32,8 @@ def test_shard_counts_track_both_workflow_matrices() -> None:
     ci_e2e = _workflow_matrix_groups("ci.yml", "e2e-shard")
     nightly_e2e = _workflow_matrix_groups("refresh-test-durations.yml", "measure-e2e")
 
-    assert refresh._BACKEND_SHARDS == len(ci_backend) == len(nightly_backend)
-    assert refresh._E2E_SHARDS == len(ci_e2e) == len(nightly_e2e)
+    assert refresh.BACKEND_SHARDS == len(ci_backend) == len(nightly_backend)
+    assert refresh.E2E_SHARDS == len(ci_e2e) == len(nightly_e2e)
 
 
 def test_coverage_args_track_the_ci_backend_shard() -> None:
@@ -43,7 +43,7 @@ def test_coverage_args_track_the_ci_backend_shard() -> None:
     systematically faster. ``--cov=shared`` outlived the shared -> base rename: pytest-cov
     warned "Module shared was never imported" on every measured shard and ``base`` was not
     traced at all. Both of the shard step's attempts must name the same modules as
-    ``_BACKEND_COVERAGE_ARGS``.
+    ``BACKEND_COVERAGE_ARGS``.
     """
     document = yaml.safe_load((_REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     steps = document["jobs"]["backend-shard"]["steps"]
@@ -55,5 +55,5 @@ def test_coverage_args_track_the_ci_backend_shard() -> None:
     assert len(attempts) == 2
     assert attempts[0] == attempts[1]
     assert (
-        sorted(arg.removeprefix("--cov=") for arg in refresh._BACKEND_COVERAGE_ARGS) == attempts[0]
+        sorted(arg.removeprefix("--cov=") for arg in refresh.BACKEND_COVERAGE_ARGS) == attempts[0]
     )

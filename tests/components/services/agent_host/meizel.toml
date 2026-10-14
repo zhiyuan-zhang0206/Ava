@@ -1,0 +1,13 @@
+[debt.first-party-patch]
+"test_event_owner_shutdown.py#monkeypatch.setattr agent.process_boot.init_process_scope" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr agent.process_boot.land_cluster_extensions" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon._is_running" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.acquire_pidfile" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.assert_clock_lattice" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.boot_handles" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.close_host_pools" = 2
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.load_installation" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.open_host_pools" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.process_clients" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.remove_pidfile" = 2
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.host.release_hosted_owner" = 1

@@ -3,14 +3,14 @@
 Usage: `child_offsite_entry.py <configured|unconfigured> <bucket> <main args...>`
 where `<bucket>` is `real` (leave `open_bucket` alone), `fake` (a working fake
 bucket) or `init_failure` (a fake bucket whose initiate call fails). Runs
-`services.backup.dump._main` with the given args and exits with its code.
+`services.backup.dump.run_offsite_publisher` with the given args and exits with its code.
 """
 
 import sys
 
 from services.backup.artifact import offsite
 from services.backup.artifact.tests.oss_fake import FakeOssBucket
-from services.backup.dump import _main
+from services.backup.dump import run_offsite_publisher
 
 if __name__ == "__main__":
     configured, bucket_kind, *args = sys.argv[1:]
@@ -30,4 +30,4 @@ if __name__ == "__main__":
         offsite.open_bucket = lambda _target: failing
     elif bucket_kind != "real":
         raise SystemExit(f"unknown bucket {bucket_kind!r}")
-    raise SystemExit(_main(args))
+    raise SystemExit(run_offsite_publisher(args))

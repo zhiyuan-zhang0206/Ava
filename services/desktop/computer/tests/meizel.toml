@@ -5,12 +5,35 @@ exports = ["slices.py"]
 "test_computer_ax_act.py" = ["slices.py"]
 "test_computer_ax_gap.py" = ["slices.py"]
 "test_computer_ax_tools.py" = ["slices.py"]
-"test_computer_loop_liveness.py" = ["slices.py"]
+"test_computer_loop_liveness.py" = ["slices.py", "test_computer_mcp_daemon.py"]
 "test_computer_mcp_daemon.py" = ["slices.py"]
 
-[debt.private-name]
-"computer_mcp_daemon/test_click_text_measures_scale_and_tracks_pointer.py -> test_computer_mcp_daemon.py#_call" = 1
-"computer_mcp_daemon/test_click_text_measures_scale_and_tracks_pointer.py -> test_computer_mcp_daemon.py#_daemon" = 1
-"computer_mcp_daemon/test_click_text_measures_scale_and_tracks_pointer.py -> test_computer_mcp_daemon.py#_ok_result" = 1
-"computer_mcp_daemon/test_release_control_ends_the_capture_badge.py -> test_computer_mcp_daemon.py#_call" = 1
-"computer_mcp_daemon/test_release_control_ends_the_capture_badge.py -> test_computer_mcp_daemon.py#_daemon" = 1
+[debt.env-patch]
+"test_computer_mcp_wrapper.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 2
+"test_computer_mcp_wrapper.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 2
+
+[debt.first-party-patch]
+"test_computer_ax_act.py#monkeypatch.setattr base.agents.impersonation.manifest.emit_recorded_central_event" = 1
+"test_computer_ax_gap.py#monkeypatch.setattr services.desktop.computer.ax_gap.read_screen" = 1
+"test_computer_config.py#monkeypatch.setattr base.config.settings.daemon.computer_use_lease_s" = 1
+"test_computer_config.py#monkeypatch.setattr base.config.settings.daemon.computer_use_loop_stall_s" = 1
+"test_computer_config.py#monkeypatch.setattr base.config.settings.daemon.computer_use_session_idle_s" = 1
+"test_computer_config.py#monkeypatch.setattr base.config.settings.daemon.computer_use_shutdown_drain_s" = 1
+"test_computer_loop_liveness.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.LoopWatchdog" = 1
+"test_computer_loop_liveness.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.asyncio.Event" = 1
+"test_computer_loop_liveness.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.asyncio.start_unix_server" = 1
+"test_computer_loop_liveness.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.dump_and_exit" = 2
+"test_computer_loop_liveness.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.socket_in_use" = 1
+"test_computer_mcp_daemon.py#monkeypatch.setattr base.agents.impersonation.manifest.emit_recorded_central_event" = 1
+"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.ocr.ocr_image" = 4
+"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.screen.snapshot_path" = 17
+"test_computer_mcp_wrapper.py#monkeypatch.setattr base.host.permissions_helper.client.socket.socket" = 4
+"test_computer_screen_region.py#monkeypatch.setattr services.desktop.computer.screen.snapshot_path" = 2
+"test_mcp_daemon_entry.py#monkeypatch.setattr base.config.settings.general.machine_name" = 1
+"test_mcp_daemon_entry.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
+"test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.ConfigBoot" = 1
+"test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.Database" = 1
+"test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.LoadedCommit.capture" = 1
+"test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.build_pipeline" = 1
+"test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.init_gateway_process" = 1
+"test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.run" = 1

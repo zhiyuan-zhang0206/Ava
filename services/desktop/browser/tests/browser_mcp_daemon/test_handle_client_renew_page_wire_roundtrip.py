@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from services.desktop.browser.mcp_daemon import ChromeMcpDaemon, _handle_client
+from services.desktop.browser.mcp_daemon import ChromeMcpDaemon, handle_client
 from services.desktop.browser.tests.test_browser_mcp_daemon import FakeUpstream, new_daemon
 
 
@@ -22,7 +22,7 @@ async def test_handle_client_renew_page_wire_roundtrip() -> None:
     daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
     sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
-        lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
+        lambda r, w: handle_client(r, w, daemon_ref), path=sock_path
     )
 
     async def roundtrip(payload: dict[str, Any]) -> dict[str, Any]:

@@ -1,1 +1,11 @@
-exports = ["external_attachment.py", "external_skills.py", "maintenance.py", "secret_argv.py"]
+exports = ["external_skills.py", "maintenance.py", "secret_argv.py"]
+
+[debt.env-patch]
+"secret_argv.py#monkeypatch.setenv os.environ" = 1
+
+[debt.first-party-patch]
+"maintenance.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"maintenance.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+
+[debt.stdlib-patch]
+"secret_argv.py#monkeypatch.setattr os.environ" = 1

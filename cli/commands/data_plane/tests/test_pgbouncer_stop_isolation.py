@@ -21,7 +21,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from cli.commands.data_plane import pgbouncer as pgb
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_machine as command_machine
 
 _SECRET = "pgbouncerstopisolationtestsecret"  # noqa: S105 — test fixture, not a real credential
 

@@ -22,6 +22,7 @@ from base.agents import impersonation as leases
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.incarnation.hosted_force import original_host_force
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
@@ -36,9 +37,8 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
 from ops.agents.wake import resurrect_agent
-from ops.lifecycle.termination import _enqueue_termination_inbounds, _force_terminate_transaction
+from ops.lifecycle.termination import enqueue_termination_inbounds, force_terminate_transaction
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import recorded_tree
 
 
 def test_reminder_commands_are_bare_ava(
@@ -228,7 +228,7 @@ async def _terminate_native(
         gate=database_gate,
     ) as ops_pool:
         if mode == "force":
-            _force_terminate_transaction(owner.agent_id, ops_pool, source="user")
+            force_terminate_transaction(owner.agent_id, ops_pool, source="user")
             assert await original_host_force(
                 aops_pool,
                 owner.agent_id,
@@ -237,7 +237,7 @@ async def _terminate_native(
                 quiescent=True,
             )
         else:
-            terminate_id, _cutoff = _enqueue_termination_inbounds(
+            terminate_id, _cutoff = enqueue_termination_inbounds(
                 Database.from_settings(gate=database_gate),
                 EventBus.from_settings(),
                 owner.agent_id,
@@ -577,7 +577,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
                 "UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,)
             )
             db_conn.commit()
-        return relay._read_inbox(
+        return relay.read_relay_inbox(
             database,
             event_bus,
             owner.agent_id,

@@ -72,7 +72,7 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 
 
 # Liveness staleness ceiling. The loop sleeps a long inter-poll interval (default
-# 300s), so `_sleep_with_liveness` beats every _LIVENESS_BEAT_STEP_S during that
+# 300s), so `sleep_with_liveness` beats every _LIVENESS_BEAT_STEP_S during that
 # wait; the ceiling only has to exceed that step, not the whole interval. A
 # genuinely wedged loop (a beat step that never returns) still trips /healthz 503
 # -> watchdog respawn.
@@ -150,7 +150,7 @@ _ADVANCE_SLACK_MINUTES = 0.5
 # The claim node wraps it via system_note_message(tag=NoteTag.HEARTBEAT).
 
 
-def _select_idle_agents_needing_heartbeat(
+def select_idle_agents_needing_heartbeat(
     pool: ConnectionPool,
     idle_threshold_s: float,
     *,
@@ -259,7 +259,7 @@ def _select_idle_agents_needing_heartbeat(
     return rows
 
 
-def _send_heartbeat_checkin(
+def send_heartbeat_checkin(
     pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int, idle_minutes: float
 ) -> None:
     """INSERT one `heartbeat` inbound for `agent_id`, then publish a Redis wake so
@@ -379,7 +379,7 @@ def _count_noop_nudge(
             _raise_backoff_level(pool, agent_id, new_level, heartbeat_interval_s)
 
 
-def _reconcile_checkin_outcomes(
+def reconcile_checkin_outcomes(
     pool: ConnectionPool,
     *,
     pending_checkin: dict[int, float],
@@ -528,7 +528,7 @@ def backoff_deadlines(
     return {agent_id: deadline for agent_id, (_, deadline) in deadline_state.items()}
 
 
-def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(_pidfile(config, runtime=runtime), "services.wake.heartbeat.daemon"):
         _log.info(
             "[heartbeat] daemon already running (pidfile=%s), exiting",
@@ -549,7 +549,7 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     return pidfile_holds_daemon(_pidfile(config, runtime=runtime), "services.wake.heartbeat.daemon")
 
 
-async def _sleep_with_liveness(liveness: LoopProgress, total_s: float) -> None:
+async def sleep_with_liveness(liveness: LoopProgress, total_s: float) -> None:
     """Sleep `total_s`, beating liveness every `_LIVENESS_BEAT_STEP_S` so a long
     inter-poll wait keeps /healthz fresh instead of reading as a wedged loop."""
     remaining = total_s
@@ -560,7 +560,7 @@ async def _sleep_with_liveness(liveness: LoopProgress, total_s: float) -> None:
         remaining -= step
 
 
-async def _dispatch_loop(
+async def dispatch_loop(
     pool: ConnectionPool, db: Database, bus: EventBus, liveness: LoopProgress
 ) -> None:
     """Main loop: on bounded dispatch steps, send a check-in to due idle agents
@@ -602,11 +602,11 @@ async def _dispatch_loop(
     failures = RoundFailureBudget("heartbeat poll")
     while True:
         try:
-            await _sleep_with_liveness(liveness, step)
+            await sleep_with_liveness(liveness, step)
             if admission.quiesced():
                 continue
             _sweep_backoff_resets(pool)
-            _reconcile_checkin_outcomes(
+            reconcile_checkin_outcomes(
                 pool,
                 pending_checkin=pending_checkin,
                 failure_streak=failure_streak,
@@ -614,7 +614,7 @@ async def _dispatch_loop(
                 noop_streak=noop_streak,
                 heartbeat_interval_s=heartbeat_interval,
             )
-            rows = _select_idle_agents_needing_heartbeat(
+            rows = select_idle_agents_needing_heartbeat(
                 pool,
                 idle_threshold,
                 heartbeat_interval_s=heartbeat_interval,
@@ -624,7 +624,7 @@ async def _dispatch_loop(
             )
             for agent_id, idle_minutes in rows:
                 try:
-                    _send_heartbeat_checkin(pool, db, bus, agent_id, idle_minutes)
+                    send_heartbeat_checkin(pool, db, bus, agent_id, idle_minutes)
                     pending_checkin[agent_id] = idle_minutes
                     _log.info(
                         "[heartbeat] checked in on idle agent %s (idle %.0f min)",
@@ -663,7 +663,7 @@ async def liveness_loop(
         except Exception as exc:
             _log.exception("[heartbeat] liveness loop iteration failed")
             failures.failed(exc)
-        await _sleep_with_liveness(liveness, PASS_INTERVAL_S)
+        await sleep_with_liveness(liveness, PASS_INTERVAL_S)
 
 
 async def run(
@@ -683,7 +683,7 @@ async def run(
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
-    _write_pidfile(process_config, runtime=runtime)
+    write_pidfile(process_config, runtime=runtime)
     _log.info("[heartbeat] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     liveness = LivenessGroup()
@@ -707,7 +707,7 @@ async def run(
         # check-in; the completion digest is a third. A loop that raises cancels
         # its siblings and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_dispatch_loop(pool, db, bus, dispatch_progress))
+            loops.create_task(dispatch_loop(pool, db, bus, dispatch_progress))
             loops.create_task(liveness_loop(db, pool, bus, liveness_progress))
             loops.create_task(
                 completion_digest.completion_digest_loop(

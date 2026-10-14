@@ -8,12 +8,13 @@ from pathlib import Path
 import pytest
 
 from base.host.permissions_helper import client
-from services.desktop.permissions_helper.tests.test_permissions_helper import (
-    _retire_env,
-    _write_agent_plist,
-)
+from base.host.permissions_helper.client import PermissionsHelperClient
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_helper as fake_helper,
+)
+from services.desktop.permissions_helper.tests.test_permissions_helper import (
+    retire_env,
+    write_agent_plist,
 )
 
 
@@ -22,17 +23,17 @@ def test_foreign_label_job_bound_to_our_socket_is_refused(
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    agents = _retire_env(monkeypatch, tmp_path)
+    agents = retire_env(monkeypatch, tmp_path)
     sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
 
-    mine = lifecycle._label()
-    foreign = _write_agent_plist(agents, "com.ava.permissions-helper.stray", sock)
-    other_cluster = _write_agent_plist(
+    mine = lifecycle.label()
+    foreign = write_agent_plist(agents, "com.ava.permissions-helper.stray", sock)
+    other_cluster = write_agent_plist(
         agents,
         "com.ava.permissions-helper.ava-other-abcdef12",
         str(tmp_path / ".." / "x") + "/.ava-other/run/permissions-helper.18010.sock",
     )
-    own = _write_agent_plist(agents, mine, sock)
+    own = write_agent_plist(agents, mine, sock)
     recorded: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):
@@ -42,7 +43,7 @@ def test_foreign_label_job_bound_to_our_socket_is_refused(
     monkeypatch.setattr(lifecycle, "run_bounded", fake_run)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
-        lifecycle._refuse_foreign_label_jobs()
+        lifecycle.refuse_foreign_label_jobs()
     assert foreign.exists()
     assert recorded == []
     # ...while other clusters' jobs and our own are untouched.
@@ -55,10 +56,10 @@ def test_foreign_label_refusal_holds_when_the_job_is_not_loaded(
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    agents = _retire_env(monkeypatch, tmp_path)
+    agents = retire_env(monkeypatch, tmp_path)
     sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
 
-    _write_agent_plist(agents, "com.ava.permissions-helper.stray", sock)
+    write_agent_plist(agents, "com.ava.permissions-helper.stray", sock)
 
     def bootout_job_not_loaded(cmd: list[str], **_kw: object) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(cmd, 78, b"", b"")
@@ -66,7 +67,7 @@ def test_foreign_label_refusal_holds_when_the_job_is_not_loaded(
     monkeypatch.setattr(lifecycle, "run_bounded", bootout_job_not_loaded)
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
-        lifecycle._refuse_foreign_label_jobs()
+        lifecycle.refuse_foreign_label_jobs()
     assert (agents / "com.ava.permissions-helper.stray.plist").exists()
 
 
@@ -75,18 +76,18 @@ def test_unrelated_cluster_plists_are_left_alone(
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    agents = _retire_env(monkeypatch, tmp_path)
+    agents = retire_env(monkeypatch, tmp_path)
     sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
 
-    other = _write_agent_plist(
+    other = write_agent_plist(
         agents,
         "com.ava.permissions-helper.ava-demo-1234abcd",
         str(tmp_path / ".." / "z") + "/.ava-demo/run/permissions-helper.1234.sock",
         env_key="AVA_PERMISSIONS_HELPER_SOCKET",
     )
-    monkeypatch.setattr(lifecycle, "permissions_helper_socket", lambda: Path(sock))
+    monkeypatch.setattr(lifecycle, "helper_socket", lambda: Path(sock))
 
-    assert lifecycle._foreign_label_plists() == []
+    assert lifecycle.foreign_label_plists() == []
     assert other.exists()
 
 
@@ -96,7 +97,7 @@ def test_long_mac_ipc_path_refuses_before_signing_or_native_jobs(
     from services.desktop.permissions_helper import lifecycle
 
     long_socket = tmp_path / ("s" * 104)
-    monkeypatch.setattr(lifecycle, "permissions_helper_socket", lambda: long_socket)
+    monkeypatch.setattr(lifecycle, "helper_socket", lambda: long_socket)
     monkeypatch.setattr(
         lifecycle, "ensure_signing_cert", lambda: pytest.fail("must refuse before signing")
     )
@@ -106,7 +107,7 @@ def test_long_mac_ipc_path_refuses_before_signing_or_native_jobs(
 
 def test_overlong_socket_is_typed_unavailability() -> None:
     with pytest.raises(client.PermissionsHelperError, match="not reachable"):
-        client.ping(sock_path="/" + "x" * 200)
+        PermissionsHelperClient("/" + "x" * 200).ping()
 
 
 @pytest.mark.parametrize("capability", ["root_stop_intent_v1", "helper_shutdown_v1"])
@@ -118,6 +119,6 @@ def test_helper_ping_refuses_missing_stop_capability(
 
     reply = {"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True}
     reply.pop(capability)
-    monkeypatch.setattr(client, "ping", lambda: reply)
+    monkeypatch.setattr(client.PermissionsHelperClient, "ping", lambda _self: reply)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="upgrade its signed artifact"):
-        lifecycle._helper_answers_ping()
+        lifecycle.helper_answers_ping()

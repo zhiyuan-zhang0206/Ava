@@ -17,7 +17,7 @@ from base.daemon.health import DaemonProbe
 from base.host.permissions_helper import client
 from base.native_process.os_platform import is_macos
 from base.native_process.ownership import OwnedProcess
-from base.paths import permissions_helper_socket
+from base.sessions.helperproc import helper_client
 from services.desktop.permissions_helper.launchd_job import (
     HelperJobState,
     parse_job_state,
@@ -34,15 +34,15 @@ UNRESPONSIVE = "unresponsive"
 ABSENT = "absent"
 
 
-class _ParentEvidenceError(RuntimeError):
+class ParentEvidenceError(RuntimeError):
     """The observer cannot bind the helper endpoint to the captured root parent."""
 
 
-def _helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
+def helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
     try:
         return _read_helper_parent(sock)
     except Exception as exc:
-        raise _ParentEvidenceError(f"helper parent evidence unavailable: {exc}") from exc
+        raise ParentEvidenceError(f"helper parent evidence unavailable: {exc}") from exc
 
 
 def _read_helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
@@ -50,17 +50,17 @@ def _read_helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess
 
     root = root_process()
     if root is None:
-        raise _ParentEvidenceError("no captured root generation")
+        raise ParentEvidenceError("no captured root generation")
     parent = psutil.Process(root.pid).parent()
     if parent is None:
-        raise _ParentEvidenceError("root has no observable native parent")
+        raise ParentEvidenceError("root has no observable native parent")
     owner = OwnedProcess.capture(parent)
     if peer_pid(sock) != owner.pid or not root.live() or not owner.live():
-        raise _ParentEvidenceError("helper peer is not the captured root parent")
+        raise ParentEvidenceError("helper peer is not the captured root parent")
     return root, owner
 
 
-def _parent_still_live(root: OwnedProcess, parent: OwnedProcess, reply_pid: int) -> bool:
+def parent_still_live(root: OwnedProcess, parent: OwnedProcess, reply_pid: int) -> bool:
     try:
         return (
             reply_pid == parent.pid
@@ -69,15 +69,15 @@ def _parent_still_live(root: OwnedProcess, parent: OwnedProcess, reply_pid: int)
             and psutil.Process(root.pid).ppid() == parent.pid
         )
     except psutil.Error as exc:
-        raise _ParentEvidenceError(f"cannot recheck helper parent: {exc}") from exc
+        raise ParentEvidenceError(f"cannot recheck helper parent: {exc}") from exc
 
 
-def _ping() -> bool:
+def ping() -> bool:
     """Ping the real helper protocol with a watchdog-sized response timeout."""
-    sock = client.connect(str(permissions_helper_socket()))
+    sock = client.connect(str(helper_client().sock_path))
     try:
         sock.settimeout(_PING_TIMEOUT_S)
-        root, parent = _helper_parent(sock)
+        root, parent = helper_parent(sock)
         sock.sendall((json.dumps({"id": 0, "method": "ping"}) + "\n").encode())
         reply = bytearray()
         while not reply.endswith(b"\n"):
@@ -93,8 +93,8 @@ def _ping() -> bool:
         sock.close()
 
     result: client.PingResult = client.parse_reply(bytes(reply), "ping")
-    if "pid" not in result or not _parent_still_live(root, parent, result["pid"]):
-        raise _ParentEvidenceError("helper reply lost captured parent identity")
+    if "pid" not in result or not parent_still_live(root, parent, result["pid"]):
+        raise ParentEvidenceError("helper reply lost captured parent identity")
     return result["pong"] is True
 
 
@@ -107,7 +107,7 @@ class _Observation:
     job: HelperJobState | None = None
 
 
-def _classify(*, ping_ok: bool, job: HelperJobState | None) -> str:
+def classify(*, ping_ok: bool, job: HelperJobState | None) -> str:
     """The LWCR truth table (pure): one failure class per observation.
 
     ``job`` is None when launchd has no readable job. The LWCR class needs the
@@ -148,8 +148,8 @@ def _detail(classification: str, job: HelperJobState | None, ping_failure: str |
 def _observe() -> _Observation:
     """Ping the helper; on failure read and classify the launchd job (total)."""
     try:
-        ping_ok = _ping()
-    except _ParentEvidenceError:
+        ping_ok = ping()
+    except ParentEvidenceError:
         raise
     except Exception as exc:
         ping_ok = False
@@ -162,7 +162,7 @@ def _observe() -> _Observation:
     text = read_helper_job()
     if text is not None:
         job = parse_job_state(text)
-    classification = _classify(ping_ok=False, job=job)
+    classification = classify(ping_ok=False, job=job)
     return _Observation(classification, _detail(classification, job, ping_failure), job)
 
 

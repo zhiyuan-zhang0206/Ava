@@ -40,7 +40,7 @@ def test_collector_health_uses_otlp_without_native_inspection(
 
     monkeypatch.setattr(port_preflight, "strict_listeners_on", forbidden)
     monkeypatch.setattr(client, "owned_process", forbidden)
-    monkeypatch.setattr(hc, "_is_alive", lambda: ready)
+    monkeypatch.setattr(hc, "is_alive", lambda: ready)
     assert hc.probe_collector().alive is ready
 
 
@@ -119,7 +119,7 @@ def test_is_alive_rejecting_valid_otlp_is_not_healthy(monkeypatch: pytest.Monkey
         )
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
-    assert hc._is_alive() is False
+    assert hc.is_alive() is False
 
 
 def test_is_alive_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,7 +141,7 @@ def test_is_alive_ok(monkeypatch: pytest.MonkeyPatch) -> None:
         return _Resp()
 
     monkeypatch.setattr(urllib.request, "urlopen", _open)
-    assert hc._is_alive() is True
+    assert hc.is_alive() is True
     assert seen == {
         "url": "http://127.0.0.1:4318/v1/traces",
         "body": b'{"resourceSpans":[]}',
@@ -173,7 +173,7 @@ def test_is_alive_uses_local_port_despite_export_endpoint_override(
         "http://collector.example:4318/base",
     )
     monkeypatch.setattr(urllib.request, "urlopen", _open)
-    assert hc._is_alive() is True
+    assert hc.is_alive() is True
     assert seen == ["http://127.0.0.1:4319/v1/traces"]
 
 
@@ -184,7 +184,7 @@ def test_is_alive_connection_refused(monkeypatch: pytest.MonkeyPatch) -> None:
         raise OSError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
-    assert hc._is_alive() is False
+    assert hc.is_alive() is False
 
 
 def test_queue_pressure_uses_configured_self_metrics_port(

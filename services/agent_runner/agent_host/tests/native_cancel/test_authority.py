@@ -19,14 +19,14 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
-from ops.lifecycle.termination import _force_terminate_transaction
+from ops.lifecycle.termination import force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.invocation.native_work import (
     recover_native_cancel,
     settle_native_invocation,
 )
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
-    _prepare_graph,
+    prepare_graph,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.managed_work import managed_work
@@ -46,7 +46,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 100, [])
+    graph, saver, config, _history = await prepare_graph(aops_pool, target.agent_id, 100, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(accept_native_cancel, pool, "pump-barrier", target.agent_id, target)
     entered, release = asyncio.Event(), asyncio.Event()
@@ -85,7 +85,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
         await asyncio.wait_for(entered.wait(), 5)
         with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
             _status, _pid, _pages, force, _shell_cutoff = await asyncio.to_thread(
-                _force_terminate_transaction, target.agent_id, pool, source="user"
+                force_terminate_transaction, target.agent_id, pool, source="user"
             )
         running.cancel()
         await asyncio.sleep(0)

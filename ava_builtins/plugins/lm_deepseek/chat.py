@@ -28,9 +28,14 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
         *,
         include_raw: bool = False,
         method: Literal["function_calling", "json_schema"] = "function_calling",
+        http_client: Any | None = None,
+        http_async_client: Any | None = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, dict[str, Any] | BaseModel]:
+        """Use native schema output with optional caller-owned HTTP clients."""
         if method != "json_schema":
+            if http_client is not None or http_async_client is not None:
+                raise ValueError("Custom HTTP clients require method='json_schema'")
             return super().with_structured_output(
                 schema, include_raw=include_raw, method=method, **kwargs
             )
@@ -50,6 +55,8 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
             max_retries=self.max_retries,
             max_completion_tokens=self.max_tokens,
             temperature=self.temperature,
+            http_client=http_client,
+            http_async_client=http_async_client,
         )
         kwargs.setdefault("strict", True)
         return model.with_structured_output(

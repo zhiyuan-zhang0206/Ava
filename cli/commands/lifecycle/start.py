@@ -22,7 +22,7 @@ from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.paths import prod_service_checkout_error
 from base.telemetry import EventPipeline
-from cli.commands._repo import _repo_root
+from cli.commands._repo import repo_root
 from cli.commands._setup import SetupValues, missing_setup_message
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.commands.lifecycle._start_bookmarks import record_running_sha as record_running_sha
@@ -208,7 +208,7 @@ def _guard_start(
         raise RuntimeError("home is being destroyed or detached; startup refused")
 
     if runtime is None:
-        runtime = StartRuntime.development(_repo_root())
+        runtime = StartRuntime.development(repo_root())
     runtime.validate()
     repo = runtime.code_root
     print(f"[ava start] cwd = {repo}")
@@ -483,7 +483,7 @@ def cmd_start_body(
     # Failed start attempts must leave recovery actions gated.
     serving_generation = start_serving.begin_start()
     record_running_sha(repo)
-    launch = _root_driver_commands._launch_service_tree(
+    launch = _root_driver_commands.launch_service_tree(
         roster,
         repo,
         roles,

@@ -1,7 +1,8 @@
-exports = ["creation"]
+[debt.first-party-patch]
+"test_catalog_admission.py#monkeypatch.setattr base.db.transaction.write_transaction" = 1
+"test_catalog_admission.py#monkeypatch.setattr base.packages.plugins.config_registration.overlay_config_classes" = 1
+"test_catalog_admission.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 2
+"test_terminate_hints.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 1
 
-[uses]
-"test_guarded_drafts.py" = ["creation"]
-"test_sdk_guarded_launch_retry.py" = ["test_keyed_launch_retry.py"]
-"test_sdk_task_assignment.py" = ["test_task_assignments.py"]
-"test_task_assignment_races.py" = ["test_task_assignments.py"]
+[debt.unresolved-patch]
+"test_terminate_hints.py#monkeypatch.setattr pool.connection" = 1

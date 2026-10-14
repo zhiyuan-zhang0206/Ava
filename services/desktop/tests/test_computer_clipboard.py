@@ -8,7 +8,7 @@ from typing import Any, cast
 import jsonschema
 import pytest
 
-from tests.fixtures.log_capture import loguru_records as loguru_records
+from base.log.tests.log_records import loguru_records as loguru_records
 
 from ..computer.input import CLIPBOARD_MAX_CHARS
 from .test_computer_input import Desktop

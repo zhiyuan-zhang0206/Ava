@@ -25,8 +25,8 @@ from langgraph.types import Command
 from agent.graph import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.graph.prompt._base_prompt import capture_ava_overview, get_ava_overview
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
@@ -619,7 +619,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
 
 # ─────────── provider-error taxonomy: fail-fast (permanent) vs retry (transient) ───────────
 # The status→ErrorClass mapping itself is covered exhaustively in
-# base/lm/tests/providers/test_provider_errors.py (classify_error). These drive the wiring
+# base/packages/tests/lm/providers/test_provider_errors.py (classify_error). These drive the wiring
 # through llm_node: a PERMANENT class becomes a fail-fast FatalProviderError, a
 # TRANSIENT class re-raises for the retry loop.
 

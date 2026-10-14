@@ -11,12 +11,12 @@ import pytest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from services.desktop.computer import mcp_daemon as daemon
-from tests.fixtures.configuration import snapshot_process_config
 
 
 @pytest.mark.parametrize("sha", ["captured-computer", None])
@@ -62,9 +62,12 @@ def test_entry_shares_the_captured_gate_with_logging_and_actions(
         assert inputs["machine_reader"]() == "computer-entry"
         factories[0]()
 
-    async def work(sock: str | None = None, *, database: Callable[[], Database]) -> None:
+    async def work(
+        sock: str | None = None, *, database: Callable[[], Database], helper: object
+    ) -> None:
         stages.append("run")
         assert sock is None
+        assert helper is not None
         assert database is factories[0]
         database()
 

@@ -26,9 +26,15 @@ from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     Impact,
     base_checkout,
     build_impact,
+    code_names,
     module_files,
     plugin_modules,
+    python_files,
     unknown_diagnostics,
+)
+from scripts.structure.imports.facts import (  # noqa: E402 - standalone script
+    UNANCHORED_READ,
+    Unknown,
 )
 from scripts.structure.placement import ModuleIndex  # noqa: E402 - standalone script
 
@@ -37,8 +43,7 @@ from scripts.structure.placement import ModuleIndex  # noqa: E402 - standalone s
 # per checkout (`Checkout.global_files`).
 _GLOBAL_FILES = frozenset(
     {
-        "pyproject.toml",  # interpreter, dependencies, pytest configuration
-        "meizel.toml",  # the declared top-level packages every scan and test host derives from
+        "pyproject.toml",  # interpreter, dependencies, pytest configuration, the test hosts
         "uv.lock",
         "conftest.py",  # root bootstrap: `pytest_plugins` loads for every test
         ".python-version",
@@ -52,6 +57,12 @@ _GLOBAL_PREFIXES = (
     "deploy/",  # operational configuration that tests read by path, not by import
     "commands/",  # slash-command prompt data read at runtime and by tests by path
 )
+# The root meizel manifests are declarations: `[roles]` names the top-level packages the
+# selector classifies by, `[uses]`/`[debt.*]` and the policy feed the meizel checks (the
+# structure job runs them over the whole tree on every CI run). No runtime behavior reads
+# them, so a change selects the tests that read them (`_manifest_tests`) instead of the full
+# suite. Test hosts come from pyproject.toml, which stays global.
+_MANIFEST_FILES = frozenset({"meizel.toml", "meizel.policy.toml"})
 # Repository-level configuration and tree-wide inputs: only the tree-scan tests
 # can observe them.
 _TREE_SCAN_ONLY_FILES = frozenset(
@@ -74,7 +85,7 @@ _TREE_SCAN_ONLY_PREFIXES = (
 )
 # Hidden tool directories that tests read by path rather than import. A change
 # there also selects every collectable test whose source text names the directory
-# (`_referencing_tests`), so the set of readers is derived, never listed by hand.
+# (`referencing_tests`), so the set of readers is derived, never listed by hand.
 _REFERENCED_ROOTS = (".github", ".agents", ".ava", ".trunk")
 # Top-level directories whose files belong to a package with an owning `tests/`.
 _PACKAGE_ROOTS = frozenset(all_packages())
@@ -89,7 +100,7 @@ _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
 # gate (task #4183: PR #3020's subset passed while the full population was red
 # on tests/contracts/test_lint_event_kinds.py).
 _TREE_SCAN_FILE_PATTERN = re.compile(r"test_lint_.*\.py$")
-_TREE_SCAN_TESTS = frozenset(
+TREE_SCAN_TESTS = frozenset(
     {
         "scripts/ci/pull_requests/tests/test_ci_job_rerun.py",
         "tests/harness/test_ci_rerun_workflow.py",
@@ -109,6 +120,7 @@ class PathClass(StrEnum):
     CONFTEST = "conftest"  # every collectable test below its directory
     PACKAGE = "package"  # runtime consumers plus the owning package's tests
     TREE_SCAN_ONLY = "tree-scan-only"  # repository-level input: tree-scan tests only
+    MANIFEST = "manifest"  # root meizel manifest: its readers' tests and meizel's own
     FRONTEND = "frontend"  # ui/ non-Python: the frontend job owns it
     GLOBAL = "global"  # applies to every test: full suite
     DELETED = "deleted"  # absent from head: use base facts or explicitly keep FULL
@@ -139,7 +151,7 @@ class SelectionResult:
         return {
             "decision": self.decision,
             "reason": self.reason,
-            "mode": _selection_mode(),
+            "mode": selection_mode(),
             "tests": list(self.tests),
             "count": self.count,
             "est_seconds": self.est_seconds,
@@ -162,7 +174,7 @@ class Checkout:
     global_files: frozenset[str]  # root-conftest plugin modules and their package inits
 
 
-def _selection_mode() -> str:
+def selection_mode() -> str:
     """The mode CI is running: the ci.yml TEST_SELECTION_MODE value.
 
     The selector itself behaves identically in either mode — the mode only
@@ -207,14 +219,13 @@ def tree_scan_tests(repo_root: Path) -> set[str]:
 
     Membership is the ``test_lint_*.py`` family (by name, so a new lint test
     joins automatically) plus the explicit repo-level CI/governance checks in
-    ``_TREE_SCAN_TESTS``; both resolve against the collectable universe.
+    ``TREE_SCAN_TESTS``; both resolve against the collectable universe.
     """
     collectable = collectable_test_paths(repo_root)
     return {
         path
         for path in collectable
-        if _TREE_SCAN_FILE_PATTERN.fullmatch(Path(path).name) is not None
-        or path in _TREE_SCAN_TESTS
+        if _TREE_SCAN_FILE_PATTERN.fullmatch(Path(path).name) is not None or path in TREE_SCAN_TESTS
     }
 
 
@@ -266,6 +277,8 @@ def classify_path(path: str, checkout: Checkout) -> PathClass:
 
 def _repository_class(path: str, checkout: Checkout) -> PathClass:
     """The class of an existing, non-test, non-conftest path."""
+    if path in _MANIFEST_FILES:
+        return PathClass.MANIFEST
     if path in _GLOBAL_FILES or path in checkout.global_files or path.startswith(_GLOBAL_PREFIXES):
         return PathClass.GLOBAL
     if path in _TREE_SCAN_ONLY_FILES or path.startswith(_TREE_SCAN_ONLY_PREFIXES):
@@ -316,7 +329,7 @@ def _reference_pattern(root: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![\w.]){escaped}/|[\"']{escaped}[\"']")
 
 
-def _referencing_tests(root: str, checkout: Checkout) -> set[str]:
+def referencing_tests(root: str, checkout: Checkout) -> set[str]:
     """Collectable tests whose source text names the top-level directory ``root``."""
     pattern = _reference_pattern(root)
     return {
@@ -330,6 +343,13 @@ def _path_tests(
     path: str, path_class: PathClass, checkout: Checkout, reverse_map: dict[str, set[str]]
 ) -> set[str]:
     """What one changed path contributes to the candidate subset."""
+    return _class_tests(path, path_class, checkout, reverse_map) | _doc_readers(path, checkout)
+
+
+def _class_tests(
+    path: str, path_class: PathClass, checkout: Checkout, reverse_map: dict[str, set[str]]
+) -> set[str]:
+    """The contribution of a path's class rule."""
     runtime = _runtime_tests(path, reverse_map)
     if path_class is PathClass.TEST:
         return {path} | runtime
@@ -337,10 +357,49 @@ def _path_tests(
         return _conftest_tests(path, checkout) | runtime
     if path_class is PathClass.PACKAGE:
         return runtime | package_tests(path, checkout)
+    if path_class is PathClass.MANIFEST:
+        return runtime | _manifest_tests(path, checkout, reverse_map)
     root = path.split("/", maxsplit=1)[0]
     if path_class is PathClass.TREE_SCAN_ONLY and root in _REFERENCED_ROOTS:
-        return _referencing_tests(root, checkout) | runtime
+        return referencing_tests(root, checkout) | runtime
     return runtime
+
+
+def _manifest_tests(
+    manifest: str, checkout: Checkout, reverse_map: dict[str, set[str]]
+) -> set[str]:
+    """The tests that can observe a root meizel manifest: meizel's own tests, every test whose
+    source names the file, and the runtime and package tests of every source module that does.
+
+    The readers are derived, not listed: a string constant equal to the file name in any
+    Python file under the code tops, outside docstrings (a comment or docstring reads nothing)."""
+    selected = {test for test in checkout.collectable if test.startswith("meizel/")}
+    for file in python_files(checkout.repo_root):
+        relative = file.relative_to(checkout.repo_root).as_posix()
+        if not code_names(file, manifest, exact=True):
+            continue
+        if relative in checkout.collectable:
+            selected.add(relative)
+        elif not _is_test_dir_path(relative, checkout.hosts):
+            selected |= _runtime_tests(relative, reverse_map) | package_tests(relative, checkout)
+    return selected
+
+
+def _doc_readers(path: str, checkout: Checkout) -> set[str]:
+    """Tests known to read skill or OKF documents at run time, when one of those changed.
+
+    The unanchored-read rule does not count Markdown as data, so the readers that are known by
+    name are pinned the way the tree-scan family is: every collectable test whose code holds
+    ``SKILL.md`` (a skill) or ``.okf.md`` (an OKF document) as part of a string constant."""
+    name = Path(path).name
+    needle = "SKILL.md" if name == "SKILL.md" else ".okf.md" if name.endswith(".okf.md") else None
+    if needle is None:
+        return set()
+    return {
+        test
+        for test in checkout.collectable
+        if code_names(checkout.repo_root / test, needle, exact=False)
+    }
 
 
 def _runtime_tests(path: str, reverse_map: dict[str, set[str]]) -> set[str]:
@@ -488,15 +547,20 @@ def _runtime_candidates(
     """
     impact = build_impact(checkout.repo_root, checkout.collectable)
     reverse_map = impact.tests_by_input
-    diagnostics = list(unknown_diagnostics(impact, tree="head"))
-    tainted = _unbounded_tests(impact)
+    data_changed = any(_is_data_change(path) for path in classes)
+    diagnostics = list(
+        unknown_diagnostics(_blocking(impact, data_changed=data_changed), tree="head")
+    )
+    tainted = _unbounded_tests(impact, data_changed=data_changed)
     selected = _owner_tests(classes, checkout, reverse_map)
     if base_ref is not None:
         with base_checkout(checkout.repo_root, base_ref) as base_root:
             base = load_checkout(base_root)
             old_impact = build_impact(base_root, base.collectable & checkout.collectable)
-            diagnostics.extend(unknown_diagnostics(old_impact, tree="base"))
-            tainted.update(_unbounded_tests(old_impact))
+            diagnostics.extend(
+                unknown_diagnostics(_blocking(old_impact, data_changed=data_changed), tree="base")
+            )
+            tainted.update(_unbounded_tests(old_impact, data_changed=data_changed))
             old_classes = {path: classify_path(path, base) for path in classes}
             old_forced = _forced_full(old_classes, full_estimate)
             if old_forced is not None:
@@ -528,9 +592,32 @@ def _runtime_candidates(
     return selected, tainted, len(reverse_map), tuple(sorted(set(diagnostics)))
 
 
-def _unbounded_tests(impact: Impact) -> set[str]:
+def _is_data_change(path: str) -> bool:
+    """Whether a changed path is a data file a test could read: anything but Python source,
+    Markdown and the meizel manifests (declarations that no runtime behavior reads).
+
+    Markdown is prose. The tests known to read skill and OKF documents are pinned by
+    ``_doc_readers``, and the Trunk queue runs the full suite before anything reaches main."""
+    return not path.endswith((".py", ".md")) and Path(path).name not in _MANIFEST_FILES
+
+
+def _blocking(impact: Impact, *, data_changed: bool) -> tuple[Unknown, ...]:
+    """The gaps that keep a test from being certified for this change.
+
+    A load the analysis cannot resolve can run any code, so it always blocks. A read whose path
+    cannot be anchored can only matter to a data file (Python sources reach tests through the
+    import graph, and the tests that read source text are the pinned tree-scan family), so it
+    blocks only when the change includes one."""
+    return tuple(item for item in impact.unknown if data_changed or item.reason != UNANCHORED_READ)
+
+
+def _unbounded_tests(impact: Impact, *, data_changed: bool) -> set[str]:
     """Tests whose runtime graph reaches an input the analysis could not bound."""
-    return {test for item in impact.unknown for test in impact.tests_by_input.get(item.path, ())}
+    return {
+        test
+        for item in _blocking(impact, data_changed=data_changed)
+        for test in impact.tests_by_input.get(item.path, ())
+    }
 
 
 def _forced_full(classes: dict[str, PathClass], full_estimate: float) -> SelectionResult | None:
@@ -578,9 +665,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(result.as_json(), sort_keys=True))
     else:
-        print(
-            f"selector mode={_selection_mode()} decision={result.decision} reason={result.reason}"
-        )
+        print(f"selector mode={selection_mode()} decision={result.decision} reason={result.reason}")
         print(f"changed files={args.changed_files}")
         print(
             f"tests={result.count} estimate={result.est_seconds:.3f}s full={result.full_est_seconds:.3f}s"

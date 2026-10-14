@@ -257,7 +257,7 @@ def test_vacuum_emits_checkpoint_table_physical_sizes(
 def test_emit_checkpoint_table_sizes_samples_without_vacuuming(
     monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
 ) -> None:
-    """The hourly emit (daemon `_run_maintenance`) samples sizes + live rows
+    """The hourly emit (daemon `run_maintenance`) samples sizes + live rows
     and emits the gauge WITHOUT vacuuming — it must be callable from the
     pooled connection on every pass, not only inside the vacuum window."""
     emitted: list[tuple[str, str, dict[str, int]]] = []

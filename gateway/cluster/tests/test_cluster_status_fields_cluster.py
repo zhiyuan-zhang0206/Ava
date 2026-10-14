@@ -58,7 +58,7 @@ def test_gather_cluster_status_local_agent_runner_probed(
             "supervisor_online": False,
         }
 
-    monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         (
@@ -127,7 +127,7 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(
             "head_sha": "abc123",
         }
 
-    monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], datetime.now(UTC), None, None, False)
@@ -183,7 +183,7 @@ def test_identity_mismatch_logs_once_per_episode(
             "head_sha": "abc123",
         }
 
-    monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], datetime.now(UTC), None, None, False)
     ]
@@ -282,7 +282,7 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
             "head_sha": "abc123",
         }
 
-    monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
     stopped = datetime.now(UTC)
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], stopped, None, stopped, False)
@@ -332,7 +332,7 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
         dispatched.append(kwargs["kind"])  # pyright: ignore[reportUnknownArgumentType]
         return {}
 
-    monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
     def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
         assert machine_name == machine_identity.name
@@ -435,7 +435,7 @@ def test_gather_cluster_status_carries_probe_paused_reason(
             "head_sha": "abc123",
         }
 
-    monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("m1", "http://localhost:9", ["agent-runner"], datetime.now(UTC), None, None, False)

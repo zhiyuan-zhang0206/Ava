@@ -10,8 +10,10 @@ import pytest
 from base import paths
 from base.lm.catalog import CatalogBuilder
 from base.lm.provider_api import ProviderContribution
-from base.lm.tests.providers.provider_plugin_support import provider_plugin as provider_plugin
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.tests.lm.providers.provider_plugin_support import (
+    provider_plugin as provider_plugin,
+)
 
 
 @pytest.mark.parametrize("phase", ["import", "contribute", "install", "build"])

@@ -3,5 +3,6 @@
 "tests.path_scoped.ava_tests" = [
     "test_shell.py",
     "test_shell_background.py",
+    "test_shell_scan.py",
     "test_shell_ttl.py",
 ]

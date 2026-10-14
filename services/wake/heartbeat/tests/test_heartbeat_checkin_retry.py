@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -20,7 +21,6 @@ from services.wake.heartbeat import JITTER_SPAN_S
 from services.wake.heartbeat import daemon as heartbeat_daemon
 from services.wake.heartbeat.tests.machine_probe_setup import pool as pool
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 @pytest.mark.usefixtures(pool.__name__)
@@ -78,12 +78,12 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
         pass
 
     monkeypatch.setattr(heartbeat_daemon, "time", SimpleNamespace(time=lambda: clock[0]))
-    monkeypatch.setattr(heartbeat_daemon, "_sleep_with_liveness", next_tick)
-    monkeypatch.setattr(heartbeat_daemon, "_send_heartbeat_checkin", record_checkin)
+    monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", next_tick)
+    monkeypatch.setattr(heartbeat_daemon, "send_heartbeat_checkin", record_checkin)
     monkeypatch.setattr(heartbeat_daemon, "_sweep_backoff_resets", skip_sweep)
 
     with pytest.raises(asyncio.CancelledError):
-        await heartbeat_daemon._dispatch_loop(
+        await heartbeat_daemon.dispatch_loop(
             pool, database, event_bus, LoopProgress("dispatch", 60.0)
         )
 

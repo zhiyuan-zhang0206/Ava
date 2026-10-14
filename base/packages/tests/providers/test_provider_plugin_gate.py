@@ -23,11 +23,13 @@ from base.lm.provider_api import (
     ProviderBinding,
     ProviderContribution,
 )
-from base.lm.tests.providers.provider_plugin_support import provider_plugin as provider_plugin
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.gate import ContributionMismatch, check_manifest
 from base.packages.plugins.manifest import ManifestError
+from base.packages.tests.lm.providers.provider_plugin_support import (
+    provider_plugin as provider_plugin,
+)
 
 
 def _manifest(name: str, providers: list[str]) -> str:

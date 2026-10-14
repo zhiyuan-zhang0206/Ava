@@ -12,8 +12,8 @@ tags:
 `scripts/structure/{quality_budget,locality}.py`, `meizel/language/path_imports.py` and the `meizel/state/ambient_state/` package are the
 pre-commit `lint-code-structure` gate's own scanner modules — see
 [[scripts/lint/docs/lint.ava.okf.md]] — and
-`{placement,patch_points,patch_targets,patch_report}.py` and `imports/` those of the
-separate `lint-patch-targets` gate ([[scripts/lint/docs/patch-targets.ava.okf.md]]).
+`placement.py`, `placement_evidence.py` and `imports/` are the reference and import-fact
+modules behind the tests-location proof and CI test selection.
 `tests_location.py` (with `tests_location_allowed.py` and, for `--suggest`,
 `tests_location_suggest.py`) is the runnable gate that keeps new tests out of the
 top-level `tests/` ([[scripts/lint/docs/tests-location.ava.okf.md]]).

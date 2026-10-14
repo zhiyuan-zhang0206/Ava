@@ -15,7 +15,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.telemetry import EventPipeline
 from cli.database import OperatorDatabaseFactory, operator_database_factory
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -110,10 +110,11 @@ def test_command_pipeline_is_lazy_and_retains_the_same_database_factory(
     seen: list[DatabaseFactory] = []
 
     def build(
-        *, database: DatabaseFactory, machine: MachineIdentity, home: Path
+        *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
     ) -> telemetry.EventPipeline:
         assert machine is command_runtime.machine
         assert home == command_home
+        assert flush_interval_s == 0.5
         seen.append(database)
         return pipeline
 

@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.graph.claim.node import claim_node
 from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent
-from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import AgentState
 from agent.tests.claim.test_inbound_ownership import insert
@@ -34,7 +34,7 @@ from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.managed_work import managed_work
-from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
+from services.agent_runner.agent_host.tests.native_cancel.test_continuation import install_faults
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -89,7 +89,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
             database_gate=database_gate,
             machine=machine_identity,
         )
-        faults = _install_faults(monkeypatch, initial.agent_id, fault_site)
+        faults = install_faults(monkeypatch, initial.agent_id, fault_site)
         running = asyncio.create_task(
             host._invoke_until_done(
                 initial.agent_id,
@@ -100,7 +100,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
             await asyncio.wait_for(entered.wait(), 5)
             command = None
             if ending != "provider_failure":
-                command = _command(db_conn, initial.agent_id, ending)
+                command = insert_lifecycle_command(db_conn, initial.agent_id, ending)
                 async with async_write_transaction(aops_pool) as conn:
                     assert (
                         await accept_lifecycle_intent(

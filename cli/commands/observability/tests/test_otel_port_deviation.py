@@ -12,9 +12,9 @@ from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.telemetry import station_endpoint
 from cli.commands.observability import otel_collector as oc
-from cli.commands.observability.tests.test_converge_otel_collector import _render_real_template
+from cli.commands.observability.tests.test_converge_otel_collector import render_real_template
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.wake.heartbeat import station_probe
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -40,7 +40,7 @@ def test_remote_station_advertisement_drives_render_and_probe(
         )
         conn.commit()
     try:
-        cfg = _render_real_template(
+        cfg = render_real_template(
             monkeypatch,
             frozenset({"gateway"}),
             observability_url="http://10.0.0.46",
@@ -85,7 +85,7 @@ def test_runner_does_not_discover_station(
         pytest.fail("pure runners must use their published gateway relay")
 
     monkeypatch.setattr(station_endpoint, "resolve_station_target", fail_discovery)
-    cfg = _render_real_template(
+    cfg = render_real_template(
         monkeypatch,
         frozenset({"agent-runner"}),
         observability_url="http://10.0.0.46",

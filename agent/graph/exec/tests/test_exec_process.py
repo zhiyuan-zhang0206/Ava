@@ -570,7 +570,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
         finally:
             runner_done.set()
 
-    monkeypatch.setattr(_subprocess, "_spawn", private_spawn)
+    monkeypatch.setattr(_subprocess, "spawn_exec_child", private_spawn)
     runner = threading.Thread(target=run_in_thread, daemon=True)
     runner.start()
     try:

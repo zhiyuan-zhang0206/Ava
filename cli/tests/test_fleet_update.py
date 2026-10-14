@@ -595,7 +595,7 @@ def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
     shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """zsh's and dash's `echo` interpret backslashes: a hold record whose argv holds `\\$HOME`
-    reached `_hold` as an invalid escape. The probe runs in each host's real shell."""
+    reached `split_hold_text` as an invalid escape. The probe runs in each host's real shell."""
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
     source = tmp_path / ".ava" / "source"
@@ -617,7 +617,7 @@ def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
     }
     assert facts["head"] == _git(source, "rev-parse", "HEAD")
     assert facts["dirty"] == "0"
-    assert fleet_update._hold(facts["hold"]) == ("paused", "stopped")
+    assert fleet_update.split_hold_text(facts["hold"]) == ("paused", "stopped")
     assert json.loads(facts["hold"])["hold"]["operation"] == '["sh", "-c", "\\$HOME\\n"]'
 
 

@@ -8,6 +8,7 @@ from psycopg_pool import ConnectionPool
 
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
+from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -16,12 +17,11 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.tests.impersonation.support import accept_controller, create_native_owner
 from services.wake.heartbeat.daemon import (
-    _reconcile_checkin_outcomes,
-    _select_idle_agents_needing_heartbeat,
-    _send_heartbeat_checkin,
+    reconcile_checkin_outcomes,
+    select_idle_agents_needing_heartbeat,
+    send_heartbeat_checkin,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def active_lease(
 
 
 def selected(pool: ConnectionPool) -> dict[int, float]:
-    return dict(_select_idle_agents_needing_heartbeat(pool, 300, heartbeat_interval_s=300))
+    return dict(select_idle_agents_needing_heartbeat(pool, 300, heartbeat_interval_s=300))
 
 
 @pytest.mark.parametrize("status", ["idling", "running"])
@@ -133,7 +133,7 @@ def test_pause_then_normal_cadence(
     )
     db_conn.commit()
     assert aid in selected(pool)
-    _send_heartbeat_checkin(pool, database, event_bus, aid, 400 / 60)
+    send_heartbeat_checkin(pool, database, event_bus, aid, 400 / 60)
     messages = leases.inbox(
         database, lease["id"], attested_caller(lease), local_machine=machine_identity.name()
     )
@@ -171,7 +171,7 @@ def test_external_work_is_not_a_failed_native_turn(
     )
     aid = lease["agent_id"]
     pending, failures, noops = {aid: 400 / 60}, {aid: 2}, {aid: 2}
-    _reconcile_checkin_outcomes(
+    reconcile_checkin_outcomes(
         pool,
         pending_checkin=pending,
         failure_streak=failures,
@@ -268,14 +268,14 @@ def test_heartbeat_history_survives_ack_including_activation_backlog(
     machine_identity: MachineIdentity,
 ):
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
-    _send_heartbeat_checkin(pool, database, event_bus, owner.agent_id, 7)
+    send_heartbeat_checkin(pool, database, event_bus, owner.agent_id, 7)
     lease = accept_controller(
         owner,
         authority=config_authority,
         database_gate=database_gate,
         local_machine=machine_identity.name(),
     )
-    _send_heartbeat_checkin(pool, database, event_bus, owner.agent_id, 8)
+    send_heartbeat_checkin(pool, database, event_bus, owner.agent_id, 8)
     messages = leases.inbox(
         database, lease["id"], attested_caller(lease), local_machine=machine_identity.name()
     )

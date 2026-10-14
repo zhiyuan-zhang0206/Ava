@@ -15,6 +15,7 @@ from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.log import logger
+from base.sessions.helperproc import helper_client
 from cli.commands.probe import ReadinessWait
 from cli.start_runtime import StartRuntime
 from services.supervision.roster import service_spec
@@ -31,10 +32,10 @@ _ROOT_READY_TIMEOUT_S = 30.0
 # Unit stop windows accumulate in dependency order.
 _ROOT_STOP_TIMEOUT_S = 90.0
 _READY_POLL_INTERVAL_S = 0.5
-_poll_sleep = time.sleep  # a named seam tests can patch (the _probe pattern)
+poll_sleep = time.sleep  # a named seam tests can patch (the _probe pattern)
 
 
-class _RootDriverError(RuntimeError):
+class RootDriverError(RuntimeError):
     """The root-driven tree could not be brought up, reconciled or stopped."""
 
 
@@ -49,10 +50,10 @@ def complete_boot_start() -> None:
     home = ava_home()
     if not in_boot_unit():
         return
-    snapshot = _root_status(root_client())
+    snapshot = root_status(root_client())
     if snapshot is None:
-        raise _RootDriverError("cannot hand systemd an unobservable root")
-    _require_root_owner(snapshot)
+        raise RootDriverError("cannot hand systemd an unobservable root")
+    require_root_owner(snapshot)
     publish_root_ready(home, native_identity(snapshot["root"]))
 
 
@@ -63,7 +64,7 @@ class LaunchOutcome(NamedTuple):
     failed: tuple[str, ...]
 
 
-def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
+def service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     """Bind profile, database login and API token to one service, never its parent."""
     from base.telemetry.lgtm_local import BACKENDS, service_environment
     from cli.commands.data_plane.bringup import api_delivery, db_delivery
@@ -87,7 +88,7 @@ def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     return extra
 
 
-def _root_tree_roster(
+def root_tree_roster(
     roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
 ) -> tuple[ServiceSpec, ...]:
     """The capability/config-selected units for this root."""
@@ -108,7 +109,7 @@ def root_client(*, timeout: float = 5.0) -> Any:
     return RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=timeout)
 
 
-def _root_status(client: Any) -> dict[str, Any] | None:
+def root_status(client: Any) -> dict[str, Any] | None:
     """The daemon's status result, or None when no root answers (yet)."""
     from base.native_process.root_control.client import RootClientError
 
@@ -122,7 +123,7 @@ def _root_status(client: Any) -> dict[str, Any] | None:
     return None
 
 
-def _root_units(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def root_units(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Unit rows by unit id from one status snapshot."""
     rows_raw = status.get("units")
     rows = cast("list[object]", rows_raw) if isinstance(rows_raw, list) else []
@@ -138,50 +139,49 @@ def _root_units(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _call_ok(response: dict[str, Any], what: str) -> None:
-    """Raise `_RootDriverError` when a K1 reply is not ok."""
+    """Raise `RootDriverError` when a K1 reply is not ok."""
     if not response.get("ok"):
-        raise _RootDriverError(f"{what} failed: {response.get('code')}: {response.get('error')}")
+        raise RootDriverError(f"{what} failed: {response.get('code')}: {response.get('error')}")
 
 
-def _helper_spawn_committed() -> bool:
+def helper_spawn_committed() -> bool:
     """macOS service ancestry is mandatory, independent of a runtime switch."""
     return sys.platform == "darwin"
 
 
-def _helper_wire_ok() -> bool:
+def helper_wire_ok() -> bool:
     """Whether the permission helper answers on this cluster's socket."""
-    from base.host.permissions_helper import client as helper_client
+    from base.host.permissions_helper.client import PermissionsHelperError
 
     try:
-        ping = helper_client.ping()
-    except (helper_client.PermissionsHelperError, OSError):
+        ping = helper_client().ping()
+    except (PermissionsHelperError, OSError):
         # Socket absent / refused / timed out / helper error reply: not answering.
         return False
     return all(ping.get(capability) is True for capability in _HELPER_PROTOCOLS)
 
 
-def _require_root_owner(status: dict[str, Any]) -> None:
+def require_root_owner(status: dict[str, Any]) -> None:
     """Bind every reused or stopped root to its required live native parent."""
     import psutil
 
-    from base.host.permissions_helper import client as helper_client
     from base.native_process.ownership import OwnedProcess
     from base.native_process.root_control.client import native_identity
     from base.paths import root_run_dir
 
     root = native_identity(status.get("root"))
     if not root.live():
-        raise _RootDriverError("recorded root native birth is no longer live")
-    if not _helper_spawn_committed():
+        raise RootDriverError("recorded root native birth is no longer live")
+    if not helper_spawn_committed():
         return
-    ping = helper_client.ping()
+    ping = helper_client().ping()
     if not all(ping.get(capability) is True for capability in _HELPER_PROTOCOLS):
-        raise _RootDriverError(f"required helper lacks lifecycle protocols: {_HELPER_PROTOCOLS}")
+        raise RootDriverError(f"required helper lacks lifecycle protocols: {_HELPER_PROTOCOLS}")
     helper_pid = ping.get("pid")
     if isinstance(helper_pid, bool) or not isinstance(helper_pid, int) or helper_pid <= 1:
-        raise _RootDriverError("required helper omitted its native process")
+        raise RootDriverError("required helper omitted its native process")
     helper = OwnedProcess.capture(psutil.Process(helper_pid))
-    keeper = helper_client.root_status()
+    keeper = helper_client().root_status()
     if (
         keeper.get("pid") != root.pid
         or keeper.get("run_dir") != str(root_run_dir())
@@ -189,10 +189,10 @@ def _require_root_owner(status: dict[str, Any]) -> None:
         or not helper.live()
         or not root.live()
     ):
-        raise _RootDriverError("root is outside this home's signed-helper custody")
+        raise RootDriverError("root is outside this home's signed-helper custody")
 
 
-def _root_argv(run_dir: Path, manifests: Path, runtime: StartRuntime | None = None) -> list[str]:
+def root_argv(run_dir: Path, manifests: Path, runtime: StartRuntime | None = None) -> list[str]:
     """The daemon command line: the K3 launch face the root package freezes."""
     arguments = [
         "--run-dir",
@@ -227,7 +227,7 @@ def tree_manifest(
         capabilities=sorted(roles),
         repo_root=repo,
         specs=roster,
-        environments={spec.session: _service_extra_env(spec) for spec in roster},
+        environments={spec.session: service_extra_env(spec) for spec in roster},
     )
 
 
@@ -240,7 +240,7 @@ def _log_tail(path: Path, lines: int = 20) -> str:
     return "\n".join(content[-lines:]) or "(empty log)"
 
 
-def _spawn_direct(
+def spawn_direct(
     run_dir: Path,
     repo: Path,
     manifests: Path,
@@ -254,7 +254,7 @@ def _spawn_direct(
     stderr = (run_dir / _ROOT_STDERR_LOG).open("ab")
     try:
         child = subprocess.Popen(
-            _root_argv(run_dir, manifests, runtime),
+            root_argv(run_dir, manifests, runtime),
             cwd=repo if runtime is None else runtime.cwd,
             env=env,
             stdin=subprocess.DEVNULL,
@@ -272,7 +272,7 @@ def _spawn_direct(
     return child
 
 
-def _await_root_status(
+def await_root_status(
     client: Any,
     run_dir: Path,
     *,
@@ -284,20 +284,20 @@ def _await_root_status(
     while time.monotonic() < deadline:
         if proc is not None and proc.poll() is not None:
             tail = _log_tail(run_dir / _ROOT_STDERR_LOG)
-            raise _RootDriverError(
+            raise RootDriverError(
                 f"ava-root exited before serving (rc={proc.returncode}); log tail:\n{tail}"
             )
-        status = _root_status(client)
+        status = root_status(client)
         if status is not None:
             return status
-        _poll_sleep(_READY_POLL_INTERVAL_S)
+        poll_sleep(_READY_POLL_INTERVAL_S)
     tail = _log_tail(run_dir / _ROOT_STDERR_LOG)
-    raise _RootDriverError(
+    raise RootDriverError(
         f"ava-root did not become ready within {timeout_s:.0f}s; log tail:\n{tail}"
     )
 
 
-def _seed_via_helper(
+def seed_via_helper(
     run_dir: Path,
     repo: Path,
     manifests: Path,
@@ -305,13 +305,13 @@ def _seed_via_helper(
     runtime: StartRuntime | None = None,
 ) -> None:
     """Seed the root keeper and wait for it to report the root `running`."""
-    from base.host.permissions_helper import client as helper_client
+    from base.host.permissions_helper.client import RootSeedConfig
 
     try:
         from base.host.atomic_io import write_text_atomic
 
-        seed: helper_client.RootSeedConfig = {
-            "argv": _root_argv(run_dir, manifests, runtime),
+        seed: RootSeedConfig = {
+            "argv": root_argv(run_dir, manifests, runtime),
             "cwd": str(repo if runtime is None else runtime.cwd),
             "run_dir": str(run_dir),
             "stdout": str(run_dir / _ROOT_STDOUT_LOG),
@@ -319,38 +319,38 @@ def _seed_via_helper(
             "env": env,
         }
         write_text_atomic(run_dir / "seed.json", json.dumps(seed), mode=0o600, sync_parent=True)
-        wire = helper_client.seed_root(seed)
+        wire = helper_client().seed_root(seed)
     except Exception as exc:
-        raise _RootDriverError(f"root_seed over the helper failed: {exc}") from exc
+        raise RootDriverError(f"root_seed over the helper failed: {exc}") from exc
     deadline = time.monotonic() + _ROOT_READY_TIMEOUT_S
     while time.monotonic() < deadline:
         state = wire.get("state")
         if state == "running":
             return
         if state == "conflict":
-            raise _RootDriverError(
+            raise RootDriverError(
                 f"another ava-root owns {run_dir}; the keeper rests in conflict and will not "
                 "spawn (resolve the conflict first)"
             )
         if state == "exited":
-            raise _RootDriverError(
+            raise RootDriverError(
                 f"the keeper stopped restarting a root that keeps exiting ({wire.get('last_exit')})"
             )
         seed_error = wire.get("seed_error")
         if seed_error:
-            raise _RootDriverError(f"the root keeper rejected the seed: {seed_error}")
-        _poll_sleep(_READY_POLL_INTERVAL_S)
+            raise RootDriverError(f"the root keeper rejected the seed: {seed_error}")
+        poll_sleep(_READY_POLL_INTERVAL_S)
         try:
-            wire = helper_client.root_status()
+            wire = helper_client().root_status()
         except Exception as exc:
-            raise _RootDriverError(f"root_status over the helper failed: {exc}") from exc
-    raise _RootDriverError(
+            raise RootDriverError(f"root_status over the helper failed: {exc}") from exc
+    raise RootDriverError(
         f"the helper did not bring ava-root up within {_ROOT_READY_TIMEOUT_S:.0f}s "
         f"(keeper state={wire.get('state')})"
     )
 
 
-def _bring_up_root(
+def bring_up_root(
     run_dir: Path,
     repo: Path,
     manifests: Path,
@@ -361,27 +361,25 @@ def _bring_up_root(
     retained_children: list[subprocess.Popen[bytes]],
 ) -> dict[str, Any]:
     """Start through the required platform owner; never change ownership on failure."""
-    if _helper_spawn_committed():
-        if not _helper_wire_ok():
-            raise _RootDriverError(
+    if helper_spawn_committed():
+        if not helper_wire_ok():
+            raise RootDriverError(
                 f"the macOS helper is unreachable or lacks {_HELPER_PROTOCOLS}; prepare and "
                 "activate a reviewed signed helper supporting durable root stop before "
                 "starting services. Refusing direct spawning outside the permission ancestry"
             )
-        _seed_via_helper(run_dir, repo, manifests, env, runtime)
-        return _await_root_status(client, run_dir)
-    proc = _spawn_direct(
-        run_dir, repo, manifests, env, runtime, retained_children=retained_children
-    )
+        seed_via_helper(run_dir, repo, manifests, env, runtime)
+        return await_root_status(client, run_dir)
+    proc = spawn_direct(run_dir, repo, manifests, env, runtime, retained_children=retained_children)
     print(f"  + ava-root spawned directly (pid {proc.pid})")
-    return _await_root_status(client, run_dir, proc=proc)
+    return await_root_status(client, run_dir, proc=proc)
 
 
-def _changed_units(manifest: dict[str, object], status: dict[str, Any]) -> set[str]:
+def changed_units(manifest: dict[str, object], status: dict[str, Any]) -> set[str]:
     """A running root may be reused only for the exact requested launch inputs."""
     from services.supervision.ava_root.manifest import UnitManifest
 
-    units = _root_units(status)
+    units = root_units(status)
     desired = [
         UnitManifest.from_mapping(row, origin="requested tree")
         for row in cast("list[dict[str, object]]", manifest["units"])
@@ -393,41 +391,40 @@ def _changed_units(manifest: dict[str, object], status: dict[str, Any]) -> set[s
     }
 
 
-def _stop_root_process(
+def stop_root_process(
     run_dir: Path, client: Any, status: dict[str, Any], *, timeout_s: float
 ) -> None:
     """Stop through the keeper on macOS, or SIGTERM; await native root exit."""
     from base.native_process.root_control.client import native_identity
 
-    _require_root_owner(status)
+    require_root_owner(status)
     identity = native_identity(status["root"])
-    if _helper_spawn_committed():
-        if not _helper_wire_ok():
-            raise _RootDriverError(
+    if helper_spawn_committed():
+        if not helper_wire_ok():
+            raise RootDriverError(
                 "the required macOS helper is unreachable — refusing to "
                 "signal a helper-seeded root directly (the keeper would restart it); stop it "
                 "through the helper"
             )
-        from base.host.permissions_helper import client as helper_client
 
         try:
-            reply = helper_client.stop_root()
+            reply = helper_client().stop_root()
         except Exception as exc:
-            raise _RootDriverError(f"root_stop over the helper failed: {exc}") from exc
+            raise RootDriverError(f"root_stop over the helper failed: {exc}") from exc
         if reply.get("stop_requested") is not True:
-            raise _RootDriverError("helper did not retain root stop intent")
+            raise RootDriverError("helper did not retain root stop intent")
     else:
         identity.send_signal(signal.SIGTERM)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         alive = identity.live()
-        if not alive and _root_status(client) is None:
+        if not alive and root_status(client) is None:
             return
-        _poll_sleep(_READY_POLL_INTERVAL_S)
-    raise _RootDriverError(f"ava-root at {run_dir} did not stop within {timeout_s:.0f}s")
+        poll_sleep(_READY_POLL_INTERVAL_S)
+    raise RootDriverError(f"ava-root at {run_dir} did not stop within {timeout_s:.0f}s")
 
 
-def _reconcile_units(
+def reconcile_units(
     roster: tuple[ServiceSpec, ...],
     client: Any,
     status: dict[str, Any],
@@ -442,7 +439,7 @@ def _reconcile_units(
     retried start is not an operator: with ``honor_restart_budget`` it leaves a
     unit down whose ava-root restart budget is spent.
     """
-    units = _root_units(status)
+    units = root_units(status)
     health = cast("dict[str, dict[str, Any]]", status.get("health") or {})
     from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 
@@ -456,17 +453,17 @@ def _reconcile_units(
             print(f"  ↑ ava-root unit {session_name(spec.session)} ({reason}) — bringing it up")
             try:
                 _call_ok(client.up(spec.session), f"up {spec.session}")
-            except _RootDriverError as exc:
+            except RootDriverError as exc:
                 if spec.session in CRITICAL_SERVICE_SESSIONS:
                     raise
                 print(f"  ✗ optional service {spec.session}: {exc}", file=sys.stderr)
-    refreshed = _root_status(client)
+    refreshed = root_status(client)
     return refreshed if refreshed is not None else status
 
 
 def _classify_units(roster: tuple[ServiceSpec, ...], status: dict[str, Any]) -> LaunchOutcome:
     """The launch verdict: units that should run but could not be spawned."""
-    units = _root_units(status)
+    units = root_units(status)
     failed: list[str] = []
     for spec in roster:
         name = session_name(spec.session)
@@ -481,20 +478,20 @@ def _classify_units(roster: tuple[ServiceSpec, ...], status: dict[str, Any]) -> 
     return LaunchOutcome(roster, tuple(failed))
 
 
-def _require_same_generation(
+def require_same_generation(
     manifest: dict[str, object],
     status: dict[str, Any],
     roster: tuple[ServiceSpec, ...],
     *,
     reconcile: bool,
 ) -> None:
-    changed = _changed_units(manifest, status)
+    changed = changed_units(manifest, status)
     if status["root"].get("launch_digest") != manifest["launch_digest"]:
         changed.add("root launch inputs")
     if reconcile:
-        changed |= _root_units(status).keys() - {spec.session for spec in roster}
+        changed |= root_units(status).keys() - {spec.session for spec in roster}
     if changed:
-        raise _RootDriverError(
+        raise RootDriverError(
             "requested services change the immutable root generation: "
             + ", ".join(sorted(changed))
             + "; run ava stop before starting with changed services or configuration"
@@ -511,20 +508,20 @@ def admit_live_start(
     """Observe before any converge/schema write; reuse only identical inputs."""
     from cli.commands.lifecycle.start_generation import launch_digest
 
-    status = _root_status(root_client())
+    status = root_status(root_client())
     if status is None:
         require_root_absent()
         return False
-    _require_root_owner(status)
+    require_root_owner(status)
     manifest = tree_manifest(roster, repo, roles=roles)
     from base.paths import ava_home
 
     manifest["launch_digest"] = launch_digest(repo, root_child_env(), home=ava_home())
-    _require_same_generation(manifest, status, roster, reconcile=reconcile)
+    require_same_generation(manifest, status, roster, reconcile=reconcile)
     return True
 
 
-def _ensure_root_service_tree(
+def ensure_root_service_tree(
     roster: tuple[ServiceSpec, ...],
     repo: Path,
     *,
@@ -549,29 +546,29 @@ def _ensure_root_service_tree(
     manifests = root_manifests_path()
     client = root_client()
     try:
-        status = _root_status(client)
+        status = root_status(client)
         if status is not None:
-            _require_root_owner(status)
-            _require_same_generation(manifest, status, roster, reconcile=reconcile)
-        units = _root_units(status) if status is not None else {}
+            require_root_owner(status)
+            require_same_generation(manifest, status, roster, reconcile=reconcile)
+        units = root_units(status) if status is not None else {}
         for spec in roster:
             unit = units.get(spec.session)
             if unit is not None and unit.get("state") == "running":
                 continue
             if spec.session == "frontend":
-                from cli.commands._repo import _ensure_frontend_deps
+                from cli.commands._repo import ensure_frontend_deps
 
-                _ensure_frontend_deps(repo)
+                ensure_frontend_deps(repo)
         if status is None:
             require_root_absent()
             write_manifest(manifests, manifest)
-            status = _bring_up_root(
+            status = bring_up_root(
                 run_dir, repo, manifests, client, env, runtime, retained_children=retained_children
             )
-            _require_root_owner(status)
-            _require_same_generation(manifest, status, roster, reconcile=reconcile)
-        status = _reconcile_units(roster, client, status, honor_restart_budget=honor_restart_budget)
-    except _RootDriverError as exc:
+            require_root_owner(status)
+            require_same_generation(manifest, status, roster, reconcile=reconcile)
+        status = reconcile_units(roster, client, status, honor_restart_budget=honor_restart_budget)
+    except RootDriverError as exc:
         print(f"  ✗ ava-root tree bring-up failed: {exc}", file=sys.stderr)
         return LaunchOutcome(roster, tuple(session_name(spec.session) for spec in roster))
     return _classify_units(roster, status)
@@ -581,10 +578,10 @@ def start_roster(
     roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
 ) -> tuple[ServiceSpec, ...]:
     """Return the sole root-owned service roster."""
-    return _root_tree_roster(roles, launch_skip, machine=machine)
+    return root_tree_roster(roles, launch_skip, machine=machine)
 
 
-def _launch_service_tree(
+def launch_service_tree(
     roster: tuple[ServiceSpec, ...],
     repo: Path,
     roles: MachineRoles,
@@ -595,7 +592,7 @@ def _launch_service_tree(
     honor_restart_budget: bool = False,
 ) -> LaunchOutcome:
     """Start the requested services through their root owner."""
-    return _ensure_root_service_tree(
+    return ensure_root_service_tree(
         roster,
         repo,
         roles=roles,
@@ -612,10 +609,10 @@ def wait_for_service_tree(
     timeout_s: float,
 ) -> ReadinessWait:
     """Verify the same root-owned roster after launch."""
-    return _wait_for_root_services_ready(roster, timeout_s=timeout_s)
+    return wait_for_root_services_ready(roster, timeout_s=timeout_s)
 
 
-def _health_verdicts(
+def health_verdicts(
     specs: tuple[ServiceSpec, ...], status: dict[str, Any] | None
 ) -> dict[str, str]:
     """Probe now instead of trusting a cached health result.
@@ -637,7 +634,7 @@ def _health_verdicts(
     return verdicts
 
 
-def _unit_ready(unit: dict[str, Any] | None, verdict: str | None) -> bool:
+def unit_ready(unit: dict[str, Any] | None, verdict: str | None) -> bool:
     """Require a running unit and a positive protocol response."""
     if unit is None:
         return False
@@ -655,9 +652,9 @@ def _fresh_readiness_round(
     client: Any, specs: tuple[ServiceSpec, ...]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
     """Observe the service table and ask the current protocol probes."""
-    status = _root_status(client)
-    units = _root_units(status) if status is not None else {}
-    verdicts = _health_verdicts(specs, status)
+    status = root_status(client)
+    units = root_units(status) if status is not None else {}
+    verdicts = health_verdicts(specs, status)
     return units, verdicts
 
 
@@ -669,13 +666,11 @@ def _unready_services(
     return tuple(
         spec
         for spec in specs
-        if not _unit_ready(units.get(spec.session), verdicts.get(spec.session))
+        if not unit_ready(units.get(spec.session), verdicts.get(spec.session))
     )
 
 
-def _wait_for_root_services_ready(
-    specs: tuple[ServiceSpec, ...], timeout_s: float
-) -> ReadinessWait:
+def wait_for_root_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -> ReadinessWait:
     """Wait for core services; optional availability is a diagnostic snapshot."""
     from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 
@@ -697,7 +692,7 @@ def _wait_for_root_services_ready(
                 sessions_gone=gone_all,
                 non_critical_unready=non_critical_unready,
             )
-        _poll_sleep(_READY_POLL_INTERVAL_S)
+        poll_sleep(_READY_POLL_INTERVAL_S)
 
 
 def require_root_absent() -> None:
@@ -709,25 +704,25 @@ def require_root_absent() -> None:
     instance_lock.release_instance_lock(fd)
 
 
-def _root_tree_plan(preserve: frozenset[str] = frozenset()) -> list[str]:
+def root_tree_plan(preserve: frozenset[str] = frozenset()) -> list[str]:
     """Display names for the selected exact root units."""
     return sorted(name for name, unit in root_tree_selection().items() if unit not in preserve)
 
 
 def root_tree_selection() -> dict[str, str]:
     """Map the home's qualified display names to the root's exact unit IDs."""
-    status = _root_status(root_client())
+    status = root_status(root_client())
     if status is None:
         require_root_absent()
         return {}
-    return {session_name(unit_id): unit_id for unit_id in _root_units(status)}
+    return {session_name(unit_id): unit_id for unit_id in root_units(status)}
 
 
-def _stop_dormant_helper_root(deadline: float) -> None:
+def stop_dormant_helper_root(deadline: float) -> None:
     """Revoke a pending keeper restart even when no root IPC is serving."""
-    if not _helper_spawn_committed():
+    if not helper_spawn_committed():
         return
-    from base.host.permissions_helper import client as helper_client
+    from base.host.permissions_helper.client import PermissionsHelperError
     from services.desktop.permissions_helper.launchd_job import (
         helper_job_domain,
         helper_job_label,
@@ -735,20 +730,20 @@ def _stop_dormant_helper_root(deadline: float) -> None:
     )
 
     try:
-        keeper = helper_client.root_status()
-    except helper_client.PermissionsHelperError as exc:
+        keeper = helper_client().root_status()
+    except PermissionsHelperError as exc:
         target = f"{helper_job_domain()}/{helper_job_label()}"
         if retirement_query(target, deadline) is None:
             return
-        raise _RootDriverError(
+        raise RootDriverError(
             "loaded helper custody is unavailable; stop remains incomplete"
         ) from exc
     if keeper["state"] == "unseeded" and not keeper["seeded"]:
         return
     if keeper.get("pid") is not None or keeper["state"] == "conflict":
-        raise _RootDriverError("helper owns a root without usable IPC; custody requires recovery")
-    if not _helper_wire_ok() or helper_client.stop_root().get("stop_requested") is not True:
-        raise _RootDriverError("helper did not persist stop of its dormant root")
+        raise RootDriverError("helper owns a root without usable IPC; custody requires recovery")
+    if not helper_wire_ok() or helper_client().stop_root().get("stop_requested") is not True:
+        raise RootDriverError("helper did not persist stop of its dormant root")
     require_root_absent()
 
 
@@ -762,21 +757,21 @@ def stop_root_service_tree(
 
     `preserve` holds bare service names (restart's browser, `--keep-service`).
     Stopping every unit also stops the root itself; keeping at least one unit
-    leaves the root running to host it. Raises `_RootDriverError` when the
+    leaves the root running to host it. Raises `RootDriverError` when the
     tree cannot be brought down; the caller's phase accounting reports it.
     """
     from base.paths import root_run_dir
 
     deadline = time.monotonic() + timeout_s
     client = root_client(timeout=timeout_s)
-    status = _root_status(client)
+    status = root_status(client)
     if status is None:
         require_root_absent()
-        _stop_dormant_helper_root(deadline)
+        stop_dormant_helper_root(deadline)
         print("  ava-root: no live owner or retained service custody")
         return
-    units = _root_units(status)
-    _require_root_owner(status)
+    units = root_units(status)
+    require_root_owner(status)
     preserved = set(units) & preserve
     stop_ids = sorted(set(units) - preserved)
     if not stop_ids and preserved:
@@ -785,7 +780,7 @@ def stop_root_service_tree(
     for unit_id in stop_ids:
         remaining_s = deadline - time.monotonic()
         if remaining_s <= 0:
-            raise _RootDriverError("service stop deadline expired; custody retained")
+            raise RootDriverError("service stop deadline expired; custody retained")
         client = root_client(timeout=remaining_s)
         response = client.force_down(unit_id) if force else client.down(unit_id)
         _call_ok(response, f"down {unit_id}")
@@ -793,7 +788,7 @@ def stop_root_service_tree(
     if preserved:
         return
     print(f"  ava-root: stopping the whole tree ({len(stop_ids)} unit(s)) and the root")
-    _stop_root_process(
+    stop_root_process(
         root_run_dir(), client, status, timeout_s=max(0.0, deadline - time.monotonic())
     )
     print("  ✓ ava-root stopped (tree down, root exited)")

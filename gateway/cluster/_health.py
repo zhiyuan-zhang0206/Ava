@@ -35,7 +35,7 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
 
     `name` is a constant naming the service this route belongs to — the point being
     that an impostor answering here reports its own name, or none. No probe reads it
-    yet; `base.daemon.health._probe_home` gains the `name` arm only once every
+    yet; `base.daemon.health.probe_unit_home` gains the `name` arm only once every
     deployed gateway emits the field, and that ordering is load-bearing (#1038)."""
     identity: dict[str, object] = {
         "status": "ok",

@@ -2,5 +2,28 @@
 "memory_indexer" = ["store_backend.py", "test_memory_indexer.py"]
 "test_memory_indexer.py" = ["store_backend.py"]
 
-[debt.private-name]
-"memory_indexer/test_reconcile_embed_error_truncates_and_returns_false.py -> test_memory_indexer.py#_watched_root" = 1
+[debt.env-patch]
+"test_memory_search_config.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_memory_indexer.py#monkeypatch.setattr base.config.settings.services.embedding_backend" = 2
+"test_memory_indexer.py#monkeypatch.setattr base.daemon.health.time" = 3
+"test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.BATCH_SIZE" = 2
+"test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.RECONCILE_CHUNK_PATHS" = 1
+"test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.memory_root" = 5
+"test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.daemon.process_paths" = 1
+"test_memory_indexer.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.factory.worst_case_batch_seconds" = 1
+"test_memory_search_api.py#monkeypatch.setattr services.derived.memory_search.app.telemetry.emit" = 1
+"test_memory_search_api.py#monkeypatch.setattr services.derived.memory_search.store.time" = 1
+"test_memory_search_config.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.factory.get_provider" = 2
+"test_memory_search_config.py#monkeypatch.setattr services.derived.memory_search.daemon.MemoryStore" = 1
+"test_memory_search_config.py#monkeypatch.setattr services.derived.memory_search.daemon.uvicorn.Server" = 1
+"test_memory_search_store.py#monkeypatch.setattr services.derived.memory_search.store.np.concatenate" = 1
+"test_memory_search_store.py#monkeypatch.setattr services.derived.memory_search.store.np.vstack" = 1
+"test_memory_search_store.py#monkeypatch.setattr services.derived.memory_search.store.time" = 1
+"test_numpy_backend_memory_search.py#monkeypatch.setattr base.config.settings.services.memory_search_uri" = 4
+
+[debt.unresolved-patch]
+"test_memory_search_api.py#monkeypatch.setattr store.save" = 1
+"test_memory_search_config.py#monkeypatch.setattr boot.view.services.memory_search_max_batch_rows" = 1
+"test_memory_search_config.py#monkeypatch.setattr boot.view.services.memory_search_port" = 1

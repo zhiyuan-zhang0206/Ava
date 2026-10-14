@@ -11,7 +11,7 @@ from psycopg_pool import AsyncConnectionPool, PoolClosed
 from agent.impersonation_handoff import flush_checkpoint
 from base.config import settings
 from base.log import logger
-from services.agent_runner.agent_host.daemon import _build_checkpointer
+from services.agent_runner.agent_host.daemon import build_checkpointer
 
 
 @pytest.mark.parametrize("method", ["aput", "aput_writes", "flush"])
@@ -23,7 +23,7 @@ async def test_shared_saver_reports_each_failed_write_owner_without_swallowing(
         settings.data_plane.db_url, min_size=0, max_size=2, open=False
     )
     await pool.open()
-    saver = await _build_checkpointer(
+    saver = await build_checkpointer(
         pool, read_checkpoint_interval=lambda: settings.agent.checkpoint_interval
     )
     configs: list[RunnableConfig] = []

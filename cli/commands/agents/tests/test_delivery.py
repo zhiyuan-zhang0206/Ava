@@ -10,6 +10,7 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.impersonation import delivery as delivery
+from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
@@ -20,7 +21,6 @@ from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import recording
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller, recorded_tree
 
 type ActiveSession = tuple[dict[str, Any], RuntimeIncarnation, int]
 
@@ -581,10 +581,10 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
         "AVA_IMPERSONATION_ACK_WINDOW_SECONDS=999\nAVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS=9\n"
     )
     pushes: list[str] = []
-    monkeypatch.setattr(relay, "_MIN_EMIT_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(relay, "MIN_EMIT_INTERVAL_SECONDS", 0)
 
     async def read() -> relay.InboxSnapshot:
-        return relay._read_inbox(
+        return relay.read_relay_inbox(
             database,
             event_bus,
             owner.agent_id,

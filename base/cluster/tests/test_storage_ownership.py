@@ -68,7 +68,7 @@ def _pg_receipt(data: Path, *, state: str = "captured") -> pg.Receipt:
 
 
 def test_pending_postgres_is_never_recovered_from_a_pidfile(pg_data: Path) -> None:
-    pg._write(pg_data, _pg_receipt(pg_data, state="pending"))
+    pg.write(pg_data, _pg_receipt(pg_data, state="pending"))
     with pytest.raises(RuntimeError, match="unresolved"):
         pg.observe(pg_data)
 
@@ -78,7 +78,7 @@ def test_postgres_birth_uses_ticks_despite_wall_clock_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     receipt = _pg_receipt(pg_data)
-    pg._write(pg_data, receipt)
+    pg.write(pg_data, receipt)
     (pg_data / "postmaster.pid").write_text(f"123\n{pg_data}\n987654321\n15433\n")
     process = SimpleNamespace(
         cmdline=lambda: ["postgres", "-D", str(pg_data)],
@@ -128,7 +128,7 @@ def test_prior_boot_never_donates_reused_pid_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     receipt = _pg_receipt(pg_data).model_copy(update={"boot_id": "prior-boot"})
-    pg._write(pg_data, receipt)
+    pg.write(pg_data, receipt)
     monkeypatch.setattr(
         pg.OwnedProcess, "live", Mock(side_effect=AssertionError("old boot PID observed"))
     )
@@ -142,7 +142,7 @@ def test_dead_postmaster_with_surviving_worker_refuses_restart(
     monkeypatch: pytest.MonkeyPatch,
     name: str,
 ) -> None:
-    pg._write(pg_data, _pg_receipt(pg_data))
+    pg.write(pg_data, _pg_receipt(pg_data))
     monkeypatch.setattr(pg.OwnedProcess, "live", Mock(return_value=False))
     worker = SimpleNamespace(
         info={"pid": 124},
@@ -163,7 +163,7 @@ def test_closed_postgres_with_unknown_scan_refuses_restart(
     pg_data: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pg._write(pg_data, _pg_receipt(pg_data))
+    pg.write(pg_data, _pg_receipt(pg_data))
     monkeypatch.setattr(pg.OwnedProcess, "live", Mock(return_value=False))
 
     def unknown(_data: Path, _receipt: pg.Receipt | None) -> None:
@@ -181,7 +181,7 @@ def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(
 ) -> None:
     pending = _pg_receipt(pg_data, state="pending")
     with pytest.raises(FileNotFoundError):
-        pg._spawn(
+        pg.spawn_postgres(
             pg_data,
             pending,
             [str(pg_data / "missing-postgres")],
@@ -196,7 +196,7 @@ def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(
 
     monkeypatch.setattr(pg.subprocess, "Popen", interrupted)
     with pytest.raises(KeyboardInterrupt):
-        pg._spawn(pg_data, pending, ["postgres"], {}, retained_children=retained_children)
+        pg.spawn_postgres(pg_data, pending, ["postgres"], {}, retained_children=retained_children)
     receipt = pg._read(pg_data)
     assert receipt is not None and receipt.state == "pending"
 
@@ -218,7 +218,7 @@ def test_real_cancellation_after_pg_spawn_retains_native_receipt(
     monkeypatch.setattr(pg.subprocess, "Popen", spawn)
     try:
         with pytest.raises(KeyboardInterrupt, match="admission interrupted"):
-            pg._spawn(
+            pg.spawn_postgres(
                 pg_data,
                 _pg_receipt(pg_data, state="pending"),
                 [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -312,7 +312,7 @@ def test_failed_birth_capture_keeps_the_callers_spawned_handle(
     )
     try:
         with pytest.raises(PermissionError, match="birth unavailable"):
-            pg._spawn(
+            pg.spawn_postgres(
                 pg_data,
                 _pg_receipt(pg_data, state="pending"),
                 [sys.executable, "-c", "import time; time.sleep(30)"],

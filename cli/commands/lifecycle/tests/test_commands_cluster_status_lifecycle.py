@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 
 from cli.commands.cluster import control
-from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
-from cli.tests._commands_helpers import _gateway_role_pinned as _gateway_role_pinned
-from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
+from cli.database.tests.command_fakes import gateway_role_pinned as gateway_role_pinned
+from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 def test_cmd_status_gateway_cluster_serves_line_shows_station(

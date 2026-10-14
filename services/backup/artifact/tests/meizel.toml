@@ -2,3 +2,15 @@ exports = ["oss_fake.py"]
 
 [uses]
 "test_offsite.py" = ["oss_fake.py"]
+
+[debt.first-party-patch]
+"test_offsite.py#monkeypatch.setattr base.config.settings.services.backup_offsite_bucket" = 2
+"test_offsite.py#monkeypatch.setattr base.config.settings.services.backup_offsite_credentials_file" = 2
+"test_offsite.py#monkeypatch.setattr base.config.settings.services.backup_offsite_endpoint" = 1
+"test_offsite.py#monkeypatch.setattr services.backup.artifact.offsite.PART_SIZE" = 1
+"test_offsite.py#monkeypatch.setattr services.backup.artifact.offsite.open_bucket" = 2
+
+[debt.unresolved-patch]
+"test_offsite.py#monkeypatch.setattr config.backup_offsite_bucket" = 1
+"test_offsite.py#monkeypatch.setattr config.backup_offsite_credentials_file" = 1
+"test_offsite.py#monkeypatch.setattr config.backup_offsite_endpoint" = 1

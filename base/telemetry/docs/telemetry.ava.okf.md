@@ -50,7 +50,7 @@ its original worker error is collected before replacement. Downstream exit
 cleanup still runs through the last concrete binding.
 
 The public `EventPipeline` resource lives in `delivery/pipeline.py`; construction starts
-its worker and requires the root's writer. `build_pipeline(database=..., machine=..., home=...)` binds
+its worker and requires the root's writer. `build_pipeline(database=..., machine=..., home=..., flush_interval_s=0.5)` binds
 ordinary sinks to that root's database factory and owns one lazy OTLP backend.
 The backend reads its machine eligibility only when enabled export is requested;
 no global machine identity or exporter is discovered. Its eligibility verdict is

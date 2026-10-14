@@ -25,7 +25,7 @@ from ... import daemon as host_daemon
 class _FakeAdmission:
     """Minimal stand-in for `AgentHost.admission` — the beat loop's long-wait scan.
 
-    These tests drive `_beat_forever` with a host double; the real host always
+    These tests drive `beat_forever` with a host double; the real host always
     carries a `TurnAdmission` (`services/agent_runner/agent_host/scheduling/admission.py`), so the double
     carries the same empty-shaped surface.
     """
@@ -78,10 +78,10 @@ async def test_agent_host_publishes_active_snapshots_and_refreshes_empty_heartbe
             writes.append((key, value, ex))
 
     patch_async_redis(monkeypatch, FakeRedis)
-    await host_daemon._publish_turn_progress_heartbeat(
+    await host_daemon.publish_turn_progress_heartbeat(
         EventBus.from_settings(), "runner-a", {agent_id}, clock
     )
-    await host_daemon._publish_turn_progress_heartbeat(
+    await host_daemon.publish_turn_progress_heartbeat(
         EventBus.from_settings(), "runner-a", set(), clock
     )
 
@@ -103,13 +103,13 @@ async def test_agent_host_progress_publish_failure_is_warning_with_traceback(
 
     patch_async_redis(monkeypatch, BrokenRedis)
 
-    with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
-        published = await host_daemon._publish_turn_progress_heartbeat(
+    with caplog.at_level(logging.DEBUG, logger=host_daemon.host_log.name):
+        published = await host_daemon.publish_turn_progress_heartbeat(
             EventBus.from_settings(), "runner-a", set(), TurnProgress()
         )
 
     assert published is False
-    records = [record for record in caplog.records if record.name == host_daemon._log.name]
+    records = [record for record in caplog.records if record.name == host_daemon.host_log.name]
     assert len(records) == 1
     assert records[0].levelno == logging.WARNING
     assert records[0].exc_info is not None
@@ -147,11 +147,11 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
         active_agents: frozenset[int] = frozenset()
 
     patch_async_redis(monkeypatch, HungRedis)
-    monkeypatch.setattr(host_daemon, "_TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.01, raising=False)
-    monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
-    with caplog.at_level(logging.WARNING, logger=host_daemon._log.name):
+    monkeypatch.setattr(host_daemon, "TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.01, raising=False)
+    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.01)
+    with caplog.at_level(logging.WARNING, logger=host_daemon.host_log.name):
         task = asyncio.create_task(
-            host_daemon._beat_forever(
+            host_daemon.beat_forever(
                 cast(host_daemon.Liveness, FakeLiveness()),
                 cast(host_daemon.AgentHost, FakeHost()),
                 cast(host_daemon.TurnScheduler, FakeScheduler()),
@@ -170,7 +170,7 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
     # Canonical order after #1856: liveness first, then DB renewal, then the
     # best-effort Redis snapshot. A hung progress SET must not stop either.
     assert calls == ["beat", "renew", "set", "set_cancelled"] * 3
-    warnings = [record for record in caplog.records if record.name == host_daemon._log.name]
+    warnings = [record for record in caplog.records if record.name == host_daemon.host_log.name]
     assert len(warnings) == 2
     assert all("turn-progress heartbeat publish exceeded" in record.message for record in warnings)
 
@@ -211,11 +211,11 @@ async def test_beat_skips_ownership_renewal_while_quiesced(
         calls.append("publish")
 
     monkeypatch.setattr(maintenance_admission, "quiesced", lambda: state["quiesced"])
-    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", _record_publish)
-    monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
+    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", _record_publish)
+    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.01)
 
     task = asyncio.create_task(
-        host_daemon._beat_forever(
+        host_daemon.beat_forever(
             cast(host_daemon.Liveness, FakeLiveness()),
             cast(host_daemon.AgentHost, FakeHost()),
             cast(host_daemon.TurnScheduler, FakeScheduler()),
@@ -253,9 +253,9 @@ async def test_progress_publish_propagates_cancellation_without_failure_warning(
                 cancelled.set()
 
     patch_async_redis(monkeypatch, HungRedis)
-    with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
+    with caplog.at_level(logging.DEBUG, logger=host_daemon.host_log.name):
         task = asyncio.create_task(
-            host_daemon._publish_turn_progress_heartbeat(
+            host_daemon.publish_turn_progress_heartbeat(
                 EventBus.from_settings(), "runner-a", set(), TurnProgress()
             )
         )
@@ -267,7 +267,7 @@ async def test_progress_publish_propagates_cancellation_without_failure_warning(
                 await task
 
     assert cancelled.is_set()
-    assert not [record for record in caplog.records if record.name == host_daemon._log.name]
+    assert not [record for record in caplog.records if record.name == host_daemon.host_log.name]
 
 
 async def _read_resp_command(reader: asyncio.StreamReader) -> list[bytes]:
@@ -320,21 +320,21 @@ async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
     client = open_async_redis(f"redis://127.0.0.1:{server.sockets[0].getsockname()[1]}/0")
     client.connection_pool.max_connections = 1
     patch_async_redis(monkeypatch, lambda: client)
-    monkeypatch.setattr(host_daemon, "_TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.1, raising=False)
+    monkeypatch.setattr(host_daemon, "TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.1, raising=False)
     try:
-        with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
+        with caplog.at_level(logging.DEBUG, logger=host_daemon.host_log.name):
             async with asyncio.timeout(2.0):
-                await host_daemon._publish_turn_progress_heartbeat(
+                await host_daemon.publish_turn_progress_heartbeat(
                     EventBus.from_settings(), "runner-a", set(), TurnProgress()
                 )
                 await first_disconnected.wait()
                 assert not client.connection_pool._in_use_connections
-                await host_daemon._publish_turn_progress_heartbeat(
+                await host_daemon.publish_turn_progress_heartbeat(
                     EventBus.from_settings(), "runner-a", set(), TurnProgress()
                 )
                 assert writes == [[b"SET", b"host_turn_progress:runner-a", b"{}", b"EX", b"60"]] * 2
                 assert not client.connection_pool._in_use_connections
-        records = [record for record in caplog.records if record.name == host_daemon._log.name]
+        records = [record for record in caplog.records if record.name == host_daemon.host_log.name]
         assert len(records) == 1  # The second response was accepted, not swallowed as a failure.
         assert "turn-progress heartbeat publish exceeded" in records[0].message
     finally:
@@ -347,7 +347,7 @@ async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
 
 
 def test_ownership_renewal_timeout_precedes_next_liveness_beat() -> None:
-    assert 0 < host_daemon._OWNERSHIP_RENEW_TIMEOUT_S < host_daemon._LIVENESS_BEAT_STEP_S
+    assert 0 < host_daemon.OWNERSHIP_RENEW_TIMEOUT_S < host_daemon.LIVENESS_BEAT_STEP_S
 
 
 async def test_ownership_renewal_timeout_logs_failure_with_traceback(
@@ -379,13 +379,13 @@ async def test_ownership_renewal_timeout_logs_failure_with_traceback(
     async def stop_sleep(delay: float) -> None:
         raise StopBeatError
 
-    monkeypatch.setattr(host_daemon, "_OWNERSHIP_RENEW_TIMEOUT_S", 0.01)
-    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", fake_publish)
+    monkeypatch.setattr(host_daemon, "OWNERSHIP_RENEW_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", fake_publish)
     monkeypatch.setattr(host_daemon.asyncio, "sleep", stop_sleep)
     caplog.set_level(logging.WARNING, logger="services.agent_runner.agent_host.daemon")
 
     with pytest.raises(StopBeatError):
-        await host_daemon._beat_forever(
+        await host_daemon.beat_forever(
             cast(host_daemon.Liveness, FakeLiveness()),
             cast(host_daemon.AgentHost, FakeHost()),
             cast(host_daemon.TurnScheduler, FakeScheduler()),
@@ -432,11 +432,11 @@ async def test_agent_host_beats_liveness_before_renewing_ownership(
         calls.append(("sleep", delay))
         raise StopBeatError
 
-    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", fake_publish)
+    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", fake_publish)
     monkeypatch.setattr(host_daemon.asyncio, "sleep", stop_sleep)
 
     with pytest.raises(StopBeatError):
-        await host_daemon._beat_forever(
+        await host_daemon.beat_forever(
             cast(host_daemon.Liveness, FakeLiveness()),
             cast(host_daemon.AgentHost, FakeHost()),
             cast(host_daemon.TurnScheduler, FakeScheduler()),
@@ -484,12 +484,12 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_hangs(
     ) -> None:
         pass
 
-    monkeypatch.setattr(host_daemon, "_OWNERSHIP_RENEW_TIMEOUT_S", 0.01)
-    monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.0)
-    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", fake_publish)
+    monkeypatch.setattr(host_daemon, "OWNERSHIP_RENEW_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.0)
+    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", fake_publish)
 
     beat = asyncio.create_task(
-        host_daemon._beat_forever(
+        host_daemon.beat_forever(
             cast(host_daemon.Liveness, FakeLiveness()),
             cast(host_daemon.AgentHost, FakeHost()),
             cast(host_daemon.TurnScheduler, FakeScheduler()),
@@ -508,7 +508,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_hangs(
         release_renewal.set()
         second_renewal.cancel()
         await asyncio.gather(second_renewal, return_exceptions=True)
-        await host_daemon._stop_ownership_beat(beat)
+        await host_daemon.stop_ownership_beat(beat)
 
 
 async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
@@ -542,12 +542,12 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
     ) -> None:
         pass
 
-    monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
-    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", fake_publish)
+    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.01)
+    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", fake_publish)
     caplog.set_level(logging.ERROR, logger="services.agent_runner.agent_host.daemon")
 
     beat = asyncio.create_task(
-        host_daemon._beat_forever(
+        host_daemon.beat_forever(
             cast(host_daemon.Liveness, FakeLiveness()),
             cast(host_daemon.AgentHost, FakeHost()),
             cast(host_daemon.TurnScheduler, FakeScheduler()),
@@ -571,7 +571,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
     finally:
         next_beat.cancel()
         await asyncio.gather(next_beat, return_exceptions=True)
-        await host_daemon._stop_ownership_beat(beat)
+        await host_daemon.stop_ownership_beat(beat)
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, psycopg.ProgrammingError])
@@ -592,7 +592,7 @@ async def test_unknown_renewal_error_exits_its_task_group(
     with pytest.raises(ExceptionGroup) as caught:
         async with asyncio.TaskGroup() as tasks:
             tasks.create_task(
-                host_daemon._ownership_beat_completion(
+                host_daemon.ownership_beat_completion(
                     cast(host_daemon.Liveness, FakeLiveness()),
                     cast(host_daemon.AgentHost, BrokenHost()),
                     cast(host_daemon.TurnScheduler, object()),
@@ -616,7 +616,7 @@ async def test_unknown_progress_error_is_not_a_recoverable_outage(
 
     patch_async_redis(monkeypatch, BrokenRedis)
     with pytest.raises(error_type) as caught:
-        await host_daemon._publish_turn_progress_heartbeat(
+        await host_daemon.publish_turn_progress_heartbeat(
             EventBus.from_settings(), "runner-a", set(), TurnProgress()
         )
     assert caught.value is error
@@ -645,12 +645,12 @@ async def test_three_database_renewal_failures_exit_host_heartbeat(
     async def publish(*_args: object) -> bool:
         return True
 
-    monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.001)
-    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", publish)
+    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.001)
+    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", publish)
     monkeypatch.setattr(maintenance_admission, "quiesced", lambda: False)
     with pytest.raises(psycopg.OperationalError, match="offline"):
         await asyncio.wait_for(
-            host_daemon._beat_forever(
+            host_daemon.beat_forever(
                 cast(host_daemon.Liveness, FakeLiveness()),
                 cast(host_daemon.AgentHost, BrokenHost()),
                 cast(host_daemon.TurnScheduler, FakeScheduler()),

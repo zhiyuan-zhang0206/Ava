@@ -12,7 +12,7 @@ Pydantic do runtime `get_type_hints()` / `inspect.signature` introspection
 that would `NameError` on a TYPE_CHECKING-only import.
 
 Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
-`_TYPE_CHECKING_ALLOWED` (`meizel/language/type_checking.py`) with a reason. This rule is lint-enforced by
+`[type-checking.files]` in `meizel.policy.toml` with a reason. This rule is lint-enforced by
 `scripts/lint/code_structure.py`.
 
 ## Per-file line budget: 800 lines
@@ -56,41 +56,23 @@ Enforced by the existing `scripts/lint/code_structure.py` and its pre-commit hoo
 
 ## Locality: file privacy, component entries and single owners
 
-The approved [component contract](../decisions/engineering/design/simplification/2026-10-10-component-public-contracts.md)
-makes `_`-prefixed members and modules private to their definition file,
-including tests and other files in the same component. Standard Python language
-protocols are distinguished by exact names; arbitrary double-underscore library
-metadata is not exempt. Moving a test or a module does not grant private access.
+A `_`-prefixed member or module is private to its definition file, tests included.
+Moving a test or a module does not grant private access, and removing an underscore
+or adding a forwarding export is not an interface design. Standard Python language
+protocols are told apart by exact names; arbitrary double-underscore library
+metadata is not exempt.
 
-Non-private spelling permits communication between files in one component.
-Cross-component communication additionally requires an exact entry module in
-`pyproject.toml` and the member in its actual definition owner's literal static
-`__all__`. Large roots are containers; explicitly declared children retain their
-own boundaries. Imported aliases, package barrels and mechanically removing an
-underscore do not create a supported interface. Use an existing capability,
-pass the required dependency explicitly, or verify public behavior.
+Dependencies between files and directories are judged by meizel
+(`python -m meizel check`): a directory's `meizel.toml` declares which of its children may
+use which, and a name another file uses is public. Reaching a private name or module is
+`private-name` / `private-module`; entering a directory through a child it does not export is
+`not-exported`; a dependency nobody declared is `undeclared-edge`; patching anything is a
+`*-patch` diagnostic. Existing violations are recorded debt that may only shrink. See
+[the checker](../../meizel/docs/checker/checker.ava.okf.md) and the
+[contributing guide](../contributing.md#locality-gate-meizel). Use an existing capability,
+pass the required dependency explicitly, or verify public behavior. Agent visibility remains owned
+by the existing SDK surface metadata and Installation; do not introduce another SDK member list.
 
-The migration audit is `scripts/lint/public_contracts.py`. It rejects undeclared
-boundaries and recognized unresolved inputs, with no baseline or consumer
-exceptions. Repository migration and gate activation remain open; the weaker
-legacy verdicts below do not certify the approved contract. Existing import
-layering and single-owner checks remain enforced during this migration.
-
-- **Rule 4 — legacy package-door check.** The currently enabled AST rule in
-  `scripts/lint/code_structure.py` rejects private imports and imported-module
-  attribute access from outside the inferred owning package, and exempts test
-  directories. Those package and test permissions are not authority under the
-  approved file-private contract. New contributions must design a real owner
-  interface rather than depend on those gaps. Agent visibility remains owned
-  by the existing SDK surface metadata and Installation, independently of
-  framework component entries; do not introduce another SDK member list.
-- **Rule 8 — legacy private-patch check.** `scripts/lint/patch_targets.py`
-  currently rejects a private patch outside the test's inferred home, using
-  placement references and the legacy ambient-environment classification.
-  That inferred home and those exclusions grant no authority under the approved
-  file-private contract. Test actual public behavior or pass a clock, transport
-  or identity dependency through the existing composition root. Neither a move
-  nor a same-name forwarding export repairs a private patch.
 - **Rule 6 — no path imports under `ava_builtins/`.** A skill or plugin
   module may not edit `sys.path`, call `site.addsitedir`, or load a module
   by file path (`spec_from_file_location`, `SourceFileLoader`,
@@ -109,13 +91,13 @@ layering and single-owner checks remain enforced during this migration.
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`base/db/connections.py`). Any other module making that
   decision is a bypass; fix it by routing through the owner. A site that
-  genuinely cannot goes in that decision's `allowed` map with a one-line
+  genuinely cannot is listed under `[single-owner.<decision>]` in `meizel.policy.toml` with a one-line
   reason — an allowed module that stops bypassing (or disappears) fails as
   stale, so the map cannot rot into a permission wall. Add a new single-owner
   decision only once its owner exists: an entry in `DECISIONS` with its owning
   module(s), a `find(tree, roots)` AST scanner, and a `fix` message.
 
-Rules 4, 5, 6 and 8 reject every measured site directly. Their retired
+Rules 5 and 6 reject every measured site directly. The retired
 `private_imports`, `owner_bypasses`, `path_imports` and `patch_targets` baseline fields may not
 be reintroduced, even empty, in the working tree or in the comparison revision.
 
@@ -159,7 +141,7 @@ forbidden. Rule 9 of `scripts/lint/code_structure.py`
 (`meizel/state/ambient_state/`) enforces both: new sites fail, today's are
 frozen in the `ambient_state` baseline section as `path::rule:name -> site count`
 (exact, shrink-only), and the only things let through are the closed, reasoned lists
-in `meizel/state/ambient_state/allowlist.py` — write-only facades, framework wiring
+in the `[ambient-state]` tables of `meizel.policy.toml` — write-only facades, framework wiring
 (`FastAPI()`, routers, argparse/Typer, `StateGraph`, locks), pure constants
 (`re.compile`, `TypeVar`, `timedelta`, `Path`) and memoized pure functions. There is
 no inline exemption; `schedules/` is in scope, tests, `__main__.py` and skill scripts

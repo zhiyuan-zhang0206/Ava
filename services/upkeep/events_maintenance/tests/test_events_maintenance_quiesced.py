@@ -34,7 +34,7 @@ def _rollup(
     process_config: ConfigBoot,
     local_machine: MachineIdentity,
 ) -> Any:
-    return daemon._dispatch_loop(
+    return daemon.dispatch_loop(
         pool,
         progress,
         config,
@@ -44,7 +44,7 @@ def _rollup(
 
 
 _LOOPS: dict[str, tuple[_Loop, str]] = {
-    "rollup": (_rollup, "_run_maintenance"),
+    "rollup": (_rollup, "run_maintenance"),
     "resolution": (daemon.resolution_loop, "_run_resolution"),
 }
 
@@ -86,7 +86,7 @@ async def test_a_quiesced_unit_runs_no_pass(
     # Cancel inside an admitted pass or the first quiesced sleep, rather than
     # racing a fixed delay against worker-thread completion.
     monkeypatch.setattr(daemon, "maintenance_with_liveness", held_pass)
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", short_sleep)
+    monkeypatch.setattr(daemon, "sleep_with_liveness", short_sleep)
     async with asyncio.TaskGroup() as tasks:
         task = tasks.create_task(
             loop(

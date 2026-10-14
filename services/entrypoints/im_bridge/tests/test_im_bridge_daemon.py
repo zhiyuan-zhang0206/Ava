@@ -107,7 +107,7 @@ def test_run_wires_the_liveness_task(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
@@ -336,7 +336,7 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         return events.append("pid_removed")

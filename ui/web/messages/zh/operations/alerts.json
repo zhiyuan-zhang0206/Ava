@@ -1,3 +1,4 @@
 {
-  "unresolvedAlerts": "{count} 条未解决"
+  "unresolvedAlerts": "{count} 条未解决",
+  "rules": "告警规则"
 }

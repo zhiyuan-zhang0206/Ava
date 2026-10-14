@@ -1,6 +1,6 @@
 """The converge firewall step: which binaries it audits, and what it says.
 
-The audit's own decision table is pinned in `base/host/tests/test_macos_firewall.py`.
+The audit's own decision table is pinned in `base/host/system/tests/test_macos_firewall.py`.
 What is asserted here is the step's two jobs on top of it — picking the right set
 of serving binaries per capability, and reporting rather than raising.
 
@@ -31,7 +31,7 @@ from base.host.system import macos_firewall as fw
 from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -417,7 +417,7 @@ def test_firewall_status_renders_manifest_details(
 
     import cli.commands._repo as _repo_commands
 
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def fake_audit_this_host(_roles: frozenset[str], *, machine: MachineIdentity) -> FirewallAudit:
         assert isinstance(machine, MachineIdentity)

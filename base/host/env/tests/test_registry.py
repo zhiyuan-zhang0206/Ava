@@ -4,7 +4,7 @@ The old seam tests (test_profile_env_keys.py) held hand-written snapshots
 against the field registry. The snapshots are gone — the registry's projections
 (`base/host/env/registry.py`) are pure functions of the Settings class metadata.
 These tests pin the DERIVATION RULES instead: each projection is re-computed
-here independently from the raw metadata (`_FIELDS` + scope/capability/alias),
+here independently from the raw metadata (`FIELD_REFS` + scope/capability/alias),
 so a future change to a rule (e.g. reverting to capability-derived sets — the
 #1570 P0 shape) is a deliberate, test-breaking change. Structural invariants
 (A1/A3) are pinned alongside.
@@ -27,7 +27,7 @@ os.environ["AVA_CONFIG_FETCH"] = (
 
 def _fields() -> dict:
     """The raw flat field registry (name -> _FieldRef with scope/capability)."""
-    from base.config import _FIELDS, field_alias, schema_extra
+    from base.config import FIELD_REFS, field_alias, schema_extra
 
     return {
         name: {
@@ -35,7 +35,7 @@ def _fields() -> dict:
             "scope": schema_extra(ref.info).get("scope"),
             "capability": ref.capability,
         }
-        for name, ref in _FIELDS.items()
+        for name, ref in FIELD_REFS.items()
     }
 
 
@@ -298,7 +298,7 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
     config package.
 
     Before the fix, `base.config.config_registry` built `FIELD_INFOS` at module
-    level, which ran `_build_registry()` during the module import; its deferred
+    level, which ran `build_registry()` during the module import; its deferred
     `base.config` package import re-entered the half-initialized registry
     module (the package __init__ re-imports `field_alias` from it) and raised
     ``ImportError: cannot import name 'field_alias' from partially initialized

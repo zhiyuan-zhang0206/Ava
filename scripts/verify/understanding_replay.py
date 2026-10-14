@@ -261,7 +261,7 @@ async def _regroup(
         await pool.close()
 
 
-def _report(db: Database, agent_id: int) -> None:
+def print_replay_report(db: Database, agent_id: int) -> None:
     with db.connect(autocommit=True) as conn:
         print(
             "nodes by depth:",
@@ -358,7 +358,7 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process=process_name())
     db = Database.from_settings(gate=gate)
     if args.command == "report":
-        _report(db, args.agent_id)
+        print_replay_report(db, args.agent_id)
         return
     catalog = build_model_catalog()
     if args.command == "consume":

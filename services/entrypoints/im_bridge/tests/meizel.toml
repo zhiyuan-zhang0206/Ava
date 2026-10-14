@@ -1,4 +1,4 @@
-exports = ["adapters", "slices.py", "task_scope.py", "test_notice_outbox.py", "test_timeline_outbox.py"]
+exports = ["adapters"]
 
 [uses]
 "adapters" = ["slices.py", "task_scope.py", "test_notice_outbox.py", "test_timeline_outbox.py"]
@@ -15,8 +15,55 @@ exports = ["adapters", "slices.py", "task_scope.py", "test_notice_outbox.py", "t
 "test_push_watchdog_retry.py" = ["slices.py"]
 "test_timeline_selection.py" = ["task_scope.py", "test_im_bridge_core.py", "test_timeline_outbox.py"]
 
-[debt.private-name]
-"im_bridge_core/test_push_snapshot_watermark_is_per_chat.py -> test_im_bridge_core.py#_core" = 1
-"im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_core" = 1
-"im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_text" = 1
-"test_im_bridge_watermark.py -> test_im_bridge_core.py#_core" = 1
+[debt.env-patch]
+"conftest.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_im_bridge_core.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
+"test_im_bridge_durable_cursors.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_notice_bridge.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+
+[debt.first-party-patch]
+"conftest.py#monkeypatch.setattr services.entrypoints.im_bridge.tests.test_im_bridge_core.TEST_POOL" = 1
+"conftest.py#monkeypatch.setattr services.entrypoints.im_bridge.types.IMAdapter.outbound_account_id" = 1
+"conftest.py#monkeypatch.setattr services.entrypoints.im_bridge.types.IMAdapter.prepare_timeline" = 1
+"conftest.py#monkeypatch.setattr services.entrypoints.im_bridge.types.IMAdapter.send_prepared_outbound" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr base.config.settings.feishu.feishu_app_id" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr base.config.settings.services.im_disabled_adapters" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr base.config.settings.services.im_send_retry_delays" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr base.config.settings.telegram.telegram_owner_id" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.core.IMBridgeCore" = 2
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.Database.pool" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.LIVENESS_BEAT_INTERVAL_S" = 2
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon._hard_exit" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon._is_running" = 2
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon._remove_pidfile" = 3
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.asyncio.Runner" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.build_pipeline" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.daemon_acceptance" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.gate_httpx_info_logs" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.gateway_auth_headers" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.import_adapter" = 3
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.init_gateway_process" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.install_graceful_shutdown" = 1
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.load_adapters" = 2
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.start_health_server" = 2
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.stop_health_server" = 2
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.timeline_outbound_loop" = 2
+"test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.write_pidfile" = 2
+"test_im_bridge_notify.py#monkeypatch.setattr services.entrypoints.im_bridge.push_watchdog.push_watchdog_sleep" = 1
+"test_im_bridge_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 2
+"test_im_bridge_quiesced.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.asyncio.sleep" = 2
+"test_notice_outbox.py#monkeypatch.setattr services.entrypoints.im_bridge.outbound.store.IMOutboxStore.insert_intent" = 2
+"test_push_watchdog_retry.py#monkeypatch.setattr services.entrypoints.im_bridge.push_watchdog.push_watchdog_sleep" = 1
+"test_timeline_outbox.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
+"test_timeline_selection.py#monkeypatch.setattr services.entrypoints.im_bridge.core.IMBridgeCore._apply_selection" = 2
+
+[debt.unresolved-patch]
+"test_alert_outbound.py#monkeypatch.setattr service.store.outbound.insert_intent" = 1
+"test_notice_bridge.py#monkeypatch.setattr bridge._open_notices" = 1
+"test_notice_bridge.py#monkeypatch.setattr bridge._unaccepted_notices" = 1
+"test_notice_outbox.py#monkeypatch.setattr core.notice_bridge.poll_store.accept_notice" = 2
+"test_timeline_outbox.py#monkeypatch.setattr store.finish" = 4
+"test_timeline_outbox.py#monkeypatch.setattr store.insert_intent" = 1
+"test_timeline_selection.py#monkeypatch.setattr adapter.prepare_timeline" = 1
+"test_timeline_selection.py#monkeypatch.setattr core.outbound_store.accept" = 2
+"test_timeline_selection.py#monkeypatch.setattr core.outbound_store.lookup_replay" = 1

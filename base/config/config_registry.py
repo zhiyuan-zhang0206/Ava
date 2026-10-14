@@ -7,7 +7,7 @@ through `base/host/env/registry.py` without a timing dependency).
 
 It sits in `base.config`, but importing it never constructs Settings: the package
 boots lite (`base/config/_lite.py`), which defers the Settings build, and the
-module-level `_FIELDS` / `FIELD_INFOS` faces of `base.config` are served from this
+module-level `FIELD_REFS` / `FIELD_INFOS` faces of `base.config` are served from this
 registry without upgrading. The sub-model class imports are deferred into the build
 (first use); the build completes against a partially-initialized `base.config` when
 one is already in flight (for example, the standalone `load_ava_env()` boot path),
@@ -166,7 +166,7 @@ Lifecycle = Literal["frozen", "live"]
 # behavioral guide (the panel/CLI prompt from it; nothing restarts on its own).
 # The empty string means no restart is needed. Every other value names a process
 # kind that must CONSUME the field (see the profile cross-check in
-# _build_registry); "schedule" is the gateway-hosted schedule runner, which has
+# build_registry); "schedule" is the gateway-hosted schedule runner, which has
 # no config profile and reads every domain.
 ALLOWED_RESTART_REQUIRED = frozenset({"", "agent", "all", "gateway", "ops", "schedule"})
 # restart_required -> the PROCESS_PROFILES set that must contain the field's
@@ -278,7 +278,7 @@ def _validate_restart_required(name: str, attr: str, extra: dict[str, Any]) -> N
 
 
 @lru_cache(maxsize=1)
-def _build_registry() -> dict[str, _FieldRef]:
+def build_registry() -> dict[str, _FieldRef]:
     """Walk the sub-models into a flat name->owner registry, failing fast on an
     ownership-metadata mistake. The structural checks that used to live in a
     standalone `lint_config_scope` hook run here — a field with a bad or missing
@@ -319,12 +319,12 @@ def _build_registry() -> dict[str, _FieldRef]:
 
 
 def fields() -> dict[str, _FieldRef]:
-    return _build_registry()
+    return build_registry()
 
 
 # Leaf FieldInfo by name — the compat replacement for the old flat
 # `Settings.model_fields` for code that iterated field metadata. Built lazily
-# (PEP 562) — constructing it at module level would run `_build_registry()`
+# (PEP 562) — constructing it at module level would run `build_registry()`
 # during this module's import, whose deferred `base.config` package import
 # re-enters this module mid-initialization (the package __init__ re-imports
 # `field_alias` etc.) and blows up on a clean env (`ImportError: cannot import

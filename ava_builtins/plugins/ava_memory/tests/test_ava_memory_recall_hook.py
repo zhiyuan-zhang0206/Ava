@@ -15,11 +15,12 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
 from agent.graph.recall.memory_recall import PassiveRecall
 from agent.messages import NoteTag, inbound_message, system_note_message
-from agent.state import build_agent_state
+from agent.state import CompactState, MemoryState, build_agent_state
 from ava import gateway_client
 from base.agents.context import AvaContext
 from base.clock import Clock
@@ -244,3 +245,138 @@ async def test_no_inbound_tail_is_a_noop(
 
     recall.assert_not_awaited()
     assert result is None
+
+
+# ── the per-window record ──
+
+
+def _recalled(*paths: str) -> PassiveRecall:
+    return PassiveRecall(
+        note=system_note_message(content="recalled", tag=NoteTag.MEMORY), paths=set(paths)
+    )
+
+
+async def test_the_record_is_kept_while_the_window_is_unchanged(
+    _hook_env: Any, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    """Notes already in this window stay excluded, and the new ones are written under the same
+    window."""
+    _loaded, recall = _hook_env
+    hook = _loaded.passive_memory_recall_before_llm
+    state = _state(
+        [AIMessage(content="prev", id="a0"), _inbound("user")],
+        memory=MemoryState(injected_paths={"seen.md"}, window=1),
+        compact=CompactState(version=1),
+    )
+
+    result = await hook(state, _runtime(model_catalog, database_gate=database_gate), _config())
+
+    assert recall.await_args.kwargs["injected_paths"] == {"seen.md"}
+    assert result["memory"] == MemoryState(injected_paths={"a.md"}, window=1)
+
+
+async def test_a_compaction_summarizes_the_injected_notes_away_so_none_is_excluded(
+    _hook_env: Any, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    """The record outgrew the gateway's `exclude` limit (800) over many windows. After a
+    compaction the notes are no longer in the context, so the pass excludes none of them and
+    the same notes are recallable again. A record written before windows existed is window 0."""
+    _loaded, recall = _hook_env
+    hook = _loaded.passive_memory_recall_before_llm
+    state = _state(
+        [AIMessage(content="prev", id="a0"), _inbound("user")],
+        memory=MemoryState(injected_paths={f"note-{i}.md" for i in range(2088)}),
+        compact=CompactState(version=3),
+    )
+
+    result = await hook(state, _runtime(model_catalog, database_gate=database_gate), _config())
+
+    assert recall.await_args.kwargs["injected_paths"] == frozenset()
+    assert result["memory"] == MemoryState(injected_paths={"a.md"}, window=3)
+
+
+async def test_a_compaction_resets_the_record_even_when_nothing_is_recalled(
+    _hook_env: Any, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    """The reset does not wait for a note to be recalled: the stale record is replaced on the
+    first pass after the compaction."""
+    _loaded, recall = _hook_env
+    recall.return_value = None
+    hook = _loaded.passive_memory_recall_before_llm
+    state = _state(
+        [AIMessage(content="prev", id="a0"), _inbound("user")],
+        memory=MemoryState(injected_paths={"old.md"}, window=0),
+        compact=CompactState(version=2),
+    )
+
+    result = await hook(state, _runtime(model_catalog, database_gate=database_gate), _config())
+
+    assert recall.await_args.kwargs["injected_paths"] == frozenset()
+    assert result == {"memory": MemoryState(window=2)}
+
+
+async def test_a_compaction_resets_the_record_on_a_turn_that_does_not_recall(
+    _hook_env: Any, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    """A watcher wake-up never searches, but the record it would have excluded is already
+    out of the window, so it is replaced all the same."""
+    _loaded, recall = _hook_env
+    hook = _loaded.passive_memory_recall_before_llm
+    state = _state(
+        [AIMessage(content="prev", id="a0"), _inbound("watcher:3")],
+        memory=MemoryState(injected_paths={"old.md"}, window=0),
+        compact=CompactState(version=1),
+    )
+
+    result = await hook(state, _runtime(model_catalog, database_gate=database_gate), _config())
+
+    recall.assert_not_awaited()
+    assert result == {"memory": MemoryState(window=1)}
+
+
+async def test_after_a_compaction_only_notes_injected_since_are_excluded(
+    _hook_env: Any, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    """The channel end to end: a note injected before a compaction is not excluded after it,
+    and the notes injected after it are, so the record never holds more than one window."""
+    _loaded, recall = _hook_env
+    asked: list[set[str]] = []
+    fresh = iter(["a.md", "b.md", "c.md"])
+
+    async def _recall(_messages: Any, *, injected_paths: Any, **_kwargs: Any) -> PassiveRecall:
+        asked.append(set(injected_paths))
+        return _recalled(next(fresh))
+
+    recall.side_effect = _recall
+    hook = _loaded.passive_memory_recall_before_llm
+    runtime = _runtime(model_catalog, database_gate=database_gate)
+    state_cls = build_agent_state(EMPTY)
+
+    async def recall_pass(state: Any) -> dict[str, Any] | None:
+        return await hook(state, runtime, _config())
+
+    async def compaction(_state: Any) -> dict[str, Any]:
+        return {"compact": CompactState(version=1)}
+
+    graph: Any = StateGraph(state_cls)
+    steps = [
+        ("recall_one", recall_pass),
+        ("compact", compaction),
+        ("recall_two", recall_pass),
+        ("recall_three", recall_pass),
+    ]
+    previous = START
+    for name, node in steps:
+        graph.add_node(name, node)
+        graph.add_edge(previous, name)
+        previous = name
+    graph.add_edge(previous, END)
+
+    final = state_cls.model_validate(
+        await graph.compile().ainvoke(
+            state_cls(messages=[AIMessage(content="prev", id="a0"), _inbound("user")])
+        )
+    )
+
+    assert asked == [set(), set(), {"b.md"}]
+    assert final.memory == MemoryState(injected_paths={"b.md", "c.md"}, window=1)

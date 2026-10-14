@@ -34,8 +34,9 @@ from agent.tests.test_compact import (
     reminder_state,
     runtime_with_llm,
 )
-from agent.tests.test_compact import _ava_compact_loaded as _ava_compact_loaded
+from agent.tests.test_compact import ava_compact_loaded as ava_compact_loaded
 from base.agents.context import AvaContext
+from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -48,18 +49,17 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 async def test_compact_reminder_fires_in_band(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """reminder_tokens < est <= ceiling, fresh window, no agent inbound →
     inject the qualitative system_note + mark reminder_shown; not a force
     (compact.version unchanged, no history replacement)."""
     from agent.graph.hooks import compact as _p
 
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, wrap_fn = ava_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     result = await wrap_fn(
         reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
@@ -79,10 +79,10 @@ async def test_compact_reminder_fires_in_band(
 
 
 async def test_compact_reminder_silent_below_threshold(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """est <= reminder_tokens → no note (and no force, est under ceiling)."""
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, wrap_fn = ava_compact_loaded
     patch_compact_config(
         monkeypatch, compact_reminder_tokens=1_000_000, auto_compact_tokens=2_000_000
     )
@@ -95,10 +95,10 @@ async def test_compact_reminder_silent_below_threshold(
 
 
 async def test_compact_reminder_yields_to_force_above_ceiling(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """Above the ceiling, defer all model work and history changes to the LLM node."""
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, wrap_fn = ava_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=0, auto_compact_tokens=1)
     result = await wrap_fn(
         reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
@@ -110,10 +110,10 @@ async def test_compact_reminder_yields_to_force_above_ceiling(
 
 
 async def test_compact_reminder_once_per_window(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """already reminded this window (shown=True, no compaction since) → silent."""
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, wrap_fn = ava_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, version=0, shown=True, seen=0)  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
@@ -123,12 +123,12 @@ async def test_compact_reminder_once_per_window(
 
 
 async def test_compact_reminder_rearms_after_compaction(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """shown=True but a compaction advanced compact.version past the bookmark →
     the old note was summarized away, so the reminder re-arms and fires again,
     catching the bookmark up to the new version."""
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, wrap_fn = ava_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, version=1, shown=True, seen=0)  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
@@ -143,11 +143,11 @@ async def test_compact_reminder_rearms_after_compaction(
 
 
 async def test_compact_reminder_defers_to_agent_reply(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """in band, but the turn was woken by an agent inbound → defer (return None)
     so the agent-reply note owns the single messages-write this pass allows."""
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, wrap_fn = ava_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     msgs = [
         SystemMessage(content="<sys>"),
@@ -162,11 +162,11 @@ async def test_compact_reminder_defers_to_agent_reply(
 
 
 async def test_compact_reminder_silent_when_no_conversation(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ):
     """est over the reminder threshold but only a SystemMessage (nothing to
     compact) → no point reminding, return None."""
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, wrap_fn = ava_compact_loaded
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, messages=[SystemMessage(content="x" * 100_000)])  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
@@ -176,7 +176,7 @@ async def test_compact_reminder_silent_when_no_conversation(
 
 
 async def test_compact_contract_reaches_request_without_resident_self(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
+    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
 ):
     """The one compaction contract — the summary's sections + how to write it —
     lives in the SDK docstring and reaches the forced request even when the

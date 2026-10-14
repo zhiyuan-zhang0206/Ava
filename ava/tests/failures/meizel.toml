@@ -1,0 +1,8 @@
+[debt.env-patch]
+"test_sdk_failure_propagation.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_sdk_failure_propagation.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"test_sdk_failure_propagation.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_sdk_failure_propagation.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
+"test_self_compact_publish.py#monkeypatch.setattr base.telemetry.audit_events.record_audit" = 1

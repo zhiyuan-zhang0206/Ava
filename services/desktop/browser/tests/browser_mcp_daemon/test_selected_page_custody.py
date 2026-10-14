@@ -7,14 +7,17 @@ from typing import Literal
 import pytest
 
 from services.desktop.browser import page_lifecycle
-from services.desktop.browser.tests.test_browser_mcp_daemon import _daemon, expire
+from services.desktop.browser.tests.test_browser_mcp_daemon import (
+    browser_daemon_with_fake_upstream,
+    expire,
+)
 
 
 @pytest.mark.parametrize("cleanup", ["release", "expiry"])
 async def test_selected_user_page_survives_automatic_cleanup(
     cleanup: Literal["release", "expiry"],
 ) -> None:
-    daemon, upstream = _daemon()
+    daemon, upstream = browser_daemon_with_fake_upstream()
     upstream.pages[99] = "http://localhost:9999/user-tab"
     await daemon.call_tool_for_agent("select_page", {"pageId": 99}, 7)
     assert daemon.pages.get_agent_page(7) == 99
@@ -31,7 +34,7 @@ async def test_selected_user_page_survives_automatic_cleanup(
 
 
 async def test_owned_page_keeps_creation_deadline_after_switching_to_user_tab() -> None:
-    daemon, upstream = _daemon()
+    daemon, upstream = browser_daemon_with_fake_upstream()
     await daemon.call_tool_for_agent("new_page", {"url": "https://example.com/owned"}, 7)
     upstream.pages[99] = "https://example.com/user-tab"
     deadline = daemon.pages.ttl_deadlines[1]

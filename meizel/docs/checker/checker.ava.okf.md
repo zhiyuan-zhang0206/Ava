@@ -23,7 +23,7 @@ files. Run from the repository root.
 
 ```
 python -m meizel check [paths... | --changed files...] [--limit N]
-python -m meizel debt [--json] | record <paths...> | prune | diff --against <ref> --on-growth fail|warn
+python -m meizel debt [--json] | record <paths...> | prune | carry | diff --against <ref> --on-growth fail|warn
 python -m meizel explain <path>
 python -m meizel sync [--prune] [--declare [paths...]]
 python -m meizel bootstrap --out <dir>
@@ -124,28 +124,27 @@ makes an edge. Other restricted forms (`sys.modules` writes, `python -c` imports
 string patches) still apply. The reason must be non-empty; an entry whose file
 has none of the exempt forms is `stale-external`.
 
-Plugin and schedule-script discovery is `[external]`, never `[loads]`: built-in plugins
-and `$AVA_HOME/plugins/` alike are discovered content core does not depend on, as is
-`schedules/` for the schedule engine.
+Plugin and schedule-script discovery is `[external]`, never `[loads]`: it is
+discovered content that core does not depend on.
 
 ## Manifest
 
-`meizel.toml` keys are `exports` (list), `[uses]` and `[loads]` (tables of
-lists), `[external]` (reason strings) and `[debt.<code>]` (recorded debt). Names
-are direct children: files with extension, directories by name.
-`meizel.toml` itself is not a child and does not count toward the directory
-budget. A directory without a manifest has no local edges and exports its door.
+`meizel.toml` keys are `exports` (list), `[uses]` (endpoints may name deeper paths:
+[[meizel/docs/checker/narrowing.ava.okf.md|narrowed endpoints]]), `[loads]` and `[external]`
+(only for sites listed in [[meizel/docs/checker/policy.ava.okf.md|the policy file]]) and
+`[debt.<code>]`. Names are direct children: files with extension, directories by name.
+`meizel.toml` is not a child and does not count toward the directory budget. A directory
+without a manifest has no local edges and exports its door.
 
 ## When it fails
 
-Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`,
-`private-name`, `restricted-python`, `unresolved-import` (a first-party import
-naming no tracked module), `stale-load`, `stale-external`, and the manifest codes
-`manifest-syntax`, `manifest-unknown-key`, `manifest-unknown-child`,
-`manifest-duplicate`, `manifest-self-edge`, `manifest-cycle`,
-`manifest-export-private`, `manifest-stale-edge` (a declared edge no fact
-needs), `manifest-debt` and `debt-paid`. An undeclared edge that would close a
-cycle says so; the way out is a public door or an injected collaborator.
+Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-name`,
+`cycle-edge`, `restricted-python`, the patch codes ([[meizel/docs/checker/patching.ava.okf.md|patching]]),
+`unresolved-import`, `unlisted-allowance`,
+`stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
+(`manifest-` + syntax, unknown-key, unknown-child, duplicate, self-edge, cycle, export-private,
+stale-edge, debt, roles). An undeclared edge that would close a cycle says so; the way out is
+a public door or an injected collaborator.
 
 ## Layout
 

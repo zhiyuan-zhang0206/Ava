@@ -105,7 +105,7 @@ def rotate_stdout_log_if_needed() -> int | None:
     return size
 
 
-async def _rotate_stdout_log_forever() -> None:
+async def rotate_stdout_log_forever() -> None:
     """Bound the raw stdout transcript by size for the daemon's whole life.
 
     The first pass runs immediately so a file that already crossed the ceiling

@@ -3,28 +3,21 @@
 "tests.path_scoped.gateway_tests" = [
     ".",
 ]
-"tests.fixtures.unit.homes" = ["."]
+"base.paths.tests.homes" = ["."]
 "tests.fixtures.unit.identity" = ["."]
-"tests.fixtures.model_catalog" = [
+"base.packages.tests.model_catalog" = [
     "test_agents_endpoints.py",
-    "test_native_cancel.py",
 ]
 "tests.fixtures.unit.config_authority" = [
     "test_agent_inspect.py",
     "test_agents_endpoints.py",
     "test_error_envelope.py",
     "test_idempotency.py",
-    "test_memory_pool.py",
-    "test_memory_refresh.py",
-    "test_native_cancel.py",
-    "test_native_restart.py",
-    "test_sse.py",
     "test_status_cluster.py",
-    "test_terminate_forward.py",
     "test_understanding_build_endpoints.py",
 ]
 "tests.fixtures.unit.sdk" = [
-    "."
+    ".",
 ]
 "tests.fixtures.unit.gateway" = [
     "events/test_weixin_ingress_command_http.py",

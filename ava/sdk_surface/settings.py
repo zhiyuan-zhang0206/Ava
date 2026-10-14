@@ -100,7 +100,7 @@ def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariabl
     return EventBus.from_settings()
 
 
-def _attached() -> tuple[Mapping[str, Any], Any] | None:
+def attached_agent_view() -> tuple[Mapping[str, Any], Any] | None:
     """The pins and plugin-config view of the agent this process attached to
     (`ava.impersonation.attach`: one attachment per process), if any: the lease its context carries."""
 
@@ -114,7 +114,7 @@ def agent_setting(name: str) -> Any:
     settings (which carry the exec child's overlay)."""
     from base.host.env.agent_slices import agent_setting
 
-    attached = _attached()
+    attached = attached_agent_view()
     return agent_setting(
         name,
         attached[0] if attached else None,
@@ -162,7 +162,7 @@ class _PluginsView:
             )
         # The attached agent's overrides over the disk image; otherwise this process's own
         # instance (the exec child's boot applied its agent's overlay to it).
-        attached = _attached()
+        attached = attached_agent_view()
         return attached[1].config_for(name) if attached else configs[name]
 
 

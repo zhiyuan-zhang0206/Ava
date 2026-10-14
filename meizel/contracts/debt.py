@@ -9,7 +9,7 @@ inside a file leaves the baseline alone.
 [debt.private-name]
 "test_a.py -> a.py#_helper" = 3
 
-[debt.manifest-cycle]
+[debt.cycle-edge]
 "b.py -> a.py" = 1
 ```
 """
@@ -24,28 +24,39 @@ from typing import cast
 from meizel.graph.model import Code
 
 __all__ = [
-    "CYCLE",
+    "CYCLE_EDGE",
     "DEBTABLE",
+    "PATCH_CODES",
     "TABLE_KEY",
     "DebtTable",
-    "back_edge",
     "edge_key",
     "file_key",
     "listing",
+    "local_edge",
     "owner_hint",
     "parse_debt",
     "render_debt",
     "set_debt",
     "source_of",
+    "target_of",
+    "target_under",
     "total",
 ]
 
-CYCLE = Code.MANIFEST_CYCLE
+CYCLE_EDGE = Code.CYCLE_EDGE
 _EDGE_CODES = frozenset(
-    {Code.UNDECLARED_EDGE, Code.NOT_EXPORTED, Code.PRIVATE_MODULE, Code.PRIVATE_NAME}
+    {Code.UNDECLARED_EDGE, Code.NOT_EXPORTED, Code.PRIVATE_MODULE, Code.PRIVATE_NAME, CYCLE_EDGE}
 )
-_FILE_CODES = frozenset({Code.RESTRICTED})
-DEBTABLE = _EDGE_CODES | _FILE_CODES | {CYCLE}
+# The codes of a patch: the key of an entry is `file#form target`.
+PATCH_CODES = (
+    Code.FIRST_PARTY_PATCH,
+    Code.STDLIB_PATCH,
+    Code.THIRD_PARTY_PATCH,
+    Code.ENV_PATCH,
+    Code.UNRESOLVED_PATCH,
+)
+_FILE_CODES = frozenset({Code.RESTRICTED, *PATCH_CODES})
+DEBTABLE = _EDGE_CODES | _FILE_CODES
 TABLE_KEY = "debt"
 
 type DebtTable = dict[Code, dict[str, int]]
@@ -71,18 +82,26 @@ def file_key(owner: str, path: str, what: str) -> str:
     return f"{_within(owner, path)}#{what}"
 
 
-def source_of(owner: str, code: Code, key: str) -> str | None:
-    """The repository path of the file a debt is about; None for a cycle back-edge."""
-    if code is CYCLE:
-        return None
+def source_of(owner: str, code: Code, key: str) -> str:
+    """The repository path of the file a debt is about."""
     head = key.split(_SEPARATOR, 1)[0] if code in _EDGE_CODES else key.split("#", 1)[0]
     return f"{owner}/{head}" if owner else head
 
 
-def back_edge(key: str) -> tuple[str, str]:
-    """The `(from, to)` children of a `manifest-cycle` key."""
-    src, _, dst = key.partition(_SEPARATOR)
-    return src, dst
+def target_of(key: str) -> str:
+    """The target of a patch entry `file#form target`."""
+    return key.partition("#")[2].partition(" ")[2]
+
+
+def target_under(target: str, prefix: str) -> bool:
+    """Whether the dotted `target` is `prefix` or inside it (`lib.mod` holds `lib.mod.f`, not `lib.mod2`)."""
+    return target == prefix or target.startswith(f"{prefix}.")
+
+
+def local_edge(key: str) -> tuple[str, str]:
+    """The `(from, to)` children of the owner that an edge key projects onto."""
+    src, _, dst = key.partition("#")[0].partition(_SEPARATOR)
+    return src.split("/", 1)[0], dst.split("/", 1)[0]
 
 
 def _edge_problem(code: Code, key: str) -> str | None:
@@ -98,10 +117,6 @@ def _edge_problem(code: Code, key: str) -> str | None:
 
 
 def _key_problem(code: Code, key: str) -> str | None:
-    if code is CYCLE:
-        src, dst = back_edge(key)
-        ok = bool(src) and bool(dst) and "/" not in key and src != dst
-        return None if ok else "a cycle back-edge is written `child -> child`"
     if code in _EDGE_CODES:
         return _edge_problem(code, key)
     file, _, what = key.partition("#")
@@ -138,8 +153,6 @@ def _valid_entries(
             report(f"[debt.{code}] {key!r}: {problem}")
         elif not isinstance(count, int) or isinstance(count, bool) or count < 1:
             report(f"[debt.{code}] {key!r}: the count must be a positive integer")
-        elif code is CYCLE and count != 1:
-            report(f"[debt.{code}] {key!r}: a back-edge is recorded once; the count must be 1")
         else:
             kept[key] = count
     return kept

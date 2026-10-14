@@ -1,0 +1,42 @@
+[uses]
+"test_rpc_result_domains.py" = ["test_agents_cmd.py"]
+
+[debt.env-patch]
+"test_external_caller_cli.py#monkeypatch.delenv os.environ.AVA_CALLER_IDENTITY" = 4
+"test_external_caller_cli.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+"test_impersonation.py#monkeypatch.delenv os.environ.DSH_AVA_RELAY_STUB" = 1
+"test_impersonation.py#monkeypatch.setenv os.environ.AVA_IMPERSONATION_RELAY_STUB" = 2
+"test_impersonation.py#monkeypatch.setenv os.environ.DSH_AVA_RELAY_STUB" = 1
+
+[debt.first-party-patch]
+"test_agents_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
+"test_agents_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
+"test_agents_cmd.py#monkeypatch.setattr cli.commands.agents.control.cmd_agents_kill" = 1
+"test_agents_cmd.py#monkeypatch.setattr cli.commands.agents.control.cmd_agents_ls" = 1
+"test_agents_cmd.py#monkeypatch.setattr cli.commands.agents.control.cmd_agents_terminate" = 1
+"test_external_caller_cli.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
+"test_external_caller_cli.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
+"test_external_caller_cli.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.ack" = 1
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.get" = 1
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.history.public_session" = 1
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.host_transport.default_control_endpoint" = 2
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.release" = 1
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.require_active" = 1
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.sessions.private_id" = 4
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.sessions.request" = 7
+"test_impersonation.py#monkeypatch.setattr cli.commands.agents.control.send_agent_message" = 1
+"test_impersonation.py#monkeypatch.setattr cli.commands.agents.timeline.cmd_agents_timeline" = 1
+"test_impersonation_bridge_parsers.py#monkeypatch.setattr base.agents.impersonation.relay_get" = 1
+"test_impersonation_bridge_parsers.py#monkeypatch.setattr base.agents.impersonation.relay_heartbeat" = 1
+"test_impersonation_bridge_parsers.py#monkeypatch.setattr base.agents.impersonation.relay_inbox" = 1
+"test_impersonation_bridge_parsers.py#monkeypatch.setattr base.events.live.redis_listener.RedisInboundListener" = 2
+"test_impersonation_bridge_parsers.py#monkeypatch.setattr cli.commands.agents.impersonation.relay_token_from_env" = 2
+"test_impersonation_bridge_parsers.py#monkeypatch.setattr cli.commands.agents.impersonation_adapters.live_submit" = 2
+"test_impersonation_bridge_parsers.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.reserve_delivery" = 2
+"test_rpc_result_domains.py#monkeypatch.setattr base.host.net.http_dial.get" = 1
+"test_rpc_result_domains.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
+
+[debt.third-party-patch]
+"test_agents_cmd.py#monkeypatch.setattr httpx.get" = 6
+"test_agents_cmd.py#monkeypatch.setattr httpx.post" = 2

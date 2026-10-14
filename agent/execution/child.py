@@ -101,7 +101,7 @@ class _Sdk(Protocol):
 
 
 @dataclass(frozen=True)
-class _ChildContext:
+class ChildContext:
     """What this one exec child holds for the run: the SDK modules it bound after boot, and
     when boot began.
 
@@ -114,14 +114,14 @@ class _ChildContext:
     boot_started_at: float
 
 
-def _import_runtime(boot_started_at: float) -> _ChildContext:
+def import_runtime(boot_started_at: float) -> ChildContext:
     """Load the SDK only after `main` can turn a boot failure into a result."""
     import ava
 
-    return _ChildContext(ava=ava, boot_started_at=boot_started_at)
+    return ChildContext(ava=ava, boot_started_at=boot_started_at)
 
 
-def _line_buffered_output() -> None:
+def line_buffered_output() -> None:
     """stdout/stderr are pipes; default buffering would hold output until the
     buffer fills. Line buffering restores the live-streaming the old
     in-thread capture gave (a print with no newline still shows up)."""
@@ -172,7 +172,7 @@ def _arm_watchdog(timeout_s: float) -> None:
     timer.start()
 
 
-def _pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | None]:
+def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | None]:
     """Pop + JSON-decode the re-emitted per-agent config maps, exactly once —
     applying them in two phases (framework now, plugin after plugins load)
     must not re-read the env."""
@@ -196,7 +196,7 @@ def _pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | No
     )
 
 
-def _apply_overlay_scope(
+def apply_overlay_scope(
     birth: dict[str, object] | None,
     overlay: dict[str, object] | None,
     *,
@@ -221,7 +221,7 @@ def _apply_overlay_scope(
     return applied
 
 
-def _init_logger(
+def init_logger(
     agent_id: int | None,
     *,
     producer: Callable[[], Any],
@@ -260,7 +260,7 @@ def _init_logger(
     producer().defer_exports()
 
 
-def _emit_child_boot_timing(child: _ChildContext, *, clients: Any) -> None:
+def emit_child_boot_timing(child: ChildContext, *, clients: Any) -> None:
     """Record the child-ready boundary before executing agent-authored code."""
     duration_ms = (time.perf_counter() - child.boot_started_at) * 1000
     extra: dict[str, object] = {}
@@ -321,7 +321,7 @@ class _LazyStateSlot:
         setattr(object.__getattribute__(self, "_real"), name, value)
 
 
-def _build_state_slot(child: _ChildContext, payload: RequestPayload) -> None:
+def build_state_slot(child: ChildContext, payload: RequestPayload) -> None:
     """Arm the dynamic AgentState slot from the request snapshot.
 
     A stateless request binds no slot, so `ava.state` does not exist in that child. A
@@ -335,7 +335,7 @@ def _build_state_slot(child: _ChildContext, payload: RequestPayload) -> None:
     child.ava.state_update = {}
 
 
-def _take_result_state_update(child: _ChildContext, payload: Any, *, state_injected: bool) -> None:
+def _take_result_state_update(child: ChildContext, payload: Any, *, state_injected: bool) -> None:
     """Serialize this turn's plugin delta into the result envelope.
 
     A tampered slot (agent replaced ava.state_update with a non-dict) is reported as
@@ -356,7 +356,7 @@ def _take_result_state_update(child: _ChildContext, payload: Any, *, state_injec
     payload.state_update = update or None
 
 
-def _run_code(code: str, payload: Any) -> None:
+def run_code(code: str, payload: Any) -> None:
     """Execute the agent's code with stdout/stderr on the pipe; capture
     lifecycle / crash outcomes into the payload."""
     from agent.graph.agent_traceback import (
@@ -429,7 +429,7 @@ def _run_code(code: str, payload: Any) -> None:
         process_context.bind_context(execution_context)
 
 
-def _finalize_telemetry(*, clients: Any = None) -> None:
+def finalize_telemetry(*, clients: Any = None) -> None:
     """Attempt finite ordinary delivery in life, then flush the available OTLP tail.
 
     A completed barrier observes writer processing, not durable capture. An
@@ -462,14 +462,14 @@ def _finalize_telemetry(*, clients: Any = None) -> None:
         owned.finalize_events()
 
 
-def _deliver_envelope_telemetry(*, clients: Any = None) -> None:
+def deliver_envelope_telemetry(*, clients: Any = None) -> None:
     """Best-effort last-mile delivery for the crash-envelope writers (task #4312).
 
     Never raises and never rewrites the envelope: the crash must stay the
     reported failure. Ordinary observation delivery can remain unfinished.
     """
     try:
-        _finalize_telemetry(clients=clients)
+        finalize_telemetry(clients=clients)
     except BaseException:
         logger.opt(exception=True).warning(
             "exec child: telemetry delivery after a crash envelope failed; "
@@ -477,7 +477,7 @@ def _deliver_envelope_telemetry(*, clients: Any = None) -> None:
         )
 
 
-def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
+def deliver_run_telemetry(result_path: str, payload: Any) -> None:
     """Attempt ordinary observation delivery after writing this run's envelope.
 
     Known unfinished delivery is best effort and preserves the business result.
@@ -488,7 +488,7 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
     if payload.kind not in ("done", "lifecycle", "crashed"):
         return
     try:
-        _finalize_telemetry()
+        finalize_telemetry()
     except BaseException as exc:
         logger.opt(exception=True).warning(
             "exec child: post-run telemetry delivery failed (run outcome: {}); "
@@ -499,7 +499,7 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
         # outcome: report it with the REAL code_reached flag (P0 #2100). A
         # crashed envelope already carries its own failure.
         if payload.kind in ("done", "lifecycle"):
-            _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
+            write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
 def _bind_identity(
@@ -530,13 +530,13 @@ def _run(
 ) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
-    child = _import_runtime(boot_started_at)
+    child = import_runtime(boot_started_at)
     from agent.graph.exec.protocol import ResultPayload, read_request, write_result
 
-    _line_buffered_output()
+    line_buffered_output()
     _install_signal_handlers()
     raw_agent_id = os.environ.get("AVA_AGENT_ID")
-    _init_logger(
+    init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
         producer=context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
@@ -544,7 +544,7 @@ def _run(
     request = read_request(Path(request_path))
     payload = ResultPayload(kind="done")
 
-    birth, overlay = _pop_overlay_env()
+    birth, overlay = pop_overlay_env()
     from base.clock import Clock, clock_config_from_boot
 
     def clock_factory() -> Clock:
@@ -555,12 +555,12 @@ def _run(
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
     # plugins load (the SDK installation owns the bound plugin config image).
-    framework_overlay_applied = _apply_overlay_scope(
+    framework_overlay_applied = apply_overlay_scope(
         birth, overlay, scope="framework", set_framework_field=config.set_field
     )
     import ava
 
-    _init_logger(
+    init_logger(
         request.agent_id,
         producer=ava.context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
@@ -581,7 +581,7 @@ def _run(
     )
     from ava.sdk_surface import settings as sdk_settings
 
-    _apply_overlay_scope(birth, overlay, scope="plugin")
+    apply_overlay_scope(birth, overlay, scope="plugin")
 
     def read_agent_default(_domain: str, field: str) -> Any:
         return sdk_settings.config_authority().service_field_value(field)
@@ -589,35 +589,35 @@ def _run(
     if framework_overlay_applied:
         # Per-agent sdk_disable additions ride the overlay; they apply additively
         # on top of the installed surface (delta — only new entries take effect).
-        from agent.process_boot import _apply_per_agent_sdk_disable
+        from agent.process_boot import apply_per_agent_sdk_disable
 
-        _apply_per_agent_sdk_disable(default_reader=read_agent_default)
+        apply_per_agent_sdk_disable(default_reader=read_agent_default)
     # A text-only agent gets no attach contract anywhere in its SDK docs,
     # including interactive `ava.help(ava.self)` (user ruling 2026-08-28): the
     # renderer computes the child's media gating itself, per call.
-    from agent.process_boot import _apply_per_agent_eval_isolation
+    from agent.process_boot import apply_per_agent_eval_isolation
 
-    _apply_per_agent_eval_isolation(default_reader=read_agent_default)
-    _build_state_slot(child, request)
+    apply_per_agent_eval_isolation(default_reader=read_agent_default)
+    build_state_slot(child, request)
 
     if request.timeout_s > 0:
         _arm_watchdog(request.timeout_s)
 
     try:
-        _emit_child_boot_timing(child, clients=context.clients)
+        emit_child_boot_timing(child, clients=context.clients)
     except BaseException as exc:
         # Boot-timing failure: the code never ran.
-        _write_crashed_result(result_path, exc, code_reached=False)
-        _deliver_envelope_telemetry()
+        write_crashed_result(result_path, exc, code_reached=False)
+        deliver_envelope_telemetry()
         return
     try:
-        _run_code(request.code, payload)
+        run_code(request.code, payload)
     except BaseException as exc:
-        # _run_code catches everything itself — an escape here is a framework
+        # run_code catches everything itself — an escape here is a framework
         # failure, not a user-code crash. Report it with the REAL code_reached
         # flag so main() never stamps it as a boot crash (P0 #2100).
-        _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
-        _deliver_envelope_telemetry()
+        write_crashed_result(result_path, exc, code_reached=payload.code_reached)
+        deliver_envelope_telemetry()
         return
     finally:
         _take_result_state_update(child, payload, state_injected=request.state_raw is not None)
@@ -629,9 +629,9 @@ def _run(
     try:
         write_result(Path(result_path), payload)
     except BaseException as write_exc:
-        _write_crashed_result(result_path, write_exc, code_reached=payload.code_reached)
+        write_crashed_result(result_path, write_exc, code_reached=payload.code_reached)
     # Deliver queued records after the envelope write (task #4312).
-    _deliver_run_telemetry(result_path, payload)
+    deliver_run_telemetry(result_path, payload)
 
 
 def main() -> None:
@@ -650,7 +650,7 @@ def main() -> None:
         raise SystemExit(2)
     clients: Any = None
     try:
-        _line_buffered_output()
+        line_buffered_output()
         _install_signal_handlers()
         from ava.boot import process_clients
         from base.agents.context import AvaContext
@@ -664,10 +664,10 @@ def main() -> None:
         context = AvaContext(clients=clients, machine=machine)
         _run(request_path, result_path, boot_started_at, config=config, context=context)
     except BaseException as exc:
-        _write_crashed_result(result_path, exc)
+        write_crashed_result(result_path, exc)
         # The crash envelope's record needs the same last-mile delivery (task
         # #4312).
-        _deliver_envelope_telemetry(clients=clients)
+        deliver_envelope_telemetry(clients=clients)
     finally:
         # The connections this child opened (SQL, Redis, gateway, MCP) end with it.
         slot = sys.modules.get("ava.sdk_surface.process_context")
@@ -678,7 +678,7 @@ def main() -> None:
             clients.close()
 
 
-def _write_crashed_result(
+def write_crashed_result(
     result_path: str, exc: BaseException, *, code_reached: bool | None = False
 ) -> None:
     """Best-effort crash envelope that cannot itself hide the original failure.

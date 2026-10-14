@@ -34,7 +34,7 @@ from cli.commands.lifecycle.tests.stop.stop_support import Launcher, PtyServiceP
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_machine as command_machine
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
@@ -198,7 +198,7 @@ def test_real_redis_stops_owned_instance_only(
 ) -> None:
     import redis
 
-    from tests._containers import redis_server
+    from base.deploy.tests.containers import redis_server
 
     with redis_server() as url, redis_server() as sibling_url:
         with redis.Redis.from_url(url, decode_responses=True) as client:  # pyright: ignore[reportUnknownMemberType] — redis stubs
@@ -222,7 +222,7 @@ def test_real_redis_stops_owned_instance_only(
         # the latest in-memory write, not merely that an old RDB existed.
         from urllib.parse import urlparse
 
-        from tests._containers import _wait_port
+        from base.deploy.tests.containers import wait_port
 
         port = urlparse(url).port
         assert port is not None
@@ -244,7 +244,7 @@ def test_real_redis_stops_owned_instance_only(
             stderr=subprocess.DEVNULL,
         )
         try:
-            _wait_port(port)
+            wait_port(port)
             with redis.Redis.from_url(url, decode_responses=True) as restored:  # pyright: ignore[reportUnknownMemberType]
                 assert restored.get("owned-test") == "latest-unsaved"  # pyright: ignore[reportUnknownMemberType]
             assert stop.stop_data_plane(3, producer=operator_pipeline) == ["redis"]
@@ -264,7 +264,7 @@ def test_foreign_redis_directory_refuses_before_local_signals(
 ) -> None:
     import redis
 
-    from tests._containers import redis_server
+    from base.deploy.tests.containers import redis_server
 
     with redis_server() as url:
         monkeypatch.setattr(settings.data_plane, "redis_url", url)
@@ -320,7 +320,7 @@ def test_redis_admin_credential_is_independent_of_runtime_url(
 ) -> None:
     import redis
 
-    from tests._containers import redis_server
+    from base.deploy.tests.containers import redis_server
 
     password = "private-maintenance-test"  # noqa: S105 — private ephemeral test
     with redis_server() as url:
@@ -345,14 +345,14 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
 ) -> None:
     import shutil
 
-    from tests._containers import _free_port, _wait_port
+    from base.deploy.tests.containers import free_port, wait_port
 
     binary = plane.pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native pgbouncer is not installed")
     directory = home / "pgbouncer"
     directory.mkdir()
-    port = _free_port()
+    port = free_port()
     ini = directory / "pgbouncer.ini"
     ini.write_text(
         "[databases]\n[pgbouncer]\nlisten_addr=127.0.0.1\n"
@@ -362,10 +362,10 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
         "unix_socket_dir=\n"
     )
     subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)
-    _wait_port(port, timeout=5)
+    wait_port(port, timeout=5)
     pid = _wait_pidfile()
     identity = OwnedProcess.capture(psutil.Process(pid))
-    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
+    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{free_port()}")
     seen_alive: list[bool] = []
 
     def note_liveness(_identity: object, _report: object) -> None:
@@ -402,14 +402,14 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
 
     import psycopg
 
-    from tests._containers import _free_port, _wait_port
+    from base.deploy.tests.containers import free_port, wait_port
 
     binary = plane.pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native pgbouncer is not installed")
     directory = home / "pgbouncer"
     directory.mkdir()
-    port = _free_port()
+    port = free_port()
     (directory / "userlist.txt").write_text('"anyone" ""\n')
     ini = directory / "pgbouncer.ini"
     ini.write_text(
@@ -421,10 +421,10 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
         "unix_socket_dir=\n"
     )
     subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)
-    _wait_port(port, timeout=5)
+    wait_port(port, timeout=5)
     pid = _wait_pidfile()
     identity = OwnedProcess.capture(psutil.Process(pid))
-    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
+    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{free_port()}")
     try:
         with psycopg.connect(
             f"postgresql://anyone@127.0.0.1:{port}/pgbouncer", autocommit=True
@@ -444,10 +444,10 @@ def test_missing_pooler_pidfile_does_not_mean_the_process_is_gone(
     monkeypatch: pytest.MonkeyPatch,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    from tests._containers import _free_port
+    from base.deploy.tests.containers import free_port
 
     identity = OwnedProcess.capture(psutil.Process())
-    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
+    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{free_port()}")
     # The scanner sees an exact owned pooler but its pidfile is absent. No stop
     # signal can be justified; the test's actual process must remain untouched.
     process = psutil.Process()
@@ -470,7 +470,7 @@ def test_redis_cleanup_cannot_turn_deadline_into_an_unbounded_wait(
 ) -> None:
     import asyncio
 
-    from tests._containers import _free_port
+    from base.deploy.tests.containers import free_port
 
     class HangingClose:
         connection = None
@@ -482,7 +482,7 @@ def test_redis_cleanup_cannot_turn_deadline_into_an_unbounded_wait(
             await asyncio.Future()
 
     monkeypatch.setattr(plane, "Redis", HangingClose)
-    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
+    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{free_port()}")
     started = time.monotonic()
     with pytest.raises(TimeoutError):
         stop.stop_data_plane(0.1, producer=operator_pipeline)
@@ -522,7 +522,7 @@ def _launch_incident_shape_pooler(
     short-circuits to the reload path by design). Pins the pooler's home and the address to
     private, bindable values.
     """
-    from tests._containers import _free_port, _wait_port
+    from base.deploy.tests.containers import free_port, wait_port
 
     binary = pb.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
@@ -536,7 +536,7 @@ def _launch_incident_shape_pooler(
     command_machine.set(host=addr)
     monkeypatch.setattr(pb, "pg_socket_dir", lambda: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
 
-    port = _free_port()
+    port = free_port()
     role = pb.POOLER_ADMIN
     secret = "s3cr3t"  # noqa: S105 — private ephemeral fixture
     pb.write_config(
@@ -550,7 +550,7 @@ def _launch_incident_shape_pooler(
         [binary, "-d", str(base_pooler.ini_path())], check=True, capture_output=True, timeout=5
     )
     try:
-        _wait_port(port, timeout=5)
+        wait_port(port, timeout=5)
         return port, role, secret, _wait_pidfile()
     except BaseException:
         _kill_test_poolers()
@@ -561,7 +561,7 @@ def _wait_pidfile(timeout: float = 5.0) -> int:
     """The pooler pid once its pidfile lands.
 
     The daemon writes the pidfile asynchronously from binding its listeners:
-    reading it straight after `_wait_port` returned races startup (2026-09-12,
+    reading it straight after `wait_port` returned races startup (2026-09-12,
     the run that leaked the pooler). Missing or empty content is publication
     still in progress; nonempty invalid content is an error, never readiness.
     """

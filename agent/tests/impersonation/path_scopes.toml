@@ -1,3 +1,7 @@
 "tests.path_scoped.agent_tests" = [
     "test_impersonation_integration.py",
 ]
+"tests.path_scoped.ava_tests" = [
+    "test_external_database_owner.py",
+    "test_external_machine_owner.py",
+]

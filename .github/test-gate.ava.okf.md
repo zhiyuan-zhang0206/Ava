@@ -42,7 +42,7 @@ and canonical runs use the same test verdict.
 
 The same step counts the tests from the JUnit report pytest already wrote
 (`scripts/ci/shard_counts.py`), per `tests/` directory, into the job log and
-summary. The informational `backend test counts (all shards)` job adds the 16
+summary. The informational `backend test counts (all shards)` job adds the 8
 shards and the flaky bucket up and prints the difference against the previous
 queue run's total, which each green Trunk merge-queue run records as the
 `test-count-baseline` artifact (main itself runs no CI), so a moved test that fell out of the suite shows as a changed count.

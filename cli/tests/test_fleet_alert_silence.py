@@ -142,7 +142,7 @@ def test_main_opens_then_closes_through_the_hosts_settings(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     fake, base = grafana
-    monkeypatch.setattr(silence, "_grafana", lambda: (base, "pw"))
+    monkeypatch.setattr(silence, "colocated_grafana", lambda: (base, "pw"))
     assert silence.main(["open", "--hours", "2", "--comment", "window"]) == 0
     assert capsys.readouterr().out.startswith("SILENCE opened id=s1 until=")
     assert fake.rows[0]["status"]["state"] == "active"
@@ -154,7 +154,7 @@ def test_main_opens_then_closes_through_the_hosts_settings(
 def test_an_unreachable_grafana_is_reported_not_raised(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(silence, "_grafana", lambda: ("http://127.0.0.1:9", "pw"))
+    monkeypatch.setattr(silence, "colocated_grafana", lambda: ("http://127.0.0.1:9", "pw"))
     assert silence.main(["open", "--hours", "1", "--comment", "w"]) == 0
     assert capsys.readouterr().out.startswith("SILENCE failed: GET /api/")
 
@@ -165,7 +165,7 @@ def test_a_refused_credential_is_reported_not_raised(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _fake, base = grafana
-    monkeypatch.setattr(silence, "_grafana", lambda: (base, "wrong"))
+    monkeypatch.setattr(silence, "colocated_grafana", lambda: (base, "wrong"))
     assert silence.main(["close"]) == 0
     assert capsys.readouterr().out == f"SILENCE failed: GET {silence.SILENCES}: HTTP 401\n"
 
@@ -173,7 +173,7 @@ def test_a_refused_credential_is_reported_not_raised(
 def test_a_home_without_the_admin_password_skips(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(silence, "_grafana", lambda: None)
+    monkeypatch.setattr(silence, "colocated_grafana", lambda: None)
     assert silence.main(["close"]) == 0
     assert capsys.readouterr().out.startswith("SILENCE skipped:")
 
@@ -187,6 +187,6 @@ def test_the_credential_comes_from_the_alerts_settings(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         settings.observability, "telemetry_grafana_url", "http://grafana.test:3003/"
     )
-    assert silence._grafana() == ("http://grafana.test:3003", "secret")
+    assert silence.colocated_grafana() == ("http://grafana.test:3003", "secret")
     monkeypatch.setattr(settings.alerts, "grafana_admin_password", None)
-    assert silence._grafana() is None
+    assert silence.colocated_grafana() is None

@@ -1,0 +1,7 @@
+[debt.first-party-patch]
+"test_lint_async_no_sync_blocking.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.BLOCKING_NAMES" = 1
+"test_lint_async_no_sync_blocking.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.DEFINITION_DIRS" = 1
+"test_lint_async_no_sync_blocking.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.REPO_BLOCKING_HELPERS" = 4
+"test_lint_async_no_sync_blocking.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.SCAN_DIRS" = 1
+"test_lint_async_no_sync_blocking.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking._ROOT" = 1
+"test_lint_ava_root_scope.py#monkeypatch.setattr scripts.lint.ava_root_scope._REPO_ROOT" = 2

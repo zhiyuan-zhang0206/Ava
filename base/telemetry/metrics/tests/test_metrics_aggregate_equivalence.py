@@ -441,3 +441,41 @@ def test_equivalence_randomized(fake: TelemetryStream) -> None:
     assert data["meta"]["agent_filter"] == agents[0]
     # the window header names the single agent
     assert str(agents[0]) in text or "1 agents" in _norm(text)
+
+
+@pytest.mark.parametrize("cached", [None, 0, 800])
+def test_cache_rates_exclude_unmetered_usage_without_losing_cost_or_tokens(
+    fake: TelemetryStream, cached: int | None
+) -> None:
+    _add(
+        fake,
+        event="llm_usage",
+        agent_id=1,
+        payload={
+            "model": "chat",
+            "in_total": 1000,
+            "cost_usd": 1,
+            **({"cache_read": cached} if cached is not None else {}),
+        },
+    )
+    _add(
+        fake,
+        event="llm_usage",
+        agent_id=1,
+        payload={"model": "decision", "in_total": 5000, "out_total": 0, "cost_usd": 2},
+    )
+    text, data, rollups = _run_aggregate(fake)
+    llm = data["metrics"]["llm_turns"]
+    expected = None if cached is None else cached / 10
+    assert llm["llm_calls"] == 2
+    assert llm["tokens_in"] == 6000
+    assert llm["cost_usd"] == 3
+    assert llm["cache_hit_pct"] == expected
+    assert rollups[1]["cache_hit_pct"] == expected
+    assert rollups[1]["tokens_in"] == 6000
+    assert rollups[1]["cost_usd"] == 3
+    if cached is None:
+        assert "cache hit overall: N/A" in text
+        assert set(llm["cache_hit_pct_by_position"].values()) == {None}
+    else:
+        assert llm["cache_hit_pct_by_position"] == {"early": expected, "mid": None, "late": None}

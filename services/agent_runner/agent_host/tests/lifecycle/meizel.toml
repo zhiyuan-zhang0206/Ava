@@ -4,3 +4,29 @@ exports = ["recovery_admission.py", "test_hosted_lifecycle.py", "test_predecesso
 "test_hosted_backlog_recovery.py" = ["recovery_admission.py"]
 "test_hosted_force_cleanup.py" = ["force_host_setup.py"]
 "test_hosted_idle_recovery.py" = ["recovery_admission.py"]
+
+[debt.env-patch]
+"test_hosted_force_quiescence.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"force_host_setup.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 1
+"test_event_publisher_lifecycle.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.driver.run_compact" = 1
+"test_event_publisher_lifecycle.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.driver.settle_original_restart" = 1
+"test_hosted_force_quiescence.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S" = 1
+"test_hosted_force_terminate_close.py#monkeypatch.setattr base.native_process.exec_domain.ExecProcessDomain.close_confirmed" = 1
+"test_hosted_force_terminate_close.py#monkeypatch.setattr services.agent_runner.agent_host.host.admit_hosted_runtime" = 1
+"test_hosted_idle_recovery.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"test_hosted_idle_recovery.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+"test_hosted_lifecycle.py#monkeypatch.setattr ops.cluster_status.kill_agent_shells" = 2
+"test_hosted_lifecycle.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 1
+"test_hosted_ownership_agent_host.py#monkeypatch.setattr agent.ownership.hosted.publish_agent_updated" = 1
+"test_hosted_ownership_agent_host.py#monkeypatch.setattr services.agent_runner.agent_host.host.publish_agent_updated" = 1
+"test_hosted_ownership_agent_host.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 1
+"test_predecessor_closure.py#monkeypatch.setattr base.deploy.maintenance.admission.pending_command" = 1
+"test_predecessor_closure.py#monkeypatch.setattr base.deploy.maintenance.admission.record_drained" = 1
+
+[debt.third-party-patch]
+"test_hosted_dispatcher_cancellation.py#monkeypatch.setattr psycopg_pool.AsyncConnectionPool._check_connection" = 1
+
+[debt.unresolved-patch]
+"test_hosted_ownership_agent_host.py#monkeypatch.setattr host._runtime_for" = 1

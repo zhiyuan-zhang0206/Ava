@@ -16,9 +16,9 @@ from services.upkeep.events_maintenance import daemon, resolution
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 from services.upkeep.events_maintenance.tests.test_events_maintenance_resolution import (
     Pool,
-    _record,
     capture_events,
     event_class,
+    record_maintenance_event,
 )
 
 
@@ -48,7 +48,7 @@ def _history(connection: psycopg.Connection[Any]) -> datetime:
     connection.execute("TRUNCATE event_dismissals")
     connection.commit()
     for slot in range(4):
-        _record(connection, event_name="steady", minutes_ago=slot * 360 + 1)
+        record_maintenance_event(connection, event_name="steady", minutes_ago=slot * 360 + 1)
     return datetime.now(UTC)
 
 
@@ -110,7 +110,7 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
             raise asyncio.CancelledError
 
     monkeypatch.setattr(daemon, "maintenance_with_liveness", execute_pass)
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", stop_after_two)
+    monkeypatch.setattr(daemon, "sleep_with_liveness", stop_after_two)
     for expected_scans in (1, 2):
         async with asyncio.TaskGroup() as tasks:
             with pytest.raises(asyncio.CancelledError):

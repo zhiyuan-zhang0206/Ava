@@ -14,15 +14,15 @@ from base import config, paths, telemetry
 from base.telemetry.delivery import loss
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp import telemetry_otlp
-from base.telemetry.tests.otlp.test_telemetry_otlp import AGENT, _event, _metrics
+from base.telemetry.tests.otlp.test_telemetry_otlp import AGENT, collected_metrics, otlp_test_event
 from base.telemetry.tests.otlp.test_telemetry_otlp import (
-    _bind_telemetry as _bind_telemetry,
-)
-from base.telemetry.tests.otlp.test_telemetry_otlp import (
-    _production_process_by_default as _production_process_by_default,
+    bind_telemetry as bind_telemetry,
 )
 from base.telemetry.tests.otlp.test_telemetry_otlp import (
     otlp_backend as otlp_backend,
+)
+from base.telemetry.tests.otlp.test_telemetry_otlp import (
+    production_process_by_default as production_process_by_default,
 )
 
 
@@ -45,9 +45,9 @@ def test_backend_init_failure_isolated_and_waits_before_retry(
 
     monkeypatch.setattr(telemetry_otlp, "build_providers", boom)
     backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
-    assert backend.export_batch([_event()]) is None  # does not raise
+    assert backend.export_batch([otlp_test_event()]) is None  # does not raise
     assert backend._logs is None
-    assert backend.export_batch([_event()]) is None  # no per-batch retry
+    assert backend.export_batch([otlp_test_event()]) is None  # no per-batch retry
     assert attempts == ["http://127.0.0.1:4318"]
     assert backend._init_failed_at is not None
 
@@ -162,8 +162,8 @@ def test_queue_full_sheds_counted_not_blocking(monkeypatch) -> None:
         export_allowed=lambda: True, providers=(None, None), queue_maxsize=1
     )
     monkeypatch.setattr(telemetry_otlp.OtlpBackend, "_ensure", lambda _self: True)  # pyright: ignore[reportUnknownMemberType]
-    backend._queue.put_nowait(_event())  # fill the queue
-    backend.export_batch([_event()])
+    backend._queue.put_nowait(otlp_test_event())  # fill the queue
+    backend.export_batch([otlp_test_event()])
     assert backend._dropped == 1
     assert backend._queue.qsize() == 1  # still full, caller not blocked
 
@@ -192,7 +192,7 @@ def test_pipeline_exports_to_otlp(otlp_backend) -> None:
     assert attrs is not None
     assert attrs["event_name"] == "llm_usage"
 
-    metrics = _metrics(metric_reader)
+    metrics = collected_metrics(metric_reader)
     assert metrics["ava_llm_usage_in_total"].data.data_points[0].value == 7
     assert metrics["ava_llm_usage_latency"].data.data_points[0].sum == 1.5
 
@@ -258,7 +258,7 @@ def test_flush_force_flushes_sdk_batch_records(monkeypatch: pytest.MonkeyPatch) 
     )
 
     try:
-        backend.export_batch([_event(attributes={"fn": "files.read"})])
+        backend.export_batch([otlp_test_event(attributes={"fn": "files.read"})])
         # Without force_flush the in-memory batch exporter would stay empty
         # until its 5s schedule; the flush must surface the record now.
         backend.flush()
@@ -312,10 +312,10 @@ def test_queue_loss_metric_survives_full_log_lane(
     mirrors: list[Event] = []
     monkeypatch.setattr(backend, "_queue", FullQueue())
     monkeypatch.setattr(telemetry_otlp, "append_jsonl", mirrors.extend)
-    backend.export_batch([_event(), _event()])
+    backend.export_batch([otlp_test_event(), otlp_test_event()])
     assert mirrors[0].event_name == "event_log_drop"
     assert mirrors[0].attributes["n"] == 2
-    metrics = _metrics(reader)
+    metrics = collected_metrics(reader)
     assert metrics["ava_event_log_drop_n"].data.data_points[0].value == 2
     assert metrics["ava_event_log_drop_last_dropped_at"].data.data_points[0].value > 0
 
@@ -382,12 +382,12 @@ def test_delayed_loss_summary_cannot_rewind_newer_loss_metric(otlp_backend: Any)
     assert backend._ensure()
     for timestamp in (2000.0, 1000.0):
         backend._record_metrics(
-            _event(
+            otlp_test_event(
                 category="telemetry",
                 event_name="event_log_drop",
                 attributes={"n": 1, "queue": "emitter", "last_dropped_at": timestamp},
             )
         )
-    metrics = _metrics(reader)
+    metrics = collected_metrics(reader)
     assert metrics["ava_event_log_drop_last_dropped_at"].data.data_points[0].value == 2000.0
     assert metrics["ava_event_log_drop_n"].data.data_points[0].value == 2

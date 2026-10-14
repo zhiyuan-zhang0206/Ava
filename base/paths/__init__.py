@@ -75,26 +75,22 @@ def logs_dir() -> Path:
     return target
 
 
-def chrome_mcp_socket() -> Path:
+def chrome_mcp_socket(cdp_port: int) -> Path:
     """Unix socket of the per-machine shared chrome MCP service
     ($AVA_HOME/run/chrome-mcp.<cdp_port>.sock). Keyed by the CDP port so
     co-hosted clusters (each with its own browser_cdp_port) get distinct
     sockets; the per-agent chrome bridge dials this, the daemon listens on it."""
-    from base.config import settings
-
-    return run_dir() / f"chrome-mcp.{settings.services.browser_cdp_port}.sock"
+    return run_dir() / f"chrome-mcp.{cdp_port}.sock"
 
 
-def permissions_helper_socket() -> Path:
+def permissions_helper_socket(port: int) -> Path:
     """Unix socket of this cluster's macOS permissions helper daemon
     ($AVA_HOME/run/permissions-helper.<port>.sock). Keyed by the per-cluster
     helper port so co-hosted clusters get distinct sockets; the per-agent client
     dials this, the signed launchd helper listens on it. (The TCC grant the
     helper relies on is shared machine-wide via a fixed bundle id, but the
     process and socket are per-cluster.)"""
-    from base.config import settings
-
-    return run_dir() / f"permissions-helper.{settings.services.permissions_helper_port}.sock"
+    return run_dir() / f"permissions-helper.{port}.sock"
 
 
 def permissions_helper_app_dir() -> Path:

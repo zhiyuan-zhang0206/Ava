@@ -9,8 +9,8 @@
 "tests.path_scoped.services_tests" = [
     "test_turn_dispatcher.py",
 ]
-"tests.fixtures.unit.homes" = ["."]
-"tests.fixtures.model_catalog" = [
+"base.paths.tests.homes" = ["."]
+"base.packages.tests.model_catalog" = [
     "test_agent_host.py",
     "test_circuit_breaker.py",
     "test_circuit_breaker_audit.py",
@@ -20,7 +20,7 @@
     "test_circuit_breaker.py",
     "test_circuit_breaker_audit.py",
 ]
-"tests.fixtures.log_capture" = [
+"base.log.tests.log_records" = [
     "test_circuit_breaker.py",
 ]
 "tests.fixtures.unit.sdk" = [

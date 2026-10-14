@@ -3,7 +3,7 @@
 
 The cmd_* functions import `base.host.net.http_dial` inside their bodies, so patching
 the module attributes here takes effect at call time (same seam as
-`cli/commands/agents/tests/test_agents_cmd.py`). What's under test is the client-side logic:
+`cli/parsers/tests/agents/test_agents_cmd.py`). What's under test is the client-side logic:
 name-or-id resolution, the script-source XOR, the exclude-unset update body,
 the tri-state enable/disable flag, and the error-detail surfacing.
 """
@@ -23,7 +23,7 @@ from base.cluster import machine
 from base.telemetry import EventPipeline
 from cli.commands.management import schedules as _sched
 from cli.commands.management import schedules_verify as _verify
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

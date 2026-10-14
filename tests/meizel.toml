@@ -1,30 +1,24 @@
-exports = ["components", "e2e", "factories", "fixtures", "impersonation_support.py", "path_scoped", "scripts", "skills"]
+exports = ["components", "e2e", "factories", "fixtures", "path_scoped", "scripts", "skills"]
 
 [uses]
 "ci" = ["e2e", "fixtures", "path_scoped"]
-"components" = ["_containers.py", "factories", "fixtures", "path_scoped"]
+"components" = ["factories", "fixtures", "path_scoped"]
 "contracts" = ["fixtures"]
 "e2e" = ["_containers.py", "components", "fixtures"]
-"factories" = ["fixtures", "path_scoped"]
-"fixtures" = ["_containers.py", "_os_jobs.py", "_test_env_file.py", "path_scoped"]
+"factories" = ["path_scoped"]
+"fixtures" = ["_os_jobs.py", "_test_env_file.py", "path_scoped"]
 "harness" = ["_asyncio_stall_probe.py", "_os_jobs.py", "components", "e2e", "fixtures"]
-"integration" = ["fixtures", "impersonation_support.py", "path_scoped"]
+"integration" = ["fixtures", "path_scoped"]
 "path_scoped" = ["_containers.py", "fixtures"]
 "scripts" = ["fixtures", "path_scoped"]
 "skills" = ["fixtures"]
 "ui" = ["e2e"]
 
-[debt.manifest-cycle]
-"path_scoped -> fixtures" = 1
+[debt.cycle-edge]
+"path_scoped/ava_tests.py -> fixtures/pin_agent.py" = 1
+"path_scoped/integration_tests.py -> fixtures/gateway_config.py" = 1
 
 [debt.private-module]
 "ci/test_owned_gateway_port.py -> e2e/_ports.py" = 1
 "harness/test_e2e_truncate_retry.py -> e2e/_truncate.py" = 1
 "ui/test_visual_snapshot.py -> e2e/visual/_visual_snapshot.py" = 1
-
-[debt.private-name]
-"components/cli/test_pgbouncer_wire.py -> _containers.py#_free_port" = 1
-"components/cli/test_pgbouncer_wire.py -> _containers.py#_wait_port" = 1
-"e2e/conftest.py -> fixtures/provisioning.py#_provisioned_db" = 1
-"e2e/conftest.py -> fixtures/provisioning.py#_provisioned_redis" = 1
-"harness/test_home_isolation.py -> e2e/conftest.py#_e2e_process_env" = 1

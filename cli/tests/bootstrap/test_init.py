@@ -35,7 +35,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    monkeypatch.setattr(start_intent, "_checkout", lambda: checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: checkout)
     monkeypatch.setattr(cluster, "port_free", _every_port_free)
     monkeypatch.setenv("AVA_HOME", str(home))
     os.environ["AVA_SERVICE_PATH"] = str(tmp_path / "tools")  # restored by the autouse fixture

@@ -1,0 +1,11 @@
+[debt.first-party-patch]
+"test_db.py#monkeypatch.setattr agent.db.publish_inbound_wake" = 1
+"test_db_pool.py#monkeypatch.setattr agent.db.time.monotonic" = 3
+
+[debt.third-party-patch]
+"test_db_pool.py#monkeypatch.setattr psycopg_pool.AsyncConnectionPool._check_connection" = 1
+"test_db_pool.py#monkeypatch.setattr psycopg_pool.AsyncConnectionPool._getconn_unchecked" = 1
+"test_db_pool.py#monkeypatch.setattr psycopg_pool.AsyncConnectionPool.getconn" = 5
+
+[debt.unresolved-patch]
+"test_db_pool.py#monkeypatch.setattr pool.get_stats" = 1

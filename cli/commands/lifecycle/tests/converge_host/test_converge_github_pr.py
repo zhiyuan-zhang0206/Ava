@@ -10,7 +10,7 @@ import cli.commands.lifecycle.converge_host as cv
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -39,7 +39,7 @@ def test_passes_when_pr_capable(
     import base.deploy.git.github_pr as gp
 
     monkeypatch.setattr(gp, "github_pr_blocker", lambda: None)
-    cv._ensure_github_pr(
+    cv.ensure_github_pr(
         _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     )  # no raise
 
@@ -54,7 +54,7 @@ def test_raises_when_pr_blocked(
 
     monkeypatch.setattr(gp, "github_pr_blocker", lambda: "gh CLI not installed")
     with pytest.raises(RuntimeError, match="gh CLI not installed"):
-        cv._ensure_github_pr(
+        cv.ensure_github_pr(
             _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
         )
 
@@ -79,7 +79,7 @@ def test_skips_on_single_box(
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config),
     )
-    cv._ensure_github_pr(ctx)  # no raise
+    cv.ensure_github_pr(ctx)  # no raise
 
 
 def test_skips_when_opt_out(
@@ -94,7 +94,7 @@ def test_skips_when_opt_out(
     monkeypatch.setattr(gp, "github_pr_blocker", lambda: "gh CLI not installed")
     ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     ctx.config.set_field("require_github_pr", False)
-    cv._ensure_github_pr(ctx)  # no raise
+    cv.ensure_github_pr(ctx)  # no raise
 
 
 def test_step_registered_agent_runner_only() -> None:

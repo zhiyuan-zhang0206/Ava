@@ -1,2 +1,16 @@
+exports = ["model_catalog.py", "plugin_config"]
+
 [uses]
 "bootstrap" = ["providers"]
+"conftest.py" = ["model_catalog.py"]
+"lm" = ["model_catalog.py"]
+"providers" = ["lm", "model_catalog.py"]
+
+[debt.env-patch]
+"test_update_disk_images.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
+[debt.first-party-patch]
+"test_preloaded_skills_paths.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 1
+"test_update_disk_images.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_update_disk_images.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_update_disk_images.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1

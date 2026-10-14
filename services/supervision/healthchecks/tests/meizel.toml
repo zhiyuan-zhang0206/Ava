@@ -1,0 +1,70 @@
+[debt.env-patch]
+"test_healthcheck_memory_search.py#patch.dict os.environ" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_prod_venv.py#monkeypatch.setenv os.environ.PYTHONPATH" = 2
+"test_prod_venv.py#monkeypatch.setenv os.environ.VIRTUAL_ENV" = 1
+
+[debt.first-party-patch]
+"test_healthcheck_browser_mcp.py#monkeypatch.setattr services.supervision.healthchecks.browser_mcp.browser_mcp_probe" = 3
+"test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.canary_async" = 1
+"test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.read_json" = 1
+"test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.websockets.connect" = 1
+"test_healthcheck_computer_mcp.py#monkeypatch.setattr services.supervision.healthchecks.computer_mcp.computer_mcp_socket" = 2
+"test_healthcheck_frontend.py#monkeypatch.setattr base.native_process.root_control.client.owned_process" = 1
+"test_healthcheck_frontend.py#monkeypatch.setattr services.supervision.healthchecks.frontend.settings" = 1
+"test_healthcheck_frontend.py#monkeypatch.setattr services.supervision.healthchecks.frontend.subprocess.run" = 3
+"test_healthcheck_gateway.py#monkeypatch.setattr base.config.settings.services.gateway_health_url" = 1
+"test_healthcheck_gateway.py#monkeypatch.setattr services.supervision.healthchecks.gateway.probe_home" = 1
+"test_healthcheck_insights.py#monkeypatch.setattr services.supervision.healthchecks.insights.insights_pidfile" = 1
+"test_healthcheck_insights.py#monkeypatch.setattr services.supervision.healthchecks.insights.insights_socket" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_grafana_url" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_loki_url" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_prometheus_url" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr base.native_process.root_control.client.owned_process" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.ava_home" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.open_local" = 10
+"test_healthcheck_lgtm.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.protocol_readiness" = 1
+"test_healthcheck_lgtm.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.time.sleep" = 1
+"test_healthcheck_maintenance_hold.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"test_healthcheck_maintenance_hold.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+"test_healthcheck_maintenance_hold.py#monkeypatch.setattr base.log.logger" = 1
+"test_healthcheck_mcp_daemon.py#monkeypatch.setattr services.supervision.healthchecks.mcp_daemon.mcp_daemon_probe" = 3
+"test_healthcheck_memory_search.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.factory.get_provider" = 1
+"test_healthcheck_memory_search.py#monkeypatch.setattr services.supervision.healthchecks.memory_search.post_search" = 4
+"test_healthcheck_otel_collector.py#monkeypatch.setattr base.cluster.port_preflight.strict_listeners_on" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.setattr base.native_process.root_control.client.owned_process" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.setattr services.supervision.healthchecks.otel_collector.gateway_observability_home" = 3
+"test_healthcheck_otel_collector.py#monkeypatch.setattr services.supervision.healthchecks.otel_collector.is_alive" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.setattr services.supervision.healthchecks.otel_collector.settings.observability.otel_collector_metrics_port" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.setattr services.supervision.healthchecks.otel_collector.settings.observability.telemetry_otlp_endpoint" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.setattr services.supervision.healthchecks.otel_collector.settings.observability.telemetry_otlp_port" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr base.host.permissions_helper.client.connect" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr base.log.logger" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr base.native_process.root_control.client.peer_pid" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr base.native_process.root_control.client.root_process" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.OwnedProcess.capture" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.helper_client" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.helper_parent" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.is_macos" = 3
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.parent_still_live" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.ping" = 4
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.psutil.Process" = 1
+"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.read_helper_job" = 4
+"test_prod_venv.py#monkeypatch.setattr services.supervision.healthchecks.prod_venv.cluster_drift.prod_source_dir" = 1
+"test_prod_venv.py#monkeypatch.setattr services.supervision.healthchecks.prod_venv.editable_install.venv_python" = 1
+"test_prod_venv.py#monkeypatch.setattr services.supervision.healthchecks.prod_venv.proc.run_bounded" = 3
+"test_prod_venv.py#monkeypatch.setattr services.supervision.healthchecks.prod_venv.shutil.which" = 2
+"test_protocol_probe.py#monkeypatch.setattr base.native_process.root_control.client.owned_process" = 1
+"test_protocol_probe.py#monkeypatch.setattr base.paths.mcp_daemon_shared_socket" = 1
+"test_redis_acl_healthcheck.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.redis.Redis.from_url" = 2
+
+[debt.stdlib-patch]
+"test_healthcheck_gateway.py#monkeypatch.setattr urllib.request.urlopen" = 3
+"test_healthcheck_otel_collector.py#monkeypatch.setattr urllib.request.urlopen" = 6
+
+[debt.third-party-patch]
+"test_healthcheck_frontend.py#monkeypatch.setattr psutil.process_iter" = 1
+"test_healthcheck_memory_search.py#monkeypatch.setattr httpx.post" = 2
+"test_protocol_probe.py#monkeypatch.setattr psutil.process_iter" = 2

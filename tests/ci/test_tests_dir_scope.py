@@ -65,9 +65,9 @@ def test_async_lint_exempts_a_package_tests_directory(
     from scripts.lint import async_no_sync_blocking as lint
 
     monkeypatch.setattr(lint, "_ROOT", tmp_path)
-    monkeypatch.setattr(lint, "_DEFINITION_DIRS", ("base",))
-    monkeypatch.setattr(lint, "_REPO_BLOCKING_HELPERS", set[str]())
-    monkeypatch.setattr(lint, "_BLOCKING_NAMES", lint._LIBRARY_BLOCKING_NAMES)
+    monkeypatch.setattr(lint, "DEFINITION_DIRS", ("base",))
+    monkeypatch.setattr(lint, "REPO_BLOCKING_HELPERS", set[str]())
+    monkeypatch.setattr(lint, "BLOCKING_NAMES", lint.LIBRARY_BLOCKING_NAMES)
     body = "import time\n\nasync def handler() -> None:\n    time.sleep(1)\n"
     _write(tmp_path, "gateway/agents/tests/test_handler.py", body)
     _write(tmp_path, "ops/tests/test_ops.py", body)
@@ -85,12 +85,12 @@ def test_async_lint_helper_names_are_not_kept_alive_by_a_test(
     from scripts.lint import async_no_sync_blocking as lint
 
     monkeypatch.setattr(lint, "_ROOT", tmp_path)
-    monkeypatch.setattr(lint, "_DEFINITION_DIRS", ("base",))
-    monkeypatch.setattr(lint, "_REPO_BLOCKING_HELPERS", {"sync_op"})
+    monkeypatch.setattr(lint, "DEFINITION_DIRS", ("base",))
+    monkeypatch.setattr(lint, "REPO_BLOCKING_HELPERS", {"sync_op"})
     _write(tmp_path, "base/pkg/tests/test_x.py", "def sync_op() -> None:\n    pass\n")
-    assert lint._stale_repo_helpers() == ["sync_op"]
+    assert lint.stale_repo_helpers() == ["sync_op"]
     _write(tmp_path, "base/pkg/ops.py", "def sync_op() -> None:\n    pass\n")
-    assert lint._stale_repo_helpers() == []
+    assert lint.stale_repo_helpers() == []
 
 
 def test_plugin_wrap_lint_exempts_a_plugins_own_tests(

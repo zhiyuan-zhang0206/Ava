@@ -16,9 +16,28 @@ exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed
 "test_maintenance_prior_failure.py" = ["host_policy.py", "test_maintenance_receipt_grading.py"]
 "test_turn_dispatcher.py" = ["turn_dispatcher"]
 
-[debt.private-name]
-"agent_host/test_maintenance_failures.py -> runtime/host_support.py#_FakePool" = 1
-"native_cancel/test_authority.py -> history/test_hosted_compact_failure.py#_prepare_graph" = 1
-"native_cancel/test_checkpoint.py -> history/test_hosted_compact_failure.py#_prepare_graph" = 1
-"native_cancel/test_interrupt.py -> history/test_hosted_compact_failure.py#_prepare_graph" = 1
-"native_restart/test_return.py -> native_cancel/test_continuation.py#_install_faults" = 1
+[debt.env-patch]
+"test_boot_sdk_posture.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_boot_sdk_posture.py#patch.dict os.environ" = 2
+
+[debt.first-party-patch]
+"test_boot_sdk_posture.py#monkeypatch.setattr ava.sdk_surface.process_context.bind_host_process" = 1
+"test_boot_sdk_posture.py#monkeypatch.setattr base.config.Settings" = 1
+"test_boot_sdk_posture.py#monkeypatch.setattr base.config.ensure_eager" = 1
+"test_circuit_breaker.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1
+"test_circuit_breaker_audit.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_standalone_async" = 1
+"test_circuit_breaker_audit.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_maintenance_prior_failure.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 1
+"test_maintenance_receipt_grading.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
+"test_maintenance_receipt_grading.py#monkeypatch.setattr ops.agent_pause.publish_inbound_wake" = 2
+"test_maintenance_receipt_grading.py#monkeypatch.setattr services.agent_runner.agent_host.lifecycle.maintenance.logger" = 1
+"test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S" = 6
+"test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CLOCK_READ_TIMEOUT_S" = 1
+"test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.logger.error" = 5
+"test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.logger.exception" = 2
+"test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.logger.warning" = 1
+
+[debt.unresolved-patch]
+"guarded_compact_support.py#monkeypatch.setattr host._runtime_for" = 1
+"test_maintenance_prior_failure.py#monkeypatch.setattr host._drive_turns" = 1
+"test_maintenance_prior_failure.py#monkeypatch.setattr host._runtime_for" = 1

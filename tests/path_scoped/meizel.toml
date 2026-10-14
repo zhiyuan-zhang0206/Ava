@@ -7,8 +7,21 @@ exports = ["api_keys.py", "ava_tests.py", "cli_tests.py", "db_authority_tests.py
 "integration_tests.py" = ["api_keys.py", "gateway_tests.py"]
 "pty_jobs.py" = ["pty_shells.py"]
 
-[debt.private-name]
-"ava_tests.py -> api_keys.py#_mock_api_keys" = 1
-"gateway_tests.py -> api_keys.py#_mock_api_keys" = 1
-"integration_tests.py -> api_keys.py#_mock_api_keys" = 1
-"integration_tests.py -> gateway_tests.py#_local_spawn_in_process" = 1
+[debt.env-patch]
+"agent_tests.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
+
+[debt.first-party-patch]
+"api_keys.py#monkeypatch.setattr base.config.settings.lm" = 1
+"cli_tests.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.selection_path" = 1
+"cli_tests.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"cli_tests.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+"cli_tests.py#monkeypatch.setattr base.telemetry.process_logging.init_cli_process" = 1
+"gateway_tests.py#monkeypatch.setattr base.cluster.machines.is_paused" = 1
+"gateway_tests.py#monkeypatch.setattr base.cluster.machines.lookup_role" = 1
+"gateway_tests.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
+"gateway_tests.py#monkeypatch.setattr gateway.agents.forward.enqueue_lifecycle" = 1
+"gateway_tests.py#monkeypatch.setattr gateway.app.ConfigBoot" = 1
+"gateway_tests.py#monkeypatch.setattr gateway.app.GatewayProcess" = 1
+"gateway_tests.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 1
+"structure_tests.py#monkeypatch.setattr meizel.owners.decisions.DECISIONS" = 1
+"structure_tests.py#monkeypatch.setattr meizel.state.ambient_state.allowlist" = 1

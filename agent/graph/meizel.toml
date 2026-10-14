@@ -4,18 +4,13 @@ exports = ["agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm"
 "__init__.py" = ["_build.py", "claim", "exec", "llm", "llm_errors.py"]
 "_build.py" = ["_init_context.py", "claim", "exec", "hooks", "llm", "llm_errors.py"]
 "_init_context.py" = ["node_log.py", "prompt"]
-"claim" = ["_attach_drain.py", "hooks", "node_log.py", "prompt", "tests"]
-"exec" = ["_attach_drain.py", "_attach_merge.py", "agent_traceback.py", "claim", "interrupt.py", "llm", "llm_errors.py", "node_log.py", "tool_calls.py"]
-"hooks" = ["interrupt.py", "llm", "node_log.py", "prompt", "recall"]
+"claim" = ["_attach_drain.py", "hooks", "node_log.py", "prompt"]
+"exec" = ["_attach_drain.py", "_attach_merge.py", "agent_traceback.py", "claim", "interrupt.py", "node_log.py", "tool_calls.py"]
+"hooks" = ["interrupt.py", "node_log.py", "prompt", "recall"]
 "interrupt.py" = ["node_log.py"]
-"llm" = ["_callbacks.py", "exec", "hooks", "interrupt.py", "llm_errors.py", "node_log.py", "tool_calls.py"]
+"llm" = ["_callbacks.py", "hooks", "interrupt.py", "llm_errors.py", "node_log.py", "tool_calls.py"]
 "recall" = ["prompt"]
 "tests" = ["__init__.py", "_attach_drain.py", "_attach_merge.py", "_callbacks.py", "_init_context.py", "_shared.py", "agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm", "llm_errors.py", "node_log.py", "prompt", "recall"]
-
-[debt.manifest-cycle]
-"claim -> tests" = 1
-"llm -> exec" = 1
-"llm -> hooks" = 1
 
 [debt.private-module]
 "tests/llm_helpers/test_llm_node_billing_error_logs_billing_vendor.py -> llm/_retry.py" = 1
@@ -25,9 +20,4 @@ exports = ["agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm"
 "tests/test_node_log.py -> exec/_stream.py" = 1
 
 [debt.private-name]
-"claim/tests/test_claim_markers_and_idle.py -> tests/cursor_fixture.py#_fresh_snapshot_cursor" = 1
 "tests/llm_helpers/test_security_findings.py -> exec/node.py#_exec_node_impl" = 1
-"tests/prompt/test_system_prompt.py -> prompt/system_prompt.py#_CAPABILITY_SURFACES" = 1
-"tests/prompt/test_system_prompt.py -> prompt/system_prompt.py#_discover_all_namespaces" = 1
-"tests/prompt/test_system_prompt.py -> prompt/system_prompt.py#_sdk_expand_section" = 1
-"tests/prompt/test_system_prompt_sections.py -> prompt/system_prompt.py#_workspace_section" = 1
