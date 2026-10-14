@@ -48,6 +48,59 @@ async def test_async_calls_record_inputs_in_order_and_filter_by_agent() -> None:
     assert model_inputs() == []
 
 
+async def test_a_torn_tail_is_skipped_until_the_writer_terminates_it() -> None:
+    """The record is appended by the agent process while the test process polls
+    it, so a read can land mid-append. A line without its terminating newline is
+    a call still being written: it is skipped instead of raising, and the next
+    poll sees it whole once the writer terminates the line (the JSONDecodeError
+    class observed in CI run 38497949470; issue #5765)."""
+    reset_record()
+    model = RecordingModel(agent_id=31, script=(say("first"), say("second")))
+    await model.ainvoke([HumanMessage(content="first call")])
+
+    path = scratch_root("record") / "model_inputs.jsonl"
+    assert [call[0]["text"] for call in model_inputs(31)] == ["first call"]
+
+    # A read racing the next append observes only a prefix of its line.
+    rendered = json.dumps(
+        {"agent_id": 31, "pid": os.getpid(), "messages": [{"type": "human", "text": "second call"}]}
+    )
+    half = len(rendered) // 2
+    with path.open("a") as stream:
+        stream.write(rendered[:half])
+    assert [call[0]["text"] for call in model_inputs(31)] == ["first call"]
+
+    with path.open("a") as stream:
+        stream.write(rendered[half:] + "\n")
+    assert [call[0]["text"] for call in model_inputs(31)] == ["first call", "second call"]
+    reset_record()
+
+
+def test_reader_line_boundaries_keep_terminated_corruption_loud() -> None:
+    """The completeness boundary is the newline, so it is pinned at both ends:
+    an empty or unterminated-only record reads as no calls, a terminated record
+    reads whole, and a terminated line that fails to parse stays an error rather
+    than passing as a missing record."""
+    path = scratch_root("record") / "model_inputs.jsonl"
+    reset_record()
+    assert model_inputs() == []
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("")
+    assert model_inputs() == []
+
+    path.write_text('{"agent_id": 1, "messages": [')
+    assert model_inputs() == []
+
+    path.write_text('{"agent_id": 1, "messages": [{"type": "human", "text": "x"}]}\n')
+    assert [call[0]["text"] for call in model_inputs(1)] == ["x"]
+
+    path.write_text('{"agent_id": 1, "messages": []}\n{"broken"\n')
+    with pytest.raises(json.JSONDecodeError):
+        model_inputs(1)
+    reset_record()
+
+
 async def test_exhausted_attempt_still_records_its_input() -> None:
     reset_record()
     model = RecordingModel(agent_id=None, script=())

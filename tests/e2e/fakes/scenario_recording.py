@@ -112,10 +112,27 @@ class RecordingModel(ScriptedFakeChatModel):
         return await super()._agenerate(messages, stop, run_manager, **kwargs)
 
 
+def _complete_lines_text(path: Path) -> str:
+    """The record's text up to its last newline.
+
+    `_record` appends one line per model call from the agent process while the
+    test process polls this file, so a read can land mid-append and see a
+    partial line. A line the writer has not terminated yet is a call still
+    being written, not a record: its fragment is dropped and the next poll sees
+    it whole. A terminated line is always parsed, so real corruption cannot
+    pass as a missing record (issue #5765).
+    """
+    complete, newline, _partial = path.read_text().rpartition("\n")
+    return complete + newline
+
+
 def model_inputs(agent_id: int | None = None) -> list[list[dict[str, Any]]]:
-    """Model calls so far (of one agent, or all), oldest first: each call's messages as seen."""
+    """Model calls so far (of one agent, or all), oldest first: each call's messages as seen.
+
+    Reads newline-terminated records only: a torn tail is an append in flight
+    (`_record` writes from the agent process while the test process polls)."""
     path = _record_path()
     if not path.exists():
         return []
-    entries = [json.loads(line) for line in path.read_text().splitlines()]
+    entries = [json.loads(line) for line in _complete_lines_text(path).splitlines()]
     return [e["messages"] for e in entries if agent_id is None or e["agent_id"] == agent_id]
