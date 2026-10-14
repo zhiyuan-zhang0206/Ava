@@ -10,10 +10,10 @@ from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fres
 from agent.state import AgentState
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_by_who_self_returns_yourself():

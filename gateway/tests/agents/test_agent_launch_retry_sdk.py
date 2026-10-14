@@ -7,10 +7,10 @@ import pytest
 
 import ava
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from gateway.tests.agents.sdk_support import sdk_via_gateway, spawn_agent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.usefixtures(sdk_via_gateway.__name__)

@@ -17,13 +17,13 @@ from base.agents.impersonation.tests.impersonation_support import (
 )
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process import ownership
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _agent(db_conn: Any, *, local_machine: str) -> RuntimeIncarnation:

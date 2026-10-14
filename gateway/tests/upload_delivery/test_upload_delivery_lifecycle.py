@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import UploadDeliveryConflictError
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.events.live.bus import EventBus
 from gateway.app import app
@@ -24,7 +25,6 @@ from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
 )
 from gateway.upload_delivery import worker
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.mark.parametrize("stage", ["before-link", "after-link"])

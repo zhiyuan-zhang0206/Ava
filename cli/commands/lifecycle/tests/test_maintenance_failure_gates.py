@@ -21,6 +21,7 @@ import pytest
 from base.agents.context.clients import DatabaseFactory
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, pause_owner
@@ -29,7 +30,6 @@ from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 WHEN = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)

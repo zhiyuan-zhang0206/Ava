@@ -9,6 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -25,7 +26,6 @@ from ops.lifecycle.tests.resurrection_setup import (
     settle_hosted_force,
 )
 from ops.tests.pool_support import make_test_pool
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestResurrectAgent:

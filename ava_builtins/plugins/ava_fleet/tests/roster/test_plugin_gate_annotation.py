@@ -7,8 +7,8 @@ from __future__ import annotations
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from services.supervision.roster import spec
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_plugin_gate_flows_through_annotation(

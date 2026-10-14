@@ -6,12 +6,12 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.app import app
 from gateway.mcp_server import endpoint
 from gateway.tests.mcp_calls import create_token, tool_call
 from gateway.tests.mcp_calls import enable_endpoint as enable_endpoint
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_older_server_rejects_guarded_tool_before_creating_anything(

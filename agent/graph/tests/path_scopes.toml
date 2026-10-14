@@ -4,7 +4,7 @@
     ".",
 ]
 "base.paths.tests.homes" = ["."]
-"tests.fixtures.unit.identity" = ["."]
+"base.cluster.machine.tests.identity" = ["."]
 "agent.graph.tests.cancel_fixture" = [
     "test_graph_stream.py",
     "test_llm_helpers.py",

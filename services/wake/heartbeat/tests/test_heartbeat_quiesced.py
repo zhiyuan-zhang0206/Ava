@@ -13,13 +13,13 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from services.wake.heartbeat import completion_digest, daemon
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def _run_briefly(

@@ -12,6 +12,7 @@ from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db import pool as db_pool
@@ -23,7 +24,6 @@ from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
 from tests.components.ops.resurrection_support import status, terminated
 from tests.fixtures.pin_agent import pin_agent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_reassigned_task_refuses_delayed_home_wake(

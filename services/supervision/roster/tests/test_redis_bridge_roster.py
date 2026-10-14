@@ -10,11 +10,11 @@ import pytest
 from base.cluster.dataplane import redis_bridge
 from base.cluster.dataplane.redis_bridge import RedisBridgeEndpoint
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths import ava_home
 from services.supervision import roster
 from services.supervision.roster import build_services
 from services.supervision.roster import spec as ops_spec
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _bridge() -> ops_spec.ServiceSpec:

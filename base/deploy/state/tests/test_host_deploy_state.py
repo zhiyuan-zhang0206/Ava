@@ -14,10 +14,10 @@ import pytest
 
 from base import db
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.state import host_deploy_state as hds
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _db(database_gate: ProcessDbGate) -> Database:

@@ -16,12 +16,12 @@ from psycopg_pool import ConnectionPool
 import services.agent_runner.page_server.daemon as psd
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.page_server.tests.page_shell import PageShellBackend
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 HOST = "127.0.0.1"
 

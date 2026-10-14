@@ -23,6 +23,7 @@ from base.agents.incarnation.resources import ResourceProcess
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -31,7 +32,6 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

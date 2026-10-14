@@ -15,6 +15,7 @@ from uuid import UUID
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
@@ -26,7 +27,6 @@ from ops.rpc_schemas import (
     LaunchAgentRequest,
     TerminateAgentRequest,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _db(*, database_gate: ProcessDbGate) -> Database:

@@ -18,6 +18,7 @@ from base.agents.context import AvaContext
 from base.agents.incarnation import hosted_force
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -30,7 +31,6 @@ from services.agent_runner.agent_host.tests.host_policy import (
     configured_policy,
 )
 from services.agent_runner.agent_host.tests.runtime.observation import HostTurnObservation
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def build_agent_host(

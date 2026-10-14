@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import Liveness
 from services.derived.memory_indexer import chunking, daemon
 from services.derived.memory_indexer.backends.base import content_hash
@@ -30,7 +31,6 @@ from services.derived.memory_search.tests.test_memory_indexer import (
 from services.derived.memory_search.tests.test_memory_indexer import (
     store_backend as store_backend,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

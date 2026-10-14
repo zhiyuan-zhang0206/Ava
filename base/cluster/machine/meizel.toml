@@ -1,4 +1,4 @@
-exports = ["boot.py"]
+exports = ["boot.py", "tests"]
 
 [uses]
 "boot.py" = ["__init__.py"]

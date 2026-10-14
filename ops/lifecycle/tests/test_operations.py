@@ -20,6 +20,7 @@ from pydantic import ValidationError
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import ResurrectResult, TerminateResult
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -36,7 +37,6 @@ from ops.rpc_schemas import (
     SpawnAgentRequest,
     TerminateAgentRequest,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _db(*, database_gate: ProcessDbGate) -> Database:

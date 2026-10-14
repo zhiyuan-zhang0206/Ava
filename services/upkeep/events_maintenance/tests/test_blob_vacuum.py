@@ -26,6 +26,7 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot, settings
 from base.db.tests.fakes import fake_database
 from services.upkeep.events_maintenance import blob_vacuum
@@ -35,7 +36,6 @@ from services.upkeep.events_maintenance.blob_vacuum import (
     vacuum_checkpoint_tables,
 )
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_db
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _SCHEMA = """
 CREATE TABLE checkpoints (

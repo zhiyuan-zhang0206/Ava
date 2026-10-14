@@ -24,10 +24,10 @@ from base.api_contracts.config import (
     ConfigWriteResult,
 )
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config
 from base.host.env import dotenv_file
 from cli.commands.management import config as cfg
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _CHILD = Path(__file__).with_name("child_config_cmd.py")
 

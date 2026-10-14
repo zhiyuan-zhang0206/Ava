@@ -21,6 +21,7 @@ from base.agents.incarnation.resources import (
     decode_resources,
 )
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -31,7 +32,6 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.lifecycle.maintenance import record_drained
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _DRAIN = {
     "maintenance": {"holder": "legacy-host:pid41", "acquired_at": "2026-09-27T01:00:00+00:00"}

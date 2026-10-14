@@ -20,6 +20,7 @@ from psycopg_pool import ConnectionPool
 
 import base.cluster.machines as cluster_machines
 from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
@@ -33,7 +34,6 @@ from services.agent_runner.agent_ops.tests.test_daemon import (
 from services.agent_runner.agent_ops.tests.test_daemon import (
     ops_pool as ops_pool,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _CHILD = Path(__file__).resolve().parents[1] / "child_daemon_exit.py"
 

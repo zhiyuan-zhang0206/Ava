@@ -23,6 +23,7 @@ from agent.tests.claim.test_inbound_ownership import agent_row, insert
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import original_host_force
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -38,7 +39,6 @@ from services.agent_runner.agent_host.health_routes import cancel_turn_route
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from tests.fixtures.pin_agent import exec_context as ctx_of
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _blocking_work(entered: threading.Event, release: threading.Event) -> None:

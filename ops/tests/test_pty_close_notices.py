@@ -20,6 +20,7 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -27,7 +28,6 @@ from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.telemetry import Event
 from ops import pty_close_notices as notices
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _WHEN = datetime(2026, 9, 10, 1, 2, 3, tzinfo=UTC)
 

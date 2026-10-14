@@ -21,6 +21,7 @@ from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.context import AvaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -30,7 +31,6 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_host_trace_reads_final_messages_after_nstep_flush(

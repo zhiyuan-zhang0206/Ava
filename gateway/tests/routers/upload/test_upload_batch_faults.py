@@ -15,11 +15,11 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths.private_dir import ensure_private_dir
 from gateway.routers.upload import batches as upload_batches
 from gateway.routers.upload.batches import UploadItem
 from gateway.schemas.uploads import UploadedBatch
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _CHILD = Path(__file__).with_name("child_batch_writer.py")
 

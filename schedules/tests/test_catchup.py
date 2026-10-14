@@ -18,7 +18,7 @@ import pytest
 
 from base.config import settings
 from base.cluster.machine import MachineIdentity
-from tests.fixtures.unit.identity import machine_identity as machine_identity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version

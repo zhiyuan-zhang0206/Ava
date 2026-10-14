@@ -23,10 +23,10 @@ import pytest
 
 import base.packages.plugins.enable_config as pc
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from services.supervision import roster
 from services.supervision.roster import plugin_services as roster_plugins
 from services.supervision.roster import service_spec, spec
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_fleet_plugin_registers_task_maintenance() -> None:

@@ -7,10 +7,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from gateway.tests.agents.gateway_auth import gateway_credentials, without_credentials
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_a_gateway_client_carries_the_cluster_secret_by_default(
