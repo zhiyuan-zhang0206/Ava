@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -137,7 +138,7 @@ def test_an_unavailable_service_is_a_gateway_error_not_a_crash(
 
 
 def test_the_gateway_declares_exactly_what_the_service_serves(
-    *, model_catalog: ModelCatalog
+    tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
     """Same query parameters and response schema per proxied route, so the OpenAPI contract
     (and the frontend types generated from it) cannot drift from the service."""
@@ -145,6 +146,7 @@ def test_the_gateway_declares_exactly_what_the_service_serves(
         cast(Database, object()),
         cast(ConnectionPool[Any], object()),
         InsightsConfig(run_timeline_message_text_max=1),
+        home=tmp_path,
         catalog=model_catalog,
         default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
         timeline_inputs=TimelineReadInputs(

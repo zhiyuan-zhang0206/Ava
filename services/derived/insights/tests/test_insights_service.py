@@ -49,12 +49,16 @@ _TIMELINE_INPUTS = TimelineReadInputs(
 
 
 def _app(
-    *, model_catalog: ModelCatalog, timeline_inputs: TimelineReadInputs = _TIMELINE_INPUTS
+    *,
+    home: Path,
+    model_catalog: ModelCatalog,
+    timeline_inputs: TimelineReadInputs = _TIMELINE_INPUTS,
 ) -> Any:
     return build_app(
         cast(Database, object()),
         cast(ConnectionPool[Any], object()),
         _CONFIG,
+        home=home,
         catalog=model_catalog,
         default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
         timeline_inputs=timeline_inputs,
@@ -62,9 +66,9 @@ def _app(
 
 
 def test_the_app_serves_the_run_timeline_routes_at_their_public_paths(
-    *, model_catalog: ModelCatalog
+    tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    paths = set(_app(model_catalog=model_catalog).openapi()["paths"])
+    paths = set(_app(home=tmp_path, model_catalog=model_catalog).openapi()["paths"])
     assert {
         "/api/agents/{agent_id}/run-timeline",
         "/api/agents/{agent_id}/run-timeline/messages",
@@ -72,14 +76,19 @@ def test_the_app_serves_the_run_timeline_routes_at_their_public_paths(
     } <= paths
 
 
-def test_healthz_names_the_service_home_and_process(*, model_catalog: ModelCatalog) -> None:
-    body = TestClient(_app(model_catalog=model_catalog)).get("/healthz").json()
+def test_healthz_names_the_service_home_and_process(
+    tmp_path: Path, *, model_catalog: ModelCatalog
+) -> None:
+    body = TestClient(_app(home=tmp_path, model_catalog=model_catalog)).get("/healthz").json()
     assert body["name"] == "insights"
     assert isinstance(body["pid"], int)
+    assert body["home"] == str(tmp_path)
 
 
-def test_a_route_validates_before_it_reads_anything(*, model_catalog: ModelCatalog) -> None:
-    client = TestClient(_app(model_catalog=model_catalog))
+def test_a_route_validates_before_it_reads_anything(
+    tmp_path: Path, *, model_catalog: ModelCatalog
+) -> None:
+    client = TestClient(_app(home=tmp_path, model_catalog=model_catalog))
     # The state holds no database: only a request rejected at the boundary can answer.
     assert client.get("/api/agents/1/run-timeline/messages?start=3&end=1").status_code == 422
     assert client.get("/api/agents/1/run-timeline/messages?start=-1&end=1").status_code == 422
@@ -123,7 +132,7 @@ def test_the_app_answers_over_the_bound_socket(
     sock: socket.socket = bind_socket(path)
     server = uvicorn.Server(
         uvicorn.Config(
-            _app(model_catalog=model_catalog),
+            _app(home=short_dir, model_catalog=model_catalog),
             log_level="warning",
             access_log=False,
             log_config=None,
@@ -194,12 +203,12 @@ def _compact_history(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
 
 def test_apps_keep_their_rendering_policy_and_cache_separate_and_live(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
     loads = _compact_history(monkeypatch)
     hidden, shown = RenderingPolicy(enabled=False), RenderingPolicy(enabled=True)
-    first = _app(model_catalog=model_catalog, timeline_inputs=hidden.inputs)
-    second = _app(model_catalog=model_catalog, timeline_inputs=shown.inputs)
+    first = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=hidden.inputs)
+    second = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=shown.inputs)
     assert first.state.timeline_inputs is hidden.inputs
     assert second.state.timeline_inputs is shown.inputs
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
@@ -224,13 +233,15 @@ def test_apps_keep_their_rendering_policy_and_cache_separate_and_live(
 
 
 def test_a_rendering_error_propagates_and_does_not_cache_a_failed_view(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
     loads = _compact_history(monkeypatch)
     policy = RenderingPolicy(enabled=False)
     failure = ValueError("invalid rendering policy")
     policy.error = failure
-    client = TestClient(_app(model_catalog=model_catalog, timeline_inputs=policy.inputs))
+    client = TestClient(
+        _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=policy.inputs)
+    )
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
     with pytest.raises(ValueError) as caught:
         client.get(path)
@@ -291,6 +302,12 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
     await daemon.run(home=short_dir, config=boot, database=lambda: cast(Database, db))
 
     assert len(apps) == 1
+    assert short_dir != Path(os.environ["AVA_HOME"])
+    assert TestClient(apps[0]).get("/healthz").json() == {
+        "name": "insights",
+        "pid": os.getpid(),
+        "home": str(short_dir),
+    }
     assert apps[0].state.config.run_timeline_message_text_max == 37
     model_reader = apps[0].state.default_model_reader
     boot.set_field("llm_model", "first-process-model")

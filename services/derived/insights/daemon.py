@@ -3,7 +3,7 @@
 The run timeline rebuilds an agent's stitched history from its checkpoints on a cold
 read (seconds of CPU for a long-lived agent). That work lives in this process so it
 never competes with the gateway's event loop, thread pool or GIL. The service binds
-`base.paths.insights_socket()` (mode 0600) and serves no TCP port; the gateway proxies
+`base.paths.insights_socket(home)` (mode 0600) and serves no TCP port; the gateway proxies
 authenticated requests to it. Its `/healthz` answers on the same socket, so it needs no
 port slot; the supervisor probes it through `services.supervision.healthchecks.insights`.
 
@@ -102,6 +102,7 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
                     db,
                     pool,
                     insights_config(config=config),
+                    home=home,
                     catalog=build_model_catalog(),
                     default_model_reader=lambda: config.view.lm.llm_model,
                     timeline_inputs=TimelineReadInputs(
