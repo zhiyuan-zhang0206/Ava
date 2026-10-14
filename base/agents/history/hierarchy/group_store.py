@@ -285,4 +285,8 @@ async def write_group_calls(
                 },
             )
         except Exception:
-            logger.opt(exception=True).warning("understanding call-record event not emitted")
+            logger.opt(exception=True).warning(
+                "event understanding_call_record_failed not emitted for agent {agent} level {level}",
+                agent=agent_id,
+                level=level,
+            )

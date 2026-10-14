@@ -522,12 +522,8 @@ async def test_a_record_write_failure_emits_an_event_and_spares_the_job(
     aops_pool: AsyncConnectionPool,
     _seams: dict,
     monkeypatch: pytest.MonkeyPatch,
+    emitted_events: EmittedEvents,
 ) -> None:
-    # Held back from `emitted_events`: `understanding_call_record_failed` is not in the event
-    # registry, so the real `emit` raises and the production `except` swallows it (the event is never
-    # emitted). The fake `emit` below hid that; this site returns once the event is declared.
-    emitted: list[str] = []
-    monkeypatch.setattr(loop.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
     from base.agents.history.hierarchy import chunks
 
     monkeypatch.setattr(chunks, "INSERT_CALL_SQL", "INSERT INTO no_such_table VALUES (1)")
@@ -539,7 +535,7 @@ async def test_a_record_write_failure_emits_an_event_and_spares_the_job(
     monkeypatch.setattr(loop, "describe", describe)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    assert "understanding_call_record_failed" in emitted
+    assert emitted_events.names() == ["understanding_call_record_failed"]
     assert await _status(aops_pool) == [("done", 1, None)]
     assert await _nodes(aops_pool) == [(5, 1, 0, 1, "what happened")]
 
