@@ -1,4 +1,4 @@
-exports = ["commands", "database", "parsers", "start_identity.py", "tests"]
+exports = ["__main__.py", "commands", "database", "parsers", "start_identity.py", "tests"]
 
 [uses]
 "__main__.py" = ["main.py"]
@@ -22,3 +22,7 @@ exports = ["commands", "database", "parsers", "start_identity.py", "tests"]
 "tests/bootstrap/test_checkout_guard.py -> start_intent.py#_home" = 1
 "tests/bootstrap/test_start_boot_attempts.py -> start_intent.py#_home" = 1
 "tests/bootstrap/test_start_boot_attempts.py -> start_intent.py#_run_boot_attempt" = 3
+
+[debt.undeclared-edge]
+"commands/cluster/home.py -> main.py" = 1
+"commands/management/schedules_verify_check_rows.py -> main.py" = 1

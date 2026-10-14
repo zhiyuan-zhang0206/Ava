@@ -2,8 +2,11 @@ exports = ["env_files.py"]
 
 [uses]
 "test_config_refresh.py" = ["env_files.py"]
-"test_dotenv_boot.py" = ["env_files.py"]
+"test_dotenv_boot.py" = ["_env_import_child.py", "env_files.py"]
 "test_dotenv_boot_launcher_context.py" = ["env_files.py", "test_dotenv_boot.py"]
+"test_file_lock_bounded.py" = ["_file_lock_holder.py"]
+"test_process_timezone.py" = ["_process_timezone_child.py"]
+"test_registry.py" = ["_env_import_child.py"]
 
 [debt.env-patch]
 "env_files.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
@@ -66,6 +69,7 @@ exports = ["env_files.py"]
 "test_agent_slices.py#monkeypatch.setattr base.config.settings.agent.history_dump_keep" = 1
 "test_bootstrap_fetch.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 4
 "test_bootstrap_fetch.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 18
+"test_config_refresh.py#assignment base.config.settings.data_plane" = 1
 "test_config_refresh.py#monkeypatch.setattr base.config.settings.env_boot" = 1
 "test_file_lock_bounded.py#monkeypatch.setattr base.host.env.dotenv_file.env_file_path" = 2
 

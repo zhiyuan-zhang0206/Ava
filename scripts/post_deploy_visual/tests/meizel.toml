@@ -1,4 +1,8 @@
+[uses]
+"test_post_deploy_visual_check.py" = ["child_processes.py"]
+
 [debt.first-party-patch]
+"child_processes.py#assignment scripts.post_deploy_visual.check.HARD_EXIT_DELAY_SECONDS" = 1
 "test_post_deploy_visual_check.py#monkeypatch.setattr scripts.post_deploy_visual.check.assert_gate_origin" = 1
 "test_post_deploy_visual_check.py#monkeypatch.setattr scripts.post_deploy_visual.check.inherited_process_env" = 1
 "test_post_deploy_visual_check.py#monkeypatch.setattr scripts.post_deploy_visual.matrix.LOGIN_REDIRECT_POLL_MS" = 1

@@ -1,6 +1,9 @@
 exports = ["bootstrap"]
 
 [uses]
+"test_main_dispatch.py" = ["bootstrap"]
+"test_main_log_init.py" = ["bootstrap"]
+"test_main_telemetry_exit.py" = ["bootstrap"]
 "test_unit_capability_cli.py" = ["bootstrap"]
 
 [debt.env-patch]

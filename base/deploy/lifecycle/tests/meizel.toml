@@ -8,6 +8,8 @@ exports = ["serving_entrypoint.py", "serving_root.py"]
 "test_status_journal.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
+"serving_entrypoint.py#assignment base.deploy.lifecycle.start_serving.is_serving" = 1
+"serving_entrypoint.py#assignment base.deploy.lifecycle.start_serving.recovery_permitted" = 1
 "serving_root.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.observe_root" = 1
 "test_home_lifecycle_locks.py#monkeypatch.setattr base.deploy.lifecycle.home_lifecycle_locks.base.paths.ava_home" = 1
 "test_service_selection.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.selection_path" = 1
@@ -16,3 +18,6 @@ exports = ["serving_entrypoint.py", "serving_root.py"]
 "test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.recovery_permitted" = 1
 "test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
 "test_status_journal.py#monkeypatch.setattr base.deploy.lifecycle.status_journal.journal_path" = 1
+
+[debt.restricted-python]
+"test_status_journal.py#python -c" = 2

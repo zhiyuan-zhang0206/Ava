@@ -1,6 +1,7 @@
 exports = ["test_maintenance.py"]
 
 [debt.first-party-patch]
+"test_claim_auto_resurrect.py#assignment ava.context" = 1
 "test_corpse_reap.py#monkeypatch.setattr agent.ownership.hosted.stamp_turn_fatal" = 1
 "test_hosted_resurrection_fences.py#monkeypatch.setattr base.agents.incarnation.exec_owner_recovery.process_ended" = 1
 "test_maintenance_legacy_cold.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.exec_run_dir" = 1

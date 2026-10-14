@@ -1,4 +1,4 @@
 exports = ["support.py"]
 
 [uses]
-"test_shell_sessions_identity.py" = ["support.py"]
+"test_shell_sessions_identity.py" = ["child_sessions_probe.py", "support.py"]

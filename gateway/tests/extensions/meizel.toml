@@ -44,5 +44,9 @@ exports = ["test_mcp_endpoint.py"]
 "test_ui_contributions.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
 "test_ui_contributions.py#monkeypatch.setattr gateway.app.build_model_catalog" = 1
 
+[debt.restricted-python]
+"test_schedule_stall_guard.py#python -c" = 3
+
 [debt.stdlib-patch]
 "test_schedule_runner.py#monkeypatch.setattr sys.argv" = 1
+"test_schedule_stall_guard.py#assignment time.sleep" = 1

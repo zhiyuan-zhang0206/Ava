@@ -1,12 +1,15 @@
 [uses]
 "shutdown_daemon.py" = ["test_scheduler_shutdown.py"]
 "shutdown_worker.py" = ["test_scheduler_shutdown.py"]
+"test_daemon_import_boundary.py" = ["child_import_probe.py"]
 "test_operation_worker.py" = ["operation_support.py"]
+"test_scheduler_shutdown.py" = ["shutdown_blocker.py"]
 
 [debt.env-patch]
 "test_backup_scheduler_daemon.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
+"child_import_probe.py#assignment services.backup.dump.run_locked_backup" = 1
 "operation_support.py#monkeypatch.setattr services.backup.scheduler.operation.worker_process.subprocess.Popen" = 1
 "test_backup_scheduler_daemon.py#monkeypatch.setattr base.config.settings.services.backup_hour" = 1
 "test_backup_scheduler_daemon.py#monkeypatch.setattr services.backup.dump.backup_dir" = 1
@@ -46,3 +49,10 @@
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.write_pidfile" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.worker.ava_home" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.worker.run_operation" = 1
+
+[debt.restricted-python]
+"operation_support.py#python subprocess that runs something other than a literal repository file" = 1
+"test_worker_bootstrap.py#python subprocess that runs something other than a literal repository file" = 1
+
+[debt.undeclared-edge]
+"test_scheduler_shutdown.py -> shutdown_daemon.py" = 1

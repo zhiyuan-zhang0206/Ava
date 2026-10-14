@@ -1,3 +1,6 @@
+[uses]
+"test_clients.py" = ["_context_import_child.py"]
+
 [debt.first-party-patch]
 "test_clients_database.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 

@@ -37,5 +37,9 @@
 "test_root_diagnostics.py#monkeypatch.setattr services.supervision.ava_root_glue.diagnostic_probes.settings" = 4
 "test_root_diagnostics.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.ping" = 1
 
+[debt.restricted-python]
+"test_ava_root_glue.py#python -c" = 1
+"test_diagnostic_work_ownership.py#python -c" = 1
+
 [debt.unresolved-patch]
 "test_root_diagnostics.py#monkeypatch.setattr probe._module._station_answers" = 1

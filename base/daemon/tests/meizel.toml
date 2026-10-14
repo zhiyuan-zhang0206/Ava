@@ -3,6 +3,7 @@ exports = ["fakes.py", "health_support.py"]
 [uses]
 "test_health.py" = ["_health_helpers.py", "health_support.py"]
 "test_health_probe.py" = ["_health_helpers.py", "health_support.py"]
+"test_http_transport.py" = ["_transport_import_child.py"]
 
 [debt.env-patch]
 "test_endpoints.py#monkeypatch.setenv os.environ.AVA_HOME" = 1

@@ -1,6 +1,10 @@
 [external]
 "test_help_renderer.py" = "executes generated module source to render help for it"
 
+[uses]
+"test_metering.py" = ["child_gate_without_agent_layer.py"]
+"test_sampling_atexit.py" = ["child_sampling_atexit.py"]
+
 [debt.env-patch]
 "test_install.py#patch.dict os.environ" = 1
 "test_metering.py#patch.dict os.environ" = 5
@@ -10,11 +14,15 @@
 "test_process_clients.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
+"child_sampling_atexit.py#assignment base.agents.sdk.call_policy.read_policy" = 1
+"test_agent_attribution.py#assignment ava.context" = 2
 "test_impersonation_capture_rebinding.py#monkeypatch.setattr ava.__all_for_ava__" = 1
 "test_impersonation_capture_rebinding.py#monkeypatch.setattr ava.receipt_probe" = 1
 "test_impersonation_capture_rebinding.py#monkeypatch.setattr ava.skills.names" = 1
 "test_impersonation_capture_rebinding.py#monkeypatch.setattr base.agents.impersonation.manifest.append_source_event" = 1
 "test_impersonation_capture_rebinding.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_injection_check.py#assignment ava.state" = 1
+"test_injection_check.py#assignment ava.state_update" = 1
 "test_injection_check.py#monkeypatch.setattr ava.sdk_surface.agent_identity.agent_id" = 1
 "test_injection_check.py#monkeypatch.setattr ava.sdk_surface.settings.model_catalog" = 2
 "test_injection_check.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 2
@@ -28,6 +36,7 @@
 "test_install.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
 "test_install.py#monkeypatch.setattr base.packages.plugins.config_registration.bind_plugin_config" = 2
 "test_install.py#monkeypatch.setattr base.packages.plugins.load_report.report_plugin_load_failure" = 1
+"test_log_agent_attribution.py#assignment ava.context" = 3
 "test_log_agent_attribution.py#monkeypatch.setattr base.log.process.init_done" = 2
 "test_log_agent_attribution.py#patch.object base.log.process.add_file_sink" = 2
 "test_log_agent_attribution.py#patch.object base.log.process.install_stdlib_intercept" = 2
@@ -45,6 +54,7 @@
 "test_metering.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
 "test_metering.py#monkeypatch.setattr base.agents.sdk.telemetry.time.monotonic" = 1
 "test_metering.py#monkeypatch.setattr base.telemetry.emit" = 2
+"test_wraps.py#delattr ava.probe" = 1
 "test_wraps.py#monkeypatch.setattr base.packages.plugins.activation.emit" = 1
 "test_wraps.py#monkeypatch.setattr base.packages.plugins.activation.record" = 1
 

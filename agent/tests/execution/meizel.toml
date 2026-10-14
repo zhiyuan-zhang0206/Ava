@@ -1,8 +1,12 @@
 [uses]
 "test_context_binding.py" = ["test_exec_child.py"]
 "test_exec_child_signals.py" = ["test_exec_child.py"]
+"test_exec_owner_entry.py" = ["_owner_host_child.py", "_owner_import_child.py"]
 "test_exec_slot.py" = ["test_exec_child.py"]
+"test_lazy_child_imports.py" = ["child_lazy_imports.py"]
+"test_lazy_child_telemetry.py" = ["child_lazy_telemetry.py"]
 "test_resource_admission.py" = ["test_exec_owner_entry.py"]
+"test_telemetry_otlp_exit_delivery_agent.py" = ["child_external_cli.py"]
 
 [debt.env-patch]
 "test_context_binding.py#patch.dict os.environ" = 3
@@ -17,6 +21,9 @@
 "test_resource_admission.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
+"child_external_cli.py#assignment agent.extensions.plugin_state_codec.load_snapshot" = 1
+"child_external_cli.py#assignment ava.impersonation.attachment.control.require_active" = 1
+"child_external_cli.py#assignment ava.impersonation.attachment.process_metadata" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.init_logger" = 1
@@ -37,6 +44,8 @@
 "test_exec_child_signals.py#monkeypatch.setattr agent.graph.exec.protocol.write_result" = 1
 "test_exec_child_signals.py#monkeypatch.setattr ava.__plugin_installation__" = 1
 "test_exec_child_signals.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
+"test_exec_slot.py#assignment ava.state" = 4
+"test_exec_slot.py#assignment ava.state_update" = 1
 "test_resource_admission.py#monkeypatch.setattr base.agents.incarnation.exec_owner_recovery.exec_run_dir" = 1
 
 [debt.private-name]

@@ -1,5 +1,8 @@
 exports = ["pool_support.py"]
 
+[uses]
+"test_env_audit.py" = ["_env_audit_projection_child.py"]
+
 [debt.first-party-patch]
 "test_agent_skill_view.py#monkeypatch.setattr ava.mcps.config.load_mcp_config" = 3
 "test_agent_skill_view.py#monkeypatch.setattr ava.skills.composer_commands.external_plugin_read_root" = 1

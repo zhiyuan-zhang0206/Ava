@@ -18,6 +18,8 @@ exports = ["claim"]
 
 [debt.first-party-patch]
 "test_compact_part2.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
+"test_external.py#assignment ava.state" = 1
+"test_external.py#assignment ava.state_update" = 1
 "test_external.py#monkeypatch.setattr ava.boot.ensure_plugins_loaded" = 1
 "test_external.py#monkeypatch.setattr ava.gateway_client.send_message" = 2
 "test_external.py#monkeypatch.setattr ava.impersonation.attachment.control.require_active" = 3
@@ -31,6 +33,11 @@ exports = ["claim"]
 "test_external_integration_agent.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1
 "test_hosted_ownership_agent.py#monkeypatch.setattr agent.ownership.hosted.publish_agent_updated" = 1
 "test_hosted_ownership_agent.py#monkeypatch.setattr agent.ownership.hosted_cleanup.publish_agent_updated" = 1
+"test_state_slot.py#assignment ava.state" = 8
+"test_state_slot.py#assignment ava.state.delta_test__counter" = 1
+"test_state_slot.py#assignment ava.state.delta_test__seen" = 1
+"test_state_slot.py#assignment ava.state.messages" = 3
+"test_state_slot.py#assignment ava.state_update" = 5
 
 [debt.private-name]
 "compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_config" = 1

@@ -1,3 +1,6 @@
+[uses]
+"test_pool_keepalives.py" = ["child_import_base_db_first.py"]
+
 [debt.env-patch]
 "test_helperproc.py#monkeypatch.delenv os.environ.AVA_PERMISSIONS_HELPER_PID" = 1
 "test_helperproc.py#monkeypatch.setenv os.environ.AVA_PERMISSIONS_HELPER_PID" = 9
@@ -14,6 +17,10 @@
 "test_helperproc.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.parent_chain_intact" = 1
 "test_os_job_leak_guard.py#monkeypatch.setattr tests._os_jobs.crontab_jobs" = 1
 "test_os_job_leak_guard.py#monkeypatch.setattr tests._os_jobs.subprocess.run" = 1
+
+[debt.restricted-python]
+"test_e2e_residue_sweep.py#python -c" = 7
+"test_helperproc.py#python -c" = 2
 
 [debt.stdlib-patch]
 "test_ci_rerun_workflow.py#monkeypatch.setattr subprocess.run" = 1

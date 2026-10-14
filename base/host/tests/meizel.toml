@@ -3,6 +3,7 @@ exports = ["fake_commands.py"]
 [uses]
 "test_fake_commands.py" = ["fake_commands.py"]
 "test_hostport.py" = ["fake_commands.py"]
+"test_proc.py" = ["_hosting_child.py"]
 
 [debt.first-party-patch]
 "test_config_validators.py#monkeypatch.setattr base.host.config_validators.browser_capable" = 1
@@ -22,6 +23,11 @@ exports = ["fake_commands.py"]
 "test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.battery_sample" = 1
 "test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.subprocess.run" = 1
 "test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.sys.platform" = 1
+
+[debt.restricted-python]
+"test_hostport.py#python -c" = 2
+"test_proc.py#python -c" = 9
+"test_proc.py#python subprocess that runs something other than a literal repository file" = 1
 
 [debt.third-party-patch]
 "test_proc.py#monkeypatch.setattr psutil.Process" = 2

@@ -60,6 +60,9 @@
 "test_protocol_probe.py#monkeypatch.setattr base.paths.mcp_daemon_shared_socket" = 1
 "test_redis_acl_healthcheck.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.redis.Redis.from_url" = 2
 
+[debt.restricted-python]
+"test_protocol_probe.py#python -c" = 1
+
 [debt.stdlib-patch]
 "test_healthcheck_gateway.py#monkeypatch.setattr urllib.request.urlopen" = 3
 "test_healthcheck_otel_collector.py#monkeypatch.setattr urllib.request.urlopen" = 6

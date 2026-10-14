@@ -1,7 +1,13 @@
 [external]
 "test_sdk_telemetry.py" = "wraps builtins.__import__ so one import raises"
 
+[uses]
+"test_call_policy.py" = ["_sdk_cold_child.py"]
+"test_sdk_telemetry.py" = ["_sdk_cold_child.py"]
+
 [debt.first-party-patch]
+"_sdk_cold_child.py#assignment base.agents.sdk.call_policy.policy" = 1
+"_sdk_cold_child.py#assignment base.agents.sdk.telemetry.emit" = 1
 "test_call_policy.py#monkeypatch.setattr base.agents.sdk.call_policy.read_policy" = 9
 "test_call_policy.py#monkeypatch.setattr base.agents.sdk.call_policy.time.monotonic" = 1
 "test_call_policy.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 2

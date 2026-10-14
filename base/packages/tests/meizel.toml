@@ -5,6 +5,7 @@ exports = ["model_catalog.py", "plugin_config"]
 "conftest.py" = ["model_catalog.py"]
 "lm" = ["model_catalog.py"]
 "providers" = ["lm", "model_catalog.py"]
+"test_overlay_fresh_process.py" = ["_overlay_child.py"]
 
 [debt.env-patch]
 "test_update_disk_images.py#monkeypatch.setenv os.environ.AVA_HOME" = 1

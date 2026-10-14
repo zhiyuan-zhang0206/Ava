@@ -37,6 +37,9 @@
 [debt.private-name]
 "operations/test_resurrect_if_terminated_placement.py -> test_operations.py#_db" = 1
 
+[debt.restricted-python]
+"test_termination_message.py#python subprocess that runs something other than a literal repository file" = 1
+
 [debt.third-party-patch]
 "test_agents_internals_lifecycle.py#monkeypatch.setattr psycopg.Cursor.execute" = 1
 "test_agents_internals_lifecycle.py#monkeypatch.setattr psycopg.Cursor.fetchone" = 1

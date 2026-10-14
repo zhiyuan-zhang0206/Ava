@@ -1,9 +1,17 @@
+exports = ["child_graceful_stop.py"]
+
 [uses]
-"daemon" = ["test_daemon.py"]
+"daemon" = ["child_daemon_exit.py", "test_daemon.py"]
+"test_daemon_part2.py" = ["child_daemon_exit.py"]
 "test_dispatch_lifecycle.py" = ["test_daemon.py"]
 "test_native_restart.py" = ["test_request_identity.py"]
 
 [debt.first-party-patch]
+"child_daemon_exit.py#assignment services.agent_runner.agent_ops.daemon.init_gateway_process" = 1
+"child_daemon_exit.py#assignment services.agent_runner.agent_ops.daemon.install_graceful_shutdown" = 1
+"child_daemon_exit.py#assignment services.agent_runner.agent_ops.daemon.serve_ops_daemon" = 1
+"child_graceful_stop.py#assignment services.agent_runner.agent_ops.daemon.init_gateway_process" = 1
+"child_graceful_stop.py#assignment services.agent_runner.agent_ops.daemon.serve_ops_daemon" = 1
 "test_daemon.py#monkeypatch.setattr ops.cluster.operations.agent_skill_view_op" = 2
 "test_daemon.py#monkeypatch.setattr ops.cluster.operations.shell_capture_op" = 3
 "test_daemon.py#monkeypatch.setattr ops.cluster.operations.shell_kill_op" = 2

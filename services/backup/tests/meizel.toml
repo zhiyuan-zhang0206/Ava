@@ -1,7 +1,11 @@
 [uses]
 "backup" = ["test_backup.py"]
+"test_backup.py" = ["child_backup_lock_holder.py"]
+"test_publish_offsite_cli.py" = ["child_offsite_entry.py"]
 
 [debt.first-party-patch]
+"child_offsite_entry.py#assignment services.backup.artifact.offsite.configured_target" = 1
+"child_offsite_entry.py#assignment services.backup.artifact.offsite.open_bucket" = 2
 "test_backup.py#monkeypatch.setattr base.config.settings.general.timezone" = 4
 "test_backup.py#monkeypatch.setattr base.config.settings.services.backup_hour" = 1
 "test_backup.py#monkeypatch.setattr base.config.settings.services.backup_keep" = 1
@@ -28,3 +32,6 @@
 "test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.backup.backup_dir" = 1
 "test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.run_drill" = 1
 "test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.shutil.disk_usage" = 1
+
+[debt.restricted-python]
+"test_backup_snapshot.py#python -c" = 1

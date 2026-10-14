@@ -1,3 +1,7 @@
+[uses]
+"test_ava_memory_pool_ops_home.py" = ["child_pool_ops.py"]
+"test_process_boot.py" = ["child_eval_isolation.py"]
+
 [debt.env-patch]
 "test_ava_memory_notes.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
 "test_ava_memory_notes.py#patch.dict os.environ" = 1
@@ -6,6 +10,10 @@
 "test_template_validate.py#monkeypatch.setenv os.environ.AVA_MEMORY_NOTE_CAP" = 1
 
 [debt.first-party-patch]
+"child_eval_isolation.py#assignment ava.context" = 2
+"child_eval_isolation.py#assignment ava.tasks" = 1
+"child_eval_isolation.py#assignment base.config.settings.agent.eval_isolation" = 3
+"child_eval_isolation.py#assignment base.config.settings.agent.eval_network_allowlist" = 2
 "test_ava_memory_inherit.py#monkeypatch.setattr ava.gateway_client.get_born_chain" = 1
 "test_ava_memory_inherit.py#monkeypatch.setattr base.config.settings.agent.eval_isolation" = 2
 "test_ava_memory_inherit.py#monkeypatch.setattr base.config.settings.agent.memory_inherit_depth" = 7
@@ -38,11 +46,17 @@
 "test_memory_write_check_hook.py#monkeypatch.setattr ava_builtins.plugins.ava_memory.agent_runtime.logger.info" = 1
 "test_memory_write_check_hook.py#monkeypatch.setattr base.config.settings.agent.memory_write_check_deadline_seconds" = 1
 "test_memory_write_check_hook.py#monkeypatch.setattr base.config.settings.agent.memory_write_dedup_threshold" = 1
+"test_memory_write_wraps.py#assignment ava.state" = 1
+"test_memory_write_wraps.py#assignment ava.state_update" = 2
 "test_memory_write_wraps.py#monkeypatch.setattr ava.gateway_client.memory_search" = 1
 "test_memory_write_wraps.py#monkeypatch.setattr ava.gateway_client.post" = 1
 "test_memory_write_wraps.py#monkeypatch.setattr ava_builtins.plugins.ava_memory.written_notes.logger" = 1
 "test_memory_write_wraps.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_validation_ava_memory.py#monkeypatch.setattr ava.gateway_client.memory_search" = 2
+
+[debt.restricted-python]
+"test_ava_memory_steward_guard.py#python subprocess that runs something other than a literal repository file" = 1
+"test_memory_write_wraps.py#python -c" = 1
 
 [debt.unresolved-patch]
 "test_ava_memory_recall_hook.py#monkeypatch.setattr _loaded.auto_compact_will_fire" = 3

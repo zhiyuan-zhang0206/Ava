@@ -3,10 +3,14 @@ exports = ["leak_guard_suite.py"]
 [external]
 "test_watch_pr.py" = "executes the watcher template the workflow embeds"
 
+[uses]
+"test_read_only_cli_imports.py" = ["child_read_only_cli.py"]
+
 [debt.env-patch]
 "test_coverage_gates.py#monkeypatch.setenv os.environ.BACKEND_COVERAGE_THRESHOLD" = 1
 
 [debt.first-party-patch]
+"child_read_only_cli.py#assignment scripts.ci.pull_requests.status.check_ci" = 1
 "test_coverage_gates.py#monkeypatch.setattr scripts.ci.coverage_gates.FLOORS" = 7
 "test_dependency_audit.py#monkeypatch.setattr scripts.ci.dependency_audit.latest_binaries" = 1
 "test_dependency_audit.py#monkeypatch.setattr scripts.ci.dependency_audit.subprocess.run" = 3

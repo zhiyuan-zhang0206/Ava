@@ -1,0 +1,2 @@
+[debt.stdlib-patch]
+"wiring_reaped_first.py#assignment asyncio.create_subprocess_exec" = 1

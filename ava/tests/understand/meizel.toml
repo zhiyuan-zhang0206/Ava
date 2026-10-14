@@ -7,3 +7,7 @@
 [debt.env-patch]
 "test_understand.py#patch.dict os.environ" = 1
 "test_understand_autosave.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+
+[debt.first-party-patch]
+"test_understand_injection.py#assignment ava.state" = 1
+"test_understand_injection.py#assignment ava.state_update" = 1
