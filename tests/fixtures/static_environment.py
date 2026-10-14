@@ -22,7 +22,7 @@ STATIC_TEST_PATHS = (
     "scripts/structure/tests",
     "scripts/ci/tests",
     "scripts/ci/pull_requests/tests",
-    "scripts/ci/two_section_chain_smoke/tests",
+    "scripts/ci/helper_smoke/tests",
     "tests/ci",
     "base/paths/tests",
     "base/sessions/pty/tests/test_pty_sessions_screen.py",

@@ -61,7 +61,7 @@ _ATTRIBUTION_RE = re.compile(
 
 def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, wait, and teardown live together on purpose
     parser = argparse.ArgumentParser(
-        prog="two_section_chain_smoke", description=(__doc__ or "").splitlines()[0]
+        prog="helper_smoke", description=(__doc__ or "").splitlines()[0]
     )
     parser.add_argument(
         "--workdir",

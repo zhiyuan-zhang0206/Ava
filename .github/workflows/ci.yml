@@ -1471,126 +1471,11 @@ jobs:
       - name: Real build + ad-hoc sign + DR readback + launchd ping
         run: |
           # Hosted macOS runners cannot codesign with an imported identity (platform
-          # limitation, runner-images#13884 family; all lookup paths return
-          # errSecItemNotFound). Real signing verification is carried by the production
-          # preflight hard gate on real hosts. This lane signs ad-hoc so the
-          # build/identity/partition/launchd/ping chain stays real.
-          uv run python - <<'PY'
-          import subprocess
-
-          from base.paths import permissions_helper_app_dir
-          from base.sessions.helperproc import helper_client
-          from services.desktop.permissions_helper import lifecycle
-
-          # Import the signing identity into the isolated keychain.
-          lifecycle.ensure_signing_cert()
-
-          # Grant codesign access to the imported private key.
-          subprocess.run(
-              [
-                  "security",
-                  "set-key-partition-list",
-                  "-S",
-                  "apple-tool:,apple:,codesign:",
-                  "-s",
-                  "-k",
-                  "ci-ava-signing",
-                  str(lifecycle.keychain_path()),
-              ],
-              check=True,
-          )
-
-          # Report identities currently valid for codesigning.
-          subprocess.run(["security", "find-identity", "-v", "-p", "codesigning"], check=True)
-          # Report all codesigning identities, including invalid ones.
-          subprocess.run(["security", "find-identity", "-p", "codesigning"], check=True)
-          # Show whether the imported key and certificate are registered.
-          subprocess.run(["security", "dump-keychain", str(lifecycle.keychain_path())], check=True)
-          # Show the keychain search list used by subsequent signing commands.
-          subprocess.run(["security", "list-keychains"], check=True)
-
-          # Report the keychain lock state without failing the lane.
-          subprocess.run(
-              ["security", "show-keychain-info", str(lifecycle.keychain_path())],
-              check=False,
-          )
-          # Unlock again immediately before signing in case the import relocked it.
-          subprocess.run(
-              [
-                  "security",
-                  "unlock-keychain",
-                  "-p",
-                  "ci-ava-signing",
-                  str(lifecycle.keychain_path()),
-              ],
-              check=True,
-          )
-
-          # Compile and assemble the real helper app bundle.
-          build_dir = permissions_helper_app_dir()
-          app = build_dir / "AvaPermissionsHelper.app"
-          build_dir.mkdir(parents=True, exist_ok=True)
-          binary = build_dir / "AvaPermissionsHelper"
-          lifecycle.run_tool(["swiftc", "-O", str(lifecycle.SOURCE), "-o", str(binary)])
-          lifecycle.remove_app(app)
-          exe = lifecycle.app_executable(app)
-          exe.parent.mkdir(parents=True, exist_ok=True)
-          (app / "Contents" / "Info.plist").write_bytes(lifecycle.INFO_PLIST.read_bytes())
-          exe.write_bytes(binary.read_bytes())
-          exe.chmod(0o755)
-
-          # Sign ad-hoc without asking the hosted runner to resolve the imported identity.
-          lifecycle.run_tool(
-              [
-                  "codesign",
-                  "--force",
-                  "--sign",
-                  "-",
-                  "--identifier",
-                  lifecycle.HELPER_BUNDLE_ID,
-                  # Production signs the artifact with the AppleEvents entitlement;
-                  # keep this lane on the same signing policy so codesign
-                  # validates the entitlements plist on every PR.
-                  "--entitlements",
-                  str(lifecycle.ENTITLEMENTS),
-                  str(app),
-              ]
-          )
-
-          # Keep designated-requirement readback on the real macOS codesign path. The
-          # ad-hoc signature's DR has no "designated =>" line, so assert on the raw
-          # readback (lifecycle.read_dr parses the stable-identity DR shape and is
-          # covered by unit tests + the production preflight gate).
-          dr_result = subprocess.run(
-              ["codesign", "-d", "-r-", str(app)],
-              capture_output=True,
-              check=False,
-              text=True,
-          )
-          dr_text = (dr_result.stdout or "") + (dr_result.stderr or "")
-          print(f"DR readback: {dr_text[:500]}")
-          assert dr_result.returncode == 0, f"codesign -d -r- failed: {dr_text[:500]}"
-          assert "cdhash" in dr_text, f"no cdhash in designated requirement output: {dr_text[:500]}"
-
-          # The entitlement must land in the signature, not only on the command
-          # line; read it back through the real codesign surface.
-          ent_result = subprocess.run(
-              ["codesign", "-d", "--entitlements", ":-", str(app)],
-              capture_output=True,
-              check=False,
-              text=True,
-          )
-          ent_text = (ent_result.stdout or "") + (ent_result.stderr or "")
-          assert ent_result.returncode == 0, f"entitlements readback failed: {ent_text[:500]}"
-          assert "com.apple.security.automation.apple-events" in ent_text, (
-              f"AppleEvents entitlement missing from the signature: {ent_text[:500]}"
-          )
-
-          # Bootstrap failure intentionally fails this lane: the hosted runner's
-          # user launchd chain is part of the production contract being tested.
-          lifecycle.install_and_load(app, rebuilt=True, helper=helper_client)
-          assert helper_client().ping()["pong"] is True
-          PY
+          # limitation, runner-images#13884 family); the module signs ad-hoc so the
+          # build/identity/partition/launchd/ping chain stays real. The password is
+          # the one the keychain step above created the throwaway keychain with.
+          uv run python -m scripts.ci.helper_smoke.signing_smoke run \
+            --keychain-password ci-ava-signing
 
       - name: Two-section chain smoke (keeper semantics)
         run: |
@@ -1602,13 +1487,13 @@ jobs:
           # The F11 tccd-attribution phase is
           # skipped here because hosted runners restrict `log show`; run the
           # script without --skip-attribution on a dev host for that phase.
-          uv run python -m scripts.ci.two_section_chain_smoke --skip-attribution
+          uv run python -m scripts.ci.helper_smoke --skip-attribution
 
       - name: Tear down helper launchd job
         if: ${{ always() }}
         run: |
           export AVA_HOME="${AVA_HOME:-$RUNNER_TEMP/ava-home}"
-          label="$(uv run python -c 'from services.desktop.permissions_helper.lifecycle import label; print(label())' 2>/dev/null || true)"
+          label="$(uv run python -m scripts.ci.helper_smoke.signing_smoke label 2>/dev/null || true)"
           if [[ -n "$label" ]]; then
             launchctl bootout "gui/$(id -u)/$label" || true
           fi

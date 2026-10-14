@@ -1,4 +1,14 @@
-"""Two-section chain smoke: launchd -> permissions-helper -> ava-root -> unit.
+"""The macOS permissions-helper smokes: the scripts of the `helper-signing-smoke` CI job.
+
+Two entry points, both run by that job on a hosted macOS runner and by hand on a dev host:
+
+  `python -m scripts.ci.helper_smoke.signing_smoke run|label`
+      builds the real helper from this checkout, signs it ad-hoc, reads the designated requirement
+      and the AppleEvents entitlement back through `codesign`, then bootstraps and pings it.
+  `python -m scripts.ci.helper_smoke`
+      the two-section chain smoke, described below.
+
+Two-section chain smoke: launchd -> permissions-helper -> ava-root -> unit.
 
 The dev-side acceptance run for the macOS "two-section" adapter (task #3209, design #3195).
 A helper compiled from this checkout is registered as a throwaway launchd job under an
@@ -29,7 +39,7 @@ under the workdir; pass --cleanup to remove it. Run with the repository venv,
 on macOS, from a checkout that contains services/supervision/ava_root (dev/CI only).
 """
 
-# The package facade: callers keep using `two_section_chain_smoke.<name>` (the
+# The package facade: callers keep using `helper_smoke.<name>` (the
 # module's own surface before the split) — re-exported unchanged.
 from .cli import main as main  # noqa: I001 - one re-export block, kept as written
 from .f12 import (
