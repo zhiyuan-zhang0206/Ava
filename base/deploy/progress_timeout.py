@@ -96,6 +96,12 @@ CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-hos
 # current availability once the core is ready.
 NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 
+# Startup grace the root health monitor falls back to for a unit that was given no tier above.
+# Production assigns every requested unit one of the two tiers, so this is the value of an assembly
+# that supplies none. No timer reads it against another: it only delays the first restart of a unit
+# whose generation has not yet answered a probe.
+DEFAULT_STARTUP_GRACE_S = 20.0
+
 # How long a unit capability bundle (`ava cluster db-authority issue-unit`,
 # `base.host.db_authority.unit.issue_bundle`) stays installable by default
 # (`--ttl-hours`): a day covers the trip to one unit. The most it may ask for is

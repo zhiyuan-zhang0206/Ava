@@ -19,6 +19,7 @@ from threading import Event, Thread
 from typing import Protocol
 
 from base.daemon.health import DaemonProbe
+from base.deploy.progress_timeout import DEFAULT_STARTUP_GRACE_S
 from base.native_process.ownership import OwnedProcess
 from services.supervision.ava_root.failure_state import UnitFailureFacts, derive_kind, describe
 from services.supervision.ava_root.manifest import UnknownUnitError
@@ -70,7 +71,7 @@ class HealthConfig:
     probe_timeout_s: float = 20.0
     """Maximum wait for one observation; an overdue worker is never duplicated."""
 
-    startup_grace_s: float = 20.0
+    startup_grace_s: float = DEFAULT_STARTUP_GRACE_S
     """Generic generation startup budget; deployment supplies per-unit readiness tiers."""
 
     max_restart_attempts: int = 3

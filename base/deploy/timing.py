@@ -90,6 +90,11 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
         "the root health monitor startup grace for optional services",
     ),
+    "DEFAULT_STARTUP_GRACE_S": Clock(
+        "deploy",
+        lambda: deploy.DEFAULT_STARTUP_GRACE_S,
+        "the root health monitor startup grace for a unit that has no readiness tier",
+    ),
     # --- unit-bundle family (default in base/deploy/progress_timeout.py, cap in
     # base/host/db_authority/unit.py) ---
     "UNIT_BUNDLE_TTL_S": Clock(
