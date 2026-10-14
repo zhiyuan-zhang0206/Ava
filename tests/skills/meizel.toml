@@ -1,5 +1,4 @@
 [loads]
-"test_impersonation_launch.py" = ["ava_builtins/skills"]
 "test_inspect_a_trace_fetch.py" = [".agents/skills/inspect-a-trace/scripts"]
 "test_watcher_wake_delivery.py" = ["ava_builtins/skills"]
 
@@ -13,15 +12,12 @@
 "test_inspect_a_trace_fetch.py#monkeypatch.setitem os.environ.AVA_CLUSTER_SECRET" = 3
 
 [debt.first-party-patch]
-"test_impersonation_launch.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_agent_id" = 1
 "test_watcher_wake_delivery.py#monkeypatch.setattr ava.self" = 1
 
 [debt.stdlib-patch]
-"test_impersonation_launch.py#monkeypatch.setattr sys.argv" = 2
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr urllib.request.build_opener" = 1
 
 [debt.unresolved-patch]
-"test_impersonation_launch.py#monkeypatch.setattr instruction_reader.impersonation.attach" = 1
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.fetch_from_mirror" = 1
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.fetch_from_tempo" = 1
 "test_inspect_a_trace_fetch.py#monkeypatch.setattr ft.resolve_ava_home" = 1

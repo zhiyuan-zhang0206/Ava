@@ -267,10 +267,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "integration",
         "real signal stop of a scheduler blocked in an ops job: spans base, ops, services.backup.scheduler, no one of which may import all the others",
     ),
-    "tests/skills/test_impersonation_launch.py": (
-        "contract",
-        "tests the launch scripts of the ava_builtins/skills/platform/ava-guide/external-agents skill",
-    ),
     "tests/skills/test_inspect_a_trace_fetch.py": (
         "contract",
         "tests the scripts of the .agents/skills/inspect-a-trace skill",
