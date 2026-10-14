@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from base.sessions.pty import client, protocol
+from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.paths import service_socket_path
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
@@ -130,12 +131,12 @@ def test_queries_read_a_missing_service_as_no_sessions(unit_home: Path) -> None:
 
 
 def test_a_mutating_request_without_a_service_raises(
-    pty_service: PtyServiceProcess, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    pty_service: PtyServiceProcess,
+    unit_home: Path,
 ) -> None:
     pty_service.stop()
-    monkeypatch.setattr(client, "CONNECT_WAIT_S", 0.2)
     with pytest.raises(client.ServiceUnavailableError):
-        support.new("ava-test-nobody-home", unit_home)
+        support.new("ava-test-nobody-home", unit_home, config=PtyClientConfig(connect_wait_s=0.2))
 
 
 def test_a_mutating_request_waits_for_a_service_that_is_still_starting(

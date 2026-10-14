@@ -22,6 +22,7 @@ from ava.shell import sessions
 from ava.shell.coding_tools import _common, codex
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
+from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from tests.fixtures.pin_agent import pin_agent
@@ -156,7 +157,7 @@ def test_codex_supervisor_uses_projected_session_environment(
 
     owner = _owner(unit_home)
     workspace = Path(owner.key.workspace)
-    backend = PtySessionBackend()
+    backend = PtySessionBackend(config=PtyClientConfig())
     report = unit_home / "codex-child-env.json"
     # The service environment is the shell's base: restart the service with a
     # foreign virtualenv in it.

@@ -185,6 +185,9 @@ class PtySessionBackend(SessionBackend):
     mapped from the service's answers.
     """
 
+    def __init__(self, config: client.PtyClientConfig) -> None:
+        self._config = config
+
     def has_session(self, name: str) -> bool:
         return client.has_session(name)
 
@@ -206,7 +209,7 @@ class PtySessionBackend(SessionBackend):
 
             env = forward_env_dict(activate_venv=cwd_is_inside_checkout(cwd, repo_root()))
         try:
-            client.create_session(name, str(cwd), env, cmd or None)
+            client.create_session(name, str(cwd), env, cmd or None, config=self._config)
         except (client.ServiceError, client.ServiceUnavailableError) as exc:
             _log.warning("pty session allocation failed for %s: %s", name, exc)
             return False
@@ -336,7 +339,7 @@ def get_shell_backend() -> SessionBackend:
     ``ava.shell.sessions`` and watcher sessions use this PTY backend — never the
     service backend.
     """
-    return PtySessionBackend()
+    return PtySessionBackend(client.PtyClientConfig())
 
 
 def native_proc() -> NativeProcessSupervisor:

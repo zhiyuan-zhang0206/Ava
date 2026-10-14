@@ -28,7 +28,6 @@ exports = ["poll_until.py", "refuse_helper.py", "scripted_helper.py"]
 "test_posixproc_liveness.py#monkeypatch.setattr base.sessions.posixproc.os.getpgid" = 2
 "test_posixproc_liveness.py#monkeypatch.setattr base.sessions.posixproc.os.killpg" = 2
 "test_posixproc_liveness.py#monkeypatch.setattr base.sessions.posixproc.psutil.process_iter" = 2
-"test_pty_backend.py#monkeypatch.setattr base.sessions.pty.client.CONNECT_WAIT_S" = 1
 
 [debt.restricted-python]
 "test_posixproc.py#python -c" = 10

@@ -29,8 +29,14 @@ from base.sessions.record import SessionRecord
 # waits up to its own bound before escalating); connecting stays instant.
 REQUEST_TIMEOUT_S = 30.0
 
-# How long a mutating request waits for a service that is not accepting yet.
-CONNECT_WAIT_S = 5.0
+
+@dataclass(frozen=True)
+class PtyClientConfig:
+    """How patiently the client dials; the default is the production value."""
+
+    connect_wait_s: float = 5.0
+    """How long a mutating request waits for a service that is not accepting yet."""
+
 
 _CONNECT_RETRY_S = 0.1
 
@@ -181,7 +187,9 @@ def live_sessions(prefix: str = "") -> dict[str, SessionRecord]:
     return {info.name: info.record() for info in list_sessions(prefix)}
 
 
-def create_session(name: str, cwd: str, env: dict[str, str], cmd: str | None = None) -> bool:
+def create_session(
+    name: str, cwd: str, env: dict[str, str], cmd: str | None = None, *, config: PtyClientConfig
+) -> bool:
     """Create the session; True when this call created it, False when it already lived.
 
     Raises:
@@ -191,7 +199,7 @@ def create_session(name: str, cwd: str, env: dict[str, str], cmd: str | None = N
     fields: dict[str, Any] = {"name": name, "cwd": cwd, "env": env}
     if cmd:
         fields["cmd"] = cmd
-    return bool(request("new", wait=CONNECT_WAIT_S, **fields)["created"])
+    return bool(request("new", wait=config.connect_wait_s, **fields)["created"])
 
 
 def send(name: str, data: bytes) -> None:

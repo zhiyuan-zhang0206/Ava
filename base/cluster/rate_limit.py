@@ -41,11 +41,25 @@ import math
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
-MAX_ENTRIES = 10_000
-"""Soft cap on tracked IPs: when exceeded, expired entries are swept on the
-next failure record. Bounds memory for a subnet scan without a background
-timer. Protective constant (task #3696 exception inventory)."""
+
+@dataclass(frozen=True)
+class LoginRateLimitConfig:
+    """The limiter's memory bound; the default is the production value.
+
+    The threshold and the window are cluster config (``gateway.login_max_failures`` /
+    ``gateway.login_lockout_seconds``), read live through the limiter's readers; this is the
+    protective constant (task #3696 exception inventory).
+    """
+
+    max_entries: int = 10_000
+    """Soft cap on tracked IPs: when exceeded, expired entries are swept on the next failure
+    record. Bounds memory for a subnet scan without a background timer."""
+
+    def __post_init__(self) -> None:
+        if self.max_entries < 1:
+            raise ValueError("max_entries must be at least 1: a cap of 0 or less drops every entry")
 
 
 class Entry:
@@ -75,8 +89,10 @@ class LoginRateLimiter:
         *,
         max_failures_reader: Callable[[], int],
         lockout_seconds_reader: Callable[[], float],
+        config: LoginRateLimitConfig,
     ) -> None:
         self._max_failures_reader = max_failures_reader
+        self._config = config
         self._lockout_seconds_reader = lockout_seconds_reader
         self._entries: dict[str, Entry] = {}
         self._lock = threading.Lock()
@@ -110,7 +126,7 @@ class LoginRateLimiter:
             entry.last_failure_at = now
             if entry.failures >= max_failures:
                 entry.locked_until = now + lockout_seconds
-            if len(self._entries) > MAX_ENTRIES:
+            if len(self._entries) > self._config.max_entries:
                 self._sweep(now, lockout_seconds)
 
     def record_success(self, ip: str) -> None:
@@ -143,7 +159,7 @@ class LoginRateLimiter:
         ]
         for ip in stale:
             del self._entries[ip]
-        over = len(self._entries) - MAX_ENTRIES
+        over = len(self._entries) - self._config.max_entries
         if over > 0:
             # oldest failure first — the entries least likely to be an active
             # attacker right now

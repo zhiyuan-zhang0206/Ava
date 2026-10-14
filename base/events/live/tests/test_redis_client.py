@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import threading
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -16,11 +17,12 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from base.config import settings
 from base.events.live import redis_client as mod
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.events.live.redis_client import TransportAwareAsyncConnection
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 
 _bus = EventBus.from_settings()
+_PUBLISH_BOUND_S = event_bus_config_from_settings().publish_attempt_timeout_s
 
 
 @pytest.fixture(autouse=True)
@@ -176,6 +178,12 @@ async def test_publish_does_not_retry_connection_errors(
     assert delays == []
 
 
+@pytest.mark.parametrize("bound", [0, -1.0])
+def test_a_publish_bound_that_would_always_time_out_is_refused(bound: float) -> None:
+    with pytest.raises(ValueError, match="publish_attempt_timeout_s"):
+        replace(event_bus_config_from_settings(), publish_attempt_timeout_s=bound)
+
+
 async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -189,9 +197,9 @@ async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     """
     publisher = _HalfOpenHealthCheckPublisher()
     patch_async_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S", 0.01, raising=False)
+    quick = EventBus(replace(event_bus_config_from_settings(), publish_attempt_timeout_s=0.01))
 
-    task = asyncio.create_task(_bus.publish_best_effort("payload", channel="ava:events"))
+    task = asyncio.create_task(quick.publish_best_effort("payload", channel="ava:events"))
     await asyncio.wait_for(publisher.read_started.wait(), timeout=1.0)
     done, _ = await asyncio.wait({task}, timeout=0.5)
     finished_within_bound = bool(done)
@@ -506,7 +514,13 @@ async def test_async_command_and_publish_keep_one_auth_retry_budget(
     client = mod.open_async_redis(settings.data_plane.redis_url)
     try:
         if best_effort:
-            result = await mod.publish_via(lambda: client, "channel", "payload", warn_last={})
+            result = await mod.publish_via(
+                lambda: client,
+                "channel",
+                "payload",
+                warn_last={},
+                attempt_timeout_s=_PUBLISH_BOUND_S,
+            )
             assert result is None
         else:
             with pytest.raises(AuthenticationError):
@@ -572,7 +586,16 @@ async def test_task_started_during_publish_keeps_its_own_command_retry_budget(
     monkeypatch.setattr(mod, "sleep_async", sleep)
     monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter)
     try:
-        assert await mod.publish_via(lambda: client, "channel", "payload", warn_last={}) == 3
+        assert (
+            await mod.publish_via(
+                lambda: client,
+                "channel",
+                "payload",
+                warn_last={},
+                attempt_timeout_s=_PUBLISH_BOUND_S,
+            )
+            == 3
+        )
         assert child is not None
         assert await asyncio.wait_for(child, timeout=1.0) == 3
         assert attempts == {"PUBLISH": 3, "GET": 3}
