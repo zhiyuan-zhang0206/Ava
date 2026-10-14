@@ -20,9 +20,6 @@
 "test_schedules_cmd.py#monkeypatch.setattr cli.commands.management.schedules_verify._report_verify" = 1
 "test_schedules_cmd.py#monkeypatch.setattr cli.commands.management.schedules_verify.telemetry.emit" = 1
 
-[debt.restricted-python]
-"test_fleet_update_pre_verify.py#python subprocess that runs something other than a literal repository file" = 2
-
 [debt.stdlib-patch]
 "test_config_cmd.py#monkeypatch.setattr os.environ" = 1
 "test_schedules_cmd.py#monkeypatch.setattr builtins.input" = 1

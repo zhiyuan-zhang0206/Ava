@@ -139,7 +139,7 @@ class Cluster:
             emit(self.names[alias])
             return 0
         if " - roster" in command:
-            assert stdin == fleet_update.GATEWAY_PROGRAM
+            assert stdin == fleet_update.gateway_program()
             emit(self._roster_json())
             return 0
         if stdin == fleet_update.silence_program():
