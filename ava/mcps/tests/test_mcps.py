@@ -15,6 +15,7 @@ import pytest
 
 import ava.mcps as mcps_mod
 import ava.mcps._remote as remote_mod
+from ava.mcps._clients import McpClients
 from ava.mcps._tools import DiskCache, ServerProxy, call_raw, list_tools
 from ava.mcps.tests._mcps_helpers import (
     StoredTools,
@@ -27,7 +28,8 @@ from ava.mcps.tests._mcps_helpers import (
 )
 from ava.mcps.tests._mcps_helpers import fake_config as fake_config
 from ava.mcps.tests._mcps_helpers import mock_session as mock_session
-from tests.fixtures.pin_agent import pin_no_identity
+from ava.sdk_surface.tests.agent_binding import BindAgent
+from base.agents.context.clients import ClientSet
 
 # ─── _load_config / servers() ────────────────────────────────────────────
 
@@ -89,7 +91,8 @@ def test_description_raises_for_missing_server(fake_config: Path) -> None:
 # ─── module-level __getattr__ / __dir__ namespace dispatch ────────────────
 
 
-def test_module_getattr_returns_proxy(fake_config: Path) -> None:
+def test_module_getattr_returns_proxy(fake_config: Path, bound_agent: BindAgent) -> None:
+    bound_agent(1, clients=ClientSet(factories={McpClients: lambda: McpClients(lambda: 1.0)}))
     fake_config.write_text(json.dumps({"mcpServers": {"fs": {"command": "x"}}}), encoding="utf-8")
     proxy = mcps_mod.fs  # goes through module-level __getattr__
     assert isinstance(proxy, ServerProxy)
@@ -368,8 +371,9 @@ def test_read_cache_fills_defaults_for_missing_fields(fake_config: Path, tmp_pat
 # ─── daemon_socket_path (identity-derived, exists()-gated) ────────────────
 
 
-def test_daemon_socket_path_none_when_identity_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    pin_no_identity()
+def test_daemon_socket_path_none_when_identity_unset(
+    monkeypatch: pytest.MonkeyPatch, no_agent: None
+) -> None:
     assert remote_mod.daemon_socket_path() is None
 
 

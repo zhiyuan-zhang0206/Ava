@@ -1,4 +1,4 @@
-exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py", "discovery.py", "extensions.py", "help.py", "injection_check.py", "install.py", "installation.py", "metering.py", "plugins.py", "process_context.py", "sdk_disable.py", "settings.py", "skill_sources.py", "validation.py", "wraps.py"]
+exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py", "discovery.py", "extensions.py", "help.py", "injection_check.py", "install.py", "installation.py", "metering.py", "plugins.py", "process_context.py", "sdk_disable.py", "settings.py", "skill_sources.py", "tests", "validation.py", "wraps.py"]
 
 [uses]
 "agent_identity.py" = ["process_context.py"]
@@ -15,5 +15,5 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 "sdk_disable.py" = ["__init__.py", "installation.py"]
 "settings.py" = ["installation.py", "process_context.py"]
 "skill_sources.py" = ["install.py", "installation.py"]
-"tests" = ["batch.py", "validation.py"]
+"tests" = ["batch.py", "process_context.py", "validation.py"]
 "wraps.py" = ["installation.py", "metering.py", "settings.py"]

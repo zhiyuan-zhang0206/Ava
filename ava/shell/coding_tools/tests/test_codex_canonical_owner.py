@@ -18,6 +18,7 @@ from uuid import UUID
 import pytest
 
 from ava.sdk_surface import agent_identity, settings
+from ava.sdk_surface.tests.agent_binding import BindAgent
 from ava.shell import sessions
 from ava.shell.coding_tools import _common, codex
 from base.sessions import coding_session_owner
@@ -25,7 +26,6 @@ from base.sessions.coding_session_owner_record import CodingSessionStatus
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
-from tests.fixtures.pin_agent import pin_agent
 
 _SKILL_DIR = (
     Path(__file__).parents[4]
@@ -148,7 +148,10 @@ def test_supervisor_bootstrap_restores_owner_identity(tmp_path: Path) -> None:
 
 
 def test_codex_supervisor_uses_projected_session_environment(
-    pty_service: PtyServiceProcess, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    pty_service: PtyServiceProcess,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bound_agent: BindAgent,
 ) -> None:
     """The runner's real sessions.new path must not hand the shell a foreign venv
     that the pty-sessions service's own environment carries."""
@@ -164,7 +167,7 @@ def test_codex_supervisor_uses_projected_session_environment(
     pty_service.stop()
     service = PtyServiceProcess(unit_home, {"VIRTUAL_ENV": str(unit_home / "foreign" / ".venv")})
     service.start()
-    pin_agent(41)
+    bound_agent(41)
     monkeypatch.setattr(settings, "database", lambda: FakeDatabase(next_index=7))
 
     def workspace_for_owner(_agent_id: int) -> Path:
