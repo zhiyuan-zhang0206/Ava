@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
 
 def _clock(
@@ -15,7 +15,7 @@ def _clock(
     authoritative: str | None = "Asia/Shanghai",
     weekday: bool = False,
 ) -> Clock:
-    return Clock(ClockConfig(timezone, authoritative, weekday))
+    return Clock(ClockConfig(timezone, authoritative, weekday), timers=SYSTEM_TIMERS)
 
 
 def test_the_zone_is_the_authoritative_name_and_none_without_one() -> None:
@@ -39,7 +39,9 @@ def test_format_converts_to_the_cluster_zone_with_and_without_the_weekday() -> N
 
 def test_now_is_the_injected_source() -> None:
     moment = datetime(2026, 5, 6, 6, 32, 5, tzinfo=UTC)
-    clock = Clock(ClockConfig("Asia/Shanghai", None, False), now=lambda: moment)
+    clock = Clock(
+        ClockConfig("Asia/Shanghai", None, False), now=lambda: moment, timers=SYSTEM_TIMERS
+    )
     assert clock.now() == moment
     assert clock.now_timestamp() == "[2026-05-06 14:32:05]"
 
@@ -73,13 +75,13 @@ def test_boot_clock_reads_keep_two_owners_and_previous_handles_separate(
         first.set_field("message_timestamp_weekday", False)
         second.set_field("timezone", "Asia/Shanghai")
         second.set_field("message_timestamp_weekday", True)
-        old = Clock(clock_config_from_boot(first))
-        other = Clock(clock_config_from_boot(second))
+        old = Clock(clock_config_from_boot(first), timers=SYSTEM_TIMERS)
+        other = Clock(clock_config_from_boot(second), timers=SYSTEM_TIMERS)
         moment = datetime(2026, 5, 6, 6, 32, 5, tzinfo=UTC)
         assert old.format_timestamp(moment) == "[2026-05-06 06:32:05]"
         assert other.format_timestamp(moment) == "[2026-05-06 Wed 14:32:05]"
         first.set_field("timezone", "Europe/Paris")
-        current = Clock(clock_config_from_boot(first))
+        current = Clock(clock_config_from_boot(first), timers=SYSTEM_TIMERS)
         assert current.authoritative_timezone == "Europe/Paris"
         assert current.format_timestamp(moment) == "[2026-05-06 08:32:05]"
         assert old.timezone == "UTC"

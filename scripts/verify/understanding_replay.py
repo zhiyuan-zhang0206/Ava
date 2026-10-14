@@ -91,7 +91,7 @@ from base.agents.history.hierarchy.chunks import (  # noqa: E402
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs  # noqa: E402
 from base.agents.history.hierarchy.rebuild import run_rebuild  # noqa: E402
 from base.agents.observation.snapshot import agent_model_target  # noqa: E402
-from base.clock import Clock, clock_config_from_boot  # noqa: E402
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot  # noqa: E402
 from base.config import ConfigBoot  # noqa: E402
 from base.db import Database  # noqa: E402
 from base.db.code_version_gate import ProcessDbGate  # noqa: E402
@@ -130,7 +130,7 @@ def _understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
         check_decay=lambda: config.view.agent.understanding_group_check_decay,
         reasoning=lambda: config.view.agent.understanding_group_reasoning,
         corrections=lambda: config.view.agent.understanding_group_corrections,
-        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         timestamps_enabled=lambda: config.view.general.message_timestamps,
         quiesced=admission.quiesced,
     )

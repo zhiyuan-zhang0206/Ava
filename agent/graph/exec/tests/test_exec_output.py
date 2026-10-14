@@ -17,7 +17,7 @@ import pytest
 
 from agent.graph.exec.output import format_elapsed, wrap_code_output
 from agent.graph.exec.tests.output_inputs import CropConfig
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.config import settings
 from tests.fixtures.pin_agent import pin_agent
 
@@ -574,7 +574,9 @@ def test_archive_clock_and_rendered_timestamp_are_explicit(
     from base.clock import ClockConfig
 
     now = datetime(2026, 10, 9, 1, 2, 3, 456789, tzinfo=UTC)
-    clock = Clock(ClockConfig("Asia/Shanghai", "Asia/Shanghai", False), now=lambda: now)
+    clock = Clock(
+        ClockConfig("Asia/Shanghai", "Asia/Shanghai", False), now=lambda: now, timers=SYSTEM_TIMERS
+    )
     wrapped = wrap_code_output(
         "x" * 200,
         agent_id=13,

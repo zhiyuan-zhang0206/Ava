@@ -545,10 +545,10 @@ def _run(
     payload = ResultPayload(kind="done")
 
     birth, overlay = pop_overlay_env()
-    from base.clock import Clock, clock_config_from_boot
+    from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 
     def clock_factory() -> Clock:
-        return Clock(clock_config_from_boot(config))
+        return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
 
     _bind_identity(request, context=context, clock_factory=clock_factory)
 

@@ -24,7 +24,7 @@ from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -107,7 +107,7 @@ def native_checkpoint(
             owns_loop=False,
             clients=clients,
             machine=machine_identity,
-            clock_factory=lambda: Clock(clock_config_from_boot(config)),
+            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         )
         yield owner, handle
 
