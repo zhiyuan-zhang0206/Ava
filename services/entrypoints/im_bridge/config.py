@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ImBridgeConfig:
-    """What the bridge core, its gateway client, push watchdog and notice bridge read."""
+    """What the bridge core, its gateway client, push watchdog, push health and notice bridge read."""
 
     im_disabled_adapters: tuple[str, ...]
     im_send_retry_delays: tuple[float, ...]
@@ -28,6 +28,8 @@ class ImBridgeConfig:
     im_bridge_notice_open_limit: int
     # The gateway's own display default, shared with `GET /api/notices/live`.
     notices_open_default_limit: int
+    im_push_health_channels: tuple[str, ...]
+    im_push_health_interval_seconds: float
 
 
 @dataclass(frozen=True)
