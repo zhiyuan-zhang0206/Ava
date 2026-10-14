@@ -24,7 +24,6 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from base.log import logger
-from base.paths import traces_dir
 
 __all__ = [
     "disk_usage",
@@ -92,7 +91,7 @@ def _mirror_epoch(path: Path) -> int:
     return 0
 
 
-def prune_old_mirror(retention_days: int) -> None:
+def prune_old_mirror(retention_days: int, *, traces_dir: Path) -> None:
     """Delete mirror files whose day stamp is older than retention_days.
 
     Recording is always-on but shipping may be off, so the mirror grows
@@ -107,7 +106,7 @@ def prune_old_mirror(retention_days: int) -> None:
     removed = 0
     # `.jsonl.gz` included: the gzip pass renames old segments, and retention
     # must still reach them (their day stamp parses from the name).
-    for path in traces_dir().glob("spans*.jsonl*"):
+    for path in traces_dir.glob("spans*.jsonl*"):
         day = mirror_day(path)
         if day is not None and day < cutoff:
             path.unlink(missing_ok=True)
@@ -121,7 +120,7 @@ def prune_old_mirror(retention_days: int) -> None:
         )
 
 
-def gzip_old_mirror(grace_seconds: int = 60) -> int:
+def gzip_old_mirror(grace_seconds: int = 60, *, traces_dir: Path) -> int:
     """gzip rotated (non-active) mirror files; return the number compressed.
 
     The collector's file exporter cannot compress its own rotated backups
@@ -149,7 +148,7 @@ def gzip_old_mirror(grace_seconds: int = 60) -> int:
     """
     cutoff = time.time() - grace_seconds
     compressed = 0
-    for path in traces_dir().glob("spans*.jsonl*"):
+    for path in traces_dir.glob("spans*.jsonl*"):
         if path.name == "spans.jsonl" or path.name.endswith(".gz"):
             continue
         try:
@@ -210,7 +209,7 @@ def mirror_size(p: Path) -> int:
         return 0
 
 
-def enforce_dir_cap(max_mb: int) -> int:
+def enforce_dir_cap(max_mb: int, *, traces_dir: Path) -> int:
     """Delete oldest mirror files until the traces directory fits under `max_mb`.
 
     Iterates oldest-first by day stamp + epoch order (`mirror_sort_key`).
@@ -222,7 +221,7 @@ def enforce_dir_cap(max_mb: int) -> int:
     if max_mb <= 0:
         return 0
     cap_bytes = max_mb * 1024 * 1024
-    files = sorted(traces_dir().glob("spans*.jsonl*"), key=mirror_sort_key)
+    files = sorted(traces_dir.glob("spans*.jsonl*"), key=mirror_sort_key)
     total = sum(mirror_size(p) for p in files)
     removed = 0
     for p in files:
@@ -241,7 +240,7 @@ def enforce_dir_cap(max_mb: int) -> int:
     return removed
 
 
-def disk_usage() -> tuple[float, int] | None:
+def disk_usage(*, traces_dir: Path) -> tuple[float, int] | None:
     """(usage fraction, free bytes) of the traces dir's data disk.
 
     The mirror is written to $AVA_HOME/traces, so the data disk is the one that
@@ -249,18 +248,18 @@ def disk_usage() -> tuple[float, int] | None:
     never be the reason recording is off.
     """
     try:
-        usage = shutil.disk_usage(traces_dir())
+        usage = shutil.disk_usage(traces_dir)
     except OSError:
         return None
     return usage.used / usage.total, usage.free
 
 
-def disk_watermark_exceeded(watermark: float) -> bool:
+def disk_watermark_exceeded(watermark: float, *, traces_dir: Path) -> bool:
     """True when the data disk's usage fraction exceeds the watermark.
 
     `watermark >= 1.0` disables the guard (the fraction can never exceed 1.0).
     """
     if watermark >= 1.0:
         return False
-    usage = disk_usage()
+    usage = disk_usage(traces_dir=traces_dir)
     return usage is not None and usage[0] > watermark
