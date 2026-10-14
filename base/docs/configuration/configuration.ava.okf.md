@@ -82,7 +82,7 @@ contain both executable Redis tools; an invalid pair fails instead of choosing
 a different version from PATH.
 
 `pg_throwaway_base` is the host-scoped scratch-cluster selection: where
-`base/pg_tools.throwaway_postgres` creates disposable Postgres instance dirs
+`base.cluster.dataplane.pg_tools.throwaway_postgres` creates disposable Postgres instance dirs
 (test fixtures, smokes, the restore drill). Empty keeps the platform default —
 `/dev/shm` on Linux, the OS temp dir elsewhere — while a caller that declares its
 required capacity (the restore drills) takes the disk fallback (`/var/tmp` where
@@ -90,6 +90,10 @@ present) outright, refusing rather than betting the estimate on a RAM-sized tmpf
 (`base/cluster/dataplane/pg_throwaway_base.py`; the estimate is a floor, not a
 guarantee). It rides the same home-authority projection as `AVA_REDIS_BIN_DIR`, so
 a parent's selection cannot leak into a sibling home.
+`configured_base(raw)` parses the root's value (strip, then `Path` or `None`).
+Its required frozen `ThrowawayConfig` supplies one override for creation, orphan
+scanning, path validation and port registration; these consumers never read
+Settings. The allocation flock remains under the shared system default.
 
 Linux Redis uses the caller's cluster bearer posture to bind loopback plus this
 host's reachable address after the bounded address wait. macOS keeps its

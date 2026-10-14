@@ -67,7 +67,11 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
 
     def database() -> Database:
         return Database(
-            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+            db_config_from_boot(config),
+            gate=gate,
+            direct_url=ClusterDirectUrl(
+                machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
+            ),
         )
 
     clients = ClientSet(

@@ -111,7 +111,11 @@ def _attachment_database(
     version = CodeVersion(process_context.loaded_code_image())
     gate = ProcessDbGate(version=version.get, process="unknown")
     return lambda: Database(
-        db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        db_config_from_boot(config),
+        gate=gate,
+        direct_url=ClusterDirectUrl(
+            machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
+        ),
     )
 
 

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
@@ -61,7 +62,7 @@ def _complete_artifact(path: Path) -> bool:
     )
 
 
-def _sanitize_restore_drill(work: Path) -> None:
+def _sanitize_restore_drill(work: Path, *, throwaway: ThrowawayConfig) -> None:
     """Remove the drill's decrypted dump and its restored throwaway cluster.
 
     The decrypted dump lives only in the private scratch. A worker killed
@@ -74,7 +75,7 @@ def _sanitize_restore_drill(work: Path) -> None:
     scratch = work / "scratch"
     if scratch.is_dir() and not scratch.is_symlink():
         shutil.rmtree(scratch)
-    sweep_orphaned_throwaway_clusters()
+    sweep_orphaned_throwaway_clusters(config=throwaway)
 
 
 def dump_kind() -> OperationKind:
@@ -86,12 +87,12 @@ def dump_kind() -> OperationKind:
     )
 
 
-def restore_drill_kind() -> OperationKind:
+def restore_drill_kind(*, throwaway: ThrowawayConfig) -> OperationKind:
     root = ava_home() / "backups"
     return OperationKind(
         "logical-restore-drill",
         root / "operations" / "restore-drill",
-        _sanitize_restore_drill,
+        lambda work: _sanitize_restore_drill(work, throwaway=throwaway),
     )
 
 
@@ -102,10 +103,22 @@ def _sha256(path: Path) -> str:
 
 async def run_job(kind: Job, *, config: ConfigBoot, now: datetime | None = None) -> None:
     """Validate and publish a zero-exit worker result."""
+    request: dict[str, object] = {"kind": kind, "now": now.isoformat() if now is not None else None}
+    if kind == "restore":
+        override = configured_base(config.view.data_plane.pg_throwaway_base)
+        # The worker starts at the code root; preserve the controller's relative
+        # path interpretation for both that child and our eventual sanitizer.
+        if override is not None:
+            override = override.absolute()
+        throwaway = ThrowawayConfig(override)
+        request["pg_throwaway_base"] = None if override is None else str(override)
+        operation_kind = restore_drill_kind(throwaway=throwaway)
+    else:
+        operation_kind = dump_kind()
     completed = await run_operation(
         "services.backup.scheduler.worker",
-        {"kind": kind, "now": now.isoformat() if now is not None else None},
-        kind=dump_kind() if kind == "dump" else restore_drill_kind(),
+        request,
+        kind=operation_kind,
         env=inherited_process_env(),
     )
     if kind == "dump":
@@ -204,7 +217,10 @@ def execute(
     database: Callable[[], Database],
     database_for_url: Callable[[str], Database],
 ) -> dict[str, object]:
-    if set(request) != {"kind", "now"}:
+    expected = {"kind", "now"}
+    if request.get("kind") == "restore":
+        expected.add("pg_throwaway_base")
+    if set(request) != expected:
         raise ValueError("invalid logical backup request")
     if request["kind"] == "dump":
         from services.backup.dump import run_backup
@@ -223,12 +239,21 @@ def execute(
             credentials_file_reader=lambda: config.view.services.backup_offsite_credentials_file,
         )
         return {"artifact": artifact.name, "sha256": _sha256(artifact)}
-    if request == {"kind": "restore", "now": None}:
+    if request["kind"] == "restore" and request["now"] is None:
         from services.backup.restore_drill import run_drill
 
+        raw_base = request["pg_throwaway_base"]
+        if raw_base is not None and not isinstance(raw_base, str):
+            raise TypeError("logical restore requires a string or null throwaway base")
+        throwaway = ThrowawayConfig(None if raw_base is None else Path(raw_base))
         scratch = work / "scratch"
         scratch.mkdir(mode=0o700)
-        run_drill(foreground=True, scratch_root=scratch, database_for_url=database_for_url)
+        run_drill(
+            foreground=True,
+            scratch_root=scratch,
+            database_for_url=database_for_url,
+            throwaway=throwaway,
+        )
         return {"restored": True}
     raise ValueError("unknown logical backup operation")
 
@@ -248,14 +273,20 @@ def main() -> None:
 
     def database() -> Database:
         return Database(
-            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+            db_config_from_boot(config),
+            gate=gate,
+            direct_url=ClusterDirectUrl(
+                machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
+            ),
         )
 
     def database_for_url(url: str) -> Database:
         return Database(
             dataclasses.replace(db_config_from_boot(config), db_url=url),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(
+                machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
+            ),
         )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)

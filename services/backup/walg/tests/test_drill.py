@@ -25,6 +25,7 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.cluster.dataplane import pg_admin
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -204,6 +205,7 @@ def test_an_expected_failure_is_recorded_with_its_message_and_keeps_the_last_suc
         lambda: T0,
         path_reader=lambda: settings.walg.walg_config_file,
         database_for_url=_database_factory(),
+        throwaway=ThrowawayConfig(None),
     )
 
     assert (record.ok, record.detail, record.backup) == (False, "no archiver state", _backup().name)
@@ -222,6 +224,7 @@ def test_an_unexpected_failure_names_its_type(monkeypatch: pytest.MonkeyPatch) -
         lambda: T0,
         path_reader=lambda: settings.walg.walg_config_file,
         database_for_url=_database_factory(),
+        throwaway=ThrowawayConfig(None),
     )
 
     assert not record.ok and record.detail == "KeyError: 'boom'"
@@ -239,6 +242,7 @@ def test_a_long_failure_message_is_cut_for_the_state_file(monkeypatch: pytest.Mo
         lambda: T0,
         path_reader=lambda: settings.walg.walg_config_file,
         database_for_url=_database_factory(),
+        throwaway=ThrowawayConfig(None),
     )
 
     assert len(record.detail) == drill.DETAIL_CHARS
@@ -341,19 +345,15 @@ def uncustodied_admin_dial(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def scratch_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def scratch_base(tmp_path: Path) -> Path:
     base = tmp_path / "scratch-base"
     base.mkdir()
 
-    def select(_required: int) -> Path:
-        return base
-
-    monkeypatch.setattr(drill, "select_throwaway_base", select)
     return base
 
 
 def _run_drill(
-    source: Source, previous: DrillRecord | None = None
+    source: Source, previous: DrillRecord | None = None, *, scratch_base: Path
 ) -> tuple[DrillRecord, list[str]]:
     lines: list[str] = []
     record = drill.run_drill(
@@ -364,6 +364,7 @@ def _run_drill(
         lambda: T0,
         path_reader=lambda: settings.walg.walg_config_file,
         database_for_url=_database_factory(),
+        throwaway=ThrowawayConfig(scratch_base),
     )
     return record, lines
 
@@ -375,7 +376,7 @@ def test_the_drill_restores_the_newest_backup_to_the_newest_archived_segment_and
     with archiving_postgres() as pg:
         source = Source(sandbox, pg)
 
-        record, lines = _run_drill(source)
+        record, lines = _run_drill(source, scratch_base=scratch_base)
 
     assert record.ok, record.detail
     assert record.target_lsn == drill.format_lsn(
@@ -407,7 +408,7 @@ def test_a_missing_segment_after_the_backup_fails_the_drill_and_cleans_up(
         source = Source(sandbox, pg)
         (sandbox.store_dir / "store" / source.after_backup_segment).unlink()
 
-        record, _ = _run_drill(source)
+        record, _ = _run_drill(source, scratch_base=scratch_base)
 
     assert not record.ok
     assert "recovery failed" in record.detail
@@ -427,7 +428,7 @@ def test_without_anything_archived_after_the_backup_the_drill_recovers_to_the_en
         listed[0]["finish_lsn"] = 1 << 60  # the backup "ends" after everything archived
         sandbox.put("backups.json", json.dumps(listed))
 
-        record, _ = _run_drill(source)
+        record, _ = _run_drill(source, scratch_base=scratch_base)
 
     assert record.ok, record.detail
     assert record.target_lsn is None
@@ -441,7 +442,7 @@ def test_a_database_without_a_conversation_fails_the_content_check(
     with archiving_postgres() as pg:
         source = Source(sandbox, pg, conversations=False)
 
-        record, _ = _run_drill(source)
+        record, _ = _run_drill(source, scratch_base=scratch_base)
 
     assert not record.ok
     assert "no readable agent conversation" in record.detail

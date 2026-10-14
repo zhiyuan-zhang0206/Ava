@@ -37,7 +37,7 @@ import psycopg
 import pytest
 
 from base.cluster.dataplane import pg_throwaway_base, pg_tools
-from base.config import settings
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.paths import repo_root
 
 _READY_TIMEOUT_S = 120.0
@@ -86,7 +86,6 @@ def throwaway_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> It
     # dir and clear the override, so a host's real /var/tmp orphan or configured
     # base can never be touched — or counted — by these tests.
     monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
-    monkeypatch.setattr(settings.data_plane, "pg_throwaway_base", "")
     yield root
     for data in root.glob("ava-pg-*/data"):
         if (data / "PG_VERSION").is_file():
@@ -129,7 +128,7 @@ def test_sweep_reaps_an_instance_whose_owner_was_killed(
         with psycopg.connect(url) as conn:
             conn.execute("select 1")
 
-        assert pg_tools.sweep_orphaned_throwaway_clusters() == 1
+        assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 1
         assert not instance.exists()
         assert not lock.exists()
         with pytest.raises(psycopg.OperationalError):
@@ -146,7 +145,7 @@ def test_sweep_reaps_an_instance_whose_lock_was_released(throwaway_root: Path) -
     assert registration is not None
     os.close(registration.fd)  # the owner "dies": lock released, files still on disk
 
-    assert pg_tools.sweep_orphaned_throwaway_clusters() == 1
+    assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 1
     assert not instance.exists()
     assert not registration.lock.exists()
 
@@ -163,14 +162,32 @@ def test_sweep_reaps_an_orphan_on_the_disk_fallback_base(
     try:
         instance = _write_instance(fallback, "ava-pg-disk")
         _write_lock(instance)
-        assert pg_tools.resolved_throwaway_dir(instance) is not None
-        assert pg_tools.sweep_orphaned_throwaway_clusters() == 1
+        assert pg_tools.resolved_throwaway_dir(instance, config=ThrowawayConfig(None)) is not None
+        assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 1
         assert not instance.exists()
     finally:
         shutil.rmtree(fallback, ignore_errors=True)
 
 
 # ── Direction 2: nothing live, and no real cluster, is ever selected ──
+
+
+def test_explicit_overrides_keep_each_sweep_and_safety_check_on_its_own_root(
+    throwaway_root: Path, tmp_path: Path
+) -> None:
+    first, second = ThrowawayConfig(tmp_path / "first"), ThrowawayConfig(tmp_path / "second")
+    one = _write_instance(tmp_path / "first", "ava-pg-one")
+    two = _write_instance(tmp_path / "second", "ava-pg-two")
+    _write_lock(one)
+    _write_lock(two)
+
+    assert pg_tools.resolved_throwaway_dir(two, config=first) is None
+    assert pg_tools.resolved_throwaway_dir(two, config=second) == two.resolve()
+    assert pg_tools.sweep_orphaned_throwaway_clusters(config=first) == 1
+    assert not one.exists() and two.exists()
+    assert pg_tools.sweep_orphaned_throwaway_clusters(config=second) == 1
+    assert not two.exists()
+
 
 _LIVE_OWNER = """
 import fcntl, os, sys, time
@@ -196,7 +213,7 @@ def test_sweep_refuses_an_instance_owned_by_a_live_process(
     )
     try:
         _wait_for(ready)
-        assert pg_tools.sweep_orphaned_throwaway_clusters() == 0
+        assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 0
         assert (instance / "data" / "PG_VERSION").is_file()
         assert lock.exists()
     finally:
@@ -210,7 +227,7 @@ def test_sweep_refuses_an_instance_this_process_owns(throwaway_root: Path) -> No
     instance = _write_instance(throwaway_root, "ava-pg-mine")
     registration = pg_tools.register_throwaway(instance, 5556)
     try:
-        assert pg_tools.sweep_orphaned_throwaway_clusters() == 0
+        assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 0
         assert (instance / "data" / "PG_VERSION").is_file()
     finally:
         pg_tools.unregister_throwaway(registration)
@@ -286,22 +303,34 @@ def test_a_real_cluster_data_dir_is_never_a_throwaway_dir(
     (fake_home / "pg").mkdir(parents=True)
     (fake_home / "pg" / "PG_VERSION").write_text("17\n")
 
-    assert pg_tools.resolved_throwaway_dir(Path.home() / ".ava") is None
-    assert pg_tools.resolved_throwaway_dir(Path.home() / ".ava" / "pg") is None
-    assert pg_tools.resolved_throwaway_dir(fake_home) is None
-    assert pg_tools.resolved_throwaway_dir(fake_home / "pg") is None
+    assert (
+        pg_tools.resolved_throwaway_dir(Path.home() / ".ava", config=ThrowawayConfig(None)) is None
+    )
+    assert (
+        pg_tools.resolved_throwaway_dir(Path.home() / ".ava" / "pg", config=ThrowawayConfig(None))
+        is None
+    )
+    assert pg_tools.resolved_throwaway_dir(fake_home, config=ThrowawayConfig(None)) is None
+    assert pg_tools.resolved_throwaway_dir(fake_home / "pg", config=ThrowawayConfig(None)) is None
     (throwaway_root / "pg").mkdir()
-    assert pg_tools.resolved_throwaway_dir(throwaway_root / "pg") is None
+    assert (
+        pg_tools.resolved_throwaway_dir(throwaway_root / "pg", config=ThrowawayConfig(None)) is None
+    )
     # A cluster home can even *contain* the prefix (`~/.ava-pg-worktree`).
     # Still refused: the name must START with the prefix, and no cluster home is a
     # child of the throwaway root.
     worktree_home = tmp_path / ".ava-pg-worktree"
     (worktree_home / "pg").mkdir(parents=True)
-    assert pg_tools.resolved_throwaway_dir(worktree_home) is None
-    assert pg_tools.resolved_throwaway_dir(worktree_home / "pg") is None
+    assert pg_tools.resolved_throwaway_dir(worktree_home, config=ThrowawayConfig(None)) is None
+    assert (
+        pg_tools.resolved_throwaway_dir(worktree_home / "pg", config=ThrowawayConfig(None)) is None
+    )
     # The positive case, so the refusals above are not vacuous.
     instance = _write_instance(throwaway_root, "ava-pg-real")
-    assert pg_tools.resolved_throwaway_dir(instance) == instance.resolve()
+    assert (
+        pg_tools.resolved_throwaway_dir(instance, config=ThrowawayConfig(None))
+        == instance.resolve()
+    )
 
 
 def test_sweep_refuses_a_symlink_aimed_out_of_the_throwaway_root(
@@ -326,7 +355,7 @@ def test_sweep_refuses_a_symlink_aimed_out_of_the_throwaway_root(
     _write_lock(trap)
     _write_lock(linked)  # lands inside fake_home, through the symlink
 
-    assert pg_tools.sweep_orphaned_throwaway_clusters() == 0
+    assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 0
     assert (real_pg / "PG_VERSION").is_file()  # the cluster's data dir, untouched
     assert fake_home.is_dir()  # and its home
     assert trap.is_dir()  # the trap dir is left alone, not reaped
@@ -350,14 +379,16 @@ def test_a_lock_body_cannot_aim_the_sweep(throwaway_root: Path, tmp_path: Path) 
     bystander.mkdir()
     _write_lock(bystander)
 
-    assert pg_tools.sweep_orphaned_throwaway_clusters() == 1  # the liar, by its parent
+    assert (
+        pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 1
+    )  # the liar, by its parent
     assert (real_pg / "PG_VERSION").is_file()  # the path in its body, untouched
     assert not liar.exists()
     assert (bystander / pg_tools.OWNER_LOCK_NAME).exists()  # never a candidate
 
 
 def test_sweep_is_a_noop_on_an_empty_root(throwaway_root: Path) -> None:
-    assert pg_tools.sweep_orphaned_throwaway_clusters() == 0
+    assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 0
 
 
 def test_sweep_ignores_an_instance_dir_with_no_owner_lock(throwaway_root: Path) -> None:
@@ -365,7 +396,7 @@ def test_sweep_ignores_an_instance_dir_with_no_owner_lock(throwaway_root: Path) 
     a candidate. Claiming it would mean guessing by exclusion, which is exactly what
     the positive identification exists to avoid."""
     instance = _write_instance(throwaway_root, "ava-pg-legacy")
-    assert pg_tools.sweep_orphaned_throwaway_clusters() == 0
+    assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 0
     assert (instance / "data" / "PG_VERSION").is_file()
 
 
@@ -383,7 +414,9 @@ def test_another_users_instance_dir_is_invisible_to_the_sweep(throwaway_root: Pa
     _write_lock(theirs)
     theirs.chmod(0o000)
     try:
-        assert pg_tools.sweep_orphaned_throwaway_clusters() == 1  # mine only
+        assert (
+            pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 1
+        )  # mine only
         assert not mine.exists()
     finally:
         theirs.chmod(0o700)
@@ -400,11 +433,11 @@ def test_two_sweepers_reap_an_instance_once(throwaway_root: Path) -> None:
     held = os.open(record, os.O_RDWR)
     try:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)  # stand in for the first sweeper
-        assert pg_tools.sweep_orphaned_throwaway_clusters() == 0
+        assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 0
         assert instance.exists()
     finally:
         os.close(held)
-    assert pg_tools.sweep_orphaned_throwaway_clusters() == 1
+    assert pg_tools.sweep_orphaned_throwaway_clusters(config=ThrowawayConfig(None)) == 1
 
 
 # ── Direction 3: port allocation is serialized across workers ──
@@ -416,8 +449,9 @@ def test_two_sweepers_reap_an_instance_once(throwaway_root: Path) -> None:
 # the race anyway (a non-registry holder bound the port) on a fresh port.
 
 
+@pytest.mark.parametrize("use_override", [False, True])
 def test_allocate_port_skips_a_live_clusters_port(
-    throwaway_root: Path, monkeypatch: pytest.MonkeyPatch
+    throwaway_root: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, use_override: bool
 ) -> None:
     """The registry is what closes the window: a port held by a live cluster's
     registration must not be handed out, even though the OS would still give it
@@ -433,13 +467,15 @@ def test_allocate_port_skips_a_live_clusters_port(
         s.bind(("127.0.0.1", 0))
         free = s.getsockname()[1]
 
-    live = _write_instance(throwaway_root, "ava-pg-live-port")
+    root = tmp_path / "override" if use_override else throwaway_root
+    config = ThrowawayConfig(root if use_override else None)
+    live = _write_instance(root, "ava-pg-live-port")
     registration = pg_tools.register_throwaway(live, held)
     probes = iter([held, free])
     monkeypatch.setattr(pg_tools, "free_port", lambda: next(probes))
     try:
-        mine = _write_instance(throwaway_root, "ava-pg-alloc-port")
-        port, mine_reg = pg_tools.allocate_port(mine)
+        mine = _write_instance(root, "ava-pg-alloc-port")
+        port, mine_reg = pg_tools.allocate_port(mine, config=config)
         try:
             assert port == free
         finally:
@@ -469,7 +505,10 @@ def test_start_retries_with_a_fresh_port_after_a_collision(
             free = s.getsockname()[1]
         probes = iter([blocked, free])
         monkeypatch.setattr(pg_tools, "free_port", lambda: next(probes))
-        with pg_tools.throwaway_postgres() as url, psycopg.connect(url) as conn:
+        with (
+            pg_tools.throwaway_postgres(config=ThrowawayConfig(None)) as url,
+            psycopg.connect(url) as conn,
+        ):
             conn.execute("select 1")
         # The blocker survived the whole retry dance untouched.
         assert blocker.getsockname()[1] == blocked

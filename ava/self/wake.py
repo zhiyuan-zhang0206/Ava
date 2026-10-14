@@ -12,6 +12,7 @@ from typing import Any
 from redis.exceptions import ResponseError
 
 from base.cluster import inbound_channel
+from base.config import settings
 from base.log import logger
 
 __all__ = ["publish_inbound_wake"]
@@ -28,7 +29,7 @@ def publish_inbound_wake(redis: Any, agent_id: int) -> None:
     ACL user is not granted its own `<prefix>:inbound:*` channel. The channel comes from
     `inbound_channel`, so it matches `RedisInboundListener` and stays inside the ACL grant.
     """
-    channel = inbound_channel(agent_id)
+    channel = inbound_channel(agent_id, settings.data_plane.events_channel)  # ambient: O
     try:
         redis.publish(channel, "0")
     except ResponseError as exc:

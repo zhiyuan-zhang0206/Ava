@@ -19,6 +19,7 @@ from base.cluster.dataplane import direct_url
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import settings
 from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
 from cli.commands.data_plane import pgbouncer
@@ -149,7 +150,7 @@ def test_migrations_apply_uses_direct_unbounded_connection() -> None:
 
     src = inspect.getsource(migrations.cmd_migrations_apply)
     assert "connect(direct=True, unbounded=True)" in src
-    assert "local_owner_authority()" in src
+    assert "local_owner_authority(settings.data_plane.db_url, remote_plane=False)" in src
 
 
 @pytest.mark.parametrize("remote", [False, True])
@@ -176,7 +177,7 @@ def test_backup_defaults_to_a_direct_dump_source(
         local_owner.assert_not_called()
     else:
         assert result == "host=/owner/socket dbname=ava"
-        local_owner.assert_called_once_with()
+        local_owner.assert_called_once_with(settings.data_plane.db_url, remote_plane=False)
         authority.verified_conninfo.assert_called_once_with()
         database.direct_url.assert_not_called()
 
@@ -213,7 +214,7 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
     monkeypatch.setattr(connections, "ConnectionPool", make_pool)
     expected_url = config.db_url.replace(":6433/", ":5433/") if direct else config.db_url
 
-    resolver = ClusterDirectUrl(lambda: "127.0.0.1")
+    resolver = ClusterDirectUrl(lambda: "127.0.0.1", gateway_url_reader=lambda: "")
 
     assert base.db.connect(config=config, gate=gate, direct=direct, direct_url=resolver) is conn
     assert dial.call_args.args == (expected_url,)

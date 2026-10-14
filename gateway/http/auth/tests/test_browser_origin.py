@@ -36,9 +36,13 @@ def test_browser_entry_normalizes_origin() -> None:
 def test_build_and_cors_use_entry_without_changing_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.gateway, "browser_origin", "https://console.example")
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://192.0.2.2:8800")
-    monkeypatch.setattr(settings.gateway, "gateway_port", 8800)
     monkeypatch.setattr(settings.gateway, "cors_allowed_origins", [])
-    env = dict(item.split("=", 1) for item in shlex.split(fe_build_env()))
+    env = dict(
+        item.split("=", 1)
+        for item in shlex.split(
+            fe_build_env(gateway_port=8800, browser_origin="https://console.example")
+        )
+    )
     assert env == {
         "NEXT_PUBLIC_GATEWAY_PORT": "8800",
         "NEXT_PUBLIC_BROWSER_ORIGIN": "https://console.example",

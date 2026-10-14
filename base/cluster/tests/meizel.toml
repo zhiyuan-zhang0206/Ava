@@ -8,18 +8,12 @@
 "test_native_layout.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
-"test_cluster_identity.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 3
-"test_cluster_identity.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
-"test_cluster_own_instance.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
-"test_cluster_own_instance.py#monkeypatch.setattr base.config.settings.data_plane.redis_admin_password" = 2
-"test_cluster_own_instance.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 2
 "test_cluster_provision.py#monkeypatch.setattr base.cluster.provision.checkpoint_schema_versions" = 1
 "test_listener_discovery_failure.py#monkeypatch.setattr base.cluster.port_preflight.lsof_argv" = 1
 "test_listener_discovery_failure.py#monkeypatch.setattr base.cluster.port_preflight.os.access" = 1
 "test_listener_discovery_failure.py#monkeypatch.setattr base.cluster.port_preflight.shutil.which" = 1
 "test_listener_discovery_failure.py#monkeypatch.setattr base.host.proc.run_bounded" = 3
 "test_machines.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 8
-"test_native_layout.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
 "test_port_preflight.py#monkeypatch.setattr base.cluster.port_preflight.lsof_argv" = 4
 "test_port_preflight.py#monkeypatch.setattr base.cluster.port_preflight.os.access" = 3
 "test_port_preflight.py#monkeypatch.setattr base.cluster.port_preflight.shutil.which" = 3

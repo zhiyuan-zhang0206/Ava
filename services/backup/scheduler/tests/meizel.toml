@@ -27,7 +27,6 @@
 "test_recovery_drill_schedule.py#monkeypatch.setattr services.backup.scheduler.recovery_drill.cluster_tz" = 1
 "test_scheduler_shutdown.py#monkeypatch.setattr services.backup.scheduler.worker.ava_home" = 1
 "test_scheduler_shutdown.py#monkeypatch.setattr services.backup.scheduler.worker.run_operation" = 1
-"test_scheduler_shutdown.py#patch.object base.config.settings.data_plane.pg_throwaway_base" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.artifact.offsite.publish" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.dump.backup_dir" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.dump.db_size_breakdown" = 1

@@ -7,6 +7,7 @@ import threading
 
 import pytest
 
+from base.config import settings
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import (
@@ -154,9 +155,11 @@ class TestPatternMatchesTheRealChannel:
         from base.cluster import inbound_channel, redis_channel_prefix
         from services.agent_runner.agent_host.dispatcher import INBOUND_PATTERN_SUFFIX
 
-        pattern = f"{redis_channel_prefix()}{INBOUND_PATTERN_SUFFIX}"
+        pattern = (
+            f"{redis_channel_prefix(settings.data_plane.events_channel)}{INBOUND_PATTERN_SUFFIX}"
+        )
         for agent_id in (1, 42, 999999):
-            channel = inbound_channel(agent_id)
+            channel = inbound_channel(agent_id, settings.data_plane.events_channel)
             assert fnmatchcase(channel, pattern), f"{channel!r} not covered by {pattern!r}"
             assert agent_id_from_channel(channel) == agent_id
 

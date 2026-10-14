@@ -16,6 +16,7 @@ from ava import ui as _ui
 from ava import watcher as _watcher
 from ava.sdk_surface import agent_identity
 from ava.tests.fixtures.pin_agent import pin_agent
+from base.config import settings
 
 
 class TestFilesEntries:
@@ -300,7 +301,7 @@ class TestSelfEntries:
 
         redis = Redis()
         wake.publish_inbound_wake(redis, 41)
-        assert redis.published == [(inbound_channel(41), "0")]
+        assert redis.published == [(inbound_channel(41, settings.data_plane.events_channel), "0")]
 
     @pytest.mark.parametrize("failure", [ResponseError("NOPERM"), ConnectionError("down")])
     def test_wake_never_raises_when_redis_refuses(self, failure: Exception) -> None:

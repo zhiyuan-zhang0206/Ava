@@ -22,7 +22,9 @@ from cli.database.runtime import CommandRuntime
 def _read_table(out: str) -> None:
     command = CommandRuntime.create()
     database = operator_database_factory(
-        local_host=command.machine.host, open_database=open_operator_database
+        local_host=command.machine.host,
+        open_database=open_operator_database,
+        gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
     )
     with Path(out).open("w") as handle:
         json.dump(_read_schedule_rows(database_factory=database), handle)
@@ -31,7 +33,9 @@ def _read_table(out: str) -> None:
 def _check_rows(rows_file: str) -> None:
     command = CommandRuntime.create()
     database = operator_database_factory(
-        local_host=command.machine.host, open_database=open_operator_database
+        local_host=command.machine.host,
+        open_database=open_operator_database,
+        gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
     )
     producer = operator_event_pipeline(database, machine=command.machine, home=ava_home())
     try:

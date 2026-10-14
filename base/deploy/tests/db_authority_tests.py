@@ -40,6 +40,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg import sql
 
 from base.cluster.authority import ensure_groups, mint_generation
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.cluster.dataplane.pg_tools import pg_start_env, pg_tool, throwaway_postgres
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -130,7 +131,7 @@ def _authenticate(instance: Instance, tcp: str, data_dir: Path) -> None:
 
 @pytest.fixture(scope="module")
 def _authority_instance(process_config: ConfigBoot) -> Iterator[Instance]:
-    with throwaway_postgres() as url:
+    with throwaway_postgres(config=ThrowawayConfig(None)) as url:
         port = urlsplit(url).port
         assert port is not None
         tcp = f"postgresql://{_SUPERUSER}@127.0.0.1:{port}"

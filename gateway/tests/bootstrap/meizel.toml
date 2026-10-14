@@ -62,7 +62,6 @@
 "test_server.py#monkeypatch.setattr gateway.cluster.server.init_gateway_process" = 3
 "test_server.py#monkeypatch.setattr gateway.cluster.server.raise_fd_limit" = 3
 "test_server.py#monkeypatch.setattr gateway.cluster.server.serve" = 3
-"test_server.py#monkeypatch.setattr gateway.cluster.server.verify_transport_encryption" = 2
 "test_server_shutdown.py#monkeypatch.setattr gateway.events.sse.retry_auth_failures_async" = 1
 "test_server_shutdown.py#monkeypatch.setattr gateway.http.middleware.stopping.is_stopping" = 1
 

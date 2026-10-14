@@ -17,7 +17,7 @@ import psycopg
 import pytest
 
 from base.cluster.dataplane import pg_foreground, pg_throwaway_base, pg_tools
-from base.config import settings
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 
 
 @pytest.fixture
@@ -27,7 +27,6 @@ def foreground_root(monkeypatch: pytest.MonkeyPatch, postgres_access: None) -> I
         root = Path(directory)
         monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
         monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
-        monkeypatch.setattr(settings.data_plane, "pg_throwaway_base", "")
         try:
             yield root
         finally:
@@ -59,7 +58,12 @@ def test_native_foreground_is_direct_child_and_reaped_on_context_exit(
     pid = 0
     instance = foreground_root
     outcome = pytest.raises(KeyboardInterrupt) if interrupted else nullcontext()
-    with outcome, pg_tools.throwaway_postgres(base=foreground_root, foreground=True) as url:
+    with (
+        outcome,
+        pg_tools.throwaway_postgres(
+            base=foreground_root, foreground=True, config=ThrowawayConfig(foreground_root)
+        ) as url,
+    ):
         with psycopg.connect(url) as connection:
             row = connection.execute("SHOW data_directory").fetchone()
             assert row is not None
@@ -230,7 +234,9 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
     try:
         with (
             pytest.raises(error),
-            pg_tools.throwaway_postgres(base=foreground_root, foreground=True),
+            pg_tools.throwaway_postgres(
+                base=foreground_root, foreground=True, config=ThrowawayConfig(foreground_root)
+            ),
         ):
             pytest.fail("a failed readiness check must never yield a database URL")
             assert len(registrations) == 1
@@ -271,7 +277,9 @@ def test_foreground_start_is_handed_the_built_start_env(
 
     with (
         pytest.raises(TimeoutError),
-        pg_tools.throwaway_postgres(base=foreground_root, foreground=True),
+        pg_tools.throwaway_postgres(
+            base=foreground_root, foreground=True, config=ThrowawayConfig(foreground_root)
+        ),
     ):
         pytest.fail("readiness never succeeds in this test")
 

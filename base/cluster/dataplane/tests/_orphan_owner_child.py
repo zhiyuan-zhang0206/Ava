@@ -10,13 +10,12 @@ import sys
 import time
 from pathlib import Path
 
-import base.cluster.dataplane.pg_throwaway_base as pg_base
 from base.cluster.dataplane import pg_tools
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 
-pg_base.default_base = lambda: Path(sys.argv[1])
 # `cm` must stay referenced: a dropped context manager is finalized, and its
 # GeneratorExit would run the very teardown this test needs never to happen.
-cm = pg_tools.throwaway_postgres()
+cm = pg_tools.throwaway_postgres(config=ThrowawayConfig(Path(sys.argv[1])))
 url = cm.__enter__()
 target = Path(sys.argv[2])
 part = Path(sys.argv[2] + ".part")

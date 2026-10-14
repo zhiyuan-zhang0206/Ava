@@ -11,7 +11,19 @@ hostile to interactive exploration (`SET`, prepared statements, advisory locks
 all misbehave). Derive the direct URL the way the admin plane does:
 
 ```bash
-psql "$(.venv/bin/python -c 'from base.cluster.dataplane.direct_url import direct_db_url; print(direct_db_url())')"
+psql "$(.venv/bin/python - <<'PY'
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
+from base.db.config import db_config_from_boot
+
+boot = ConfigBoot()
+boot.boot()
+machine = machine_from_boot(boot)
+resolve = ClusterDirectUrl(machine.host, gateway_url_reader=lambda: boot.view.gateway.gateway_url)
+print(resolve(db_config_from_boot(boot)))
+PY
+)"
 ```
 
 Pass that URL verbatim — it already carries whatever the cluster's auth needs

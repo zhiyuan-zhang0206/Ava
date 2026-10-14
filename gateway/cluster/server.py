@@ -17,7 +17,7 @@ from uvicorn.config import STARTUP_FAILURE
 
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.port_preflight import serves_off_box
-from base.cluster.transport_encryption import verify_transport_encryption
+from base.cluster.transport_encryption import verify_transport_encryption_declaration
 from base.config import ConfigBoot, settings
 from base.deploy.schema.migrations import assert_schema_current
 from base.host.net.auth import require_cluster_secret
@@ -162,7 +162,9 @@ def _serve_process(process: GatewayProcess, app: Any) -> None:
     )
     host = "" if serves_off_box_gateway else "127.0.0.1"
     if host != "127.0.0.1":
-        verify_transport_encryption(host, authenticated=True)
+        verify_transport_encryption_declaration(
+            host, process.config.view.data_plane.transport_encryption, authenticated=True
+        )
     if _GATEWAY_UVICORN_WORKERS != 1:
         raise RuntimeError(
             "gateway must run one uvicorn worker because rate limiters are process-local"

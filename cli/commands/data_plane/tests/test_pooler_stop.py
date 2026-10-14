@@ -23,6 +23,7 @@ import pytest
 
 from base.cluster import ownership, port_preflight
 from base.cluster.dataplane import pooler as base_pooler
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import settings
 from base.native_process.ownership import OwnedProcess
@@ -153,7 +154,7 @@ def native_pooler(
     directory.mkdir()
     config = directory / "pgbouncer.ini"
     (directory / "userlist.txt").write_text('"ava" ""\n"ava_pooler_admin" ""\n')
-    with throwaway_postgres() as direct:
+    with throwaway_postgres(config=ThrowawayConfig(None)) as direct:
         backend_port = urlsplit(direct).port
         assert backend_port is not None
         identity, port = _start_private_pooler(binary, directory, backend_port)

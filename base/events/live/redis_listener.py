@@ -33,6 +33,7 @@ import redis.asyncio as aredis
 from redis.asyncio.client import PubSub as _RedisPubSub
 
 from base.cluster import inbound_channel
+from base.config import settings
 from base.events.live.redis_client import TransportAwareAsyncConnection
 from base.events.live.redis_resilience import (
     HEALTH_CHECK_INTERVAL_S,
@@ -105,7 +106,7 @@ class RedisInboundListener:
     def __init__(self, redis_url: str, agent_id: int) -> None:
         self._redis_url = redis_url
         self._agent_id = agent_id
-        self._channel = inbound_channel(agent_id)
+        self._channel = inbound_channel(agent_id, settings.data_plane.events_channel)  # ambient: B2
         self._redis: aredis.Redis | None = None
         self._pubsub: _RedisPubSub | None = None
         self._lock = asyncio.Lock()

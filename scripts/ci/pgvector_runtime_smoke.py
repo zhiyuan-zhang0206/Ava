@@ -30,7 +30,9 @@ from urllib.parse import urlsplit
 import psycopg
 
 from base.cluster.dataplane import runtime_binaries as rb
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.dataplane.pg_tools import throwaway_postgres
+from base.config import ConfigBoot
 
 
 def _assert_platform_supported() -> None:
@@ -60,7 +62,10 @@ def main() -> int:
     # The throwaway cluster resolves initdb/pg_ctl via pg_tool, which prefers
     # the vendored tree just built — so everything below runs on the vendored
     # binaries, not any host install.
-    with throwaway_postgres() as url:
+    config = ConfigBoot()
+    config.read_process_environment()
+    throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+    with throwaway_postgres(config=throwaway) as url:
         port = urlsplit(url).port
         with psycopg.connect(url) as conn:
             conn.execute("CREATE EXTENSION vector")
