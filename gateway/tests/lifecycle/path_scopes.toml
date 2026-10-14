@@ -6,6 +6,6 @@
 "tests.fixtures.unit.config_authority" = [
     ".",
 ]
-"tests.fixtures.model_catalog" = [
+"base.packages.tests.model_catalog" = [
     "test_native_cancel.py",
 ]

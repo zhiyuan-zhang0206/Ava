@@ -11,12 +11,12 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import insert
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddBindings
 from gateway.tests.lifecycle.guarded_compact.host.admission import AcceptedHost, admit
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact import apply as compact_apply
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel
-from tests.fixtures.model_catalog import AddBindings
 
 
 def accept_cancel(client: TestClient, accepted: AcceptedHost) -> dict[str, Any]:

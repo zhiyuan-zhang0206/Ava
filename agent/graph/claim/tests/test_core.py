@@ -27,8 +27,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddModels
 from base.paths import ava_home
-from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 

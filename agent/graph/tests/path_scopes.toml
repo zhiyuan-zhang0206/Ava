@@ -10,7 +10,7 @@
     "test_llm_helpers.py",
     "test_llm_understanding_wiring.py",
 ]
-"tests.fixtures.model_catalog" = [
+"base.packages.tests.model_catalog" = [
     "test_build_with_extensions.py",
     "test_interrupt.py",
 ]

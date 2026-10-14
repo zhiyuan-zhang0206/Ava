@@ -11,12 +11,12 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from agent.tests.claim.test_inbound_ownership import insert
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddBindings
 from gateway.tests.lifecycle.guarded_compact.host.admission import admit
 from gateway.tests.lifecycle.guarded_compact.host.faults import install
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel
-from tests.fixtures.model_catalog import AddBindings
 
 
 @pytest.mark.parametrize("failure", ["operational", "pool", "provider", "short"])
