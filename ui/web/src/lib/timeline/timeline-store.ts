@@ -2,8 +2,8 @@
 // A dedicated Zustand store keeps high-frequency timeline updates from waking
 // sidebar, spawn-dialog and cluster-banner subscribers. useTimeline coordinates
 // its activeThreadId with the UI selection; the stores never cross-read.
-// Switching replaces the view from an HTTP tail snapshot and releases inactive
-// histories. Durable history remains available through paging.
+// Switching seeds from a retained reading window or HTTP tail snapshot. Only
+// the selected view owns live updates; inactive windows are frozen in QueryClient.
 
 "use client";
 
@@ -111,11 +111,10 @@ export interface TimelineState {
    * Reset when the selected conversation changes. */
   olderFetchCount: number;
 
-  /** Force the viewport to bottom on selection or send. Reads/history paging
+  /** Force the viewport to bottom on send. Reads/history paging
    * never bump this signal; ordinary content growth follows the sticky controller. */
   scrollToBottomRequest: number;
-  /** Bump `scrollToBottomRequest` — called on send (the switch bump happens
-   * inside `switchThread`). */
+  /** Bump `scrollToBottomRequest` on an explicit send. */
   requestScrollToBottom: () => void;
   setCompactHistoryPages: (pages: number) => void;
   invalidateCompactEpoch: () => void;
@@ -141,7 +140,7 @@ export interface TimelineState {
   reloadSnapshot: (snapshot: BackendTimelineItem[], msg_count: number, hasMoreOlder: boolean) => void;
 
   /** Replace the selected view atomically; inactive views retain no live state. */
-  switchThread: (agentId: number | null, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean) => void;
+  switchThread: (agentId: number | null, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean, buffer?: CompactTransitionBuffer | null) => void;
 
   /** Atomically apply the selected HTTP token snapshot, including its model
    * ceiling and compact thresholds. Live SSE token_usage changes usage only;
@@ -366,11 +365,12 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     });
   },
 
-  switchThread: (agentId, cached, hasMoreOlder) => {
+  switchThread: (agentId, cached, hasMoreOlder, buffer = null) => {
+    if (buffer && buffer.threadId !== agentId) throw new Error("A retained timeline buffer must belong to its selected agent");
     set((s) => ({
       activeThreadId: agentId,
       items: cached ?? [],
-      compactBuffer: null,
+      compactBuffer: buffer ? { ...buffer, epoch: s.compactEpoch + 1 } : null,
       compactEpoch: s.compactEpoch + 1,
       streamingIds: new Set(),
       streamingCode: false,
@@ -385,7 +385,6 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       softCompactTokens: 0,
       hardCompactTokens: 0,
       loadingOlder: false,
-      scrollToBottomRequest: s.scrollToBottomRequest + 1,
     }));
   },
 

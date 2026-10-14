@@ -9,17 +9,16 @@ landing yanked the viewport back by the distance scrolled in between; with
 the anchor below the viewport it scrolled by the anchor's whole displacement
 — the "whole list jumps after loading older messages" report).
 
-The paging request is triggered by reaching the top (auto-load, task #4186):
-scrolling up to scrollTop=0 with older pages remaining fires the fetch for
-the previous window — no control, no pull gesture. The request is slowed with
-a paused route so the user's continued scrolling happens before the fetch is
-released, deterministically.
+Reaching the top stops at the prepared pull boundary without loading. A fresh
+native wheel pull requests the previous window on release. The first request
+is paused so continued reading movement happens before its response lands.
 """
 
 from __future__ import annotations
 
 import re
 import time
+from typing import TypedDict
 
 import httpx
 import pytest
@@ -48,7 +47,10 @@ _SAMPLER_JS = """
       if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) { anchorId = n.dataset.itemId; anchorTop = r.top; break; }
     }
     if (window.__tl.samples.length > 20000) return;
-    window.__tl.samples.push({ t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), anchorId, anchorTop });
+    const reserve = vp.querySelector('[data-history-pull-space]');
+    const reserveBox = reserve?.getBoundingClientRect();
+    const exposedPullSpace = reserveBox ? Math.max(0, Math.min(reserveBox.height, reserveBox.bottom - vpRect.top)) : 0;
+    window.__tl.samples.push({ t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), anchorId, anchorTop, exposedPullSpace });
   };
   let raf = 0;
   const loop = () => { sample('raf'); raf = requestAnimationFrame(loop); };
@@ -63,16 +65,35 @@ _SAMPLER_JS = """
 _SCROLL_UP_JS = """
 () => {
   const vp = window.__tl.vp;
+  const boundary = vp.querySelector('[data-history-pull-space]').getBoundingClientRect().height;
+  window.__tl.arrivalEnded = vp.scrollTop <= boundary;
+  const ended = event => {
+    if (event.target === vp && vp.scrollTop <= boundary + 1) {
+      window.__tl.arrivalEnded = true;
+      vp.removeEventListener('scrollend', ended);
+    }
+  };
+  vp.addEventListener('scrollend', ended);
   let st = vp.scrollTop;
   const step = () => {
-    st = Math.max(0, st - 500);
+    st = Math.max(boundary, st - 500);
     vp.scrollTop = st;
-    if (st > 0) setTimeout(step, 30);
+    if (st > boundary) setTimeout(step, 30);
   };
   step();
   return 'scrolling';
 }
 """
+
+
+class _ReadingSample(TypedDict):
+    anchorId: str | None
+    anchorTop: float
+    exposedPullSpace: float
+
+
+def _reading_top(sample: _ReadingSample) -> float:
+    return sample["anchorTop"] - (sample["exposedPullSpace"] if sample["anchorId"] == "0.0" else 0)
 
 
 def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
@@ -89,14 +110,20 @@ def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
     before = [s for s in samples[:landing_idx] if s["anchorTop"] is not None]
     after = [s for s in samples[landing_idx:] if s["anchorTop"] is not None]
     assert before and after, f"round {round_no}: no anchor measurements around the landing"
-    before_top = before[-1]["anchorTop"]
+    # The fixture's standing prompt (0.0) stays above prepended history. When
+    # only it is visible, a successful page closes the exposed pull space
+    # smoothly; compare its reading position after removing that intended motion.
+    # Real message anchors retain the strict, unadjusted viewport comparison.
+    before_top = _reading_top(before[-1])
     for s in after:
-        assert abs(s["anchorTop"] - before_top) < 3.0, (
+        top = _reading_top(s)
+        assert abs(top - before_top) < 3.0, (
             f"round {round_no}: reading position moved by "
-            f"{s['anchorTop'] - before_top:.1f}px across the load-older landing "
-            f"(before={before_top:.1f}, after={s['anchorTop']:.1f}, "
+            f"{top - before_top:.1f}px beyond pull-space motion across the landing "
+            f"(before={before_top:.1f}, after={top:.1f}, "
             f"st={s['st']}, sh={s['sh']}, n={s['n']}, anchor={s['anchorId']})"
         )
+    assert after[-1]["exposedPullSpace"] < 1, "the released pull left a blank space above history"
 
 
 def _wait_landing(
@@ -136,12 +163,11 @@ def _run_rounds(
     agent_id: int,
     gateway_url: str,
 ) -> int:
-    """Round 1 uses the first top arrival (with the in-flight-scroll scenario);
-    rounds 2+ leave the top and re-arrive — reaching the top auto-fires the
-    next window (task #4186; the QA #2623 repro path). Each round must hold
-    < 3px; the above-anchor stack grows every round, which is exactly where
-    the estimate-based under-compensation lived. Returns the number of rounds
-    completed."""
+    """Each released pull must preserve the reading position within 3px.
+
+    The first request pauses while the reader moves. Later pulls grow the
+    above-anchor stack that exposed estimate-based under-compensation.
+    """
     sample_start = page.evaluate("window.__tl.samples.length")
     _load_older_at_top(page, before_requests, paused_routes)
     _wait_landing(page, init_n, 1, agent_id, gateway_url, before_requests)
@@ -151,7 +177,7 @@ def _run_rounds(
     round_no = 1
     while round_no < 5:
         round_no += 1
-        # Leave the top, then come back — a fresh arrival fires the next window.
+        # Leave the top, then start a separate released pull for the next page.
         page.evaluate("window.__tl.vp.scrollTop = 240")
         page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
         page.wait_for_timeout(200)
@@ -159,10 +185,9 @@ def _run_rounds(
             "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
         )
         sample_start = page.evaluate("window.__tl.samples.length")
-        page.evaluate("window.__tl.vp.scrollTop = 0")
-        page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
+        did_pull = _pull_history_page(page, before_requests)
 
-        deadline = time.monotonic() + 30.0
+        deadline = time.monotonic() + (30.0 if did_pull else 0.0)
         n = before_n
         while time.monotonic() < deadline:
             n = page.evaluate(
@@ -173,14 +198,14 @@ def _run_rounds(
             page.wait_for_timeout(200)
         if n <= before_n:
             # No landing: either history is exhausted (everything the backend
-            # has is already mounted) or the auto-load failed to fire.
+            # has is already mounted) or the released pull failed to load.
             rest = httpx.get(
                 f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
                 timeout=30.0,
             ).json()["items"]
             if before_n < len(rest):
                 raise AssertionError(
-                    f"round {round_no}: reaching the top did not load more history; "
+                    f"round {round_no}: a released pull did not load more history; "
                     f"mounted={before_n} rest_total={len(rest)}, "
                     f"last_samples={page.evaluate('window.__tl.samples')[-6:]}"
                 )
@@ -190,27 +215,34 @@ def _run_rounds(
     return round_no
 
 
-def _load_older_at_top(page: Page, before_requests: list[str], paused_routes: list[Route]) -> None:
-    """Trigger load-older by reaching the top (auto-load, task #4186): scroll
-    up to scrollTop=0 — the resulting scroll event fires the fetch for the
-    previous window. Keep that request paused until the in-flight user scroll
-    has completed."""
+def _pull_history_page(page: Page, before_requests: list[str]) -> bool:
+    """Arrival alone is quiet; a fresh native wheel pull loads one older page."""
+    count = len(before_requests)
     page.evaluate(_SCROLL_UP_JS)
-    deadline = time.monotonic() + 15.0
-    while time.monotonic() < deadline:
-        st = page.evaluate("window.__tl.vp.scrollTop")
-        if st == 0:
-            break
-        page.wait_for_timeout(100)
-    assert page.evaluate("window.__tl.vp.scrollTop") == 0, "viewport never reached the top"
-
-    # Reaching the top fires the request. The route remains paused while
-    # Playwright dispatches the user scroll; a blocking callback would release
-    # the response before the test can move the viewport.
+    page.wait_for_function("() => window.__tl.arrivalEnded", timeout=15_000)
+    assert len(before_requests) == count, "arriving at the top loaded history without a pull"
+    if page.get_by_test_id("load-older-keyboard").count() == 0:
+        return False
+    viewport = page.locator('[data-slot="scroll-area-viewport"]').filter(
+        has=page.locator('[role="log"]')
+    )
+    box = viewport.bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    distance = viewport.locator("[data-history-pull-space]").evaluate(
+        "el => el.getBoundingClientRect().height"
+    )
+    page.mouse.wheel(0, -distance)
     deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline and not before_requests:
+    while time.monotonic() < deadline and len(before_requests) == count:
         page.wait_for_timeout(50)
-    assert before_requests, "reaching the top never triggered the load-older request"
+    assert len(before_requests) == count + 1, "a released pull must request exactly one page"
+    return True
+
+
+def _load_older_at_top(page: Page, before_requests: list[str], paused_routes: list[Route]) -> None:
+    """Hold the first released-pull request until the in-flight reading move completes."""
+    assert _pull_history_page(page, before_requests), "the initial history page is unavailable"
 
     assert len(paused_routes) == 1, "the first paging request was not held"
     before_n = page.evaluate(

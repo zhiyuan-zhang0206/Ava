@@ -4,7 +4,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 
-import { ContextBreakdownCard, type CategoryHighlight } from "@/components/inspector/context-breakdown";
+import { ContextBreakdownCard, type CategoryHighlight } from "@/components/inspector/context-breakdown-body";
 import { AgentViewToolbar } from "@/components/run-timeline/agent-view/agent-view-toolbar";
 import { AgentPending } from "@/components/run-timeline/agent-view/agent-view-group";
 import type { AgentSelection } from "@/components/run-timeline/agent-view/agent-view-nav";

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Timeline View
-description: The conversation timeline renderer (`components/timeline/`) — item kinds, memoized streaming rows, segment dividers, cross-compact scroll-up paging, and deep collapse.
+description: The conversation timeline renderer (`components/timeline/`) — item kinds, memoized streaming rows, continuous segments, cross-compact scroll-up paging, and deep collapse.
 tags:
 - frontend
 ---
@@ -12,28 +12,48 @@ tags:
 
 ## Streaming rows
 
-During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/ChatMarkdown to suppress unchanged-row renders; `TimelineView` itself is memoized against unrelated page renders, and `TurnBlock` compares its rebuilt member ids and summary by value so collapsed historical turns skip each regroup. Every live clock (block chips, the turn header, the compacting block) shares one 100ms ticker in `reasoning-clock`; the interval exists only while a clock is live, and block clocks tick only while the agent is busy (`LiveClockGate`). The load-older overlay animates its spinner only while loading. Grouping is reused while the items reference is unchanged; nested sticky geometry is measured only inside the selected top-level turn. Sticky bottom auto-scroll + last-item fork.
+During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/ChatMarkdown to suppress unchanged-row renders; `TimelineView` itself is memoized against unrelated page renders, and `TurnBlock` compares its rebuilt member ids and summary by value so collapsed historical turns skip each regroup. Every live clock (block chips, the turn header, the compacting block) shares one 100ms ticker in `reasoning-clock`; the interval exists only while a clock is live, and block clocks tick only while the agent is busy (`LiveClockGate`). The load-older circle animates while the reader pulls or a page is loading, and is absent while idle. Grouping is reused while the items reference is unchanged. Sticky bottom auto-scroll + last-item fork.
 
-## Pinned headers
+## Returning to an agent
 
-Message, work-block, and nested detail headers share one frosted-glass pane.
-It keeps the 95% background tint, 30% accent tint on hover, and backdrop blur.
-The pane spans the header and its paint-only 2px top overlap so the title-bar/
-parent-header seam receives the same blur and tint. The button itself stays
-transparent to avoid doubling the tint. The right shadow covers the scrollbar
-gutter and the 1px separator sits inside the bottom edge. Pinning changes no
-box dimensions or nested-header offsets.
+The page keys each mounted timeline by agent and scopes its in-memory bookmark
+by page-entry plus agent. A bookmark includes the visible message coordinate
+and viewport offset; work/detail expansion choices are retained under the same
+identity and Details mode. Returning materializes the prefix before restoring
+that anchor. A former bottom follower returns to its last read item, including
+when new messages arrived while away. Resize, tail repair and trim cannot move
+that bookmark until the reader scrolls or explicitly requests the bottom.
+Sending still jumps to the latest message; a first visit starts at the bottom.
+
+The existing bottom button keeps one fixed footprint and its downward arrow.
+A thin rotating ring runs along its edge while the latest read is queued/running,
+including the composed re-attach read. The button stays enabled: clicking during
+refresh jumps to the current bottom and resumes following incoming messages.
+Finishing removes only the ring, without moving messages. Older paging retains its separate top pull circle. Cold views
+without retained rows keep the existing initial-load UI.
+
+## Header scrolling scope
+
+Human-message and agent-reply titles stay in normal flow, including historical,
+streaming and interrupted replies. Expanded work blocks retain their sticky
+header below HeaderBar. Their expanded detail cards retain a second sticky line
+below the work header, using its measured `--turn-header-h`. Collapsed headers
+stay in flow. The existing frosted pane, geometry tracking and fast-scroll
+suppression apply only to those work and detail headers.
 
 Event timestamps remain visible in message-card headers at narrow widths;
 headers and timestamp text wrap when needed. Standing context notes continue
 to omit timestamps according to their timeline item metadata.
 
-## Segments and dividers
+## Continuous segments
 
-Historical ranks group separately; localized dividers never enter items or anchor counts — the rank-0 dashed divider labels the live boundary into the current post-compact segment ("Context compacted", task #3698), while the other historical ranks carry the scroll-back label (original history before compact); the rule carries long dashes at a 1:1 ratio and a demoted tone, and a plain label carries no arrow glyph (user feedback 2026-09-17, task #3870). The dividers are pure labels — no load-earlier control exists (paging is driven by reaching the top; task #4186).
+Historical ranks group separately for turn grouping and scroll anchors. Compact
+boundaries add no separator, label, gap, or virtual height to the message stream.
+Original messages remain readable in order across each boundary. Older pages
+load after a fresh pull at the top ends, as described below.
 
 During a compact transition, the view renders buffered old groups above the
-new rank-0 window with provisional historical ranks and a dashed live boundary.
+new rank-0 window with provisional historical ranks and no visible boundary.
 Buffered and canonical React keys occupy separate namespaces; canonical history
 already covered by the buffer stays hidden until a single store update replaces
 the buffer with the re-keyed rows. A pre-commit notification captures the topmost visible
@@ -48,11 +68,18 @@ readers continue following the tail. If a finite page budget excludes the
 anchor, the nearest surviving row is used. The ordinary prepend anchor remains
 responsible for non-compact scroll-up pages.
 
+Prepend materialization keeps successfully measured rows above the reading
+anchor at `content-visibility: visible`. Restoring `auto` immediately can revert
+off-screen rows to intrinsic estimates after compensation; the preview's real
+checkpoint reproduced a 378px shift. The bounded DOM window releases measured
+rows as a long conversation scrolls. Abandoned landings restore their original
+visibility styles.
+
 ## Cross-compact paging
 
-The first short viewport fills at most two older pages, stopping once content exceeds its height. After that, only an actual upward scroll movement classified by the sticky controller can load a page at the top. Layout changes, pin echoes, and following the bottom cannot page; a sustained upward gesture has a three-page budget, refilled by downward motion or a 750 ms arrival pause — the landing's own compensation echo is not downward motion. The spinner remains visible while a page is in flight. Deliberate scroll-up can continue through backend `has_more` and the configured `AVA_TIMELINE_COMPACT_HISTORY` depth.
-
-While following the bottom, `display.timeline_retained_items_max` (250 by default) evicts the oldest selected-thread rows and keeps older paging available. A reader parked in history keeps the loaded and visible window until returning to the bottom. The temporary compact transition buffer is kept intact through its anchor handoff, then the canonical list is trimmed.
+Earlier pages use a released native pull with a circular progress indicator and
+stable prepend compensation. Gesture ownership, the prepared reserve and selected
+row retention are described in [[ui/web/src/docs/frontend-components/timeline-view/history-paging.ava.okf.md|Timeline history paging]].
 
 ## Bounded mounted window
 
