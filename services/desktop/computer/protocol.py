@@ -7,8 +7,13 @@ audit per agent — the bridge stamps it from the calling agent's identity.
 
   Request:  {"id": 1, "method": "ping"}
             {"id": 2, "method": "call_tool", "tool": "click", "args": {...}, "agent_id": 42}
-  Response: {"id": 1, "ok": true,  "result": {...}}
+  Response: {"id": 1, "ok": true,  "result": "pong"}
+            {"id": 2, "ok": true,  "result": {"content": [{"type": "text", "text": "..."}], "isError": false}}
             {"id": 2, "ok": false, "error": "message"}
+
+A call_tool result is an MCP CallToolResult dump: the tool's plain dict rides
+as one JSON text block, the contract both the per-agent wrapper and the direct
+dial validate against.
 """
 
 from __future__ import annotations
