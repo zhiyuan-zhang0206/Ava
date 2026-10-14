@@ -10156,6 +10156,39 @@
         "title": "BuildResponse",
         "description": "POST /api/agents/{agent_id}/understanding/build response.\n\n`build_id` and `rebuild_id` are None for a dry run, which writes nothing. `queued` counts the jobs\nnewly on the queue, `merged` those of the same stretch already live. `jobs` may be empty\n(everything chosen is covered): the rebuild of the upper levels is still queued."
       },
+      "ChoiceQuestion": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "single_select",
+              "multi_select"
+            ],
+            "title": "Type"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/NoticeOption"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Options"
+          },
+          "allow_other": {
+            "type": "boolean",
+            "title": "Allow Other",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "options"
+        ],
+        "title": "ChoiceQuestion"
+      },
       "ClusterPanel": {
         "properties": {
           "current_machine": {
@@ -14104,6 +14137,57 @@
         "title": "NeighborsResponse",
         "description": "GET /api/agents/{id}/neighbors response."
       },
+      "NoticeAnswer": {
+        "properties": {
+          "option_ids": {
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": "array",
+            "title": "Option Ids"
+          },
+          "other_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Other Text"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "NoticeAnswer"
+      },
       "NoticeCreateIn": {
         "properties": {
           "title": {
@@ -14157,8 +14241,35 @@
               }
             ],
             "title": "Expire At"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ChoiceQuestion"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TextQuestion"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "multi_select": "#/components/schemas/ChoiceQuestion",
+                    "single_select": "#/components/schemas/ChoiceQuestion",
+                    "text": "#/components/schemas/TextQuestion"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "title"
@@ -14264,6 +14375,42 @@
             ],
             "title": "Reply"
           },
+          "question": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ChoiceQuestion"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TextQuestion"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "multi_select": "#/components/schemas/ChoiceQuestion",
+                    "single_select": "#/components/schemas/ChoiceQuestion",
+                    "text": "#/components/schemas/TextQuestion"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoticeAnswer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "task_id": {
             "anyOf": [
               {
@@ -14295,7 +14442,40 @@
           "expire_at"
         ],
         "title": "NoticeItem",
-        "description": "One agent_notices row — element of GET /api/notices/open (the FYI feed:\nrequire_response false, resolved_at None) and the resolved page of\nGET /api/notices (the cross-fleet resolution history). Joined to the agent label.\n\nServed as an independent feed kept off the agent snapshot — the snapshot\ncarries the open require_response notices inline + an unread FYI count, so a\nlarge FYI backlog never bloats the fleet-wide broadcast.\n\n`resolution` is NULL while open, else one of answered / dismissed / read /\nwithdrawn / superseded; `reply` is the cached user reply text (NULL when none)."
+        "description": "One agent_notices row — element of GET /api/notices/open (the FYI feed:\nrequire_response false, resolved_at None) and the resolved page of\nGET /api/notices (the cross-fleet resolution history). Joined to the agent label.\n\nServed as an independent feed kept off the agent snapshot — the snapshot\ncarries the open require_response notices inline + an unread FYI count, so a\nlarge FYI backlog never bloats the fleet-wide broadcast.\n\n`resolution` is NULL while open, else one of answered / dismissed / read /\nwithdrawn / superseded; `reply` is the cached readable reply (NULL when none). `question` keeps the\noriginal numbered options and `answer` keeps the validated structured reply."
+      },
+      "NoticeOption": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Label"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "NoticeOption"
       },
       "NoticesCursor": {
         "properties": {
@@ -14477,6 +14657,32 @@
               }
             ],
             "title": "Expire At"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ChoiceQuestion"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TextQuestion"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "multi_select": "#/components/schemas/ChoiceQuestion",
+                    "single_select": "#/components/schemas/ChoiceQuestion",
+                    "text": "#/components/schemas/TextQuestion"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
           },
           "task_id": {
             "anyOf": [
@@ -15346,14 +15552,25 @@
               }
             ],
             "title": "Reply"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoticeAnswer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "action"
         ],
         "title": "ResolveNoticeIn",
-        "description": "POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve request body.\n\n`action` is the explicit close verb (never inferred from whether `reply` is\npresent): `answer` / `dismiss` apply to a require_response notice, `read`\napplies to an FYI notice. `reply` is the user's free-text reply — required\nfor `answer`, optional for `dismiss` and `read`. When present it is cached on\nthe notice row and delivered back to the agent as a normal chat inbound."
+        "description": "POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve request body.\n\n`action` is the explicit close verb (never inferred from whether `reply` is\npresent): `answer` / `dismiss` apply to a require_response notice, `read`\napplies to an FYI notice. `answer` is a structured response to an immutable question. `reply` is the\nlegacy free-text response or a numbered CLI/IM answer; it cannot accompany\n`answer`. Answer requires one of them. Optional dismiss/read notes remain\nfree text. The server validates the original question and delivers a\nself-describing system:notice-reply inbound."
       },
       "ResolvedConfigView": {
         "properties": {
@@ -18557,6 +18774,21 @@
         ],
         "title": "TextContentBlock",
         "description": "Text part of a multimodal chat message (OpenAI content-block shape)."
+      },
+      "TextQuestion": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "text",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "TextQuestion"
       },
       "TimelineItem": {
         "properties": {

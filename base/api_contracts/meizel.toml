@@ -1,4 +1,4 @@
-exports = ["agent_contract.py", "caller_identity.py", "config.py", "contracts.py", "idempotency.py", "launch_retry.py", "mcp_tool_contract.py", "memory_search.py", "metric_spec.py", "op_envelope.py", "status.py"]
+exports = ["agent_contract.py", "caller_identity.py", "config.py", "contracts.py", "idempotency.py", "launch_retry.py", "mcp_tool_contract.py", "memory_search.py", "metric_spec.py", "notice_question.py", "op_envelope.py", "status.py"]
 
 [uses]
-"tests" = ["contracts.py", "idempotency.py"]
+"tests" = ["contracts.py", "idempotency.py", "notice_question.py"]

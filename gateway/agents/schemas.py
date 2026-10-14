@@ -23,6 +23,7 @@ from base.agents.messages.kwargs import NoteTag
 from base.agents.observation.snapshot import AgentSnapshot
 from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import AgentStatus
+from base.api_contracts.notice_question import NoticeAnswer, NoticeQuestion
 from ops.rpc_schemas.content import UserContent
 
 
@@ -126,13 +127,23 @@ class ResolveNoticeIn(BaseModel):
 
     `action` is the explicit close verb (never inferred from whether `reply` is
     present): `answer` / `dismiss` apply to a require_response notice, `read`
-    applies to an FYI notice. `reply` is the user's free-text reply — required
-    for `answer`, optional for `dismiss` and `read`. When present it is cached on
-    the notice row and delivered back to the agent as a normal chat inbound.
+    applies to an FYI notice. `answer` is a structured response to an immutable question. `reply` is the
+    legacy free-text response or a numbered CLI/IM answer; it cannot accompany
+    `answer`. Answer requires one of them. Optional dismiss/read notes remain
+    free text. The server validates the original question and delivers a
+    self-describing system:notice-reply inbound.
     """
 
+    model_config = ConfigDict(extra="forbid")
     action: Literal["answer", "dismiss", "read"]
     reply: UserContent | None = None
+    answer: NoticeAnswer | None = None
+
+    @model_validator(mode="after")
+    def validate_answer_intent(self) -> "ResolveNoticeIn":
+        if self.answer is not None and (self.action != "answer" or self.reply is not None):
+            raise ValueError("structured answer requires action=answer and cannot accompany reply")
+        return self
 
 
 class NoticeCreateIn(BaseModel):
@@ -145,6 +156,7 @@ class NoticeCreateIn(BaseModel):
     `expire_at` specifies the notice lifetime; omitted uses the configured default TTL.
     """
 
+    model_config = ConfigDict(extra="forbid")
     title: str
     content: str | None = None
     priority: Priority = Priority.P2
@@ -152,6 +164,13 @@ class NoticeCreateIn(BaseModel):
     blocking: bool = False
     task_id: int | None = None
     expire_at: datetime | None = None
+    question: NoticeQuestion | None = None
+
+    @model_validator(mode="after")
+    def validate_question_obligation(self) -> "NoticeCreateIn":
+        if self.question is not None and not self.require_response:
+            raise ValueError("question requires require_response=True")
+        return self
 
 
 class NoticeEditIn(BaseModel):
@@ -177,7 +196,8 @@ class NoticeItem(BaseModel):
     large FYI backlog never bloats the fleet-wide broadcast.
 
     `resolution` is NULL while open, else one of answered / dismissed / read /
-    withdrawn / superseded; `reply` is the cached user reply text (NULL when none).
+    withdrawn / superseded; `reply` is the cached readable reply (NULL when none). `question` keeps the
+    original numbered options and `answer` keeps the validated structured reply.
     """
 
     id: int
@@ -193,6 +213,8 @@ class NoticeItem(BaseModel):
     resolved_at: datetime | None = None
     resolution: str | None = None
     reply: str | None = None
+    question: NoticeQuestion | None = None
+    answer: NoticeAnswer | None = None
     # The task this notice belongs to, or None — lets the feed group by task.
     task_id: int | None = None
     expire_at: datetime

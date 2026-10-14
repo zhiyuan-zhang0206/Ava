@@ -13,5 +13,21 @@
   "marking": "标记中…",
   "answerPlaceholder": "你的回复…（回车发送）",
   "notePlaceholder": "可选备注…（回车标记已读）",
-  "expires": "{time}过期"
+  "expires": "{time}过期",
+  "singleSelect": "请选择一项",
+  "multiSelect": "请选择一项或多项",
+  "openQuestion": "你的回答",
+  "openPlaceholder": "写下你的回答…",
+  "other": "其他",
+  "otherAnswer": "你的其他答案",
+  "otherPlaceholder": "描述你的答案，可以通过编号引用选项。",
+  "additionalNote": "添加补充说明",
+  "noteForAnswer": "对所选答案的补充说明（可选）…",
+  "needsAnswer": "需要你回答",
+  "closeQuestion": "关闭此问题，不作回答",
+  "submitAnswer": "提交回答",
+  "submitting": "提交中…",
+  "noLongerAvailable": "此问题已无法回答，请刷新查看最新状态。",
+  "originalOptions": "原始编号选项",
+  "selected": "已选择"
 }

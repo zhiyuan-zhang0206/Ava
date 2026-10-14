@@ -13,5 +13,21 @@
   "marking": "Marking…",
   "answerPlaceholder": "Your answer… (Enter to send)",
   "notePlaceholder": "Optional note… (Enter to mark read)",
-  "expires": "Expires {time}"
+  "expires": "Expires {time}",
+  "singleSelect": "Choose one",
+  "multiSelect": "Choose one or more",
+  "openQuestion": "Your answer",
+  "openPlaceholder": "Write your answer…",
+  "other": "Other",
+  "otherAnswer": "Your alternative answer",
+  "otherPlaceholder": "Describe your answer. You can refer to options by number.",
+  "additionalNote": "Add a note",
+  "noteForAnswer": "Optional explanation for your selected answer…",
+  "needsAnswer": "Needs your answer",
+  "closeQuestion": "Close without answering",
+  "submitAnswer": "Submit answer",
+  "submitting": "Submitting…",
+  "noLongerAvailable": "This question is no longer available. Refresh to see its current status.",
+  "originalOptions": "Original numbered options",
+  "selected": "Selected"
 }

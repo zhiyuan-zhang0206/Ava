@@ -140,6 +140,7 @@ def notify(
     task: int | None = None,
     expire_at: datetime | timedelta | str | None = None,
     idempotency_key: str,
+    question: dict[str, object] | None = None,
 ) -> "Notice":
     """Post one notice, replacing any previous open notice.
 
@@ -159,7 +160,11 @@ def notify(
 
     Args:
         content: optional detail. Offer discrete choices as A / B / C so the
-            user can reply with one letter (the reply is always free text).
+            user can reply with one letter for legacy free-text notices.
+        question: one structured question: type=text, or type=single_select /
+            multi_select with ordered options (id, label, optional description)
+            and allow_other. Requires require_response=True. Options are numbered
+            from 1; Other follows them. The question and its context are immutable.
         task: groups your notices by task in the user's queue.
         expire_at: expiration deadline; omit it to use the configured lifetime.
         idempotency_key: reuse for the same notice across explicit retries.
@@ -180,6 +185,12 @@ def notify(
     validate_priority(priority)
     if blocking and not require_response:
         raise ValueError("blocking=True requires require_response=True (an FYI never stalls you)")
+
+    from base.api_contracts.notice_question import parse_question
+
+    parsed_question = parse_question(question) if question is not None else None
+    if parsed_question is not None and not require_response:
+        raise ValueError("question requires require_response=True")
 
     expire_at_iso: str | None = None
     if expire_at is not None:
@@ -213,6 +224,11 @@ def notify(
             "blocking": blocking,
             "task_id": task,
             "expire_at": expire_at_iso,
+            **(
+                {"question": parsed_question.model_dump(mode="json")}
+                if parsed_question is not None
+                else {}
+            ),
         },
         idempotency_key=idempotency_key,
     )

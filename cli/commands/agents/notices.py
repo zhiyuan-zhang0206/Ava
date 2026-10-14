@@ -19,6 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from base.api_contracts.idempotency import keyed_headers
+from base.api_contracts.notice_question import parse_question, question_instructions
 
 _TIMEOUT_S = 15.0
 
@@ -50,6 +51,8 @@ def _print_notice(
     )
     if n.get("content"):
         print(f"    {n['content'][:120]}")
+    if n.get("question") is not None:
+        print(question_instructions(parse_question(n["question"])))
 
 
 def _agent_status_map(

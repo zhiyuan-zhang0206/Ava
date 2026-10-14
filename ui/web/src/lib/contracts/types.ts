@@ -122,6 +122,8 @@ export type NoticeItem = Schemas["NoticeItem"];
 // awaiting (require_response) + one keyset page of the resolved history.
 export type NoticesFeed = Schemas["NoticesFeed"];
 export type ResolveNoticeIn = Schemas["ResolveNoticeIn"];
+export type NoticeQuestion = NonNullable<OpenNotice["question"]>;
+export type NoticeAnswer = Schemas["NoticeAnswer"];
 export type AgentMessageEnqueued = Schemas["AgentMessageEnqueued"];
 export type PendingInbound = Schemas["PendingInbound"];
 
