@@ -20,6 +20,7 @@
   "composerInput": "给 agent 发送消息",
   "composerPlaceholder": "发送消息",
   "composerPlaceholderResurrect": "发送消息以复活此 agent",
+  "replySuggestionKeys": "上下方向键切换候选回复，右方向键填入输入框，接受后按回车发送。",
   "failed": "失败",
   "filesUploadingHint": "文件上传中——回车将只发送文字，文件上传完成后送达。",
   "deliveryUnconfirmedToast": "暂时无法确认消息是否已收到，草稿已保留。"

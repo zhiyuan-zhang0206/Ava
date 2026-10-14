@@ -18,8 +18,9 @@
   "checkGateway": "Couldn't load — check the gateway and reload.",
   "removeImage": "Remove {name}",
   "composerInput": "Message your agent",
-  "composerPlaceholder": "send a message",
-  "composerPlaceholderResurrect": "send a message to resurrect this agent",
+  "composerPlaceholder": "Send a message",
+  "composerPlaceholderResurrect": "Send a message to resurrect this agent",
+  "replySuggestionKeys": "Up and Down choose a reply. Right fills the input. Enter sends after accepting.",
   "failed": "Failed",
   "filesUploadingHint": "Uploading file(s) — Enter sends the text now; files are delivered when the upload finishes.",
   "deliveryUnconfirmedToast": "Message receipt could not be confirmed. Your draft has been kept."
