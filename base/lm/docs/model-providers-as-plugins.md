@@ -58,7 +58,7 @@ The repository ships this default enabled set:
 |---|---|---|---|
 | `lm_alibaba` | `qwen3.8-` | `ReasoningContentChatModel` | `lm_openai` (`openai`) |
 | `lm_anthropic` | `claude-` | `ThinkingTokensChatAnthropic` | `lm_anthropic` (`anthropic`) |
-| `lm_deepseek` | `deepseek-` | `ThinkingTokensChatAnthropic` | `lm_anthropic` (`anthropic`) |
+| `lm_deepseek` | `deepseek-` | `DeepSeekChatModel` | `lm_anthropic` (`anthropic`); schema output uses `lm_openai` (`openai`) |
 | `lm_google` | `gemini-` | `ChatGoogleGenerativeAI` | `lm_google` (`google_genai`) |
 | `lm_moonshot` | `kimi-` | `ChatMoonshot` | `lm_moonshot` (`moonshot`) |
 | `lm_openai` | `gpt-` | `ChatOpenAI` Responses API | `lm_openai` (`openai`) |
@@ -72,6 +72,13 @@ Anthropic registration also classifies DeepSeek. `ReasoningContentChatModel`
 subclasses `ChatOpenAI`, so the OpenAI registration also classifies Alibaba,
 Xiaomi, and Zhipu. A binding that reuses one of those clients omits
 `stop_spec`; a client with a distinct emitted key owns one registration.
+
+DeepSeek uses its Anthropic-compatible endpoint for ordinary chat and tools.
+`with_structured_output(method="json_schema")` uses the same configured model on its
+Responses endpoint, submitting a native schema with strict mode and retaining raw usage.
+This transport belongs to the provider; feature callers do not construct vendor clients
+or change model selection. See [reply-suggestion verification](../../../gateway/agents/docs/reply-suggestion.ava.okf.md#verification-scope)
+for the observed limits of the provider's schema-adherence guarantee.
 
 ## Loading and startup
 

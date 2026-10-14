@@ -88,11 +88,10 @@ interface Props {
   // column. One falsy convention shared with TimelineView/HeaderBar/
   // PendingStrip: undefined, never "" (audit C2).
   maxWidthCss?: string;
-  // A drafted reply shown as grey ghost text while the input is empty: it takes
-  // the placeholder's place, so typing hides it and clearing the input brings it
-  // back. ArrowRight in the empty input accepts it (fills the input, caret at the
-  // end). Owned by use-reply-suggestion; absent/null = the normal placeholder.
-  suggestion?: string | null;
+  // Drafted replies shown in the empty input's placeholder. Up/Down selects a
+  // candidate; Right fills its text, with the caret at the end. The position
+  // marker is display-only. Owned by use-reply-suggestion; absent/null = no replies.
+  suggestions?: readonly string[] | null;
 }
 
 // One image attached to the composer, before / after its silent upload.
@@ -181,13 +180,25 @@ function readSendAttempt(agentId: number): SendAttempt | null {
   }
 }
 
-export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, suggestion = null, children, details }: Props) {
+export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, suggestions = null, children, details }: Props) {
   const t = useTranslations("common");
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
     if (agentId == null) return '';
     return readSession(draftKey(agentId)) ?? '';
   });
+  // A response's selection survives accepting/editing/clearing its text. Only a
+  // successful send consumes it; another response or agent starts at index zero.
+  const [replySelection, setReplySelection] = useState<{
+    options: readonly string[];
+    agentId: number | null;
+    index: number;
+    consumed: boolean;
+  } | null>(null);
+  const currentReplySelection =
+    replySelection !== null && replySelection.options === suggestions && replySelection.agentId === agentId
+      ? replySelection : null;
+  const replyIndex = currentReplySelection?.index ?? 0;
   // Caret offset in `value`. The slash dropdown and the instruction hint are
   // both scoped to the token / command segment the caret is in, so the caret is
   // state here, not just a DOM detail: every move has to re-render them. Kept
@@ -427,6 +438,11 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
         // A request for A can finish after the user switched to B. Clear only
         // the still-visible snapshot belonging to A, never B's current draft.
         if (prevAgentIdRef.current === sendingAgentId) {
+          if (suggestions) {
+            setReplySelection({
+              options: suggestions, agentId: sendingAgentId, index: replyIndex, consumed: true,
+            });
+          }
           setValue((current) => (current.trim() === content ? "" : current));
           setCaret(0);
           clearImages();
@@ -494,7 +510,12 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
 
   // The suggestion is offered only while the input is truly empty, which is also
   // exactly when the browser shows the placeholder it replaces.
-  const offeredSuggestion = value === "" && suggestion ? suggestion : null;
+  const offeredSuggestion =
+    value === "" && !currentReplySelection?.consumed && suggestions?.length
+      ? suggestions[replyIndex] : null;
+  const suggestionPlaceholder =
+    offeredSuggestion !== null && suggestions && suggestions.length > 1
+      ? `[${replyIndex + 1}/${suggestions.length}] ${offeredSuggestion}` : offeredSuggestion;
   const acceptSuggestion = (text: string) => {
     pendingCaret.current = text.length;
     setCaret(text.length);
@@ -682,8 +703,9 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           ref={taRef}
           data-testid="composer-input"
           aria-label={t("composerInput")}
+          aria-description={offeredSuggestion !== null ? t("replySuggestionKeys") : undefined}
           placeholder={
-            offeredSuggestion ??
+            suggestionPlaceholder ??
             (agentTerminated ? t("composerPlaceholderResurrect") : t("composerPlaceholder"))
           }
           value={value}
@@ -745,11 +767,9 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
                 if (ac.selectActive()) return;
               }
             }
-            // ArrowRight is otherwise unused in an empty input, so it is free to
-            // accept the ghost suggestion. The slash dropdown cannot be open here
-            // (no `/token` in an empty value), but the check keeps that explicit.
+            // Plain arrows browse/accept the empty input's candidates. Slash
+            // completion, IME composition and text editing keep their own keys.
             if (
-              e.key === "ArrowRight" &&
               offeredSuggestion !== null &&
               !composing &&
               !composerLocked &&
@@ -759,9 +779,24 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
               !e.altKey &&
               !e.metaKey
             ) {
-              e.preventDefault();
-              acceptSuggestion(offeredSuggestion);
-              return;
+              if (e.key === "ArrowRight") {
+                e.preventDefault();
+                acceptSuggestion(offeredSuggestion);
+                return;
+              }
+              if (
+                suggestions && suggestions.length > 1 &&
+                (e.key === "ArrowUp" || e.key === "ArrowDown")
+              ) {
+                e.preventDefault();
+                const step = e.key === "ArrowDown" ? 1 : -1;
+                setReplySelection({
+                  options: suggestions, agentId,
+                  index: (replyIndex + step + suggestions.length) % suggestions.length,
+                  consumed: false,
+                });
+                return;
+              }
             }
             if (e.key === "Enter" && !e.shiftKey && !composing) {
               e.preventDefault();
