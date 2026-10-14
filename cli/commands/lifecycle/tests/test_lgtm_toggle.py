@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -11,6 +10,7 @@ from base.deploy.lifecycle import service_selection
 from base.deploy.lifecycle.service_selection import ServiceSelection
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import lgtm_toggle as lgtm
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision import roster
@@ -37,7 +37,7 @@ def _wire(
 def test_on_preserves_explicit_other_service_choices(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -67,7 +67,7 @@ def test_on_preserves_explicit_other_service_choices(
 def test_off_disables_backends_even_on_role_declared_station(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -102,7 +102,7 @@ def test_off_disables_backends_even_on_role_declared_station(
 def test_off_only_backend_allowlist_does_not_enable_all_services(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -142,7 +142,7 @@ def test_off_only_backend_allowlist_does_not_enable_all_services(
 def test_normal_start_refusal_is_not_reported_as_toggle_success(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,

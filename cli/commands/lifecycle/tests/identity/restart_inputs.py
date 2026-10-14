@@ -67,11 +67,11 @@ def restart_command_environment(
     monkeypatch.setattr(
         _start_mod, "ensure_gateway_data_plane", ignore_retained_children(lambda: 0)
     )
-    monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda: None)
+    monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda _config: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         bringup,
         "complete_gateway_data_plane",
-        lambda **_kw: None,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda _config, **_kw: None,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     from cli.commands.lifecycle.root_driver import LaunchOutcome
 
@@ -110,7 +110,7 @@ def restart_command_environment(
     # ensures secondary tests can also reuse the default noop.
     monkeypatch.setattr(_repo_commands, "probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
     # assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
-    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 0)
+    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda _db_url: 0)  # pyright: ignore[reportUnknownArgumentType]
     # Root service preparation must not install frontend dependencies in unit tests.
     from cli.commands import _repo
     from cli.commands.lifecycle import root_driver

@@ -51,7 +51,8 @@ _FACTORY_CHECKOUT = {
         "    return [(1, 'digest', 'host=' + database_factory())]\n"
     ),
     "cli/database/__init__.py": (
-        "def operator_database_factory(*, local_host):\n    return lambda: local_host\n"
+        "def open_operator_database(config, gate, direct_url):\n    return None\n\n\n"
+        "def operator_database_factory(*, local_host, open_database):\n    return lambda: local_host\n"
     ),
     "cli/database/runtime.py": (
         "class _Machine:\n    host = 'gateway'\n\n\n"

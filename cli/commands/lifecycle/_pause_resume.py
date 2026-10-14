@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Concatenate
 
-from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.events.live.bus import EventBus
+from cli.database import OperatorDatabaseFactory
 
 
 @dataclass(frozen=True)
@@ -35,15 +35,17 @@ def exclusive_resources[**P, R](operation: Callable[P, R]) -> Callable[P, R]:
 
 def resume_after_start[**P](
     start: Callable[
-        Concatenate[PauseOwnerSnapshot | None, DatabaseFactory, P], int | StartDelegation
+        Concatenate[PauseOwnerSnapshot | None, OperatorDatabaseFactory, P], int | StartDelegation
     ],
-) -> Callable[Concatenate[PauseOwnerSnapshot | None, DatabaseFactory, MachineIdentity, P], int]:
+) -> Callable[
+    Concatenate[PauseOwnerSnapshot | None, OperatorDatabaseFactory, MachineIdentity, P], int
+]:
     """Keep admission closed until a real start passes its serving gate."""
 
     @exclusive_resources
     def start_locked(
         operation: PauseOwnerSnapshot | None,
-        database_factory: DatabaseFactory,
+        database_factory: OperatorDatabaseFactory,
         machine: MachineIdentity,
         /,
         *args: P.args,
@@ -78,7 +80,7 @@ def resume_after_start[**P](
     @wraps(start)
     def wrapped(
         operation: PauseOwnerSnapshot | None,
-        database_factory: DatabaseFactory,
+        database_factory: OperatorDatabaseFactory,
         machine: MachineIdentity,
         /,
         *args: P.args,

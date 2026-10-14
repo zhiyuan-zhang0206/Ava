@@ -575,17 +575,23 @@ def test_launch_delivers_each_service_its_class_token(
 ) -> None:
     tokens = _tokens(gateway).api
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: True)
-    assert bringup.api_delivery("gateway") == {api.API_TOKEN_ENV: tokens.gateway}
-    assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: tokens.runner}
+    assert bringup.api_delivery("gateway", remote_data_plane=False) == {
+        api.API_TOKEN_ENV: tokens.gateway
+    }
+    assert bringup.api_delivery("runner", remote_data_plane=False) == {
+        api.API_TOKEN_ENV: tokens.runner
+    }
 
 
 def test_a_pure_runner_launch_delivers_its_capability_token(
     gateway: Path, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
-    assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: _tokens(gateway).api.runner}
+    assert bringup.api_delivery("runner", remote_data_plane=False) == {
+        api.API_TOKEN_ENV: _tokens(gateway).api.runner
+    }
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
-        bringup.api_delivery("gateway")
+        bringup.api_delivery("gateway", remote_data_plane=False)
 
 
 def test_api_class_follows_the_login_class_else_the_single_capability() -> None:

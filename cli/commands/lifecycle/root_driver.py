@@ -17,6 +17,7 @@ from base.config import settings
 from base.host.permissions_helper.client import HelperFactory
 from base.log import logger
 from base.sessions.helperproc import HELPER_PROTOCOLS, helper_spawn_committed, helper_wire_ok
+from cli.commands.data_plane.config import data_plane_config_from_settings
 from cli.commands.probe import ReadinessWait
 from cli.start_runtime import StartRuntime
 from services.supervision.roster import service_spec
@@ -64,7 +65,7 @@ class LaunchOutcome(NamedTuple):
     failed: tuple[str, ...]
 
 
-def service_extra_env(spec: ServiceSpec) -> dict[str, str]:
+def service_extra_env(spec: ServiceSpec, *, remote_data_plane: bool) -> dict[str, str]:
     """Bind profile, database login and API token to one service, never its parent."""
     from base.telemetry.lgtm_local import BACKENDS, service_environment
     from cli.commands.data_plane.bringup import api_delivery, db_delivery
@@ -74,12 +75,13 @@ def service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     if marker is not None:
         extra["AVA_PROCESS_PROFILE"] = marker
     cls = service_spec.db_access(spec)
-    delivery = db_delivery(cls) if cls is not None else {}
+    delivery = db_delivery(cls, remote_data_plane=remote_data_plane) if cls is not None else {}
     if delivery:
         extra.update(delivery)
     elif marker == "agent":
         extra["AVA_DB_URL"] = runner_db_url_projection()
-    extra.update(api_delivery(api) if (api := service_spec.api_access(spec)) is not None else {})
+    if (api := service_spec.api_access(spec)) is not None:
+        extra.update(api_delivery(api, remote_data_plane=remote_data_plane))
     if spec.plugin_config is not None:
         from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
         from base.packages.plugins.config_registration import service_config_packet
@@ -206,11 +208,12 @@ def tree_manifest(
     """Prepare launch inputs without changing any running generation's seed."""
     from services.supervision.ava_root_glue.manifests import build_manifest
 
+    remote = data_plane_config_from_settings().is_remote
     return build_manifest(
         capabilities=sorted(roles),
         repo_root=repo,
         specs=roster,
-        environments={spec.session: service_extra_env(spec) for spec in roster},
+        environments={s.session: service_extra_env(s, remote_data_plane=remote) for s in roster},
     )
 
 

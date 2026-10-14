@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
+from base.host.net.predicates import is_loopback_host
+
 
 def url_with_userinfo(url: str, user: str, password: str) -> str:
     """Return `url` with its userinfo set to `user:password` (`scheme://user:pw@host`;
@@ -123,6 +125,17 @@ def url_host(url: str, fallback: str = "127.0.0.1") -> str:
     guard still matches the placeholder URL byte-for-byte.
     """
     return urlsplit(url).hostname or fallback
+
+
+def names_foreign_host(*urls: str) -> bool:
+    """Whether any of `urls` dials a host other than this box (a non-loopback host).
+
+    The one owner of the "is this data plane hosted off-box" fact: the configuration's
+    `is_remote` and the data-plane commands' config value both answer it here, so a URL
+    swapped on a copy of the config moves the answer with it. A host-less URL reads as
+    loopback (`url_host`'s fallback), so the placeholder and unix-socket forms are local.
+    """
+    return any(not is_loopback_host(url_host(url)) for url in urls)
 
 
 _USERINFO_PASSWORD_RE = re.compile(r"(://[^/@]*:)[^/@]*(@)")

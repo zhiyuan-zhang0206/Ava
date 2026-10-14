@@ -29,7 +29,6 @@ BY_DESIGN: dict[str, str] = {
     "tests/e2e/": "end-to-end tests drive the whole stack from outside every package",
     "tests/factories/": "shared test-data factories",
     "tests/fixtures/": "shared fixture plugins loaded by the root conftest.py",
-    "tests/integration/test_cluster_instance.py": "real-process proof with its own CI wiring",
     "tests/integration/test_grafana_native_runtime.py": "real-process proof with its own CI wiring",
     "tests/integration/test_schedule_runner_cleanup.py": "real-process proof with its own CI wiring",
     "tests/ui/": "tests of ui artifacts (Android overlay and update check, app CI and release workflows); ui/ is not a Python package",
@@ -75,10 +74,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/components/base/test_crash_row_writers.py": (
         "contract",
         "scans every production module for writers of the crash-row predicate fields",
-    ),
-    "tests/components/base/test_no_secrets_on_argv.py": (
-        "integration",
-        "one guard over every launch path (cli, schedule manager, sdk) for secrets on a command line: spans ava, base, cli, services.wake.schedule_manager, no one of which may import all the others",
     ),
     "tests/components/base/test_proc_contract.py": (
         "contract",

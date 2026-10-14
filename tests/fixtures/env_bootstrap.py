@@ -204,7 +204,7 @@ os.environ["AVA_TRANSPORT_ENCRYPTION"] = "overlay"
 # PgBouncer defaults ON in prod, but the suite pins it OFF for determinism: with
 # no running pooler, AVA_DB_URL (the one dial URL) stays direct, and pinning the
 # toggle keeps the real ensure_cluster_instance bring-up
-# (tests/integration/test_cluster_instance.py) from spawning a pgbouncer process.
+# (cli/commands/data_plane/tests/test_cluster_instance_native.py) from spawning a pgbouncer process.
 # Tests that exercise the pooled path opt in explicitly (monkeypatch enabled=True).
 os.environ["AVA_PGBOUNCER_ENABLED"] = "false"
 

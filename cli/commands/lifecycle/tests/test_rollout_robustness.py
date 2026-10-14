@@ -41,6 +41,7 @@ from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.telemetry import EventPipeline
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause
@@ -72,7 +73,7 @@ def test_roster_flags_a_live_host_that_carries_a_stop_marker() -> None:
 
 def test_declined_restart_reports_its_own_exit_code(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -111,7 +112,7 @@ def test_declined_restart_reports_its_own_exit_code(
 
 def test_failed_restart_after_the_stop_is_not_reported_as_declined(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -175,7 +176,7 @@ def _paused_posture(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_declined_restart_releases_a_pause_nothing_else_owns(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -203,7 +204,7 @@ def test_declined_restart_releases_a_pause_nothing_else_owns(
 def test_declined_restart_leaves_a_stop_holds_pause_alone(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -349,7 +350,7 @@ async def test_a_drain_failure_in_restart_leaves_the_host_wakeable(
 
     rc = _stop_commands.cmd_restart(
         retained_children=[],
-        database_factory=lambda: database,
+        database_factory=lambda: database,  # pyright: ignore[reportArgumentType] — a fake factory; the start leg is stubbed
         producer=operator_pipeline,
         command=command_runtime,
     )

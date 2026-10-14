@@ -3,7 +3,6 @@
 import subprocess as subprocess
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,12 +11,12 @@ import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
-from base.agents.context.clients import DatabaseFactory
 from base.telemetry import EventPipeline
 from cli.commands._setup import collect_setup_values as _real_collect_setup_values
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     hermetic_start as hermetic_start,
 )
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_fakes import FakeResult, git_aware
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -29,7 +28,7 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 def test_cmd_start_needs_no_tty(
     db_url: str,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -60,7 +59,7 @@ def test_cmd_start_needs_no_tty(
 def test_root_launch_uses_the_start_callers_child_owner(
     db_url: str,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -95,7 +94,7 @@ def test_cmd_start_aborts_when_schema_mismatched(
     monkeypatch: pytest.MonkeyPatch,
     capsys,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -106,7 +105,7 @@ def test_cmd_start_aborts_when_schema_mismatched(
     _ = tmp_path
     launch = MagicMock()
     monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
-    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 1)
+    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda _db_url: 1)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _start_commands.cmd_start(
         retained_children=[],
@@ -123,7 +122,7 @@ def test_start_missing_capability_reports_serve_flags_only(
     monkeypatch: pytest.MonkeyPatch,
     capsys,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -167,7 +166,7 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     monkeypatch: pytest.MonkeyPatch,
     capsys,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -200,7 +199,7 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     monkeypatch: pytest.MonkeyPatch,
     capsys,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -266,7 +265,7 @@ def test_start_refuses_capabilities_that_differ_from_the_ones_init_recorded(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -306,7 +305,7 @@ def test_start_refuses_capabilities_that_differ_from_the_ones_init_recorded(
 
 def test_start_requires_child_owner_before_entering_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -321,7 +320,7 @@ def test_start_requires_child_owner_before_entering_lifecycle(
 
 
 def test_start_refreshes_only_its_invocations_machine(
-    operator_database: DatabaseFactory,
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     command_runtime: CommandRuntime,
 ) -> None:

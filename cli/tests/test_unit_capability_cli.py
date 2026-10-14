@@ -150,7 +150,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     with monkeypatch.context() as scoped:
         scoped.setenv("AVA_HOME", str(runner))
         scoped.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
-        assert bringup.db_delivery("runner") == {
+        assert bringup.db_delivery("runner", remote_data_plane=False) == {
             "AVA_DB_URL": capability.dsn,
             delivery.GENERATION_ENV: "0",
         }

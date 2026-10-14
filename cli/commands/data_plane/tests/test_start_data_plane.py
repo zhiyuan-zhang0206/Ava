@@ -1,5 +1,6 @@
 """Data-plane startup ordering, authority and prerequisite contracts."""
 
+import dataclasses
 import subprocess
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -14,7 +15,9 @@ from base.config import settings
 from base.db.tests.fakes import patch_database
 from cli import start_identity
 from cli.commands.data_plane import cluster_instance as _ci
+from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import cluster_record
+from cli.database import OperatorDatabaseFactory
 from cli.database.tests.command_inputs import command_machine as command_machine
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -34,20 +37,27 @@ class _Ledger:
 class _Plane:
     """Recorded effects of `complete_gateway_data_plane` and the fake start state."""
 
-    def __init__(self) -> None:
+    def __init__(self, config: DataPlaneConfig) -> None:
+        self.config = config
         self.calls: list[str] = []
         self.state = {"active": True, "birth": False}
 
 
 @pytest.fixture
-def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
+def plane(monkeypatch: pytest.MonkeyPatch, data_plane_config: DataPlaneConfig) -> _Plane:
     """Every effect of `complete_gateway_data_plane`, recorded in order."""
     from base.cluster import authority
     from base.host.db_authority import delivery, ledger
     from cli.commands.converge import health_preflight
     from cli.commands.data_plane import bringup
 
-    recorded = _Plane()
+    recorded = _Plane(
+        dataclasses.replace(
+            data_plane_config,
+            db_url="postgresql://ava@127.0.0.1:6433/ava",
+            redis_url="redis://127.0.0.1:6380/0",
+        )
+    )
     calls, state = recorded.calls, recorded.state
 
     def record(name: str, result: object = None) -> object:
@@ -68,8 +78,8 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     monkeypatch.setattr(bringup, "prove_generation_logins", record("prove-logins"))
     monkeypatch.setattr(bringup, "adopt_gateway_login", record("adopt"))
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:6433/ava")
-    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://127.0.0.1:6380/0")
+    # `cluster.db_identity()` (base.cluster) still names the database from the global settings.
+    monkeypatch.setattr(settings.data_plane, "db_url", recorded.config.db_url)
     monkeypatch.setattr(cluster, "ensure_pgvector_extension", record("extension"))
 
     def fake_ledger(_home: object) -> _Ledger:
@@ -105,13 +115,15 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
 
 def test_ordinary_start_regrants_and_checks_before_the_pooler(
     plane: _Plane,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_machine: MachineIdentity,
 ) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-    complete_gateway_data_plane(database_factory=operator_database, machine=command_machine)
+    complete_gateway_data_plane(
+        plane.config, database_factory=operator_database, machine=command_machine
+    )
     assert plane.calls == [
         "start",
         "extension",
@@ -129,14 +141,16 @@ def test_ordinary_start_regrants_and_checks_before_the_pooler(
 
 def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(
     plane: _Plane,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_machine: MachineIdentity,
 ) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     plane.state["birth"] = True
-    complete_gateway_data_plane(database_factory=operator_database, machine=command_machine)
+    complete_gateway_data_plane(
+        plane.config, database_factory=operator_database, machine=command_machine
+    )
     assert plane.calls == [
         "start",
         "extension",
@@ -158,14 +172,17 @@ def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(
 
 def test_release_readiness_performs_no_schema_or_grant_writes(
     plane: _Plane,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_machine: MachineIdentity,
 ) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     complete_gateway_data_plane(
-        refresh_schema=False, database_factory=operator_database, machine=command_machine
+        plane.config,
+        refresh_schema=False,
+        database_factory=operator_database,
+        machine=command_machine,
     )
     assert plane.calls == [
         "start",
@@ -181,7 +198,7 @@ def test_release_readiness_performs_no_schema_or_grant_writes(
 def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
     plane: _Plane,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -194,7 +211,9 @@ def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
 
     monkeypatch.setattr(authority, "check_invariant", fail)
     with pytest.raises(model.CatalogRefusedError, match="foreign grant"):
-        complete_gateway_data_plane(database_factory=operator_database, machine=command_machine)
+        complete_gateway_data_plane(
+            plane.config, database_factory=operator_database, machine=command_machine
+        )
     assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor"]
 
 
@@ -211,7 +230,9 @@ class _Authority:
 
 
 def test_memory_vectors_prepared_as_owner_only_for_pgvector(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """The pgvector table is start-time DDL through the owner authority at the
     provider's dimension; any other backend dials nothing."""
@@ -234,21 +255,23 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
 
     monkeypatch.setattr(factory, "get_descriptor", descriptor)
 
-    monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
-    prepare_memory_vectors(database_factory=operator_database)
+    data_plane_config = dataclasses.replace(data_plane_config, memory_search_backend="numpy")
+    prepare_memory_vectors(data_plane_config, database_factory=operator_database)
     assert calls == []
 
-    monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
-    prepare_memory_vectors(database_factory=operator_database)
+    data_plane_config = dataclasses.replace(data_plane_config, memory_search_backend="pgvector")
+    prepare_memory_vectors(data_plane_config, database_factory=operator_database)
     assert calls == [
-        f"descriptor:{settings.services.embedding_backend}",
+        f"descriptor:{data_plane_config.embedding_backend}",
         "owner-session",
         "prepare:owner-connection:3072",
     ]
 
 
 def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
+    monkeypatch: pytest.MonkeyPatch,
+    operator_database: Callable[[], Any],
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """A remote-managed plane has no local owner authority; its provider URL
     carries the table DDL, exactly as it carries the plane's migrations."""
@@ -267,19 +290,22 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
     def prepare(conn: str, dim: int) -> None:
         calls.append(f"prepare:{conn}:{dim}")
 
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
-    monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
+    data_plane_config = dataclasses.replace(
+        data_plane_config,
+        db_url="postgresql://owner@db.example/ava",
+        memory_search_backend="pgvector",
+    )
     patch_database(monkeypatch, connect=provider)
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: pytest.fail("no local admin"))
     monkeypatch.setattr(pgvector, "prepare_table", prepare)
 
     def descriptor(name: str) -> SimpleNamespace:
-        assert name == settings.services.embedding_backend
+        assert name == data_plane_config.embedding_backend
         return SimpleNamespace(dim=768)
 
     monkeypatch.setattr(factory, "get_descriptor", descriptor)
 
-    prepare_memory_vectors(database_factory=operator_database)
+    prepare_memory_vectors(data_plane_config, database_factory=operator_database)
 
     assert calls == ["provider:{'direct': True}", "prepare:provider-connection:768"]
 
@@ -301,6 +327,7 @@ def test_storage_refuses_missing_credentials_before_effects(
     retained_children: list[subprocess.Popen[bytes]],
     *,
     command_machine: MachineIdentity,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """Redis always authenticates, so an empty bearer does not excuse missing
     Redis credentials: a home born without them is refused before any native
@@ -308,6 +335,9 @@ def test_storage_refuses_missing_credentials_before_effects(
     administrator is the OS user over the owner-only socket."""
     credentials = {"redis_admin_password": "admin-value", "redis_password": "runtime-value"}
     credentials[missing] = ""
+    data_plane_config = dataclasses.replace(
+        data_plane_config, redis_admin_password=credentials["redis_admin_password"]
+    )
     monkeypatch.setattr(
         _ci,
         "start_pg",
@@ -315,10 +345,11 @@ def test_storage_refuses_missing_credentials_before_effects(
     )
     with pytest.raises(ValueError, match=reason):
         _ci.ensure_cluster_storage(
+            data_plane_config,
             pg_port=5433,
             redis_port=6380,
             redis_user="ava",
-            **credentials,
+            redis_password=credentials["redis_password"],
             retained_children=retained_children,
             machine=command_machine,
         )

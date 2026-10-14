@@ -8,8 +8,8 @@ loud: stderr plus the `postgres_stop_escalated` event
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
-from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +19,7 @@ from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer
+from cli.commands.data_plane.config import DataPlaneConfig
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
@@ -28,6 +29,7 @@ def test_stop_cluster_instance_reports_an_escalation(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_pipeline: Callable[[], EventPipeline],
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     escalation = owned_postgres.Escalation(
         detail="fast shutdown did not complete within 277s", killed=(4242,)
@@ -43,22 +45,20 @@ def test_stop_cluster_instance_reports_an_escalation(
     def fake_pg_data_dir() -> None:
         return None
 
-    def fake_port() -> None:
-        return None
-
     def fake_pgbouncer_stop() -> None:
         return None
 
     monkeypatch.setattr(telemetry, "emit", fake_emit)
-    monkeypatch.setattr(
-        dp, "settings", SimpleNamespace(data_plane=SimpleNamespace(is_remote=False))
-    )
     monkeypatch.setattr(instance, "pg_data_dir", fake_pg_data_dir)
-    monkeypatch.setattr(instance.ownership, "configured_redis_port", fake_port)
     monkeypatch.setattr(instance.owned_postgres, "stop", fake_stop)
     monkeypatch.setattr(pgbouncer, "stop_pgbouncer", fake_pgbouncer_stop)
 
-    assert dp.stop_cluster_instance(producer=operator_pipeline) == 0
+    # A loopback plane whose Redis URL names no port: nothing for the redis half of the stop.
+    local_plane = dataclasses.replace(
+        data_plane_config, db_url="postgresql://ava@127.0.0.1/ava", redis_url="redis://127.0.0.1"
+    )
+
+    assert dp.stop_cluster_instance(local_plane, producer=operator_pipeline) == 0
 
     assert len(emitted) == 1
     (args, kwargs) = emitted[0]

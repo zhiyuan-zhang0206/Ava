@@ -24,6 +24,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, settings
 from base.host import resource_sample
 from base.native_process.root_control import client
+from cli.commands.data_plane.config import DataPlaneConfig
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_fakes import FakeResponse, FakeResult, _sess, patch_gateway_http
 from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
@@ -58,7 +59,7 @@ def _local_status_boundary(
         def status(self) -> object:
             raise RootClientError("isolated status test")
 
-    def _print_plane(*, database_factory: DatabaseFactory) -> None:
+    def _print_plane(_config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
         assert database_factory is operator_database
 
     monkeypatch.setattr(_status_commands, "print_data_plane_status", _print_plane)
@@ -709,7 +710,7 @@ def test_status_prints_a_live_host_reading(
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
     monkeypatch.setattr(status_mod, "print_gateway_cluster_status", lambda: None)
 
-    def _print_plane(*, database_factory: DatabaseFactory) -> None:
+    def _print_plane(_config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
         assert database_factory is operator_database
 
     monkeypatch.setattr(status_mod, "print_data_plane_status", _print_plane)
@@ -745,7 +746,7 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
     monkeypatch.setattr(status_mod, "print_gateway_cluster_status", lambda: None)
 
-    def _print_plane(*, database_factory: DatabaseFactory) -> None:
+    def _print_plane(_config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
         assert database_factory is operator_database
 
     monkeypatch.setattr(status_mod, "print_data_plane_status", _print_plane)

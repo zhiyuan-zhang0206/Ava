@@ -11,10 +11,10 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable
 
-from base.agents.context.clients import DatabaseFactory
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.lifecycle import start
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from services.supervision.healthchecks.lgtm import lgtm_host_marker
 
@@ -23,7 +23,7 @@ def _reconcile(
     *,
     enabled: bool,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
@@ -69,7 +69,7 @@ def _reconcile(
 def cmd_lgtm_on(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
@@ -91,7 +91,7 @@ def cmd_lgtm_on(
 def cmd_lgtm_off(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:

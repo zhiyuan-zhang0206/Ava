@@ -55,7 +55,6 @@ exports = ["bootstrap"]
 "test_main_dispatch.py#monkeypatch.setattr cli.start_identity.require_initialized" = 2
 "test_main_log_init.py#monkeypatch.setattr base.config.settings.observability.lgtm_storage_dir" = 1
 "test_main_log_init.py#monkeypatch.setattr base.db.Database.connect" = 1
-"test_main_log_init.py#monkeypatch.setattr base.db.Database.from_settings" = 1
 "test_main_log_init.py#monkeypatch.setattr base.packages.dashboard_supply.render_dashboard_json" = 1
 "test_main_log_init.py#monkeypatch.setattr base.telemetry.build_pipeline" = 5
 "test_main_log_init.py#monkeypatch.setattr base.telemetry.init_telemetry" = 1

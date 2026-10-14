@@ -6,13 +6,6 @@ exports = ["helper_chain_probe.py"]
 [debt.first-party-patch]
 "plugin_restart_probe.py#assignment services.agent_runner.agent_host.daemon.PLUGINS_POLL_INTERVAL_S" = 1
 "plugin_restart_probe.py#assignment services.agent_runner.agent_host.daemon.plugins_fingerprint" = 1
-"test_no_secrets_on_argv.py#monkeypatch.setattr base.cluster.ownership.redis_data_dir" = 1
-"test_no_secrets_on_argv.py#monkeypatch.setattr base.cluster.port_preflight.bind_addrs" = 1
-"test_no_secrets_on_argv.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.ensure_redis_acl" = 1
-"test_no_secrets_on_argv.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.print" = 1
-"test_no_secrets_on_argv.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.redis_running" = 1
-"test_no_secrets_on_argv.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.redis_server_bin" = 1
-"test_no_secrets_on_argv.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.subprocess.run" = 1
 "test_shutdown.py#monkeypatch.setattr base.daemon.shutdown.logger" = 1
 "test_shutdown.py#monkeypatch.setattr base.host.exit_codes.logging.shutdown" = 1
 "test_shutdown.py#monkeypatch.setattr base.host.exit_codes.os._exit" = 2

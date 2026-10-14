@@ -172,11 +172,17 @@ def redis_data_dir() -> Path:
     return ava_home() / "redis"
 
 
+def redis_port_of(redis_url: str) -> int | None:
+    """The port `redis_url` names, or None if it names none (no instance to stop).
+    Deliberately no credential: the URL carries the restricted runtime ACL password,
+    which is never admin authority — admin effects use the admin password."""
+    return urlsplit(redis_url).port or None
+
+
 def configured_redis_port() -> int | None:
     """This cluster's redis port from settings.data_plane.redis_url, or None if not
-    resolvable (no instance to stop). Deliberately no credential: the URL carries
-    the restricted runtime ACL password, which is never admin authority — admin
-    effects use `settings.data_plane.redis_admin_password`."""
+    resolvable (no instance to stop). Callers that already hold the URL use
+    `redis_port_of`."""
     from base.config import settings
 
-    return urlsplit(settings.data_plane.redis_url).port or None
+    return redis_port_of(settings.data_plane.redis_url)

@@ -18,7 +18,6 @@ from unittest.mock import MagicMock
 import psycopg
 import pytest
 
-from base.agents.context.clients import DatabaseFactory
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -28,6 +27,7 @@ from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
+from cli.database import OperatorDatabaseFactory
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -98,7 +98,7 @@ class _StartHarness:
         self,
         monkeypatch: pytest.MonkeyPatch,
         *,
-        database_factory: DatabaseFactory,
+        database_factory: OperatorDatabaseFactory,
         machine: MachineIdentity,
     ) -> None:
         from base.deploy.lifecycle import start_serving
@@ -121,7 +121,8 @@ class _StartHarness:
 
         @resume_after_start
         def start(
-            operation: pause_owner.PauseOwnerSnapshot | None, database_factory: DatabaseFactory
+            operation: pause_owner.PauseOwnerSnapshot | None,
+            database_factory: OperatorDatabaseFactory,
         ) -> int:
             assert admission.start_authorized(operation)
             ran.append(True)
@@ -136,7 +137,7 @@ def test_start_releases_the_hold_and_wakes_every_pending_restart(
     redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
-    operator_database: DatabaseFactory,
+    operator_database: OperatorDatabaseFactory,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -160,7 +161,7 @@ def test_start_releases_even_when_a_restart_pointer_is_gone(
     redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
-    operator_database: DatabaseFactory,
+    operator_database: OperatorDatabaseFactory,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -190,7 +191,7 @@ def test_a_journal_that_still_carries_old_receipts_is_released_by_start(
     redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
-    operator_database: DatabaseFactory,
+    operator_database: OperatorDatabaseFactory,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -219,7 +220,7 @@ def test_failed_start_keeps_the_hold(
     redis_url: str,
     monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
-    operator_database: DatabaseFactory,
+    operator_database: OperatorDatabaseFactory,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,

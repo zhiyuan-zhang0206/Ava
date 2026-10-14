@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import subprocess
 import sys
@@ -11,9 +12,10 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from base.config import settings
 from base.config.service_read import ConfigAuthority
 from cli.commands.data_plane import cluster_instance as instance
+from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 
 
 def _tools(path: Path, version: str) -> Path:
@@ -79,24 +81,24 @@ def test_home_selection_survives_a_polluted_boot_env(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("missing", ["redis-server", "redis-cli"])
 def test_explicit_directory_requires_both_tools(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing: str
+    tmp_path: Path, missing: str, data_plane_config: DataPlaneConfig
 ) -> None:
     selected = _tools(tmp_path / "bin", "selected-8")
     (selected / missing).unlink()
-    monkeypatch.setattr(settings.data_plane, "redis_bin_dir", str(selected))
+    data_plane_config = dataclasses.replace(data_plane_config, redis_bin_dir=str(selected))
     for resolver in (instance.redis_server_bin, instance.redis_cli_bin):
         with pytest.raises(RuntimeError, match=missing):
-            resolver()
+            resolver(data_plane_config)
 
 
 def test_explicit_nonexecutable_tool_never_falls_back(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, data_plane_config: DataPlaneConfig
 ) -> None:
     selected = _tools(tmp_path / "bin", "selected-8")
     (selected / "redis-cli").chmod(0o600)
-    monkeypatch.setattr(settings.data_plane, "redis_bin_dir", str(selected))
+    data_plane_config = dataclasses.replace(data_plane_config, redis_bin_dir=str(selected))
     with pytest.raises(RuntimeError, match="redis-cli"):
-        instance.redis_server_bin()
+        instance.redis_server_bin(data_plane_config)
 
 
 @pytest.mark.parametrize("value", ["relative/bin", "~/redis/bin", "/redis\n/bin"])

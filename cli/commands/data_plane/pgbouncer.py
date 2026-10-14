@@ -65,6 +65,7 @@ from cli.commands.data_plane.cluster_instance import (
     pg_socket_dir,
     wait_for_reachable_bind,
 )
+from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
 
 # Transaction-pooling defaults. max_client_conn
 # caps total in-flight psycopg connections through the pooler; default_pool_size is
@@ -544,34 +545,38 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
        direct. The install itself lives in the provision scripts
        (`brew install pgbouncer` / apt), not here, so `ava start` never triggers
        a heavyweight package install."""
+    converge_pgbouncer(data_plane_config_from_settings(), ctx.ava_home)
+
+
+def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
+    """The converge step's work for `home` under `config` (see `ensure_pgbouncer_step`)."""
     from dotenv import dotenv_values
 
     from base.cluster import get_record
-    from base.config import settings
     from base.host.env.dotenv_file import upsert_env
     from ops.env_audit import EnvWriteAudit
 
-    if settings.data_plane.is_remote:
+    if config.is_remote:
         # The pooler is a local-instance component; a remote/SaaS plane's URL
         # is the provider's (its port is not this cluster's), so converge must
         # neither rewrite it nor preflight the local binary.
         return
-    rec = get_record(ctx.ava_home)
+    rec = get_record(home)
     if rec is None:
         return
-    env_path = ctx.ava_home / ".env"
+    env_path = home / ".env"
     current = (dotenv_values(env_path).get("AVA_DB_URL") or "").strip()
     normalized = _normalized_db_url(
         current,
         pg_port=rec.ports["postgres"],
         pooler_port=rec.ports["pgbouncer"],
-        pooler_enabled=settings.data_plane.pgbouncer_enabled,
+        pooler_enabled=config.pgbouncer_enabled,
     )
     if normalized:
         upsert_env(
             env_path, {"AVA_DB_URL": normalized}, audit=EnvWriteAudit(site="converge_pgbouncer")
         )
-    if not settings.data_plane.pgbouncer_enabled:
+    if not config.pgbouncer_enabled:
         return
     binary = pgbouncer_bin()
     if Path(binary).exists() or shutil.which(binary) is not None:
