@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
@@ -44,6 +45,8 @@ def skill_ctx(
         database_factory=operator_database,
         producer=producer,
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
 
 

@@ -21,19 +21,6 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-
-def _skip_binary_verification(_home: Path) -> None:
-    """Render fixtures do not install native executable assets."""
-
-
-@pytest.fixture(autouse=True)
-def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These existing lifecycle cases exercise the Darwin implementation."""
-    monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(lgtm_native, "verify_loki", _skip_binary_verification)
-
-
 _STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
 
 

@@ -15,6 +15,7 @@ import pytest
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineRoles
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import health_preflight as _hp
@@ -48,6 +49,8 @@ def _preflight_ctx(
         producer=producer,
         machine=command_runtime.machine,
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
 
 
@@ -389,6 +392,8 @@ def _git_repo(
         producer=producer,
         machine=command_runtime.machine,
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
     return ctx, head, first
 
@@ -457,6 +462,8 @@ def test_checkout_worktree_skipped(
         producer=operator_pipeline,
         machine=command_runtime.machine,
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
     (wt / "stray.txt").write_text("dirty\n")
 

@@ -2,16 +2,18 @@
 
 `memory_repo_slug()` reads the remote URL through `base.deploy.git.memory_repo.memory_remote`,
 which `github_pr` re-imports into its own namespace; tests patch
-`gp.memory_remote`. `github_pr_blocker()` shells out to `gh` via `shutil.which`
-+ `subprocess.run`; tests patch both so no network / gh install is required.
+`gp.memory_remote`. `github_pr_blocker(host=...)` finds and runs `gh` through the `Host`
+it is given; the tests hand it a `Host` whose `run` is a `FakeCommands` script, so no
+network / gh install is required.
 """
 
 import subprocess
-from dataclasses import dataclass
 
 import pytest
 
 import base.deploy.git.github_pr as gp
+from base.host.system.hostport import Host
+from base.host.tests.fake_commands import FakeCommands, Reply, fake_host
 
 # ── memory_repo_slug ──────────────────────────────────────────────────────
 
@@ -40,80 +42,79 @@ def test_slug_raises_on_non_github_remote(monkeypatch: pytest.MonkeyPatch) -> No
 # ── github_pr_blocker ─────────────────────────────────────────────────────
 
 
-@dataclass
-class _FakeProc:
-    returncode: int
-    stdout: str = ""
+def _host(commands: FakeCommands, *, gh: str | None = "/usr/bin/gh") -> Host:
+    return fake_host(commands, programs={"gh": gh} if gh else {})
 
 
 def _patch_slug(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gp, "memory_remote", lambda: "git@github.com:owner/AvaMemory.git")
 
 
+def _authenticated(permission: Reply) -> FakeCommands:
+    commands = FakeCommands()
+    commands.on(["gh", "auth", "status"], Reply())
+    commands.on(["gh", "repo", "view"], permission)
+    return commands
+
+
 def test_blocker_none_when_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
+    commands = _authenticated(Reply(stdout="WRITE\n"))
+    assert gp.github_pr_blocker(host=_host(commands)) is None
+    assert commands.argvs == [
+        ("gh", "auth", "status"),
+        (
+            "gh",
+            "repo",
+            "view",
+            "owner/AvaMemory",
+            "--json",
+            "viewerPermission",
+            "-q",
+            ".viewerPermission",
+        ),
+    ]
+    assert [call.timeout for call in commands.calls] == [20, 20]  # each gh call is bounded
 
-    def fake_run(args, **_):
-        if args[:3] == ["gh", "auth", "status"]:
-            return _FakeProc(returncode=0)
-        return _FakeProc(returncode=0, stdout="WRITE\n")
 
-    monkeypatch.setattr(gp.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    assert gp.github_pr_blocker() is None
-
-
-def test_blocker_gh_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gp.shutil, "which", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
-    assert gp.github_pr_blocker() == "gh CLI not installed"
+def test_blocker_gh_missing() -> None:
+    commands = FakeCommands()
+    assert gp.github_pr_blocker(host=_host(commands, gh=None)) == "gh CLI not installed"
+    assert commands.calls == []  # nothing is run without gh
 
 
 def test_blocker_not_authenticated(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(gp.subprocess, "run", lambda *_a, **_k: _FakeProc(returncode=1))  # pyright: ignore[reportUnknownArgumentType]
-    reason = gp.github_pr_blocker()
+    commands = FakeCommands()
+    commands.on("gh", Reply(returncode=1))
+    reason = gp.github_pr_blocker(host=_host(commands))
     assert reason is not None
     assert "not authenticated" in reason
+    assert commands.argvs == [("gh", "auth", "status")]  # the permission read never runs
 
 
 def test_blocker_read_only_permission(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
-
-    def fake_run(args, **_):
-        if args[:3] == ["gh", "auth", "status"]:
-            return _FakeProc(returncode=0)
-        return _FakeProc(returncode=0, stdout="READ\n")
-
-    monkeypatch.setattr(gp.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    commands = _authenticated(Reply(stdout="READ\n"))
     assert (
-        gp.github_pr_blocker()
+        gp.github_pr_blocker(host=_host(commands))
         == "gh account lacks write access to owner/AvaMemory (viewerPermission='READ')"
     )
 
 
 def test_blocker_permission_read_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
-
-    def fake_run(args, **_):
-        if args[:3] == ["gh", "auth", "status"]:
-            return _FakeProc(returncode=0)
-        return _FakeProc(returncode=1, stdout="")
-
-    monkeypatch.setattr(gp.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    assert gp.github_pr_blocker() == "could not read permission on owner/AvaMemory via gh"
+    commands = _authenticated(Reply(returncode=1))
+    assert (
+        gp.github_pr_blocker(host=_host(commands))
+        == "could not read permission on owner/AvaMemory via gh"
+    )
 
 
 def test_blocker_auth_timeout_is_reason_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
-
-    def fake_run(args, **_):
-        raise subprocess.TimeoutExpired(cmd=args, timeout=20)  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(gp.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    reason = gp.github_pr_blocker()
+    commands = FakeCommands()
+    commands.on("gh", subprocess.TimeoutExpired(cmd="gh", timeout=20))
+    reason = gp.github_pr_blocker(host=_host(commands))
     assert reason is not None
     assert "timed out" in reason

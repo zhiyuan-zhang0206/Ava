@@ -7,7 +7,7 @@ the test instead of answering with a default, so a test never passes by accident
 
     commands = FakeCommands()
     commands.on("lsof", Reply(stdout="p1109\\n"))
-    host = Host(run=commands, which=lambda name: None, platform=..., uid=1000)
+    host = fake_host(commands, programs={"lsof": "/usr/sbin/lsof"})
     ...
     assert commands.argvs == [("lsof", "-nP")]
 """
@@ -15,9 +15,14 @@ the test instead of answering with a default, so a test never passes by accident
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
+
+from base.host.system.hostport import Host, Platform
+
+LINUX_X86 = Platform("linux", "x86_64", "/usr/bin/python3")
+DARWIN_ARM64 = Platform("darwin", "arm64", "/usr/bin/python3")
 
 
 @dataclass(frozen=True)
@@ -40,7 +45,8 @@ class Call:
 
 @dataclass
 class _Route:
-    prefix: tuple[str, ...]
+    matches: Callable[[tuple[str, ...]], bool]
+    label: str
     replies: list[Reply | BaseException]
     repeat: bool
 
@@ -49,6 +55,13 @@ def _shape(value: str | bytes, *, text: bool) -> str | bytes:
     if text:
         return value.decode() if isinstance(value, bytes) else value
     return value if isinstance(value, bytes) else value.encode()
+
+
+def _starts_with(prefix: tuple[str, ...]) -> Callable[[tuple[str, ...]], bool]:
+    def matches(argv: tuple[str, ...]) -> bool:
+        return argv[: len(prefix)] == prefix
+
+    return matches
 
 
 def _is_piped(capture_output: bool, popen_kwargs: Mapping[str, object], stream: str) -> bool:
@@ -86,11 +99,12 @@ class FakeCommands:
 
     def on(
         self,
-        prefix: str | Sequence[str],
+        match: str | Sequence[str] | Callable[[tuple[str, ...]], bool],
         *replies: Reply | BaseException,
         repeat: bool = False,
     ) -> None:
-        """Script the commands whose argv starts with `prefix` (a program name or a list).
+        """Script the commands that `match` selects: an argv prefix (a program name or a list), or
+        a predicate over the whole argv for commands whose first element is not known up front.
 
         Each matching call consumes the next reply: a `Reply` is returned, an exception is
         raised (`subprocess.TimeoutExpired`, `FileNotFoundError`). With `repeat=True` the last
@@ -99,15 +113,19 @@ class FakeCommands:
         """
         if not replies:
             raise ValueError("a route needs at least one reply")
-        key = (prefix,) if isinstance(prefix, str) else tuple(prefix)
-        self._routes.append(_Route(key, list(replies), repeat))
+        if callable(match):
+            matches, label = match, "<predicate>"
+        else:
+            prefix = (match,) if isinstance(match, str) else tuple(match)
+            matches, label = _starts_with(prefix), str(list(prefix))
+        self._routes.append(_Route(matches, label, list(replies), repeat))
 
     def _next_reply(self, command: tuple[str, ...]) -> Reply | BaseException:
-        route = next((r for r in self._routes if command[: len(r.prefix)] == r.prefix), None)
+        route = next((r for r in self._routes if r.matches(command)), None)
         if route is None:
             raise AssertionError(f"unscripted command: {list(command)}")
         if not route.replies:
-            raise AssertionError(f"replies for {list(route.prefix)} ran out: {list(command)}")
+            raise AssertionError(f"replies for {route.label} ran out: {list(command)}")
         keep_last = route.repeat and len(route.replies) == 1
         return route.replies[0] if keep_last else route.replies.pop(0)
 
@@ -127,3 +145,23 @@ class FakeCommands:
         if isinstance(reply, BaseException):
             raise reply
         return _result(command, reply, capture_output=capture_output, popen_kwargs=popen_kwargs)
+
+
+def fake_host(
+    commands: FakeCommands | None = None,
+    *,
+    platform: Platform = LINUX_X86,
+    programs: Mapping[str, str] | None = None,
+    uid: int = 1000,
+) -> Host:
+    """A `Host` over `commands` (none scripted by default: any command fails the test).
+
+    `which` finds only the programs in `programs` (name -> path); every other name is absent.
+    """
+    found = dict(programs or {})
+    return Host(
+        run=commands if commands is not None else FakeCommands(),
+        which=found.get,
+        platform=platform,
+        uid=uid,
+    )

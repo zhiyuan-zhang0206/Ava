@@ -11,11 +11,12 @@ import yaml
 
 from base import config
 from base.cluster.machine import MachineIdentity
+from base.host.system.hostport import Host
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import service_argv
 from cli.commands.observability import lgtm_native
 from cli.commands.observability.tests.lgtm_inputs import (
-    darwin_rendering as darwin_rendering,
+    darwin_host as darwin_host,
 )
 from cli.commands.observability.tests.lgtm_inputs import (
     default_provisioning as default_provisioning,
@@ -33,6 +34,7 @@ def test_station_role_renders_full_native_set_without_marker(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -43,7 +45,6 @@ def test_station_role_renders_full_native_set_without_marker(
     home = tmp_path / "station-home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
 
     lgtm_native.ensure_lgtm_native(
@@ -53,6 +54,7 @@ def test_station_role_renders_full_native_set_without_marker(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_machine,
+        host=darwin_host,
     )
 
     native_dir = home / "lgtm/native"
@@ -141,6 +143,7 @@ def test_station_role_creates_configured_storage_dirs(
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
+    darwin_host: Host,
     *,
     command_machine: MachineIdentity,
 ) -> None:
@@ -151,7 +154,6 @@ def test_station_role_creates_configured_storage_dirs(
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
     storage = tmp_path / "obs-data"
-    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
     monkeypatch.setattr(config.settings.observability, "lgtm_storage_dir", str(storage))
 
@@ -162,6 +164,7 @@ def test_station_role_creates_configured_storage_dirs(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_machine,
+        host=darwin_host,
     )
 
     assert (storage / "loki").is_dir()

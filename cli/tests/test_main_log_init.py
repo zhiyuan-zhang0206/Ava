@@ -36,6 +36,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.paths import ava_home
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
@@ -293,9 +294,8 @@ def _cold_report(
 
     monkeypatch.setattr(dashboard_supply, "render_dashboard_json", failed_render)
     repo = _REPO_ROOT
-    tag = lgtm_native.platform_tag()
-    if tag is None:
-        pytest.skip("native LGTM is unsupported on this platform")
+    tag = lgtm_native.platform_tag(DARWIN_ARM64)
+    assert tag is not None
     native = path / "lgtm/native"
     native.mkdir(parents=True)
     versions = yaml.safe_load((repo / "deploy/lgtm/native/versions.yml").read_text())
@@ -316,6 +316,7 @@ def _cold_report(
         producer=args.producer,
         services=frozenset({"prometheus"}),
         helper=refuse_helper,
+        host=fake_host(platform=DARWIN_ARM64),
     )
     lgtm_native.ensure_lgtm_native_step(context)
     return 0

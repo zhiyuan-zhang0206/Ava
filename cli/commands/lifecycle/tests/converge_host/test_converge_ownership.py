@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import ownership_preflight as _ownership
@@ -43,6 +44,8 @@ def _ctx(
         producer=producer,
         machine=command_runtime.machine,
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
 
 

@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from base.host.system import packages_job as job
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
@@ -46,6 +47,8 @@ def test_converge_registers_the_refresh_job(
         producer=operator_pipeline,
         machine=command_runtime.machine,
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
     ensure_packages_refresh_job(ctx)
     assert calls == ["register"]

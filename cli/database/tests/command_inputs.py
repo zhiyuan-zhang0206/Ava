@@ -6,6 +6,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from cli.database.runtime import CommandRuntime
 
@@ -14,9 +15,18 @@ __all__ = ["command_config_machine", "command_machine", "command_runtime"]
 
 @pytest.fixture
 def command_runtime() -> CommandRuntime:
-    """Own function-local config overlays and identity caches for this invocation."""
+    """Own function-local config overlays and identity caches for this invocation.
+
+    The host is inert: it finds no program and runs no command, so a test that reaches for the
+    host must say what the host answers (`fake_host(...)`).
+    """
     config = snapshot_process_config()
-    return CommandRuntime(config=config, machine=machine_from_boot(config), helper=refuse_helper)
+    return CommandRuntime(
+        config=config,
+        machine=machine_from_boot(config),
+        helper=refuse_helper,
+        host=fake_host(),
+    )
 
 
 @pytest.fixture
