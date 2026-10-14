@@ -281,7 +281,6 @@ check-typed-exception = true
 "agent/graph/claim/tests/test_core.py" = ["S110"]
 "base/deploy/schema/tests/test_migration_reset.py" = ["S110"]
 "tests/integration/test_grafana_native_runtime.py" = ["S110"]
-"tests/components/services/test_backup_scheduler_shutdown.py" = ["S110"]
 # T20 exemptions — print() is legitimate here: cli/ writes to the user's
 # terminal; ava/ and plugins/ print() is agent-facing dump (help() / context
 # injection), the SDK's documented output channel.

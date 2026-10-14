@@ -71,7 +71,6 @@
 "tests/ci/test_path_scopes.py" = ["tests/path_scoped"]
 "tests/components/ava/test_self_evolution_schedules.py" = ["schedules"]
 "tests/components/schedules/test_goal_watch_filter.py" = ["ava_builtins/plugins", "ava_builtins/skills"]
-"tests/components/services/daemon_shutdown_test_support.py" = ["services/backup/scheduler"]
 "tests/e2e/process_support.py" = ["services/agent_runner"]
 "tests/fixtures/path_scopes.py" = ["tests/path_scoped"]
 "tests/skills/test_inspect_a_trace_fetch.py" = [".agents/skills/inspect-a-trace/scripts"]

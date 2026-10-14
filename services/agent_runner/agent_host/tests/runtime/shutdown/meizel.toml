@@ -1,0 +1,30 @@
+exports = ["test_agent_host_shutdown.py"]
+
+[uses]
+"test_agent_host_shutdown.py" = ["child_shutdown.py"]
+
+[debt.first-party-patch]
+"test_agent_host_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.host.RELEASE_OWNER_TIMEOUT_S" = 1
+"test_agent_host_shutdown.py#patch.multiple agent.process_boot.init_process_scope" = 1
+"test_agent_host_shutdown.py#patch.multiple agent.process_boot.land_cluster_extensions" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.AgentHost" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.InboundWakeDispatcher" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.PLUGINS_POLL_INTERVAL_S" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.TurnScheduler" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon._is_running" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.acquire_pidfile" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.background_loops" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.beat_forever" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.build_checkpointer" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.build_control_pool" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.build_shared_pool" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.close_host_pools" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.open_host_pools" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.plugins_fingerprint" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.remove_pidfile" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.rotate_stdout_log_forever" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.settle_stale_running_rows" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.start_health_server" = 1
+"test_agent_host_shutdown.py#patch.multiple services.agent_runner.agent_host.daemon.stop_health_server" = 1
+"test_agent_host_shutdown.py#patch.object agent.graph.build_graph" = 1
+"test_agent_host_shutdown.py#patch.object base.agents.sdk.call_policy.SamplingPolicyOwner.close" = 1

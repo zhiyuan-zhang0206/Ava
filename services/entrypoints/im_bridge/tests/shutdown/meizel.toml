@@ -1,0 +1,6 @@
+[uses]
+"test_daemon_shutdown.py" = ["child_shutdown.py"]
+
+[debt.first-party-patch]
+"test_im_bridge_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 2
+"test_im_bridge_quiesced.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.asyncio.sleep" = 2

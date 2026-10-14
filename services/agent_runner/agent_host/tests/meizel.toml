@@ -33,13 +33,13 @@ exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed
 "test_turn_dispatcher.py#monkeypatch.setattr services.agent_runner.agent_host.dispatcher.CLOCK_READ_TIMEOUT_S" = 1
 
 [debt.not-exported]
+"runtime/shutdown/test_agent_host_shutdown.py -> agent_host/child_runtime_scenarios.py" = 1
 "runtime/test_agent_host_log_rotate.py -> agent_host/child_runtime_scenarios.py" = 3
-"runtime/test_agent_host_shutdown.py -> agent_host/child_runtime_scenarios.py" = 1
 "runtime/test_resource_join.py -> agent_host/child_runtime_scenarios.py" = 1
 
 [debt.undeclared-edge]
+"runtime/shutdown/test_agent_host_shutdown.py -> agent_host/child_runtime_scenarios.py" = 1
 "runtime/test_agent_host_log_rotate.py -> agent_host/child_runtime_scenarios.py" = 3
-"runtime/test_agent_host_shutdown.py -> agent_host/child_runtime_scenarios.py" = 1
 "runtime/test_resource_join.py -> agent_host/child_runtime_scenarios.py" = 1
 
 [debt.unresolved-patch]
