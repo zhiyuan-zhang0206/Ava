@@ -143,7 +143,7 @@ def stop_plan(
 
 
 def services_phase_action(
-    *, preserved: frozenset[str], deadline: float, helper: HelperFactory
+    *, preserved: frozenset[str], deadline: float, helper: HelperFactory | None
 ) -> Callable[[], object]:
     """Stop services through their root owner, preserving explicitly retained units."""
     import cli.commands.lifecycle.root_driver as _root_driver_commands
@@ -183,7 +183,7 @@ def _stop_initialization(
     clients: list[str],
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
-    helper: HelperFactory,
+    helper: HelperFactory | None,
 ) -> None:
     """Close a proven pre-application attempt through the existing native owners."""
     _timed_phase(
@@ -245,7 +245,7 @@ def _drain_and_stop(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
-    helper: HelperFactory,
+    helper: HelperFactory | None,
 ) -> None:
     """Drain the agents, then stop the selected resources; each phase is timed into `phases`."""
     _timed_phase(
@@ -335,7 +335,7 @@ def stop(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
-    helper: HelperFactory,
+    helper: HelperFactory | None,
 ) -> int:
     """Drain via normal restart, then stop selected resources.
 

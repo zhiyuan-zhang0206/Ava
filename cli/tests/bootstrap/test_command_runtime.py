@@ -4,6 +4,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.sessions.helperproc import helper_for
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -39,3 +40,10 @@ def test_narrow_machine_fixture_borrows_the_invocation_owner(
     command_runtime: CommandRuntime, command_machine: MachineIdentity
 ) -> None:
     assert command_machine is command_runtime.machine
+
+
+def test_the_runtime_runs_with_the_helper_its_hosts_platform_has() -> None:
+    runtime = CommandRuntime.create()
+    assert runtime.helper is helper_for(runtime.host.platform)
+    # None answers only "this platform has no helper": macOS never gets it.
+    assert (runtime.helper is None) == (runtime.host.platform.system == "linux")

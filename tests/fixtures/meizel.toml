@@ -27,7 +27,7 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 "provisioning.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
 
 [debt.restricted-python]
-"guards.py#string patch target 'cli.commands.lifecycle.root_driver.wait_for_service_tree'" = 1
+"guards.py#string patch target 'cli.commands.lifecycle.root_readiness.wait_for_service_tree'" = 1
 
 [debt.stdlib-patch]
 "guards.py#monkeypatch.setattr os" = 1

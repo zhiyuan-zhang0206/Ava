@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
-import sys
 import time
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from base.host.permissions_helper.client import (
 )
 from base.log import logger
 from base.native_process import pid_starttime_ticks
+from base.native_process.os_platform import Platform
 from base.native_process.ownership import stable_create_time
 from base.paths import logs_dir, permissions_helper_socket, run_dir
 from base.sessions.protocol import SessionBackend
@@ -107,9 +107,18 @@ def helper_client() -> PermissionsHelperClient:
     )
 
 
-def helper_spawn_committed() -> bool:
-    """macOS service ancestry is mandatory, independent of a runtime switch."""
-    return sys.platform == "darwin"
+def helper_for(platform: Platform) -> HelperFactory | None:
+    """The permissions-helper factory a platform runs with, or None where it has no helper.
+
+    macOS service ancestry is mandatory there, so darwin always gets the real factory: no
+    setting, environment variable or flag turns it off. Linux has no helper and gets None. The
+    composition root calls this once; None means only "this platform has no helper" and is never
+    a way to opt out of one."""
+    if platform.system == "darwin":
+        return helper_client
+    if platform.system == "linux":
+        return None
+    raise ValueError(f"no permissions-helper decision for platform {platform.system!r}")
 
 
 def helper_wire_ok(helper: HelperFactory) -> bool:

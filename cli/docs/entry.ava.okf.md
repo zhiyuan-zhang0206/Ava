@@ -27,9 +27,11 @@ again under its lifecycle lock. Other parsed runtime commands create one
 `MachineIdentity`. Dispatch, embedded
 lifecycle legs, logging, database host resolution and telemetry borrow that same
 identity, and with `CommandRuntime.helper`, the one place the real permissions-helper
-factory is chosen (`base.sessions.helperproc.helper_client`, which reads the helper's port only when
-a macOS code path calls it). `start`, `stop` and `converge` hand that factory down to the root
-driver and the helper bring-up; nothing below them builds a helper client. Successful setup
+factory is chosen: `base.sessions.helperproc.helper_for(host.platform)` returns
+`helper_client` on macOS, which reads the helper's port only when a code path calls it, and `None`
+on Linux. `None` means only "this platform has no helper" and is never a switch; macOS always has
+one. `start`, `stop` and `converge` hand that value down to the root driver and the helper
+bring-up (a `None` takes the direct-spawn path); nothing below them builds a helper client. Successful setup
 resets only this owner before role and intent checks;
 failed setup preserves its cached inputs. Help exits before constructing the root,
 and lightweight status/stop paths do not force identity or configuration fetches.

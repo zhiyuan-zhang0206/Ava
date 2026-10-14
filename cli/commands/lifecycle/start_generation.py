@@ -1,4 +1,4 @@
-"""Read-only source identity for a development root generation.
+"""Source identity and successful-start bookmarks for a development root generation.
 
 The snapshot includes dirty and untracked source, not just HEAD. Ignored build
 outputs and the editable environment are not sealed by this check.
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 from base.deploy.release import start_inputs
@@ -47,3 +48,22 @@ def launch_digest(repo: Path, environment: dict[str, str], *, home: Path) -> str
         "write_generation": write_generation(home),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def record_running_sha(repo: Path) -> None:
+    """Record the current HEAD for update change detection without failing start."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            from base.deploy.git import running_sha
+
+            running_sha.set(result.stdout.strip())
+    except Exception as exc:
+        print(f"  · running-sha bookmark skipped ({exc})")

@@ -255,7 +255,7 @@ def guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
 def guard_service_readiness(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The CLI owner's guard: `cli.commands.lifecycle.root_driver.wait_for_service_tree` reports every
+    """The CLI owner's guard: `cli.commands.lifecycle.root_readiness.wait_for_service_tree` reports every
     service ready without polling anything.
 
     The start path's readiness wait is bounded by `SERVICE_READY_TIMEOUT_S` (180 s),
@@ -273,7 +273,7 @@ def guard_service_readiness(
 
     ready = ReadinessWait((), 0.0, sessions_gone=False)
     monkeypatch.setattr(
-        "cli.commands.lifecycle.root_driver.wait_for_service_tree",
+        "cli.commands.lifecycle.root_readiness.wait_for_service_tree",
         lambda *_a, **_kw: ready,
     )
 

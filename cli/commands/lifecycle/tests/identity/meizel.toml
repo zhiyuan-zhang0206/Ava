@@ -20,7 +20,7 @@
 "restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_tree_plan" = 1
 "restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.runner_db_url_projection" = 1
 "restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.stop_root_service_tree" = 1
-"restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.wait_for_service_tree" = 1
+"restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.root_readiness.wait_for_service_tree" = 1
 "restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.start.cmd_status" = 1
 "restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.start.ensure_gateway_data_plane" = 1
 "restart_inputs.py#monkeypatch.setattr cli.commands.lifecycle.stop.force_close_terminals" = 1
@@ -51,7 +51,6 @@
 "test_root_driver_signals.py#monkeypatch.setattr base.native_process.ownership.pidfd.send_signal" = 1
 "test_root_driver_signals.py#monkeypatch.setattr base.native_process.ownership.sys" = 1
 "test_root_driver_signals.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.await_root_status" = 1
-"test_root_driver_signals.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.helper_spawn_committed" = 3
 "test_root_driver_signals.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_argv" = 1
 "test_root_driver_signals.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_status" = 1
 
