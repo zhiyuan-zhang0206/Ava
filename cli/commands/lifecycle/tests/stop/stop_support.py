@@ -36,6 +36,7 @@ from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.sessions.pty.paths import SERVICE_UNIT
+from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_service import PtyServiceProcess as PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import output_until
@@ -46,7 +47,6 @@ from cli.commands.lifecycle import service_stop as strict
 from ops import pty_close_notices
 from tests.e2e.process_support import kill_group_if_alive
 from tests.path_scoped import pty_jobs as jobs
-from tests.path_scoped.pty_reaper import PtyReaper
 
 
 class Launcher(Protocol):

@@ -24,6 +24,8 @@ from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.sessions.pty.paths import ledger_path
 from base.sessions.pty.tests import pty_shells
+from base.sessions.pty.tests.pty_reaper import PtyReaper
+from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as command
@@ -45,8 +47,6 @@ from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
-from tests.path_scoped.pty_reaper import PtyReaper
-from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
 
 def test_busy_fixture_waits_for_the_job_after_a_login_helper(
