@@ -8,7 +8,6 @@ used to each inline.
 
 from __future__ import annotations
 
-from dataclasses import fields
 from typing import Any
 
 import httpx
@@ -18,7 +17,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from base import config
-from base.config import get_field, settings
+from base.config.tests.configuration import model_overrides
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import call
 from base.lm.call import answer_text, extract_text, invoke_text
@@ -284,10 +283,8 @@ def test_answer_text_happy_path(
         error_type=ValueError,
         desc="d",
         catalog=model_catalog,
-        llm_override=settings.lm.llm_override,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-        ),
+        llm_override="",
+        overrides=model_overrides(),
         build_chat_model=_fake_build,
     )
     assert out == "answer"
@@ -320,10 +317,8 @@ def test_answer_text_build_failure_raises_error_type(
             error_type=ValueError,
             desc="d",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
             build_chat_model=_fail,
         )
 
@@ -359,10 +354,8 @@ def test_answer_text_build_failure_uses_build_error_when_given(
             desc="d",
             build_error=_wrap,
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
             build_chat_model=_fail,
         )
     assert seen["model"] == "m1"

@@ -156,7 +156,7 @@ def test_per_model_default_wins_over_shared_floor(
 
 
 def test_explicit_setting_wins_over_per_model_default(
-    monkeypatch: pytest.MonkeyPatch, add_models: AddModels, *, model_catalog: ModelCatalog
+    add_models: AddModels, *, model_catalog: ModelCatalog
 ) -> None:
     """A non-None settings value (env/.env/per-agent overlay all write one) is
     the explicit layer — it beats the per-model default."""
@@ -171,20 +171,19 @@ def test_explicit_setting_wins_over_per_model_default(
         tuning=ModelTuning(auto_compact_fraction=0.9, reasoning_effort="high"),
     )
     model_catalog = add_models(model_catalog, {"deepseek-flash": tuned})
-    monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.5)
     assert (
         resolve_setting(
             "auto_compact_fraction",
             model="deepseek-flash",
             models=model_catalog.models,
-            explicit=get_field("auto_compact_fraction"),
+            explicit=0.5,
         )
         == 0.5
     )
 
 
 def test_explicit_empty_string_beats_per_model_effort(
-    monkeypatch: pytest.MonkeyPatch, add_models: AddModels, *, model_catalog: ModelCatalog
+    add_models: AddModels, *, model_catalog: ModelCatalog
 ) -> None:
     """An explicitly empty AVA_REASONING_EFFORT is a real choice ("use the
     provider default"), distinct from unset — it must mask a per-model effort
@@ -209,13 +208,12 @@ def test_explicit_empty_string_beats_per_model_effort(
         )
         == "max"
     )
-    monkeypatch.setattr(settings.lm, "reasoning_effort", "")
     assert (
         resolve_setting(
             "reasoning_effort",
             model="deepseek-flash",
             models=model_catalog.models,
-            explicit=get_field("reasoning_effort"),
+            explicit="",
         )
         == ""
     )

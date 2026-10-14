@@ -34,7 +34,7 @@ from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface import settings as _settings
 from ava.sdk_surface.settings import agent_setting
 from base import telemetry
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.packages.plugin_providers import build_model_catalog
 from base.telemetry.otlp.tests.external_flush import HANDSHAKE_BOUND_S as _HANDSHAKE_BOUND_S
@@ -586,9 +586,7 @@ def test_external_controls_stay_out_of_native_prompt(
 
     prompt = build_system_prompt(
         ExtensionRegistry(()),
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        AgentSlices.resolve(default_reader=defaults()),
         agent_id=None,
         catalog=build_model_catalog(),
     )

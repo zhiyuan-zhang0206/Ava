@@ -16,7 +16,7 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 
 from agent.graph.hooks.compact import auto_compact_will_fire, compact_reminder_update
 from agent.state import AgentState, CompactState
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 
@@ -37,7 +37,7 @@ def _state() -> AgentState:
 def _agent(**pins: float) -> AgentSlices:
     return AgentSlices.resolve(
         {"llm_model": _MODEL, **pins},
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        default_reader=defaults(),
     )
 
 

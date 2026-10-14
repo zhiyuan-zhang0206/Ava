@@ -43,7 +43,7 @@ from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.config.tests.configuration import snapshot_process_config
+from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -213,9 +213,7 @@ async def prepare_graph(
         machine=machine_identity,
         ops_pool=aops_pool,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         clients=clients,

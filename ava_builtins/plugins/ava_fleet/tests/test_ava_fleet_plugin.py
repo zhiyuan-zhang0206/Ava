@@ -32,19 +32,19 @@ from ava_builtins.plugins.ava_fleet.tests.registry_support import (
     installed_fleet_surface,
     set_fleet_configuration,
 )
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from tests.fixtures.pin_agent import pin_agent
 
 
-def _fleet_slices() -> AgentSlices:
+def _fleet_slices(**changes: Any) -> AgentSlices:
     installation = installed()
     assert installation is not None
     return AgentSlices.resolve(
         plugin_configs=installation.configs,
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        default_reader=defaults(**changes),
     )
 
 
@@ -94,13 +94,13 @@ def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
     assert "duplicate task-log writes" in prompt
 
 
-def test_enabled_fleet_preserves_parallel_work_policy(
-    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
-):
+def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None):
     """Fleet preserves core parallel guidance without requiring task tracking."""
-    monkeypatch.setattr(settings.agent, "prompt_delegation_check_enabled", True)
     prompt = build_system_prompt(
-        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+        fleet_registry(),
+        _fleet_slices(agent__prompt_delegation_check_enabled=True),
+        agent_id=1,
+        catalog=build_model_catalog(),
     )
     assert "Workflow selection belongs to `ava-workflow`" in prompt
     assert "enabling Fleet does not require a registry task or a management tree" in prompt
@@ -282,13 +282,13 @@ def test_fleet_contract_preserves_numeric_identifier_prefixes():
     assert "A bare number is ambiguous" in contract
 
 
-def test_task_conversion_absent_when_plugin_disabled():
+def test_task_conversion_absent_when_plugin_disabled(**changes: Any):
     """Prompt copy and the task SDK reference disappear together with the
     fleet plugin."""
     prompt = build_system_prompt(
         EMPTY,
         AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(**changes),
         ),
         agent_id=1,
         catalog=build_model_catalog(),

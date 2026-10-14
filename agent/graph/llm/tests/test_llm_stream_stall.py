@@ -37,7 +37,7 @@ from agent.state import AgentState
 from base import config
 from base.agents.context import AvaContext
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -82,9 +82,7 @@ def _make_runtime(
         ops_pool=make_fake_ops_pool(),
         llm=llm,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=model_catalog,
@@ -248,9 +246,6 @@ async def test_total_timeout_ends_the_original_request_while_chunks_keep_arrivin
         return AIMessage(content="fallback")
 
     monkeypatch.setattr(stream_module.time, "monotonic", fake_monotonic)
-    monkeypatch.setattr(settings.lm, "llm_stream_total_timeout_seconds", 1.0)
-    monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", 10.0)
-    monkeypatch.setattr(settings.lm, "llm_stream_inter_chunk_timeout_seconds", 10.0)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _dripping_stream()
     fake_llm.ainvoke = _fallback
@@ -263,7 +258,11 @@ async def test_total_timeout_ends_the_original_request_while_chunks_keep_arrivin
             chunks=chunks,
             handler=MagicMock(),
             agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                default_reader=defaults(
+                    lm__llm_stream_total_timeout_seconds=1.0,
+                    lm__llm_stream_ttft_timeout_seconds=10.0,
+                    lm__llm_stream_inter_chunk_timeout_seconds=10.0,
+                )
             ),
             catalog=model_catalog,
         )
@@ -370,15 +369,13 @@ async def test_an_agents_stream_bound_is_the_one_the_stream_runs_under(
         monkeypatch,
         AgentSlices.resolve(
             {setting: 4.25},
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(),
         ),
     )
     assert pinned[_STREAM_BOUNDS[setting]] == 4.25
     unpinned = await _stream_bounds(
         monkeypatch,
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        AgentSlices.resolve(default_reader=defaults()),
     )
     for other in _STREAM_BOUNDS.values():
         if other != _STREAM_BOUNDS[setting]:

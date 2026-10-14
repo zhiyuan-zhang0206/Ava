@@ -22,8 +22,6 @@ exports = ["test_provider_plugins.py"]
 "test_validate_model_config.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1
 
 [debt.first-party-patch]
-"test_model_registry.py#monkeypatch.setattr base.config.settings.lm.llm_stream_total_timeout_seconds" = 2
-"test_model_registry.py#monkeypatch.setattr base.config.settings.lm.llm_stream_ttft_timeout_seconds" = 2
 "test_provider_plugins.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 2
 "test_provider_plugins.py#monkeypatch.setattr base.lm.factory.resolve_available_model" = 1
 "test_validate_model_config.py#monkeypatch.setattr base.config.settings.lm" = 2

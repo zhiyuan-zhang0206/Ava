@@ -39,7 +39,7 @@ from agent.graph.hooks.compact import (
 from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -136,9 +136,7 @@ def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[AvaCont
         ops_pool=None,
         llm=llm,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -159,9 +157,7 @@ async def test_generate_summary_returns_summary():
     """generate_summary returns summary text (from LLM), no longer returns tail."""
     msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
 
-    slices = AgentSlices.resolve(
-        None, default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-    )
+    slices = AgentSlices.resolve(None, default_reader=defaults())
     llm = _fake_llm(summary_text="a synthetic summary")
     summary = await generate_summary(msgs, llm, slices, catalog=build_model_catalog())
 
@@ -175,9 +171,7 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
     from base.agents.history.closing_request import ClosingRequest
 
     msgs: list[AnyMessage] = [HumanMessage(content=f"msg{i}") for i in range(8)]
-    slices = AgentSlices.resolve(
-        None, default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-    )
+    slices = AgentSlices.resolve(None, default_reader=defaults())
     response = AIMessage(
         content="a synthetic summary",
         usage_metadata={"input_tokens": 4321, "output_tokens": 9, "total_tokens": 4330},
@@ -301,9 +295,7 @@ def _make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
         ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),

@@ -22,7 +22,7 @@ from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
 from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
     load_ava_code_plugin as load_ava_code_plugin,
 )
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm import factory
 from base.packages.plugin_providers import build_model_catalog
@@ -310,7 +310,7 @@ def test_set_cwd_non_git_stores_cwd_note(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pytest.MonkeyPatch):
+def test_coding_tools_section_skips_framework_expanded_modules():
     """A module in the effective expand view (settings + plugin registrations)
     is already rendered (full contract) by the framework section — the plugin
     must not promote it a second time. Exact path match: an expand entry for a
@@ -319,10 +319,9 @@ def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pyte
     always expanded and never promoted here."""
     from ava_builtins.plugins.ava_code._prompt_sections import coding_tools_section
 
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell.sessions"])
     text = coding_tools_section(
         AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(agent__sdk_expand_in_system_prompt=["files", "shell.sessions"]),
         ),
         catalog=build_model_catalog(),
     )
@@ -332,15 +331,12 @@ def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pyte
     assert "Use the Ava file and shell tools" in text  # preamble always renders
 
 
-def test_coding_tools_section_all_expanded_keeps_preamble_only(
-    monkeypatch: pytest.MonkeyPatch,
-):
+def test_coding_tools_section_all_expanded_keeps_preamble_only():
     from ava_builtins.plugins.ava_code._prompt_sections import coding_tools_section
 
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["cwd", "files", "shell"])
     text = coding_tools_section(
         AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(agent__sdk_expand_in_system_prompt=["cwd", "files", "shell"]),
         ),
         catalog=build_model_catalog(),
     )
