@@ -1,5 +1,5 @@
 import { act, cleanup, render } from "@testing-library/react";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { StrictMode, useEffect, useLayoutEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useOlderHistoryPull } from "./use-older-history-pull";
@@ -104,7 +104,18 @@ describe("native release-to-load older history", () => {
     expect(loadPage).not.toHaveBeenCalled();
     rerender(<Harness available loadPage={loadPage} intent={intent} />);
     expect(space.style.height).toBe("80px");
+    expect(viewport.scrollTop).toBe(110); // preserve the 30px reading position below the new reserve
+    rerender(<Harness available loadPage={loadPage} intent={intent} />);
+    expect(viewport.scrollTop).toBe(110);
+  });
+
+  it("keeps one reserve across StrictMode re-attachment and restores natural coordinates on cleanup", () => {
+    const view = render(<StrictMode><Harness loadPage={() => true} intent={vi.fn()} /></StrictMode>);
+    const viewport = view.getByTestId("viewport");
+    expect(view.getByTestId("space").style.height).toBe("80px");
     expect(viewport.scrollTop).toBe(80);
+    view.unmount();
+    expect(viewport.scrollTop).toBe(0);
   });
 
   it("stops an arriving gesture and its momentum at the top until a new gesture starts", () => {
