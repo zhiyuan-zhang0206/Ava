@@ -110,6 +110,15 @@ errors cannot be recorded.
   shows). Totals, not directories, are
   compared, so debt that moves with its file does not count as growth. The
   caller chooses `fail` or `warn`; there is no default.
+- `--waive-if-changed <pathspec>...` marks a change that edits those paths (the
+  rule code) as a rule change, which is judged in two parts
+  (`meizel/contracts/debt_rules.py`). The growth the new rules cause is what this
+  checker, run on a checkout of the ref, records for the ref's unchanged code, minus what the ref
+  records: reported, never judged. The growth the content causes is what the change records
+  beyond that: judged. Every recorded key must be one the new rules find in the ref, with no
+  greater count, so a declaration cannot hide a new violation and a violation cannot ride along.
+  A file moved in the same change fails; move files separately. A manifest the checker cannot
+  read in the ref stops the comparison. Other changes are judged by totals, with no waiver.
 
 ## Depths of `check`
 
