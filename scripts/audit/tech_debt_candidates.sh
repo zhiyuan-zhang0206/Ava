@@ -157,56 +157,7 @@ echo ""
 # Class 8: docstring-budget (detection half — judgement happens in the sweep)
 # ------------------------------------------------------------------
 echo "--- [5/6] docstring-budget: Raises sections + soft-zone lengths ---"
-report_scan text .venv/bin/python - <<'PY'
-import ast
-from pathlib import Path
-from scripts.lint.agent_docstrings import (
-    discover_agent_surface_modules, _discover_plugin_namespace_modules, is_in_scope,
-    _agent_visible_names, _wrap_targets, _is_visible,
-)
-
-def doc_of(node):
-    if (node.body and isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, ast.Constant)
-            and isinstance(node.body[0].value.value, str)):
-        return node.body[0].value.value, node.body[0].lineno
-    return None, None
-
-root = Path(".")
-ns_files = _discover_plugin_namespace_modules(root)
-surface_files = discover_agent_surface_modules(root)
-hits = 0
-for f in sorted(root.rglob("*.py")):
-    if ".venv" in f.parts or not is_in_scope(f.relative_to(root), ns_files, surface_files):
-        continue
-    tree = ast.parse(f.read_text())
-    rel = str(f)
-    is_plugin = rel.endswith("/plugin.py")
-    allnames = _agent_visible_names(tree)
-    wraps = _wrap_targets(tree) if is_plugin else set()
-    if not is_plugin:
-        d, ln = doc_of(tree)
-        if d and len(d.splitlines()) > 2:
-            print(f"{rel}:{ln}: module docstring {len(d.splitlines())} lines (soft cap 2)")
-            hits += 1
-    for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        visible = (node.name in wraps) if is_plugin else _is_visible(node.name, allnames)
-        if not visible:
-            continue
-        d, ln = doc_of(node)
-        if not d:
-            continue
-        if "Raises:" in d:
-            print(f"{rel}:{ln}: {node.name} has a Raises: section")
-            hits += 1
-        if len(d.splitlines()) > 12:
-            print(f"{rel}:{ln}: {node.name} docstring {len(d.splitlines())} lines (soft cap 12)")
-            hits += 1
-if not hits:
-    print("(none found)")
-PY
+report_scan text .venv/bin/python -m scripts.lint.docstring_budget_report
 echo ""
 
 # ------------------------------------------------------------------
