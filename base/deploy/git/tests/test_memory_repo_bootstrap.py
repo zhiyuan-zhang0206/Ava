@@ -10,6 +10,11 @@ from pathlib import Path
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.gateway_stubs import (
+    gateway_api_base_raises,
+    gateway_api_base_stub,
+    gateway_auth_headers_stub,
+)
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.deploy.git import memory_repo
@@ -204,9 +209,13 @@ def test_bootstrap_from_gateway_clones_bundle_as_machine_branch(
 
     import base.cluster.machine as _machine
 
-    monkeypatch.setattr(_machine, "gateway_api_base", lambda: "http://gw.example:8000")
     monkeypatch.setattr(
-        _machine, "gateway_auth_headers", lambda: {"Authorization": "Bearer s3cret"}
+        _machine, "gateway_api_base", gateway_api_base_stub("http://gw.example:8000")
+    )
+    monkeypatch.setattr(
+        _machine,
+        "gateway_auth_headers",
+        gateway_auth_headers_stub({"Authorization": "Bearer s3cret"}),
     )
 
     machine_identity.set(role="agent-runner", name="test-host-2")
@@ -253,7 +262,9 @@ def test_bootstrap_from_gateway_head_mismatch_fails_loud(
 
     import base.cluster.machine as _machine
 
-    monkeypatch.setattr(_machine, "gateway_api_base", lambda: "http://gw.example:8000")
+    monkeypatch.setattr(
+        _machine, "gateway_api_base", gateway_api_base_stub("http://gw.example:8000")
+    )
 
     machine_identity.set(role="agent-runner", name="test-host-2")
     with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="does not match"):
@@ -275,7 +286,7 @@ def test_bootstrap_from_gateway_non_200_fails_loud(
 
     import base.cluster.machine as _machine
 
-    monkeypatch.setattr(_machine, "gateway_api_base", lambda: "http://gw")
+    monkeypatch.setattr(_machine, "gateway_api_base", gateway_api_base_stub("http://gw"))
     machine_identity.set(role="agent-runner", name="test-host-2")
     with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="HTTP 502"):
         memory_repo.bootstrap_from_gateway(machine=machine_identity)
@@ -293,7 +304,7 @@ def test_bootstrap_from_gateway_missing_gateway_url_fails_loud(
     monkeypatch.setattr(
         _machine,
         "gateway_api_base",
-        lambda: (_ for _ in ()).throw(
+        gateway_api_base_raises(
             _machine.GatewayApiBaseMissing("gateway_url unset — `ava start` writes it")
         ),
     )
@@ -317,7 +328,9 @@ def test_bootstrap_from_gateway_corrupt_bundle_fails_loud(
 
     import base.cluster.machine as _machine
 
-    monkeypatch.setattr(_machine, "gateway_api_base", lambda: "http://gw.example:8000")
+    monkeypatch.setattr(
+        _machine, "gateway_api_base", gateway_api_base_stub("http://gw.example:8000")
+    )
     machine_identity.set(role="agent-runner", name="test-host-2")
     with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="git clone from bundle failed"):
         memory_repo.bootstrap_from_gateway(machine=machine_identity)

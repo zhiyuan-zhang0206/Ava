@@ -13,6 +13,10 @@ import httpx
 import pytest
 
 import base.cluster.machine as cluster_machine
+from base.cluster.machine.tests.gateway_stubs import (
+    gateway_api_base_stub,
+    gateway_auth_headers_stub,
+)
 from cli.commands.agents import control as _agents
 
 TARGET = {
@@ -66,9 +70,13 @@ def _agent_row(agent_id: int, status: str, machine: str, label: str | None) -> d
 
 @pytest.fixture(autouse=True)
 def _gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cluster_machine, "gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr(
-        cluster_machine, "gateway_auth_headers", lambda: {"Authorization": "Bearer secret"}
+        cluster_machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000")
+    )
+    monkeypatch.setattr(
+        cluster_machine,
+        "gateway_auth_headers",
+        gateway_auth_headers_stub({"Authorization": "Bearer secret"}),
     )
 
 

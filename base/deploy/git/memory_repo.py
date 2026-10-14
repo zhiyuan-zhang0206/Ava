@@ -296,15 +296,17 @@ def bootstrap_from_gateway(*, machine: MachineIdentity) -> None:
     import tempfile
 
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
 
+    access = gateway_access_from_settings()  # ambient: B2
     try:
-        base = gateway_api_base()
+        base = gateway_api_base(access.gateway_url)
     except (
         Exception
     ) as e:  # GatewayApiBaseMissing (base.cluster.machine) — wrap into the guided failure
         raise MemoryPoolBootstrapFailed(f"gateway URL unavailable: {e}") from e
     url = f"{base}/api/memory/pool"
-    head, bundle_bytes = download_pool_snapshot(url, gateway_auth_headers())
+    head, bundle_bytes = download_pool_snapshot(url, gateway_auth_headers(access))
     target = memory_dir()
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp_dir = Path(tempfile.mkdtemp(prefix=".memory-bootstrap-", dir=str(target.parent)))

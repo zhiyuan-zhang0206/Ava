@@ -26,15 +26,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.host.net.http_dial import post as dial_post
 
 
 def main() -> None:
-    base = gateway_api_base()  # role-blind: the configured gateway_url (localhost on a dev cluster)
+    access = gateway_access_from_settings()  # ambient: O
+    base = gateway_api_base(
+        access.gateway_url
+    )  # role-blind: the configured gateway_url (localhost on a dev cluster)
     # The keyed spawn route is authenticated: present the machine API token (or the
     # cluster secret) as a Bearer token; without it the gateway rejects this spawn with 401.
     headers = {
-        **gateway_auth_headers(),
+        **gateway_auth_headers(access),
         "Idempotency-Key": uuid.uuid4().hex,
         SCOPE_HEADER: PRINCIPAL_SCOPE,
     }

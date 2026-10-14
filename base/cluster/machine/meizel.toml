@@ -1,5 +1,6 @@
-exports = ["boot.py", "tests"]
+exports = ["ambient.py", "boot.py", "tests"]
 
 [uses]
+"ambient.py" = ["__init__.py"]
 "boot.py" = ["__init__.py"]
 "tests" = ["__init__.py", "boot.py"]

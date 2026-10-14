@@ -16,6 +16,7 @@ from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import CopyProof, ReceiveRequest
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.host.db_authority.unit import UnitIdentity
@@ -200,7 +201,9 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
         # A receiver file/network phase has released its own DB connection.
         with app.state.db_pool.connection(timeout=1) as conn:
             assert conn.execute("SELECT 1").fetchone() == (1,)
-        result = client.get(url.removeprefix(receiver.gateway_api_base().rstrip("/")))
+        result = client.get(
+            url.removeprefix(receiver.gateway_api_base(settings.gateway.gateway_url).rstrip("/"))
+        )
         return httpx.Response(
             result.status_code, content=result.content, request=httpx.Request("GET", url)
         )
@@ -472,7 +475,11 @@ def test_single_connection_receiver_releases_pool_across_http(
         def get(url: str, **_kwargs: Any):
             with pool.connection(timeout=0.5) as conn:
                 assert conn.execute("SELECT 1").fetchone() == (1,)
-            result = client.get(url.removeprefix(receiver.gateway_api_base().rstrip("/")))
+            result = client.get(
+                url.removeprefix(
+                    receiver.gateway_api_base(settings.gateway.gateway_url).rstrip("/")
+                )
+            )
             return httpx.Response(
                 result.status_code, content=result.content, request=httpx.Request("GET", url)
             )

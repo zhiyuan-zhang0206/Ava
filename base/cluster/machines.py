@@ -37,7 +37,7 @@ from base.api_contracts.agent_contract import MachineNotRegistered
 from base.cluster.machine import (
     GatewayApiBaseMissing,
     MachineRoles,
-    resolve_gateway_api_base,
+    gateway_api_base,
 )
 from base.db import Database
 from base.host.net.predicates import is_loopback_host
@@ -99,7 +99,7 @@ def gateway_url(configured: str) -> str:
     URL normalization used by HTTP clients.
     """
     try:
-        return resolve_gateway_api_base(configured)
+        return gateway_api_base(configured)
     except GatewayApiBaseMissing as exc:
         raise GatewayUrlMissing(
             "gateway URL not set — `ava init --gateway-url <url>` records it for a new home; "

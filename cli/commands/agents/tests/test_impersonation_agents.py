@@ -10,6 +10,10 @@ import httpx
 import pytest
 
 from base.cluster import machine
+from base.cluster.machine.tests.gateway_stubs import (
+    gateway_api_base_stub,
+    gateway_auth_headers_stub,
+)
 from base.host.net import http_dial
 from cli.commands.agents import impersonation as cli
 from cli.commands.agents.timeline import cmd_agents_timeline
@@ -30,9 +34,11 @@ def test_timeline_preserves_existing_payload(
         return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(http_dial, "get", get)
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gateway")
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gateway"))
     monkeypatch.setattr(
-        machine, "gateway_auth_headers", lambda: {"Authorization": "Bearer cluster"}
+        machine,
+        "gateway_auth_headers",
+        gateway_auth_headers_stub({"Authorization": "Bearer cluster"}),
     )
     assert cmd_agents_timeline(405) == 0
     assert seen["url"] == "http://gateway/api/agents/405/timeline"

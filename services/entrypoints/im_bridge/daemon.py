@@ -26,6 +26,7 @@ from psycopg_pool import PoolTimeout
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import daemon_acceptance, gateway_auth_headers
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -141,10 +142,11 @@ def feishu_config() -> FeishuCredentialsConfig:
 
 
 def gateway_client(config: ImBridgeConfig) -> GatewayClient:
+    access = gateway_access_from_settings()  # ambient: S
     return GatewayClient(
         config,
         gateway_url=settings.gateway.gateway_url,
-        auth_headers=gateway_auth_headers(),
+        auth_headers=gateway_auth_headers(access),
     )
 
 
@@ -333,6 +335,7 @@ async def run(
     adapters: list[Any] = []
     cleanup_errors: list[BaseException] = []
     primary: BaseException | None = None
+    access = gateway_access_from_settings()  # ambient: S
     try:
         async with asyncio.TaskGroup() as loops:
             try:
@@ -352,7 +355,7 @@ async def run(
                         ("POST", "/send"): await handle_send(core),
                         ("POST", "/send/alert-outbound"): alerts.handle,
                     },
-                    auth_digests=daemon_acceptance(),
+                    auth_digests=daemon_acceptance(access),
                     image=image,
                 )
                 _log.info("[im_bridge] healthz listening on :%s", endpoint.health_port)

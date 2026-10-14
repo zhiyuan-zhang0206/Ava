@@ -100,7 +100,7 @@ first prompt, the gateway POSTs a `spawn-launch` op to the target runner's ops
 server (address read from this table), which calls
 `ops/lifecycle/__init__.py:launch_agent_op` in-process and returns the result in
 the same response. Runners run **no** local gateway process — an agent's SDK
-reaches the gateway over HTTP via `gateway_api_base()`.
+reaches the gateway over HTTP via `gateway_api_base(gateway_url)`.
 
 **Spawn-target invariant**: `POST /api/keyed/v1/agents` returns **HTTP 400** when the
 resolved `machine` lacks the `agent-runner` capability (`'agent-runner' =
@@ -115,7 +115,7 @@ agent onto a gateway-only node where only the scheduling/DB layer lives".
   `docs/conventions/python-conventions.md`.
 - Enrolling a split runner (`ava start`) does not birth a cluster — its cluster
   identity **is** the gateway URL + the capability bundle it installed.
-- `gateway_auth_headers` presents `gateway_bearer()`: this process's delivered machine
+- `gateway_auth_headers(access)` presents `gateway_bearer(access)`: this process's delivered machine
   API token (`AVA_API_TOKEN`), else the human secret of an operator or gateway-profile
   process; a process launched with the agent or runner profile, a set secret and no token raises
   `GatewayApiTokenMissing` (a remote-managed plane delivers none, so it is exempt);
@@ -127,8 +127,9 @@ agent onto a gateway-only node where only the scheduling/DB layer lives".
 - [[base/cluster/docs/paths.ava.okf.md]] — where the home's `.env` lives
 - [[cli/docs/cli.ava.okf.md]] — `ava start`, which persists these labels
 
-Explicit process composition uses `resolve_gateway_api_base(value)` and
-`resolve_gateway_bearer` with narrow live readers from its configuration owner.
-The latter keeps delivered-token precedence: a present token never reads the
-secret, profile or remote-plane policy. Legacy process entry points retain
-`gateway_api_base()` and `gateway_bearer()` until their own roots migrate.
+Gateway access is a value, `GatewayAccess(gateway_url, cluster_secret, remote_plane)`, built by a root
+from its configuration (`base/cluster/machine/boot.py:gateway_access_from_boot`).
+`gateway_api_base(gateway_url)`, `gateway_bearer(access)`, `gateway_auth_headers(access)` and
+`daemon_acceptance(access)` read no settings; `resolve_gateway_bearer` keeps token-first admission.
+A caller with no root yet calls `base/cluster/machine/ambient.py:gateway_access_from_settings` and labels it
+`# ambient: <batch>`; the list only shrinks and the module goes with the last call.

@@ -60,13 +60,15 @@ def cmd_agents_ls(
 ) -> int:
     """Render one agent directory page and its continuation cursor."""
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
-    url = f"{gateway_api_base()}/api/agents"
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/agents"
     params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
     if before_id is not None:
         params["before_id"] = before_id
-    resp = dial_get(url, params=params, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    resp = dial_get(url, params=params, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
     resp.raise_for_status()
     page = resp.json()
     rows = [_AgentListItem.model_validate(r) for r in page["agents"]]
@@ -185,17 +187,19 @@ def send_agent_message(
 
     from base.agents.messages.delivery.retry import network_errors, retryable_response
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
     if tail_file is not None:
         content = _with_tail(content, tail_file)
-    headers = {**gateway_auth_headers(), **keyed_headers(str(uuid4()))}
+    access = gateway_access_from_settings()  # ambient: C
+    headers = {**gateway_auth_headers(access), **keyed_headers(str(uuid4()))}
     body = {
         "content": content,
         "source": source,
         **({"completion_notice": True} if completion else {}),
     }
-    url = f"{gateway_api_base()}/api/agents/{agent_id}/messages"
+    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/messages"
     for attempt in range(3):
         try:
             response = dial_post(url, json=body, timeout=_TIMEOUT_S, headers=headers)
@@ -216,11 +220,15 @@ def cmd_agents_cancel(agent_id: int) -> int:
     """Cancel the exact observed ACTIVE native work; acceptance precedes its stop."""
     from base.agents.incarnation.native_work_models import NativeCancelAcceptance, NativeWorkTarget
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
     from base.host.net.http_dial import post as dial_post
 
-    root = f"{gateway_api_base()}/api/keyed/v1/agents/{agent_id}"
-    observed = dial_get(f"{root}/native-work", timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    access = gateway_access_from_settings()  # ambient: C
+    root = f"{gateway_api_base(access.gateway_url)}/api/keyed/v1/agents/{agent_id}"
+    observed = dial_get(
+        f"{root}/native-work", timeout=_TIMEOUT_S, headers=gateway_auth_headers(access)
+    )
     observed.raise_for_status()
     target = NativeWorkTarget.model_validate(observed.json())
     if target.agent_id != agent_id:
@@ -229,7 +237,7 @@ def cmd_agents_cancel(agent_id: int) -> int:
         f"{root}/cancel-work",
         json=target.model_dump(mode="json"),
         timeout=_TIMEOUT_S,
-        headers={**gateway_auth_headers(), **keyed_headers(uuid4().hex)},
+        headers={**gateway_auth_headers(access), **keyed_headers(uuid4().hex)},
     )
     resp.raise_for_status()
     accepted = NativeCancelAcceptance.model_validate(resp.json())
@@ -255,16 +263,18 @@ def cmd_agents_restart(
     import sys
 
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
-    url = f"{gateway_api_base()}/api/agents/{agent_id}/restart"
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/restart"
     caller = _explicit_caller(source)
     if config_json is None:
         resp = dial_post(
             url,
             **({"json": caller} if caller else {}),
             timeout=_TIMEOUT_S,
-            headers=gateway_auth_headers(),
+            headers=gateway_auth_headers(access),
         )
     else:
         try:
@@ -279,7 +289,7 @@ def cmd_agents_restart(
             url,
             json={"config_overlay": config_overlay, **caller},
             timeout=_TIMEOUT_S,
-            headers=gateway_auth_headers(),
+            headers=gateway_auth_headers(access),
         )
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} restart: {resp.json().get('status')}")
@@ -293,15 +303,17 @@ def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
     same agent_id (history preserved). An already-running agent returns
     `already_alive`."""
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
-    url = f"{gateway_api_base()}/api/agents/{agent_id}/resurrect"
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/resurrect"
     caller = _explicit_caller(source, field="resurrected_by")
     resp = dial_post(
         url,
         **({"json": caller} if caller else {}),
         timeout=_TIMEOUT_S,
-        headers=gateway_auth_headers(),
+        headers=gateway_auth_headers(access),
     )
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} resurrect: {resp.json().get('status')}")
@@ -323,16 +335,18 @@ def _terminate(
     `kill_all_shell_sessions` is sent only when set; the output reports what
     the kill did, so it is verifiable from the output alone."""
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
     verb = "kill" if force else "terminate"
-    url = f"{gateway_api_base()}/api/agents/{agent_id}/terminate"
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/terminate"
     kill_flag = {"kill_all_shell_sessions": True} if kill_all_shell_sessions else {}
     resp = dial_post(
         url,
         json={"force": force, **kill_flag, **_explicit_caller(source)},
         timeout=_TIMEOUT_S,
-        headers=gateway_auth_headers(),
+        headers=gateway_auth_headers(access),
     )
     resp.raise_for_status()
     data = resp.json()
@@ -390,12 +404,14 @@ def cmd_agents_compact(agent_id: int) -> int:
     """Accept manual compaction of the exact observed closed source history."""
     from base.agents.compaction.models import CompactAcceptance, CompactTarget
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
     from base.host.net.http_dial import post as dial_post
 
-    root = f"{gateway_api_base()}/api/keyed/v1/agents/{agent_id}"
+    access = gateway_access_from_settings()  # ambient: C
+    root = f"{gateway_api_base(access.gateway_url)}/api/keyed/v1/agents/{agent_id}"
     observed = dial_get(
-        f"{root}/compact-target", timeout=_TIMEOUT_S, headers=gateway_auth_headers()
+        f"{root}/compact-target", timeout=_TIMEOUT_S, headers=gateway_auth_headers(access)
     )
     observed.raise_for_status()
     target = CompactTarget.model_validate(observed.json())
@@ -405,7 +421,7 @@ def cmd_agents_compact(agent_id: int) -> int:
         f"{root}/compact-history",
         json=target.model_dump(mode="json"),
         timeout=_TIMEOUT_S,
-        headers={**gateway_auth_headers(), **keyed_headers(uuid4().hex)},
+        headers={**gateway_auth_headers(access), **keyed_headers(uuid4().hex)},
     )
     resp.raise_for_status()
     accepted = CompactAcceptance.model_validate(resp.json())

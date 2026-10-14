@@ -74,7 +74,7 @@ def __getattr__(name: str) -> Any:
     if name == "GATEWAY_URL":
         from base.cluster.machine import gateway_api_base
 
-        return gateway_api_base()
+        return gateway_api_base(settings.gateway.gateway_url)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

@@ -22,6 +22,7 @@ from base.cluster.machine import (
     gateway_api_base,
     gateway_bearer,
 )
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.config import settings
 from base.log import logger
 from services.desktop.browser.mcp_upstream import await_stop_or_timeout, contained
@@ -44,13 +45,14 @@ def gateway_session_params() -> tuple[str, str] | None:
     a launch defect and left without the cookie (best effort, like every
     other path here), except on a remote-managed data plane, which delivers no
     token and whose gateway home presents the human secret."""
+    access = gateway_access_from_settings()  # ambient: S
     try:
-        gateway_url = gateway_api_base()
+        gateway_url = gateway_api_base(access.gateway_url)
     except Exception as e:  # gateway URL unset on this unit
         logger.warning(f"[browser-mcp] gateway session injection disabled: {e}")
         return None
     try:
-        credential = gateway_bearer()
+        credential = gateway_bearer(access)
     except GatewayApiTokenMissing as e:
         logger.error(f"[browser-mcp] gateway session injection disabled: {e}")
         return None

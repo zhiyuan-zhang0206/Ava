@@ -58,9 +58,11 @@ def gateway_liveness() -> bool:
     host, this is `http://localhost:<port>/api/health`; the URL is resolved
     from Settings."""
     from base.cluster.machine import gateway_api_base
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
-    base = gateway_api_base()
+    access = gateway_access_from_settings()  # ambient: C
+    base = gateway_api_base(access.gateway_url)
     url = f"{base}/api/health"
     try:
         resp = dial_get(url, timeout=10.0)

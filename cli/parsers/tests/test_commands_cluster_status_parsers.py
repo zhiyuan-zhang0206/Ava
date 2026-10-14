@@ -6,6 +6,10 @@ import pytest
 
 import cli.commands.cluster.control as cluster_control
 from base.cluster import machine
+from base.cluster.machine.tests.gateway_stubs import (
+    gateway_api_base_stub,
+    gateway_auth_headers_stub,
+)
 from base.host.net import http_dial
 from cli.database.tests.command_fakes import FakeResponse
 from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
@@ -26,8 +30,8 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
 
     from cli.parsers import build_parser
 
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr(machine, "gateway_auth_headers", dict)
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
+    monkeypatch.setattr(machine, "gateway_auth_headers", gateway_auth_headers_stub({}))
     monkeypatch.setattr(
         http_dial,
         "post",

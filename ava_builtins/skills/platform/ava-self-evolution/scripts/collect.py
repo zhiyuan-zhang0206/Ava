@@ -52,6 +52,7 @@ from record import _plugins_activated as _plugins_activated
 from record import _transcript as _transcript
 
 from base.cluster.machine import gateway_auth_headers
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.config import settings
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from base.paths import ava_home
@@ -98,10 +99,11 @@ def _events_page(
         params["agent_id"] = agent_id
 
     def fetch() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        access = gateway_access_from_settings()  # ambient: O
         resp = client.get(
             _gateway_url() + _EVENTS_PATH,
             params=params,
-            headers=gateway_auth_headers(),
+            headers=gateway_auth_headers(access),
             timeout=_HTTP_TIMEOUT_S,
         )
         resp.raise_for_status()

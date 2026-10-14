@@ -9,6 +9,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.config import settings
 from base.telemetry.alerts import im_bridge_rpc_url
 
@@ -82,11 +83,12 @@ def notify_alert_group(group_id: int) -> bool:
     if not settings.alerts.im_notify_enabled:
         return False
     base = im_bridge_rpc_url()
+    access = gateway_access_from_settings()  # ambient: B2
     try:
         response = httpx.post(
             f"{base}/send/alert-outbound",
             json={"group_id": group_id, "source_origin": AlertGroupOrigin.NATIVE.value},
-            headers=gateway_auth_headers(),
+            headers=gateway_auth_headers(access),
             timeout=10.0,
         )
         if response.status_code == 200:

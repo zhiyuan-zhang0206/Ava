@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from base.cluster.machine import GatewayApiBaseMissing
+from base.cluster.machine.tests.gateway_stubs import gateway_api_base_stub
 from services.desktop.browser import gateway_session
 from services.desktop.browser import session as sess
 from services.desktop.browser.gateway_session import GatewaySession
@@ -213,7 +214,7 @@ async def test_inject_raises_when_chrome_unreachable(monkeypatch: pytest.MonkeyP
 
 
 async def test_inject_once_skips_when_gateway_url_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    def raise_missing() -> str:
+    def raise_missing(_gateway_url: str) -> str:
         raise GatewayApiBaseMissing("gateway_url unset")
 
     calls: list[tuple[int, str, str]] = []
@@ -233,7 +234,7 @@ async def test_inject_once_skips_on_empty_secret(monkeypatch: pytest.MonkeyPatch
     async def fake_inject(port: int, url: str, secret: str) -> None:
         calls.append((port, url, secret))
 
-    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
     monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", "")
     await GatewaySession(asyncio.TaskGroup()).inject_once()
@@ -246,7 +247,7 @@ async def test_inject_once_injects_with_settings(monkeypatch: pytest.MonkeyPatch
     async def fake_inject(port: int, url: str, secret: str) -> None:
         calls.append((port, url, secret))
 
-    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
     monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
     await GatewaySession(asyncio.TaskGroup()).inject_once()
@@ -256,7 +257,7 @@ async def test_inject_once_injects_with_settings(monkeypatch: pytest.MonkeyPatch
 def test_session_params_present_the_delivered_runner_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
     monkeypatch.setenv("AVA_API_TOKEN", "delivered-runner-token")
@@ -270,7 +271,7 @@ def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secr
     that delivered no token is an error, and the human secret never stands in."""
     errors: list[str] = []
     monkeypatch.setattr(gateway_session.logger, "error", errors.append)
-    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
     monkeypatch.delenv("AVA_API_TOKEN", raising=False)
@@ -286,7 +287,7 @@ async def test_inject_once_swallows_injection_failure(monkeypatch: pytest.Monkey
     async def boom(port: int, url: str, secret: str) -> None:
         raise RuntimeError("cdp down")
 
-    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
     monkeypatch.setattr(gateway_session, "inject_session_cookie", boom)
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
     await GatewaySession(asyncio.TaskGroup()).inject_once()  # must not raise

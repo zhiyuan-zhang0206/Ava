@@ -6,6 +6,11 @@ import pytest
 
 import cli.commands.cluster.control as cluster_control
 from base.cluster import machine
+from base.cluster.machine.tests.gateway_stubs import (
+    gateway_api_base_raises,
+    gateway_api_base_stub,
+    gateway_auth_headers_stub,
+)
 from base.host.net import http_dial
 from cli.database.tests.command_fakes import FakeResponse
 from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
@@ -177,7 +182,7 @@ def test_cmd_cluster_status_read_timeout_reports_friendly(
 
     from base.config import settings
 
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
     monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 5.0)
 
     def _slow_get(url: str, **_kw: object) -> None:
@@ -210,7 +215,7 @@ def test_cmd_cluster_status_dials_the_derived_read_budget(
     not the thin-POST timeout constant (#4900)."""
     from base.config import settings
 
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
     monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 5.0)
     seen: dict[str, object] = {}
 
@@ -232,7 +237,7 @@ def test_cmd_cluster_status_connect_error_reports_friendly(
     exits 1 instead of raising (#219)."""
     import httpx
 
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
 
     def _refused_get(url: str, **_kw: object) -> None:
         raise httpx.ConnectError("connection refused", request=None)
@@ -251,7 +256,7 @@ def test_cmd_cluster_status_http_error_reports_status(
     """A non-2xx roster response names the status code and exits 1 (#219)."""
     import httpx
 
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
 
     def _server_error_get(url: str, **_kw: object) -> httpx.Response:
         # A real dial returns the 500 response; raise_for_status() in
@@ -276,7 +281,7 @@ def test_cmd_cluster_status_unresolvable_gateway_reports_friendly(
     monkeypatch.setattr(
         machine,
         "gateway_api_base",
-        lambda: (_ for _ in ()).throw(GatewayApiBaseMissing("AVA_GATEWAY_URL unset")),
+        gateway_api_base_raises(GatewayApiBaseMissing("AVA_GATEWAY_URL unset")),
     )
     rc = cluster_control.cmd_cluster_status()
     assert rc == 1
@@ -289,7 +294,7 @@ def test_cmd_cluster_status_unresolvable_gateway_reports_friendly(
 
 def _patch_roster_get(monkeypatch: pytest.MonkeyPatch, roster: list[dict]) -> list[str]:
     """Stub the gateway URL/headers + httpx.get so cmd_cluster_status renders `roster`."""
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
     calls: list[str] = []
 
     def _fake_get(url, **_kw):
@@ -366,7 +371,7 @@ def test_cmd_cluster_status_fails_fast_on_http_error(
 ) -> None:
     """A 5xx from the gateway exits 1 with the status named — fail-fast, no
     silent fallback, and no unhandled traceback (#219)."""
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
     monkeypatch.setattr("httpx.get", lambda *_a, **_kw: FakeResponse([], status_code=503))  # pyright: ignore[reportUnknownArgumentType]
     rc = cluster_control.cmd_cluster_status()
     assert rc == 1
@@ -390,8 +395,8 @@ def test_cmd_cluster_status_without_held_hosts_has_no_banner(
 
 
 def _post_returns(monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]) -> None:
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr(machine, "gateway_auth_headers", dict)
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
+    monkeypatch.setattr(machine, "gateway_auth_headers", gateway_auth_headers_stub({}))
     monkeypatch.setattr(
         http_dial,
         "post",

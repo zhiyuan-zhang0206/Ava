@@ -56,13 +56,15 @@ def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
     fan-outs). Exit 1 when the gateway reports no such machine.
     """
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
-    url = f"{gateway_api_base()}/api/cluster/machines/{name}/staging"
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/cluster/machines/{name}/staging"
     resp = dial_post(
         url,
         timeout=_CLUSTER_STATUS_PROBE_TIMEOUT_S,
-        headers=gateway_auth_headers(),
+        headers=gateway_auth_headers(access),
         json={"is_staging": is_staging},
     )
     if resp.status_code == 404:
@@ -88,13 +90,15 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
     Exit 1 when the gateway reports no such machine or refuses (own gateway).
     """
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
-    url = f"{gateway_api_base()}/api/cluster/machines/{name}/pause"
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/cluster/machines/{name}/pause"
     resp = dial_post(
         url,
         timeout=60.0,
-        headers=gateway_auth_headers(),
+        headers=gateway_auth_headers(access),
         json={"reason": reason or ""},
     )
     if resp.status_code == 404:
@@ -132,13 +136,15 @@ def cmd_cluster_resume(name: str) -> int:
     and its reachable address may have changed while it was out).
     """
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
-    url = f"{gateway_api_base()}/api/cluster/machines/{name}/resume"
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/cluster/machines/{name}/resume"
     resp = dial_post(
         url,
         timeout=_CLUSTER_STATUS_PROBE_TIMEOUT_S,
-        headers=gateway_auth_headers(),
+        headers=gateway_auth_headers(access),
         json={},
     )
     if resp.status_code == 404:
@@ -189,12 +195,14 @@ def cmd_cluster_status() -> int:
         gateway_api_base,
         gateway_auth_headers,
     )
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
+    access = gateway_access_from_settings()  # ambient: C
     try:
         # An operator command: dial every runner now rather than render the heartbeat
         # pass's last probe, which can be a minute old.
-        url = f"{gateway_api_base()}/api/cluster/roster?fresh=true"
+        url = f"{gateway_api_base(access.gateway_url)}/api/cluster/roster?fresh=true"
     except GatewayApiBaseMissing as exc:
         # Same diagnostic posture as `ava status`'s gateway supplement: a host
         # that cannot resolve the gateway URL must still say why.
@@ -202,7 +210,7 @@ def cmd_cluster_status() -> int:
         return 1
     read_timeout_s = roster_read_timeout_s()
     try:
-        resp = dial_get(url, timeout=read_timeout_s, headers=gateway_auth_headers())
+        resp = dial_get(url, timeout=read_timeout_s, headers=gateway_auth_headers(access))
     except httpx.TimeoutException as exc:
         print(
             f"✗ gateway at {url} did not respond within {read_timeout_s:g}s — the "
@@ -334,10 +342,12 @@ def fetch_gateway_cluster_status() -> dict[str, object]:
     unreachable gateway.
     """
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
-    url = f"{gateway_api_base()}/api/cluster/status"
-    resp = dial_get(url, timeout=10.0, headers=gateway_auth_headers())
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/cluster/status"
+    resp = dial_get(url, timeout=10.0, headers=gateway_auth_headers(access))
     resp.raise_for_status()
     return resp.json()
 
