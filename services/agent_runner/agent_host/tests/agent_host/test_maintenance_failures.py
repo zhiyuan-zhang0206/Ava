@@ -10,6 +10,7 @@ from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.tests.maintenance_factory import WHEN
 from base.deploy.tests.maintenance_factory import isolate as isolate
+from base.log.tests.log_records import loguru_records as loguru_records
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,
     FakeConnCtx,
