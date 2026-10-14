@@ -745,7 +745,7 @@ def throwaway_postgres(
             # subprocess loading Settings fresh dials exactly this URL). The peer
             # superuser role of the same name is kept for URLs that name it as the
             # user (trust auth ignores its password). Deliberately not `ava_main`
-            # (the prod-db guard in tests/path_scoped/ava_tests.py refuses that name).
+            # (the prod-db guard in ava/tests/fixtures/ava_tests.py refuses that name).
             cur.execute("CREATE ROLE ava_citest LOGIN SUPERUSER")
             cur.execute("CREATE DATABASE ava_citest")
 

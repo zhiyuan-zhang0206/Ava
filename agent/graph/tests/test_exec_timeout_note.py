@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.prompt.context_notes import exec_timeout_note
+from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
@@ -19,7 +20,6 @@ from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)

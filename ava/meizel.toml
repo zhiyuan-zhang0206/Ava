@@ -1,4 +1,4 @@
-exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "ui.py", "understand", "watcher"]
+exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "tests", "ui.py", "understand", "watcher"]
 
 [uses]
 "__init__.py" = ["agents", "boot.py", "files.py", "impersonation", "mcps", "sdk_surface", "self", "shell", "skills", "ui.py", "understand", "watcher", "web"]

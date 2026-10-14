@@ -1,5 +1,0 @@
-"tests.path_scoped.ava_tests" = [
-    "test_web.py",
-    "test_web_injection.py",
-    "test_web_search.py",
-]

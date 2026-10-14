@@ -22,13 +22,13 @@ from agent.messages import NoteTag, read_ava_kwargs
 from agent.state import build_agent_state
 from ava import gateway_client
 from ava.gateway_client import MemorySearchResult
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry
-from tests.fixtures.pin_agent import pin_agent
 
 _SHARED = "ava_memory__shared_notes"
 _PERSONAL = "ava_memory__personal_notes"

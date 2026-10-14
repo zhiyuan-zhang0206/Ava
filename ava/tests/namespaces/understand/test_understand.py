@@ -1,0 +1,496 @@
+"""ava.understand unit tests — input disambiguation (paths vs literal text),
+per-modality provider routing (text → settings.lm.understand_text_model default
+DeepSeek V4 Pro / media → settings.lm.understand_media_model default Gemini 3.5
+Flash), config adjustability, and error paths.
+
+Both paths mock `base.lm.factory.build_chat_model` (the provider factory that
+picks the model client by prefix — the media path has no Gemini SDK imports
+of its own anymore). Neither path hits a real API."""
+
+from __future__ import annotations
+
+import dataclasses
+import os
+from pathlib import Path
+
+import pytest
+from langchain_core.exceptions import ModelRateLimitError
+
+from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
+from ava.tests.fixtures.pin_agent import pin_no_identity
+from ava.tests.fixtures.workspace import workspace as workspace
+from ava.tests.namespaces.understand.provider_support import ProviderCapture, run_understand
+from ava.tests.namespaces.understand.provider_support import fake_image as fake_image
+from ava.tests.namespaces.understand.provider_support import fake_pdf as fake_pdf
+from ava.tests.namespaces.understand.provider_support import fake_video as fake_video
+from ava.tests.namespaces.understand.provider_support import mock_deepseek as mock_deepseek
+from ava.tests.namespaces.understand.provider_support import mock_gemini as mock_gemini
+from ava.tests.namespaces.understand.provider_support import understand_deps as understand_deps
+from ava.understand import UnderstandError, understand
+from ava.understand.answer import UnderstandDeps
+
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+
+# ── mode validation (paths= / text= mutually exclusive) ─────────────────────
+
+
+def test_text_mode_uses_deepseek(mock_deepseek: ProviderCapture) -> None:
+    """`text=` is the material itself — two text parts (material, prompt),
+    routed to DeepSeek V4 Flash (default downgraded from pro, task #918)."""
+    [out] = mock_deepseek.understand([{"prompt": "summarize", "text": "the quick brown fox"}])
+    assert out == "fake answer"
+    assert mock_deepseek.model == "deepseek-flash"
+    assert mock_deepseek.content == [
+        {"type": "text", "text": "the quick brown fox"},
+        {"type": "text", "text": "summarize"},
+    ]
+
+
+# ── reasoning effort ──────────────────────────────────────────────────────
+
+
+def test_text_default_effort_is_max(mock_deepseek: ProviderCapture) -> None:
+    """Default effort is `max` — sent explicitly to build_chat_model so a
+    global env override cannot silently downgrade understand's text path."""
+    mock_deepseek.understand([{"prompt": "x", "text": "some text"}])
+    assert mock_deepseek.kwargs["reasoning_effort"] == "max"
+
+
+def test_text_effort_flows_to_build_chat_model(mock_deepseek: ProviderCapture) -> None:
+    """effort='low' reaches build_chat_model's reasoning_effort verbatim."""
+    mock_deepseek.understand([{"prompt": "x", "text": "some text"}], effort="low")
+    assert mock_deepseek.kwargs["reasoning_effort"] == "low"
+
+
+def test_text_effort_accepts_enum_member(mock_deepseek: ProviderCapture) -> None:
+    """A ReasoningEffort member is accepted and equals its literal value —
+    both spellings produce the same wire value."""
+    from base.lm.effort import ReasoningEffort
+
+    mock_deepseek.understand([{"prompt": "x", "text": "some text"}], effort=ReasoningEffort.XHIGH)
+    assert mock_deepseek.kwargs["reasoning_effort"] == "xhigh"
+    assert isinstance(mock_deepseek.kwargs["reasoning_effort"], str)
+
+
+def test_effort_invalid_value_raises(mock_deepseek: ProviderCapture) -> None:
+    """Unknown effort strings fail fast before any model call — including
+    'minimal', a gemini-only thinking_level outside the public enum."""
+    with pytest.raises(ValueError, match="effort"):
+        mock_deepseek.understand([{"prompt": "x", "text": "y"}], effort="ultra")
+    with pytest.raises(ValueError, match="effort"):
+        mock_deepseek.understand([{"prompt": "x", "text": "y"}], effort="minimal")
+    with pytest.raises(TypeError, match="effort"):
+        mock_deepseek.understand([{"prompt": "x", "text": "y"}], effort=3)  # type: ignore[arg-type]
+
+
+def test_media_effort_preserves_supported_gemini_levels(
+    mock_gemini: ProviderCapture, fake_image: Path
+) -> None:
+    """Valid graded levels pass through; none selects the model's lowest tier."""
+    for effort, level in [
+        ("none", "minimal"),
+        ("low", "low"),
+        ("medium", "medium"),
+        ("high", "high"),
+    ]:
+        mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}], effort=effort)
+        assert mock_gemini.kwargs["media_thinking_level"] == level, f"effort={effort}"
+
+
+def test_media_effort_rejects_unsupported_grade(
+    mock_gemini: ProviderCapture, fake_image: Path
+) -> None:
+    with pytest.raises(ValueError, match="unsupported reasoning effort"):
+        mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}], effort="xhigh")
+
+
+def test_media_default_effort_max_keeps_settings_knob(
+    mock_gemini: ProviderCapture, fake_image: Path
+) -> None:
+    """max has no gemini equivalent — the default keeps the configured
+    AVA_UNDERSTAND_MEDIA_THINKING_LEVEL knob, so existing clusters see no
+    behavior change on the media path."""
+    mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+    assert mock_gemini.kwargs["media_thinking_level"] == mock_gemini.deps.media_thinking_level
+
+    mock_gemini.configure(media_thinking_level="high")
+    mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}], effort="max")
+    assert mock_gemini.kwargs["media_thinking_level"] == "high"
+
+
+def test_existing_text_file_uses_deepseek(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
+    """An existing non-media file is read as UTF-8 and run through the text path."""
+    f = tmp_path / "notes.md"
+    f.write_text("# Heading\nbody text", encoding="utf-8")
+    mock_deepseek.understand([{"prompt": "what is the heading", "paths": [str(f)]}])
+    assert mock_deepseek.model == "deepseek-flash"
+    content = mock_deepseek.content
+    assert content[0] == {"type": "text", "text": "# Heading\nbody text"}
+    assert content[1] == {"type": "text", "text": "what is the heading"}
+
+
+def test_path_not_found_raises(tmp_path: Path) -> None:
+    """`paths` pointing to a nonexistent file → FileNotFoundError (same semantics as files.read)."""
+    with pytest.raises(FileNotFoundError):
+        understand([{"prompt": "x", "paths": [str(tmp_path / "nope.txt")]}])
+
+
+def test_single_call_keywords_rejected(tmp_path: Path) -> None:
+    """There is no single-call form. The old top-level `prompt=` / `path=` /
+    `text=` keywords are not parameters any more, so Python rejects them
+    outright rather than the SDK growing a compatibility branch."""
+    f = tmp_path / "f.txt"
+    f.write_text("x")
+    with pytest.raises(TypeError):
+        understand(prompt="x", path=str(f))  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        understand(prompt="x", text="y")  # type: ignore[call-arg]
+
+
+# ── path resolution: same base as ava.files (workspace / pre-identity HOME) ──
+
+
+def test_relative_path_resolves_to_workspace(
+    mock_deepseek: ProviderCapture, workspace: Path
+) -> None:
+    """Relative path resolved through ava.files.resolve using the same baseline —
+    relative filenames in the workspace are read, consistent with ava.files.read's resolution."""
+    workspace.mkdir(parents=True)
+    (workspace / "notes.md").write_text("workspace material", encoding="utf-8")
+    mock_deepseek.understand([{"prompt": "p", "paths": ["notes.md"]}])
+    assert mock_deepseek.content[0] == {"type": "text", "text": "workspace material"}
+
+
+def test_relative_path_resolves_to_home_before_identity(
+    mock_deepseek: ProviderCapture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Identity not bound → relative path falls back to $HOME resolution (same as ava.files pre-identity baseline)."""
+    from unittest.mock import patch
+
+    pin_no_identity()
+    (tmp_path / "h.txt").write_text("home material", encoding="utf-8")
+    with patch.dict(os.environ, {"HOME": str(tmp_path)}):
+        assert Path.home() == tmp_path  # mock lock-in
+        mock_deepseek.understand([{"prompt": "p", "paths": ["h.txt"]}])
+    assert mock_deepseek.content[0] == {"type": "text", "text": "home material"}
+
+
+def test_text_list_content_response_is_flattened(mock_deepseek: ProviderCapture) -> None:
+    """A content-list response (text blocks) is joined to plain text."""
+    mock_deepseek.respond_with(
+        [
+            {"type": "text", "text": "line one"},
+            {"type": "thinking", "text": "ignored"},
+            {"type": "text", "text": "line two"},
+        ]
+    )
+    [out] = mock_deepseek.understand([{"prompt": "prompt", "text": "material"}])
+    assert out == "line one\nline two"
+
+
+# ── media path: branch selection + Gemini Flash routing ─────────────────────
+
+
+def test_image_uses_gemini_flash_and_image_mime(
+    mock_gemini: ProviderCapture, fake_image: Path
+) -> None:
+    [out] = mock_gemini.understand([{"prompt": "describe this", "paths": [str(fake_image)]}])
+    assert out == "fake answer"
+    assert mock_gemini.model == mock_gemini.deps.media_model
+    content = mock_gemini.content
+    assert content[0]["type"] == "media"
+    assert content[0]["mime_type"] == "image/png"
+    assert content[1] == {"type": "text", "text": "describe this"}
+
+
+def test_video_uses_video_mime(mock_gemini: ProviderCapture, fake_video: Path) -> None:
+    mock_gemini.understand([{"prompt": "summarize", "paths": [str(fake_video)]}])
+    assert mock_gemini.model == mock_gemini.deps.media_model
+    assert mock_gemini.content[0]["mime_type"] == "video/mp4"
+
+
+def test_pdf_uses_pdf_mime(mock_gemini: ProviderCapture, fake_pdf: Path) -> None:
+    mock_gemini.understand([{"prompt": "summarize", "paths": [str(fake_pdf)]}])
+    assert mock_gemini.content[0]["mime_type"] == "application/pdf"
+
+
+def test_media_default_knobs_high_res_medium_thinking(
+    mock_gemini: ProviderCapture, fake_image: Path
+) -> None:
+    """Default media quality knobs: resolution=high (see detail), thinking=medium.
+    The Gemini enum mapping happens in the provider branch — the factory call
+    carries the configured strings."""
+    mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+    assert mock_gemini.kwargs["media_resolution"] == "high"
+    assert mock_gemini.kwargs["media_thinking_level"] == "medium"
+
+
+def test_text_model_config_flows_in(mock_deepseek: ProviderCapture) -> None:
+    """settings.lm.understand_text_model overrides which model the text path builds."""
+    mock_deepseek.configure(text_model="claude-sonnet-5")
+    mock_deepseek.understand([{"prompt": "x", "text": "some text"}])
+    assert mock_deepseek.model == "claude-sonnet-5"
+
+
+def test_media_model_config_flows_in(mock_gemini: ProviderCapture, fake_image: Path) -> None:
+    """settings.lm.understand_media_model overrides which model the media path uses."""
+    mock_gemini.configure(media_model="gemini-3.1-pro-preview")
+    mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+    assert mock_gemini.model == "gemini-3.1-pro-preview"
+
+
+def test_media_resolution_config_flows_in(mock_gemini: ProviderCapture, fake_image: Path) -> None:
+    """settings.lm.understand_media_resolution rides the factory's
+    media_resolution kwarg (the gemini branch maps it onto the enum)."""
+    mock_gemini.configure(media_resolution="low")
+    mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+    assert mock_gemini.kwargs["media_resolution"] == "low"
+
+
+def test_media_invalid_resolution_raises(mock_gemini: ProviderCapture, fake_image: Path) -> None:
+    mock_gemini.configure(media_resolution="ultra")
+    with pytest.raises(UnderstandError, match="AVA_UNDERSTAND_MEDIA_RESOLUTION"):
+        mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+
+
+def test_media_base_url_config_flows_in(mock_gemini: ProviderCapture, fake_image: Path) -> None:
+    """AVA_UNDERSTAND_MEDIA_BASE_URL rides the factory's base_url kwarg so a
+    self-hosted Gemini-compatible relay can be pointed at without code changes."""
+    mock_gemini.configure(media_base_url="http://localhost:8080/v1beta")
+    mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+    assert mock_gemini.kwargs["base_url"] == "http://localhost:8080/v1beta"
+
+
+def test_media_base_url_default_keeps_none(mock_gemini: ProviderCapture, fake_image: Path) -> None:
+    """No base URL configured → the factory gets None (SDK default endpoint)."""
+    mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+    assert mock_gemini.kwargs["base_url"] is None
+
+
+def test_media_model_non_gemini_fails_fast(
+    understand_deps: UnderstandDeps, fake_image: Path
+) -> None:
+    """Non-Gemini media models fail fast with a clear error: the media wire
+    format is Gemini-specific, so a gpt image model would otherwise crash at
+    invoke time. Real provider routing — no build_chat_model mock — and the
+    check runs before any client is built, so no API key is needed here."""
+    deps = dataclasses.replace(understand_deps, media_model="gpt-5.6-sol")
+    with pytest.raises(UnderstandError, match="Gemini"):
+        run_understand(deps, [{"prompt": "x", "paths": [str(fake_image)]}])
+
+
+# ── error paths ─────────────────────────────────────────────────────────────
+
+
+def test_media_wraps_missing_gemini_key(mock_gemini: ProviderCapture, fake_image: Path) -> None:
+    """The gemini provider branch raises RuntimeError on a missing key; the
+    media path wraps it as UnderstandError like the text path does."""
+
+    def _raise(model: str, **kwargs: object):
+        raise RuntimeError("GEMINI_API_KEY not set")
+
+    mock_gemini.configure(build_chat_model=_raise)
+    with pytest.raises(UnderstandError, match="GEMINI_API_KEY"):
+        mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+
+
+def test_text_wraps_missing_deepseek_key(mock_deepseek: ProviderCapture) -> None:
+    """build_chat_model raising (e.g. missing DEEPSEEK_API_KEY) surfaces as
+    UnderstandError, not a raw RuntimeError."""
+
+    def _raise(model: str, **kwargs: object):
+        raise RuntimeError("DEEPSEEK_API_KEY not set")
+
+    mock_deepseek.configure(build_chat_model=_raise)
+    with pytest.raises(UnderstandError, match="DEEPSEEK_API_KEY"):
+        mock_deepseek.understand([{"prompt": "x", "text": "some text"}])
+
+
+def test_raises_on_oversized_media(mock_gemini: ProviderCapture, tmp_path: Path) -> None:
+    """Over 20MB raises immediately — size check before any provider call."""
+    big = tmp_path / "huge.mp4"
+    big.write_bytes(b"\x00" * (20 * 1024 * 1024 + 1))
+    with pytest.raises(UnderstandError, match="exceeds"):
+        mock_gemini.understand([{"prompt": "x", "paths": [str(big)]}])
+    mock_gemini.invoke.assert_not_called()
+
+
+def test_raises_on_undecodable_unknown_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A binary file with an unrecognized suffix can't be read as UTF-8 — raise a
+    legible error naming the suffix, not a silent garbage decode."""
+    weird = tmp_path / "data.bin"
+    weird.write_bytes(b"\xff\xfe\x00\x01\x80")
+    with pytest.raises(UnderstandError, match="UTF-8"):
+        understand([{"prompt": "x", "paths": [str(weird)]}])
+
+
+def test_media_raises_on_empty_response(mock_gemini: ProviderCapture, fake_image: Path) -> None:
+    """Gemini returns empty (safety block etc.) → UnderstandError, does not silently swallow with empty str."""
+    mock_gemini.respond_with("")
+    with pytest.raises(UnderstandError, match="empty response"):
+        mock_gemini.understand([{"prompt": "x", "paths": [str(fake_image)]}])
+
+
+def test_text_wraps_upstream_error(mock_deepseek: ProviderCapture) -> None:
+    mock_deepseek.configure(retry=dataclasses.replace(mock_deepseek.deps.retry, attempts=0))
+    error = ModelRateLimitError("rate limit")
+    mock_deepseek.invoke.side_effect = error
+    with pytest.raises(UnderstandError, match="rate limit") as raised:
+        mock_deepseek.understand([{"prompt": "x", "text": "some text"}])
+    assert raised.value.__cause__ is error
+    mock_deepseek.invoke.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("invalid callback input"),
+        ValueError("invalid response"),
+        RuntimeError("rate limit"),
+    ],
+)
+def test_unknown_model_error_preserves_identity_without_retry(
+    mock_deepseek: ProviderCapture, error: Exception
+) -> None:
+    mock_deepseek.invoke.side_effect = error
+    with pytest.raises(type(error)) as raised:
+        mock_deepseek.understand([{"prompt": "x", "text": "some text"}])
+    assert raised.value is error
+    mock_deepseek.invoke.assert_called_once()
+
+
+# ── paths mode (files, ONE model call) ─────────────────────────────────────
+
+
+def test_paths_two_images_single_media_call(
+    mock_gemini: ProviderCapture, fake_image: Path, tmp_path: Path
+) -> None:
+    """paths=[img1, img2] → ONE Gemini call with both files as media parts, in
+    order, prompt last — the shape that lets the model compare two images."""
+    img2 = tmp_path / "img2.png"
+    img2.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x11" * 32)
+    [out] = mock_gemini.understand(
+        [{"prompt": "compare these", "paths": [str(fake_image), str(img2)]}]
+    )
+    assert out == "fake answer"
+    assert mock_gemini.model == mock_gemini.deps.media_model
+    assert mock_gemini.invoke.call_count == 1
+    content = mock_gemini.content
+    assert content[0] == {
+        "type": "media",
+        "data": fake_image.read_bytes(),
+        "mime_type": "image/png",
+    }
+    assert content[1] == {"type": "media", "data": img2.read_bytes(), "mime_type": "image/png"}
+    assert content[2] == {"type": "text", "text": "compare these"}
+
+
+def test_paths_mixed_media_and_text_uses_media_model(
+    mock_gemini: ProviderCapture, fake_image: Path, tmp_path: Path
+) -> None:
+    """A text file inside paths rides along as a text part on the media model —
+    one call, parts in paths order."""
+    notes = tmp_path / "notes.md"
+    notes.write_text("design notes", encoding="utf-8")
+    [out] = mock_gemini.understand([{"prompt": "check", "paths": [str(fake_image), str(notes)]}])
+    assert out == "fake answer"
+    assert mock_gemini.model == mock_gemini.deps.media_model
+    assert mock_gemini.invoke.call_count == 1
+    content = mock_gemini.content
+    assert content[0]["type"] == "media"
+    assert content[1] == {"type": "text", "text": "design notes"}
+    assert content[2] == {"type": "text", "text": "check"}
+
+
+def test_paths_all_text_uses_text_model(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
+    """paths of only text files stays on the text model — one call, both
+    materials as text parts, prompt last."""
+    a = tmp_path / "a.md"
+    a.write_text("material A", encoding="utf-8")
+    b = tmp_path / "b.md"
+    b.write_text("material B", encoding="utf-8")
+    [out] = mock_deepseek.understand([{"prompt": "diff", "paths": [str(a), str(b)]}])
+    assert out == "fake answer"
+    assert mock_deepseek.model == "deepseek-flash"
+    assert mock_deepseek.invoke.call_count == 1
+    assert mock_deepseek.content == [
+        {"type": "text", "text": "material A"},
+        {"type": "text", "text": "material B"},
+        {"type": "text", "text": "diff"},
+    ]
+
+
+def test_paths_validation() -> None:
+    """paths must be a non-empty list of path strings, mutually exclusive with
+    text= — same fail-fast before any model call."""
+    with pytest.raises(TypeError, match="must be a list of file paths"):
+        understand([{"prompt": "p", "paths": "a.png"}])
+    with pytest.raises(TypeError, match="must be a list of file paths"):
+        understand(
+            [{"prompt": "p", "paths": ("a.png", "b.png")}]  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="must not be empty"):
+        understand([{"prompt": "p", "paths": []}])
+    with pytest.raises(TypeError, match="must be a path string or Path"):
+        understand([{"prompt": "p", "paths": [123]}])  # type: ignore[arg-type]
+    # The legacy singular `path` key is gone entirely — only `paths` / `text`
+    # are accepted, and they stay mutually exclusive.
+    with pytest.raises(ValueError, match="exactly one of 'text' / 'paths'"):
+        understand([{"prompt": "p", "path": "a.png"}])
+    with pytest.raises(ValueError, match="exactly one of 'text' / 'paths'"):
+        understand([{"prompt": "p", "text": "x", "paths": ["b.png"]}])
+
+
+def test_paths_missing_file_raises(mock_gemini: ProviderCapture, tmp_path: Path) -> None:
+    """One missing file in paths → FileNotFoundError naming it."""
+    good = tmp_path / "good.png"
+    good.write_bytes(b"\x89PNG\r\n\x1a\n")
+    with pytest.raises(FileNotFoundError, match="does not name an existing file"):
+        mock_gemini.understand(
+            [{"prompt": "p", "paths": [str(good), str(tmp_path / "missing.png")]}]
+        )
+
+
+def test_paths_oversized_media_raises(mock_gemini: ProviderCapture, tmp_path: Path) -> None:
+    """The 20MB inline cap applies per file in a paths list."""
+    big = tmp_path / "huge.png"
+    big.write_bytes(b"\x00" * (20 * 1024 * 1024 + 1))
+    with pytest.raises(UnderstandError, match="exceeds"):
+        mock_gemini.understand([{"prompt": "x", "paths": [str(big)]}])
+    mock_gemini.invoke.assert_not_called()
+
+
+def test_paths_undecodable_file_raises(tmp_path: Path) -> None:
+    """An unrecognized binary suffix in paths raises the same legible
+    UnderstandError as the single-file flow."""
+    weird = tmp_path / "data.bin"
+    weird.write_bytes(b"\xff\xfe\x00\x01\x80")
+    with pytest.raises(UnderstandError, match="UTF-8"):
+        understand([{"prompt": "x", "paths": [str(weird)]}])
+
+
+def test_paths_auto_save_source_labels_list(
+    mock_gemini: ProviderCapture, fake_image: Path, tmp_path: Path
+) -> None:
+    """Auto-saved output carries the paths list as its source label."""
+
+    ws = tmp_path / "paths_ws"
+    mock_gemini.configure(output_dir=lambda: ws / ".exec_output")
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    mock_gemini.understand([{"prompt": "compare", "paths": [str(fake_image), str(shot)]}])
+    files = list((ws / ".exec_output").glob("understand_*.txt"))
+    assert len(files) == 1
+    assert f"# source: paths={[str(fake_image), str(shot)]!r}" in files[0].read_text()
+
+
+def test_signature_is_targets_effort_max_concurrent() -> None:
+    """`understand` defaults to the shared safe batch ceiling."""
+    import inspect
+
+    sig = inspect.signature(understand)
+    assert list(sig.parameters) == ["targets", "effort", "max_concurrent"]
+    assert sig.parameters["effort"].default == "max"
+    assert sig.parameters["max_concurrent"].default == DEFAULT_BATCH_MAX_CONCURRENT

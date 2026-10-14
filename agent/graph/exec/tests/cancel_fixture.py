@@ -16,6 +16,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.exec import node
 from agent.graph.interrupt import InterruptEvent
 from agent.hooks.tests.fakes import make_fake_ops_pool
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents.context import AvaContext
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.clock import Clock
@@ -28,7 +29,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def install_cancel_event(monkeypatch: pytest.MonkeyPatch, event: InterruptEvent) -> None:

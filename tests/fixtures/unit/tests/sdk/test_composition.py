@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 
 import ava
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.context import AvaContext
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
-from tests.fixtures.pin_agent import pin_agent
 
 
 def test_sdk_context_uses_the_prepared_owner_with_a_bare_home(
@@ -65,8 +65,8 @@ from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from tests.fixtures.unit.sdk import sdk_environment as sdk_environment
-from tests.fixtures.unit.sdk import sdk_identity as sdk_identity
+from ava.tests.fixtures.sdk import sdk_environment as sdk_environment
+from ava.tests.fixtures.sdk import sdk_identity as sdk_identity
 
 prior = AvaContext()
 process_context.bind_context(prior)

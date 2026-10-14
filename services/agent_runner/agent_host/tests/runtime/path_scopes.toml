@@ -1,4 +1,4 @@
-"tests.path_scoped.agent_tests" = [
+"agent.tests.agent_tests" = [
     "test_boot_extension_materialize.py",
 ]
 "tests.path_scoped.services_tests" = [

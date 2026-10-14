@@ -22,6 +22,7 @@ import pytest
 import ava
 from ava.sdk_surface import install
 from ava.sdk_surface.installation import installed
+from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from base.agents.sdk import call_policy
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
@@ -33,7 +34,6 @@ from base.packages.plugins.extensions import (
     SdkMember,
     SdkNamespace,
 )
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)

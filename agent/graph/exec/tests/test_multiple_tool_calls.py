@@ -17,6 +17,7 @@ from agent.graph.tool_calls import normalize_tool_calls
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from ava.boot import process_clients
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
@@ -27,7 +28,6 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:

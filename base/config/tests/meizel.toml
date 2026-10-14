@@ -1,4 +1,4 @@
-exports = ["config_authority.py", "configuration.py", "served_gateway_home.py"]
+exports = ["api_keys.py", "config_authority.py", "configuration.py", "served_gateway_home.py"]
 
 [uses]
 "conftest.py" = ["config_authority.py"]
@@ -27,6 +27,7 @@ exports = ["config_authority.py", "configuration.py", "served_gateway_home.py"]
 [debt.first-party-patch]
 "_boot_lite_child.py#assignment base.config._full.build" = 8
 "_boot_lite_child.py#assignment base.config._lite.BUILD_WAIT_TIMEOUT_SECONDS" = 2
+"api_keys.py#monkeypatch.setattr base.config.settings.lm" = 1
 "served_gateway_home.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config._full.build" = 2
 "test_config_boot_owner.py#monkeypatch.setattr base.config._lite.BUILD_WAIT_TIMEOUT_SECONDS" = 1

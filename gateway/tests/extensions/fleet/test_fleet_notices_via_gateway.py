@@ -10,6 +10,7 @@ import psycopg
 import pytest
 
 import ava
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet.tests.registry_support import (
     installed_fleet_surface,
 )
@@ -17,7 +18,6 @@ from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.pin_agent import pin_agent
 
 
 def seed_agent(db: psycopg.Connection) -> int:

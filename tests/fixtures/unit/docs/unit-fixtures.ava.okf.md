@@ -10,7 +10,7 @@ tags:
 # Opt-in Unit Capabilities
 
 The root plugin roster does not load unit fixtures. Consumer-local conftests
-import `unit.homes` (private and default homes) and `unit.workspace` (SDK workspace). The
+import `unit.homes` (private and default homes) and `ava.tests.fixtures.workspace` (SDK workspace). The
 fixtures of a component live in that component's `tests/`: `machine_identity` in
 `base/cluster/machine/tests/`, `config_authority` and `served_gateway_home` in
 `base/config/tests/`, and the private-ledger seeds (`seed_write_generation`,
@@ -25,7 +25,7 @@ assembled gateway.
 
 Model consumers import the immutable catalog fixtures from `model_catalog`.
 `base.config.tests.config_authority` owns the lightweight configuration authority and its
-private-home dependency; `unit.model_owner` owns the explicit SDK installation
+private-home dependency; `ava.tests.fixtures.model_owner` owns the explicit SDK installation
 and opt-in process binding. A test that only needs authority therefore does
 not import Installation or construct a model catalog. The fixture bodies and
 their dependencies remain unchanged; consumers choose when to install the SDK
@@ -55,7 +55,7 @@ Their four consumer directories use file-level declarations in
 make unrelated tests depend on every gateway router. These declarations use the
 existing pytest/CI scope reader. They add no runtime binding mechanism.
 
-`unit.sdk` owns the public fixture capabilities `sdk_environment`,
+`ava.tests.fixtures.sdk` owns the public fixture capabilities `sdk_environment`,
 `sdk_identity` and `sdk_metering` beside actual SDK consumers. Its exact component
 entry and static `__all__` name these definitions; the lightweight identity slot
 protocol and its minimal context/client-close contracts are defined and exported
@@ -87,4 +87,4 @@ SDK environment never bootstraps configuration from that directory.
 
 ## SDK identity restoration
 
-The identity a test acts as is bound bare by hundreds of tests (`pin_agent(...)`, `tests/fixtures/pin_agent.py`: it binds an `AvaContext` carrying it), so reporting it would turn the convention into a defect. The root plugin `identity_restore` (`tests/fixtures/identity_restore.py`) receives the SDK consumer's explicit `ava.context` slot through the ordinary `sdk_identity` fixture override in `unit.sdk`. It closes only clients created by the test, then restores the previous SDK context even when close fails. Unrelated tests use the lightweight default without importing the SDK. Native admission scopes do not provide or rebind SDK identity. `tests/ci/test_leak_guard.py` checks that boundary, that `ava.sdk_surface.agent_identity` holds no process-global slot of its own, and that the restore isolates the next-test victim. `ava.self.AGENT_ID` is not touched: the module `__getattr__` serves it, and writing a read value back would store it for good (PR #3791); a test that stores it is a `module-attr` leak.
+The identity a test acts as is bound bare by hundreds of tests (`pin_agent(...)`, `ava.tests.fixtures.pin_agent`: it binds an `AvaContext` carrying it), so reporting it would turn the convention into a defect. The root plugin `identity_restore` (`tests/fixtures/identity_restore.py`) receives the SDK consumer's explicit `ava.context` slot through the ordinary `sdk_identity` fixture override in `ava.tests.fixtures.sdk`. It closes only clients created by the test, then restores the previous SDK context even when close fails. Unrelated tests use the lightweight default without importing the SDK. Native admission scopes do not provide or rebind SDK identity. `tests/ci/test_leak_guard.py` checks that boundary, that `ava.sdk_surface.agent_identity` holds no process-global slot of its own, and that the restore isolates the next-test victim. `ava.self.AGENT_ID` is not touched: the module `__getattr__` serves it, and writing a read value back would store it for good (PR #3791); a test that stores it is a `module-attr` leak.

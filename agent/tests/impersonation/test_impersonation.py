@@ -22,6 +22,7 @@ from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
 from agent.hooks.tests.fakes import placeholder_runtime
 from agent.state import BaseAgentState
+from ava.tests.fixtures.pin_agent import exec_context, pin_agent
 from base.agents.context import AvaContext
 from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes
@@ -38,7 +39,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.pin_agent import exec_context, pin_agent
 
 
 def _notes() -> HandoffNotes:

@@ -10,13 +10,13 @@ from fastapi.testclient import TestClient
 from ava.gateway_client.transport import use_client
 from base.cluster.machine import MachineIdentity
 
+# The provider-key mock and the in-process spawn stand-in are defined once (the ava and
+# gateway tests take them too); imported here so they register for this module's paths.
+from base.config.tests.api_keys import mock_api_keys as mock_api_keys
+
 # ava.self.AGENT_ID is set by tests/fixtures/env_bootstrap.py (=1), no override here.
 from gateway.app import app
 from tests.fixtures.gateway_config import gateway_test_client
-
-# The provider-key mock and the in-process spawn stand-in are defined once (the ava and
-# gateway tests take them too); imported here so they register for this module's paths.
-from tests.path_scoped.api_keys import mock_api_keys as mock_api_keys
 from tests.path_scoped.gateway_tests import gateway_config_owner as gateway_config_owner
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 

@@ -1,15 +1,9 @@
-exports = ["agent_tests.py", "api_keys.py", "ava_tests.py", "cli_tests.py", "gateway_tests.py", "integration_tests.py", "services_tests.py", "structure_tests.py"]
+exports = ["cli_tests.py", "gateway_tests.py", "integration_tests.py", "services_tests.py", "structure_tests.py"]
 
 [uses]
-"ava_tests.py" = ["api_keys.py"]
-"gateway_tests.py" = ["api_keys.py"]
-"integration_tests.py" = ["api_keys.py", "gateway_tests.py"]
-
-[debt.env-patch]
-"agent_tests.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
+"integration_tests.py" = ["gateway_tests.py"]
 
 [debt.first-party-patch]
-"api_keys.py#monkeypatch.setattr base.config.settings.lm" = 1
 "cli_tests.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.selection_path" = 1
 "cli_tests.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
 "cli_tests.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1

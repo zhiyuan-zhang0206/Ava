@@ -13,11 +13,8 @@ import contextlib
 import inspect
 import io
 import os
-import subprocess
-import sys
 from collections.abc import Callable, Generator, Iterator, Mapping
 from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
@@ -27,6 +24,7 @@ import pytest
 import ava
 from ava.sdk_surface import install, metering, process_context
 from ava.sdk_surface.installation import Installation
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.context import AvaContext
 from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
@@ -39,7 +37,6 @@ from base.packages.plugins.extensions import (
     SdkMember,
     SdkWrap,
 )
-from tests.fixtures.pin_agent import pin_agent
 
 
 @contextlib.contextmanager
@@ -318,20 +315,6 @@ def test_mcp_recorder_derives_fq_from_runtime_args(
     calls.clear()
     rec(None, "chrome", "navigate")  # without an execution tally
     assert calls[0][0] == "mcps.chrome.navigate"
-
-
-_GATE_CHILD = Path(__file__).with_name("child_gate_without_agent_layer.py")
-
-
-def test_a_surface_installed_without_the_agent_layer_is_seen() -> None:
-    """A plugin load that never imports `agent.state` (the schedule runner's in-process script)
-    still installs namespaces and members on the SDK surface. The gate must see them, or the
-    fixture never drops them and they stay for the rest of the worker. A fresh interpreter
-    guarantees the agent layer is absent."""
-    result = subprocess.run(  # noqa: S603 - fixed interpreter and child script
-        [sys.executable, str(_GATE_CHILD)], capture_output=True, text=True, timeout=60, check=False
-    )
-    assert result.returncode == 0, result.stderr
 
 
 def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(

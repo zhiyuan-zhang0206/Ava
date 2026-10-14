@@ -1,6 +1,6 @@
 """Put the agent identity back after every test.
 
-Hundreds of tests pin the agent they created with `pin_agent(spawn_agent())` (`tests/fixtures/pin_agent.py`), which binds an
+Hundreds of tests pin the agent they created with `pin_agent(spawn_agent())` (`ava.tests.fixtures.pin_agent`), which binds an
 `AvaContext` carrying that identity in the ordinary `ava.context` module slot, and nothing
 puts the previous one back. The next test in the same xdist worker then reads an identity it never
 set, so which tests fail depends on the shard composition, and moving test files changes it. This

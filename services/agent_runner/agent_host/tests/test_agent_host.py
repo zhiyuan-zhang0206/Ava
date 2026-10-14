@@ -32,6 +32,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 import ava
+from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
@@ -52,7 +53,6 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     wired as wired,
 )
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 # ── 1. isolation ─────────────────────────────────────────────────────────────
 

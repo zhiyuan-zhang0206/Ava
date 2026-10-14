@@ -8,7 +8,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from tests.fixtures.pin_agent import pin_agent
+from ava.tests.fixtures.pin_agent import pin_agent
 
 
 class TestTasksEntries:

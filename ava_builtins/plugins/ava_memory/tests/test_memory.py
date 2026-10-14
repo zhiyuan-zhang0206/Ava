@@ -60,8 +60,8 @@ def test_path_is_path_object() -> None:
 
 
 def test_personal_path_is_the_memory_folder_of_the_agent_workspace() -> None:
+    from ava.tests.fixtures.pin_agent import pin_agent
     from base.paths import workspace_dir
-    from tests.fixtures.pin_agent import pin_agent
 
     pin_agent(17)
     assert workspace_dir(17) / "memory" == ava.memory.PERSONAL_PATH
@@ -70,7 +70,7 @@ def test_personal_path_is_the_memory_folder_of_the_agent_workspace() -> None:
 
 
 def test_personal_path_needs_an_agent_identity() -> None:
-    from tests.fixtures.pin_agent import pin_no_identity
+    from ava.tests.fixtures.pin_agent import pin_no_identity
 
     pin_no_identity()
     with pytest.raises(AttributeError, match="needs an established agent identity"):
@@ -87,7 +87,7 @@ def test_there_is_no_memory_writer() -> None:
 @pytest.mark.parametrize("name", ["PATH", "PERSONAL_PATH"])
 def test_path_docs_carry_the_note_format(name: str) -> None:
     """`help()` on either path shows the frontmatter fields and the one-type-tag rule."""
-    from tests.fixtures.pin_agent import pin_agent
+    from ava.tests.fixtures.pin_agent import pin_agent
 
     pin_agent(17)
     doc = getattr(ava.memory, name).__doc__

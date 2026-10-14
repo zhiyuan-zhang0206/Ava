@@ -272,7 +272,7 @@ def uninstall(ledger: tuple[tuple[Any, str], ...]) -> None:
     ``ledger`` is the record ``install()`` returned — the ``(parent, attr)`` pairs it
     actually wrapped, in wrap order; the Installation carries it
     (``installation.installed().metered``), and the consumer-local SDK restore
-    (``tests/fixtures/unit/sdk.py``) passes that ledger. Direct callers own their
+    (``ava/tests/fixtures/sdk.py``) passes that ledger. Direct callers own their
     returned ledger and restore it in their own ``finally``.
 
     Restore from the record, never by re-walking the namespace: the walk resolves

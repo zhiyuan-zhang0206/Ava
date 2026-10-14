@@ -26,6 +26,7 @@ from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from ava.boot import process_clients
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
@@ -52,7 +53,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 __all__ = [
     "HandoffState",

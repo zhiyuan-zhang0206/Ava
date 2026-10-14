@@ -10,6 +10,7 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 import ava
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.lifecycle import SystemHalt
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -19,7 +20,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.tests.fakes import patch_sync_redis
 from base.lm.catalog import ModelCatalog
 from base.telemetry import audit_events
-from tests.fixtures.pin_agent import pin_agent
 
 
 class _BoomSyncClient:

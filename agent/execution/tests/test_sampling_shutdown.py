@@ -9,9 +9,9 @@ from loguru import logger
 from agent.execution import child
 from agent.graph.exec.protocol import ResultPayload
 from ava.sdk_surface import install
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.sdk import call_policy, telemetry
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
-from tests.fixtures.pin_agent import pin_agent
 
 
 def _assert_outcome(

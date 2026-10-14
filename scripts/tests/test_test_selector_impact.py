@@ -89,12 +89,10 @@ def test_empty_consumer_universe_has_no_reachable_unknowns(tmp_path: Path) -> No
 def test_path_scoped_fixture_closure_reaches_tests_outside_its_owner(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _write(root, "base/leaf.py")
-    _write(root, "tests/path_scoped/agent_tests.py", "from base import leaf\n")
+    _write(root, "agent/tests/agent_tests.py", "from base import leaf\n")
     _write(root, "base/consumer/tests/test_scope.py", "def test_scope(): pass\n")
-    _write(
-        root, "base/consumer/tests/path_scopes.toml", '"tests.path_scoped.agent_tests" = ["."]\n'
-    )
-    _assert_selected(root, "tests/path_scoped/agent_tests.py", "base/consumer/tests/test_scope.py")
+    _write(root, "base/consumer/tests/path_scopes.toml", '"agent.tests.agent_tests" = ["."]\n')
+    _assert_selected(root, "agent/tests/agent_tests.py", "base/consumer/tests/test_scope.py")
     _assert_selected(root, "base/leaf.py", "base/consumer/tests/test_scope.py")
 
 

@@ -34,6 +34,7 @@ from agent.graph.llm_errors import (
 )
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base import config
 from base.agents.context import AvaContext
 from base.clock import Clock
@@ -45,7 +46,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 

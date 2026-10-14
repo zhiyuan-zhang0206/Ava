@@ -1,0 +1,12 @@
+[external]
+"test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
+
+[debt.env-patch]
+"test_external_integration_agent.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+
+[debt.first-party-patch]
+"test_core.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_external_integration_agent.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"test_external_integration_agent.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
+"test_external_integration_agent.py#monkeypatch.setattr ava.impersonation.attachment.process_metadata" = 3
+"test_external_integration_agent.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1

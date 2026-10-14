@@ -1,4 +1,5 @@
 [uses]
+"test_plugin_registrations.py" = ["child_gate_without_agent_layer.py"]
 "test_throwaway_storage.py" = ["child_throwaway_storage.py"]
 
 [debt.first-party-patch]

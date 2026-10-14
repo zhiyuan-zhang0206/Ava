@@ -20,6 +20,7 @@ from agent.db import has_pending_interrupt
 from agent.graph.exec._subprocess import run_in_subprocess
 from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import agent_row, insert
+from ava.tests.fixtures.pin_agent import exec_context as ctx_of
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import original_host_force
 from base.cluster.machine import MachineIdentity
@@ -39,7 +40,6 @@ from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.health_routes import cancel_turn_route
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
-from tests.fixtures.pin_agent import exec_context as ctx_of
 
 
 def _blocking_work(entered: threading.Event, release: threading.Event) -> None:

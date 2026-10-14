@@ -9,6 +9,7 @@ import pytest
 from ava.agents import work
 from ava.gateway_client import transport
 from ava.sdk_surface import agent_identity
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava.tests.namespaces.agents.test_work import TARGET
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAcceptance,
@@ -16,7 +17,6 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartProgress,
 )
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
-from tests.fixtures.pin_agent import pin_agent
 
 ACCEPTED = NativeRestartAcceptance(
     command_id=123, target=TARGET, config_overlay={"completion_notice_policy": "hourly"}

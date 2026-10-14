@@ -9,6 +9,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.notes import record_notes
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
@@ -21,7 +22,6 @@ from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
 )
 from base.events.live import announce
-from tests.fixtures.pin_agent import pin_agent
 
 
 def test_update_non_owner_notifies_owner(

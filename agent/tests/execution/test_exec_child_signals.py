@@ -19,7 +19,7 @@ from agent.graph.exec.protocol import (
 )
 from agent.tests.execution.test_exec_child import AGENT_ID, child_env
 from ava.sdk_surface.installation import Installation
-from tests.fixtures.pin_agent import exec_context
+from ava.tests.fixtures.pin_agent import exec_context
 
 
 def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:

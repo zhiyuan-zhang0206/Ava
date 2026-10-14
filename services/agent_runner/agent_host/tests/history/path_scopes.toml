@@ -1,4 +1,4 @@
-"tests.path_scoped.agent_tests" = [
+"agent.tests.agent_tests" = [
     "test_checkpoint_parent_guard.py",
     "test_hosted_checkpoint_diagnostics.py",
     "test_hosted_cold_history.py",

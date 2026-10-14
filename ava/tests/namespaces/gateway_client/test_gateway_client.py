@@ -19,8 +19,8 @@ import ava
 from ava.gateway_client.transport import use_client
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
+from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from base.api_contracts.agent_contract import GatewayUnavailable
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture()

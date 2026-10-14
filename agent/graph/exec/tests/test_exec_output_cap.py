@@ -24,9 +24,9 @@ import pytest
 from agent.graph.exec._stream import StreamCap, StreamingTextIO
 from agent.graph.exec.output import wrap_code_output
 from agent.graph.exec.tests.output_inputs import CropConfig
+from ava.tests.fixtures.pin_agent import exec_context, pin_agent
 from base.clock import Clock
 from base.db import Database
-from tests.fixtures.pin_agent import exec_context, pin_agent
 
 # ---------------------------------------------------------------------------
 # The accumulator: head + rolling tail under a fixed budget

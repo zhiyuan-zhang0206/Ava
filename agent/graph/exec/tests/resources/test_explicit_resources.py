@@ -13,8 +13,8 @@ from agent.graph.exec._output_pipe import ExecOutputPipe
 from agent.graph.exec._process import ExecTeardownError, TeardownFailure
 from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import finish_request_evidence, retain_late_reader_completion
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.native_process.turn_identity import HostedTurnResources
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _files(directory: Path) -> tuple[Path, Path]:

@@ -5,6 +5,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
@@ -12,7 +13,6 @@ from base import telemetry
 from base.db import fetch_one
 from base.db import pool as db_pool
 from base.db.code_version_gate import ProcessDbGate
-from tests.fixtures.pin_agent import pin_agent
 
 
 def test_sdk_commit_survives_producer_loss(
