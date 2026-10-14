@@ -12,8 +12,6 @@ import pytest
 
 from base import config
 from base.host.db_authority import unit
-from base.telemetry import trace_mirror
-from cli.commands.observability import trace
 from cli.commands.observability.trace import (
     ShipTarget,
     TraceShipError,
@@ -29,13 +27,12 @@ def test_load_watermark_drops_entries_for_missing_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     """Retention prunes mirror files; the watermark must shed their stale entries."""
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)
     (tmp_path / "spans.jsonl").write_text("x\n", encoding="utf-8")
     (tmp_path / ".ship-watermark.json").write_text(
         json.dumps({"spans.jsonl": 2, "spans-2020-01-01T00-00-00.000-size.jsonl": 5}),
         encoding="utf-8",
     )
-    marks = load_watermark()
+    marks = load_watermark(traces_dir=tmp_path)
     assert marks == {"spans.jsonl": 2}
 
 
@@ -134,11 +131,15 @@ def test_ship_disabled_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, command_runtime: CommandRuntime
 ):
     """The OTLP kill switch off -> fail fast, the shipper is unconfigured."""
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)
     monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", False)
     with pytest.raises(TraceShipError, match="AVA_TELEMETRY_OTLP_ENABLED"):
-        cmd_trace_ship(since=None, until=None, dry_run=False, machine=command_runtime.machine)
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=False,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
 
 
 def test_ship_dry_run_needs_no_config(
@@ -146,7 +147,6 @@ def test_ship_dry_run_needs_no_config(
 ):
     """--dry-run reads the mirror only: no backend config required, nothing
     POSTed, counts reported — the inspection path when the kill switch is off."""
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)
     (tmp_path / "spans.jsonl").write_text(
         _otlp_line("a") + "\n" + _otlp_line("b") + "\n", encoding="utf-8"
     )
@@ -171,7 +171,14 @@ def test_ship_dry_run_needs_no_config(
     monkeypatch.setattr("httpx.Client", _Client)
 
     assert (
-        cmd_trace_ship(since=None, until=None, dry_run=True, machine=command_runtime.machine) == 0
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=True,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
+        == 0
     )
     assert posts == []  # dry run never POSTs
     assert not (tmp_path / ".ship-watermark.json").exists()  # watermark untouched
@@ -185,7 +192,6 @@ def test_incremental_ship_posts_and_advances_watermark(
 ):
     """Incremental ship POSTs each line, then a second run sends nothing new."""
     _enable_tempo_config(monkeypatch, command_runtime=command_runtime)
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)
 
     (tmp_path / "spans.jsonl").write_text(
         _otlp_line("a") + "\n" + _otlp_line("b") + "\n", encoding="utf-8"
@@ -214,7 +220,14 @@ def test_incremental_ship_posts_and_advances_watermark(
     monkeypatch.setattr("httpx.Client", _Client)
 
     assert (
-        cmd_trace_ship(since=None, until=None, dry_run=False, machine=command_runtime.machine) == 0
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=False,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
+        == 0
     )
     assert len(posts) == 2  # one POST per OTLP-JSON line
 
@@ -224,7 +237,14 @@ def test_incremental_ship_posts_and_advances_watermark(
     # Second run: watermark is at EOF, nothing re-ships.
     posts.clear()
     assert (
-        cmd_trace_ship(since=None, until=None, dry_run=False, machine=command_runtime.machine) == 0
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=False,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
+        == 0
     )
     assert posts == []
 
@@ -241,7 +261,6 @@ def test_incremental_ship_reads_gzipped_segments_and_keeps_watermark(
     import gzip as gz
 
     _enable_tempo_config(monkeypatch, command_runtime=command_runtime)
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)
 
     rotated = tmp_path / "spans-2026-08-27T03-29-10.942-size.jsonl.gz"
     with gz.open(rotated, "wt", encoding="utf-8") as f:
@@ -271,7 +290,14 @@ def test_incremental_ship_reads_gzipped_segments_and_keeps_watermark(
     monkeypatch.setattr("httpx.Client", _Client)
 
     assert (
-        cmd_trace_ship(since=None, until=None, dry_run=False, machine=command_runtime.machine) == 0
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=False,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
+        == 0
     )
     assert len(posts) == 2  # both gz lines POSTed
 
@@ -283,7 +309,14 @@ def test_incremental_ship_reads_gzipped_segments_and_keeps_watermark(
     # Second run: watermark is at the end of the stream, nothing re-ships.
     posts.clear()
     assert (
-        cmd_trace_ship(since=None, until=None, dry_run=False, machine=command_runtime.machine) == 0
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=False,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
+        == 0
     )
     assert posts == []
 
@@ -299,7 +332,6 @@ def test_incremental_ship_gz_resumes_from_partial_watermark(
     import gzip as gz
 
     _enable_tempo_config(monkeypatch, command_runtime=command_runtime)
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)
 
     rotated = tmp_path / "spans-2026-08-27T03-29-10.942-size.jsonl.gz"
     with gz.open(rotated, "wt", encoding="utf-8") as f:
@@ -337,7 +369,14 @@ def test_incremental_ship_gz_resumes_from_partial_watermark(
     monkeypatch.setattr("httpx.Client", _Client)
 
     assert (
-        cmd_trace_ship(since=None, until=None, dry_run=False, machine=command_runtime.machine) == 0
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=False,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
+        == 0
     )
     assert len(posts) == 1  # only the tail line
 
@@ -350,7 +389,6 @@ def test_windowed_ship_includes_gzipped_segments(
     import gzip as gz
 
     _enable_tempo_config(monkeypatch, command_runtime=command_runtime)
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)
 
     gz_rotated = tmp_path / "spans-2026-06-16T00-00-00.000-size.jsonl.gz"
     with gz.open(gz_rotated, "wt", encoding="utf-8") as f:
@@ -386,6 +424,7 @@ def test_windowed_ship_includes_gzipped_segments(
             until="2026-06-17",  # time-bomb-ok: explicit request range under test
             dry_run=False,
             machine=command_runtime.machine,
+            traces_dir=tmp_path,
         )
         == 0
     )
@@ -400,7 +439,6 @@ def test_ship_client_bypasses_environment_proxy(
     the VPN/clash proxy (127.0.0.1:7897), which mangles binary bodies and answers
     502 — a two-day real outage of the trace replay pipeline (2026-08-25)."""
     _enable_tempo_config(monkeypatch, command_runtime=command_runtime)
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)
     (tmp_path / "spans.jsonl").write_text(_otlp_line("a") + "\n", encoding="utf-8")
 
     seen: dict[str, object] = {}
@@ -425,7 +463,14 @@ def test_ship_client_bypasses_environment_proxy(
     monkeypatch.setattr("httpx.Client", _Client)
 
     assert (
-        cmd_trace_ship(since=None, until=None, dry_run=False, machine=command_runtime.machine) == 0
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=False,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
+        == 0
     )
     assert seen.get("trust_env") is False
 
@@ -439,7 +484,6 @@ def test_windowed_ship_filters_by_file_day_and_ignores_watermark(
     """--since/--until selects files by day stamp and ships them whole, regardless
     of any incremental watermark."""
     _enable_tempo_config(monkeypatch, command_runtime=command_runtime)
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)
 
     (tmp_path / "spans-2026-06-10T00-00-00.000-size.jsonl").write_text(
         _otlp_line("old") + "\n", encoding="utf-8"
@@ -480,6 +524,7 @@ def test_windowed_ship_filters_by_file_day_and_ignores_watermark(
             until="2026-06-17",  # time-bomb-ok: explicit request range under test
             dry_run=False,
             machine=command_runtime.machine,
+            traces_dir=tmp_path,
         )
         == 0
     )
@@ -494,8 +539,6 @@ def test_gateway_ship_posts_to_local_tempo_without_auth(
 ) -> None:
     """A gateway replays straight to its loopback Tempo, bypassing its local
     collector because that collector would mirror the replay again."""
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
         config.settings.observability, "telemetry_tempo_endpoint", "http://tempo.test:14318"
@@ -529,7 +572,14 @@ def test_gateway_ship_posts_to_local_tempo_without_auth(
     monkeypatch.setattr("httpx.Client", _Client)  # pyright: ignore[reportUnknownMemberType]
 
     assert (
-        cmd_trace_ship(since=None, until=None, dry_run=False, machine=command_runtime.machine) == 0
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=False,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
+        == 0
     )
     assert len(posts) == 2  # pyright: ignore[reportUnknownArgumentType]
     for endpoint, headers in posts:
@@ -550,7 +600,6 @@ def test_runner_ship_posts_to_gateway_relay_with_its_telemetry_token(
     """A pure runner cannot dial loopback Tempo. It replays to the gateway's
     authenticated remote trace pipeline, which deliberately has no file exporter,
     with its capability's telemetry token (it holds no human secret)."""
-    monkeypatch.setattr(trace, "traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
         config.settings.observability, "telemetry_otlp_enabled", True
     )
@@ -592,7 +641,14 @@ def test_runner_ship_posts_to_gateway_relay_with_its_telemetry_token(
     monkeypatch.setattr("httpx.Client", _Client)  # pyright: ignore[reportUnknownMemberType]
 
     assert (
-        cmd_trace_ship(since=None, until=None, dry_run=False, machine=command_runtime.machine) == 0
+        cmd_trace_ship(
+            since=None,
+            until=None,
+            dry_run=False,
+            machine=command_runtime.machine,
+            traces_dir=tmp_path,
+        )
+        == 0
     )
     assert posts == [
         (
