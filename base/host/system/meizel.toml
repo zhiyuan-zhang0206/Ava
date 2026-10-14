@@ -1,4 +1,4 @@
-exports = ["autostart.py", "backend.py", "boot_policy.py", "boot_unit.py", "cron.py", "logs_job.py", "macos_firewall.py", "packages_job.py", "pr_flow_job.py", "probes.py", "walg_job.py"]
+exports = ["autostart.py", "backend.py", "boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "logs_job.py", "macos_firewall.py", "packages_job.py", "pr_flow_job.py", "probes.py", "walg_job.py"]
 
 [uses]
 "autostart.py" = ["boot_policy.py", "boot_unit.py", "cron.py"]
