@@ -14,6 +14,7 @@ from types import ModuleType
 import pytest
 
 from ava.sdk_surface import agent_identity
+from ava.sdk_surface.tests.agent_binding import BindAgent
 from ava.shell.coding_tools import _claude_checks, _common, claude, impersonator_guide
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
@@ -556,8 +557,10 @@ def test_supervised_launch_needs_its_files(tmp_path: Path) -> None:
 def test_a_new_generation_lets_the_sweep_ask_about_terminated_owners(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    bound_agent: BindAgent,
 ) -> None:
     record = _owner(tmp_path)
+    bound_agent(41)
     seen: list[object] = []
 
     def _launch_generation(
