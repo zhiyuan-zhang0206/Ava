@@ -150,7 +150,7 @@ Settings.__module__ = "base.config"
 @dataclass(frozen=True)
 class FullBundle:
     """What an upgrade installs: the constructed singleton plus every name the
-    facade publishes only in full mode (Settings, _FIELDS, the re-exports)."""
+    facade publishes only in full mode (Settings, FIELD_REFS, the re-exports)."""
 
     settings: Any
     exports: dict[str, Any]
@@ -194,7 +194,7 @@ def facade_exports() -> dict[str, Any]:
     fields = _config_registry.fields()
     return {
         "Settings": Settings,
-        "_FIELDS": fields,
+        "FIELD_REFS": fields,
         "FIELD_INFOS": {name: ref.info for name, ref in fields.items()},
         "BOOTSTRAP_FIELDS": _bootstrap_fields(),
         "flat_dump": flat_dump,
