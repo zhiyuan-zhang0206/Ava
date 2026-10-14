@@ -466,71 +466,93 @@ caller's bound is the only real one.
 Not lint-enforced repo-wide yet; the modules that drive git are guarded by
 `base/host/tests/test_proc.py::test_git_driving_modules_do_not_bound_with_subprocess_run`.
 
-## Reach a stubbable name through its owning module
+## Tests do not patch; production takes what a test needs to control
 
-`from base.cluster import session_name` binds the function object into the
-*reader's* module dict at import time, and that binding is what the reader
-resolves. So the reader — not the owner — becomes the patch surface, and moving a
-function to another module silently takes it out of reach of a patch aimed at its
-old home. Splitting one `ops` module cost **81 `setattr` repoints across 6 test
-files over 12 names** for exactly this reason; a re-export facade did not help,
-because it fixes importers, not global resolution inside moved code.
+A test does not replace a name in another module (`monkeypatch.setattr`,
+`mock.patch`, `patch.object`, `patch.dict`, `monkeypatch.setenv`). When a test has to
+control something, the production code takes it as a parameter, a constructor argument
+for a class or a required keyword for a function, and the test passes a fake or a
+value. Every patch is recorded meizel debt that may only shrink
+([patching](../../meizel/docs/checker/patching.ava.okf.md)), and a new one fails the
+check.
 
-So a name that a test would stub is **reached through the module that owns it**:
+Why:
+
+- **A patch finds its target by name, and a wrong name fails silently.** A patch aimed
+  at a name that moved, was re-exported, or was bound into another module by
+  `from x import y` still passes while the test stops testing what it claims. Splitting
+  one `ops` module cost 81 `setattr` repoints across 6 test files over 12 names.
+- **The dependency is visible where it is used.** A reader sees from the signature what
+  a function decides on, without opening its tests to learn which names they replace.
+- **A patch is process-wide.** `monkeypatch.setattr(mod.time, "monotonic", f)` rewrites
+  the shared `time` module, not an attribute of `mod`: asyncio's `loop.time()`, other
+  threads and every library in the process read `f` too.
+- **A parameter follows a refactor.** It moves with the function. A patch target is a
+  coordinate, and the next move breaks it.
+
+What tests need sets the scope. Inject a time source, a process runner or a path where
+a test has to control it; production code that no test needs to steer may still
+`import time`. There is no blanket ban, and no static analysis that sorts a call into
+"decision" or "record".
+
+### The one allowed form per kind of dependency
+
+| The test needs to control | The only form |
+|---|---|
+| Configuration, including a value that comes from an environment variable | The component takes its own frozen `XxxConfig`, with exactly the fields it reads. The composition root builds it from `settings`; the component never reads `settings` or `os.environ`. A test builds the config it wants. |
+| A tuning constant (timeout, threshold, interval) | A field of that config whose default is today's constant. A test passes a small value. |
+| A client, a factory | A required parameter with no default. |
+| A path | A parameter. A test hands in `tmp_path`; it does not switch `AVA_HOME`. |
+| A socket or a server | A real local service: a listener on port 0, a unix socket under `tmp_path`. Only fault injection (a refused or half-open connect) goes through a `connect` parameter, and only in the clients of `services/redis_bridge` and `base/host/permissions_helper`. |
+| A logger, a meter, a tracer | Production may use the global facade, because it is write-only and decides nothing. A test does not patch it; it reads what was recorded through the capture fixture the facade's owner exports from its `tests/`. |
+
+A fake lives in the `tests/` of the component that defines the port and is exported by
+that directory's `meizel.toml`; a test of the component or of a layer above it imports
+it from there.
+
+### Composition roots and required dependencies
+
+A composition root is where a process builds its parts: a process entry point, a CLI
+command's `CommandRuntime.create()`, or a component's wiring module. It is the only
+code that reads `settings`, the environment or `.env`, and it constructs configs,
+clients and the system implementations of ports, then passes them down as arguments.
+That `settings` is read only there is a convention that reviewers hold, not a lint
+(decided deliberately): a component that imports `settings` is a defect even though no
+check reports it.
+
+A dependency is a required parameter. A default (`client: Client = Client()`), a
+module-level instance, or a function that builds its own client when none is passed puts
+the dependency back out of sight, and a module entry that calls a factory itself has
+become a second composition root. Defaults are for tuning constants only.
+
+### Existing patches
+
+Existing patches stay recorded debt until their component is converted. Do not add one,
+and do not repoint one at another module to keep a test green. When a change makes a
+patched thing injectable, convert the tests of that component in the same change.
+`stub_everywhere` in `tests/fixtures/guards.py` reaches aliases that are already frozen;
+it serves the debt that remains and is not a pattern for a new test.
+
+## A function-local `import base.x` makes `base` local to the whole function
+
+A function that reaches a module as `base.deploy.state.host_deploy_state.read()` through
+a module-level `import base.deploy` breaks if the same function also contains
+`import base.db`. The statement binds `base` as a *local* for the entire body, because
+the binding is decided statically, so a module-level import does not rescue it, and
+every `base.…` above that line raises `UnboundLocalError`:
 
 ```python
-import base.cluster
-from ops.cluster.operations import pause as cluster_pause
-
-base.cluster.session_name(service)      # not: session_name(...)
-cluster_pause.unpause_local_cluster()     # not: unpause_local_cluster()
-```
-
-Which names: the state-touching ones — path resolvers, session liveness probes,
-spawners, pause/unpause, anything that reads the filesystem, a subprocess or the
-network. **Not** constants, exception classes, Pydantic models, type aliases, pure
-formatters, or the `settings` singleton: nothing stubs them, so they carry no patch
-surface, and `except cluster_rpc.ClusterOpUnreachable` only adds noise. A
-function-local `from x import y` is already fine — it re-resolves per call, so it
-reads the owner's current binding and survives its enclosing function moving.
-
-**Before converting anything in a function, check that function for a
-`import base.X` statement.** It binds `base` as a *local* for the entire function
-body — the binding is decided statically, so a module-level `import base.paths`
-does **not** rescue you — and every `base.…` above that line then raises
-`UnboundLocalError`:
-
-```python
-import base.paths          # module scope — irrelevant to the function below
+import base.paths          # module scope: irrelevant to the function below
 
 def is_paused():
     state = base.deploy.state.host_deploy_state.read()     # UnboundLocalError
     import base.db                            # <- makes `base` local for the whole body
 ```
 
-Runtime only, on that branch only, and neither ruff nor pyright reports it.
-`ops/cluster_status/pause.py` was exactly this shape, so its conversion had to hoist
-`import base.db` to module level first. Hit blind, it reads as the whole approach
-being unworkable rather than as one import in the wrong place. A function-local
-`from base.x import y` is safe — it binds `y`, not `base`.
-
-The trade is deliberate: source-patching has a **wider blast radius** than
-patch-where-used. Measure it before arguing about it — a source patch only reaches
-readers that *also* go through the module, so converting a name every other consumer
-from-imports widens nothing today. Take the trade where the name is one fact per
-process (there is one `$AVA_HOME`, one posture row, one session-naming
-scheme — a second reader seeing the unpatched value is a bug, not precision).
-
-Keep the from-import where the test's assertion is about *one call site's mechanism*
-rather than about the value. A subprocess-boundary test must name the actual
-call site when it proves that site's timeout, native custody or refusal behavior.
-Patching the shared utility itself can also intercept unrelated consumers and
-turn their work into an accidental fake.
-
-Pre-existing aliases that cannot be converted away — a facade's own re-exports, and
-consumers that from-import from it at module top level — are what
-`tests/fixtures/guards.py`'s `stub_everywhere` is for. The two mechanisms do not overlap:
-this rule prevents new frozen aliases, that helper reaches the ones already frozen.
+It fails at runtime, on that branch only, and ruff does not report it. Pyright does
+(`"base" is unbound`), so run it on the file you edit rather than waiting for a test to
+reach the line. Hoist the import to module level. A function-local `from base.x import y`
+is safe, since it binds `y`, not `base`.
 
 ## Role-scope check for per-machine surfaces
 

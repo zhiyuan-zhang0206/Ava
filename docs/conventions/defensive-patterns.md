@@ -179,9 +179,10 @@ existed for.
 ### A dead dependency is a fact about the dependency, not about one seam
 
 A test asserting behavior under a downed dependency must close **every** route to
-it, not the route the current implementation happens to take. Patch `connect`
-*and* `pool`; otherwise the fixture silently retargets itself the next time the
-implementation changes seam, and the test keeps passing while guarding nothing.
+it, not the route the current implementation happens to take. Make `connect`
+*and* `pool` fail, each through the dependency the code receives (a patch closes only
+the one name it spells); otherwise the fixture silently retargets itself the next time
+the implementation changes seam, and the test keeps passing while guarding nothing.
 Evidence: [`docs/postmortems/0002`](../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md)
 records the original `no_db` / `dead_db` fixture failure.
 
