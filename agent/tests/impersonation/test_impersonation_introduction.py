@@ -16,7 +16,7 @@ from agent import impersonation_handoff
 from agent.impersonation_handoff import ensure_start_marker, start_marker
 from agent.state import BaseAgentState
 from base.agents.impersonation.notes import HandoffNotes
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import settings
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -124,7 +124,11 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, timestamps: bool, weekday: bool
 ) -> None:
     moment = datetime(2026, 10, 6, 13, 39, 25, tzinfo=UTC)
-    clock = Clock(ClockConfig("America/New_York", "America/New_York", weekday), now=lambda: moment)
+    clock = Clock(
+        ClockConfig("America/New_York", "America/New_York", weekday),
+        now=lambda: moment,
+        timers=SYSTEM_TIMERS,
+    )
 
     def fixed_clock(_cls: type[Clock]) -> Clock:
         return clock
@@ -191,6 +195,7 @@ def test_notes_keep_two_live_configuration_roots_and_read_order() -> None:
                             owner.view.general.message_timestamp_weekday,
                         ),
                         now=now,
+                        timers=SYSTEM_TIMERS,
                     )
 
                 def timestamps() -> bool:

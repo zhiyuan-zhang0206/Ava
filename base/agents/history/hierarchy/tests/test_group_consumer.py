@@ -48,7 +48,7 @@ policy = GroupPolicy()
 
 
 def read_inputs() -> gc.UnderstandingReadInputs:
-    from base.clock import Clock, ClockConfig
+    from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
     return gc.UnderstandingReadInputs(
         enabled=lambda: True,
@@ -59,7 +59,7 @@ def read_inputs() -> gc.UnderstandingReadInputs:
         check_decay=lambda: policy.understanding_group_check_decay,
         reasoning=lambda: policy.understanding_group_reasoning,
         corrections=lambda: policy.understanding_group_corrections,
-        clock_factory=lambda: Clock(ClockConfig("UTC", "UTC", False)),
+        clock_factory=lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
         timestamps_enabled=lambda: True,
         quiesced=lambda: False,
     )
@@ -69,10 +69,10 @@ def test_generation_keeps_operation_reader_order(monkeypatch: pytest.MonkeyPatch
     """Reasoning/model construction, corrections, clock and cadence keep their order."""
     from dataclasses import replace
 
-    from base.clock import Clock, ClockConfig
+    from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
     reads: list[str] = []
-    clock = Clock(ClockConfig("UTC", "UTC", False))
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
 
     def read[T](name: str, value: T) -> T:
         reads.append(name)

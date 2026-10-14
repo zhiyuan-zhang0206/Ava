@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from gateway.agents import eval_guard
@@ -148,7 +148,7 @@ def test_the_gateway_declares_exactly_what_the_service_serves(
         catalog=model_catalog,
         default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
         timeline_inputs=TimelineReadInputs(
-            lambda: Clock(ClockConfig("UTC", "UTC", False)), lambda: False
+            lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), lambda: False
         ),
     ).openapi()
     gateway = _gateway(httpx.MockTransport(lambda _r: httpx.Response(200))).openapi()

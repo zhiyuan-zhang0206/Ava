@@ -4,7 +4,7 @@ import pytest
 
 from agent.graph.exec.tests.cancel_fixture import fake_cancel_event as fake_cancel_event
 from agent.graph.exec.tests.output_inputs import CropConfig
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.tests.model_catalog import add_bindings as add_bindings
@@ -32,4 +32,4 @@ def crop_config() -> CropConfig:
 
 @pytest.fixture
 def output_clock() -> Clock:
-    return Clock(ClockConfig("UTC", "UTC", False))
+    return Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)

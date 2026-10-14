@@ -2,7 +2,7 @@
 
 import pytest
 
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.config import field_names, get_field, settings
 from base.config.tests.configuration import snapshot_process_config
 from gateway import app as gateway_app
@@ -23,7 +23,7 @@ def test_session_snapshot_preserves_timezone_origin(explicit: bool) -> None:
         assert owner.env_boot is original_authority
         assert owner.view.env_boot is original_authority
         assert owner.field_explicitly_set("timezone") is explicit
-        clock = Clock(clock_config_from_boot(owner))
+        clock = Clock(clock_config_from_boot(owner), timers=SYSTEM_TIMERS)
         assert clock.timezone == timezone
         assert clock.authoritative_timezone == (timezone if explicit else None)
         assert settings.general.model_fields_set == (
@@ -48,7 +48,7 @@ def test_gateway_snapshot_preserves_all_values_and_timezone_origin(explicit: boo
         owner = gateway_app.ConfigBoot()
         assert {name: owner.get_field(name) for name in values} == values
         assert owner.field_explicitly_set("timezone") is explicit
-        clock = Clock(clock_config_from_boot(owner))
+        clock = Clock(clock_config_from_boot(owner), timers=SYSTEM_TIMERS)
         assert clock.timezone == timezone
         assert clock.authoritative_timezone == (timezone if explicit else None)
         assert settings.general.model_fields_set == (

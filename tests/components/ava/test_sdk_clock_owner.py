@@ -11,7 +11,7 @@ import pytest
 from ava.sdk_surface import install, process_context, settings
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.config import ConfigBoot
 from base.packages.plugins.extensions import ExtensionRegistry
 
@@ -46,7 +46,7 @@ def test_bare_sdk_clock_uses_live_installation_owner(clock_scope: None) -> None:
     calls: list[Clock] = []
 
     def clock() -> Clock:
-        value = Clock(clock_config_from_boot(first))
+        value = Clock(clock_config_from_boot(first), timers=SYSTEM_TIMERS)
         calls.append(value)
         return value
 
@@ -58,7 +58,10 @@ def test_bare_sdk_clock_uses_live_installation_owner(clock_scope: None) -> None:
     after = settings.clock()
     assert after.authoritative_timezone == "Asia/Tokyo"
     assert before.authoritative_timezone == "UTC"
-    assert Clock(clock_config_from_boot(second)).authoritative_timezone == "Asia/Shanghai"
+    assert (
+        Clock(clock_config_from_boot(second), timers=SYSTEM_TIMERS).authoritative_timezone
+        == "Asia/Shanghai"
+    )
     assert len(calls) == 2
 
 
@@ -71,7 +74,10 @@ def test_bound_sdk_clock_uses_context_without_borrowing_installation(clock_scope
 
     install.install(ExtensionRegistry(()), clock_factory=unrelated)
     process_context.bind_context(
-        AvaContext(clients=ClientSet(), clock_factory=lambda: Clock(clock_config_from_boot(boot)))
+        AvaContext(
+            clients=ClientSet(),
+            clock_factory=lambda: Clock(clock_config_from_boot(boot), timers=SYSTEM_TIMERS),
+        )
     )
     try:
         assert settings.clock().authoritative_timezone == "UTC"
@@ -82,7 +88,8 @@ def test_bound_sdk_clock_uses_context_without_borrowing_installation(clock_scope
 def test_partial_context_refuses_clock_instead_of_falling_back(clock_scope: None) -> None:
     boot = ConfigBoot()
     install.install(
-        ExtensionRegistry(()), clock_factory=lambda: Clock(clock_config_from_boot(boot))
+        ExtensionRegistry(()),
+        clock_factory=lambda: Clock(clock_config_from_boot(boot), timers=SYSTEM_TIMERS),
     )
     process_context.bind_context(AvaContext(clients=ClientSet()))
     try:

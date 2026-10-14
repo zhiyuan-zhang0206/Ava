@@ -15,7 +15,7 @@ from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -65,7 +65,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
         )
 
     def clock_factory() -> Clock:
-        return Clock(clock_config_from_boot(config))
+        return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
 
     clients = process_clients(config=config, database=database, machine=machine)
     primary: BaseException | None = None
