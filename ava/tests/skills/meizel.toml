@@ -1,4 +1,5 @@
 [uses]
+"test_command_catalog_real_files.py" = ["_skills_helpers.py"]
 "test_skills.py" = ["_skills_helpers.py"]
 "test_skills_attribution.py" = ["_skills_helpers.py"]
 "test_skills_mount.py" = ["_skills_helpers.py"]
