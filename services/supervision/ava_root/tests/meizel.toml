@@ -1,4 +1,5 @@
 [uses]
+"test_ava_root_daemon.py" = ["child_unit.py"]
 "test_ava_root_health.py" = ["child_unit.py"]
 "test_ava_root_intent.py" = ["child_unit.py"]
 "test_ava_root_stop_window.py" = ["child_unit.py"]

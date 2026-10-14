@@ -24,6 +24,7 @@ from base.native_process.ownership import OwnedProcess
 from services.supervision.ava_root.failure_state import UnitFailureFacts, derive_kind, describe
 from services.supervision.ava_root.manifest import UnknownUnitError
 from services.supervision.ava_root.probes import Probe, ProbeError, ProbeRegistry
+from services.supervision.ava_root.stopping import UnitStopTimeoutError
 
 _log = logging.getLogger(__name__)
 
@@ -429,7 +430,12 @@ class HealthMonitor:
             state.restart_attempts,
             self._config.max_restart_attempts,
         )
-        await self._supervisor.restart(unit_id)
+        try:
+            await self._supervisor.restart(unit_id)
+        except* UnitStopTimeoutError as exc:
+            # Supervisor retains the generation and records restart_failed.down.
+            # This attempt remains spent; other errors still reach root's owner.
+            _log.warning("[health] unit %s: replacement stop refused", unit_id, exc_info=exc)
         # Spawn acceptance is not readiness. The next ordinary round observes it.
 
     @staticmethod
