@@ -312,7 +312,7 @@ def load() -> Registry:
             dual-row state that used to crash the skill scanner).
         OSError: filesystem read error.
     """
-    path = paths.install_registry_path()
+    path = paths.install_registry_path(paths.ava_home())
     if not path.exists():
         return Registry()
     raw = path.read_text(encoding="utf-8")
@@ -352,7 +352,7 @@ def save(registry: Registry) -> None:
     two savers running at once share it: the second overwrites the first's
     staged body, and whichever unlinks first leaves the other's rename raising
     FileNotFoundError. `mutate`'s lock is what keeps them from overlapping."""
-    path = paths.install_registry_path()
+    path = paths.install_registry_path(paths.ava_home())
     body = json.dumps(json.loads(registry.model_dump_json()), indent=2) + "\n"
     tmp = path.with_name(f"{path.name}.tmp")
     try:
@@ -391,7 +391,7 @@ def registry_lock() -> Generator[None]:
 
     `mutate` is the way in and takes this for you.
     """
-    path = paths.install_registry_path()
+    path = paths.install_registry_path(paths.ava_home())
     with file_lock(path.with_name(f"{path.name}.lock"), timeout_s=_REGISTRY_LOCK_TIMEOUT_S):
         yield
 
@@ -518,7 +518,7 @@ def loadable_skill_names() -> set[str]:
     Packages without a manifest pass unchanged, so the check costs one stat per
     enabled name unless a manifest is actually present.
     """
-    skills_root = paths.skills_dir()
+    skills_root = paths.skills_dir(paths.ava_home())
     return {
         name for name in enabled_skill_names() if host_contract_reason(skills_root / name) is None
     }

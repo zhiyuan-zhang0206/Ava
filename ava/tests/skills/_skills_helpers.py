@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from base.packages.extensions import install_registry
-from base.paths import skills_dir
+from base.paths import ava_home, skills_dir
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +18,7 @@ def overlay_all_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     controlled set (a per-test setattr overrides this autouse one)."""
 
     def _all_enabled() -> set[str]:
-        d = skills_dir()
+        d = skills_dir(ava_home())
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
     monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
@@ -26,7 +26,7 @@ def overlay_all_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def fake_skills_dir(unit_home: Path) -> Path:
-    d = skills_dir()
+    d = skills_dir(ava_home())
     d.mkdir()
     return d
 

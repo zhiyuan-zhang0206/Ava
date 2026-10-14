@@ -2,9 +2,10 @@
 agent / subprocess.
 
 `base.paths.home.resolve_ava_home` is the path source (`$AVA_HOME`,
-else `~/.ava`, read on every call); this door adds first-access mkdir side
-effects, so calling a helper means "the directory is ready and writable". The
-three process classes inherit the same variable, no manual passing required.
+else `~/.ava`, read on every call); `ava_home()` adds the mkdir side effect for
+the home itself. A helper that takes `home` is a pure derivation (no environment,
+no mkdir); the zero-argument helpers that remain still create their directory on
+first access. The three process classes inherit the same variable.
 The package holds only this door; its doc nodes (`docs/paths.ava.okf.md`,
 `docs/lock-discipline.ava.okf.md`) sit beside it.
 """
@@ -30,11 +31,11 @@ def run_dir() -> Path:
     return target
 
 
-def install_registry_path() -> Path:
-    """Install registry file ($AVA_HOME/installed.json) — records externally
-    installed packages and their enable state. Returns the path only; the
+def install_registry_path(home: Path) -> Path:
+    """Install registry file (`<home>/installed.json`) — records externally
+    installed packages and their enable state. Pure: the path only; the
     registry module decides read/write."""
-    return ava_home() / "installed.json"
+    return home / "installed.json"
 
 
 def plugins_dir() -> Path:
@@ -159,19 +160,20 @@ def gateway_memory_dir(*, roles: frozenset[str]) -> Path:
     return memory_dir()
 
 
-def skills_dir() -> Path:
-    """Per-unit skill load dir ($AVA_HOME/skills) — the single directory the
-    skill scanner reads; repo + plugin skills are converged into it."""
-    return ava_home() / "skills"
+def skills_dir(home: Path) -> Path:
+    """Per-unit skill load dir (`<home>/skills`) — the single directory the
+    skill scanner reads; repo + plugin skills are converged into it. Pure: a
+    writer creates it."""
+    return home / "skills"
 
 
-def mcps_dir() -> Path:
-    """Per-unit installed-MCP load dir ($AVA_HOME/mcps) — where `ava mcp install`
+def mcps_dir(home: Path) -> Path:
+    """Per-unit installed-MCP load dir (`<home>/mcps`) — where `ava mcp install`
     lands each installed MCP package (`<name>/` holding its own `.mcp.json` +
     `pyproject.toml` + `.venv`). The MCP config loader scans each `<name>/.mcp.json`
     here as its installed layer, gated by the install registry; built-in MCPs stay in
-    the repo's `<repo>/ava_builtins/mcps/`. Symmetric with `skills_dir()` / `plugins_dir()`."""
-    return ava_home() / "mcps"
+    the repo's `<repo>/ava_builtins/mcps/`. Symmetric with `skills_dir(home)` / `plugins_dir()`."""
+    return home / "mcps"
 
 
 def workspace_dir(agent_id: int) -> Path:
@@ -246,8 +248,8 @@ def quarantined_exec_requests_dir() -> Path:
     return target
 
 
-def launch_failures_path() -> Path:
-    """Path of the `$AVA_HOME/last_launch_failures` file — the session names the
+def launch_failures_path(home: Path) -> Path:
+    """Path of the `<home>/last_launch_failures` file — the session names the
     last `ava start` on this host could not launch.
 
     Exists because the rollout's local leg runs `ava start` in a FRESH child
@@ -262,11 +264,11 @@ def launch_failures_path() -> Path:
 
     Returns the path only; ``base.deploy.lifecycle.launch_failures`` owns read/write.
     """
-    return ava_home() / "last_launch_failures"
+    return home / "last_launch_failures"
 
 
-def running_sha_path() -> Path:
-    """Path of the `$AVA_HOME/running_sha` file that records the commit the
+def running_sha_path(home: Path) -> Path:
+    """Path of the `<home>/running_sha` file that records the commit the
     gateway was last started on.
 
     Written by `ava start` (on every host, regardless of role) right before
@@ -277,7 +279,7 @@ def running_sha_path() -> Path:
 
     Returns the path only; ``base.deploy.git.running_sha`` owns read/write.
     """
-    return ava_home() / "running_sha"
+    return home / "running_sha"
 
 
 def computer_mcp_socket() -> Path:

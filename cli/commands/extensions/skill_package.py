@@ -291,7 +291,7 @@ def install(
     """
     from base import paths
 
-    dest_root = paths.skills_dir()
+    dest_root = paths.skills_dir(paths.ava_home())
     clashes = [pkg.name for pkg in packages if (dest_root / pkg.name).exists()]
     if clashes:
         raise SkillPackageError(

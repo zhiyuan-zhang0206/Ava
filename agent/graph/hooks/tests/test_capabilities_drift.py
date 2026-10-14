@@ -67,7 +67,7 @@ def _runtime(*, container: bool = False, database_gate: ProcessDbGate) -> Runtim
 
 @pytest.fixture
 def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    d = paths.skills_dir()
+    d = paths.skills_dir(paths.ava_home())
     d.mkdir()
     monkeypatch.setattr(
         install_registry,
