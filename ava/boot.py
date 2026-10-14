@@ -20,7 +20,7 @@ from ava.sdk_surface import ava_module, process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -224,7 +224,7 @@ def launched_context(*, config: ConfigBoot | None = None) -> AvaContext | None:
         identity=AgentIdentity(agent_id=int(raw), owns_loop=False),
         clients=process_clients(config=config, machine=machine),
         machine=machine,
-        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )
 
 
@@ -366,7 +366,8 @@ def _load_plugin_stages(
                 catalog=build_model_catalog(),
                 authority=authority,
                 producer=producer,
-                clock_factory=clock_factory or (lambda: Clock(clock_config_from_boot(config))),
+                clock_factory=clock_factory
+                or (lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)),
                 validate_state=validate_state,
             )
             if not surface:

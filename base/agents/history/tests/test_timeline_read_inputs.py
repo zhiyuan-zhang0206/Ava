@@ -6,14 +6,14 @@ from langchain_core.messages import HumanMessage
 
 from base.agents.history.timeline import build_timeline_items, timeline_default_limit
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
 
 def test_renderers_are_lazy_isolated_live_and_read_flag_before_clock() -> None:
     reads: list[str] = []
     flags = [True, False]
     instant = datetime(2026, 10, 4, 12, tzinfo=UTC)
-    clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: instant)
+    clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: instant, timers=SYSTEM_TIMERS)
 
     def flag(index: int) -> bool:
         reads.append(f"flag{index}")

@@ -15,7 +15,7 @@ from ava.sdk_surface import metering, process_context
 from ava.sdk_surface.installation import installed
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -41,7 +41,7 @@ def sdk_environment(
         identity=AgentIdentity(agent_id=1, owns_loop=True),
         clients=process_clients(config=process_config, machine=machine_identity),
         machine=machine_identity,
-        clock_factory=lambda: Clock(clock_config_from_boot(process_config)),
+        clock_factory=lambda: Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS),
     )
     process_context.bind_context(context)
     try:

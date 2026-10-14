@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import ConfigBoot
 from services.backup import dump
 from services.backup.artifact import offsite
@@ -44,7 +44,7 @@ def test_due_reads_two_fresh_clocks_around_hour_and_discovery(
 
     def clock() -> Clock:
         calls.append("clock")
-        return Clock(ClockConfig(next(zones), None, False))
+        return Clock(ClockConfig(next(zones), None, False), timers=SYSTEM_TIMERS)
 
     def hour() -> int:
         calls.append("hour")

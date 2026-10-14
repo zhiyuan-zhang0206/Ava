@@ -9,7 +9,6 @@ import httpx
 import pytest
 
 from base import config
-from base.telemetry import trace_mirror
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
 from base.telemetry.tests.test_tracing import (
@@ -51,7 +50,6 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     dead arm thread carrying no flag left one-attempt-per-process bypassable).
     """
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     under_watermark(monkeypatch)
     calls: list[int] = []
 
@@ -61,14 +59,14 @@ def test_arm_thread_base_exception_marks_attempt_spent(
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _exit_sdk)
 
-    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
+    initialize_tracing(machine=machine_identity(), home=tmp_path)
     wait_init_resolved()
 
     assert tracing_mod._state["arm_failed"] is True
     assert tracing_mod._state["initialized"] is False
 
     initialize_tracing(
-        machine=machine_identity(), home=Path(".ava")
+        machine=machine_identity(), home=tmp_path
     )  # must be a no-op: the attempt was spent
     assert calls == [1]
 
@@ -83,7 +81,6 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
     Also: a later ensure call skips the wait (already remembered), so the
     timeout does not block the late-armed turn from opening its span."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     under_watermark(monkeypatch)
     monkeypatch.setattr(tracing_mod, "INIT_RESOLVED_TIMEOUT_S", 0.05)
 
@@ -104,7 +101,7 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
 
     monkeypatch.setattr(tracing_mod.logger, "warning", _capture_warning)
 
-    initialize_tracing(machine=machine_identity(), home=Path(".ava"))
+    initialize_tracing(machine=machine_identity(), home=tmp_path)
     assert entered.wait(timeout=5.0), "arm thread must reach Traceloop.init"
 
     # The arm is still in flight: the bounded wait gives up (one warning),
@@ -137,7 +134,6 @@ def test_ensure_init_resolved_instant_without_arming(
     from base.telemetry.tracing import ensure_init_resolved
 
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     under_watermark(monkeypatch)
     monkeypatch.setattr(
         tracing_mod,
@@ -149,7 +145,7 @@ def test_ensure_init_resolved_instant_without_arming(
     monkeypatch.setattr(tracing_mod, "start_collector_retry", ignore_arguments)
 
     initialize_tracing(
-        machine=machine_identity(), home=Path(".ava")
+        machine=machine_identity(), home=tmp_path
     )  # declined: collector unreachable, no arm thread
     ensure_init_resolved()  # must return at once, not hang on an unset event
 
@@ -305,7 +301,6 @@ def test_prune_old_mirror_removes_stale_keeps_recent(
     unstamped ACTIVE `spans.jsonl` or non-mirror files."""
     from base.telemetry.tracing import prune_old_mirror
 
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     old = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"  # well before any cutoff
     old_gz = tmp_path / "spans-2020-01-01T01-00-00.000-time.jsonl.gz"  # same, gzipped
     recent = tmp_path / "spans-2099-01-01T00-00-00.000-size.jsonl"  # well after any cutoff
@@ -314,7 +309,7 @@ def test_prune_old_mirror_removes_stale_keeps_recent(
     for p in (old, old_gz, recent, active, other):
         p.write_text("{}\n", encoding="utf-8")
 
-    prune_old_mirror(retention_days=14)
+    prune_old_mirror(retention_days=14, traces_dir=tmp_path)
 
     assert not old.exists()
     assert not old_gz.exists()
@@ -375,7 +370,6 @@ def test_prune_old_mirror_removes_stale_suffixed_and_gz(
     segments — and keeps the ACTIVE `spans.jsonl` untouched."""
     from base.telemetry.tracing import prune_old_mirror
 
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     old_suffixed = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"
     old_gz = tmp_path / "spans-2020-01-01T01-00-00.000-time.jsonl.gz"
     old_cut = tmp_path / "spans.cut-20200101.jsonl"
@@ -384,7 +378,7 @@ def test_prune_old_mirror_removes_stale_suffixed_and_gz(
     for p in (old_suffixed, old_gz, old_cut, recent, active):
         p.write_text("{}\n", encoding="utf-8")
 
-    prune_old_mirror(retention_days=14)
+    prune_old_mirror(retention_days=14, traces_dir=tmp_path)
 
     assert not old_suffixed.exists()
     assert not old_gz.exists()
@@ -403,14 +397,13 @@ def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(
     could be deleted in either order)."""
     from base.telemetry.tracing import enforce_dir_cap
 
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     oldest = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
     newest = tmp_path / "spans-2026-01-02T00-00-00.000-time.jsonl.gz"
     active = tmp_path / "spans.jsonl"
     for p in (oldest, newest, active):
         p.write_bytes(b"x" * (1024 * 1024))
 
-    removed = enforce_dir_cap(max_mb=2)
+    removed = enforce_dir_cap(max_mb=2, traces_dir=tmp_path)
     assert removed == 1
     remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl*"))
     assert remaining == ["spans-2026-01-02T00-00-00.000-time.jsonl.gz", "spans.jsonl"]
@@ -426,7 +419,6 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(
 
     from base.telemetry.tracing import gzip_old_mirror
 
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     rotated = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
     cut = tmp_path / "spans.cut-20260827.jsonl"
     active = tmp_path / "spans.jsonl"
@@ -434,7 +426,7 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(
     cut.write_text('{"b":1}\n', encoding="utf-8")
     active.write_text('{"c":1}\n', encoding="utf-8")
 
-    assert gzip_old_mirror(grace_seconds=-1) == 2
+    assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 2
     assert rotated.exists() is False
     assert cut.exists() is False
     gz_rotated = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl.gz"
@@ -448,7 +440,7 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(
     with gz.open(gz_cut, "rt", encoding="utf-8") as fh:
         assert fh.read() == '{"b":1}\n'
     # Idempotent: already-compressed files are skipped.
-    assert gzip_old_mirror(grace_seconds=-1) == 0
+    assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 0
 
 
 def test_gzip_old_mirror_skips_recently_written_files(
@@ -461,7 +453,6 @@ def test_gzip_old_mirror_skips_recently_written_files(
 
     from base.telemetry.tracing import gzip_old_mirror
 
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     fresh = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
     fresh.write_text("x\n", encoding="utf-8")
     # Touch mtime to "now" (write_text already did; keep explicit for clarity).
@@ -470,11 +461,11 @@ def test_gzip_old_mirror_skips_recently_written_files(
 
     os.utime(fresh, (now, now))
 
-    assert gzip_old_mirror(grace_seconds=3600) == 0
+    assert gzip_old_mirror(grace_seconds=3600, traces_dir=tmp_path) == 0
     assert fresh.exists()
     assert not (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl.gz").exists()
 
-    assert gzip_old_mirror(grace_seconds=-1) == 1
+    assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 1
     assert not fresh.exists()
 
 
@@ -484,10 +475,9 @@ def test_prune_old_mirror_disabled_when_nonpositive(
     """retention_days <= 0 disables pruning entirely."""
     from base.telemetry.tracing import prune_old_mirror
 
-    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     old = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"
     old.write_text("{}\n", encoding="utf-8")
-    prune_old_mirror(retention_days=0)
+    prune_old_mirror(retention_days=0, traces_dir=tmp_path)
     assert old.exists()
 
 

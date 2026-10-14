@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage
 
 from base.agents.history.checkpoint import single_segment_history
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from services.derived.insights.run_timeline import history
 from services.derived.insights.run_timeline.history import HistoryViewCache
 
@@ -40,7 +40,7 @@ class FakeStore:
 
 DB: Any = SimpleNamespace()
 _TIMELINE_INPUTS = TimelineReadInputs(
-    lambda: Clock(ClockConfig("UTC", "UTC", False)), lambda: False
+    lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), lambda: False
 )
 
 

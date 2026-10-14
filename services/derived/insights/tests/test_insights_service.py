@@ -25,7 +25,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import FullHistory, single_segment_history
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
@@ -43,7 +43,7 @@ from services.derived.insights.run_timeline import history
 
 _CONFIG = InsightsConfig(run_timeline_message_text_max=20)
 _TIMELINE_INPUTS = TimelineReadInputs(
-    lambda: Clock(ClockConfig("UTC", "UTC", False)), lambda: False
+    lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), lambda: False
 )
 
 
@@ -152,6 +152,7 @@ class RenderingPolicy:
         return Clock(
             ClockConfig("UTC", "UTC", False),
             now=lambda: datetime(2026, 10, 10, 12, tzinfo=UTC),
+            timers=SYSTEM_TIMERS,
         )
 
 

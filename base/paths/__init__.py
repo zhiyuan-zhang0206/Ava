@@ -102,17 +102,16 @@ def permissions_helper_app_dir() -> Path:
     return ava_home() / "helper"
 
 
-def traces_dir() -> Path:
-    """Per-unit trace mirror directory ($AVA_HOME/traces); create if missing.
+def traces_dir(home: Path) -> Path:
+    """The trace mirror directory under a unit home (`<home>/traces`). Pure: reads no
+    environment and creates nothing; the caller owns the home and ensures the directory.
 
     Holds the local OTLP-JSON span mirror written by the OTel Collector
     sidecar's file exporter (task #1266): the active `spans.jsonl` plus
     rotated `spans-<ISO-timestamp>.jsonl` backups, each line one
     `ExportTraceServiceRequest`. `ava trace ship` replays a window of it
     straight to Tempo when the live fan-out missed data."""
-    target = ava_home() / "traces"
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+    return home / "traces"
 
 
 def otel_collector_dir() -> Path:

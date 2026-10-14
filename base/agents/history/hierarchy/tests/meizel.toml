@@ -14,7 +14,6 @@ exports = ["consumer_helpers.py"]
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.run_group_checks" = 2
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.run_job" = 1
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.settle_chunk_job" = 1
-"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.telemetry.emit" = 1
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunks.INSERT_CALL_SQL" = 1
 "test_chunk_consumer.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 2
 "test_chunk_consumer_quiesced.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.POLL_SECONDS" = 1

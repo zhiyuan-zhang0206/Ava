@@ -110,10 +110,15 @@ def _h_firewall_sync(args: argparse.Namespace) -> int:
 
 
 def _h_trace_ship(args: argparse.Namespace) -> int:
+    from base.paths import ava_home, traces_dir
     from cli.commands.observability.trace import cmd_trace_ship
 
     return cmd_trace_ship(
-        since=args.since, until=args.until, dry_run=args.dry_run, machine=args.runtime.machine
+        since=args.since,
+        until=args.until,
+        dry_run=args.dry_run,
+        machine=args.runtime.machine,
+        traces_dir=traces_dir(ava_home()),
     )
 
 
