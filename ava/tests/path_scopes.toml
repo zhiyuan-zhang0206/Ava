@@ -11,7 +11,7 @@
     "test_core.py",
 ]
 "base.paths.tests.homes" = ["."]
-"tests.fixtures.model_catalog" = [
+"base.packages.tests.model_catalog" = [
     "test_attachment_transport.py",
     "test_core.py",
     "test_security.py",

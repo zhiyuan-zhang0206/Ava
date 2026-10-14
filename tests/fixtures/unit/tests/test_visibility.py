@@ -36,7 +36,7 @@ def test_optin_fixtures_are_not_visible_to_unrelated_collectors(
     assert request.config.pluginmanager.get_plugin("base.agents.tests.units") is None
     assert request.config.pluginmanager.get_plugin("tests.fixtures.unit.gateway") is None
     assert request.config.pluginmanager.get_plugin("agent.graph.tests.cancel_fixture") is None
-    assert request.config.pluginmanager.get_plugin("tests.fixtures.model_catalog") is None
+    assert request.config.pluginmanager.get_plugin("base.packages.tests.model_catalog") is None
     assert request.config.pluginmanager.get_plugin("base.log.tests.log_records") is None
     assert request.config.pluginmanager.get_plugin("base.host.net.tests.retry_waits") is None
     assert (

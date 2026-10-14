@@ -1,8 +1,10 @@
-exports = ["plugin_config"]
+exports = ["model_catalog.py", "plugin_config"]
 
 [uses]
 "bootstrap" = ["providers"]
-"providers" = ["lm"]
+"conftest.py" = ["model_catalog.py"]
+"lm" = ["model_catalog.py"]
+"providers" = ["lm", "model_catalog.py"]
 
 [debt.env-patch]
 "test_update_disk_images.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
