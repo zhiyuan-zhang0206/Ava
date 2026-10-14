@@ -17,23 +17,42 @@ to keep that module under its line ceiling.
 
 from __future__ import annotations
 
+import math
 import os
 import signal
 import subprocess
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.log import logger
 from base.native_process.os_platform import is_macos
 
-# How long the cluster may stay unresponsive before we call it stalled and
-# fail fast. Probe cadence is deliberately coarse: the cluster is disposable
-# test infrastructure, and a real stall costs the suite minutes either way.
-PROBE_INTERVAL_S = 5.0
-PROBE_TIMEOUT_S = 4
 _PROBE_CONSECUTIVE_FAILURES = 2
+
+
+@dataclass(frozen=True)
+class StallWatchdogConfig:
+    """Probe cadence of the stall watchdog; the defaults are the production values.
+
+    How long the cluster may stay unresponsive before it is called stalled and failed fast is
+    `_PROBE_CONSECUTIVE_FAILURES` probes. The cadence is deliberately coarse: the cluster is
+    disposable test infrastructure, and a real stall costs the suite minutes either way.
+    """
+
+    probe_interval_s: float = 5.0
+    """Seconds between two probes."""
+
+    probe_timeout_s: float = 4.0
+    """Seconds one probe may spend connecting; libpq takes whole seconds, so it is rounded up."""
+
+    def __post_init__(self) -> None:
+        if self.probe_interval_s <= 0:
+            raise ValueError("probe_interval_s must be positive")
+        if self.probe_timeout_s <= 0:
+            raise ValueError("probe_timeout_s must be positive: libpq reads 0 as 'wait forever'")
 
 
 def fixture_log_artifact_dir() -> Path:
@@ -158,10 +177,11 @@ class StallWatchdog(threading.Thread):
     """Daemon thread probing the throwaway cluster; on a sustained stall,
     captures evidence and kills the postmaster so the suite fails fast."""
 
-    def __init__(self, admin_url: str, port: int) -> None:
+    def __init__(self, admin_url: str, port: int, config: StallWatchdogConfig) -> None:
         super().__init__(name=f"pg-stall-watchdog-{port}", daemon=True)
         self._admin_url = admin_url
         self._port = port
+        self._config = config
         self._stop_requested = threading.Event()
         self.evidence_path: str | None = None
 
@@ -169,10 +189,12 @@ class StallWatchdog(threading.Thread):
         import psycopg
 
         failures = 0
-        while not self._stop_requested.wait(PROBE_INTERVAL_S):
+        while not self._stop_requested.wait(self._config.probe_interval_s):
             try:
                 with (
-                    psycopg.connect(self._admin_url, connect_timeout=PROBE_TIMEOUT_S) as conn,
+                    psycopg.connect(
+                        self._admin_url, connect_timeout=math.ceil(self._config.probe_timeout_s)
+                    ) as conn,
                     conn.cursor() as cur,
                 ):
                     cur.execute("SELECT 1")
@@ -196,17 +218,19 @@ class StallWatchdog(threading.Thread):
 
 
 @contextmanager
-def stall_guard(admin_url: str, port: int) -> Generator[None, None, None]:
+def stall_guard(
+    admin_url: str, port: int, *, config: StallWatchdogConfig
+) -> Generator[None, None, None]:
     """Run the stall watchdog over a throwaway cluster's usable lifetime; if it
     fired (cluster stalled and was killed for fail-fast), log the evidence path
     at teardown so the failure's "why" survives next to its "what"."""
-    watchdog = StallWatchdog(admin_url, port)
+    watchdog = StallWatchdog(admin_url, port, config)
     watchdog.start()
     try:
         yield
     finally:
         watchdog.stop()
-        watchdog.join(timeout=2 * PROBE_TIMEOUT_S + 1)
+        watchdog.join(timeout=2 * config.probe_timeout_s + 1)
         if watchdog.is_alive():
             raise RuntimeError(
                 f"throwaway PG watchdog for port {port} did not stop; "

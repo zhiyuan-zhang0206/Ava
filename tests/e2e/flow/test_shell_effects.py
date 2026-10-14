@@ -17,6 +17,7 @@ import pytest
 
 from base.config import settings
 from base.sessions.backend import PtySessionBackend
+from base.sessions.pty.client import PtyClientConfig
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, wait_for_status
 from tests.e2e._ports import GATEWAY_SOCKET, GATEWAY_URL
@@ -169,7 +170,7 @@ def test_session_survives_agent_host_and_gateway_restarts(
     chat_and_wait(agent, "create survivor session")
     sid = int((world.sandbox() / "survivor-id").read_text())
     full_name = f"ava-agent-{agent}-shell-{sid}-e2e-survivor"
-    backend = PtySessionBackend()
+    backend = PtySessionBackend(config=PtyClientConfig())
 
     def usable(stage: str) -> None:
         assert backend.has_session(full_name), f"session disappeared after {stage}"

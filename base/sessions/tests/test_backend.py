@@ -17,6 +17,7 @@ from base.sessions.backend import (
     get_shell_backend,
 )
 from base.sessions.protocol import SessionBackend
+from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 
@@ -108,7 +109,7 @@ def test_pty_child_virtual_env_projection(
         },
     )
     service.start()
-    backend = PtySessionBackend()
+    backend = PtySessionBackend(config=PtyClientConfig())
     name = "ava-test-venv-projection"
     report = unit_home / "child-env.json"
     code = (

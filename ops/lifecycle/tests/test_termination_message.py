@@ -18,6 +18,7 @@ from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.telemetry import Event
 from ops.lifecycle import termination
@@ -606,7 +607,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     watcher = session_name(f"agent-{running_agent_id}-shell-1-watcher")
     page = page_session_name(running_agent_id, "dash_board", 2)
     foreign = session_name(f"agent-{other_agent_id}-shell-0")
-    backend = PtySessionBackend()
+    backend = PtySessionBackend(config=PtyClientConfig())
     replacement = session_name(f"agent-{running_agent_id}-shell-3-replacement")
 
     async def _allocate_after_acceptance(_aid: int, _command_id: int) -> None:

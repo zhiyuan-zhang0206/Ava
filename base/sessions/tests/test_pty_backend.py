@@ -27,6 +27,7 @@ import base.sessions.backend as sb
 from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty import allocation_freeze, client
+from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.paths import service_socket_path
 from base.sessions.pty.tests.job_wait import wait_for_job
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
@@ -44,7 +45,7 @@ _NAME = "ava-agent-1-shell-2"
 
 
 def _backend() -> PtySessionBackend:
-    return PtySessionBackend()
+    return PtySessionBackend(config=PtyClientConfig())
 
 
 def _new(name: str, cwd: Path, *, cmd: str = "", env: dict[str, str] | None = None) -> None:
@@ -356,12 +357,11 @@ def test_new_session_under_an_allocation_freeze_returns_false_and_warns(
 
 
 def test_a_home_without_a_service_holds_no_sessions(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    unit_home: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Nothing is alive in a service that is not there: queries read as empty and `kill`
     as a noop; `new` fails as False with a warning, and `send`/`capture` raise."""
-    monkeypatch.setattr(client, "CONNECT_WAIT_S", 0.0)
-    backend = _backend()
+    backend = PtySessionBackend(config=PtyClientConfig(connect_wait_s=0.0))
     assert backend.has_session(_NAME) is False
     assert backend.list_sessions() == []
     assert backend.list_sessions(prefix="ava-agent-1") == []

@@ -35,7 +35,11 @@ from base.cluster.dataplane.pg_foreground import (
     stop_foreground_postgres,
     wait_foreground_postgres,
 )
-from base.cluster.dataplane.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
+from base.cluster.dataplane.pg_stall_watchdog import (
+    StallWatchdogConfig,
+    fixture_log_artifact_dir,
+    stall_guard,
+)
 from base.log import logger
 from base.native_process.child_env import daemon_process_env
 from base.native_process.os_platform import is_macos
@@ -753,7 +757,11 @@ def throwaway_postgres(
             with PostgresSaver.from_conn_string(url) as saver:
                 saver.setup()
 
-        with stall_guard(admin, port) if watch_stalls else contextlib.nullcontext():
+        with (
+            stall_guard(admin, port, config=StallWatchdogConfig())
+            if watch_stalls
+            else contextlib.nullcontext()
+        ):
             yield url
     finally:
         teardown_throwaway(tmp, data, registration, process, foreground=foreground)
