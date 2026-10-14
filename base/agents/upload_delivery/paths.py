@@ -74,11 +74,13 @@ def fetch_upload_b64(agent_id: int, name: str) -> tuple[str, str]:
     import httpx
 
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as http_get
 
-    url = f"{gateway_api_base().rstrip('/')}/api/agents/{agent_id}/uploads/{name}"
+    access = gateway_access_from_settings()  # ambient: B2
+    url = f"{gateway_api_base(access.gateway_url).rstrip('/')}/api/agents/{agent_id}/uploads/{name}"
     try:
-        resp = http_get(url, headers=gateway_auth_headers(), timeout=15.0)
+        resp = http_get(url, headers=gateway_auth_headers(access), timeout=15.0)
         resp.raise_for_status()
     except httpx.HTTPError as exc:
         raise OSError(f"fetch upload {url!r} failed: {exc}") from exc

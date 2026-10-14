@@ -22,6 +22,7 @@ from mcp import types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from base.cluster.machine.tests.gateway_stubs import gateway_api_base_stub
 from services.desktop.browser import gateway_session, page_lifecycle, session
 from services.desktop.browser.mcp_daemon import (
     ChromeMcpDaemon,
@@ -679,7 +680,7 @@ async def test_gateway_origin_navigation_is_an_ordinary_navigation(
     async def forbidden(*_args: Any) -> Any:
         pytest.fail("a gateway-origin navigation must not touch the session cookie")
 
-    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: gateway)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(gateway))
     monkeypatch.setattr(gateway_session, "inject_session_cookie", forbidden)
     monkeypatch.setattr(session, "gateway_session_login", forbidden)
     d, up = browser_daemon_with_fake_upstream()

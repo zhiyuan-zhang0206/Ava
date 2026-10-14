@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from base.cluster.machine import (
+    GatewayAccess,
     GatewayApiTokenMissing,
     MachineIdentity,
     MachineRole,
@@ -619,15 +620,16 @@ def test_api_class_follows_the_login_class_else_the_single_capability() -> None:
 
 
 def test_clients_present_the_delivered_token_first(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
+    holding = GatewayAccess(gateway_url="http://gw", cluster_secret=_HUMAN, remote_plane=False)
     monkeypatch.delitem(os.environ, api.API_TOKEN_ENV, raising=False)
-    assert gateway_auth_headers() == bearer_header(_HUMAN)
+    assert gateway_auth_headers(holding) == bearer_header(_HUMAN)
     monkeypatch.setitem(os.environ, api.API_TOKEN_ENV, "delivered-" + "t" * 32)
-    assert gateway_auth_headers() == bearer_header("delivered-" + "t" * 32)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+    assert gateway_auth_headers(holding) == bearer_header("delivered-" + "t" * 32)
     monkeypatch.delitem(os.environ, api.API_TOKEN_ENV)
     with pytest.raises(GatewayApiTokenMissing):
-        gateway_auth_headers()
+        gateway_auth_headers(
+            GatewayAccess(gateway_url="http://gw", cluster_secret="", remote_plane=False)
+        )
 
 
 def test_the_telemetry_token_is_one_way_and_stable_per_secret() -> None:

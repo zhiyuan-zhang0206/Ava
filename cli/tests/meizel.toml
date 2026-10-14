@@ -45,7 +45,6 @@ exports = ["bootstrap"]
 "test_install_unit.py#monkeypatch.setattr base.cluster.port_free" = 1
 "test_install_unit.py#monkeypatch.setattr base.host.db_authority.unit.install_bundle" = 1
 "test_install_unit.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1
-"test_lite_verbs.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_lite_verbs.py#monkeypatch.setattr base.host.db_authority.unit.consume_unit" = 2
 "test_lite_verbs.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 2
 "test_lite_verbs.py#monkeypatch.setattr cli.parsers.build_parser" = 3

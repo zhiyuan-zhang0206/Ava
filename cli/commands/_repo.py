@@ -193,13 +193,15 @@ def probe_gateway_once(gateway_url: str, *, timeout_s: float = 10.0) -> GatewayP
     import httpx
 
     from base.cluster.machine import gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
+    access = gateway_access_from_settings()  # ambient: C
     try:
         resp = dial_get(
             f"{gateway_url.rstrip('/')}{GATEWAY_PROBE_PATH}",
             timeout=timeout_s,
-            headers=gateway_auth_headers(),
+            headers=gateway_auth_headers(access),
         )
     except httpx.HTTPError as e:
         return GatewayProbe(None, str(e))

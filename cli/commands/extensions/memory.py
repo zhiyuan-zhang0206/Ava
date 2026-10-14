@@ -18,6 +18,7 @@ from typing import TypedDict, cast
 import httpx
 
 from base.cluster.machine import MachineIdentity, gateway_api_base, gateway_auth_headers
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.deploy.git.memory_repo import MemoryBranchMismatch
 from base.host.net.http_dial import post as dial_post
 
@@ -56,9 +57,10 @@ def cmd_memory_init(*, machine: MachineIdentity) -> int:
 
 def _refresh_index() -> None:
     """POST /api/memory/refresh to the gateway so it re-indexes."""
-    url = f"{gateway_api_base()}/api/memory/refresh"
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/memory/refresh"
     try:
-        resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+        resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
         resp.raise_for_status()
         data = resp.json()
         print(f"  index refreshed: {data.get('status', 'ok')}")
@@ -109,14 +111,16 @@ def cmd_memory_search(query: str, *, limit: int, json_output: bool) -> int:
     import json
 
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
-    url = f"{gateway_api_base()}/api/memory/search"
+    access = gateway_access_from_settings()  # ambient: C
+    url = f"{gateway_api_base(access.gateway_url)}/api/memory/search"
     resp = dial_post(
         url,
         json={"query": query, "k": limit, "purpose": "search"},
         timeout=_TIMEOUT_S,
-        headers=gateway_auth_headers(),
+        headers=gateway_auth_headers(access),
     )
     if resp.status_code >= 400:
         print(resp.text, file=sys.stderr)

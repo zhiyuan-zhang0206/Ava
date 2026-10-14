@@ -11,6 +11,10 @@ from typing import cast
 
 import pytest
 
+from base.cluster.machine.tests.gateway_stubs import (
+    gateway_api_base_stub,
+    gateway_auth_headers_stub,
+)
 from scripts.entrypoints import agent as mod
 
 
@@ -29,8 +33,10 @@ def test_start_agent_posts_with_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
         captured["headers"] = headers
         return _Resp()
 
-    monkeypatch.setattr(mod, "gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr(mod, "gateway_auth_headers", lambda: {"Authorization": "Bearer sekret"})
+    monkeypatch.setattr(mod, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
+    monkeypatch.setattr(
+        mod, "gateway_auth_headers", gateway_auth_headers_stub({"Authorization": "Bearer sekret"})
+    )
     monkeypatch.setattr(mod, "dial_post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
 
     mod.main()

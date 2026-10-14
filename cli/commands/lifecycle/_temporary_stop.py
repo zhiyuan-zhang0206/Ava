@@ -443,15 +443,20 @@ def announce_stopping(*, machine: MachineIdentity) -> None:
     anyway, so we log and proceed rather than block the teardown.
     """
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
     from base.paths import ava_home
 
+    access = gateway_access_from_settings()  # ambient: C
     try:
         name = machine.name()
         home = str(ava_home())
-        url = f"{gateway_api_base()}/api/cluster/stopping"
+        url = f"{gateway_api_base(access.gateway_url)}/api/cluster/stopping"
         resp = dial_post(
-            url, params={"machine": name, "home": home}, timeout=5.0, headers=gateway_auth_headers()
+            url,
+            params={"machine": name, "home": home},
+            timeout=5.0,
+            headers=gateway_auth_headers(access),
         )
         resp.raise_for_status()
         print(f"[ava stop] announced intentional shutdown of {name!r} ({home}) to the gateway")

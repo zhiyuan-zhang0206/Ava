@@ -20,6 +20,10 @@ import psycopg
 import pytest
 
 from base.cluster import machine
+from base.cluster.machine.tests.gateway_stubs import (
+    gateway_api_base_stub,
+    gateway_auth_headers_stub,
+)
 from base.telemetry import EventPipeline
 from cli.commands.management import schedules as _sched
 from cli.commands.management import schedules_verify as _verify
@@ -66,8 +70,8 @@ def _row(
 
 @pytest.fixture(autouse=True)
 def _gateway(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr(machine, "gateway_auth_headers", dict)
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
+    monkeypatch.setattr(machine, "gateway_auth_headers", gateway_auth_headers_stub({}))
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch, verb: str, payload: object, status: int = 200) -> dict:

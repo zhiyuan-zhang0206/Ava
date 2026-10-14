@@ -23,6 +23,7 @@ from agent.graph.claim._chat_inbound import build_chat_inbound
 from base.agents.messages.envelope import EnvelopeReadInputs
 from base.clock import Clock
 from base.cluster import machine
+from base.cluster.machine.tests.gateway_stubs import gateway_api_base_stub
 from base.config import settings
 from base.packages.composer_commands import CommandCatalog
 
@@ -70,7 +71,7 @@ def _stub_upload_fetch(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> dict[str,
         return _Resp()
 
     monkeypatch.setattr(http_dial, "get", _fake_get)
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw.test:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw.test:8000"))
     return seen
 
 
@@ -165,7 +166,7 @@ def test_missing_image_degrades_to_text_note(monkeypatch: pytest.MonkeyPatch) ->
         return _Resp()
 
     monkeypatch.setattr(http_dial, "get", _fake_get)
-    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw.test:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw.test:8000"))
     payload = {
         "content_blocks": [
             {"type": "text", "text": "see this"},

@@ -3,11 +3,7 @@
 "test_gateway_bearer.py#monkeypatch.setenv os.environ" = 1
 
 [debt.first-party-patch]
-"test_gateway_bearer.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_gateway_bearer.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 1
 "test_rate_limit_trim.py#monkeypatch.setattr base.cluster.rate_limit.MAX_ENTRIES" = 1
 "test_rate_limit_trim.py#monkeypatch.setattr base.cluster.rate_limit.time.time" = 2
 "test_transport_encryption.py#monkeypatch.setattr base.config.settings.data_plane.transport_encryption" = 3
-
-[debt.unresolved-patch]
-"test_gateway_bearer.py#monkeypatch.setattr type(settings.data_plane).is_remote" = 1

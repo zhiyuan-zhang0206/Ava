@@ -31,11 +31,13 @@ def _keyed_headers(headers: dict[str, str]) -> dict[str, str]:
 
 def _dial() -> tuple[str, dict[str, str], Any, Any]:
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
     from base.host.net.http_dial import post as dial_post
 
-    base = f"{gateway_api_base()}/api"
-    headers = gateway_auth_headers()
+    access = gateway_access_from_settings()  # ambient: C
+    base = f"{gateway_api_base(access.gateway_url)}/api"
+    headers = gateway_auth_headers(access)
     return base, headers, dial_get, dial_post
 
 

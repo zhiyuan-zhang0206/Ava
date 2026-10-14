@@ -47,26 +47,20 @@ def _redis(*, url_reader: Callable[[], str]) -> object:
 
 
 def _gateway_url(config: ConfigBoot) -> str:
-    from base.cluster.machine import resolve_gateway_api_base
+    from base.cluster.machine import gateway_api_base
 
-    return resolve_gateway_api_base(config.view.gateway.gateway_url)
+    return gateway_api_base(config.view.gateway.gateway_url)
 
 
 def _gateway(url: str, *, config: ConfigBoot, timeout_reader: Callable[[], float]) -> Any:
     import httpx
 
-    from base.cluster.machine import resolve_gateway_bearer
-    from base.host.env.bootstrap import config_source_is_local
-    from base.host.env.dotenv_boot import launcher_context
-    from base.host.net.auth import bearer_header, delivered_token
+    from base.cluster.machine import gateway_bearer
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from base.host.net.auth import bearer_header
     from base.host.net.http_dial import transport_for_url
 
-    bearer = resolve_gateway_bearer(
-        token_reader=delivered_token,
-        secret_reader=lambda: config.view.data_plane.cluster_secret,
-        profile_reader=launcher_context,
-        no_tokens_reader=lambda: config_source_is_local() and config.view.data_plane.is_remote,
-    )
+    bearer = gateway_bearer(gateway_access_from_boot(config))
     return httpx.Client(
         base_url=url,
         timeout=httpx.Timeout(timeout_reader()),

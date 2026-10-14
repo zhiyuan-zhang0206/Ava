@@ -45,6 +45,7 @@ import httpx
 from pydantic import ValidationError
 
 from base.cluster.machine import gateway_auth_headers
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.cluster.machines import (
     MachineGatewayUrlMissing,
     MachineNotRegistered,
@@ -215,6 +216,7 @@ async def _dispatch_once(
     """
     url = f"{ops_url.rstrip('/')}/ops"
     started = time.monotonic()
+    access = gateway_access_from_settings()  # ambient: O
     try:
         # connect is capped by timeout_s: a blackholed host (powered-off private-
         # network peer) hangs in connect, so a connect floor above timeout_s would defeat
@@ -222,7 +224,7 @@ async def _dispatch_once(
         # Present the gateway's machine API token so the runner's authenticated
         # /ops accepts the dial (a runner holds only its digest, never the human
         # secret).
-        headers = gateway_auth_headers()
+        headers = gateway_auth_headers(access)
         # Cluster-internal dials must never honor the host's system/env proxy:
         # private peers are not proxy-routable. This matches base/host/net/http_dial.py's
         # PinnedIPv4Transport, which is sync-only; async httpx already handles
