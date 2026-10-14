@@ -359,7 +359,7 @@ def __getattr__(name: str) -> Any:
     and a name the build never installs stays an AttributeError (PEP 562,
     the `ava/__init__` latch shape).
 
-    The two registry-backed field faces (`_FIELDS`, `FIELD_INFOS`) and the
+    The two registry-backed field faces (`FIELD_REFS`, `FIELD_INFOS`) and the
     write-path metadata pair (`CONFIG_UNCHANGED_SENTINEL`, `ConfigFieldMeta`)
     are served WITHOUT the upgrade and ahead of the gate, because they never
     depend on it: building the registry is construction-free — it never
@@ -368,7 +368,7 @@ def __getattr__(name: str) -> Any:
     exactly the states where a broken `.env` makes Settings unable to
     construct (task #3621) — the pre-boot-lite import-time registry served
     the same surfaces. Gating them on the process-global build flag turned a
-    concurrent `from base.config import _FIELDS` into a spurious ImportError
+    concurrent `from base.config import FIELD_REFS` into a spurious ImportError
     whenever any other thread's ~1s build was in flight (task #4964: the
     a keyed message send lost its idempotency key). First access is
     not free: it imports the registry stack (~220 modules including
@@ -376,10 +376,10 @@ def __getattr__(name: str) -> Any:
     counter does not move."""
     if name.startswith("__"):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    if name in ("_FIELDS", "FIELD_INFOS"):
+    if name in ("FIELD_REFS", "FIELD_INFOS"):
         from base.config.config_registry import field_infos, fields
 
-        return fields() if name == "_FIELDS" else field_infos()
+        return fields() if name == "FIELD_REFS" else field_infos()
     if name in ("CONFIG_UNCHANGED_SENTINEL", "ConfigFieldMeta"):
         # The write-path policy (`base/config/admin/editing.py`) imports these at
         # module level; both are settings-free metadata objects, so serve them

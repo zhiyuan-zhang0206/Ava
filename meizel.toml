@@ -455,7 +455,6 @@ frontend = ["ui"]
 "cli/commands/data_plane/tests/test_storage_ownership_data_plane.py -> base/cluster/postgres.py#_boot" = 1
 "cli/commands/data_plane/tests/test_storage_ownership_data_plane.py -> base/cluster/postgres.py#_read" = 2
 "cli/commands/lifecycle/tests/converge_host/test_converge.py -> base/cluster/dataplane/runtime_binaries.py#_PGVECTOR_SQL" = 1
-"cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py -> base/config/__init__.py#_FIELDS" = 2
 "cli/commands/lifecycle/tests/test_root_driver.py -> base/host/env/registry.py#_PASSTHROUGH_ROWS" = 1
 "cli/commands/lifecycle/tests/test_root_driver.py -> base/host/env/registry.py#_TEMP_DIR_KEYS" = 2
 "cli/commands/tests/test_unit_capability_commands.py -> base/cluster/authority/tests/unit_capability_support.py#_open" = 1
