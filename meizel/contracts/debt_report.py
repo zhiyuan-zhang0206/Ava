@@ -1,7 +1,7 @@
-"""`debt` and `debt diff`: read-only views of the recorded baselines.
+"""The read-only baseline summary and the totals-only part of `debt diff`.
 
-Both read `meizel.toml` files and nothing else, so they never analyse the source and finish in
-about a second. The summary reads the working tree; `diff` compares it with a git ref.
+These views read `meizel.toml` files and nothing else, so they never analyse the source and finish
+in about a second. Rule changes use the separate regeneration in `debt_rules`.
 """
 
 from __future__ import annotations

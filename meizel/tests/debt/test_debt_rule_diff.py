@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,7 @@ def base_repo(make_repo: RepoFactory, extra: dict[str, str] | None = None) -> Pa
     return root
 
 
-def diff(root: Path) -> int:
+def diff(root: Path, on_growth: str = "fail") -> int:
     return run(
         root,
         "debt",
@@ -34,7 +35,7 @@ def diff(root: Path) -> int:
         "--against",
         "HEAD",
         "--on-growth",
-        "fail",
+        on_growth,
         "--waive-if-changed",
         RULES,
     )
@@ -80,6 +81,36 @@ def test_a_rule_change_that_also_adds_a_violation_fails(
     assert "grew" in out.err
 
 
+def test_a_rule_change_cannot_replace_one_debt_with_another(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(make_repo)
+    rule_change(root)
+    write(root, {"app/x.py": "", "app/y.py": "import lib._hidden\n"})
+    record(root)
+    capsys.readouterr()
+    assert diff(root) == 1
+    out = capsys.readouterr()
+    assert "app/y.py" in out.out
+    assert "1 recorded, 0 found" in out.out
+    assert "grew" in out.err
+
+
+def test_a_rule_change_cannot_increase_an_existing_debt_count(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(make_repo)
+    rule_change(root)
+    write(root, {"app/x.py": "import lib._hidden\nimport lib._hidden\n"})
+    record(root)
+    capsys.readouterr()
+    assert diff(root, on_growth="warn") == 0
+    out = capsys.readouterr()
+    assert "app/x.py" in out.out
+    assert "2 recorded, 1 found" in out.out
+    assert "warning" in out.err
+
+
 def test_a_content_change_that_moves_a_file_is_not_growth(make_repo: RepoFactory) -> None:
     root = base_repo(make_repo)
     record(root)
@@ -111,8 +142,42 @@ def test_a_content_change_with_no_rule_change_is_judged_by_total(
     assert "grew" in capsys.readouterr().err
 
 
-def test_manifests_the_checker_cannot_read_stop_the_comparison(make_repo: RepoFactory) -> None:
-    root = base_repo(make_repo, {"app/meizel.toml": 'not_a_key = ["x"]\n'})
+@pytest.mark.parametrize(
+    ("path", "text"),
+    [
+        ("app/meizel.toml", 'not_a_key = ["x"]\n'),
+        ("app/meizel.toml", "exports = [\n"),
+        ("meizel.policy.toml", "not_a_table = []\n"),
+    ],
+)
+def test_manifests_the_checker_cannot_read_stop_the_comparison(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], path: str, text: str
+) -> None:
+    root = base_repo(make_repo, {path: text})
     rule_change(root)
-    write(root, {"app/meizel.toml": ""})
+    write(root, {path: ""})
     assert diff(root) == 2
+    assert "cannot read the manifests" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_comparison_preserves_the_working_tree_and_removes_its_checkout(
+    make_repo: RepoFactory, unreadable: bool
+) -> None:
+    extra = {"app/meizel.toml": "unknown = []\n"} if unreadable else {}
+    root = base_repo(make_repo, extra)
+    rule_change(root)
+    if unreadable:
+        write(root, {"app/meizel.toml": ""})
+    else:
+        record(root)
+    (root / "untracked.txt").write_text("keep this file\n")
+    before = {path: path.read_bytes() for path in root.rglob("meizel.toml")}
+    assert diff(root) == (2 if unreadable else 0)
+    assert {path: path.read_bytes() for path in root.rglob("meizel.toml")} == before
+    assert (root / "rules/engine.py").read_text() == "RULE = 2\n"
+    assert (root / "untracked.txt").read_text() == "keep this file\n"
+    worktrees = subprocess.check_output(  # noqa: S603 - fixed argv
+        ["git", "-C", str(root), "worktree", "list", "--porcelain"], text=True
+    )
+    assert worktrees.count("worktree ") == 1
