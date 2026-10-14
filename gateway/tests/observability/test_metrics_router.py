@@ -18,9 +18,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.telemetry.metrics.tests.telemetry_stream import TelemetryStream
 from gateway.app import app
 from gateway.events import metrics as metrics_router
-from tests.components.gateway.telemetry_stream import TelemetryStream
 
 _UNITS = {
     "syntax_fix",

@@ -4,4 +4,4 @@ exports = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.
 "client.py" = ["closure.py", "paths.py", "protocol.py"]
 "closure.py" = ["process_groups.py"]
 "screen.py" = ["paths.py"]
-"tests" = ["allocation_freeze.py", "closure.py", "process_groups.py", "screen.py"]
+"tests" = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.py", "process_groups.py", "protocol.py", "screen.py"]

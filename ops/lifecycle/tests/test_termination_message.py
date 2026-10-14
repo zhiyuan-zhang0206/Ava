@@ -18,12 +18,12 @@ from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.telemetry import Event
 from ops.lifecycle import termination
 from ops.rpc_schemas import TerminateAgentRequest
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
-from tests.path_scoped.pty_service import pty_service as pty_service
 
 
 @pytest.fixture

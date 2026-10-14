@@ -178,28 +178,21 @@ def test_birth_read_refuses_marker_replaced_during_native_observation(
 def test_direct_process_e2e_injects_only_its_explicit_fixture_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import runpy
-    import sys
-
     from base.deploy.lifecycle import start_serving
-    from tests.e2e.process_support import fixture_entrypoint
+    from base.deploy.lifecycle.tests.serving_entrypoint import inject_fixture_gate
 
     gate = tmp_path / "e2e-serving"
-    monkeypatch.setattr(sys, "argv", ["fixture", str(gate), "fixture_target"])
     # Track the deliberate test-only injection so this pytest process restores
-    # both product functions even though the child entry point assigns them.
+    # both product functions even though the injection assigns them.
     monkeypatch.setattr(start_serving, "is_serving", start_serving.is_serving)
     monkeypatch.setattr(start_serving, "recovery_permitted", start_serving.recovery_permitted)
 
-    def target(_module: str, **_kwargs: object) -> dict[str, object]:
-        assert not start_serving.is_serving()
-        gate.write_text("ready\n")
-        assert start_serving.is_serving()
-        with start_serving.recovery_permitted() as permitted:
-            assert permitted
-        gate.unlink()
-        assert not start_serving.is_serving()
-        return {}
+    inject_fixture_gate(gate)
 
-    monkeypatch.setattr(runpy, "run_module", target)
-    fixture_entrypoint()
+    assert not start_serving.is_serving()
+    gate.write_text("ready\n")
+    assert start_serving.is_serving()
+    with start_serving.recovery_permitted() as permitted:
+        assert permitted
+    gate.unlink()
+    assert not start_serving.is_serving()

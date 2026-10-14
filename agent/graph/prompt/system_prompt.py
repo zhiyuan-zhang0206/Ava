@@ -15,6 +15,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
+from base.agents.to_user import document_filename
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import activation
@@ -562,6 +563,7 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         return ""
     # Ensure the workspace directory exists (mkdir side effect).
     workspace_dir(agent_id)
+    filename = document_filename(slices.prompt.to_user_format)
     return (
         "# Workspace\n\n"
         "Your workspace is your per-agent folder — it is named with your agent "
@@ -572,7 +574,17 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         "by default. Using it is optional: work that has a natural home — a "
         "repo checkout, a location the user names — belongs there, not in the "
         "workspace. Other agents have their own; share a file by sending its "
-        "absolute path." + workspace_section_hint(slices.history_dump)
+        "absolute path."
+        + workspace_section_hint(slices.history_dump)
+        + f"\n\nYour workspace file `{filename}` is displayed next to your messages in Ava. "
+        "Use it to maintain shared context with the user. The user may return hours later "
+        "and may not read every message; keep this document current, especially while "
+        "waiting for a reply. File edits appear automatically; there is no publish step. "
+        "Its current contents are included again after compaction. Choose the document's "
+        "structure freely. The user may be on a phone: links must be reachable from their "
+        "browser, not local filesystem paths or a localhost on your machine. HTML is "
+        "displayed in an isolated frame without Ava credentials; use notifications when "
+        "you need a reply. This document does not itself send a notification."
     )
 
 

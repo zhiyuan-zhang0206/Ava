@@ -10,7 +10,7 @@ import psycopg
 import pytest
 
 from base.config import settings
-from tests.components.base.poll_until import poll_until
+from base.sessions.tests.poll_until import poll_until
 from tests.e2e.fixture_environment import E2EEnv
 
 

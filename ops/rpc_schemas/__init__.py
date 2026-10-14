@@ -329,6 +329,7 @@ OpKind = Literal[
     "agent_skill_view",
     "shell_capture",
     "upload-receive-v1",
+    "to_user_read",
 ]
 
 

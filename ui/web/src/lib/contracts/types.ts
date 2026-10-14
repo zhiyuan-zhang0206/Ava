@@ -437,6 +437,10 @@ export interface LabelUpdatedEvent extends BaseEvent {
   readonly role: "label_updated";
   readonly label: string | null;
 }
+export interface ToUserChangedEvent extends BaseEvent {
+  role: "to_user_changed";
+}
+
 export interface PageOpenedEvent extends BaseEvent {
   readonly role: "page_opened";
   readonly page_id: number;
@@ -511,6 +515,7 @@ export type SystemEvent =
   | InboundArrivedEvent
   | InboundCommittedEvent
   | LabelUpdatedEvent
+  | ToUserChangedEvent
   | PageOpenedEvent
   | PageClosedEvent
   | TokenUsageEvent
@@ -894,3 +899,5 @@ export type ContextMeterWidth = "compact" | "comfortable" | "wide";
 
 /** Date format mode. */
 export type DateFormat = "relative" | "absolute";
+
+export type ToUserDocument = Schemas["ToUserDocument"];

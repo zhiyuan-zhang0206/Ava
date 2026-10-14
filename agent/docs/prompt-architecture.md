@@ -515,3 +515,12 @@ SDK disable) so bench is a clean baseline with none of them — comparable to
 historical runs. That is intentional: the toggles are the ablation knobs.
 Whether each section actually helps is an open question — a proper A/B /
 ablation design is TBD, but the on/off surface is already in place to run it.
+
+### Shared user context
+
+The workspace guidance explains that `to_user.html` (or `to_user.md` when the
+agent's `to_user_format` is `markdown`) is continuously displayed beside messages.
+It imposes no document schema. The agent-ID context note includes the current file
+contents when a context is created or compacted; forks read their own workspace.
+Invalid or unreadable documents produce a repair note rather than preventing the
+agent from starting. The workspace-section switch gates both guidance and loading.

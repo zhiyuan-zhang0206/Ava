@@ -14,10 +14,10 @@ from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.deploy.maintenance import cohort, pause_owner
+from base.deploy.tests.maintenance_factory import WHEN, maintenance_agent
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from tests.factories.maintenance import WHEN, maintenance_agent
-from tests.factories.maintenance import isolate as isolate
 
 
 def test_maintenance_parks_a_never_admitted_birth_without_consuming_its_marker(

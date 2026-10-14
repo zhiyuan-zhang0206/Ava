@@ -25,6 +25,7 @@ from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
+from base.sessions.pty.tests.pty_shells import new as new_session
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane import pgbouncer as pb
@@ -38,7 +39,6 @@ from cli.database.tests.command_inputs import command_machine as command_machine
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
-from tests.path_scoped.pty_shells import new as new_session
 
 
 def forbidden(*_args: object, **_kwargs: object) -> NoReturn:

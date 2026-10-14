@@ -20,9 +20,9 @@ from pathlib import Path
 import pytest
 
 from base.sessions.pty import client
-from tests.path_scoped import pty_shells as support
-from tests.path_scoped.pty_service import pty_service as pty_service
-from tests.path_scoped.pty_shells import new, type_line, wait_for
+from base.sessions.pty.tests import pty_shells as support
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_shells import new, type_line, wait_for
 
 pytestmark = [
     pytest.mark.usefixtures("pty_service"),

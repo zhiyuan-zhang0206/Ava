@@ -90,6 +90,7 @@ from gateway.agents.notice_operations import router as guarded_notices_router
 from gateway.agents.reply_suggestion import router as reply_suggestion_router
 from gateway.agents.reply_suggestion.configuration import reply_suggestion_service
 from gateway.agents.task_assignment import router as task_assignments_router
+from gateway.agents.to_user import document as to_user_router
 from gateway.alerts import router as alerts_router
 from gateway.cluster import alert_classes as alert_classes_router
 from gateway.cluster import bootstrap as bootstrap_router
@@ -623,6 +624,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 app.include_router(auth_router.router)
 app.include_router(bootstrap_router.router)
 app.include_router(agents_router.router)
+app.include_router(to_user_router.router)
 app.include_router(agents_launch_retry_router.router)
 app.include_router(agents_lifecycle_router.router)
 app.include_router(agents_understanding_router.router)
