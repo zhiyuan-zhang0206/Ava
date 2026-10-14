@@ -22,6 +22,7 @@ from base.agents.observation.evidence import (
 )
 from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import AgentStatus, LivenessState
+from base.api_contracts.notice_question import NoticeQuestion
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -56,7 +57,7 @@ _FULL_COLS = (
     "COALESCE("
     "(SELECT json_agg(json_build_object("
     "'id', n.id, 'title', n.title, 'content', n.content, 'priority', n.priority, "
-    "'blocking', n.blocking, 'created_at', n.created_at, 'task_id', n.task_id, 'expire_at', n.expire_at) ORDER BY n.created_at) "
+    "'blocking', n.blocking, 'created_at', n.created_at, 'task_id', n.task_id, 'expire_at', n.expire_at, 'question', n.question) ORDER BY n.created_at) "
     "FROM agent_notices n "
     "WHERE n.agent_id = a.id AND n.require_response AND n.resolved_at IS NULL), "
     "'[]'::json) AS notices_awaiting_response, "
@@ -116,6 +117,7 @@ class OpenNotice(BaseModel):
     blocking: bool
     created_at: datetime
     expire_at: datetime | None = None
+    question: NoticeQuestion | None = None
     # The task this notice belongs to, or None — the human queue groups notices
     # by it (falling back to the owner agent's task when absent).
     task_id: int | None = None

@@ -92,6 +92,8 @@ def test_notice_item_wire_shape() -> None:
         "resolved_at",
         "resolution",
         "reply",
+        "question",
+        "answer",
         "task_id",
         "expire_at",
     }
@@ -104,6 +106,8 @@ def test_notice_item_wire_shape() -> None:
     assert d["resolved_at"] is None
     assert d["resolution"] is None
     assert d["reply"] is None
+    assert d["question"] is None
+    assert d["answer"] is None
 
 
 def test_resolve_notice_in_wire_shape() -> None:

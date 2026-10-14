@@ -31,6 +31,7 @@ from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import PoolTimeout
 
 from base.api_contracts.idempotency import keyed_headers
+from base.api_contracts.notice_question import parse_question, question_instructions
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from services.entrypoints.im_bridge import copy
@@ -65,7 +66,7 @@ def state_dir() -> Path:
 # NoticeItem exactly, so the push/filter logic is unchanged.
 _SELECT_NOTICE = (
     "SELECT n.id, n.agent_id, t.label, n.title, n.content, n.priority, "
-    "n.require_response, n.blocking, n.created_at, n.resolved_at, n.resolution, n.reply, n.task_id "
+    "n.require_response, n.blocking, n.created_at, n.resolved_at, n.resolution, n.reply, n.task_id, n.question "
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
 )
 
@@ -87,6 +88,7 @@ def _row_to_notice(r: tuple[Any, ...]) -> dict[str, Any]:
         "resolution": r[10],
         "reply": r[11],
         "task_id": r[12],
+        "question": r[13],
     }
 
 
@@ -281,6 +283,8 @@ class NoticeBridge:
             lines.append(prefix)
         if n.get("content"):
             lines.append(str(n["content"]))
+        if n.get("question") is not None:
+            lines.append(question_instructions(parse_question(n["question"])))
         label = n.get("agent_label") or ""
         lines.append(f"[#{n['agent_id']} {label}] · {n['priority']}".rstrip())
         cb = f"{n['agent_id']}:{n['id']}"

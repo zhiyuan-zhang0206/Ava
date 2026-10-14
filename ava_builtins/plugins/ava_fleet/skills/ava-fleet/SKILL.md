@@ -186,3 +186,15 @@ redesign was rejected because it costs an extra round-trip.)
 ## Artifacts: File + Message, Never Shared Mutable State
 
 A worker publishes a result by **writing a file and sending the path** to whoever needs it (`send_message`). Siblings consume each other's *published* artifacts (the message they received), never each other's live workspace. There is no shared artifact store and no shared mutable state — every agent owns its own workspace, and a reduce is the only place outputs meet. (Single machine: forks land locally and share the filesystem.)
+
+### Asking one numbered question
+
+For discrete decisions, supply `question={"type": "single_select",
+"options": [{"id": "stable-id", "label": "Choice", "description": "Optional detail"}],
+"allow_other": True}` to `ava.ui.notify(..., require_response=True)`.
+Use `type="multi_select"` for multiple selections. For an open question use `question={"type": "text"}`. Put the question in `title`
+and context in `content`. One notice is one question; await its answer before
+asking another. Options keep their declared 1-based numbers and Other is last.
+Question/context changes require a replacement notice. Interpret both explicit
+selections and the user's Other/note, preserving references such as "option 2";
+mentions inside text are not selections. A dismissal is not approval.

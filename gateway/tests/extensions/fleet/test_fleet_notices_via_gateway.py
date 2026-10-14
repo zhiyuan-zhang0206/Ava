@@ -167,6 +167,37 @@ def test_notify_require_response_rides_awaiting_worklist(
     assert awaiting[0].blocking is False  # blocking defaults False
 
 
+def test_sdk_question_keeps_number_order_in_snapshot(
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
+) -> None:
+    agent_id = seed_agent(db_conn)
+    pin_agent(agent_id)
+    ava.ui.notify(  # type: ignore[attr-defined]
+        "Choose the scope?",
+        require_response=True,
+        question={
+            "type": "single_select",
+            "options": [{"id": "z", "label": "First"}, {"id": "a", "label": "Second"}],
+            "allow_other": True,
+        },
+        idempotency_key=str(uuid4()),
+    )
+    db_conn.rollback()
+    snapshot = select_one(
+        db_conn,
+        agent_id,
+        catalog=build_model_catalog(),
+        default_model_reader=lambda: settings.lm.llm_model,
+    )
+    assert snapshot is not None
+    question = snapshot.notices_awaiting_response[0].question
+    assert question is not None
+    assert question.model_dump(mode="json")["options"] == [
+        {"id": "z", "label": "First", "description": None},
+        {"id": "a", "label": "Second", "description": None},
+    ]
+
+
 def _seed_task(db: psycopg.Connection, owner: int) -> int:
     with db.cursor() as cur:
         cur.execute(

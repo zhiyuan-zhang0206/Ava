@@ -126,18 +126,18 @@ export function NoticeListRow({
           MIN_W_0, FLEX_1, FLEX
         )}
       >
-        <PriorityBadge priority={priority} muted={muted} />
-        {blocking && (
-          <span className="shrink-0 rounded bg-destructive/10 px-1 text-[9px] font-medium uppercase text-destructive">
-            {t("blocking")}
+        <span className={cn("space-y-1.5", FLEX_1, MIN_W_0)}>
+          <span className={cn("items-start gap-2", FLEX)}>
+            <span data-testid="notice-title" className={cn("text-sm font-medium break-words", MIN_W_0, FLEX_1)}>{title}</span>
+            <PriorityBadge priority={priority} muted={muted} />
           </span>
-        )}
-        <span className={cn("truncate text-xs", MIN_W_0, FLEX_1)}>{title}</span>
-        <span className={cn("max-w-[45%] items-center gap-1.5 font-mono text-[10px] text-muted-foreground", FLEX, MIN_W_0)}>
-          <AgentStatusDot status={agentStatus} />
-          <span className={cn("truncate", MIN_W_0)}>
-            {agentLabel}
-            {createdAt ? ` · ${formatRelativeTime(createdAt)}` : ""}
+          <span className={cn("flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground", FLEX)}>
+            <span className={cn("items-center gap-1.5", FLEX)}>
+              <AgentStatusDot status={agentStatus} />
+              <span className="break-all">{agentLabel}</span>
+            </span>
+            {createdAt && <span>{formatRelativeTime(createdAt)}</span>}
+            {blocking && <span className="text-destructive">{t("blocking")}</span>}
           </span>
         </span>
       </button>
@@ -165,7 +165,7 @@ export function AgentContextHeader({
     <div className="mb-3">
       <div className={cn("items-center gap-2", FLEX)}>
         <AgentStatusDot status={agentStatus} />
-        <span className={cn("truncate font-mono text-[10px] text-muted-foreground", MIN_W_0)}>
+        <span className={cn("truncate text-xs text-muted-foreground", MIN_W_0)}>
           {agentLabel}
           {createdAt ? ` · ${formatRelativeTime(createdAt)}` : ""}
         </span>

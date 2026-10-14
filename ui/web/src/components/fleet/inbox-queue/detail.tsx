@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
+import { NoticeQuestionSummary } from "@/components/notifications/notice-question-form";
 import { formatRelativeTime } from "@/lib/agents/sidebar";
 import { dropOpenNotices } from "@/lib/notifications/use-notices";
 import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
@@ -153,7 +154,10 @@ export function ResolvedDetail({
             {label}
             {notice.resolved_at ? ` · ${formatRelativeTime(notice.resolved_at)}` : ""}
           </div>
-          {notice.reply && (
+          {notice.question ? (
+            <div className="mt-3"><NoticeQuestionSummary question={notice.question} answer={notice.answer} /></div>
+          ) : null}
+          {notice.reply && (!notice.question || !notice.answer) && (
             <p className="mt-1 whitespace-pre-wrap break-words text-xs text-foreground/80">{notice.reply}</p>
           )}
         </div>
