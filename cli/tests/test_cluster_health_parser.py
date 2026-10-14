@@ -9,6 +9,7 @@ from base.telemetry import EventPipeline
 from cli.commands.cluster.tests.health_probe_inputs import (
     all_checks_pass as all_checks_pass,
 )
+from cli.commands.cluster.tests.health_probe_inputs import emitted_events as emitted_events
 from cli.commands.cluster.tests.health_probe_inputs import (
     provider_guard_healthy as provider_guard_healthy,
 )
