@@ -70,7 +70,7 @@ describe("OpenNoticeDetail — require_response", () => {
   it("uses the same monospace input typography as the page composer", () => {
     render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
 
-    expect(screen.getByRole("textbox").className).toContain("font-mono");
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").className).toContain("font-mono");
   });
 
   it("answer: sends action=answer with the typed reply, then calls onResolved", async () => {
@@ -78,7 +78,7 @@ describe("OpenNoticeDetail — require_response", () => {
     const onResolved = vi.fn();
     render(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
 
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "ship it" } });
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "ship it" } });
     fireEvent.click(screen.getByLabelText("Send answer"));
 
     await waitFor(() =>
@@ -91,7 +91,7 @@ describe("OpenNoticeDetail — require_response", () => {
     render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
     const send = screen.getByLabelText("Send answer");
     expect(send.hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "x" } });
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "x" } });
     expect(send.hasAttribute("disabled")).toBe(false);
   });
 
@@ -112,7 +112,7 @@ describe("OpenNoticeDetail — require_response", () => {
     resolveNotice.mockRejectedValue(new Error("HTTP 409 conflict"));
     render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
 
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "x" } });
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "x" } });
     fireEvent.click(screen.getByLabelText("Send answer"));
 
     await waitFor(() =>
@@ -127,7 +127,7 @@ describe("OpenNoticeDetail — FYI", () => {
       .mockResolvedValueOnce({ status: "idling" });
     const onResolved = vi.fn();
     render(<OpenNoticeDetail agentId={7} notice={ntc({ require_response: false })} onResolved={onResolved} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "noted" } });
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "noted" } });
     fireEvent.click(screen.getByText("Mark read"));
     await waitFor(() => expect(screen.getByText(/response lost/)).toBeTruthy());
     expect(resolveNotice).toHaveBeenCalledTimes(1);
@@ -141,10 +141,10 @@ describe("OpenNoticeDetail — FYI", () => {
     resolveNotice.mockRejectedValueOnce(new TypeError("response lost"))
       .mockResolvedValueOnce({ status: "idling" });
     render(<OpenNoticeDetail agentId={7} notice={ntc({ require_response: false })} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "first" } });
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "first" } });
     fireEvent.click(screen.getByText("Mark read"));
     await waitFor(() => expect(screen.getByText(/response lost/)).toBeTruthy());
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "second" } });
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "second" } });
     fireEvent.click(screen.getByText("Mark read"));
     await waitFor(() => expect(resolveNotice).toHaveBeenCalledTimes(2));
     expect(resolveNotice.mock.calls[1][3]).not.toBe(resolveNotice.mock.calls[0][3]);
@@ -156,9 +156,9 @@ describe("OpenNoticeDetail — FYI", () => {
       // Keep the request unresolved while repeated keyboard events arrive.
     }));
     render(<OpenNoticeDetail agentId={7} notice={ntc({ require_response: false })} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "noted" } });
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "noted" } });
+    fireEvent.keyDown(screen.getByRole<HTMLTextAreaElement>("textbox"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole<HTMLTextAreaElement>("textbox"), { key: "Enter" });
     expect(resolveNotice).toHaveBeenCalledTimes(1);
   });
 
@@ -207,11 +207,86 @@ describe("OpenNoticeDetail — FYI", () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     render(<OpenNoticeDetail agentId={7} notice={ntc({ id: 22, require_response: false })} />);
 
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "noted" } });
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "noted" } });
     fireEvent.click(screen.getByText("Mark read"));
 
     await waitFor(() =>
       expect(resolveNotice).toHaveBeenCalledWith(7, 22, { action: "read", reply: "noted" }, expect.any(String)),
     );
+  });
+});
+
+const options = [{ id: "web", label: "Web" }, { id: "desktop", label: "Desktop" }];
+
+describe("OpenNoticeDetail — numbered questions", () => {
+  it("does not preselect or submit a single choice until explicit confirmation", async () => {
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: true } })} />);
+    const submit = screen.getByRole("button", { name: "Submit answer" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole<HTMLInputElement>("radio", { name: "1. Web" }));
+    fireEvent.click(screen.getByRole<HTMLInputElement>("radio", { name: "2. Desktop" }));
+    expect((screen.getByRole<HTMLInputElement>("radio", { name: "1. Web" })).checked).toBe(false);
+    expect(resolveNotice).not.toHaveBeenCalled();
+    fireEvent.click(submit);
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { option_ids: ["desktop"] } }, expect.any(String)));
+  });
+
+  it("preserves an Other draft when toggled off, and never selects numbers mentioned in it", async () => {
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "multi_select", options, allow_other: true } })} />);
+    fireEvent.click(screen.getByRole<HTMLInputElement>("checkbox", { name: "2. Desktop" }));
+    const other = screen.getByRole<HTMLInputElement>("checkbox", { name: "3. Other" });
+    fireEvent.click(other);
+    expect(screen.getByRole("button", { name: "Submit answer" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText<HTMLTextAreaElement>("Your alternative answer"), { target: { value: "Based on 2, defer 1." } });
+    fireEvent.click(other);
+    fireEvent.click(other);
+    expect((screen.getByLabelText<HTMLTextAreaElement>("Your alternative answer")).value).toBe("Based on 2, defer 1.");
+    expect((screen.getByRole<HTMLInputElement>("checkbox", { name: "1. Web" })).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { option_ids: ["desktop"], other_text: "Based on 2, defer 1." } }, expect.any(String)));
+  });
+
+  it("single-select Other replaces the selected option and requires its text", async () => {
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: true } })} />);
+    fireEvent.click(screen.getByRole<HTMLInputElement>("radio", { name: "1. Web" }));
+    fireEvent.click(screen.getByRole<HTMLInputElement>("radio", { name: "3. Other" }));
+    expect(screen.getByRole("button", { name: "Submit answer" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText<HTMLTextAreaElement>("Your alternative answer"), { target: { value: "Use option 2 later." } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { option_ids: [], other_text: "Use option 2 later." } }, expect.any(String)));
+  });
+
+  it("open questions preserve multiline text; Enter alone does not submit", async () => {
+    resolveNotice.mockResolvedValue({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "Use 2.\nThen 1." } });
+    fireEvent.keyDown(screen.getByRole<HTMLTextAreaElement>("textbox"), { key: "Enter" });
+    expect(resolveNotice).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, { action: "answer", answer: { text: "Use 2.\nThen 1." } }, expect.any(String)));
+  });
+
+  it("retains a failed answer and reuses its operation key on a manual retry", async () => {
+    resolveNotice.mockRejectedValueOnce(new TypeError("response lost")).mockResolvedValueOnce({ status: "ok" });
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "Keep it readable." } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("response lost"));
+    expect((screen.getByRole<HTMLTextAreaElement>("textbox")).value).toBe("Keep it readable.");
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(resolveNotice).toHaveBeenCalledTimes(2));
+    expect(resolveNotice.mock.calls[1]).toEqual(resolveNotice.mock.calls[0]);
+  });
+
+  it("disables stale questions after a conflict", async () => {
+    resolveNotice.mockRejectedValue(new Error("HTTP 409 expired"));
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "Yes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("no longer available"));
+    expect(screen.getByRole("button", { name: "Submit answer" }).hasAttribute("disabled")).toBe(true);
   });
 });

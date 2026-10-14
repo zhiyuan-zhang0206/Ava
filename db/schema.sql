@@ -273,6 +273,8 @@ CREATE TABLE agent_notices (
     resolved_at     TIMESTAMPTZ,
     resolution      TEXT CHECK (resolution IN ('answered', 'dismissed', 'read', 'withdrawn', 'superseded', 'expired')),
     reply           TEXT,
+    question        JSONB,
+    answer          JSONB,
     -- Optional task this notice belongs to: the agent reports the task it was
     -- working when it posted, so the human queue groups notices by task rather
     -- than only by owner agent. NULL is the norm (a notice need not name one).
@@ -280,6 +282,11 @@ CREATE TABLE agent_notices (
     -- (agent_notices is declared first, so an inline REFERENCES would forward-ref).
     task_id         BIGINT,
     expire_at       TIMESTAMPTZ NOT NULL,
+    CONSTRAINT agent_notices_question_requires_response
+        CHECK (question IS NULL OR (jsonb_typeof(question) = 'object' AND require_response)),
+    CONSTRAINT agent_notices_answer_requires_question
+        CHECK (answer IS NULL OR (jsonb_typeof(answer) = 'object' AND question IS NOT NULL
+                                  AND resolution IS NOT DISTINCT FROM 'answered')),
     CONSTRAINT agent_notices_agent_local_id_unique UNIQUE (agent_id, local_id),
     CONSTRAINT agent_notices_blocking_requires_response
         CHECK (NOT blocking OR require_response),
@@ -2523,6 +2530,7 @@ CREATE TABLE schema_migrations (
 -- Seed: stamp the squashed baseline (this file IS the baseline). A fresh DB is
 -- "already at the baseline"; `apply_pending_migrations` then applies only the
 -- post-baseline files in migrations/ that are not folded below.
+INSERT INTO schema_migrations (name) VALUES ('20261014T023838_notice-questions') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');
 
 -- Strict post-baseline deltas retained from concurrent upstream work.

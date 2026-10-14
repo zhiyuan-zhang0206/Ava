@@ -45,6 +45,7 @@ from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from gateway.agents.inbound_provenance import request_inbound_provenance
+from gateway.agents.notice_answers import resolution_answer, resolution_inbound
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
     NoticeCreateIn,
@@ -63,7 +64,7 @@ _log = logging.getLogger(__name__)
 _SELECT = (
     "SELECT n.id, n.agent_id, t.label, n.title, n.content, n.priority, "
     "n.require_response, n.blocking, n.created_at, n.updated_at, "
-    "n.resolved_at, n.resolution, n.reply, n.task_id, n.expire_at "
+    "n.resolved_at, n.resolution, n.reply, n.task_id, n.expire_at, n.question, n.answer "
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
 )
 
@@ -109,6 +110,8 @@ def _row_to_item(r: tuple[Any, ...]) -> NoticeItem:
         reply=r[12],
         task_id=r[13],
         expire_at=r[14],
+        question=r[15],
+        answer=r[16],
     )
 
 
@@ -339,7 +342,7 @@ async def post_notice_resolve(
     def _resolve(conn: psycopg.Connection) -> str | None:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT title, require_response, resolved_at FROM agent_notices "
+                "SELECT title, require_response, resolved_at, question, expire_at FROM agent_notices "
                 "WHERE id = %s AND agent_id = %s FOR UPDATE",
                 (notice_id, agent_id),
             )
@@ -349,7 +352,11 @@ async def post_notice_resolve(
                     status_code=409,
                     detail=f"notice {notice_id} does not exist for agent {agent_id}",
                 )
-            title, require_response, resolved_at = row
+            title, require_response, resolved_at, raw_question, expire_at = row
+            if raw_question is not None and expire_at <= datetime.now(UTC):
+                raise HTTPException(status_code=409, detail="this question has expired")
+            resolved_answer = resolution_answer(body, raw_question)
+            reply = resolved_answer.reply
             if resolved_at is not None:
                 # Idempotent close: a bare 'read' on an already-resolved notice
                 # silently succeeds (user ruling 2026-08-28) — the already-read
@@ -359,7 +366,7 @@ async def post_notice_resolve(
                 # 'dismiss' keep the 409 so a reply or a dismissal is never
                 # silently dropped.
                 if action == "read":
-                    return f'Re: "{title}"\n\n{reply}' if reply is not None else None
+                    return resolution_inbound(title, action, reply)
                 raise HTTPException(
                     status_code=409,
                     detail=f"notice {notice_id} is already resolved for agent {agent_id}",
@@ -379,30 +386,35 @@ async def post_notice_resolve(
             if action == "answer" and reply is None:
                 raise HTTPException(status_code=422, detail="action 'answer' requires a reply")
             cur.execute(
-                "UPDATE agent_notices SET resolved_at = now(), resolution = %s, reply = %s "
+                "UPDATE agent_notices SET resolved_at = now(), resolution = %s, reply = %s, answer = %s "
                 "WHERE id = %s",
-                (_ACTION_RESOLUTION[action], reply, notice_id),
+                (
+                    _ACTION_RESOLUTION[action],
+                    reply,
+                    Jsonb(resolved_answer.answer.model_dump(mode="json"))
+                    if resolved_answer.answer is not None
+                    else None,
+                    notice_id,
+                ),
             )
-        if reply is not None:
-            return f'Re: "{title}"\n\n{reply}'
-        if action == "dismiss":
-            return (
-                f'Re: "{title}"\n\n[This notice was dismissed by the user — no answer will arrive.]'
-            )
-        return None  # read with no reply: nothing to deliver
+        return resolution_inbound(title, action, resolved_answer.reply)
 
     # Delivery channel: every notice resolution rides the notice-system source —
     # a user reply as `system:notice-reply`, a bare dismiss as
     # `system:notice-dismiss`. The claim node envelope-wraps both as "[system] ..."
     # (base/agents/messages/envelope.py), so no User-role message is consumed and nothing is
     # shaped like a reply request; read-without-reply still delivers nothing.
-    deliver_source = "system:notice-reply" if reply is not None else "system:notice-dismiss"
+    deliver_source = (
+        "system:notice-reply"
+        if reply is not None or body.answer is not None
+        else "system:notice-dismiss"
+    )
     receipt = await asyncio.to_thread(
         resolve_once,
         request.app.state.db_pool,
         request.url.path,
         idempotency_key,
-        body.model_dump(mode="json"),
+        body.model_dump(mode="json", exclude={"answer"} if body.answer is None else set()),
         agent_id,
         deliver_source,
         _resolve,
@@ -479,7 +491,9 @@ async def post_notice_create(
     """
     validate_creation(body)
     idempotency_key = notice_key(request, idempotency_key)
-    request_body = body.model_dump(mode="json")
+    request_body = body.model_dump(
+        mode="json", exclude={"question"} if body.question is None else set()
+    )
 
     def _create(
         pool: ConnectionPool,
@@ -539,9 +553,9 @@ async def post_notice_create(
             # Insert the new notice with the agent's next local id.
             cur.execute(
                 "INSERT INTO agent_notices "
-                "(agent_id, local_id, title, content, priority, require_response, blocking, task_id, expire_at) "
+                "(agent_id, local_id, title, content, priority, require_response, blocking, task_id, expire_at, question) "
                 "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices "
-                "WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s, %s) "
+                "WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "RETURNING id, local_id",
                 (
                     agent_id,
@@ -553,6 +567,9 @@ async def post_notice_create(
                     body.blocking,
                     body.task_id,
                     final_expire_at,
+                    Jsonb(body.question.model_dump(mode="json"))
+                    if body.question is not None
+                    else None,
                 ),
             )
             row = cur.fetchone()

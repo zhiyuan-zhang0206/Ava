@@ -27,13 +27,14 @@ The notification system is the only reliable channel for agents to push messages
 
 ## API
 
-### `ava.ui.notify(title, content=None, *, require_response=False, blocking=False, priority='P2', task=None, idempotency_key) -> Notice`
+### `ava.ui.notify(title, content=None, *, require_response=False, blocking=False, priority='P2', task=None, expire_at=None, idempotency_key, question=None) -> Notice`
 
 Push a notification, automatically superseding any previously unresolved notification from the same agent (resolution=`"superseded"`).
 
 - `idempotency_key` (required): retain this operation key for the same notice across retries; use an absolute expiration deadline. Missing or invalid keys fail before HTTP.
 - `title` (required): A one-line title; this is exactly what the user sees in their queue.
-- `content` (optional): Detailed content displayed when the user opens the notification. When presenting multiple options, label them A/B/C to facilitate single-letter replies.
+- `content` (optional): Detailed content displayed when the user opens the notification. For a structured question, use this as background and put the question itself in `title`; legacy notices may still offer A/B/C in plain text.
+- `question` (optional): one `text`, `single_select`, or `multi_select` question. Choice questions carry ordered `options` (`id`, `label`, optional `description`) and `allow_other`. Requires `require_response=True`.
 - `priority`: `"P0"` (highest) to `"P3"` (lowest), suggesting how the user should sort.
 - `task` (optional, #663): the owning task's ID—the human queue groups by the notice's **own** task, not just the owner agent; validated at post time (`ValueError` if absent, no dangling FK); immutable after posting (`edit_notice` rejects it).
 - Returns a `Notice` object—integer id (for reference) + `.pending_count`, `.pending_notices`, `.superseded`.
@@ -42,7 +43,7 @@ Push a notification, automatically superseding any previously unresolved notific
 
 ### `ava.ui.edit_notice(*, title=..., content=..., priority=..., blocking=...) -> None`
 
-Modify the current pending notice. Pass only changed fields. The call observes the open notice id first and edits exactly that row under one key; an ambiguous response is retried under the same key and replays the original acceptance, never editing a newer notice.
+Modify the current pending notice. Pass only changed fields. Structured questions freeze `title`, `content`, and the ordered question when posted; replace the notice to change their meaning. Priority and blocking can still be edited. The call observes the open notice id first and edits exactly that row under one key; an ambiguous response is retried under the same key and replays the original acceptance, never editing a newer notice.
 
 - Cannot change `require_response` (to change it, dismiss + re-notify)
 - `content=None` clears the content
@@ -56,6 +57,14 @@ Withdraw the current open notice (resolution=`"withdrawn"`); no open notice is a
 ### ~~`ava.ui.list_notices`~~ (removed 2026-08-02)
 
 At most one notice is open per agent (notify auto-resolves the previous), so the agent-facing list verb had no consumer-side reason to exist — its dominant usage was recovering the id for edit/dismiss, which no longer take ids. The unified inbox (frontend) remains the consumer of the resolved history; agents who need their own notice rows can query the table directly.
+
+## Numbered questions
+
+A notice carries one immutable `text`, `single_select`, or `multi_select` question.
+Options keep their declared 1-based order; Other follows them with the final number.
+Web submits structured answers and CLI/IM use the same validator for numbered
+text replies. See [[notice-questions.ava.okf.md]] for examples, answer
+rules and the text-client grammar. Existing notices remain free-text.
 
 ## Data Model
 
@@ -72,7 +81,9 @@ agent_notices (table)
 ├── updated_at        — last edit / status change
 ├── resolved_at       — NULL means unresolved (CHECK: (resolved_at IS NULL) = (resolution IS NULL))
 ├── resolution        — 'answered' | 'dismissed' | 'read' | 'withdrawn' | 'superseded'
-└── reply             — cached user free-text reply (for history/display; real-time delivery goes via a system:notice-reply inbound, not this column)
+├── question          — immutable JSONB question; NULL for legacy notices
+├── answer            — validated JSONB answer; NULL until answered
+└── reply             — cached readable reply (free text for legacy notices, server projection for structured answers); delivery uses system:notice-reply
 ```
 
 `task_id` propagates to the gateway notice read path (snapshots, `NoticeItem`, `notice_posted` SSE) and the `notice_posted`/`notice_resolved` events—the frontend groups the needs-you queue by the notice's own task, falling back to owner-join grouping without one.

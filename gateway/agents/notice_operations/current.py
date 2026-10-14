@@ -137,6 +137,11 @@ def _edit(conn: Connection, record: NoticeItem, body: GuardedNoticeEdit) -> None
             status_code=422, detail="blocking=True requires a notice that needs a response"
         )
     changes = body.model_dump(exclude_unset=True, exclude={"observed_notice_id"})
+    if record.question is not None and {"title", "content"} & changes.keys():
+        raise HTTPException(
+            status_code=422,
+            detail="question and its context are immutable; post a replacement notice",
+        )
     # Keys come exclusively from the validated, extra-forbidden model fields.
     columns = [name for name in ("title", "content", "priority", "blocking") if name in changes]
     assignments = ", ".join(f"{name}=%s" for name in columns)

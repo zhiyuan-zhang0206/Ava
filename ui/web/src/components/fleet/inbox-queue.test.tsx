@@ -177,7 +177,7 @@ function listTitles(): string[] {
   const list = screen.getByRole("list", { name: /inbox queue/i });
   return within(list)
     .getAllByRole("button")
-    .map((b) => b.querySelector("span.truncate")?.textContent ?? "")
+    .map((b) => b.querySelector('[data-testid="notice-title"]')?.textContent ?? "")
     .filter((t) => t !== "");
 }
 

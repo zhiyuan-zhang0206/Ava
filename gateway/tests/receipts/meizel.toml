@@ -1,5 +1,6 @@
 [uses]
 "test_guarded_notice_resolution.py" = ["test_current_notice_receipts.py"]
+"test_notice_questions.py" = ["test_current_notice_receipts.py"]
 
 [debt.first-party-patch]
 "test_current_notice_receipts.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1

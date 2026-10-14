@@ -4987,6 +4987,21 @@ export interface components {
             /** Rebuild Id */
             rebuild_id: number | null;
         };
+        /** ChoiceQuestion */
+        ChoiceQuestion: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "multi_select" | "single_select";
+            /** Options */
+            options: components["schemas"]["NoticeOption"][];
+            /**
+             * Allow Other
+             * @default false
+             */
+            allow_other: boolean;
+        };
         /**
          * ClusterPanel
          * @description GET /api/status cluster sub-section — multi-machine view.
@@ -6851,6 +6866,17 @@ export interface components {
             /** Ancestors */
             ancestors: components["schemas"]["NeighborRow"][];
         };
+        /** NoticeAnswer */
+        NoticeAnswer: {
+            /** Option Ids */
+            option_ids?: string[];
+            /** Other Text */
+            other_text?: string | null;
+            /** Text */
+            text?: string | null;
+            /** Comment */
+            comment?: string | null;
+        };
         /**
          * NoticeCreateIn
          * @description POST /api/agents/{id}/notices request body — the unified notice write API
@@ -6882,6 +6908,8 @@ export interface components {
             task_id?: number | null;
             /** Expire At */
             expire_at?: string | null;
+            /** Question */
+            question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
         };
         /**
          * NoticeItem
@@ -6894,7 +6922,8 @@ export interface components {
          *     large FYI backlog never bloats the fleet-wide broadcast.
          *
          *     `resolution` is NULL while open, else one of answered / dismissed / read /
-         *     withdrawn / superseded; `reply` is the cached user reply text (NULL when none).
+         *     withdrawn / superseded; `reply` is the cached readable reply (NULL when none). `question` keeps the
+         *     original numbered options and `answer` keeps the validated structured reply.
          */
         NoticeItem: {
             /** Id */
@@ -6925,6 +6954,9 @@ export interface components {
             resolution?: string | null;
             /** Reply */
             reply?: string | null;
+            /** Question */
+            question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
+            answer?: components["schemas"]["NoticeAnswer"] | null;
             /** Task Id */
             task_id?: number | null;
             /**
@@ -6932,6 +6964,15 @@ export interface components {
              * Format: date-time
              */
             expire_at: string;
+        };
+        /** NoticeOption */
+        NoticeOption: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description?: string | null;
         };
         /**
          * NoticesCursor
@@ -7035,6 +7076,8 @@ export interface components {
             created_at: string;
             /** Expire At */
             expire_at?: string | null;
+            /** Question */
+            question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
             /** Task Id */
             task_id?: number | null;
         };
@@ -7427,9 +7470,11 @@ export interface components {
          *
          *     `action` is the explicit close verb (never inferred from whether `reply` is
          *     present): `answer` / `dismiss` apply to a require_response notice, `read`
-         *     applies to an FYI notice. `reply` is the user's free-text reply — required
-         *     for `answer`, optional for `dismiss` and `read`. When present it is cached on
-         *     the notice row and delivered back to the agent as a normal chat inbound.
+         *     applies to an FYI notice. `answer` is a structured response to an immutable question. `reply` is the
+         *     legacy free-text response or a numbered CLI/IM answer; it cannot accompany
+         *     `answer`. Answer requires one of them. Optional dismiss/read notes remain
+         *     free text. The server validates the original question and delivers a
+         *     self-describing system:notice-reply inbound.
          */
         ResolveNoticeIn: {
             /**
@@ -7439,6 +7484,7 @@ export interface components {
             action: "answer" | "dismiss" | "read";
             /** Reply */
             reply?: string | null;
+            answer?: components["schemas"]["NoticeAnswer"] | null;
         };
         /**
          * ResolvedConfigView
@@ -8968,6 +9014,14 @@ export interface components {
             type: "text";
             /** Text */
             text: string;
+        };
+        /** TextQuestion */
+        TextQuestion: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "text";
         };
         /**
          * TimelineItem

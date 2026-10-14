@@ -76,3 +76,15 @@ These are the only current-notice edit/withdraw surfaces. SDK `edit_notice` and
 when none is open; each call sends one fresh key and the `principal-v1` scope.
 A 409 means the observed row is no longer current. An ambiguous outcome is
 retried under the same key and replays the original acceptance.
+
+## Structured question resolutions
+
+Question rows carry immutable question JSON; priority and blocking remain editable.
+Answer resolution validates the submitted selection against the locked question,
+canonicalizes selected IDs into its original number order, and commits answer JSON,
+readable reply, notice state, inbound and operation receipt together. Text-only
+clients use the same validator after parsing the numbered first line. A reference
+inside Other does not select that number. Replay keeps the original inbound and
+answer without validating against later state; new expired-question answers fail.
+Legacy operation normalization omits absent question/answer fields so old accepted
+receipt requests retain their equality across this additive schema upgrade.
