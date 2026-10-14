@@ -10,11 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.catalog import ModelCatalog
 from base.lm.pricing import cost_usd
+from base.packages.plugin_providers import build_model_catalog
 from tests.components.base.poll_until import poll_until
 from tests.e2e.fakes.scenarios import budget_handoff
-from tests.fixtures.model_catalog import model_catalog as model_catalog
 
 _WRITER = Path(__file__).with_name("child_budget_writer.py")
 
@@ -79,15 +78,14 @@ def test_readers_keep_the_previous_snapshot_until_publication(
 
 
 @pytest.mark.parametrize("model", ["deepseek-flash", budget_handoff.BUDGET_MODEL])
-def test_handoff_budget_across_the_daily_price_boundary(
-    model_catalog: ModelCatalog, model: str
-) -> None:
+def test_handoff_budget_across_the_daily_price_boundary(model: str) -> None:
     """Only a fixed-price scenario guarantees four calls below and six above its limit."""
+    prices = build_model_catalog().prices
     before = datetime(2026, 10, 11, 9, 59, 59, tzinfo=UTC)
     after = datetime(2026, 10, 11, 10, 0, 0, tzinfo=UTC)
-    limit = cost_usd(model, 50, 25, 0, prices=model_catalog.prices, at=before)
-    initial_call = cost_usd(model, 10, 5, 0, prices=model_catalog.prices, at=before)
-    later_call = cost_usd(model, 10, 5, 0, prices=model_catalog.prices, at=after)
+    limit = cost_usd(model, 50, 25, 0, prices=prices, at=before)
+    initial_call = cost_usd(model, 10, 5, 0, prices=prices, at=before)
+    later_call = cost_usd(model, 10, 5, 0, prices=prices, at=after)
     assert limit is not None and initial_call is not None and later_call is not None
     assert initial_call * 4 < limit
     if model == budget_handoff.BUDGET_MODEL:
