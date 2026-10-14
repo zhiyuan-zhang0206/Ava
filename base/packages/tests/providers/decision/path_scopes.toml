@@ -1,7 +1,0 @@
-# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
-# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
-"tests.fixtures.unit.sdk" = [
-    "test_decision_catalog.py",
-    "test_jev_provider.py",
-    "test_openai_decisions_provider.py",
-]
