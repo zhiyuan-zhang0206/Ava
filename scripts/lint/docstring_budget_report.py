@@ -19,16 +19,12 @@ from scripts.lint.agent_docstrings import (
 )
 
 
-def doc_of(node: ast.AST) -> tuple[str | None, int | None]:
-    body: list[ast.stmt] = getattr(node, "body", [])
-    if (
-        body
-        and isinstance(body[0], ast.Expr)
-        and isinstance(body[0].value, ast.Constant)
-        and isinstance(body[0].value.value, str)
-    ):
-        return body[0].value.value, body[0].lineno
-    return None, None
+def doc_of(
+    node: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
+) -> tuple[str | None, int | None]:
+    """The raw docstring and the line of its expression, or (None, None)."""
+    doc = ast.get_docstring(node, clean=False)
+    return (doc, node.body[0].lineno) if doc is not None else (None, None)
 
 
 def file_findings(path: Path) -> list[str]:

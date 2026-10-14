@@ -148,8 +148,8 @@ def test_shards_are_skipped_only_on_the_enforced_subset_path(tmp_path: Path) -> 
     assert "needs.classify.outputs.mode != 'enforce'" in condition
     assert "needs.classify.outputs.decision != 'SELECTED'" in condition
     run = _step(shard, "Run pytest shard")["run"]
-    assert '"--collect-only", "-qq"' in run
-    assert '"--file-shard-plan=tmp/file-shards/plan.json"' in run
+    assert "-m scripts.ci.pull_requests.plan_file_shards" in run
+    assert "--count 8 --plan tmp/file-shards/plan.json" in run
     assert run.count("--file-shard-check=tmp/file-shards/plan.json") == 2
     assert run.count("--file-shard-group=${{ matrix.group }}") == 2
     assert run.count("--file-shard-execute") == 2
@@ -328,10 +328,6 @@ def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
         ("backend-serial", "Run flaky pytest bucket serially"),
     ):
         run = _step(jobs[job], name)["run"]
-        if job == "backend-shard":
-            planning, run = run.split("\nPY\n", 1)
-            assert '"--omit-static-tests"' in planning
-            assert '"--collect-only"' in planning
         assert run.count("--omit-static-tests") == run.count("uv run pytest") > 0
 
 
