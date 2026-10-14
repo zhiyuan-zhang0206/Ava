@@ -10,14 +10,12 @@ deepseek-* uses ChatAnthropic + DeepSeek anthropic-compatible endpoint
 
 from __future__ import annotations
 
-from dataclasses import fields
-
 import pytest
 from langchain_anthropic import ChatAnthropic
 
 from base.config import get_field, settings
+from base.config.tests.configuration import model_overrides
 from base.host.env import dotenv_file
-from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import (
     build_chat_model,
@@ -37,10 +35,8 @@ class TestBuildChatModel:
         llm = build_chat_model(
             "gemini-3.8-flash",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
 
         assert isinstance(llm, ChatGoogleGenerativeAI)
@@ -53,10 +49,8 @@ class TestBuildChatModel:
         llm = build_chat_model(
             "claude-opus-5",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.anthropic_api_key.get_secret_value() == "sk-ant-test"
@@ -68,10 +62,8 @@ class TestBuildChatModel:
         llm = build_chat_model(
             "claude-sonnet-5",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(llm, ChatAnthropic)
 
@@ -84,10 +76,8 @@ class TestBuildChatModel:
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(llm, ChatAnthropic)
         # base_url uses DeepSeek instead of the official Anthropic
@@ -108,10 +98,8 @@ class TestBuildChatModel:
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         # isinstance narrow enables pyright to see ChatAnthropic.max_tokens
         # (build_chat_model returns BaseChatModel, the parent doesn't have this field)
@@ -129,10 +117,8 @@ class TestBuildChatModel:
         llm = build_chat_model(
             "claude-sonnet-5",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 128_000
@@ -147,10 +133,8 @@ class TestBuildChatModel:
         llm = build_chat_model(
             "claude-haiku-4-5-20251001",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 64_000
@@ -166,10 +150,8 @@ class TestBuildChatModel:
             build_chat_model(
                 "claude-sonnet-3-9",
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="",
+                overrides=model_overrides(),
             )
 
     def test_deepseek_empty_effort_skips_extra_body(
@@ -179,14 +161,11 @@ class TestBuildChatModel:
         defaults (medium thinking budget). Empty string is an explicit non-None value that
         overrides the per-model "max" from the registry — opt out to a cheaper tier."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(reasoning_effort=""),
         )
         assert isinstance(llm, ChatAnthropic)
         assert "extra_body" not in llm.model_kwargs
@@ -212,14 +191,11 @@ class TestBuildChatModel:
         """effort='max' → injects output_config.effort=max into extra_body, passed through
         by langchain-anthropic to the Anthropic SDK into the POST body."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(reasoning_effort="max"),
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "max"}}
@@ -230,14 +206,11 @@ class TestBuildChatModel:
         """high is also a valid effort value — DeepSeek docs high/max two tiers;
         explicit value overrides the per-model 'max' from the registry."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(reasoning_effort="high"),
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "high"}}
@@ -251,14 +224,11 @@ class TestBuildChatModel:
         `ava.web.fetch` down (AVA_WEB_FETCH_REASONING ships as "none"). Off is the
         endpoint's thinking switch, which is also what the setting promises."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(reasoning_effort="none"),
         )
         assert isinstance(llm, ChatAnthropic)
         assert "extra_body" not in llm.model_kwargs
@@ -271,15 +241,12 @@ class TestBuildChatModel:
         global effort of 'none' — the effort is dropped rather than overwriting the
         caller's thinking config."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
         llm = build_chat_model(
             "deepseek-flash",
             thinking={"type": "enabled", "budget_tokens": 8000},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(reasoning_effort="none"),
         )
         assert isinstance(llm, ChatAnthropic)
         assert "extra_body" not in llm.model_kwargs
@@ -289,15 +256,12 @@ class TestBuildChatModel:
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
         with pytest.raises(ValueError, match="unsupported reasoning effort"):
             build_chat_model(
                 "deepseek-flash",
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="",
+                overrides=model_overrides(reasoning_effort="low"),
             )
 
     def test_shipped_web_fetch_config_builds_an_accepted_request(
@@ -311,10 +275,8 @@ class TestBuildChatModel:
             settings.web.web_fetch_model,
             reasoning_effort=settings.web.web_fetch_reasoning,
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(llm, ChatAnthropic)
         assert "extra_body" not in llm.model_kwargs
@@ -325,15 +287,12 @@ class TestBuildChatModel:
     ) -> None:
         """A typo'd effort fails fast at build time rather than as a provider 400."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "nonw")
         with pytest.raises(ValueError, match="unknown reasoning effort"):
             build_chat_model(
                 "deepseek-flash",
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="",
+                overrides=model_overrides(reasoning_effort="nonw"),
             )
 
     def test_deepseek_thinking_disabled_skips_extra_body(
@@ -344,15 +303,12 @@ class TestBuildChatModel:
         "thinking options type cannot be disabled when reasoning_effort is set"). The labeler
         short-text path explicitly disables thinking; the global env effort must not sneak back in."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
         llm = build_chat_model(
             "deepseek-flash",
             thinking={"type": "disabled"},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(reasoning_effort="max"),
         )
         assert isinstance(llm, ChatAnthropic)
         assert "extra_body" not in llm.model_kwargs
@@ -363,15 +319,12 @@ class TestBuildChatModel:
         """thinking={'type':'enabled', ...} does not conflict — the server accepts thinking enabled
         together with reasoning_effort. Only thinking=disabled is mutually exclusive with effort."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
         llm = build_chat_model(
             "deepseek-flash",
             thinking={"type": "enabled", "budget_tokens": 8000},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(reasoning_effort="max"),
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "max"}}
@@ -383,15 +336,12 @@ class TestBuildChatModel:
         allowing a caller like syntax repair to lock on max without being dragged down
         by a global config set to a lower effort by some agent."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         llm = build_chat_model(
             "deepseek-flash",
             reasoning_effort="max",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(reasoning_effort="high"),
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "max"}}
@@ -402,15 +352,12 @@ class TestBuildChatModel:
         """When global effort is empty, explicit override still injects — the override is an
         independent source, not dependent on the global being non-empty."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "")
         llm = build_chat_model(
             "deepseek-flash",
             reasoning_effort="max",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(reasoning_effort=""),
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "max"}}
@@ -431,10 +378,8 @@ class TestBuildChatModel:
             build_chat_model(
                 "deepseek-flash",
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="",
+                overrides=model_overrides(),
             )
 
     def test_claude_missing_api_key_raises(
@@ -448,24 +393,19 @@ class TestBuildChatModel:
             build_chat_model(
                 "claude-opus-5",
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="",
+                overrides=model_overrides(),
             )
 
     def test_gemini_branch_builds(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GEMINI_API_KEY", "k")
         m = build_chat_model(
             "gemini-3.1-pro-preview",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -474,16 +414,13 @@ class TestBuildChatModel:
     def test_gemini_missing_key_raises(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
             build_chat_model(
                 "gemini-3.1-pro-preview",
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="",
+                overrides=model_overrides(),
             )
 
     def test_gemini_enables_include_thoughts(
@@ -493,17 +430,14 @@ class TestBuildChatModel:
         zero thought blocks (live view zero reasoning). When enabled, thoughts are returned as
         `{"type":"thinking","thinking":...}` content blocks, same shape as claude/deepseek,
         reusing the existing streaming/timeline path without a provider branch."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         m = build_chat_model(
             "gemini-3.5-flash",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(m, ChatGoogleGenerativeAI)
         assert m.include_thoughts is True
@@ -514,7 +448,6 @@ class TestBuildChatModel:
         """thinking={'type':'disabled'} (short-text path) → include_thoughts=False,
         no thought blocks returned. Symmetric with deepseek thinking-disabled skipping effort
         injection: the caller explicitly disables reasoning, so thinking should not be emitted."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -522,10 +455,8 @@ class TestBuildChatModel:
             "gemini-3.5-flash",
             thinking={"type": "disabled"},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(m, ChatGoogleGenerativeAI)
         assert m.include_thoughts is False
@@ -537,7 +468,6 @@ class TestBuildChatModel:
         Google enum, media_thinking_level wins over the resolved effort, and
         base_url overrides the endpoint. include_thoughts stays at the SDK
         default (None) — the media path never surfaced thought blocks."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GEMINI_API_KEY", "k")
         from google.genai.types import MediaResolution
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -548,10 +478,8 @@ class TestBuildChatModel:
             media_thinking_level="low",
             base_url="http://localhost:8080/v1beta",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(m, ChatGoogleGenerativeAI)
         assert m.media_resolution == MediaResolution.MEDIA_RESOLUTION_HIGH
@@ -562,7 +490,6 @@ class TestBuildChatModel:
     def test_gemini_media_resolution_maps_each_level(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GEMINI_API_KEY", "k")
         from google.genai.types import MediaResolution
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -576,10 +503,8 @@ class TestBuildChatModel:
                 "gemini-3.5-flash",
                 media_resolution=setting,
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="",
+                overrides=model_overrides(),
             )
             assert isinstance(m, ChatGoogleGenerativeAI)
             assert m.media_resolution == enum
@@ -587,15 +512,12 @@ class TestBuildChatModel:
     def test_gemini_invalid_media_resolution_raises(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GEMINI_API_KEY", "k")
         with pytest.raises(ValueError, match="media_resolution"):
             build_chat_model(
                 "gemini-3.5-flash",
                 media_resolution="ultra",
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="",
+                overrides=model_overrides(),
             )

@@ -12,13 +12,10 @@ the static model maps are asserted.
 
 from __future__ import annotations
 
-from dataclasses import fields
-
 import pytest
 from langchain_anthropic import ChatAnthropic
 
-from base.config import get_field, settings
-from base.host.env.agent_slices import ModelOverrides
+from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import build_chat_model
 
@@ -33,10 +30,8 @@ class TestDeepseekMaxTokens:
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="",
+            overrides=model_overrides(),
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 384_000
@@ -52,10 +47,8 @@ class TestDeepseekMaxTokens:
             build_chat_model(
                 "deepseek-v4-nonexistent",
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="",
+                overrides=model_overrides(),
             )
 
         message = str(exc_info.value)

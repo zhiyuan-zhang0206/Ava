@@ -6,13 +6,10 @@ constructed catalog before the first budget read.
 
 from __future__ import annotations
 
-from dataclasses import fields
-
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from base.config import get_field, settings
-from base.host.env.agent_slices import ModelOverrides
+from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import (
     UnknownModelWindowError,
@@ -27,9 +24,7 @@ def test_budget_is_thirty_forty_percent_of_a_1m_window(*, model_catalog: ModelCa
     budget = resolve_context_budget(
         "claude-sonnet-5",
         catalog=model_catalog,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-        ),
+        overrides=model_overrides(),
     )
     assert budget.max_context_tokens == 1_000_000
     assert budget.hard_compact_tokens == 400_000
@@ -43,9 +38,7 @@ def test_deepseek_budget_is_374k_soft_512k_hard(*, model_catalog: ModelCatalog) 
     budget = resolve_context_budget(
         "deepseek-flash",
         catalog=model_catalog,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-        ),
+        overrides=model_overrides(),
     )
     assert budget.max_context_tokens == 1_000_000
     assert budget.soft_compact_tokens == 374_000
@@ -59,9 +52,7 @@ def test_budget_scales_to_a_smaller_window(*, model_catalog: ModelCatalog) -> No
     budget = resolve_context_budget(
         "claude-haiku-4-5-20251001",
         catalog=model_catalog,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-        ),
+        overrides=model_overrides(),
     )
     assert budget.max_context_tokens == 200_000
     assert budget.hard_compact_tokens == 80_000
@@ -82,46 +73,35 @@ def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule(
             budget = resolve_context_budget(
                 model,
                 catalog=model_catalog,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                overrides=model_overrides(),
             )
             window = budget.max_context_tokens
             assert budget.soft_compact_tokens == round(0.3 * window), model
             assert budget.hard_compact_tokens == round(0.4 * window), model
 
 
-def test_fractions_are_configurable(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
+def test_fractions_are_configurable(*, model_catalog: ModelCatalog) -> None:
     """The thresholds track the configured fractions (per-agent overridable)."""
-    monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.5)
-    monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.25)
     budget = resolve_context_budget(
         "deepseek-flash",
         catalog=model_catalog,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-        ),
+        overrides=model_overrides(auto_compact_fraction=0.5, compact_reminder_fraction=0.25),
     )
     assert budget.hard_compact_tokens == 500_000
     assert budget.soft_compact_tokens == 250_000
 
 
-def test_ceiling_caps_the_hard_threshold(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
+def test_ceiling_caps_the_hard_threshold(*, model_catalog: ModelCatalog) -> None:
     """The whole point of the absolute cap: on a 1M-window model the fraction
     alone lands at 800K, far past where any lab triggers its own agent's
     compaction. The ceiling wins whenever it is the smaller of the two."""
-    monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.8)
-    monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.6)
-    monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 150_000)
     budget = resolve_context_budget(
         "deepseek-flash",
         catalog=model_catalog,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
+        overrides=model_overrides(
+            auto_compact_fraction=0.8,
+            compact_reminder_fraction=0.6,
+            auto_compact_ceiling_tokens=150_000,
         ),
     )
     assert budget.hard_compact_tokens == 150_000
@@ -130,28 +110,24 @@ def test_ceiling_caps_the_hard_threshold(
     assert budget.soft_compact_tokens == 112_500
 
 
-def test_ceiling_above_the_fraction_is_inert(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
+def test_ceiling_above_the_fraction_is_inert(*, model_catalog: ModelCatalog) -> None:
     """A ceiling that never binds must leave both thresholds byte-identical to
     the pure-fraction result — a model whose evidence says "no cap needed"
     carries 0 and behaves exactly as before."""
-    monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.8)
-    monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.6)
-    monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 900_000)
     capped = resolve_context_budget(
         "deepseek-flash",
         catalog=model_catalog,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
+        overrides=model_overrides(
+            auto_compact_fraction=0.8,
+            compact_reminder_fraction=0.6,
+            auto_compact_ceiling_tokens=900_000,
         ),
     )
-    monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 0)
     uncapped = resolve_context_budget(
         "deepseek-flash",
         catalog=model_catalog,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
+        overrides=model_overrides(
+            auto_compact_fraction=0.8, compact_reminder_fraction=0.6, auto_compact_ceiling_tokens=0
         ),
     )
     assert capped == uncapped
@@ -168,9 +144,7 @@ def test_soft_stays_below_hard_for_every_spawnable_model(*, model_catalog: Model
             budget = resolve_context_budget(
                 model,
                 catalog=model_catalog,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                overrides=model_overrides(),
             )
             assert 0 < budget.soft_compact_tokens < budget.hard_compact_tokens, model
             assert budget.hard_compact_tokens <= budget.max_context_tokens, model
@@ -183,9 +157,7 @@ def test_unknown_model_raises(*, model_catalog: ModelCatalog) -> None:
         resolve_context_budget(
             "no-such-model",
             catalog=model_catalog,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            overrides=model_overrides(),
         )
 
 
@@ -204,9 +176,7 @@ def test_every_supported_model_resolves(*, model_catalog: ModelCatalog) -> None:
             resolve_context_budget(
                 model,
                 catalog=model_catalog,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                overrides=model_overrides(),
             )
 
 

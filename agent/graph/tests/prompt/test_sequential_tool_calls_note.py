@@ -5,10 +5,13 @@ is off by default and adds one sentence to the preamble when on, both with the
 SDK overview and in the bare identity.
 """
 
+from typing import Any
+
 import pytest
 
 from agent.graph.prompt.system_prompt import build_system_prompt
 from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
@@ -16,12 +19,10 @@ from base.packages.plugins.extensions import EMPTY
 _SENTENCE = "Several tool calls in one response run one at a time, in the order given"
 
 
-def _prompt() -> str:
+def _prompt(**changes: Any) -> str:
     return build_system_prompt(
         EMPTY,
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        AgentSlices.resolve(default_reader=defaults(**changes)),
         agent_id=1,
         catalog=build_model_catalog(),
     )
@@ -36,13 +37,12 @@ def test_sequential_note_defaults_to_off() -> None:
 
 @pytest.mark.parametrize("sdk_overview", [True, False])
 @pytest.mark.parametrize("enabled", [True, False])
-def test_sequential_note_gating(
-    monkeypatch: pytest.MonkeyPatch, enabled: bool, sdk_overview: bool
-) -> None:
-    monkeypatch.setattr(settings.agent, "prompt_sequential_tool_calls_enabled", enabled)
-    monkeypatch.setattr(settings.agent, "prompt_sdk_overview_enabled", sdk_overview)
+def test_sequential_note_gating(enabled: bool, sdk_overview: bool) -> None:
 
-    prompt = _prompt()
+    prompt = _prompt(
+        agent__prompt_sequential_tool_calls_enabled=enabled,
+        agent__prompt_sdk_overview_enabled=sdk_overview,
+    )
 
     assert (_SENTENCE in prompt) is enabled
     assert "{_SEQUENTIAL_TOOL_CALLS}" not in prompt

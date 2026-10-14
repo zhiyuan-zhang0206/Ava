@@ -21,8 +21,7 @@ from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import read_ava_kwargs
 from base.clock import Clock
-from base.config import settings
-from base.config.tests.configuration import snapshot_process_config
+from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -70,7 +69,7 @@ def runtime(database_gate: ProcessDbGate) -> Iterator[Runtime[AvaContext]]:
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=defaults(),
             ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),

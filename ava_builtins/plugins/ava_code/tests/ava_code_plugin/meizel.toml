@@ -6,7 +6,6 @@
 "test_read_wrap_corrupted_state_field_raises.py#assignment ava.state" = 17
 "test_read_wrap_corrupted_state_field_raises.py#assignment ava.state.ava_code__injected_paths" = 1
 "test_read_wrap_corrupted_state_field_raises.py#assignment ava.state_update" = 17
-"test_read_wrap_corrupted_state_field_raises.py#monkeypatch.setattr base.config.settings.agent.sdk_expand_in_system_prompt" = 2
 "test_read_wrap_corrupted_state_field_raises.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 1
 "test_read_wrap_hash_dedup_primary_path_blocks.py#assignment ava.context" = 1
 "test_read_wrap_hash_dedup_primary_path_blocks.py#assignment ava.state" = 5

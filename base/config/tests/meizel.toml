@@ -3,6 +3,7 @@ exports = ["config_authority.py", "configuration.py", "served_gateway_home.py"]
 [uses]
 "conftest.py" = ["config_authority.py"]
 "test_config_boot_owner.py" = ["_boot_owner_child.py"]
+"test_slice_defaults.py" = ["configuration.py"]
 
 [debt.env-patch]
 "configuration.py#patch.dict os.environ" = 1

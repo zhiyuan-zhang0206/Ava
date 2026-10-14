@@ -6,7 +6,7 @@ from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import BatchState, handle_restart
 from base.agents.context import AvaContext
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 
@@ -15,9 +15,7 @@ async def test_hosted_restart_marker_does_not_claim_completion() -> None:
     state = BatchState()
     await handle_restart(
         AvaContext(
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
+            agent=AgentSlices.resolve(default_reader=defaults()),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
         ),

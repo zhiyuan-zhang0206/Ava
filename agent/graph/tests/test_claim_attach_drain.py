@@ -21,7 +21,7 @@ from agent.state import AttachEntry, AttachState, BaseAgentState
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -40,9 +40,7 @@ def _context(model_name: str, database_gate: ProcessDbGate) -> AvaContext:
         ops_pool=MagicMock(),
         llm=cast("BaseChatModel", SimpleNamespace(model_name=model_name)),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),

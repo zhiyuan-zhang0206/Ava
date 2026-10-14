@@ -43,6 +43,7 @@ from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -58,9 +59,7 @@ def read_agent_field(field: str):
 
 
 def pinned_slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
-    return AgentSlices.resolve(
-        pins, default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-    )
+    return AgentSlices.resolve(pins, default_reader=defaults())
 
 
 def compact_tail(update: Any) -> list[AnyMessage]:

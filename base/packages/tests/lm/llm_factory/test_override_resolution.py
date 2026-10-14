@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
-
 import pytest
 
-from base.config import get_field, settings
-from base.host.env.agent_slices import ModelOverrides
+from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import build_chat_model, resolve_override
 from base.packages.tests.lm.llm_factory.factory_support import FakeLLM, install_fake_module
@@ -95,26 +92,21 @@ class TestResolveOverride:
             return FakeLLM()
 
         mod.__dict__["build"] = build
-        monkeypatch.setattr(settings.lm, "llm_override", "tests._llm_override_e2e:build")
         from base.lm.factory import build_chat_model_bound
 
         llm = build_chat_model(
             "claude-opus-4-7",
             agent_id=8,
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="tests._llm_override_e2e:build",
+            overrides=model_overrides(),
         )
         assert isinstance(llm, FakeLLM)
         bound, binding = build_chat_model_bound(
             "claude-opus-4-7",
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
-            overrides=ModelOverrides.from_pins(
-                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-            ),
+            llm_override="tests._llm_override_e2e:build",
+            overrides=model_overrides(),
         )
         assert isinstance(bound, FakeLLM)
         assert binding is None
@@ -124,26 +116,21 @@ class TestResolveOverride:
                 "claude-opus-4-7",
                 single_attempt=True,
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="tests._llm_override_e2e:build",
+                overrides=model_overrides(),
             )
 
     def test_build_chat_model_override_failure_propagates(
-        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+        self, *, model_catalog: ModelCatalog
     ) -> None:
         """When override resolution fails, `build_chat_model` must not silently fall back
         to the original prefix dispatch — if env is set it must take effect; failure must
         be loud, telling the user to correct the env rather than letting prod silently use
         the real LLM."""
-        monkeypatch.setattr(settings.lm, "llm_override", "bad_format_no_colon")
         with pytest.raises(ValueError, match=r"requires 'module\.path:factory_name' form"):
             build_chat_model(
                 "claude-opus-4-7",
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                overrides=ModelOverrides.from_pins(
-                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-                ),
+                llm_override="bad_format_no_colon",
+                overrides=model_overrides(),
             )

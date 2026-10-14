@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.graph.hooks import compact
 from agent.graph.hooks.compact import generate_summary
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm import usage
 from base.packages.plugin_providers import build_model_catalog
@@ -17,7 +17,7 @@ from base.packages.plugin_providers import build_model_catalog
 async def test_compaction_preserves_fast_accounting_id() -> None:
     slices = AgentSlices.resolve(
         {"llm_model": "gpt-6.1-sol-fast"},
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        default_reader=defaults(),
     )
     llm = MagicMock()
     llm.model_name = "gpt-6.1-sol"

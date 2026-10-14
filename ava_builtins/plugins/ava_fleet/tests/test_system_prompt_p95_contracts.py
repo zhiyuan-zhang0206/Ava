@@ -13,9 +13,10 @@ import pytest
 from agent.graph.prompt.system_prompt import sdk_expand_section
 from ava.sdk_surface import install
 from ava.sdk_surface.installation import installed
-from base.config import FIELD_INFOS, settings
+from base.config import FIELD_INFOS
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -56,7 +57,6 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", factory())
     install.install(
         ExtensionRegistry((("ava_fleet", fleet.contribute()),)),
         catalog=model_catalog,
@@ -64,9 +64,7 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
     )
 
     text = sdk_expand_section(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        AgentSlices.resolve(default_reader=defaults(agent__sdk_expand_in_system_prompt=factory())),
         catalog=model_catalog,
     )
 

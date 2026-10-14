@@ -1,6 +1,6 @@
 """Fast IDs preserve selection, vendor requests and actual-service accounting."""
 
-from dataclasses import fields, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
 
@@ -8,8 +8,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, UsageMetadata
 from langchain_openai import ChatOpenAI
 
-from base.config import get_field, settings
-from base.host.env.agent_slices import ModelOverrides
+from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 from base.lm.factory import build_chat_model
@@ -53,10 +52,8 @@ def test_openai_wire_model_and_service_tier(
     model = build_chat_model(
         "gpt-6.1-sol-fast" if fast else "gpt-6.1-sol",
         catalog=model_catalog,
-        llm_override=settings.lm.llm_override,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-        ),
+        llm_override="",
+        overrides=model_overrides(),
     )
     assert isinstance(model, ChatOpenAI)
     # The pinned SDK leaves this private payload method's dict unparameterized.
@@ -74,10 +71,8 @@ def test_anthropic_wire_model_speed_and_beta(
     model = build_chat_model(
         "claude-opus-5-5-fast" if fast else "claude-opus-5-5",
         catalog=model_catalog,
-        llm_override=settings.lm.llm_override,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-        ),
+        llm_override="",
+        overrides=model_overrides(),
     )
     assert isinstance(model, ThinkingTokensChatAnthropic)
     # Exercise the SDK's actual wire conversion despite its incomplete typing.

@@ -35,7 +35,7 @@ from agent.graph.llm_errors import (
     LLMStreamUnexpectedStopReasonError,
 )
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -309,9 +309,7 @@ async def test_llm_node_validator_wired(
         ops_pool=ops_db,
         llm=fake_llm,
         event_publisher=pub,
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),

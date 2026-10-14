@@ -24,6 +24,7 @@ from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import IndexerUnavailable
 from base.clock import Clock
 from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 
@@ -81,10 +82,8 @@ def _conversation() -> list[AnyMessage]:
     ]
 
 
-def _agent() -> AgentSlices:
-    return AgentSlices.resolve(
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-    )
+def _agent(**changes: Any) -> AgentSlices:
+    return AgentSlices.resolve(default_reader=defaults(**changes))
 
 
 def _context() -> AvaContext:

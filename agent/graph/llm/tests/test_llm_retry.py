@@ -38,6 +38,7 @@ from agent.graph.llm_errors import (
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -56,9 +57,9 @@ def _wait(exc: Exception, attempts: int = 1, agent_id: int = _ZERO_PHASE) -> flo
         model=_MODEL,
         agent_id=agent_id,
         catalog=build_model_catalog(),
-        max_attempts_pin=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).read("lm", "llm_retry_max_attempts"),
+        max_attempts_pin=AgentSlices.resolve(default_reader=defaults()).read(
+            "lm", "llm_retry_max_attempts"
+        ),
         read_lm=lambda field: getattr(settings.lm, field),
     )
 
@@ -136,9 +137,9 @@ def test_the_model_caps_the_number_of_tries(monkeypatch: pytest.MonkeyPatch) -> 
             model="model-for-this-agent",
             agent_id=1,
             catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ).read("lm", "llm_retry_max_attempts"),
+            max_attempts_pin=AgentSlices.resolve(default_reader=defaults()).read(
+                "lm", "llm_retry_max_attempts"
+            ),
             read_lm=lambda field: getattr(settings.lm, field),
         )
         is not None
@@ -150,9 +151,9 @@ def test_the_model_caps_the_number_of_tries(monkeypatch: pytest.MonkeyPatch) -> 
             model="model-for-this-agent",
             agent_id=1,
             catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ).read("lm", "llm_retry_max_attempts"),
+            max_attempts_pin=AgentSlices.resolve(default_reader=defaults()).read(
+                "lm", "llm_retry_max_attempts"
+            ),
             read_lm=lambda field: getattr(settings.lm, field),
         )
         is None
@@ -231,9 +232,7 @@ def _runtime(database_gate: ProcessDbGate) -> Runtime[AvaContext]:
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -400,7 +399,7 @@ def _failing_node_run(
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(
             {"llm_model": model},
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(),
         ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),

@@ -29,7 +29,7 @@ from agent.graph.hooks import compact
 from agent.messages import NoteTag
 from agent.state import build_agent_state
 from base.agents.context import AvaContext
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -64,7 +64,7 @@ def _runtime(catalog: ModelCatalog, database_gate: ProcessDbGate) -> Runtime[Ava
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(),
         ),
         catalog=catalog,
         db=Database.from_settings(gate=database_gate),

@@ -10,7 +10,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from agent.graph.hooks import compact
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
@@ -48,9 +48,7 @@ async def test_compaction_programming_error_stops_once_without_history_change(
             messages,
             llm,
             content_count=1,
-            slices=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
+            slices=AgentSlices.resolve(default_reader=defaults()),
             catalog=model_catalog,
         )
     assert raised.value is error
@@ -72,9 +70,7 @@ async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
     )
     monkeypatch.setattr(compact, "ainvoke_tool_call", invocation)
     llm = cast(BaseChatModel, MagicMock())
-    slices = AgentSlices.resolve(
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-    )
+    slices = AgentSlices.resolve(default_reader=defaults())
     result = await compact.auto_compact_summary(
         messages, llm, 1, slices, catalog=build_model_catalog()
     )

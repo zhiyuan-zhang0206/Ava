@@ -8,7 +8,7 @@ from dataclasses import fields as dataclass_fields
 
 import pytest
 
-from base.config import field_names, get_field, settings
+from base.config import field_names, get_field
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import (
     DEFAULT_TUNING,
@@ -53,56 +53,50 @@ def test_default_tuning_is_fully_populated() -> None:
 
 
 def test_stream_total_timeout_resolves_shared_floor_and_explicit_override(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    *, model_catalog: ModelCatalog
 ) -> None:
-    monkeypatch.setattr(settings.lm, "llm_stream_total_timeout_seconds", None)
     assert (
         resolve_setting(
             "llm_stream_total_timeout_seconds",
             model="deepseek-flash",
             models=model_catalog.models,
-            explicit=get_field("llm_stream_total_timeout_seconds"),
+            explicit=None,
         )
         == 3600.0
     )
 
-    monkeypatch.setattr(settings.lm, "llm_stream_total_timeout_seconds", 7200.0)
     assert (
         resolve_setting(
             "llm_stream_total_timeout_seconds",
             model="deepseek-flash",
             models=model_catalog.models,
-            explicit=get_field("llm_stream_total_timeout_seconds"),
+            explicit=7200.0,
         )
         == 7200.0
     )
 
 
-def test_deepseek_stall_wave_ttft_default_is_150(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
+def test_deepseek_stall_wave_ttft_default_is_150(*, model_catalog: ModelCatalog) -> None:
     """Task #3884: the DeepSeek family's resolved TTFT default dropped 600 -> 150
     (the 600 matched the provider's documented up-to-10-minute queue, which the
     09-14/15 waves turned into 600s stream + 600s fallback burns per turn). The
     sentinel + per-model layer must agree, and an explicit override still wins."""
-    monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", None)
     assert (
         resolve_setting(
             "llm_stream_ttft_timeout_seconds",
             model="deepseek-flash",
             models=model_catalog.models,
-            explicit=get_field("llm_stream_ttft_timeout_seconds"),
+            explicit=None,
         )
         == 150.0
     )
 
-    monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", 90.0)
     assert (
         resolve_setting(
             "llm_stream_ttft_timeout_seconds",
             model="deepseek-flash",
             models=model_catalog.models,
-            explicit=get_field("llm_stream_ttft_timeout_seconds"),
+            explicit=90.0,
         )
         == 90.0
     )
