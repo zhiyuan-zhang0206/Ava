@@ -323,9 +323,9 @@ def test_helper_native_effects_require_explicit_test_boundary(boundary: str) -> 
         if boundary == "converge":
             permissions_helper.converge()
         elif boundary == "build":
-            lifecycle._run(["swiftc", "unreachable.swift"])
+            lifecycle.run_tool(["swiftc", "unreachable.swift"])
         elif boundary == "sign":
-            lifecycle._run(["codesign", "--sign", "unreachable"])
+            lifecycle.run_tool(["codesign", "--sign", "unreachable"])
         elif boundary == "launchd":
             launchd_job.retirement_command(["bootout", "gui/0/unreachable"], float("inf"))
 
