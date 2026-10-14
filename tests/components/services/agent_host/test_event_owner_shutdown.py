@@ -12,6 +12,7 @@ import pytest
 import services.agent_runner.agent_host.host as agent_host_host
 from agent import process_boot
 from base.agents.context.clients import ClientSet
+from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -156,7 +157,7 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     clients = ClientSet(pipeline_factory=lambda: pipe)
 
     def boot_handles(
-        _database: Database, _config: ConfigBoot
+        _database: Database, _config: ConfigBoot, *, timers: Timers
     ) -> tuple[Any, Any, EventBus, Database]:
         return object(), object(), EventBus.from_settings(), database
 
@@ -207,7 +208,11 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     try:
         with pytest.raises(ValueError) as observed:
             await daemon.run(
-                config=ConfigBoot(), database=lambda: database, machine=machine, home=unit_home
+                config=ConfigBoot(),
+                database=lambda: database,
+                machine=machine,
+                home=unit_home,
+                timers=SYSTEM_TIMERS,
             )
         assert observed.value is boot_error
         assert any(str(writer_error) in note for note in boot_error.__notes__)
