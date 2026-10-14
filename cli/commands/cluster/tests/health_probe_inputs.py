@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Callable, Generator
 from functools import partial
 from typing import Any
@@ -60,20 +61,54 @@ def redis_bridge_verdict(
 
 
 @pytest.fixture
-def all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(cluster_health, "agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cluster_health, "schema_health", healthy)
+def schema_verdicts() -> list[bool]:
+    """Schema verdicts the patched check returns, oldest first; empty = pass.
+
+    A test appends False to fail one round's schema check while every other
+    check of `all_checks_pass` stays healthy."""
+    return []
+
+
+@pytest.fixture
+def quiet_schema_health(monkeypatch: pytest.MonkeyPatch, schema_verdicts: list[bool]) -> None:
+    """The schema check passes without a real skew, per `schema_verdicts`."""
+
+    def schema_verdict(*_args: object, database_factory: DatabaseFactory) -> bool:
+        assert callable(database_factory)
+        return schema_verdicts.pop(0) if schema_verdicts else True
+
+    monkeypatch.setattr(cluster_health, "schema_health", schema_verdict)
+
+
+@pytest.fixture
+def quiet_service_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The service probes and the Redis bridge pass without dialing anything."""
     monkeypatch.setattr(
         cluster_health, "service_probes", partial(service_probe_verdict, failures=[])
     )
     monkeypatch.setattr(
         cluster_health, "redis_bridge_probe", partial(redis_bridge_verdict, result=None)
     )
+
+
+@pytest.fixture
+def quiet_host_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The host-level checks (disk, editable records, source tree) pass."""
     monkeypatch.setattr(cluster_health, "disk_usage_failure", lambda: None)
     monkeypatch.setattr(cluster_health, "editable_install_failure", lambda: None)
     # Source-tree cases below supply their own checkout outcomes.
     monkeypatch.setattr(cluster_health, "source_tree_failure", lambda: None)  # pyright: ignore[reportUnknownArgumentType]
+
+
+@pytest.fixture
+def all_checks_pass(
+    monkeypatch: pytest.MonkeyPatch,
+    quiet_schema_health: None,
+    quiet_service_health: None,
+    quiet_host_health: None,
+) -> None:
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
+    monkeypatch.setattr(cluster_health, "agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture
@@ -99,17 +134,33 @@ def _no_init(**_kwargs: object) -> None:
     return None
 
 
+@pytest.fixture
+def provider_guard_reports() -> list[tuple[str, str]]:
+    """Provider-guard failures the stubbed guard reports this round, in order.
+
+    Empty (the default) = the guard passes. A test appends the failures it
+    wants reported, e.g. the balance-low signal with the real guard's message
+    shape."""
+    return []
+
+
 @pytest.fixture(autouse=True)
-def provider_guard_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
+def provider_guard_healthy(
+    monkeypatch: pytest.MonkeyPatch, provider_guard_reports: list[tuple[str, str]]
+) -> None:
     """Checks 9-10 read a live provider API and the real agent table; stub the
-    guard healthy everywhere so this file's tests stay hermetic. The guard's
-    own tests below re-point `run_provider_guard` at the real one to exercise
-    the wiring."""
+    guard so this file's tests stay hermetic. The stub reports the failures in
+    `provider_guard_reports` and returns their count, exactly as the real guard
+    reports and counts (the real module's own tests exercise its readings)."""
 
-    def _ok(*, report: object, database_factory: DatabaseFactory) -> None:
+    def _guard(*, report: Callable[[str, str], None], database_factory: DatabaseFactory) -> int:
         assert callable(database_factory)
+        for check, message in provider_guard_reports:
+            print(message, file=sys.stderr)
+            report(check, message)
+        return len(provider_guard_reports)
 
-    monkeypatch.setattr(cluster_health, "run_provider_guard", _ok)
+    monkeypatch.setattr(cluster_health, "run_provider_guard", _guard)
 
 
 @pytest.fixture(autouse=True)

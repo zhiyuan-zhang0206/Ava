@@ -88,7 +88,7 @@ exports = ["health_probe_inputs.py", "test_cluster_health.py"]
 "test_provider_guard.py#monkeypatch.setattr cli.commands.cluster._provider_guard.blocked_agents_failure" = 1
 "test_provider_guard.py#monkeypatch.setattr cli.commands.cluster._provider_guard.fetch_balance" = 7
 "test_provider_guard.py#monkeypatch.setattr cli.commands.cluster._provider_guard.halted_agents_count" = 4
-"test_provider_guard.py#monkeypatch.setattr cli.commands.cluster._provider_guard.provider_guard_failure" = 2
+"test_provider_guard.py#monkeypatch.setattr cli.commands.cluster._provider_guard.provider_guard_failures" = 2
 
 [debt.stdlib-patch]
 "test_cluster_health.py#monkeypatch.setattr subprocess.run" = 1

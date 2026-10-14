@@ -39,7 +39,22 @@ from cli.commands.cluster.tests.health_probe_inputs import (
     provider_guard_healthy as provider_guard_healthy,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
+    provider_guard_reports as provider_guard_reports,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    quiet_host_health as quiet_host_health,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    quiet_schema_health as quiet_schema_health,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    quiet_service_health as quiet_service_health,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
     ran as ran,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    schema_verdicts as schema_verdicts,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
     signals as signals,
@@ -111,16 +126,21 @@ def test_agent_population_db_error_is_environment_class(
 
 
 def test_liveness_retry_recovers_before_reporting_outage(
-    probe: Probe, isolated_cluster_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_url: str,
+    redis_url: str,
+    probe: Probe,
+    isolated_cluster_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A brief data-plane restart window is healthy once liveness recovers."""
+    """A brief data-plane restart window is healthy once liveness recovers.
+
+    A failed round spends the fixed retry budget exactly once — three attempts,
+    two 30-second waits — because the checks that now run after a failure add no
+    liveness work and no extra waiting (task #5064)."""
     answers = iter([False, False, True])
     monkeypatch.setattr(cluster_health, "gateway_liveness", lambda: next(answers))
-
-    def _no_sleep(_seconds: float) -> None:
-        return None
-
-    monkeypatch.setattr(cluster_health.time, "sleep", _no_sleep)
+    sleeps: list[float] = []
+    monkeypatch.setattr(cluster_health.time, "sleep", sleeps.append)
     monkeypatch.setattr(cluster_health, "agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cluster_health, "schema_health", healthy)
     monkeypatch.setattr(
@@ -134,10 +154,18 @@ def test_liveness_retry_recovers_before_reporting_outage(
     monkeypatch.setattr(cluster_health, "editable_install_failure", lambda: None)
 
     assert probe() == 0
+    assert sleeps == [30.0, 30.0]  # two waits between the three attempts
+
+    answers = iter([False, False, False])
+    assert probe() == 1
+    assert sleeps == [30.0, 30.0, 30.0, 30.0]  # a fully failed round spends no more
 
 
 def test_environment_liveness_failure_signals_without_counting(
-    probe: Probe, isolated_cluster_home: Path, monkeypatch: pytest.MonkeyPatch
+    probe: Probe,
+    all_checks_pass: None,
+    isolated_cluster_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A data-plane failure signals but cannot launch an unrelated code rollback."""
     rollback_commands: list[list[str]] = []
@@ -154,7 +182,10 @@ def test_environment_liveness_failure_signals_without_counting(
 
 
 def test_code_liveness_failure_is_unhealthy(
-    probe: Probe, isolated_cluster_home: Path, monkeypatch: pytest.MonkeyPatch
+    probe: Probe,
+    all_checks_pass: None,
+    isolated_cluster_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A gateway failure with a healthy data plane remains unhealthy."""
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
@@ -164,7 +195,10 @@ def test_code_liveness_failure_is_unhealthy(
 
 
 def test_agent_population_classifies_db_failure_as_environment(
-    probe: Probe, isolated_cluster_home: Path, monkeypatch: pytest.MonkeyPatch
+    probe: Probe,
+    all_checks_pass: None,
+    isolated_cluster_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Population-query connection failure is environmental; a low count is code-class."""
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
@@ -218,9 +252,9 @@ def test_every_run_emits_the_heartbeat_healthy_or_not(
     )
     assert probe() == 1  # the alert-only path
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
-    assert probe() == 1  # the primary-check path
-    assert ran == [{"unhealthy_checks": 0}, {"unhealthy_checks": 1}, {"unhealthy_checks": 1}]
-    assert len(signals) == 2
+    assert probe() == 1  # the primary-check path, reported alongside the still-failing one
+    assert ran == [{"unhealthy_checks": 0}, {"unhealthy_checks": 1}, {"unhealthy_checks": 2}]
+    assert len(signals) == 3  # service_probe; then gateway_liveness and service_probe
 
 
 def test_a_refused_checkout_emits_no_heartbeat(
@@ -464,7 +498,8 @@ def test_signal_names_the_failed_check(
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
 ) -> None:
-    """A changed failure reason is a different check, grouped separately by Grafana."""
+    """A changed failure reason is a different check, grouped separately by Grafana;
+    a check that starts failing adds its own signal without silencing the others."""
     monkeypatch.setattr(
         cluster_health,
         "service_probes",
@@ -474,7 +509,78 @@ def test_signal_names_the_failed_check(
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
     assert probe() == 1
 
-    assert [signal["check"] for signal in signals] == ["service_probe", "gateway_liveness"]
+    assert [signal["check"] for signal in signals] == [
+        "service_probe",
+        "gateway_liveness",
+        "service_probe",
+    ]
+
+
+# ── checks report independently: one failure never silences the others ───────
+
+
+def test_schema_failure_does_not_mask_the_provider_guard(
+    probe: Probe,
+    all_checks_pass: None,
+    isolated_cluster_home: Path,
+    schema_verdicts: list[bool],
+    provider_guard_reports: list[tuple[str, str]],
+    signals: list[dict[str, object]],
+    ran: list[dict[str, object]],
+) -> None:
+    """A schema/code skew used to end the round before checks 9-10, so the balance
+    runway went fully silent exactly when the fleet needed it (2026-10-12
+    evaluation of task #5064). The provider guard still runs and reports its
+    balance signal next to the schema failure."""
+    schema_verdicts.append(False)
+    provider_guard_reports.append(
+        (
+            "provider_balance",
+            "FAIL: provider balance — account balance below the configured minimum "
+            "(AVA_PROVIDER_GUARD_BALANCE_MIN_CNY=¥500); top up the provider account "
+            "before it runs dry",
+        )
+    )
+
+    assert probe() == 1
+
+    assert [signal["check"] for signal in signals] == ["schema", "provider_balance"]
+    assert "balance below the configured minimum" in str(signals[1]["message"])
+    assert ran == [{"unhealthy_checks": 2}]
+
+
+def test_every_failing_check_reports_in_one_run(
+    probe: Probe,
+    all_checks_pass: None,
+    isolated_cluster_home: Path,
+    schema_verdicts: list[bool],
+    provider_guard_reports: list[tuple[str, str]],
+    signals: list[dict[str, object]],
+    ran: list[dict[str, object]],
+) -> None:
+    """One round reports every failed check as its own event — the shape Grafana
+    groups per `attributes_check` — including both provider-guard checks (9 and
+    10), which used to stop at the first failure inside the guard as well."""
+    schema_verdicts.append(False)
+    provider_guard_reports.extend(
+        [
+            ("provider_balance", "FAIL: provider balance — account balance below the minimum"),
+            (
+                "provider_blocked_agents",
+                "FAIL: provider blocked agents — multiple agents are halted by permanent "
+                "provider rejections",
+            ),
+        ]
+    )
+
+    assert probe() == 1
+
+    assert [signal["check"] for signal in signals] == [
+        "schema",
+        "provider_balance",
+        "provider_blocked_agents",
+    ]
+    assert ran == [{"unhealthy_checks": 3}]
 
 
 # ── the gate's entry port rides in check 5 (alert-only) ───────────────────────

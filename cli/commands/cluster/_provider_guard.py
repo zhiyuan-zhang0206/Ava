@@ -52,36 +52,39 @@ class BalanceReadError(RuntimeError):
 
 def run_provider_guard(
     *, report: Callable[[str, str], None], database_factory: DatabaseFactory
-) -> int | None:
-    """Run checks 9-10 for the health probe; return 1 on failure, None on pass.
+) -> int:
+    """Run checks 9-10 for the health probe; return how many of them failed.
 
-    `report(check, message)` is the probe's failure signal
-    (`cluster.health._report_failing`), passed in rather than imported so the
-    caller's module attribute stays the single test seam.
+    Every failing check reports in the same run: a drained balance no longer
+    stops the halted-agents check from reporting (each check is the probe's unit
+    of reporting, task #5064). `report(check, message)` is the probe's failure
+    signal (`cluster.health._report_failing`), passed in rather than imported so
+    the caller's module attribute stays the single test seam.
     """
-    failure = provider_guard_failure(database_factory=database_factory)
-    if failure is not None:
-        check, message = failure
+    failures = provider_guard_failures(database_factory=database_factory)
+    for check, message in failures:
         print(message, file=sys.stderr)
         report(check, message)
-        return 1
-    print("  ✓ provider account guard")
-    return None
+    if not failures:
+        print("  ✓ provider account guard")
+    return len(failures)
 
 
-def provider_guard_failure(*, database_factory: DatabaseFactory) -> tuple[str, str] | None:
-    """The first failing provider-guard check as (check name, failure line), if any.
+def provider_guard_failures(*, database_factory: DatabaseFactory) -> list[tuple[str, str]]:
+    """Every failing provider-guard check as (check name, failure line), balance first.
 
-    Balance first (the root cause), blocked agents second; a run reports one
-    failure at a time, like the probe's earlier checks.
+    Balance first (the root cause), blocked agents second; both are observed and
+    reported independently, so a low balance also reports the halted agents it
+    caused.
     """
+    failures: list[tuple[str, str]] = []
     balance = balance_failure()
     if balance is not None:
-        return "provider_balance", f"FAIL: provider balance — {balance}"
+        failures.append(("provider_balance", f"FAIL: provider balance — {balance}"))
     blocked = blocked_agents_failure(database_factory=database_factory)
     if blocked is not None:
-        return "provider_blocked_agents", f"FAIL: provider blocked agents — {blocked}"
-    return None
+        failures.append(("provider_blocked_agents", f"FAIL: provider blocked agents — {blocked}"))
+    return failures
 
 
 def balance_failure() -> str | None:
