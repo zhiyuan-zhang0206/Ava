@@ -439,7 +439,7 @@ def current_facade_resolves_after_upgrade() -> None:
         "CONFIG_FETCH_ENV",
         "CONFIG_FETCH_SKIP",
         "refresh_data_plane_settings",
-        "_FIELDS",
+        "FIELD_REFS",
         "FIELD_INFOS",
     ]
     served_ok = all(hasattr(c, n) for n in lite_served) and c.boot_state()["mode"] == "lite"
@@ -512,12 +512,12 @@ def field_faces_serve_while_another_thread_builds() -> None:
     t.start()
     assert entered.wait(30), "build never started"
     try:
-        from base.config import _FIELDS, CONFIG_UNCHANGED_SENTINEL, FIELD_INFOS, ConfigFieldMeta
+        from base.config import CONFIG_UNCHANGED_SENTINEL, FIELD_INFOS, FIELD_REFS, ConfigFieldMeta
 
         faces = (
             "ok"
             if (
-                len(_FIELDS) > 0
+                len(FIELD_REFS) > 0
                 and len(FIELD_INFOS) > 0
                 and present(CONFIG_UNCHANGED_SENTINEL)
                 and present(ConfigFieldMeta)

@@ -447,7 +447,7 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
     consumption matrix — test_gateway_consumer_guard keeps them honest)."""
     from typing import Any, cast
 
-    from base.config import _FIELDS
+    from base.config import FIELD_REFS
     from base.config.config_registry import ALLOWED_RESTART_REQUIRED, RESTART_REQUIRED_PROFILE
     from base.config.profiles import PROCESS_PROFILES
 
@@ -457,13 +457,13 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
         return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
 
     bad_value: list[tuple[str, str]] = [
-        (name, str(_extra(ref).get("restart_required", ""))) for name, ref in _FIELDS.items()
+        (name, str(_extra(ref).get("restart_required", ""))) for name, ref in FIELD_REFS.items()
     ]
     bad_value = [(n, v) for n, v in bad_value if v not in ALLOWED_RESTART_REQUIRED]
     assert not bad_value, f"fields with invalid restart_required: {bad_value}"
 
     wrong_kind: list[tuple[str, str, str]] = []
-    for name, ref in _FIELDS.items():
+    for name, ref in FIELD_REFS.items():
         restart = str(_extra(ref).get("restart_required", ""))
         kind = RESTART_REQUIRED_PROFILE.get(restart)
         if kind is not None and ref.domain not in PROCESS_PROFILES[kind]:  # type: ignore[index]
