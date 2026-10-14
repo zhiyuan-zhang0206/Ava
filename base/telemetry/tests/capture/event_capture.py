@@ -106,7 +106,8 @@ def capturing_events() -> Generator[EmittedEvents]:
     The previously bound pipeline (usually none) is put back afterwards. The only events
     captured are those emitted by this process while the block runs; an exec child or any
     other process keeps its own pipeline. A test that builds its own `EventPipeline` and binds
-    it does not use this."""
+    it does not use this. If an application's startup binds its pipeline, enter this context
+    after startup and leave it before shutdown so that lifecycle retains its own binding."""
     captured: list[Event] = []
     pipeline = EventPipeline(writer=captured.extend, flush_interval_s=0.01)
     previous = process_state["pipeline"]

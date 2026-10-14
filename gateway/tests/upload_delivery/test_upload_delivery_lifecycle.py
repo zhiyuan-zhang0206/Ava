@@ -222,8 +222,12 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
             status = source.status(app.state.db_pool, agent, batch_id)
             assert status.attempts == attempt
             assert status.state == ("hold" if attempt == source.MAX_COPY_ATTEMPTS else "pending")
-        held = emitted_events.attributes("upload_delivery_held")
-    assert held == [{"agent_id": agent, "batch_id": batch_id, "reason": "OSError"}]
+        assert [(event.event_name, event.attributes) for event in emitted_events] == [
+            (
+                "upload_delivery_held",
+                {"agent_id": agent, "batch_id": batch_id, "reason": "OSError"},
+            )
+        ]
     # Held means held: no later round copies it again.
     with app.state.db_pool.connection() as conn:
         conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
