@@ -3,12 +3,8 @@
 "tests.path_scoped.agent_tests" = [
     "test_events_channel_isolation.py",
 ]
-"tests.path_scoped.ava_tests" = [
-    "test_seed_guard.py",
-]
 "tests.fixtures.unit.sdk" = [
     "test_config_authority.py",
     "test_config_boot_lite.py",
     "test_events_channel_isolation.py",
-    "test_seed_guard.py",
 ]

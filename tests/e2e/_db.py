@@ -29,7 +29,7 @@ from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver a
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.config import settings
 from base.db import Database
-from tests.components.base.poll_until import poll_until
+from base.sessions.tests.poll_until import poll_until
 from tests.e2e._ports import GATEWAY_URL
 
 

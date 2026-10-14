@@ -19,7 +19,7 @@ import httpx
 import pytest
 
 from base.api_contracts.agent_contract import AgentStatus
-from tests.components.base.poll_until import poll_until
+from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import wait_for_status
 from tests.e2e.fakes.scenarios.context_identity import REPLY_TEXT
 from tests.e2e.fixture_environment import E2EEnv

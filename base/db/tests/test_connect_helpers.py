@@ -542,28 +542,6 @@ def test_an_exempt_process_dials_as_the_cli_without_a_version(
     assert _gated_process == []
 
 
-def test_a_runner_login_reads_the_minimum_and_cannot_write_it(
-    process_gate: gate.ProcessDbGate,
-    monkeypatch: pytest.MonkeyPatch,
-    stored_minimum: int,
-    _gated_process: list[int],
-) -> None:
-    """The gate needs no new grant: the runner group's blanket `SELECT` covers the
-    column, and its inability to `UPDATE` the row (only the gateway raises the
-    minimum) is unchanged."""
-    from tests._containers import runner_projection
-
-    _set_minimum(_VERSION)
-    runner_url = runner_projection()
-    monkeypatch.setattr(settings.data_plane, "db_url", runner_url)
-
-    with db.connect(gate=process_gate) as conn:
-        assert process_gate.min_read_due() is False  # this dial read the minimum
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute("UPDATE deployment_state SET min_code_version = 0")
-    assert _gated_process == []
-
-
 def test_independent_handles_and_async_restore_share_one_process_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

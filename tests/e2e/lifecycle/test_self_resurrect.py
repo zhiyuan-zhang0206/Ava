@@ -13,8 +13,8 @@ from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.net.auth import API_TOKEN_ENV
+from base.sessions.tests.poll_until import poll_until
 from ops.cluster.rpc import dispatch_to_machine
-from tests.components.base.poll_until import poll_until
 from tests.e2e._credentials import current_credentials
 from tests.e2e._db import wait_for_status
 from tests.e2e.fixture_environment import E2EEnv

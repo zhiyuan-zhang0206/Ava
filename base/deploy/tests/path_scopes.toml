@@ -9,5 +9,4 @@
 "tests.fixtures.unit.sdk" = [
     "test_maintenance_cold.py",
     "test_migrations.py",
-    "test_pooler_clients.py",
 ]

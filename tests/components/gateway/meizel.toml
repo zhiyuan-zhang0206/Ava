@@ -1,4 +1,4 @@
-exports = ["telemetry_stream.py", "test_alerts_api.py", "test_cluster_endpoints.py"]
+exports = ["test_alerts_api.py", "test_cluster_endpoints.py"]
 
 [debt.first-party-patch]
 "test_alerts_api.py#monkeypatch.setattr base.config.settings.alerts.im_notify_enabled" = 1

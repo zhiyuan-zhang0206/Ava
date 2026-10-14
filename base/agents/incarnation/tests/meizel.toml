@@ -1,4 +1,7 @@
-exports = ["test_resources.py"]
+exports = ["test_resources.py", "test_runner_role.py"]
+
+[uses]
+"test_runner_grant_matrix.py" = ["test_runner_role.py"]
 
 [debt.first-party-patch]
 "test_exec_owner_recovery.py#monkeypatch.setattr base.agents.incarnation.exec_owner_protocol.psutil.Process" = 1
@@ -21,3 +24,7 @@ exports = ["test_resources.py"]
 "test_exec_request_evidence.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 2
 "test_exec_request_evidence.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_exec_request_evidence.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
+
+[debt.third-party-patch]
+"test_runner_role.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.MIGRATIONS" = 1
+"test_runner_role.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.setup" = 8

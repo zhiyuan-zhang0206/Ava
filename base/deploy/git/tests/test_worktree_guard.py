@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 
 from base.deploy.git.worktree_guard import find_live_anchors
-from tests.path_scoped.pty_service import PtyServiceProcess
-from tests.path_scoped.pty_service import pty_service as pty_service
-from tests.path_scoped.pty_shells import new
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_shells import new
 
 
 def test_a_pty_session_anchored_under_the_target_is_reported(

@@ -10,8 +10,11 @@ tags:
 # Opt-in Unit Capabilities
 
 The root plugin roster does not load unit fixtures. Consumer-local conftests
-import `unit.homes` (private and default homes), `unit.workspace` (SDK workspace),
-`unit.identity` (runner and machine identity), and `unit.generation` (private ledgers and served homes).
+import `unit.homes` (private and default homes) and `unit.workspace` (SDK workspace). The
+fixtures of a component live in that component's `tests/`: `machine_identity` in
+`base/cluster/machine/tests/`, `config_authority` and `served_gateway_home` in
+`base/config/tests/`, and the private-ledger seeds (`seed_write_generation`,
+`seed_active_generation`) in `base/host/db_authority/tests/`.
 Descendant tests inherit those fixtures from their nearest shared test directory.
 Directories already at their entry budget use the same existing scope reader
 for a directory-level capability declaration instead of adding a conftest.
@@ -21,7 +24,7 @@ imported agent allocation and environment-file helpers without loading the
 assembled gateway.
 
 Model consumers import the immutable catalog fixtures from `model_catalog`.
-`unit.config_authority` owns the lightweight configuration authority and its
+`base.config.tests.config_authority` owns the lightweight configuration authority and its
 private-home dependency; `unit.model_owner` owns the explicit SDK installation
 and opt-in process binding. A test that only needs authority therefore does
 not import Installation or construct a model catalog. The fixture bodies and

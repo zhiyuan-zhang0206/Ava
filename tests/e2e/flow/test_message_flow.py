@@ -28,8 +28,8 @@ from playwright.sync_api import ConsoleMessage, Page
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
+from base.sessions.tests.poll_until import poll_until
 from scripts.verify.scripted_reply import REPLY_TEXT
-from tests.components.base.poll_until import poll_until
 from tests.e2e._db import wait_for_status
 from tests.e2e.fixture_environment import E2EEnv
 

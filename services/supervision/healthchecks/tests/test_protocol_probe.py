@@ -15,9 +15,9 @@ from base import paths
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.native_process.root_control import client
 from base.sessions.pty.paths import service_socket_path
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from services.supervision.healthchecks import protocol_probe as probe
-from tests.path_scoped.pty_service import PtyServiceProcess
-from tests.path_scoped.pty_service import pty_service as pty_service
 
 
 @contextlib.contextmanager

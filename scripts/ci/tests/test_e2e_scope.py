@@ -93,23 +93,143 @@ def test_the_cli_prints_the_step_output(tmp_path: Path, capsys: pytest.CaptureFi
     assert capsys.readouterr().out == "skip=false\n"
 
 
-def test_e2e_imports_nothing_from_a_package_internal_tests_directory() -> None:
+def test_a_package_test_helper_that_e2e_imports_is_never_skipped_past(tmp_path: Path) -> None:
     """The premise of the rule: a unit-test edit inside a package cannot reach an e2e test."""
-    offenders: list[str] = []
+    helper = tmp_path / "base" / "sessions" / "tests" / "poll.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("from base.sessions.tests import deeper\n")
+    (helper.parent / "deeper.py").write_text("")
+    (helper.parent / "unrelated.py").write_text("")
+    e2e = tmp_path / "tests" / "e2e"
+    e2e.mkdir(parents=True)
+    (e2e / "test_flow.py").write_text(
+        "from base.sessions.tests.poll import wait\nfrom tests.fixtures import thing\n"
+    )
+
+    reached = e2e_scope.e2e_reached_unit_tests(tmp_path)
+
+    assert reached == {"base/sessions/tests/poll.py", "base/sessions/tests/deeper.py"}
+    assert not _skip(changed=["base/sessions/tests/deeper.py"], reached=reached)
+    assert _skip(changed=["base/sessions/tests/unrelated.py"], reached=reached)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import importlib\nimportlib.import_module(name)\n",
+        "__import__(name)\n",
+        "import runpy\nrunpy.run_module(name)\n",
+        "import runpy\nrunpy.run_path('somewhere.py')\n",
+        "exec(code)\n",
+        "def broken(:\n",
+    ],
+    ids=[
+        "computed-import",
+        "computed-dunder-import",
+        "computed-run-module",
+        "run-path",
+        "exec",
+        "syntax-error",
+    ],
+)
+def test_a_file_the_walk_cannot_understand_fails_closed(tmp_path: Path, source: str) -> None:
+    e2e = tmp_path / "tests" / "e2e"
+    e2e.mkdir(parents=True)
+    (e2e / "test_flow.py").write_text(source)
+
+    reached = e2e_scope.e2e_reached_unit_tests(tmp_path)
+
+    assert reached is None
+    assert not _skip(changed=["base/sessions/tests/unrelated.py"], reached=reached)
+
+
+def test_a_literal_dynamic_import_is_followed_like_an_import_statement(tmp_path: Path) -> None:
+    helper = tmp_path / "base" / "sessions" / "tests" / "poll.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("")
+    e2e = tmp_path / "tests" / "e2e"
+    e2e.mkdir(parents=True)
+    (e2e / "test_flow.py").write_text(
+        "import importlib\nimportlib.import_module('base.sessions.tests.poll')\n"
+    )
+
+    assert e2e_scope.e2e_reached_unit_tests(tmp_path) == {"base/sessions/tests/poll.py"}
+
+
+def test_a_relative_import_inside_a_package_test_file_is_followed(tmp_path: Path) -> None:
+    tests = tmp_path / "base" / "sessions" / "tests"
+    tests.mkdir(parents=True)
+    (tests / "poll.py").write_text("from .deeper import wait\n")
+    (tests / "deeper.py").write_text("")
+    e2e = tmp_path / "tests" / "e2e"
+    e2e.mkdir(parents=True)
+    (e2e / "test_flow.py").write_text("from base.sessions.tests.poll import wait\n")
+
+    assert e2e_scope.e2e_reached_unit_tests(tmp_path) == {
+        "base/sessions/tests/poll.py",
+        "base/sessions/tests/deeper.py",
+    }
+
+
+def test_a_package_test_helper_reached_through_a_top_level_test_module_counts(
+    tmp_path: Path,
+) -> None:
+    helper = tmp_path / "gateway" / "tests" / "agents" / "auth.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("")
+    fixtures = tmp_path / "tests" / "fixtures"
+    fixtures.mkdir(parents=True)
+    (fixtures / "client.py").write_text("from gateway.tests.agents.auth import credentials\n")
+    e2e = tmp_path / "tests" / "e2e"
+    e2e.mkdir()
+    (e2e / "test_flow.py").write_text("from tests.fixtures.client import client\n")
+
+    assert e2e_scope.e2e_reached_unit_tests(tmp_path) == {"gateway/tests/agents/auth.py"}
+
+
+def test_a_known_dynamic_entry_whose_call_is_gone_is_stale(tmp_path: Path) -> None:
+    kept = tmp_path / "tests" / "e2e" / "kept.py"
+    kept.parent.mkdir(parents=True)
+    kept.write_text("import runpy\nrunpy.run_module('services.daemon')\n")
+    (tmp_path / "tests" / "e2e" / "rewritten.py").write_text("print('no dynamic call any more')\n")
+    (tmp_path / "tests" / "e2e" / "broken.py").write_text("def broken(:\n")
+    known = {
+        "tests/e2e/kept.py": frozenset({"run_module"}),
+        "tests/e2e/rewritten.py": frozenset({"run_module"}),
+        "tests/e2e/deleted.py": frozenset({"exec"}),
+        "tests/e2e/broken.py": frozenset({"exec"}),
+    }
+
+    assert e2e_scope.stale_known_dynamic(tmp_path, known) == [
+        "tests/e2e/broken.py: exec (file missing or unreadable)",
+        "tests/e2e/deleted.py: exec (file missing or unreadable)",
+        "tests/e2e/rewritten.py: run_module",
+    ]
+
+
+def test_every_known_dynamic_entry_still_has_its_call() -> None:
+    """A stale entry would quietly excuse a new dynamic import of the same name; delete it with the call."""
+    assert e2e_scope.stale_known_dynamic(_REPO_ROOT) == []
+
+
+def test_the_real_e2e_walk_understands_every_import() -> None:
+    """A new dynamic import in e2e flips the walk to fail-closed; this keeps the skip alive on purpose."""
+    reached = e2e_scope.e2e_reached_unit_tests(_REPO_ROOT)
+    assert reached is not None
+    assert "base/sessions/tests/poll_until.py" in reached
+
+
+def test_the_real_e2e_imports_are_all_in_the_reached_set() -> None:
+    reached = e2e_scope.e2e_reached_unit_tests(_REPO_ROOT)
+    assert reached is not None
     for file in sorted((_REPO_ROOT / "tests" / "e2e").rglob("*.py")):
         for node in ast.walk(ast.parse(file.read_text(encoding="utf-8"))):
-            modules = (
-                [node.module or ""]
-                if isinstance(node, ast.ImportFrom)
-                else [alias.name for alias in node.names]
-                if isinstance(node, ast.Import)
-                else []
-            )
-            for module in modules:
-                parts = module.split(".")
+            if isinstance(node, ast.ImportFrom) and node.module:
+                parts = node.module.split(".")
                 if parts[0] in e2e_scope.PACKAGES and "tests" in parts[1:]:
-                    offenders.append(f"{file.relative_to(_REPO_ROOT)}: {module}")
-    assert offenders == []
+                    path = Path(*parts).with_suffix(".py").as_posix()
+                    if (_REPO_ROOT / path).is_file():
+                        assert path in reached, f"{file.relative_to(_REPO_ROOT)}: {node.module}"
 
 
 def test_every_package_with_unit_tests_is_covered_or_excluded_on_purpose() -> None:

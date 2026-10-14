@@ -12,7 +12,7 @@
     "test_pty_commands.py",
     "test_stop_parser.py",
 ]
-"tests.fixtures.unit.generation" = ["."]
+"base.host.db_authority.tests.generation" = ["."]
 "base.paths.tests.homes" = ["."]
 "base.log.tests.log_records" = [
     "test_plugin_scaffold.py",

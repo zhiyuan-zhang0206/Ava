@@ -17,11 +17,11 @@ import psutil
 import pytest
 
 from base.sessions.pty import client, closure
+from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_shells import new, output_until, type_line, wait_for
 from tests.path_scoped import pty_jobs as jobs
-from tests.path_scoped import pty_shells as support
-from tests.path_scoped.pty_service import pty_service as pty_service
-from tests.path_scoped.pty_shells import new, output_until, type_line, wait_for
 
 pytestmark = [
     pytest.mark.usefixtures("pty_service"),

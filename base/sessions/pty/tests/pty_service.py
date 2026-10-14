@@ -28,7 +28,7 @@ import pytest
 from base.sessions.pty import client, protocol
 from base.sessions.pty.paths import fallback_dir, service_socket_path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[4]
 
 _READY_TIMEOUT_S = 20.0
 _STOP_TIMEOUT_S = 30.0

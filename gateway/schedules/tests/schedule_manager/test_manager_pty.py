@@ -26,10 +26,10 @@ from base.cluster import session_name
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.sessions.backend import get_shell_backend
 from base.sessions.pty import client
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_shells import wait_for
 from gateway.schedules import session_control
 from services.wake.schedule_manager import manager as sm
-from tests.path_scoped.pty_service import PtyServiceProcess
-from tests.path_scoped.pty_shells import wait_for
 
 REPO = Path(__file__).resolve().parents[4]
 

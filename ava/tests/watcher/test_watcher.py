@@ -4,7 +4,7 @@ PTY session whose command line tees output to a log file and session capture,
 then ends with the CLI completion notice (`ava agents send ... --source
 watcher:N`); cron/at build a script then spawn.
 
-The `pty_service` fixture (tests/path_scoped/pty_service.py) runs a real
+The `pty_service` fixture (base/sessions/pty/tests/pty_service.py) runs a real
 pty-sessions service under the tmp test home."""
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import ava
 from ava import watcher
 from ava.shell import background
 from ava.watcher import plans, spawn, wiring
-from tests.path_scoped.pty_shells import wait_for
+from base.sessions.pty.tests.pty_shells import wait_for
 
 pytestmark = [
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); apply it

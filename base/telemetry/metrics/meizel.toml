@@ -1,4 +1,4 @@
-exports = ["aggregate.py", "aggregate_sql.py", "ci_runs_metrics.py", "core", "event_sql.py", "grafana_dashboard.py", "logql.py", "observed_metrics.py", "plugin_metrics.py", "usage.py"]
+exports = ["aggregate.py", "aggregate_sql.py", "ci_runs_metrics.py", "core", "event_sql.py", "grafana_dashboard.py", "logql.py", "observed_metrics.py", "plugin_metrics.py", "tests", "usage.py"]
 
 [uses]
 "__init__.py" = ["core", "report.py"]

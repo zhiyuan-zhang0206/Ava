@@ -11,9 +11,9 @@ import pytest
 
 from base.daemon import shutdown
 from base.host import exit_codes as hard_exit_module
+from base.sessions.tests.poll_until import poll_until
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
-from tests.components.base.poll_until import poll_until
 
 
 def test_cancel_and_drain_runs_cleanup_and_returns_only_ordinary_failures() -> None:

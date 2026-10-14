@@ -39,18 +39,18 @@ from base.agents.tests.capture_inputs import lease as lease
 from base.agents.tests.capture_inputs import owner as owner
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.authority.event_grants import grant_event_log_runner_access
+from base.cluster.authority.tests.runner_logins import grant_runner_login
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.config_authority import config_authority as config_authority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from base.telemetry.audit_events import audit_event_uid, prepare_event_log
-from tests._containers import grant_runner_login
-from tests.fixtures.unit.config_authority import config_authority as config_authority
 
 # The capability group the grants target, and the generation-shaped login that
 # inherits it (the only identity that logs in).
