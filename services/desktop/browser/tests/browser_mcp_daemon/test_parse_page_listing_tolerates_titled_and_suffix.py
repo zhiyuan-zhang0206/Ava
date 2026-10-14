@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 import pytest
 
 from base.config import settings
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import text_of
 from services.desktop.browser.page_lifecycle import parse_page_listing
@@ -17,7 +18,6 @@ from services.desktop.browser.tests.test_browser_mcp_daemon import (
     browser_daemon_with_fake_upstream,
     expire,
     new_daemon,
-    record_emits,
     ttl_remaining,
 )
 
@@ -336,39 +336,40 @@ async def test_list_tools_appends_renew_page() -> None:
     assert renew[0]["inputSchema"]["properties"]["ttl"]["type"] == "number"
 
 
-async def test_renew_page_emits_audit_event(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_renew_page_emits_audit_event(emitted_events: EmittedEvents) -> None:
     """Every renewal is auditable through the event pipeline, carrying the TTL
     as a whole-second int (task #4011's cast: a float here would flip the
     emitted metric family to a histogram)."""
     d, _up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
-    emitted: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    monkeypatch.setattr(page_lifecycle.telemetry, "emit", record_emits(emitted))
+    emitted_events.clear()  # opening the page above emitted its own events
 
     res = await d.call_tool_for_agent("renew_page", {"ttl": 60}, 7)
 
     assert not res.is_error
-    assert emitted[0][0][:2] == ("telemetry", "chrome_page_ttl_renewed")
-    assert emitted[0][1]["agent_id"] == 7
-    assert emitted[0][1]["attributes"]["ttl_s"] == 60
-    assert isinstance(emitted[0][1]["attributes"]["ttl_s"], int)
+    emitted = list(emitted_events)
+    assert (emitted[0].category, emitted[0].event_name) == ("telemetry", "chrome_page_ttl_renewed")
+    assert emitted[0].agent_id == 7
+    assert emitted[0].attributes["ttl_s"] == 60
+    assert isinstance(emitted[0].attributes["ttl_s"], int)
 
     # A float caller still lands an int: locks the cast, not just the value.
     res2 = await d.call_tool_for_agent("renew_page", {"ttl": 90.9}, 7)
     assert not res2.is_error
-    assert emitted[1][1]["attributes"]["ttl_s"] == 91
-    assert isinstance(emitted[1][1]["attributes"]["ttl_s"], int)
+    emitted = list(emitted_events)
+    assert emitted[1].attributes["ttl_s"] == 91
+    assert isinstance(emitted[1].attributes["ttl_s"], int)
 
 
-async def test_expiry_emits_audit_event(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_expiry_emits_audit_event(emitted_events: EmittedEvents) -> None:
     d, _up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "https://example.com/old"}, 7)
     expire(d, 1)
-    emitted: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    monkeypatch.setattr(page_lifecycle.telemetry, "emit", record_emits(emitted))
+    emitted_events.clear()  # opening the page above emitted its own events
 
     assert await page_lifecycle.reap_expired_pages(d) == 1
 
-    assert emitted[0][0][:2] == ("log", "chrome_page_ttl_expired")
-    assert emitted[0][1]["attributes"]["page_id"] == 1
-    assert emitted[0][1]["agent_id"] == 7
+    emitted = list(emitted_events)
+    assert (emitted[0].category, emitted[0].event_name) == ("log", "chrome_page_ttl_expired")
+    assert emitted[0].attributes["page_id"] == 1
+    assert emitted[0].agent_id == 7

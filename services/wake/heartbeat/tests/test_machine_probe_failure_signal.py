@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base import telemetry
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import payload_keys
 from base.events.live.bus import EventBus
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.wake.heartbeat.liveness import (
     run_liveness_pass,
 )
@@ -29,18 +29,6 @@ class TestMachineProbeFailedSignal:
     """Every pass in which an unpaused machine's probe fails emits one
     `machine_probe_failed` event; a reachable or paused machine emits nothing."""
 
-    @pytest.fixture
-    def emitted(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> list[tuple[str, str, str, dict[str, Any]]]:
-        events: list[tuple[str, str, str, dict[str, Any]]] = []
-
-        def capture(category: str, event_name: str, **kwargs: Any) -> None:
-            events.append((category, event_name, kwargs["level"], kwargs["attributes"]))
-
-        monkeypatch.setattr(telemetry, "emit", capture)
-        return events
-
     async def _run(
         self, pool: ConnectionPool, probe: FakeProbe, *, database_gate: ProcessDbGate
     ) -> None:
@@ -53,7 +41,7 @@ class TestMachineProbeFailedSignal:
         self,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
-        emitted: list[tuple[str, str, str, dict[str, Any]]],
+        emitted_events: EmittedEvents,
         *,
         database_gate: ProcessDbGate,
     ) -> None:
@@ -61,7 +49,10 @@ class TestMachineProbeFailedSignal:
 
         for _ in range(3):
             asyncio.run(self._run(pool, FakeProbe({MACHINE: False}), database_gate=database_gate))
-        assert emitted == [
+        assert [
+            (event.category, event.event_name, event.level, event.attributes)
+            for event in emitted_events
+        ] == [
             ("telemetry", "machine_probe_failed", "warning", attrs)
             for attrs in (
                 {"machine": MACHINE, "consecutive_failures": 1},
@@ -70,14 +61,16 @@ class TestMachineProbeFailedSignal:
             )
         ]
         # The emitted attributes are exactly the declared payload.
-        assert set(emitted[0][3]) == set(payload_keys("machine_probe_failed"))
+        assert set(next(iter(emitted_events)).attributes) == set(
+            payload_keys("machine_probe_failed")
+        )
 
     @pytest.mark.usefixtures(pool.__name__)
     def test_reachable_machine_emits_nothing_and_a_new_run_restarts_at_one(
         self,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
-        emitted: list[tuple[str, str, str, dict[str, Any]]],
+        emitted_events: EmittedEvents,
         *,
         database_gate: ProcessDbGate,
     ) -> None:
@@ -86,14 +79,14 @@ class TestMachineProbeFailedSignal:
         asyncio.run(self._run(pool, FakeProbe({MACHINE: False}), database_gate=database_gate))
         asyncio.run(self._run(pool, FakeProbe({MACHINE: True}), database_gate=database_gate))
         asyncio.run(self._run(pool, FakeProbe({MACHINE: False}), database_gate=database_gate))
-        assert [attrs["consecutive_failures"] for *_, attrs in emitted] == [1, 1]
+        assert [event.attributes["consecutive_failures"] for event in emitted_events] == [1, 1]
 
     @pytest.mark.usefixtures(pool.__name__)
     def test_paused_machine_is_not_probed_and_emits_nothing(
         self,
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
-        emitted: list[tuple[str, str, str, dict[str, Any]]],
+        emitted_events: EmittedEvents,
         *,
         database_gate: ProcessDbGate,
     ) -> None:
@@ -120,4 +113,4 @@ class TestMachineProbeFailedSignal:
             assert probe_row is not None
             (n_probe_rows,) = probe_row
         assert n_probe_rows == 0
-        assert emitted == []
+        assert len(emitted_events) == 0

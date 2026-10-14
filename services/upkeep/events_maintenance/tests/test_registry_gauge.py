@@ -21,6 +21,8 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.daemon.loop_health import LoopProgress
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.upkeep.events_maintenance import registry_gauge
 
 
@@ -85,64 +87,52 @@ def test_read_max_agent_id_returns_none_for_empty_registry() -> None:
     )
 
 
-def test_emit_max_agent_id_sends_one_telemetry_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    emitted: list[tuple[str, str, dict[str, object]]] = []
-
-    def _fake_emit(
-        category: str, event_name: str, *, attributes: dict[str, object] | None = None
-    ) -> None:
-        emitted.append((category, event_name, attributes or {}))
-
-    monkeypatch.setattr(registry_gauge.telemetry, "emit", _fake_emit)
-
+def test_emit_max_agent_id_sends_one_telemetry_event(emitted_events: EmittedEvents) -> None:
     registry_gauge.emit_max_agent_id(9_999)
-    assert emitted == [("telemetry", "agent_registry", {"max_id": 9_999})]
+    assert [(e.category, e.event_name, e.attributes) for e in emitted_events] == [
+        ("telemetry", "agent_registry", {"max_id": 9_999})
+    ]
 
 
-async def test_a_round_samples_once_and_emits(monkeypatch: pytest.MonkeyPatch) -> None:
-    emitted: list[int] = []
-
+async def test_a_round_samples_once_and_emits(
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+) -> None:
     def read(_pool: object) -> int:
         return 42
 
     monkeypatch.setattr(registry_gauge, "read_max_agent_id_blocking", read)
-    monkeypatch.setattr(registry_gauge, "emit_max_agent_id", emitted.append)
 
     await registry_gauge.registry_gauge_round(cast(ConnectionPool, object()))
 
-    assert emitted == [42]
+    assert [e.attributes["max_id"] for e in emitted_events.named("agent_registry")] == [42]
 
 
 async def test_a_round_over_an_empty_registry_emits_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
 ) -> None:
-    emitted: list[int] = []
-
     def read(_pool: object) -> None:
         return None
 
     monkeypatch.setattr(registry_gauge, "read_max_agent_id_blocking", read)
-    monkeypatch.setattr(registry_gauge, "emit_max_agent_id", emitted.append)
 
     await registry_gauge.registry_gauge_round(cast(ConnectionPool, object()))
 
-    assert emitted == []
+    assert len(emitted_events) == 0
 
 
-async def test_the_loop_samples_at_once_then_paces(monkeypatch: pytest.MonkeyPatch) -> None:
-    samples: list[int] = []
-
+async def test_the_loop_samples_at_once_then_paces(
+    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+) -> None:
     def read(_pool: object) -> int:
         return 7
 
     monkeypatch.setattr(registry_gauge, "read_max_agent_id_blocking", read)
-    monkeypatch.setattr(registry_gauge, "emit_max_agent_id", samples.append)
     task = asyncio.create_task(
         registry_gauge.registry_gauge_loop(cast(ConnectionPool, object()), LoopProgress("g", 180.0))
     )
     try:
         for _ in range(200):
-            if samples:
+            if len(emitted_events):
                 break
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.05)
@@ -150,7 +140,8 @@ async def test_the_loop_samples_at_once_then_paces(monkeypatch: pytest.MonkeyPat
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    assert samples == [7]  # the sample at once; the 60 s wait never elapses
+    # the sample at once; the 60 s wait never elapses
+    assert [e.attributes["max_id"] for e in emitted_events] == [7]
 
 
 async def test_a_failing_sample_ends_the_loop(monkeypatch: pytest.MonkeyPatch) -> None:

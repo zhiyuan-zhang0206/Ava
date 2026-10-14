@@ -18,7 +18,8 @@ from typing import Any
 
 import pytest
 
-import services.entrypoints.im_bridge.adapters.feishu as feishu_module
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.sessions.tests.poll_until import poll_until_async
 from services.entrypoints.im_bridge.adapters.feishu import (
     MAX_SEGMENT_CHARS,
@@ -149,16 +150,6 @@ class PatchingAdapter(FeishuAdapter):
 
     def _build_ws_client(self) -> Any:
         return self._ws_client_impl
-
-
-class _LogRecorder:
-    """Captures info() calls so tests can assert delivery-count lines."""
-
-    def __init__(self) -> None:
-        self.messages: list[str] = []
-
-    def info(self, message: str, *args: Any) -> None:
-        self.messages.append(message.format(*args) if args else message)
 
 
 @pytest.fixture
@@ -399,7 +390,7 @@ async def test_send_segments_long_text(adapter: FeishuAdapter) -> None:
 
 
 async def test_send_logs_one_delivery_line_per_segment(
-    adapter: FeishuAdapter, monkeypatch: pytest.MonkeyPatch
+    adapter: FeishuAdapter, loguru_records: LogRecords
 ) -> None:
     """Each API-confirmed segment appends one 'feishu send ok' line (the
     delivery-count surface, task #4250); the poller-registration line is not
@@ -408,27 +399,23 @@ async def test_send_logs_one_delivery_line_per_segment(
     adapter._app_secret = "secret_x"  # noqa: S105
     rest = FakeRestClient()
     adapter._rest_client = rest
-    recorder = _LogRecorder()
-    monkeypatch.setattr(feishu_module, "logger", recorder)
     async with websocket_ready(adapter):
         await adapter.send("ou_user_1", "a" * (MAX_SEGMENT_CHARS * 2 + 123))
-    oks = [message for message in recorder.messages if "send ok" in message]
+    oks = [message for message in loguru_records.messages("INFO") if "send ok" in message]
     assert oks == ["feishu send ok chat_id=ou_user_1 message_id=om_sent_1"] * 3
 
 
 async def test_card_send_logs_delivery_line(
-    adapter: FeishuAdapter, monkeypatch: pytest.MonkeyPatch
+    adapter: FeishuAdapter, loguru_records: LogRecords
 ) -> None:
     """The interactive-card path logs its own 'feishu send ok' line."""
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
     rest = FakeRestClient()
     adapter._rest_client = rest
-    recorder = _LogRecorder()
-    monkeypatch.setattr(feishu_module, "logger", recorder)
     async with websocket_ready(adapter):
         await adapter.send("ou_user_1", "hi", buttons=[("List", "/list")])
-    oks = [message for message in recorder.messages if "send ok" in message]
+    oks = [message for message in loguru_records.messages("INFO") if "send ok" in message]
     assert oks == ["feishu send ok chat_id=ou_user_1 message_id=om_sent_1"]
 
 

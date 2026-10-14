@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from typing import Any
 
 import pytest
 
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 from services.agent_runner.agent_host.tests.turn_dispatcher.helpers import (
@@ -22,18 +23,13 @@ from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import Sc
 
 class TestSubscriptionRecovery:
     async def test_db_down_scan_keeps_the_redis_subscription_open(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         """The durable backstop may be down while the Redis wake path remains healthy."""
         pubsub = QueueingPubSub()
         clients = patch_redis(monkeypatch, pubsub)
         failures_seen = asyncio.Event()
-        failure_events: list[dict[str, object]] = []
         scans = 0
-
-        def _warning(_message: str, **fields: object) -> None:
-            if fields["event"] == "host_dispatcher_scan_failed":
-                failure_events.append(fields)
 
         async def _pending() -> list[int]:
             nonlocal scans
@@ -42,7 +38,6 @@ class TestSubscriptionRecovery:
                 failures_seen.set()
             raise RuntimeError("database unavailable")
 
-        monkeypatch.setattr(dispatcher.logger, "warning", _warning)
         disp = InboundWakeDispatcher(
             EventBus.from_settings(),
             ScanScheduler(),
@@ -56,6 +51,9 @@ class TestSubscriptionRecovery:
         try:
             await asyncio.wait_for(failures_seen.wait(), timeout=1.0)
 
+            failures = loguru_records.events("host_dispatcher_scan_failed")
+            assert all(record["level"].name == "WARNING" for record in failures)
+            failure_events = [record["extra"] for record in failures]
             assert len(clients) == 1
             assert len(failure_events) >= 3
             assert [event["backoff_s"] for event in failure_events[:3]] == [0.02, 0.04, 0.04]
@@ -244,15 +242,9 @@ class TestReconnectExhaustion:
     endless reconnect loop; one completed read starts the count over."""
 
     async def test_consecutive_failures_raise_and_log_an_error_event(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
         opened = 0
-        errors: list[dict[str, Any]] = []
-
-        def _error(_message: str, **fields: Any) -> None:
-            errors.append(fields)
-
-        monkeypatch.setattr(dispatcher.logger, "error", _error)
 
         def _open(_url: str, **_kw: object) -> _ScriptedRedis:
             nonlocal opened
@@ -270,9 +262,10 @@ class TestReconnectExhaustion:
         limit = dispatcher.MAX_CONSECUTIVE_RECONNECT_FAILURES
         assert opened == limit, "the run must stop reconnecting at the limit"
         assert isinstance(raised.value.__cause__, ConnectionError)
-        exhausted = [e for e in errors if e.get("event") == "host_dispatcher_reconnect_exhausted"]
+        exhausted = loguru_records.events("host_dispatcher_reconnect_exhausted")
         assert len(exhausted) == 1
-        assert exhausted[0]["failures"] == limit
+        assert exhausted[0]["level"].name == "ERROR"
+        assert exhausted[0]["extra"]["failures"] == limit
 
     async def test_a_completed_read_resets_the_failure_count(
         self, monkeypatch: pytest.MonkeyPatch
