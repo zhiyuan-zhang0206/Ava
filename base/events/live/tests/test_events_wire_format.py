@@ -45,11 +45,13 @@ from base.events.live.projection import (
     TaskCreated,
     TaskUpdated,
     TokenUsage,
+    ToUserChanged,
 )
 
 # Frozen list of (class, expected role, extra fields beyond agent_id/role).
 # When adding a role, append it here — forget and the new Event variant is unpinned.
 FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
+    (ToUserChanged, "to_user_changed", {}),
     (AgentSpawned, "agent_spawned", {}),
     (AgentUpdated, "agent_updated", {}),
     (ChatStart, "chat_start", {"item_id": "5.0"}),
@@ -172,6 +174,7 @@ def test_global_roles_is_low_frequency_subset_of_system_roles():
         "agent_spawned",
         "agent_updated",
         "label_updated",
+        "to_user_changed",
         "page_opened",
         "page_closed",
         "notice_posted",

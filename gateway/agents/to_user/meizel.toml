@@ -1,0 +1,4 @@
+exports = ["document.py"]
+
+[uses]
+"tests" = ["document.py"]

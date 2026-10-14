@@ -23,10 +23,10 @@ interface ColumnFrame {
 }
 
 const DESKTOP_COLUMNS: ColumnFrame = {
-  layoutId: "ava.home.columns.desktop",
-  expanded: ["30%", "70%"],
+  layoutId: "ava.home.columns.context",
+  expanded: ["16%", "84%"],
   collapsedSidebarSize: 3,
-  expandedMinimums: ["20%", "45%"],
+  expandedMinimums: ["12%", "60%"],
 };
 
 const MOBILE_COLUMNS: ColumnFrame = {
@@ -36,8 +36,8 @@ const MOBILE_COLUMNS: ColumnFrame = {
   expandedMinimums: ["30%", "40%"],
 };
 
-const INSPECTOR_LAYOUT_ID = "ava.home.inspector.desktop";
-const INSPECTOR_OPEN_SIZES = ["68%", "32%"] as const;
+const INSPECTOR_LAYOUT_ID = "ava.home.context.desktop";
+const INSPECTOR_OPEN_SIZES = ["57.143%", "42.857%"] as const;
 
 // v4 stores a group's layout as { <panelId>: percent }, so panel ids are part
 // of the persisted state (the library also writes them to id/data-testid on

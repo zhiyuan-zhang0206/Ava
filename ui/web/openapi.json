@@ -550,6 +550,84 @@
         }
       }
     },
+    "/api/agents/{agent_id}/to-user": {
+      "get": {
+        "summary": "Get To User",
+        "operationId": "get_to_user_api_agents__agent_id__to_user_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToUserDocument"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/to-user/document": {
+      "get": {
+        "summary": "To User Document",
+        "operationId": "to_user_document_api_agents__agent_id__to_user_document_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keyed/v1/agents/{agent_id}/retry-launch": {
       "post": {
         "summary": "Retry Launch",
@@ -18798,6 +18876,62 @@
         ],
         "title": "TimelineResponse",
         "description": "Cold-load timeline payload: one window of rendered items + the\nauthoritative `msg_count` (len(state.messages)) + `has_more`.\n\n`msg_count` is surfaced (not inferred frontend-side from max rendered\nmsg_idx) so the merge that preserves the single streaming \"future\npartial\" uses the exact boundary — a trailing message that renders to\nnothing would otherwise make an inferred count too low.\n\nThe endpoint returns only a tail window (newest `limit` items); `before`\npages further back for scroll-up history. `has_more` reports whether\nolder items exist before the returned window."
+      },
+      "ToUserDocument": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "html",
+              "markdown"
+            ],
+            "title": "Format"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "modified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "format",
+          "content",
+          "version",
+          "modified_at"
+        ],
+        "title": "ToUserDocument",
+        "description": "An authoritative file snapshot; missing or empty files have no content."
       },
       "TokenUsageResponse": {
         "properties": {

@@ -486,6 +486,7 @@
     "timeline_window_measure_rows": "display",
     "timeline_window_turn_rows": "display",
     "timezone": "general",
+    "to_user_format": "agent",
     "trace_disk_watermark": "observability",
     "trace_enabled": "observability",
     "trace_max_dir_mb": "observability",
@@ -857,6 +858,7 @@
     "timeline_window_measure_rows": "AVA_TIMELINE_WINDOW_MEASURE_ROWS",
     "timeline_window_turn_rows": "AVA_TIMELINE_WINDOW_TURN_ROWS",
     "timezone": "AVA_TIMEZONE",
+    "to_user_format": "AVA_TO_USER_FORMAT",
     "trace_disk_watermark": "AVA_TRACE_DISK_WATERMARK",
     "trace_enabled": "AVA_TRACE_ENABLED",
     "trace_max_dir_mb": "AVA_TRACE_MAX_DIR_MB",
@@ -1228,6 +1230,7 @@
     "timeline_window_measure_rows": "cluster-pinned",
     "timeline_window_turn_rows": "cluster-pinned",
     "timezone": "cluster-pinned",
+    "to_user_format": "cluster-default",
     "trace_disk_watermark": "cluster-pinned",
     "trace_enabled": "cluster-pinned",
     "trace_max_dir_mb": "cluster-pinned",
@@ -1599,6 +1602,7 @@
     "timeline_window_measure_rows": "common",
     "timeline_window_turn_rows": "common",
     "timezone": "common",
+    "to_user_format": "agent-runner",
     "trace_disk_watermark": "common",
     "trace_enabled": "common",
     "trace_max_dir_mb": "common",
@@ -1678,7 +1682,8 @@
     "skills_to_expand_at_start",
     "skills_to_inject_into_system_prompt",
     "syntax_fix_ruff_format",
-    "system_prompt_extra"
+    "system_prompt_extra",
+    "to_user_format"
   ],
   "sensitive_fields": [
     "anthropic_api_key",
