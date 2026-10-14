@@ -66,37 +66,13 @@ _SECRETS = (
     (re.compile(rf"(?i)(\b{_SECRET_NAME}[\"']?\s*[=:]\s*[\"']?)[^\s\"',;}}]+"), r"\1<redacted>"),
     (re.compile(r"(?i)([a-z][a-z0-9+.-]*://[^/\s:@]*:)[^@\s/]+@"), r"\1<redacted>@"),
 )
-GATEWAY_PROGRAM = """\
-import json, sys, time, uuid
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
-from base.cluster.machine import gateway_api_base, gateway_auth_headers
-from base.host.net.http_dial import get, post
-base, headers = gateway_api_base(), gateway_auth_headers()
-if sys.argv[1] == "roster":
-    rows = get(f"{base}/api/cluster/roster?fresh=true", headers=headers, timeout=90); rows.raise_for_status()
-    keep = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve_agent_runner")
-    print(json.dumps([{key: row[key] for key in keep} for row in rows.json()])); sys.exit(0)
-keyed = {**headers, "Idempotency-Key": uuid.uuid4().hex, SCOPE_HEADER: PRINCIPAL_SCOPE}
-spawned = post(f"{base}/api/keyed/v1/agents", headers=keyed, json={"machine": sys.argv[2]}, timeout=60)
-out = {"completed": False, "spawn": spawned.status_code}
-if spawned.status_code >= 300:
-    print(json.dumps(out)); sys.exit(1)
-agent = out["agent"] = spawned.json()["id"]
-try:
-    message = {"content": "Update smoke test. Run exactly this Python code with your code tool, once: print(1 + 2)", "source": "user"}
-    post(f"{base}/api/agents/{agent}/messages", headers=headers, json=message, timeout=60).raise_for_status()
-    deadline = time.monotonic() + float(sys.argv[3])
-    while not out["completed"] and time.monotonic() < deadline:
-        time.sleep(4)
-        items = get(f"{base}/api/agents/{agent}/timeline", headers=headers, timeout=60).json()["items"]
-        code = [i for i, item in enumerate(items) if item["kind"] == "agent_code" and "print(1+2)" in item["payload"].replace(" ", "")]
-        outputs = [item["payload"] for item in items[code[-1] + 1:] if item["kind"] == "code_output"] if code else []
-        out["completed"] = bool(outputs) and outputs[0].partition("\\n\\n")[2].strip().startswith("3")
-finally:
-    out["terminate"] = post(f"{base}/api/agents/{agent}/terminate", headers=headers, timeout=60).status_code
-    print(json.dumps(out))
-sys.exit(0 if out["completed"] and out["terminate"] < 300 else 2)
-"""
+
+
+def gateway_program() -> str:
+    """The gateway checks' single source, sent on stdin after NEW has started."""
+    return (Path(__file__).parent / "commands" / "management" / "fleet_gateway.py").read_text(
+        encoding="utf-8"
+    )
 
 
 # Before anything stops: NEW's `ava schedules verify` over the running gateway's schedule table
@@ -387,7 +363,7 @@ def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[di
     wanted = set(names.values())
     deadline = time.monotonic() + args.roster_timeout
     while True:
-        out = s.run(args.gateway, f"{program} roster", effect=False, stdin=GATEWAY_PROGRAM)
+        out = s.run(args.gateway, f"{program} roster", effect=False, stdin=gateway_program())
         rows = json.loads(out.splitlines()[-1])
         if missing := sorted(wanted - {row["name"] for row in rows}):
             raise FailedError(f"no roster row for {missing} (host aliases to names: {names})")
@@ -464,7 +440,7 @@ def up(s: Session, args: argparse.Namespace) -> None:
     rows, commit = _roster(s, args, program)
     for name in [row["name"] for row in rows if row["serve_agent_runner"]]:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
-        s.run(args.gateway, smoke, stdin=GATEWAY_PROGRAM)
+        s.run(args.gateway, smoke, stdin=gateway_program())
     _refresh(s, args)
     _drift_checks(s, args)  # last, so a false red never skips the smoke or the refresh
     _silence(s, args, "close")
