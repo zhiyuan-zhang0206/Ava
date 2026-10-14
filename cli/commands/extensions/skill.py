@@ -142,10 +142,10 @@ def cmd_skill_scan(target: str) -> int:
 
     root = Path(target).expanduser()
     if not root.is_dir():
-        root = paths.skills_dir() / target
+        root = paths.skills_dir(paths.ava_home()) / target
     if not root.is_dir():
         print(
-            f"[ava skill scan] no directory at '{target}' nor {paths.skills_dir() / target}.",
+            f"[ava skill scan] no directory at '{target}' nor {paths.skills_dir(paths.ava_home()) / target}.",
             file=sys.stderr,
         )
         return 1
@@ -246,7 +246,7 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
     # `name` is both a registry key and a path segment, so it has to become the
     # directory's REAL spelling before either use: the caller may type the
     # canonical dash form at a directory that is still `foo_bar/` on disk.
-    skills_root = paths.skills_dir()
+    skills_root = paths.skills_dir(paths.ava_home())
     on_disk = (
         find(name, (p.name for p in skills_root.iterdir() if p.is_dir()))
         if skills_root.is_dir()
@@ -600,7 +600,7 @@ def cmd_skill_update(
         return 1
 
     sources = _selected_sources(repo, names)
-    skills_root = paths.skills_dir()
+    skills_root = paths.skills_dir(paths.ava_home())
     skills_root.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC).isoformat(timespec="seconds")
     landed: list[str] = []
@@ -664,7 +664,7 @@ def cmd_skill_upgrade(name: str) -> int:
         )
         return 1
 
-    dest = paths.skills_dir() / name
+    dest = paths.skills_dir(paths.ava_home()) / name
     if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
             f"[ava skill upgrade] note: '{name}' was modified locally; "

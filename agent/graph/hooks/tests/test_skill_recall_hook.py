@@ -121,7 +121,7 @@ def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[
 
 @pytest.fixture
 def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    d = paths.skills_dir()
+    d = paths.skills_dir(paths.ava_home())
     d.mkdir()
     monkeypatch.setattr(
         install_registry,

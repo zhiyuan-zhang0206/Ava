@@ -10,7 +10,6 @@ from typing import Any
 
 import pytest
 
-from base import paths
 from base.db.tests.fakes import patch_database
 from base.packages.extensions import adopt, materialize
 from cli.commands.extensions.materialize import (
@@ -54,14 +53,13 @@ def test_materialize_cluster_extensions_closes_pool_on_success(
 ) -> None:
     """Materialization closes its eagerly opened worker-owning pool after use."""
     spy = _install_pool_spy(monkeypatch)
-    monkeypatch.setattr(paths, "skills_dir", lambda: tmp_path)
 
     def _noop_materialize(_conn: object, *, _dest_root: Path) -> SimpleNamespace:
         return SimpleNamespace(landed=[], updated=[], kept_local_edits=[], missing_blob=[])
 
     monkeypatch.setattr(materialize, "materialize_skills", _noop_materialize)
 
-    materialize_cluster_extensions(database_factory=operator_database)
+    materialize_cluster_extensions(database_factory=operator_database, skills_root=tmp_path)
 
     assert spy.closed
 
@@ -71,14 +69,13 @@ def test_materialize_cluster_extensions_closes_pool_when_materialize_raises(
 ) -> None:
     """The best-effort materialization failure path still closes the pool."""
     spy = _install_pool_spy(monkeypatch)
-    monkeypatch.setattr(paths, "skills_dir", lambda: tmp_path)
 
     def raise_materialize(*args: object, **kwargs: object) -> None:
         raise RuntimeError("registry unavailable")
 
     monkeypatch.setattr(materialize, "materialize_skills", raise_materialize)
 
-    materialize_cluster_extensions(database_factory=operator_database)
+    materialize_cluster_extensions(database_factory=operator_database, skills_root=tmp_path)
 
     assert spy.closed
 
@@ -92,7 +89,6 @@ def test_adopt_local_extensions_closes_pool_on_success(
 ) -> None:
     """Adoption closes its eagerly opened worker-owning pool after use."""
     spy = _install_pool_spy(monkeypatch)
-    monkeypatch.setattr(paths, "skills_dir", lambda: tmp_path)
 
     def _noop_adopt(_pool: object, *, _skills_root: Path) -> SimpleNamespace:
         return SimpleNamespace(adopted=[], missing_tree=[], conflicts=[])
@@ -100,7 +96,9 @@ def test_adopt_local_extensions_closes_pool_on_success(
     monkeypatch.setattr(adopt, "adopt_local_installs", _noop_adopt)
 
     adopt_local_extensions(
-        database_factory=operator_database, machine_name=command_runtime.machine.name
+        database_factory=operator_database,
+        machine_name=command_runtime.machine.name,
+        skills_root=tmp_path,
     )
 
     assert spy.closed
@@ -115,7 +113,6 @@ def test_adopt_local_extensions_closes_pool_when_adopt_raises(
 ) -> None:
     """The best-effort adoption failure path still closes the pool."""
     spy = _install_pool_spy(monkeypatch)
-    monkeypatch.setattr(paths, "skills_dir", lambda: tmp_path)
 
     def raise_adopt(*args: object, **kwargs: object) -> None:
         raise RuntimeError("registry unavailable")
@@ -123,7 +120,9 @@ def test_adopt_local_extensions_closes_pool_when_adopt_raises(
     monkeypatch.setattr(adopt, "adopt_local_installs", raise_adopt)
 
     adopt_local_extensions(
-        database_factory=operator_database, machine_name=command_runtime.machine.name
+        database_factory=operator_database,
+        machine_name=command_runtime.machine.name,
+        skills_root=tmp_path,
     )
 
     assert spy.closed

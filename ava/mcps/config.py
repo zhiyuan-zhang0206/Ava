@@ -217,7 +217,7 @@ def _installed_mcp_paths() -> list[Path]:
     """
     from base.packages.extensions.install_registry import installed_mcp_names
 
-    root = mcps_dir()
+    root = mcps_dir(ava_home())
     if not root.is_dir():
         return []
     paths: list[Path] = []
@@ -246,7 +246,7 @@ def installed_mcp_dir(name: str) -> Path | None:
         return None
     if name in read_servers(machine_config_path()):
         return None
-    d = mcps_dir() / name
+    d = mcps_dir(ava_home()) / name
     return d if (d / ".mcp.json").is_file() else None
 
 
