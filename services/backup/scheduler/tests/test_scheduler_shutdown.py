@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, patch
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.config import ConfigBoot, ensure_eager, settings
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -163,18 +164,20 @@ def _operation_harness(root: Path, mode: str, postgres_base: Path):
 def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
     # This child is not pytest: patching a settings attribute needs the eager chain.
     ensure_eager()
-    state = daemon.BackupState()
+    state = daemon.BackupState(started_at=SYSTEM_TIMERS.monotonic())
     pidfile = root / "daemon.pid"
     restore_mode = mode.startswith("restore")
 
     def record_success(_now: datetime) -> None:
         (root / "restore-success").touch()
 
-    async def loop(_state: object, *, config: ConfigBoot) -> None:
+    async def loop(_state: object, *, config: ConfigBoot, clock: Clock) -> None:
         if restore_mode:
-            await daemon.run_due_local_dump_restore(datetime.now().astimezone(), config=config)
+            await daemon.run_due_local_dump_restore(
+                datetime.now().astimezone(), config=config, clock=clock
+            )
         else:
-            await daemon.backup_loop(state, config=config)
+            await daemon.backup_loop(state, config=config, clock=clock)
 
     def write_pidfile(_config: ConfigBoot, *, runtime: Path) -> None:
         assert runtime.name == "run"
@@ -214,12 +217,14 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
 
 def _run_daemon() -> None:
     daemon.install_graceful_shutdown("backup-shutdown-test")
+    config = ConfigBoot()
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(
             daemon.run(
-                config=ConfigBoot(),
+                config=config,
                 image=LoadedCommit(Path(), None),
                 runtime=Path(os.environ["AVA_HOME"]) / "run",
+                clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             )
         )
 

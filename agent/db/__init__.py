@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple, TypeVar, cast
@@ -18,6 +17,7 @@ from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.live import ALIVE_STATUSES
 from base.agents.incarnation.native_work_models import NativeCancelPendingError, NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
+from base.clock import Timers
 from base.config import settings
 from base.db import Database
 from base.db.transaction import async_write_transaction
@@ -59,8 +59,9 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
     identical to the base pool (the exception still propagates).
     """
 
-    def __init__(self, *args: Any, pool_name: str, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, pool_name: str, timers: Timers, **kwargs: Any) -> None:
         self._pool_name = pool_name
+        self._timers = timers
         # The borrow in flight on each task of THIS pool: `_getconn_unchecked` and
         # `_check_connection` run inside that task and add their share to its span.
         self._borrow_spans: WeakKeyDictionary[asyncio.Task[Any], _BorrowSpan] = WeakKeyDictionary()
@@ -78,28 +79,28 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
 
     async def _getconn_unchecked(self, timeout: float) -> _CT:
         # Includes the pool lock and client-side queue, not server-side PgBouncer wait.
-        started = time.monotonic()
+        started = self._timers.monotonic()
         try:
             return await super()._getconn_unchecked(timeout)
         finally:
             task = asyncio.current_task()
             span = self._borrow_spans.get(task) if task is not None else None
             if span is not None:
-                span.slot_wait_ms += (time.monotonic() - started) * 1000
+                span.slot_wait_ms += (self._timers.monotonic() - started) * 1000
 
     async def _check_connection(self, conn: _CT) -> None:
-        started = time.monotonic()
+        started = self._timers.monotonic()
         try:
             await super()._check_connection(conn)
         finally:
             task = asyncio.current_task()
             span = self._borrow_spans.get(task) if task is not None else None
             if span is not None:
-                span.check_ms += (time.monotonic() - started) * 1000
+                span.check_ms += (self._timers.monotonic() - started) * 1000
                 span.check_attempts += 1
 
     async def getconn(self, timeout: float | None = None) -> _CT:
-        t0 = time.monotonic()
+        t0 = self._timers.monotonic()
         span = _BorrowSpan()
         task = asyncio.current_task()
         assert task is not None  # noqa: S101 — async pool borrow runs in a task
@@ -115,7 +116,7 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
                 "— Postgres unreachable or the client pool is saturated",
                 event="db_pool_acquire_timeout",
                 name=self._pool_name,
-                elapsed=time.monotonic() - t0,
+                elapsed=self._timers.monotonic() - t0,
                 slot_wait_ms=span.slot_wait_ms,
                 check_ms=span.check_ms,
                 check_attempts=span.check_attempts,
@@ -124,7 +125,7 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
             )
             raise
         else:
-            elapsed = time.monotonic() - t0
+            elapsed = self._timers.monotonic() - t0
             if elapsed >= settings.agent.db_pool_slow_acquire_warn_seconds:
                 stats = self._acquire_stats()
                 logger.warning(

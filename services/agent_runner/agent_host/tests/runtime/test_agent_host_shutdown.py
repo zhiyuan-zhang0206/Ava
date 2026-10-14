@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -210,6 +211,7 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
                     database=lambda: Database.from_settings(gate=database_gate),
                     machine=machine,
                     home=home,
+                    timers=SYSTEM_TIMERS,
                 )
             )
         except (
