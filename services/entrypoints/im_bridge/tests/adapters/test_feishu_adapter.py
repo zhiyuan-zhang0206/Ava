@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 import services.entrypoints.im_bridge.adapters.feishu as feishu_module
+from base.sessions.tests.poll_until import poll_until_async
 from services.entrypoints.im_bridge.adapters.feishu import (
     MAX_SEGMENT_CHARS,
     FeishuAdapter,
@@ -27,7 +28,6 @@ from services.entrypoints.im_bridge.adapters.feishu import (
 from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
-from tests.components.base.poll_until import poll_until_async
 
 
 class FakeCore:

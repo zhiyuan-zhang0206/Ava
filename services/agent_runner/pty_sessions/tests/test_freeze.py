@@ -15,8 +15,8 @@ import pytest
 
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.sessions.pty import allocation_freeze, client
-from tests.path_scoped.pty_service import pty_service as pty_service
-from tests.path_scoped.pty_shells import new, output_until, type_line, wait_for
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_shells import new, output_until, type_line, wait_for
 
 pytestmark = pytest.mark.usefixtures("pty_service")
 

@@ -23,7 +23,7 @@ import pytest
 from base.sessions import posixproc
 from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend, get_shell_backend
 from base.sessions.protocol import SessionBackend
-from tests.components.base.poll_until import poll_until
+from base.sessions.tests.poll_until import poll_until
 
 # A long-lived child that outlives the test body; each test kills it explicitly.
 _SLEEP = "/bin/sleep 300"
