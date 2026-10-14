@@ -24,6 +24,7 @@ import pytest
 import cli.commands.converge.firewall as cfw
 import cli.commands.converge.firewall_command as firewall_cmd
 import cli.commands.lifecycle.converge_host as cv
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -59,6 +60,7 @@ def _ctx(
         helper=refuse_helper,
         host=host if host is not None else fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )  # type: ignore[arg-type]
 
 

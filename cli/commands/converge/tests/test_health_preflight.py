@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineRoles
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -51,6 +52,7 @@ def _preflight_ctx(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
 
@@ -394,6 +396,7 @@ def _git_repo(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
     return ctx, head, first
 
@@ -464,6 +467,7 @@ def test_checkout_worktree_skipped(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
     (wt / "stray.txt").write_text("dirty\n")
 

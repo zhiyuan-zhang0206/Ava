@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane import redis_bridge
 from base.cluster.dataplane.redis_bridge import RedisBridgeEndpoint
 from base.cluster.machine.boot import machine_from_boot
@@ -145,6 +146,7 @@ def test_converge_retires_the_standalone_launchd_job_and_installed_copy(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
     bridge.retire_launchd_redis_bridge(ctx)
@@ -333,6 +335,7 @@ def test_probe_uses_each_owners_live_url_and_recorded_port(
         machine=machine_from_boot(second_config),
         helper=refuse_helper,
         host=command_runtime.host,
+        timers=ManualTimers(),
     )
     urls: list[str] = []
     closed: list[str] = []

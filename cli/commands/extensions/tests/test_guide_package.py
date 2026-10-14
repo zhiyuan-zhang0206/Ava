@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 import ava.skills
+from base.clock.tests.manual_timers import ManualTimers
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
@@ -125,6 +126,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
     external_skills.converge_external_agent_skill(context, host_home=host_home)
     target = client_home / "skills" / "ava-guide"

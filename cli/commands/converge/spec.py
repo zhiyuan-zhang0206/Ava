@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock import Timers
 from base.cluster.machine import MachineIdentity, MachineRole, MachineRoles
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
@@ -38,6 +39,7 @@ class ConvergeCtx:
     producer: Callable[[], EventPipeline]
     helper: HelperFactory
     host: Host
+    timers: Timers
     services: frozenset[str]
 
     def read_config(self) -> ConfigBoot:

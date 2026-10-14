@@ -12,6 +12,7 @@ import pytest
 
 import base.config as config_facade
 from base.agents.context.clients import DatabaseFactory
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane import pg_runtime, runtime_binaries
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -92,6 +93,7 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
             helper=refuse_helper,
             host=fake_host(),
             services=frozenset(),
+            timers=ManualTimers(),
         )
     )
     assert pg_runtime.pg_tool("postgres") == installed / "postgres"
@@ -124,6 +126,7 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             helper=refuse_helper,
             host=fake_host(),
             services=frozenset(),
+            timers=ManualTimers(),
         )
     )
 
@@ -156,6 +159,7 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 helper=refuse_helper,
                 host=fake_host(),
                 services=frozenset(),
+                timers=ManualTimers(),
             )
         )
     ensure_pg_binaries_step(contexts[0])

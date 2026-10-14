@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 import cli.commands.lifecycle.converge_host as cv
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
@@ -39,6 +40,7 @@ def _ctx(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
 
@@ -241,6 +243,7 @@ def test_context_read_failure_keeps_the_original_error(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
     with pytest.raises(RuntimeError) as caught:
         cv.ensure_browser(ctx)

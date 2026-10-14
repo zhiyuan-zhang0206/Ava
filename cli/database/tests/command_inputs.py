@@ -2,6 +2,7 @@
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -26,6 +27,7 @@ def command_runtime() -> CommandRuntime:
         machine=machine_from_boot(config),
         helper=refuse_helper,
         host=fake_host(),
+        timers=ManualTimers(),
     )
 
 
