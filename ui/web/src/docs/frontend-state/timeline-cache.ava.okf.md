@@ -23,7 +23,10 @@ existing read leaves a trailing composed read (including the initial no-cache
 request), a second gap during the composed read leaves one more, and the
 composed write never overwrites a newer read. Leaving the view aborts the
 in-flight request through its AbortSignal and disposes queued reconcile work,
-so query cancellation reaches `fetch`. Older-page requests have selection-scoped controllers:
+so query cancellation reaches `fetch`. The coordinator exposes its queued/running
+activity directly through an external-store subscription. `useTimeline.isFetching`
+includes that activity, including join/trailing work, and clears on abort or
+selection loss even when a transport ignores cancellation. Older-page requests have selection-scoped controllers:
 a late response after A-to-B-to-A cannot append to the new A view, and cancellation
 does not produce an error toast or clear the new view's loading state.
 
@@ -53,9 +56,14 @@ and preserves the immediate swap. Switch clears the buffer; hide and reconnect
 invalidate a page owner's epoch while preserving it; a newer compact captures
 the current display at a new epoch. Late pages cannot enter a newer epoch.
 
-History remains fully accessible through scroll-up paging. Switching releases
-the inactive store view (scroll-loaded history is not retained); only the tail
-window stays cached, for the 30-minute window. Durable records are untouched.
+History remains fully accessible through scroll-up paging. Leaving a selection
+freezes its displayed rows, compact buffer and paging boundary under the
+`timeline-reading-window` query key for the same 30-minute retention window.
+Returning consumes that frozen window into the selected store; leaving again
+starts a fresh retention interval. The authoritative tail query remains separate
+and a fresh composed reconcile merges into the retained rows. Inactive windows
+own no SSE subscriptions, DOM, timers or live reducer buckets. Durable records
+are untouched.
 While the reader follows the bottom, `TimelineView` asks the store to trim the
 oldest canonical rows to `display.timeline_retained_items_max` (250 by default),
 sets `hasMoreOlder` so evicted rows can be reloaded, and resets the next older

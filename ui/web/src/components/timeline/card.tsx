@@ -315,7 +315,8 @@ export const HEADER_CLS =
 // pins one level deeper instead (STICKY_CHILD_HEADER_CLS below). While
 // `isStuck`, the header switches to the elevated frosted-glass surface over the
 // body scrolling beneath it; the resting header remains transparent.
-export const STICKY_HEADER_CLS = "sticky top-11 z-10";
+export const STICKY_HEADER_CLS =
+  "sticky top-11 z-10 group-data-[fast-scrolling=true]/timeline:relative group-data-[fast-scrolling=true]/timeline:top-auto";
 
 // The nested variant (task #3215): a work block's child card pins under the
 // block header's pinned bottom — the same 2.75rem bar offset (BAR_HEIGHT_CLASS
@@ -324,7 +325,7 @@ export const STICKY_HEADER_CLS = "sticky top-11 z-10";
 // the block header (z-10) while staying above the card body scrolling beneath
 // it. Tailwind needs the literal class string (underscores = the calc spaces).
 export const STICKY_CHILD_HEADER_CLS =
-  "sticky top-[calc(2.75rem_+_var(--turn-header-h,0px))] z-[5]";
+  "sticky top-[calc(2.75rem_+_var(--turn-header-h,0px))] z-[5] group-data-[fast-scrolling=true]/timeline:relative group-data-[fast-scrolling=true]/timeline:top-auto";
 // A single frosted pane covers the header and its 2px top overlap, preserving
 // the translucent hover without an unblurred seam under HeaderBar/parent turn.
 // The button stays transparent: painting the pane twice would flatten the glass.

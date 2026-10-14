@@ -1,45 +1,65 @@
 "use client";
 
-// Floating overlay chrome for the timeline view: the load-older spinner, the
-// cold-load spinner, and the scroll-to-bottom button. (The load-earlier
-// button, the in-divider pill and the pull-to-load ring are gone — older
-// pages load when an actual upward scroll gesture reaches the top, bounded
-// per burst, tasks #4186/#4702.)
+// Overlays follow their owning interaction without intercepting pointer input.
 
 import { ArrowDown, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/format/utils";
-import { FLEX, FLEX_1 } from "@/lib/layout/layout";
+import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 
-// Load-older spinner — shown while a scroll-up paging fetch (an upward
-// gesture reaching the top with older pages remaining) is in flight. Always
-// mounted (opacity-only visibility) and an absolutely-positioned overlay
-// outside the scrolled content, so it never shifts scrollHeight or disturbs
-// the prepend anchor; pointer-events-none in every state so it can never
-// capture the wheel/touch gesture that triggered it. Only the icon is
-// conditional: an always-running animate-spin under opacity-0 kept the
-// compositor and style system busy on every idle frame.
-export function LoadOlderSpinner({ loadingOlder }: { loadingOlder: boolean }) {
+// The circle is clipped above the revealed native scroll space. No visible
+// instructions compete with the conversation; the label remains accessible.
+export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 0, returning = false }: {
+  loadingOlder: boolean; pullProgress?: number; pullOffset?: number; returning?: boolean;
+}) {
   const t = useTranslations("timeline");
+  const visible = loadingOlder || pullOffset > 0;
+  const state = loadingOlder ? "loading" : pullProgress >= 1 ? "ready" : "pulling";
+  const height = pullOffset || (loadingOlder ? 40 : 0);
+  const circumference = 2 * Math.PI * 8;
+  const arc = loadingOlder ? 0.72 : 0.18 + 0.54 * pullProgress;
   return (
     <div
       role="status"
-      aria-hidden={!loadingOlder}
+      aria-hidden={!visible}
       data-testid="load-older-spinner"
+      data-state={visible ? state : "idle"}
+      data-pull-offset={pullOffset}
+      style={{ height }}
       className={cn(
-        "absolute top-14 left-1/2 -translate-x-1/2 z-20 pointer-events-none",
-        "size-9 rounded-full",
-        "bg-background border border-border shadow-md",
-        "items-center justify-center text-primary",
-        "transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
-        loadingOlder ? "opacity-100" : "opacity-0 scale-75",
-        FLEX,
+        "absolute top-11 inset-x-0 z-20 pointer-events-none text-muted-foreground justify-center items-center",
+        returning && "transition-[height,opacity] duration-200 ease-out motion-reduce:transition-none",
+        visible ? "opacity-100" : "opacity-0",
+        OVERFLOW_HIDDEN, FLEX,
       )}
     >
+      {visible ? (
+        <svg viewBox="0 0 24 24" className="size-5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true">
+          <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" opacity="0.15" />
+          <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
+            strokeDasharray={`${circumference * arc} ${circumference * (1 - arc)}`} />
+        </svg>
+      ) : null}
       <span className="sr-only">{t("loadingEarlier")}</span>
-      {loadingOlder ? <Loader2 className="size-4 animate-spin text-primary" /> : null}
     </div>
+  );
+}
+
+// Gesture paging remains available to keyboard and assistive-technology users.
+// Reveal this control only when focused, without adding idle reading chrome.
+export function LoadOlderKeyboardButton({ loading, onClick }: { loading: boolean; onClick: () => boolean }) {
+  const t = useTranslations("timeline");
+  return (
+    <button
+      type="button"
+      data-testid="load-older-keyboard"
+      disabled={loading}
+      onClick={onClick}
+      className="sr-only focus:not-sr-only focus:absolute focus:top-14 focus:left-1/2 focus:-translate-x-1/2 focus:z-30 focus:rounded-md focus:border focus:bg-background focus:px-3 focus:py-2 focus:text-xs"
+    >
+      {t("loadEarlier")}
+    </button>
   );
 }
 
@@ -60,9 +80,11 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
 // measured away from the bottom; clicking smooth-scrolls back.
 export function ScrollToBottomButton({
   atBottom,
+  refreshing = false,
   onClick,
 }: {
   atBottom: boolean;
+  refreshing?: boolean;
   onClick: () => void;
 }) {
   const t = useTranslations("timeline");
@@ -71,6 +93,8 @@ export function ScrollToBottomButton({
       type="button"
       onClick={onClick}
       aria-label={t("scrollToBottom")}
+      aria-busy={refreshing}
+      data-testid="scroll-to-bottom"
       className={cn(
         "absolute bottom-4 left-1/2 -translate-x-1/2 z-30",
         "size-9 rounded-full",
@@ -82,42 +106,23 @@ export function ScrollToBottomButton({
         "items-center justify-center",
         "text-muted-foreground hover:text-foreground",
         "transition-all duration-300 ease-out",
-        atBottom
+        atBottom && !refreshing
           ? "opacity-0 translate-y-2 pointer-events-none scale-75"
           : "opacity-100 translate-y-0 pointer-events-auto scale-100",
           FLEX
       )}
     >
-      <ArrowDown className="size-4" />
+      {refreshing ? (
+        <>
+          <svg data-testid="latest-loading-ring" viewBox="0 0 36 36" aria-hidden="true"
+            className="absolute inset-0 size-full animate-spin motion-reduce:animate-none pointer-events-none">
+            <circle cx="18" cy="18" r="16.5" fill="none" stroke="currentColor" strokeWidth="1.5"
+              strokeDasharray="38 66" strokeLinecap="round" />
+          </svg>
+          <span role="status" className="sr-only">{t("loadingLatest")}</span>
+        </>
+      ) : null}
+      <ArrowDown data-testid="scroll-to-bottom-arrow" className="size-4" />
     </button>
-  );
-}
-
-// The divider's dashed rule: longer dashes and gaps than the browser's
-// `border-dashed` (~2-3px) at a 1:1 ratio, and a deeper color than
-// `border-border` so the line is legible in the dark theme (user feedback
-// 2026-09-17, task #3870). currentColor lets `text-*` carry the tone.
-const DIVIDER_RULE_CLASS =
-  "h-px bg-[repeating-linear-gradient(to_right,currentColor_0_6px,transparent_6px_12px)] text-muted-foreground/60";
-
-// Segment divider — a pure label, never a control: rank 0 marks the live
-// boundary between retained history and the current post-compact segment
-// (task #3698); the historical ranks carry the scroll-back copy. The label
-// carries no arrow glyph (task #3870); older history loads when an upward
-// scroll gesture reaches the top (tasks #4186/#4702).
-export function CompactHistoryDivider({ rank }: { readonly rank: number }) {
-  const t = useTranslations("timeline");
-  const label = rank === 0 ? t("compactBoundaryDivider") : t("compactHistoryDivider");
-  return (
-    <div
-      data-testid="compact-history-divider"
-      data-segment-rank={rank}
-      aria-live="off"
-      className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
-    >
-      <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
-      <span className="shrink-0">{label}</span>
-      <span aria-hidden="true" className={cn(DIVIDER_RULE_CLASS, FLEX_1)} />
-    </div>
   );
 }

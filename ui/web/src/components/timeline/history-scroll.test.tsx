@@ -149,6 +149,7 @@ describe("history entry scroll ownership", () => {
     saveScrollMemory(`history-short-wheel-${deltaY}`, { contentKey: "42", scrollTop: 700, followBottom: false });
     render(conversation(42, `history-short-wheel-${deltaY}`));
     resize();
+    viewport().scrollTop = viewport().scrollHeight - viewport().clientHeight;
     act(() => { fireEvent.wheel(viewport(), { deltaY }); });
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(700);
@@ -209,4 +210,101 @@ describe("history entry scroll ownership", () => {
     rerender(conversation(43, "history-send"));
     expect(viewport().scrollTop).toBe(4400);
   });
+});
+
+
+function AgentTabs({ agentId, entry }: { agentId: number; entry: string }) {
+  const timeline = useTimeline(agentId, () => undefined);
+  return <TimelineView key={agentId} items={timeline.items} threadKey={String(agentId)}
+    scrollMemoryKey={`${entry}:agent:${agentId}`} loadingNew={timeline.isFetching} />;
+}
+function tabs(agentId: number, entry: string) {
+  return <QueryClientProvider client={client}><AgentTabs agentId={agentId} entry={entry} /></QueryClientProvider>;
+}
+
+describe("agent switch reading positions", () => {
+  it("restores independent A/B bookmarks inside the same page entry", () => {
+    const { rerender } = render(tabs(42, "agent-tabs"));
+    act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
+    rerender(tabs(43, "agent-tabs"));
+    act(() => { viewport().scrollTop = 1200; fireEvent.scroll(viewport()); });
+    rerender(tabs(42, "agent-tabs"));
+    expect(viewport().scrollTop).toBe(700);
+    rerender(tabs(43, "agent-tabs"));
+    expect(viewport().scrollTop).toBe(1200);
+  });
+
+  it("keeps a former bottom follower at the last read item when new messages arrive", () => {
+    const { rerender } = render(tabs(42, "agent-new-tail"));
+    act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
+    rerender(tabs(43, "agent-new-tail"));
+    act(() => { height = 6000; });
+    rerender(tabs(42, "agent-new-tail"));
+    expect(viewport().scrollTop).toBe(4400);
+    resize();
+    expect(viewport().scrollTop).toBe(4400);
+    expect(screen.getByTestId("scroll-to-bottom").className).toContain("opacity-100");
+    act(() => useTimelineStore.getState().requestScrollToBottom());
+    expect(viewport().scrollTop).toBe(5400);
+  });
+
+  it("retains scroll-loaded history and keeps it after a newer tail snapshot", () => {
+    const older: BackendTimelineItem = { ...items[0], item_id: "s1.old.1.0", payload: "Previously loaded history" };
+    const { rerender } = render(tabs(42, "agent-old-window"));
+    act(() => { useTimelineStore.getState().prependOlder([older], true); });
+    act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
+    rerender(tabs(43, "agent-old-window"));
+    expect(screen.queryByText("Previously loaded history")).toBeNull();
+    rerender(tabs(42, "agent-old-window"));
+    expect(screen.getByText("Previously loaded history")).toBeTruthy();
+    expect(viewport().scrollTop).toBe(700);
+    act(() => useTimelineStore.getState().reloadSnapshot([...items, { ...items[0], item_id: "17.0", payload: "New reply" }], 18, false));
+    resize();
+    expect(screen.getByText("Previously loaded history")).toBeTruthy();
+    expect(viewport().scrollTop).toBe(700);
+  });
+
+  it("uses the bottom button's existing footprint for a refresh without moving content", () => {
+    const { rerender } = render(<TimelineView items={items} threadKey="spinner" loadingNew />, {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    });
+    const button = screen.getByTestId("scroll-to-bottom");
+    const position = viewport().scrollTop;
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(button.className).toContain("opacity-100");
+    expect(button.querySelector(".animate-spin")).not.toBeNull();
+    expect(screen.getByTestId("latest-loading-ring")).toBeTruthy();
+    const arrow = screen.getByTestId("scroll-to-bottom-arrow");
+    expect(button.hasAttribute("disabled")).toBe(false);
+    expect(button.getAttribute("aria-label")).toBe("Scroll to bottom");
+    rerender(<TimelineView items={items} threadKey="spinner" />);
+    expect(screen.getByTestId("scroll-to-bottom")).toBe(button);
+    expect(button.querySelector(".animate-spin")).toBeNull();
+    expect(screen.getByTestId("scroll-to-bottom-arrow")).toBe(arrow);
+    expect(viewport().scrollTop).toBe(position);
+  });
+});
+
+
+it("captures the departing reading position before the native pull reserve is removed", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const reserve = Number.parseFloat(this.closest('[data-slot="scroll-area-viewport"]')?.querySelector<HTMLElement>('[data-history-pull-space]')?.style.height ?? "0") || 0;
+    const y = this.dataset.itemId ? reserve + (Number.parseInt(this.dataset.itemId) - 1) * 300 - top : 0;
+    return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
+  });
+  const { rerender } = render(tabs(42, "agent-native-reserve"));
+  act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
+  rerender(tabs(43, "agent-native-reserve"));
+  rerender(tabs(42, "agent-native-reserve"));
+  expect(viewport().scrollTop).toBe(700);
+});
+
+it("keeps the arrow actionable while the loading ring is visible", () => {
+  render(<QueryClientProvider client={client}><TimelineView items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
+  act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
+  const scrollTo = vi.spyOn(viewport(), "scrollTo");
+  fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+  expect(screen.getByTestId("latest-loading-ring")).toBeTruthy();
+  expect(screen.getByTestId("scroll-to-bottom-arrow")).toBeTruthy();
+  expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: "smooth" });
 });

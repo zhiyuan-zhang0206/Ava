@@ -7,6 +7,8 @@ import { parseItemIdParts } from "@/lib/timeline/timeline";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { useDisplayLimit } from "@/lib/format/display-limits";
 
+import { materializeBeforeAnchor } from "./materialize-prefix";
+
 const GAP = 12; // space-y-3 on the timeline and expanded turn body
 // KEEP (task #3696 exception inventory): task #4709 fixes one viewport of buffer on each side as window geometry, not an operator limit.
 const BUFFER_VIEWPORTS = 1;
@@ -66,11 +68,12 @@ export function applySavedTimelineScroll(
   compactBuffer: CompactTransitionBuffer | null,
   canonicalItems: readonly BackendTimelineItem[],
 ): boolean {
-  const max = viewport.scrollHeight - viewport.clientHeight;
-  if (max <= 0) return false;
+  if (viewport.scrollHeight <= viewport.clientHeight) return false;
   const target = saved.followBottom || !saved.anchor ? null
     : resolveSavedTimelineAnchor(viewport, saved.anchor, compactBuffer, canonicalItems);
   if (target?.present && !target.node) return false;
+  if (target?.node) materializeBeforeAnchor(viewport, target.node);
+  const max = viewport.scrollHeight - viewport.clientHeight;
   const top = saved.followBottom ? max : target?.node
     ? viewport.scrollTop + target.node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - target.viewportTop
     : saved.scrollTop;
