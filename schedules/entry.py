@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
-from base.clock import Clock, clock_config_from_boot
+from base.clock import Clock, clock_config_from_boot, SYSTEM_TIMERS
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
@@ -53,7 +53,7 @@ def fresh_schedule_entry() -> Generator[ScheduleInputs]:
         AvaContext(
             clients=clients,
             machine=machine,
-            clock_factory=lambda: Clock(clock_config_from_boot(config)),
+            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         )
     )
     try:

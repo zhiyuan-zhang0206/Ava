@@ -1,4 +1,7 @@
-exports = ["fakes.py"]
+exports = ["fakes.py", "manual_timers.py"]
+
+[uses]
+"test_timers.py" = ["manual_timers.py"]
 
 [debt.first-party-patch]
 "fakes.py#monkeypatch.setattr base.clock.Clock.now_timestamp" = 1

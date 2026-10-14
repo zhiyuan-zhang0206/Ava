@@ -5,14 +5,14 @@ from datetime import UTC, datetime
 import pytest
 
 from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head, wrap_inbound
-from base.clock import Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
 
 def test_envelopes_are_lazy_isolated_and_live() -> None:
     reads: list[str] = []
     flags = [True, False]
     instant = datetime(2026, 10, 4, 12, tzinfo=UTC)
-    clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: instant)
+    clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: instant, timers=SYSTEM_TIMERS)
 
     def enabled(index: int) -> bool:
         reads.append(f"flag{index}")
@@ -49,7 +49,7 @@ def test_system_header_does_not_read_policy_or_clock() -> None:
 
 def test_external_agent_header_names_the_sender_and_follows_the_timestamp_policy() -> None:
     instant = datetime(2026, 10, 4, 12, tzinfo=UTC)
-    clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: instant)
+    clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: instant, timers=SYSTEM_TIMERS)
     stamped = EnvelopeReadInputs(lambda: clock, lambda: True)
     bare = EnvelopeReadInputs(lambda: clock, lambda: False)
     source = "external_agent:codex:run-42"

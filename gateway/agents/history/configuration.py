@@ -1,7 +1,7 @@
 """Compose history readers from the gateway's actual configuration authority."""
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.config import ConfigBoot
 from base.config.domains.agent.runtime import AgentRuntimeSettings
 from base.config.service_read import ConfigAuthority
@@ -14,7 +14,7 @@ def timeline_policy(config: ConfigBoot) -> TimelineReadPolicy:
     """Capture an owner without reading policy until the request needs it."""
     return TimelineReadPolicy(
         rendering=TimelineReadInputs(
-            clock_factory=lambda: Clock(clock_config_from_boot(config)),
+            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             timestamps_enabled=lambda: config.view.general.message_timestamps,
         ),
         default_limit=lambda: config.view.display.timeline_default_limit,

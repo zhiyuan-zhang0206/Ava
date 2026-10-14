@@ -9,7 +9,7 @@ from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
 from base.agents.impersonation.notes import HandoffNotes
-from base.clock import Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -49,9 +49,9 @@ def host_policy(config: ConfigBoot) -> HostPolicy:
         default_model=lambda: config.view.lm.llm_model,
         llm_override=lambda: config.view.lm.llm_override,
         default_reader=lambda domain, field: getattr(getattr(config.view, domain), field),
-        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         handoff_notes=HandoffNotes(
-            clock_factory=lambda: Clock(clock_config_from_boot(config)),
+            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             timestamps_enabled=lambda: config.view.general.message_timestamps,
         ),
     )
@@ -68,7 +68,7 @@ def understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
         check_decay=lambda: config.view.agent.understanding_group_check_decay,
         reasoning=lambda: config.view.agent.understanding_group_reasoning,
         corrections=lambda: config.view.agent.understanding_group_corrections,
-        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         timestamps_enabled=lambda: config.view.general.message_timestamps,
         quiesced=admission.quiesced,
     )
@@ -106,7 +106,7 @@ def load_installation(
         catalog=build_model_catalog(),
         authority=authority,
         producer=producer,
-        clock_factory=lambda: Clock(clock_config_from_boot(config)),
+        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )
     installation = installed()
     if installation is None:
