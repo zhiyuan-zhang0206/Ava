@@ -244,20 +244,6 @@ def _stubborn(ready: Path) -> list[str]:
     ]
 
 
-# Wiring hook: asyncio's child watcher reaps each unit leader before root reads its birth.
-_REAPED_FIRST = (
-    "import asyncio\n"
-    "spawn = asyncio.create_subprocess_exec\n"
-    "async def reaped_first(*args, **kwargs):\n"
-    "    proc = await spawn(*args, **kwargs)\n"
-    "    await proc.wait()\n"
-    "    return proc\n"
-    "def build(context):\n"
-    "    asyncio.create_subprocess_exec = reaped_first\n"
-    "    return []\n"
-)
-
-
 @pytest.mark.parametrize("reaped_first", [False, True])
 def test_termination_after_unit_exit_exits(short_tmp: Path, reaped_first: bool) -> None:
     """A unit that exited before any stop does not hold root past SIGTERM.
@@ -268,15 +254,12 @@ def test_termination_after_unit_exit_exits(short_tmp: Path, reaped_first: bool) 
     """
     command = [sys.executable, "-c", "pass"]
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": command, "restart": "never"}])
-    fixture = short_tmp / "fixtures"
-    fixture.mkdir()
-    (fixture / "reaped_first.py").write_text(_REAPED_FIRST)
     run_dir = short_tmp / "run"
     with _daemon(
         run_dir,
         manifests,
-        wiring="reaped_first:build" if reaped_first else None,
-        env=_wiring_env(fixture, short_tmp / "markers") if reaped_first else None,
+        wiring=_wiring("wiring_reaped_first") if reaped_first else None,
+        env=_wiring_env(short_tmp / "markers") if reaped_first else None,
     ) as (root, log):
         client = _wait_ready(run_dir, root, log)
         _wait_for(
@@ -331,46 +314,27 @@ def test_bad_manifests_exit_nonzero(short_tmp: Path) -> None:
     assert not (run_dir / _SOCKET_NAME).exists()
 
 
-_WIRING_FIXTURE = '''\
-"""Recording wiring participant for the daemon wiring tests (written to tmp)."""
-
-import os
-from pathlib import Path
+def _wiring(module: str) -> str:
+    """The `--wiring` reference of a hook module that lives beside this test."""
+    return f"services.supervision.ava_root.tests.hooks.{module}:build"
 
 
-def build(context):
-    markers = Path(os.environ["AVA_ROOT_WIRING_MARKERS"])
-    markers.mkdir(parents=True, exist_ok=True)
-
-    class Participant:
-        def start(self):
-            (markers / "started").write_text("yes", encoding="utf-8")
-
-        def stop(self):
-            (markers / "stopped").write_text("yes", encoding="utf-8")
-
-    return [Participant()]
-'''
-
-
-def _wiring_env(fixture_dir: Path, markers: Path) -> dict[str, str]:
+def _wiring_env(markers: Path, *, fault: Path | None = None) -> dict[str, str]:
     env = dict(os.environ)
-    existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = str(fixture_dir) if not existing else f"{fixture_dir}{os.pathsep}{existing}"
     env["AVA_ROOT_WIRING_MARKERS"] = str(markers)
+    if fault is not None:
+        env["AVA_ROOT_WIRING_FAULT"] = str(fault)
     return env
 
 
 def test_wiring_hook_start_stop_lifecycle(short_tmp: Path) -> None:
     run_dir = short_tmp / "run"
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
-    fixture_dir = short_tmp / "fixtures"
-    fixture_dir.mkdir()
-    (fixture_dir / "record_wiring.py").write_text(_WIRING_FIXTURE, encoding="utf-8")
     markers = short_tmp / "markers"
-    with _daemon(
-        run_dir, manifests, wiring="record_wiring:build", env=_wiring_env(fixture_dir, markers)
-    ) as (proc, log_path):
+    with _daemon(run_dir, manifests, wiring=_wiring("wiring_record"), env=_wiring_env(markers)) as (
+        proc,
+        log_path,
+    ):
         client = _wait_ready(run_dir, proc, log_path)
         assert (markers / "started").exists()
         assert "wired participant(s)" in _read_log(log_path)
@@ -432,52 +396,25 @@ def _root_uptime(result: dict[str, object]) -> float:
 
 def _systemd_starter(
     home: Path, receipt: Path, run_dir: Path, manifest: Path, failure: str
-) -> Path:
-    """A disposable readiness caller for the real generic root, not a deployed wrapper."""
-    starter = receipt.parent / "start.py"
-    starter.write_text(
-        "import json, os, subprocess, sys, time\n"
-        "from pathlib import Path\n"
-        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
-        "import psutil\n"
-        "from base.native_process.root_control.client import RootClient, RootClientError, native_identity\n"
-        "from base.host.system.boot_unit import publish_root_ready, root_pid_path\n"
-        "from base.native_process.ownership import OwnedProcess\n"
-        "from dataclasses import asdict\n"
-        f"receipt = Path({str(receipt)!r})\n"
-        f"data = subprocess.Popen({_SLEEPER!r}, start_new_session=True)\n"
-        f"hint = root_pid_path(Path({str(home)!r}))\n"
-        "hint.parent.mkdir(parents=True, exist_ok=True)\n"
-        "hint.write_text(str(data.pid) + '\\n')\n"
-        "births = {'data': asdict(OwnedProcess.capture(psutil.Process(data.pid)))}\n"
-        "receipt.write_text(json.dumps(births))\n"
-        f"root = subprocess.Popen({_daemon_command(run_dir, manifest)!r}, start_new_session=True)\n"
-        "births['root'] = asdict(OwnedProcess.capture(psutil.Process(root.pid)))\n"
-        "receipt.write_text(json.dumps(births))\n"
-        f"client = RootClient(Path({str(run_dir / _SOCKET_NAME)!r}), timeout=1)\n"
-        "deadline = time.monotonic() + 20\n"
-        "while True:\n"
-        "    try:\n"
-        "        status = client.status()['result']\n"
-        "        if status['units'][0]['state'] == 'running': break\n"
-        "    except (RootClientError, KeyError): pass\n"
-        "    if root.poll() is not None or time.monotonic() > deadline: raise RuntimeError('root unready')\n"
-        "    time.sleep(.05)\n"
-        "births['app'] = asdict(native_identity(status['units'][0]))\n"
-        "receipt.write_text(json.dumps(births))\n"
-        + (
-            "receipt.with_suffix('.failure').write_text('before')\nraise RuntimeError('failed before publication')\n"
-            if failure == "before"
-            else ""
-        )
-        + f"publish_root_ready(Path({str(home)!r}), native_identity(status['root']))\n"
-        + (
-            "receipt.with_suffix('.failure').write_text('after')\nraise RuntimeError('failed after publication')\n"
-            if failure == "after"
-            else ""
+) -> tuple[Path, Path]:
+    """A disposable readiness caller for the real generic root, not a deployed wrapper.
+
+    Returns the starter script and the parameter file it reads.
+    """
+    parameters = receipt.parent / "starter.json"
+    parameters.write_text(
+        json.dumps(
+            {
+                "receipt": str(receipt),
+                "home": str(home),
+                "data_command": _SLEEPER,
+                "root_command": _daemon_command(run_dir, manifest),
+                "socket": str(run_dir / _SOCKET_NAME),
+                "failure": failure,
+            }
         )
     )
-    return starter
+    return Path(__file__).parent / "hooks" / "systemd_starter.py", parameters
 
 
 def _terminate_systemd_test_births(receipt: Path) -> None:
@@ -585,13 +522,17 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
     run_dir = ctx.home / "root"
     manifest = _write_manifests(tmp_path, [{"id": "app", "exec": _SLEEPER, "restart": "always"}])
     receipt = tmp_path / "births.json"
-    starter = _systemd_starter(ctx.home, receipt, run_dir, manifest, failure)
+    starter, parameters = _systemd_starter(ctx.home, receipt, run_dir, manifest, failure)
     unit = boot_unit.UNIT_NAME
     target = Path("/run/systemd/system") / unit
     holder = tmp_path / unit
     content = boot_unit.render_unit(ctx)
     exec_line = next(row for row in content.splitlines() if row.startswith("ExecStart="))
-    replacement = f"ExecStart=:{boot_unit.quote(sys.executable, 'python')} {boot_unit.quote(str(starter), 'test starter')}"
+    replacement = (
+        f"ExecStart=:{boot_unit.quote(sys.executable, 'python')}"
+        f" {boot_unit.quote(str(starter), 'test starter')}"
+        f" {boot_unit.quote(str(parameters), 'starter parameters')}"
+    )
     holder.write_text(
         content.replace(exec_line, replacement).replace("Restart=on-failure", "Restart=no")
     )
@@ -643,20 +584,12 @@ def test_failed_shutdown_reports_error_and_exits_without_another_stop(short_tmp:
     manifests = _write_manifests(
         short_tmp, [{"id": "svc", "exec": _stubborn(ready), "restart": "never"}]
     )
-    fixture = short_tmp / "fixtures"
-    fixture.mkdir()
-    (fixture / "short_deadline.py").write_text(
-        "from services.supervision.ava_root.supervisor import SupervisorConfig\n"
-        "def build(context):\n"
-        "    context.supervisor._config = SupervisorConfig(stop_timeout_s=0.15)\n"
-        "    return []\n"
-    )
     run_dir = short_tmp / "run"
     with _daemon(
         run_dir,
         manifests,
-        wiring="short_deadline:build",
-        env=_wiring_env(fixture, short_tmp / "markers"),
+        wiring=_wiring("wiring_short_deadline"),
+        env=_wiring_env(short_tmp / "markers"),
     ) as (proc, log):
         client = _wait_ready(run_dir, proc, log)
         _wait_for(ready.exists, "child did not install its TERM handler")
@@ -681,27 +614,12 @@ def test_unknown_monitor_failure_exits_and_preserves_cleanup_refusal(
         [{"id": "svc", "exec": _stubborn(ready), "restart": "never"}] if refuses_stop else []
     )
     manifests = _write_manifests(short_tmp, units)
-    fixture = short_tmp / "fixtures"
-    fixture.mkdir()
-    (fixture / "unknown_monitor.py").write_text(
-        "from pathlib import Path\n"
-        "from services.supervision.ava_root.selfcheck import TreeSelfCheck, SelfCheckConfig\n"
-        "from services.supervision.ava_root.supervisor import SupervisorConfig\n"
-        "class Monitor(TreeSelfCheck):\n"
-        "    def run_once(self):\n"
-        f"        if Path({str(fault)!r}).exists():\n"
-        "            raise ValueError('unknown-monitor-primary')\n"
-        "def build(context):\n"
-        "    context.supervisor._config = SupervisorConfig(stop_timeout_s=0.15)\n"
-        "    return Monitor(context.supervisor, config=SelfCheckConfig(interval_s=0.01), "
-        "tasks=context.participant_tasks)\n"
-    )
     run_dir = short_tmp / "run"
     with _daemon(
         run_dir,
         manifests,
-        wiring="unknown_monitor:build",
-        env=_wiring_env(fixture, short_tmp / "markers"),
+        wiring=_wiring("wiring_unknown_monitor"),
+        env=_wiring_env(short_tmp / "markers", fault=fault),
     ) as (proc, log):
         client = _wait_ready(run_dir, proc, log)
         child = None
