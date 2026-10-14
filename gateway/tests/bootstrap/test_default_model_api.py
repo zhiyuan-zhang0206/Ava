@@ -24,9 +24,9 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.tests.model_catalog import AddModels
 from gateway.app import app
 from tests.fixtures.gateway_config import spawn_via_http
-from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

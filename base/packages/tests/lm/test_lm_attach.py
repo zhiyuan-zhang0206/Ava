@@ -22,7 +22,7 @@ from base.lm.attach.packing import (
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import media_types_for_model
 from base.lm.provider_api import AttachPolicy, ProviderBinding
-from tests.fixtures.model_catalog import AddBindings, AddModels
+from base.packages.tests.model_catalog import AddBindings, AddModels
 
 
 @pytest.fixture

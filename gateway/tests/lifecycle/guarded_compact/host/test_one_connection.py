@@ -11,10 +11,10 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddBindings
 from gateway.tests.lifecycle.guarded_compact.host.admission import admit
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel
-from tests.fixtures.model_catalog import AddBindings
 
 
 async def test_real_chain_pool_one_provider_can_borrow_only_connection(

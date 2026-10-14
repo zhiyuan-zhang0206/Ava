@@ -1,4 +1,4 @@
-exports = ["dashboard_supply.py", "docs", "extensions", "plugin_config_admin.py", "plugin_config_images.py", "plugin_providers.py", "plugins", "skills"]
+exports = ["dashboard_supply.py", "docs", "extensions", "plugin_config_admin.py", "plugin_config_images.py", "plugin_providers.py", "plugins", "skills", "tests"]
 
 [uses]
 "dashboard_supply.py" = ["extensions", "plugins"]

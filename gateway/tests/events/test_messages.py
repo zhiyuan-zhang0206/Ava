@@ -18,8 +18,8 @@ from base.daemon.schedules.completion_notices import (
     policy_for_agent,
 )
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddModels
 from gateway.app import app
-from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 UPLOAD_HEADERS = {"Idempotency-Key": "silent-upload", "Idempotency-Scope": "principal-v1"}

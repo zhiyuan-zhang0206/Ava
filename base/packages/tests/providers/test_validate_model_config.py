@@ -12,7 +12,7 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import build_chat_model, validate_model_config
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.model_catalog import AddModels
+from base.packages.tests.model_catalog import AddModels
 
 
 class TestValidateModelConfig:

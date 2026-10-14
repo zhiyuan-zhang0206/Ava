@@ -14,10 +14,10 @@ from base.cluster.authority import ensure_groups
 from base.db.code_version_gate import ProcessDbGate
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddBindings
 from gateway.tests.lifecycle.guarded_compact.host.admission import admit
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel
-from tests.fixtures.model_catalog import AddBindings
 
 
 async def test_real_runner_login_closes_compact_without_admission_or_metadata_insert_authority(

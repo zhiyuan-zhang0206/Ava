@@ -95,8 +95,10 @@ multi-chunk.
   `python -m uvicorn --fd` entry; normal gateway lifespan is unchanged. Each previous fixture process
   must exit before replacement; readiness requires HTTP plus the new PID/birth's native listener.
   Fixed-port listener diagnostics retain native identities and unknown visibility on failure.
-  Next's frontend port still uses a released kernel allocation and has a separate reservation gap;
-  dynamic allocation alone is not a zero-collision guarantee. Postgres/Redis use base/deploy/tests/containers.py
+  Next cannot inherit a socket, so its frontend port is a reservation from a block below the kernel's
+  ephemeral range (one candidate per xdist worker slot), held through the build and released only right
+  before `next start` is spawned: no `bind(0)` and no outgoing connection's source port can take it, and
+  workers never share one. Postgres/Redis use base/deploy/tests/containers.py
   for independent native clusters per worker. This gateway FD path targets the existing POSIX E2E CI.
 - **dev and e2e can run simultaneously** — ports/databases/channels are all separate
   (see `_ports.py` + `conftest.py` env override section).

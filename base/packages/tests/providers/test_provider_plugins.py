@@ -38,7 +38,7 @@ from base.packages.plugins import enable_config
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
-from tests.fixtures.model_catalog import AddBindings
+from base.packages.tests.model_catalog import AddBindings
 
 _REPO_PROVIDER_PLUGINS = {
     "lm_alibaba",
