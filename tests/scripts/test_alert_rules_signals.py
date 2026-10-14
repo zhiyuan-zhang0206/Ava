@@ -72,6 +72,8 @@ SIGNALS: dict[str, Signal] = {
     "ava-ops-im-feishu-owner-seed-failed": Signal(
         "im_feishu_owner_seed_failed", "ava-ops", "0s", "warning"
     ),
+    # leg-level outbound stall: pending pushes with no delivered push for > 15m (task #4935)
+    "ava-ops-im-push-stall": Signal("im_push_health", "ava-ops", "2m", "warning"),
     "ava-ops-lifecycle-pointer-stuck": Signal(
         "lifecycle_pointer_stuck", "ava-ops-slow", "0s", "warning", 0
     ),
