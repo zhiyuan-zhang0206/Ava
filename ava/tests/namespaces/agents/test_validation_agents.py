@@ -2,25 +2,71 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from ava import agents, gateway_client
-from ava.sdk_surface import agent_identity
+from ava.gateway_client.transport import use_client
+from ava.sdk_surface import process_context
+from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity, ExternalLease
+
+
+@pytest.fixture
+def gateway_requests(sdk_environment: AvaContext) -> Iterator[list[httpx.Request]]:
+    requests: list[httpx.Request] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        responses = {
+            "/api/keyed/v1/agents": {"id": 42},
+            "/api/agents/7/system-note": {"inbound_id": 81},
+            "/api/agents/7/resurrect": {"status": "spawned"},
+            "/api/agents/7/messages": None,
+        }
+        return httpx.Response(200, json=responses[request.url.path])
+
+    with (
+        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(capture)) as client,
+        use_client(client),
+    ):
+        yield requests
+
+
+@pytest.fixture
+def no_gateway_http(sdk_environment: AvaContext) -> Iterator[None]:
+    def unexpected(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"invalid input reached HTTP: {request.method} {request.url.path}")
+
+    with (
+        httpx.Client(
+            base_url="http://gateway", transport=httpx.MockTransport(unexpected)
+        ) as client,
+        use_client(client),
+    ):
+        yield
 
 
 class TestAgentsEntries:
     def test_spawn_prompt_unwraps_before_gateway_call(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, gateway_requests: list[httpx.Request]
     ) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 1)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(agent_identity, "require_actor", lambda: "agent:1")
-
-        agents.spawn(prompt=("hello",), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
-        assert seen["prompt"] == "hello"
+        result = agents.spawn(prompt=("hello",), machine="test-machine", idempotency_key="intent")  # pyright: ignore[reportArgumentType]
+        assert result == 42
+        [request] = gateway_requests
+        assert (request.method, request.url.path) == ("POST", "/api/keyed/v1/agents")
+        assert json.loads(request.content) == {
+            "prompt": "hello",
+            "prompt_source": "agent:1",
+            "spawner": "agent:1",
+            "machine": "test-machine",
+        }
 
     @pytest.mark.parametrize(
         "prompt",
@@ -30,27 +76,20 @@ class TestAgentsEntries:
         ],
     )
     def test_spawn_prompt_multi_element_type_errors(
-        self, monkeypatch: pytest.MonkeyPatch, prompt: object
+        self, no_gateway_http: None, prompt: object
     ) -> None:
-        monkeypatch.setattr(gateway_client, "spawn", lambda **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="prompt must be a string"):
             agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
-    def test_spawn_fork_from_never_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(gateway_client, "spawn", lambda **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
+    def test_spawn_fork_from_never_unwraps(self, no_gateway_http: None) -> None:
         with pytest.raises(TypeError, match="fork_from must be int"):
             agents.spawn(fork_from=(5,), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
-    def test_send_message_content_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            gateway_client,
-            "send_message",
-            lambda _aid, **kw: seen.update(kw) or None,  # pyright: ignore[reportUnknownArgumentType]
-        )  # pyright: ignore[reportUnknownArgumentType]
-
+    def test_send_message_content_unwraps(self, gateway_requests: list[httpx.Request]) -> None:
         agents.send_message(7, ("hi",))  # pyright: ignore[reportArgumentType]
-        assert seen["content"] == "hi"
+        [request] = gateway_requests
+        assert (request.method, request.url.path) == ("POST", "/api/agents/7/messages")
+        assert json.loads(request.content) == {"content": "hi", "source": "agent:1"}
 
     def test_send_message_blocks_pass_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen: dict[str, Any] = {}
@@ -64,38 +103,32 @@ class TestAgentsEntries:
         agents.send_message(7, blocks)  # pyright: ignore[reportArgumentType]
         assert seen["content"] is blocks
 
-    def test_send_message_multi_element_type_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(gateway_client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    def test_send_message_multi_element_type_errors(self, no_gateway_http: None) -> None:
         with pytest.raises(TypeError, match="content must be a string"):
             agents.send_message(7, ("a", "b"))  # pyright: ignore[reportArgumentType]
 
     def test_send_system_note_unwraps_content_and_tag(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, gateway_requests: list[httpx.Request]
     ) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            gateway_client,
-            "send_system_note",
-            lambda *_a, **_kw: seen.update(_kw) or 1,  # pyright: ignore[reportUnknownArgumentType]
-        )  # pyright: ignore[reportUnknownArgumentType]
+        result = agents.send_system_note(7, ("note",), tag=("task",), idempotency_key="note-intent")  # pyright: ignore[reportArgumentType]
+        assert result == 81
+        [request] = gateway_requests
+        assert (request.method, request.url.path) == ("POST", "/api/agents/7/system-note")
+        assert json.loads(request.content) == {
+            "content": "note",
+            "note_tag": "task",
+            "source": "agent:1",
+            "resurrect": True,
+        }
+        assert request.headers["Idempotency-Key"] == "note-intent"
 
-        agents.send_system_note(7, ("note",), tag=("task",), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
-        assert seen["content"] == "note"
-        assert seen["note_tag"] == "task"
+    def test_resurrect_prompt_unwraps(self, gateway_requests: list[httpx.Request]) -> None:
+        assert agents.resurrect(7, ("wake up",)) == "spawned"  # pyright: ignore[reportArgumentType]
+        [request] = gateway_requests
+        assert (request.method, request.url.path) == ("POST", "/api/agents/7/resurrect")
+        assert json.loads(request.content) == {"prompt": "wake up", "resurrected_by": "agent:1"}
 
-    def test_resurrect_prompt_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            gateway_client,
-            "resurrect",
-            lambda *_a, **_kw: seen.update(_kw) or "spawned",  # pyright: ignore[reportUnknownArgumentType]
-        )  # pyright: ignore[reportUnknownArgumentType]
-
-        agents.resurrect(7, ("wake up",))  # pyright: ignore[reportArgumentType]
-        assert seen["prompt"] == "wake up"
-
-    def test_resurrect_rejects_none_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(gateway_client, "resurrect", lambda *_a, **_kw: "spawned")  # pyright: ignore[reportUnknownArgumentType]
+    def test_resurrect_rejects_none_prompt(self, no_gateway_http: None) -> None:
         with pytest.raises(TypeError, match="prompt must be a string, got None"):
             agents.resurrect(7, None)  # pyright: ignore[reportArgumentType]
 
@@ -131,31 +164,24 @@ class TestAgentsEntries:
             ),  # pyright: ignore[reportArgumentType]
         ],
     )
-    def test_agent_ids_never_unwrap(
-        self, monkeypatch: pytest.MonkeyPatch, call: Any, match: str
-    ) -> None:
-        monkeypatch.setattr(gateway_client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(gateway_client, "send_system_note", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(gateway_client, "terminate", lambda *_a, **_kw: "enqueued")  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(gateway_client, "restart", lambda *_a, **_kw: "enqueued")  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(gateway_client, "list_agents", lambda **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(gateway_client, "get_neighbors", lambda *_a, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+    def test_agent_ids_never_unwrap(self, no_gateway_http: None, call: Any, match: str) -> None:
         with pytest.raises(TypeError, match=match):
             call()
 
 
-def test_core_spawn_forwards_caller_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, Any] = {}
-
-    def capture(**kwargs: Any) -> int:
-        seen.update(kwargs)
-        return 42
-
-    monkeypatch.setattr(gateway_client, "spawn", capture)
-    monkeypatch.setattr(agent_identity, "require_actor", lambda: "agent:1")
-    assert agents.spawn(prompt="goal", idempotency_key="intent") == 42
-    assert "require_idempotency" not in seen
-    assert seen["idempotency_key"] == "intent"
+def test_core_spawn_forwards_caller_key(gateway_requests: list[httpx.Request]) -> None:
+    assert agents.spawn(prompt="goal", machine="test-machine", idempotency_key="intent") == 42
+    [request] = gateway_requests
+    assert (request.method, request.url.path) == ("POST", "/api/keyed/v1/agents")
+    assert json.loads(request.content) == {
+        "prompt": "goal",
+        "prompt_source": "agent:1",
+        "spawner": "agent:1",
+        "machine": "test-machine",
+    }
+    assert "require_idempotency" not in json.loads(request.content)
+    assert request.headers["Idempotency-Key"] == "intent"
+    assert request.headers["Idempotency-Scope"] == "principal-v1"
 
 
 @pytest.mark.parametrize(
@@ -169,11 +195,19 @@ def test_core_spawn_forwards_caller_key(monkeypatch: pytest.MonkeyPatch) -> None
     ],
 )
 def test_core_spawn_invalid_strong_admission_before_actor_or_http(
-    monkeypatch: pytest.MonkeyPatch, kwargs: dict[str, Any]
+    sdk_environment: AvaContext, no_gateway_http: None, kwargs: dict[str, Any]
 ) -> None:
-    def unexpected() -> str:
+    def unexpected() -> int:
         raise AssertionError("invalid strong admission must precede actor lookup")
 
-    monkeypatch.setattr(agent_identity, "require_actor", unexpected)
-    with pytest.raises((TypeError, ValueError)):
-        agents.spawn(**kwargs)
+    lease = ExternalLease(agent_id=1, validate=unexpected, config=lambda: None)
+    context = replace(
+        sdk_environment, identity=AgentIdentity(agent_id=1, owns_loop=False, lease=lease)
+    )
+    previous = process_context.current_context()
+    process_context.bind_context(context)
+    try:
+        with pytest.raises((TypeError, ValueError)):
+            agents.spawn(**kwargs)
+    finally:
+        process_context.bind_context(previous)

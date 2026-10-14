@@ -2,7 +2,6 @@
 "test_watcher.py#monkeypatch.setenv os.environ.AVA_WATCHER_SESSION_ID" = 1
 
 [debt.first-party-patch]
-"test_patch_label.py#monkeypatch.setattr ava.gateway_client.patch" = 1
 "test_watcher.py#monkeypatch.setattr ava.gateway_client.send_message" = 1
 "test_watcher.py#monkeypatch.setattr ava.sdk_surface.agent_identity.agent_id" = 1
 
