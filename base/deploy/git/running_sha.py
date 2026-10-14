@@ -20,12 +20,12 @@ update detection should compare its own running commit, not the cluster pin.
 
 from __future__ import annotations
 
-from base.paths import running_sha_path
+from base.paths import ava_home, running_sha_path
 
 
 def get() -> str | None:
     """The commit this host was last started on, or None if never recorded."""
-    path = running_sha_path()
+    path = running_sha_path(ava_home())
     try:
         content = path.read_text().strip()
     except FileNotFoundError:
@@ -37,7 +37,7 @@ def get() -> str | None:
 
 def set(sha: str) -> None:
     """Record `sha` as the commit this host is now running."""
-    path = running_sha_path()
+    path = running_sha_path(ava_home())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(sha.strip() + "\n")
 
@@ -45,4 +45,4 @@ def set(sha: str) -> None:
 def clear() -> None:
     """Remove the bookmark (recovery — forces fallback-to-HEAD on the next
     update check)."""
-    running_sha_path().unlink(missing_ok=True)
+    running_sha_path(ava_home()).unlink(missing_ok=True)
