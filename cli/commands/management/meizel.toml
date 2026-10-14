@@ -10,6 +10,5 @@ exports = ["config.py", "presets.py", "schedules.py", "schedules_verify.py"]
 [debt.private-name]
 "schedules_verify_read_rows.py -> schedules_verify.py#_read_schedule_rows" = 3
 "tests/child_schedules_verify.py -> schedules_verify.py#_read_schedule_rows" = 1
-"tests/test_config_cmd.py -> config.py#_gateway_base" = 3
 "tests/test_schedules_cmd.py -> schedules_verify.py#_read_schedule_rows" = 2
 "tests/test_schedules_cmd.py -> schedules_verify.py#_report_verify" = 3

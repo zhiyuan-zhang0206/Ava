@@ -85,7 +85,7 @@ def test_reconcile_embed_error_truncates_and_returns_false(
     liveness = Liveness(600.0)
     with caplog.at_level(logging.ERROR, logger="services.derived.memory_indexer.daemon"):
         assert (
-            daemon._reconcile(store_backend, FakeProvider(), liveness, machine=machine_identity)
+            daemon.reconcile(store_backend, FakeProvider(), liveness, machine=machine_identity)
             is False
         )
 

@@ -52,9 +52,9 @@ async def daemon_sock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database:
 async def test_probe_alive(daemon_sock) -> None:
     # The blocking probe would deadlock the loop the fixture's server runs
     # on; bounce it to a worker thread.
-    assert await asyncio.to_thread(hc._is_alive) is True
+    assert await asyncio.to_thread(hc.is_alive) is True
 
 
 def test_probe_dead_when_socket_gone(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hc, "computer_mcp_socket", lambda: "/tmp/does-not-exist.sock")  # noqa: S108
-    assert hc._is_alive() is False
+    assert hc.is_alive() is False

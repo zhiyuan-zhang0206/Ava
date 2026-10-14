@@ -56,7 +56,7 @@ async def test_both_loops_run_their_rounds(
     monkeypatch.setattr(daemon.requests, "consume_requests", consume)
     liveness = LivenessGroup()
 
-    task = asyncio.create_task(daemon._run_loops(pool, liveness))
+    task = asyncio.create_task(daemon.run_loops(pool, liveness))
     try:
         await asyncio.wait_for(asyncio.gather(reconciled.wait(), consumed.wait()), timeout=10)
         assert set(liveness.snapshot()) == {"reconcile", "requests"}
@@ -92,7 +92,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     monkeypatch.setattr(daemon.round_loop, "run_rounds", run_rounds)
 
     with pytest.raises(ExceptionGroup) as raised:
-        await daemon._run_loops(pool, LivenessGroup())
+        await daemon.run_loops(pool, LivenessGroup())
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} loop crashed"]
     assert cancelled == [({"reconcile", "requests"} - {crashing}).pop()]
@@ -142,7 +142,7 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     monkeypatch.setattr(daemon.Database, "pool", make_pool)
     monkeypatch.setattr(daemon, "provision_builtins", no_provision)
-    monkeypatch.setattr(daemon, "_run_loops", crashing_loops)
+    monkeypatch.setattr(daemon, "run_loops", crashing_loops)
 
     with pytest.raises(ExceptionGroup):
         await daemon.run(
@@ -195,7 +195,7 @@ async def test_a_quiesced_unit_polls_the_request_table_through_no_connection(
     pool = MagicMock()
     pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchall.return_value = []
 
-    task = asyncio.create_task(daemon._run_loops(pool, LivenessGroup()))
+    task = asyncio.create_task(daemon.run_loops(pool, LivenessGroup()))
     try:
         await asyncio.sleep(0.3)
     finally:

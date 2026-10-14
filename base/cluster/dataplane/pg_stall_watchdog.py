@@ -32,7 +32,7 @@ from base.native_process.os_platform import is_macos
 # fail fast. Probe cadence is deliberately coarse: the cluster is disposable
 # test infrastructure, and a real stall costs the suite minutes either way.
 PROBE_INTERVAL_S = 5.0
-_PROBE_TIMEOUT_S = 4
+PROBE_TIMEOUT_S = 4
 _PROBE_CONSECUTIVE_FAILURES = 2
 
 
@@ -172,7 +172,7 @@ class StallWatchdog(threading.Thread):
         while not self._stop_requested.wait(PROBE_INTERVAL_S):
             try:
                 with (
-                    psycopg.connect(self._admin_url, connect_timeout=_PROBE_TIMEOUT_S) as conn,
+                    psycopg.connect(self._admin_url, connect_timeout=PROBE_TIMEOUT_S) as conn,
                     conn.cursor() as cur,
                 ):
                     cur.execute("SELECT 1")
@@ -206,7 +206,7 @@ def stall_guard(admin_url: str, port: int) -> Generator[None, None, None]:
         yield
     finally:
         watchdog.stop()
-        watchdog.join(timeout=2 * _PROBE_TIMEOUT_S + 1)
+        watchdog.join(timeout=2 * PROBE_TIMEOUT_S + 1)
         if watchdog.is_alive():
             raise RuntimeError(
                 f"throwaway PG watchdog for port {port} did not stop; "

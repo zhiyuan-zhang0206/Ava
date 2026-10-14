@@ -26,11 +26,11 @@ from .input import (
 )
 from .ocr_text import click_text_tool, find_text_tool
 from .screen import (
-    _snapshot_path,
     capture_region,
     capture_screen,
     current_scale,
     png_size,
+    snapshot_path,
     to_logical,
 )
 from .targets import (
@@ -193,7 +193,7 @@ def _snapshot_tool(
             source = "region"
         else:
             target = WindowTarget.parse(args["target"])
-            path = _snapshot_path(agent_id)
+            path = snapshot_path(agent_id)
             captured = helper.screencapture_window(target.pid, target.window_id, str(path))
             pw, ph = png_size(path)
             if (pw, ph) != (captured["width"], captured["height"]):

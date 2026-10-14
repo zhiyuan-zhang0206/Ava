@@ -42,7 +42,7 @@ import threading
 import time
 from collections.abc import Callable
 
-_MAX_ENTRIES = 10_000
+MAX_ENTRIES = 10_000
 """Soft cap on tracked IPs: when exceeded, expired entries are swept on the
 next failure record. Bounds memory for a subnet scan without a background
 timer. Protective constant (task #3696 exception inventory)."""
@@ -110,7 +110,7 @@ class LoginRateLimiter:
             entry.last_failure_at = now
             if entry.failures >= max_failures:
                 entry.locked_until = now + lockout_seconds
-            if len(self._entries) > _MAX_ENTRIES:
+            if len(self._entries) > MAX_ENTRIES:
                 self._sweep(now, lockout_seconds)
 
     def record_success(self, ip: str) -> None:
@@ -143,7 +143,7 @@ class LoginRateLimiter:
         ]
         for ip in stale:
             del self._entries[ip]
-        over = len(self._entries) - _MAX_ENTRIES
+        over = len(self._entries) - MAX_ENTRIES
         if over > 0:
             # oldest failure first — the entries least likely to be an active
             # attacker right now

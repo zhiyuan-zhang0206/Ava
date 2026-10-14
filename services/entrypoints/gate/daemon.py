@@ -105,7 +105,7 @@ def _valid_forwarded_header(name: str, value: str) -> bool:
     return True
 
 
-_PROBE_TIMEOUT_S = 3.0
+PROBE_TIMEOUT_S = 3.0
 
 # Auth-probe failure categories (audit #1736). The gate's verdict is
 # fail-closed ("down") for every one of them — the category exists so an
@@ -113,7 +113,7 @@ _PROBE_TIMEOUT_S = 3.0
 # indistinguishable "down" pages. Each category is one value of
 # `gate_auth_probe_failed`'s `category` attribute.
 PROBE_FAIL_AUTH = "auth"  # gateway answered 401/403 — the probe itself was rejected
-PROBE_FAIL_TIMEOUT = "timeout"  # probe exceeded _PROBE_TIMEOUT_S (connect or read)
+PROBE_FAIL_TIMEOUT = "timeout"  # probe exceeded PROBE_TIMEOUT_S (connect or read)
 PROBE_FAIL_NETWORK = "network"  # transport failure: refused, unreachable, reset, DNS
 PROBE_FAIL_APPLICATION = "application"  # gateway answered, but not with a valid auth check
 
@@ -189,7 +189,7 @@ class Gate:
         started = time.monotonic()
         try:
             with urllib.request.urlopen(  # noqa: S310 — operator-declared internal URL
-                req, timeout=_PROBE_TIMEOUT_S
+                req, timeout=PROBE_TIMEOUT_S
             ) as resp:
                 body = json.loads(resp.read())
                 return "up" if body.get("authenticated") else "login"
@@ -240,7 +240,7 @@ class Gate:
                 length = int(handler.headers.get("Content-Length") or 0)
                 req.data = handler.rfile.read(length) if length else b""
             try:
-                with urllib.request.urlopen(req, timeout=_PROBE_TIMEOUT_S) as resp:  # noqa: S310
+                with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT_S) as resp:  # noqa: S310
                     status, headers, body = resp.status, resp.headers, resp.read()
             except urllib.error.HTTPError as e:  # app up, answered with an error status
                 status, headers, body = e.code, e.headers, e.read()
@@ -344,7 +344,7 @@ def _app_base() -> str:
     return f"http://127.0.0.1:{app_port()}"
 
 
-def _gateway_base(*, local_host: Callable[[], str]) -> str:
+def gateway_base(*, local_host: Callable[[], str]) -> str:
     """The gateway API base the gate probes and the login page posts to.
 
     The host must be one the user's browser can dial: the login page posts the
@@ -367,7 +367,7 @@ def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> N
     static_dir = args.static_dir or (Path(__file__).parent / "static")
     port = args.port or entry_port()
     gate = Gate(
-        gateway_base=_gateway_base(local_host=local_host),
+        gateway_base=gateway_base(local_host=local_host),
         browser_origin=settings.gateway.browser_origin,
         app_base=_app_base(),
         static_dir=static_dir,

@@ -101,7 +101,7 @@ _CONSUMERS: list[tuple[str, Callable[[], Path], str]] = [
     ("paths.logs_dir", paths.logs_dir, "logs"),
     ("paths.run_dir", paths.run_dir, "run"),
     ("dotenv_file.env_file_path", dotenv_file.env_file_path, ".env"),
-    ("bootstrap snapshot", bootstrap._snapshot_path, "run/bootstrap-snapshot.json"),
+    ("bootstrap snapshot", bootstrap.snapshot_path, "run/bootstrap-snapshot.json"),
     ("config path-field default", unit_home, ""),
 ]
 

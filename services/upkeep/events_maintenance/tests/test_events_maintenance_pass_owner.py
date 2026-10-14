@@ -114,7 +114,7 @@ def _mock_service(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         return closed.append("pidfile")

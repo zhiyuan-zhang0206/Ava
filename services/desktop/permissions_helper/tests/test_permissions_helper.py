@@ -458,7 +458,7 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     zh_lproj = locales / "zh-Hans.lproj"
     zh_lproj.mkdir()
     (zh_lproj / "Localizable.strings").write_text('"panel.title" = "zh";')
-    monkeypatch.setattr(lifecycle, "_SOURCE", src)
+    monkeypatch.setattr(lifecycle, "SOURCE", src)
     monkeypatch.setattr(lifecycle, "_INFO_PLIST", info)
     monkeypatch.setattr(lifecycle, "_ENTITLEMENTS", entitlements)
     monkeypatch.setattr(lifecycle, "_LOCALES", locales)

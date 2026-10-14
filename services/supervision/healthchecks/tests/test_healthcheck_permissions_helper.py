@@ -188,11 +188,11 @@ def test_parse_tolerates_a_missing_exit_code_and_empty_text() -> None:
 )
 def test_classification_truth_table(text: str | None, expected: str) -> None:
     job = None if text is None else hc.parse_job_state(text)
-    assert hc._classify(ping_ok=False, job=job) == expected
+    assert hc.classify(ping_ok=False, job=job) == expected
 
 
 def test_ping_alive_short_circuits_to_healthy() -> None:
-    assert hc._classify(ping_ok=True, job=hc.parse_job_state(_STUCK_JOB)) == hc.HEALTHY
+    assert hc.classify(ping_ok=True, job=hc.parse_job_state(_STUCK_JOB)) == hc.HEALTHY
 
 
 # -- the watchdog round (era 1) ------------------------------------------------

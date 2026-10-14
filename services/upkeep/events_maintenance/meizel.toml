@@ -9,16 +9,7 @@ exports = ["daemon.py", "resolution.py", "rollup.py", "token_totals.py"]
 "token_totals.py" = ["config.py"]
 
 [debt.private-name]
-"tests/test_auto_dismiss_cadence.py -> daemon.py#_sleep_with_liveness" = 1
-"tests/test_events_maintenance_daemon.py -> daemon.py#_dispatch_loop" = 5
 "tests/test_events_maintenance_daemon.py -> daemon.py#_is_running" = 3
 "tests/test_events_maintenance_daemon.py -> daemon.py#_remove_pidfile" = 3
-"tests/test_events_maintenance_daemon.py -> daemon.py#_sleep_with_liveness" = 2
-"tests/test_events_maintenance_daemon.py -> daemon.py#_write_pidfile" = 3
-"tests/test_events_maintenance_failure_budget.py -> daemon.py#_dispatch_loop" = 1
-"tests/test_events_maintenance_failure_budget.py -> daemon.py#_sleep_with_liveness" = 1
 "tests/test_events_maintenance_pass_owner.py -> daemon.py#_is_running" = 1
 "tests/test_events_maintenance_pass_owner.py -> daemon.py#_remove_pidfile" = 1
-"tests/test_events_maintenance_pass_owner.py -> daemon.py#_write_pidfile" = 1
-"tests/test_events_maintenance_quiesced.py -> daemon.py#_dispatch_loop" = 1
-"tests/test_events_maintenance_quiesced.py -> daemon.py#_sleep_with_liveness" = 1

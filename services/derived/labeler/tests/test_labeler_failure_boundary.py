@@ -296,7 +296,7 @@ async def test_dispatch_failure_stops_the_batch_without_rewriting_inbounds(
     p = pool(gate=database_gate)
     try:
         with pytest.raises(type(error)) as caught:
-            await daemon._dispatch_loop(
+            await daemon.dispatch_loop(
                 p,
                 labeler_db(database_gate=database_gate),
                 event_bus,
@@ -352,7 +352,7 @@ async def test_poll_failure_reaches_service_owner_without_retry(
     p = pool(gate=database_gate)
     try:
         with pytest.raises(type(error)) as caught:
-            await daemon._dispatch_loop(
+            await daemon.dispatch_loop(
                 p,
                 labeler_db(database_gate=database_gate),
                 event_bus,

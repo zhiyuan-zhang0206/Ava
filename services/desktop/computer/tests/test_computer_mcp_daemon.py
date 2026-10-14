@@ -248,7 +248,7 @@ async def test_click_executes_and_converts_coordinates(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(screen_mod, "snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     resp = await _call(d, "click", {"x": 100, "y": 200})
     assert resp["ok"] is True
@@ -266,7 +266,7 @@ async def test_user_abort_is_an_error_and_is_never_retried_or_replayed(
     fake_helper.click_errors = [
         UserAbortError("Stopped by the user: the mouse is parked in the top-left corner")
     ]
-    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(screen_mod, "snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     refused = await _call(d, "click", {"x": 100, "y": 200})
     assert refused["ok"] is False
@@ -292,7 +292,7 @@ async def test_snapshot_returns_path_and_geometry(
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/snap-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -322,7 +322,7 @@ async def test_snapshot_and_click_measure_scale_not_helper_claim(
     fh.png_size = (1920, 1080)
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/snap-1x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -352,7 +352,7 @@ async def test_snapshot_measures_scale_on_2x_and_converts_ax(
     fh = fake_helper
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/snap-2x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -386,7 +386,7 @@ async def test_snapshot_include_ocr_adds_text_boxes(
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/snap-ocr-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
@@ -409,7 +409,7 @@ async def test_snapshot_include_ocr_failure_degrades(
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/snap-ocr-fail.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -432,7 +432,7 @@ async def test_snapshot_without_include_ocr_skips_ocr(
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/snap-plain.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     called: list[str] = []
@@ -538,7 +538,7 @@ async def test_find_text_returns_matching_boxes(
     physical-pixel geometry (the click space, no scale conversion)."""
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -564,7 +564,7 @@ async def test_find_text_reuses_last_ocr_when_asked(
     produced — no second capture, and the result says fresh:false."""
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -590,7 +590,7 @@ async def test_find_text_fresh_then_stale_share_one_capture(
     searches that same screen (fresh:false) without a new capture."""
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -615,7 +615,7 @@ async def test_find_text_stale_with_empty_cache_captures(
     falls back to a fresh capture (and reports fresh:true)."""
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -638,7 +638,7 @@ async def test_find_text_ocr_failure_is_an_error(
     never a silent empty list."""
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     fake_ocr.error = "swiftc missing"
@@ -673,7 +673,7 @@ async def test_click_text_ocrs_locates_and_clicks(
     (physical pixels converted by the capture's measured 2x scale)."""
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -697,7 +697,7 @@ async def test_click_text_index_selects_among_matches(
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -721,7 +721,7 @@ async def test_click_text_failures_are_readable_and_never_click(
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -751,7 +751,7 @@ async def test_click_text_audits_the_clicked_center(
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)

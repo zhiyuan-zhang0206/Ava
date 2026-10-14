@@ -35,7 +35,7 @@ Usage:
 
 Kept alive by the root supervisor's health monitor through the `/healthz`
 identity probe of the plugin's `services()` entry — so the schema-drift exit in
-`_dispatch_loop` is revived on the next round instead of staying dead.
+`dispatch_loop` is revived on the next round instead of staying dead.
 """
 
 import asyncio
@@ -240,7 +240,7 @@ def run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: 
 # ── Daemon lifecycle ─────────────────────────────────────────────────────────
 
 
-def _write_pidfile() -> None:
+def write_pidfile() -> None:
     if not acquire_pidfile(_pidfile(), "ava_builtins.plugins.ava_fleet.task_maintenance.daemon"):
         _log.info("[task_maintenance] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
@@ -269,7 +269,7 @@ async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
         remaining -= step
 
 
-async def _dispatch_loop(
+async def dispatch_loop(
     pool: ConnectionPool,
     db: Database,
     bus: EventBus,
@@ -321,7 +321,7 @@ async def run(
         sys.exit(1)
 
     # Pidfile before the healthz bind — see services/restarter/daemon.py:run().
-    _write_pidfile()
+    write_pidfile()
     _log.info("[task-maintenance] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
@@ -334,7 +334,7 @@ async def run(
     db = database()
     pool = db.pool()
     try:
-        await _dispatch_loop(pool, db, EventBus.from_settings(), liveness, config=config)
+        await dispatch_loop(pool, db, EventBus.from_settings(), liveness, config=config)
     finally:
         pool.close()
         await stop_health_server(health)

@@ -124,7 +124,7 @@ class MarkdownEventHandler(FileSystemEventHandler):
                 self._push(str(dest))
 
 
-def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(
         _pidfile(config, runtime=runtime), "services.derived.memory_indexer.daemon"
     ):
@@ -351,7 +351,7 @@ def _kind_limits(rows: list[tuple[float, str, str, int, str]]) -> dict[str, int]
     return limits
 
 
-def _reconcile(
+def reconcile(
     backend: MemorySearchBackend,
     provider: EmbeddingProvider,
     liveness: Liveness,
@@ -548,7 +548,7 @@ async def run(
         )
         sys.exit(1)
 
-    _write_pidfile(config, runtime=runtime)
+    write_pidfile(config, runtime=runtime)
     _log.info("[indexer] pidfile written: %s", _pidfile(config, runtime=runtime))
 
     # Fail fast before deriving liveness or binding healthz: an unknown
@@ -618,7 +618,7 @@ async def run(
     _log.info("[indexer] watching %s", root)
 
     try:
-        if not await asyncio.to_thread(_reconcile, backend, provider, liveness, machine=machine):
+        if not await asyncio.to_thread(reconcile, backend, provider, liveness, machine=machine):
             _log.warning("[indexer] startup index incomplete; explicit rebuild required")
         await drain_loop(backend, dirty_queue, liveness, provider, machine=machine)
     finally:

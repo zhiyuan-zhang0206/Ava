@@ -1,6 +1,6 @@
 """Unit tests for the computer MCP bridge's socket link.
 
-Covers _Link (request/response framing + agent-id stamping) and
+Covers Link (request/response framing + agent-id stamping) and
 _ReconnectingLink (automatic reconnect on transport errors). The MCP stdio
 surface itself is a thin pass-through (same shape as the browser wrapper),
 exercised against a live daemon in dev-cluster testing.
@@ -17,7 +17,7 @@ import pytest
 
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperError
-from services.desktop.computer.mcp_wrapper import _Link, _ReconnectingLink
+from services.desktop.computer.mcp_wrapper import Link, _ReconnectingLink
 
 
 class FakeWriter:
@@ -75,7 +75,7 @@ async def test_request_returns_result_on_ok(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("AVA_AGENT_ID", "42")
     reader = FakeReader([_line({"id": 1, "ok": True, "result": {"x": 1}})])
     writer = FakeWriter()
-    link = _Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+    link = Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     assert await link.request({"method": "list_tools"}) == {"x": 1}
     sent = json.loads(writer.written[0])
     assert sent["agent_id"] == 42  # identity stamped on every request
@@ -85,7 +85,7 @@ async def test_request_without_identity(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     reader = FakeReader([_line({"id": 1, "ok": True, "result": None})])
     writer = FakeWriter()
-    link = _Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+    link = Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     await link.request({"method": "call_tool", "tool": "click", "args": {}})
     sent = json.loads(writer.written[0])
     assert sent["agent_id"] is None
@@ -100,7 +100,7 @@ async def test_agent_identity_is_injected_for_each_request(monkeypatch: pytest.M
         ]
     )
     writer = FakeWriter()
-    link = _Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+    link = Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     monkeypatch.setenv("AVA_AGENT_ID", "7")
     await link.request({"method": "list_tools", "agent_id": 99})
     monkeypatch.delenv("AVA_AGENT_ID")
@@ -110,20 +110,20 @@ async def test_agent_identity_is_injected_for_each_request(monkeypatch: pytest.M
 
 async def test_request_raises_on_error_response() -> None:
     reader = FakeReader([_line({"id": 1, "ok": False, "error": "quota exceeded"})])
-    link = _Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+    link = Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     with pytest.raises(RuntimeError, match="quota exceeded"):
         await link.request({"method": "call_tool", "tool": "x", "args": {}})
 
 
 async def test_request_raises_on_closed_connection() -> None:
-    link = _Link(FakeReader([]), FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+    link = Link(FakeReader([]), FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     with pytest.raises(ConnectionError, match="closed"):
         await link.request({"method": "list_tools"})
 
 
 async def test_request_raises_on_id_mismatch() -> None:
     reader = FakeReader([_line({"id": 99, "ok": True, "result": {}})])
-    link = _Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+    link = Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     with pytest.raises(RuntimeError, match="response id"):
         await link.request({"method": "list_tools"})
 
@@ -131,7 +131,7 @@ async def test_request_raises_on_id_mismatch() -> None:
 @pytest.mark.parametrize("fail_stage", ["write", "drain"])
 async def test_request_preserves_unknown_delivery_error(fail_stage: str) -> None:
     writer = FailingWriter(fail_stage)
-    link = _Link(FakeReader([]), writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+    link = Link(FakeReader([]), writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
     with pytest.raises(BrokenPipeError, match="socket broke"):
         await link.request({"method": "call_tool", "tool": "click", "args": {}})
     assert len(writer.written) == (1 if fail_stage == "drain" else 0)
@@ -145,12 +145,12 @@ async def test_reconnecting_link_redials_on_connection_error() -> None:
     attempts = 0
     writer = FakeWriter()
 
-    async def _connect_once() -> _Link:
+    async def _connect_once() -> Link:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             raise ConnectionRefusedError("daemon not listening")
-        return _Link(
+        return Link(
             cast(asyncio.StreamReader, FakeReader([_line({"id": 1, "ok": True, "result": "ok"})])),
             cast(asyncio.StreamWriter, writer),
             timeout_reader=lambda: 1.0,
@@ -171,7 +171,7 @@ async def test_reconnecting_link_never_retries_delivered_call() -> None:
     attempts = 0
     writers: list[FakeWriter] = []
 
-    async def _connect_once() -> _Link:
+    async def _connect_once() -> Link:
         nonlocal attempts
         attempts += 1
         writer = FakeWriter()
@@ -181,7 +181,7 @@ async def test_reconnecting_link_never_retries_delivered_call() -> None:
             if attempts == 1
             else FakeReader([_line({"id": 1, "ok": True, "result": "next"})])
         )
-        return _Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+        return Link(reader, writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
 
     rl = _ReconnectingLink(timeout_reader=lambda: 1.0)
     rl._connect_once = _connect_once  # type: ignore[method-assign]
@@ -201,12 +201,12 @@ async def test_reconnecting_link_does_not_retry_write_or_drain_failure(fail_stag
     failed_writer = FailingWriter(fail_stage)
     success_writer = FakeWriter()
 
-    async def _connect_once() -> _Link:
+    async def _connect_once() -> Link:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            return _Link(FakeReader([]), failed_writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
-        return _Link(
+            return Link(FakeReader([]), failed_writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+        return Link(
             cast(asyncio.StreamReader, FakeReader([_line({"id": 1, "ok": True, "result": "ok"})])),
             cast(asyncio.StreamWriter, success_writer),
             timeout_reader=lambda: 1.0,
@@ -237,10 +237,10 @@ async def test_reconnecting_link_does_not_retry_bad_response(
     attempts = 0
     writer = FakeWriter()
 
-    async def _connect_once() -> _Link:
+    async def _connect_once() -> Link:
         nonlocal attempts
         attempts += 1
-        return _Link(FakeReader([line]), writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
+        return Link(FakeReader([line]), writer, timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
 
     rl = _ReconnectingLink(timeout_reader=lambda: 1.0)
     rl._connect_once = _connect_once  # type: ignore[method-assign]
@@ -255,10 +255,10 @@ async def test_reconnecting_link_times_out_without_retry(monkeypatch: pytest.Mon
     attempts = 0
     writer = FakeWriter()
 
-    async def _connect_once() -> _Link:
+    async def _connect_once() -> Link:
         nonlocal attempts
         attempts += 1
-        return _Link(HangingReader([]), writer, timeout_reader=lambda: 0.01)  # type: ignore[arg-type]
+        return Link(HangingReader([]), writer, timeout_reader=lambda: 0.01)  # type: ignore[arg-type]
 
     rl = _ReconnectingLink(timeout_reader=lambda: 0.01)
     rl._connect_once = _connect_once  # type: ignore[method-assign]

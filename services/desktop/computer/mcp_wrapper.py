@@ -47,7 +47,7 @@ def _agent_id() -> int | None:
         return None
 
 
-class _Link(SocketLink):
+class Link(SocketLink):
     def __init__(
         self,
         reader: asyncio.StreamReader,
@@ -72,7 +72,7 @@ class _ReconnectingLink(ReconnectingLink):
     def __init__(self, *, timeout_reader: Callable[[], float]) -> None:
         super().__init__(
             _connect,
-            lambda reader, writer: _Link(reader, writer, timeout_reader=timeout_reader),
+            lambda reader, writer: Link(reader, writer, timeout_reader=timeout_reader),
             max_attempts=6,
             base_delay=0.5,
             close_on_error=lambda _exc: True,

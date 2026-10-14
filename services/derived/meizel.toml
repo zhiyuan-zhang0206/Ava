@@ -5,7 +5,4 @@ exports = ["insights", "labeler", "memory_indexer", "memory_search"]
 
 [debt.private-name]
 "memory_search/tests/memory_indexer/test_entry_config_failure.py -> memory_indexer/daemon.py#_is_running" = 1
-"memory_search/tests/memory_indexer/test_entry_config_failure.py -> memory_indexer/daemon.py#_write_pidfile" = 1
 "memory_search/tests/memory_indexer/test_reconcile_embed_error_truncates_and_returns_false.py -> memory_indexer/chunking.py#_file_rows" = 2
-"memory_search/tests/memory_indexer/test_reconcile_embed_error_truncates_and_returns_false.py -> memory_indexer/daemon.py#_reconcile" = 1
-"memory_search/tests/test_memory_indexer.py -> memory_indexer/daemon.py#_reconcile" = 3

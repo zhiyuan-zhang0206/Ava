@@ -6,8 +6,8 @@
 
 [debt.first-party-patch]
 "test_entry_config_failure.py#monkeypatch.setattr services.derived.memory_indexer.daemon._is_running" = 1
-"test_entry_config_failure.py#monkeypatch.setattr services.derived.memory_indexer.daemon._write_pidfile" = 1
 "test_entry_config_failure.py#monkeypatch.setattr services.derived.memory_indexer.daemon.start_health_server" = 1
+"test_entry_config_failure.py#monkeypatch.setattr services.derived.memory_indexer.daemon.write_pidfile" = 1
 "test_reconcile_embed_error_truncates_and_returns_false.py#monkeypatch.setattr services.derived.memory_indexer.daemon.BATCH_SIZE" = 3
 "test_reconcile_embed_error_truncates_and_returns_false.py#monkeypatch.setattr services.derived.memory_indexer.daemon.RECONCILE_CHUNK_PATHS" = 1
 "test_reconcile_embed_error_truncates_and_returns_false.py#monkeypatch.setattr services.derived.memory_indexer.daemon.asyncio.sleep" = 1
