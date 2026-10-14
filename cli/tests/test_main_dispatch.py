@@ -593,8 +593,8 @@ def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParse
     return parser
 
 
-def test_init_and_start_are_settings_free_until_the_home_is_admitted(tmp_path: Path) -> None:
-    """Keep config imports before admission and lazy runtime delivery separate."""
+def _start_entry_probe(scenario: str, tmp_path: Path) -> None:
+    """Run the real admitted start entry with the child's service phase boundary."""
     repo = Path(__file__).resolve().parents[2]
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(
@@ -603,7 +603,7 @@ def test_init_and_start_are_settings_free_until_the_home_is_admitted(tmp_path: P
         AVA_GATEWAY_URL="http://foreign.invalid",
     )
     result = subprocess.run(  # noqa: S603 — fixed interpreter and literal probe
-        [sys.executable, "-I", "-B", str(_CHILD), "init_and_start_settings_free", str(repo)],
+        [sys.executable, "-I", "-B", str(_CHILD), scenario, str(repo)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -612,6 +612,16 @@ def test_init_and_start_are_settings_free_until_the_home_is_admitted(tmp_path: P
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_init_and_start_are_settings_free_until_the_home_is_admitted(tmp_path: Path) -> None:
+    """Keep config imports before admission and lazy runtime delivery separate."""
+    _start_entry_probe("init_and_start_settings_free", tmp_path)
+
+
+@pytest.mark.parametrize("scenario", ["warm", "cold", "foreign", "refused", "launcher"])
+def test_start_reenters_database_authority_for_its_home(scenario: str, tmp_path: Path) -> None:
+    _start_entry_probe(f"start_delivery_{scenario}", tmp_path)
 
 
 @pytest.mark.parametrize("entry", ["package", "parser", "config"])

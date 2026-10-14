@@ -38,6 +38,13 @@ also pins a minted logical-backup passphrase before it publishes `.env`
 keeps the first one). Unregistered existing resources, a terminal destroy intent, or a capability set
 that differs from the intent's refuses a start.
 
+Entering that home discards inherited derived identity, including the database
+login and its delivered-generation marker together. The command's configuration
+then re-admits database authority for this home and checkout, even when the CLI's
+earlier import already delivered a login. This also applies to a warm start's
+read-only schema and checkpoint checks; a matching endpoint does not authorize
+another home's login or a restricted launcher.
+
 `ava init` needs explicit capabilities (`--serve-gateway`, `--serve-agent-runner`,
 `--serve-observability-station`) and a machine name. A remote runner gives it
 `--gateway-url` and `--db-capability` (a sealed bundle minted by

@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from base.host.db_authority.delivery import GENERATION_ENV
 from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
@@ -44,8 +45,9 @@ def _home() -> Path:
 
 def _enter_home(home: Path) -> None:
     """Make this process the admitted home's: its `.env` is the only source of its
-    identity, so inherited derived and identity keys never reach Settings."""
-    for key in derived_env_keys() | env_identity_keys():
+    identity. Discard a delivered login and its generation together so Settings
+    re-admits database authority for this home."""
+    for key in derived_env_keys() | env_identity_keys() | {GENERATION_ENV}:
         os.environ.pop(key, None)
     os.environ["AVA_HOME"] = str(home)
 
