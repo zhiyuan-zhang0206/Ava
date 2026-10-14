@@ -24,7 +24,9 @@ if __name__ == "__main__":
     scenario = sys.argv[1]
     if scenario == "agent_host":
         # A stand-in for the agent host, creating its session through the client.
-        client.create_session(sys.argv[2], sys.argv[3], {}, sys.argv[4])
+        client.create_session(
+            sys.argv[2], sys.argv[3], {}, sys.argv[4], config=client.PtyClientConfig()
+        )
         _stay_alive()
     elif scenario == "backend_host":
         # The same stand-in, through the backend every SDK call goes through.

@@ -306,11 +306,11 @@ def _db_stall_guard(provisioned_db: str, postgres_access: None) -> Iterator[None
     """Own the cluster probe until this function's admitted DB users finish."""
     from psycopg.conninfo import conninfo_to_dict
 
-    from base.cluster.dataplane.pg_stall_watchdog import stall_guard
+    from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig, stall_guard
 
     port = conninfo_to_dict(provisioned_db)["port"]
     assert isinstance(port, str), "the native test database must publish its port"
-    with stall_guard(provisioned_db, int(port)):
+    with stall_guard(provisioned_db, int(port), config=StallWatchdogConfig()):
         yield
 
 

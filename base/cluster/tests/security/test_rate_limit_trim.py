@@ -12,19 +12,20 @@ from __future__ import annotations
 import pytest
 
 from base.cluster import rate_limit
-from base.cluster.rate_limit import Entry, LoginRateLimiter
+from base.cluster.rate_limit import Entry, LoginRateLimitConfig, LoginRateLimiter
 from base.config import ConfigBoot, settings
 
 
-def test_sweep_trims_oldest_active_entries_over_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sweep_trims_oldest_active_entries_over_cap() -> None:
     """Over the soft cap, the OLDEST entries are dropped even when none are
     stale — the memory bound holds under a sustained many-IP attack."""
+    # shrink the cap so the test needs no 10k entries
+    limit_config = LoginRateLimitConfig(max_entries=5)
     limiter = LoginRateLimiter(
         max_failures_reader=lambda: settings.gateway.login_max_failures,
         lockout_seconds_reader=lambda: settings.gateway.login_lockout_seconds,
+        config=limit_config,
     )
-    # shrink the cap so the test needs no 10k entries
-    monkeypatch.setattr(rate_limit, "MAX_ENTRIES", 5)
     now = 1000.0
     for i in range(8):
         ip = f"10.0.0.{i}"
@@ -43,12 +44,19 @@ def test_sweep_trims_oldest_active_entries_over_cap(monkeypatch: pytest.MonkeyPa
     assert "10.0.0.7" in remaining
 
 
+@pytest.mark.parametrize("cap", [0, -1])
+def test_a_cap_that_drops_every_entry_is_refused(cap: int) -> None:
+    with pytest.raises(ValueError, match="max_entries"):
+        LoginRateLimitConfig(max_entries=cap)
+
+
 def test_sweep_stale_removed_first() -> None:
     """Stale entries are dropped before the oldest-active trim — a stale
     streak is the first candidate for reclamation."""
     limiter = LoginRateLimiter(
         max_failures_reader=lambda: settings.gateway.login_max_failures,
         lockout_seconds_reader=lambda: settings.gateway.login_lockout_seconds,
+        config=LoginRateLimitConfig(),
     )
     now = 1000.0
     limiter._entries["stale-ip"] = Entry(failures=1, locked_until=0.0, last_failure_at=now - 99999)
@@ -76,7 +84,9 @@ def test_policy_readers_are_lazy_and_read_in_order_for_each_failure(
         return 17.5
 
     monkeypatch.setattr(rate_limit.time, "time", now)
-    limiter = LoginRateLimiter(max_failures_reader=maximum, lockout_seconds_reader=window)
+    limiter = LoginRateLimiter(
+        max_failures_reader=maximum, lockout_seconds_reader=window, config=LoginRateLimitConfig()
+    )
     assert calls == []
     limiter.record_failure("ip")
     limiter.record_failure("ip")
@@ -99,10 +109,12 @@ def test_independent_config_owners_update_policy_at_failure_time(
     left = LoginRateLimiter(
         max_failures_reader=lambda: first.view.gateway.login_max_failures,
         lockout_seconds_reader=lambda: first.view.gateway.login_lockout_seconds,
+        config=LoginRateLimitConfig(),
     )
     right = LoginRateLimiter(
         max_failures_reader=lambda: second.view.gateway.login_max_failures,
         lockout_seconds_reader=lambda: second.view.gateway.login_lockout_seconds,
+        config=LoginRateLimitConfig(),
     )
     now = [1000.0]
     monkeypatch.setattr(rate_limit.time, "time", lambda: now[0])

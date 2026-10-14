@@ -19,6 +19,7 @@ from base import config
 from base.cluster import rate_limit
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.cluster.rate_limit import LoginRateLimitConfig
 from gateway.app import app, lifespan
 from gateway.http.auth.router import router
 from tests.fixtures.gateway_config import gateway_test_client
@@ -187,6 +188,7 @@ def test_limiter_locks_at_threshold_and_restarts_after_expiry(
     limiter = rate_limit.LoginRateLimiter(
         max_failures_reader=lambda: config.settings.gateway.login_max_failures,
         lockout_seconds_reader=lambda: config.settings.gateway.login_lockout_seconds,
+        config=LoginRateLimitConfig(),
     )
     ip = "203.0.113.9"
 
@@ -217,6 +219,7 @@ def test_limiter_success_resets_streak(monkeypatch: pytest.MonkeyPatch) -> None:
     limiter = rate_limit.LoginRateLimiter(
         max_failures_reader=lambda: config.settings.gateway.login_max_failures,
         lockout_seconds_reader=lambda: config.settings.gateway.login_lockout_seconds,
+        config=LoginRateLimitConfig(),
     )
     ip = "203.0.113.11"
 

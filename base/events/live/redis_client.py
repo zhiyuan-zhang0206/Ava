@@ -139,12 +139,6 @@ _AUTH_RETRY_WINDOW_S = 60.0
 _AUTH_RETRY_MAX_ATTEMPTS = 10
 _AUTH_RETRY_ERRORS = (AuthenticationError, NoPermissionError)
 
-# A normal command must not inherit the pub/sub listener's unbounded read. The
-# shared client deliberately pins ``socket_timeout=None`` because listeners use
-# the same connection class and legitimately block while idle; command callers
-# that are only a latency optimization need their own operation-level bound.
-BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S = 2.0
-
 # The two indirections make the retry contract deterministic in unit tests
 # without making real callers choose a scheduler or clock implementation.
 sleep_sync = time.sleep
@@ -330,12 +324,18 @@ async def publish_via(
     payload: str,
     *,
     warn_last: dict[tuple[str, str], float],
+    attempt_timeout_s: float,
     context: str = "",
 ) -> int | None:
     """Publish on the caller-owned client, recovering only known Redis/network errors.
 
     Client construction is inside the same bounded failure policy as publish.
     Programming errors in either step propagate to the caller.
+
+    A normal command must not inherit the pub/sub listener's unbounded read: the shared client
+    deliberately pins ``socket_timeout=None`` because listeners use the same connection class and
+    legitimately block while idle, so a command caller that is only a latency optimization gets its
+    own operation-level bound, `attempt_timeout_s`.
     """
     try:
 
@@ -345,9 +345,7 @@ async def publish_via(
                 channel, payload, auth_retry=False
             )
 
-        return await retry_auth_failures_async(
-            _publish, attempt_timeout_s=BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S
-        )
+        return await retry_auth_failures_async(_publish, attempt_timeout_s=attempt_timeout_s)
     except (ResponseError, RedisConnectionError, RedisTimeoutError, OSError, TimeoutError) as exc:
         _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
         return None

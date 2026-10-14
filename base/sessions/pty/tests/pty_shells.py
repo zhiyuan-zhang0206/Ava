@@ -12,6 +12,7 @@ from pathlib import Path
 import psutil
 
 from base.sessions.pty import client
+from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.keys import keys_to_bytes
 
 # A ceiling, not a delay: every wait returns the moment its condition holds. Under CI
@@ -30,8 +31,16 @@ def wait_for(
     return predicate()
 
 
-def new(name: str, cwd: Path, env: dict[str, str] | None = None, cmd: str | None = None) -> bool:
-    return client.create_session(name, str(cwd), env or {}, cmd)
+def new(
+    name: str,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    cmd: str | None = None,
+    *,
+    config: PtyClientConfig | None = None,
+) -> bool:
+    """Create the session; `config` is the production tuning unless a test shortens it."""
+    return client.create_session(name, str(cwd), env or {}, cmd, config=config or PtyClientConfig())
 
 
 def type_line(name: str, text: str) -> None:

@@ -69,7 +69,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from base import paths, telemetry
 from base.api_contracts.agent_contract import AvaAgentError
 from base.cluster.machine.boot import machine_from_boot
-from base.cluster.rate_limit import LoginRateLimiter
+from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
 from base.config import ConfigBoot, Settings, settings
 from base.config.service_read import ConfigAuthority
 from base.events.live.bus import EventBus
@@ -216,6 +216,7 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
     app.state.login_limiter = LoginRateLimiter(
         max_failures_reader=lambda: config.view.gateway.login_max_failures,
         lockout_seconds_reader=lambda: config.view.gateway.login_lockout_seconds,
+        config=LoginRateLimitConfig(),
     )
     # The insights service's Unix socket: no connection until the first proxied read.
     app.state.insights_client = insights_router.build_client()

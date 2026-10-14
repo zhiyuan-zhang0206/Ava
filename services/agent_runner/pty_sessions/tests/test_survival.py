@@ -24,6 +24,7 @@ import pytest
 from base.db import create_agent
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
+from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.paths import ledger_path
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.pty_service import REPO, PtyServiceProcess
@@ -105,7 +106,7 @@ def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path)
     host.send_signal(signal.SIGKILL)
     host.wait(timeout=10)
 
-    backend = PtySessionBackend()
+    backend = PtySessionBackend(config=PtyClientConfig())
     assert backend.has_session(name)
     backend.send(name, "echo reached-through-the-backend")
     backend.send_keys(name, "Enter")

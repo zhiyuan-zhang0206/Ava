@@ -35,6 +35,15 @@ class EventBusConfig:
     redis_url: str = field(repr=False)
     # The one channel every live lifecycle / UI event is published on.
     events_channel: str
+    # How long one best-effort publish attempt may take before it is abandoned: a latency
+    # optimization must not wait on a half-open connection.
+    publish_attempt_timeout_s: float = 2.0
+
+    def __post_init__(self) -> None:
+        if self.publish_attempt_timeout_s <= 0:
+            raise ValueError(
+                "publish_attempt_timeout_s must be positive: a publish would always time out"
+            )
 
 
 def event_bus_config_from_settings() -> EventBusConfig:
@@ -90,6 +99,7 @@ class EventBus:
             self.channel if channel is None else channel,
             payload,
             warn_last=self._warn_last,
+            attempt_timeout_s=self._config.publish_attempt_timeout_s,
             context=context,
         )
 
