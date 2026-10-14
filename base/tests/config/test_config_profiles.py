@@ -179,12 +179,13 @@ def test_keys_of_the_retired_stack_are_inert(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Support daemons include browser sandbox and telemetry; alerts belong to the
-    gateway's ingest, and agent execution stays in the agent-host's separate profile."""
+    """Ops reads agent document configuration; browser sandbox and telemetry also
+    belong to support daemons. Agent execution stays in the separate agent host."""
     from base import config
 
     s = config.Settings(profile="runner")
     for domain in (
+        "agent",
         "services",
         "daemon",
         "general",
@@ -195,7 +196,7 @@ def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
         "observability",
     ):
         assert s.has_domain(domain), domain
-    for domain in ("agent", "web", "alerts", "telegram", "feishu"):
+    for domain in ("web", "alerts", "telegram", "feishu"):
         assert not s.has_domain(domain), domain
         with pytest.raises(AttributeError):
             getattr(s, domain)
