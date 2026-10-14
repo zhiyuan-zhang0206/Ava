@@ -135,7 +135,9 @@ def land_cluster_extensions(db: Database) -> None:
 
     try:
         with db.connect() as conn:
-            result = materialize.materialize_skills(conn, dest_root=paths.skills_dir())
+            result = materialize.materialize_skills(
+                conn, dest_root=paths.skills_dir(paths.ava_home())
+            )
     except Exception as exc:
         logger.warning(
             "[extensions] could not read the cluster registry at boot ({}); this "

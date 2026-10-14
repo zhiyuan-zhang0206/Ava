@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "`$AVA_HOME` Layout"
-description: '`base/paths/__init__.py` resolves every per-unit path from `$AVA_HOME`. One home = one unit; co-located units keep separate state because their homes differ. Helpers mkdir on first access, so calling one means the directory is ready.'
+description: '`base/paths/__init__.py` resolves every per-unit path from `$AVA_HOME`. One home = one unit; co-located units keep separate state because their homes differ. `ava_home()` reads the environment and creates the home; a helper that takes `home` is a pure derivation that creates nothing.'
 tags:
 - base
 - library
@@ -14,9 +14,16 @@ tags:
 
 `base/paths/__init__.py` is the single-point resolver for every per-unit path. The root
 comes from `base.paths.home.resolve_ava_home` (env `AVA_HOME`, default
-`~/.ava`), read on every call — never captured at import; each
-helper `mkdir(parents=True, exist_ok=True)` on first access, so calling one
-means "this directory is ready and writable".
+`~/.ava`), read on every call — never captured at import. Only
+`ava_home()` reads the environment and creates the home (mode 0700); the composition
+root of a process calls it once and passes the result down.
+
+A helper takes one of two forms. The **pure form** `H(home)` (`traces_dir`, `skills_dir`,
+`mcps_dir`, `install_registry_path`, `running_sha_path`, `launch_failures_path`) derives a
+path from the home it is handed: it reads no environment and creates nothing, so a test
+hands in `tmp_path` and the code that writes the directory creates it. The zero-argument
+helpers that remain read `AVA_HOME` and `mkdir(parents=True, exist_ok=True)` on first
+access; each is replaced by its pure form together with its callers.
 
 All three process classes — gateway, agent, exec subprocess — inherit the same
 `AVA_HOME` variable, so nothing is passed by hand. **The home is the unit's

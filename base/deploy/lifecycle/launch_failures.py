@@ -39,7 +39,7 @@ def record(sessions: list[str]) -> None:
     footnote. The write is atomic (temp + rename) so a reader never sees a
     partial list.
     """
-    target = base.paths.launch_failures_path()
+    target = base.paths.launch_failures_path(base.paths.ava_home())
     with suppress(OSError):  # a diagnostic footnote must not fail the start
         if not sessions:
             target.unlink(missing_ok=True)
@@ -62,7 +62,7 @@ def take() -> list[str]:
     rollout. The cost of a failed clear is one duplicate report next time, which
     is strictly better than taking the rollout down over a stale footnote.
     """
-    target = base.paths.launch_failures_path()
+    target = base.paths.launch_failures_path(base.paths.ava_home())
     try:
         raw = target.read_text(encoding="utf-8")
     except OSError:
