@@ -249,7 +249,7 @@ async def connect_server(
         )
     shared = spec.get("shared")
     if shared == "browser":
-        return await connect_browser_direct()
+        return await connect_browser_direct(ava_home())
     if shared == "computer_use":
         from ._computer import connect_computer_direct
 
@@ -666,7 +666,9 @@ def reap_stale_daemons(project_root: Path | None) -> None:
 
 
 def _prepare_socket(socket_path: str) -> None:
-    """Clear the way for a fresh bind: reap stale daemons, drop a stale file."""
+    """Clear the way for a fresh bind: create the socket's directory (the path helpers derive
+    paths and create nothing), reap stale daemons, drop a stale file."""
+    Path(socket_path).parent.mkdir(parents=True, exist_ok=True)
     reap_stale_daemons(settings.services.project_root)
     with suppress(OSError):
         Path(socket_path).unlink()
@@ -749,7 +751,7 @@ def main() -> None:
     else:
         from base.paths import mcp_daemon_shared_socket
 
-        socket_path = mcp_daemon_shared_socket()
+        socket_path = mcp_daemon_shared_socket(ava_home())
     add_sink(sys.stderr, format="{message}")
     # Refuse to start over a LIVE socket: unlink+rebind here is what turns the
     # serving daemon into a ghost when a respawn storm races the previous

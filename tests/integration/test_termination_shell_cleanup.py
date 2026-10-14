@@ -102,7 +102,7 @@ async def test_blocked_shell_cleanup_releases_row_lock_with_fixed_cutoff(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda _home: tmp_path)  # pyright: ignore[reportUnknownArgumentType]
     owner, command = await _prepare(phase, db_conn, aops_pool, database_gate=database_gate)
     entered, release = asyncio.Event(), threading.Event()
     loop = asyncio.get_running_loop()
@@ -136,7 +136,7 @@ async def test_unknown_cleanup_error_keeps_original_exception_and_committed_rece
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda _home: tmp_path)  # pyright: ignore[reportUnknownArgumentType]
     owner, command = await _prepare(phase, db_conn, aops_pool, database_gate=database_gate)
     original = RuntimeError("unknown cleanup defect")
 

@@ -290,7 +290,7 @@ def check_helper_chain(_home: Path, _source: Path) -> Detail:
     -> ava-root -> every unit. Reads the helper, the root and the system TCC database;
     changes nothing."""
     from base.native_process.root_control.client import RootClient
-    from base.paths import root_run_dir
+    from base.paths import ava_home, root_run_dir
     from base.sessions.helperproc import helper_client
 
     helper = helper_client()
@@ -302,9 +302,11 @@ def check_helper_chain(_home: Path, _source: Path) -> Detail:
     helper_pid = ping["pid"]
     keeper: Detail = dict(helper.root_status())
     root_pid = keeper["pid"]
-    if keeper["state"] != "running" or keeper["run_dir"] != str(root_run_dir()):
+    if keeper["state"] != "running" or keeper["run_dir"] != str(root_run_dir(ava_home())):
         raise RuntimeError(f"the helper does not keep this home's running root: {keeper}")
-    reply: Detail = dict(RootClient(root_run_dir() / "ava-root.sock", timeout=10).status())
+    reply: Detail = dict(
+        RootClient(root_run_dir(ava_home()) / "ava-root.sock", timeout=10).status()
+    )
     status: Detail = reply["result"]
     if status["root"]["pid"] != root_pid:
         raise RuntimeError(f"the helper keeps root {root_pid}, the root reports {status['root']}")

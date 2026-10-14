@@ -61,7 +61,7 @@ from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import exec_run_dir, quarantined_exec_requests_dir
+from base.paths import ava_home, exec_run_dir, quarantined_exec_requests_dir
 from base.telemetry import process_name
 
 # The envelope protocol's own ceiling (agent/graph/exec/protocol.py). The
@@ -170,9 +170,9 @@ class QuarantineReport:
     retained: tuple[RequestEvidence, ...]
 
 
-def request_paths(agent_id: int) -> tuple[Path, ...]:
-    """Every request envelope currently present for one agent."""
-    return tuple(sorted((exec_run_dir() / str(agent_id)).glob("req-*.json")))
+def request_paths(agent_id: int, *, home: Path) -> tuple[Path, ...]:
+    """Every request envelope currently present for one agent of `home`."""
+    return tuple(sorted((exec_run_dir(home) / str(agent_id)).glob("req-*.json")))
 
 
 def stored_host(resources: object) -> HostEvidence:
@@ -319,6 +319,7 @@ def classify_request(
 def survey(
     agent_id: int,
     *,
+    home: Path,
     incumbent: RuntimeIncarnation | None,
     resources: object,
 ) -> tuple[RequestEvidence, ...]:
@@ -326,13 +327,14 @@ def survey(
     host = stored_host(resources)
     return tuple(
         classify_request(path, agent_id=agent_id, incumbent=incumbent, host=host)
-        for path in request_paths(agent_id)
+        for path in request_paths(agent_id, home=home)
     )
 
 
 def quarantine_stale(
     agent_id: int,
     *,
+    home: Path,
     incumbent: RuntimeIncarnation | None,
     resources: object,
     reason: str,
@@ -349,13 +351,13 @@ def quarantine_stale(
     host = stored_host(resources)
     entries = tuple(
         classify_request(path, agent_id=agent_id, incumbent=incumbent, host=host)
-        for path in request_paths(agent_id)
+        for path in request_paths(agent_id, home=home)
     )
     disposable = tuple(entry for entry in entries if not entry.retained)
     retained = tuple(entry for entry in entries if entry.retained)
     if not disposable:
         return QuarantineReport(agent_id, None, (), retained)
-    committed = _commit(agent_id, disposable, reason=reason)
+    committed = _commit(agent_id, disposable, home=home, reason=reason)
     return QuarantineReport(
         agent_id, committed.event_dir, committed.quarantined, retained + committed.retained
     )
@@ -539,8 +541,8 @@ def row_identity(db: Database, agent_id: int) -> tuple[RuntimeIncarnation | None
     return RuntimeIncarnation(agent_id, generation, owner), resources
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """List one agent's request evidence, or quarantine reviewed entries."""
+def main(argv: Sequence[str] | None = None, *, home: Path) -> int:
+    """List one agent's request evidence, or quarantine reviewed entries (under `home`)."""
     parser = argparse.ArgumentParser(
         prog="python -m base.agents.incarnation.exec_request_evidence",
         description=(
@@ -566,7 +568,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     gate = ProcessDbGate(version=version.get, process=process_name())
     db = Database.from_settings(gate=gate)
     incumbent, resources = row_identity(db, args.agent)
-    entries = survey(args.agent, incumbent=incumbent, resources=resources)
+    entries = survey(args.agent, home=home, incumbent=incumbent, resources=resources)
     if not args.quarantine:
         print_request_evidence(args.agent, entries)
         return 0
@@ -588,7 +590,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     if not selected:
         return 0
-    report = _commit(args.agent, selected, reason="manual quarantine")
+    report = _commit(args.agent, selected, home=home, reason="manual quarantine")
     for item in report.quarantined:
         _emit(f"quarantined {item.entry.path} -> {item.destination}")
     return 0
@@ -615,9 +617,11 @@ def _emit(line: str) -> None:
     sys.stdout.write(line + "\n")
 
 
-def _commit(agent_id: int, entries: Sequence[RequestEvidence], *, reason: str) -> QuarantineReport:
+def _commit(
+    agent_id: int, entries: Sequence[RequestEvidence], *, home: Path, reason: str
+) -> QuarantineReport:
     """Move already-classified entries; shared by the automatic and manual paths."""
-    event_dir = quarantined_exec_requests_dir() / f"{_slug(reason)}-{_stamp()}"
+    event_dir = quarantined_exec_requests_dir(home) / f"{_slug(reason)}-{_stamp()}"
     destination_dir = _private_dir(event_dir / str(agent_id))
     moved: list[QuarantinedEvidence] = []
     retained: list[RequestEvidence] = []
@@ -650,4 +654,4 @@ def _commit(agent_id: int, entries: Sequence[RequestEvidence], *, reason: str) -
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(home=ava_home()))

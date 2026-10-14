@@ -46,7 +46,6 @@
 "test_exec_child_signals.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
 "test_exec_slot.py#assignment ava.state" = 4
 "test_exec_slot.py#assignment ava.state_update" = 1
-"test_resource_admission.py#monkeypatch.setattr base.agents.incarnation.exec_owner_recovery.exec_run_dir" = 1
 
 [debt.private-name]
 "test_resource_admission.py -> test_exec_owner_entry.py#_start" = 1

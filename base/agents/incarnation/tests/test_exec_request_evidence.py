@@ -27,6 +27,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.paths import exec_run_dir, quarantined_exec_requests_dir
 
 _AGENT = 424242
 
@@ -79,22 +80,26 @@ def _resources(host: ResourceProcess) -> dict[str, object]:
 
 
 @pytest.fixture
-def exec_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    directory = tmp_path / "exec"
-    directory.mkdir()
-    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda: directory)
+def home(tmp_path: Path) -> Path:
+    return tmp_path / "home"
+
+
+@pytest.fixture
+def exec_dir(home: Path) -> Path:
+    directory = exec_run_dir(home)
+    directory.mkdir(parents=True)
     return directory
 
 
 @pytest.fixture
-def quarantine_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    directory = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr(exec_request_evidence, "quarantined_exec_requests_dir", lambda: directory)
-    return directory
+def quarantine_dir(home: Path) -> Path:
+    return quarantined_exec_requests_dir(home)
 
 
 def test_superseded_envelope_is_stale_and_quarantined_with_receipt(
-    exec_dir: Path, quarantine_dir: Path
+    exec_dir: Path,
+    quarantine_dir: Path,
+    home: Path,
 ) -> None:
     """An old incarnation's envelope moves aside; its bytes and proof survive."""
     owner = uuid4()
@@ -102,12 +107,14 @@ def test_superseded_envelope_is_stale_and_quarantined_with_receipt(
     before = request.read_text()
     incumbent = _superseded()
 
-    (entry,) = survey(_AGENT, incumbent=incumbent, resources=None)
+    (entry,) = survey(_AGENT, home=home, incumbent=incumbent, resources=None)
     assert entry.verdict is Verdict.STALE
     assert entry.incarnation is not None and entry.incarnation.owner == owner
     assert entry.live_pids == ()
 
-    report = quarantine_stale(_AGENT, incumbent=incumbent, resources=None, reason="unit test")
+    report = quarantine_stale(
+        _AGENT, home=home, incumbent=incumbent, resources=None, reason="unit test"
+    )
     assert report.retained == ()
     assert not request.exists()
     (moved,) = report.quarantined
@@ -122,14 +129,16 @@ def test_superseded_envelope_is_stale_and_quarantined_with_receipt(
 
 
 def test_unattributed_envelope_is_retained_and_never_moved(
-    exec_dir: Path, quarantine_dir: Path
+    exec_dir: Path,
+    quarantine_dir: Path,
+    home: Path,
 ) -> None:
     """Absent structured evidence stays exactly where it is, with its reason."""
     request = _write_envelope(
         exec_dir, payload={"v": 1, "code": "x", "agent_id": _AGENT, "timeout_s": 5.0}, age_s=3600
     )
 
-    report = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+    report = quarantine_stale(_AGENT, home=home, incumbent=None, resources=None, reason="unit test")
 
     (entry,) = report.retained
     assert entry.verdict is Verdict.UNKNOWN
@@ -164,14 +173,17 @@ def _no_processes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_unreadable_envelope_inside_the_bound_is_retained(
-    exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
+    exec_dir: Path,
+    quarantine_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    home: Path,
 ) -> None:
     """Young evidence still defers — a deferral that may settle is not a stall."""
     request = _write_envelope(exec_dir)
     _unreadable(request, age_s=60.0)
     _no_processes(monkeypatch)
 
-    report = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+    report = quarantine_stale(_AGENT, home=home, incumbent=None, resources=None, reason="unit test")
 
     (entry,) = report.retained
     assert entry.verdict is Verdict.UNKNOWN
@@ -201,7 +213,9 @@ def test_bounded_age_resolves_profile_safely_without_the_sandbox_domain(
 
 
 def test_routine_stale_quarantine_is_not_the_bounded_alert(
-    exec_dir: Path, quarantine_dir: Path
+    exec_dir: Path,
+    quarantine_dir: Path,
+    home: Path,
 ) -> None:
     """Only the unreadable class escalates; attributed staleness stays quiet."""
     from loguru import logger
@@ -213,7 +227,7 @@ def test_routine_stale_quarantine_is_not_the_bounded_alert(
     )
     try:
         report = quarantine_stale(
-            _AGENT, incumbent=_superseded(), resources=None, reason="unit test"
+            _AGENT, home=home, incumbent=_superseded(), resources=None, reason="unit test"
         )
     finally:
         logger.remove(sink)
@@ -227,7 +241,9 @@ def test_routine_stale_quarantine_is_not_the_bounded_alert(
 
 
 def test_live_reference_of_any_process_shape_is_never_excluded(
-    exec_dir: Path, quarantine_dir: Path
+    exec_dir: Path,
+    quarantine_dir: Path,
+    home: Path,
 ) -> None:
     """A live process naming the request keeps it deferred, whatever its argv."""
     request = _write_envelope(exec_dir, owner=uuid4())
@@ -243,7 +259,7 @@ def test_live_reference_of_any_process_shape_is_never_excluded(
                 break
             time.sleep(0.05)
         report = quarantine_stale(
-            _AGENT, incumbent=_superseded(), resources=None, reason="unit test"
+            _AGENT, home=home, incumbent=_superseded(), resources=None, reason="unit test"
         )
         (entry,) = report.retained
         assert entry.verdict is Verdict.LIVE
@@ -259,7 +275,9 @@ def test_live_reference_of_any_process_shape_is_never_excluded(
 
 
 def test_exec_child_with_hidden_environment_is_never_excluded(
-    exec_dir: Path, monkeypatch: pytest.MonkeyPatch
+    exec_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    home: Path,
 ) -> None:
     """Unreadable is not absence: a hidden exec-child root still defers."""
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
@@ -272,7 +290,7 @@ def test_exec_child_with_hidden_environment_is_never_excluded(
     hidden.environ.side_effect = psutil.AccessDenied()
     monkeypatch.setattr(exec_request_evidence.psutil, "process_iter", _only_process(hidden))
 
-    (entry,) = survey(_AGENT, incumbent=_superseded(), resources=None)
+    (entry,) = survey(_AGENT, home=home, incumbent=_superseded(), resources=None)
 
     assert entry.verdict is Verdict.LIVE
     assert entry.live_pids == (987654,)
@@ -288,6 +306,7 @@ def test_exec_child_birth_window_bounds_a_scrubbed_root(
     monkeypatch: pytest.MonkeyPatch,
     birth_offset: float,
     verdict: Verdict,
+    home: Path,
 ) -> None:
     """A readable non-matching exec child counts only inside the request's lifetime."""
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
@@ -301,13 +320,15 @@ def test_exec_child_birth_window_bounds_a_scrubbed_root(
     scrubbed.create_time.return_value = request.stat().st_mtime + birth_offset
     monkeypatch.setattr(exec_request_evidence.psutil, "process_iter", _only_process(scrubbed))
 
-    (entry,) = survey(_AGENT, incumbent=_superseded(), resources=None)
+    (entry,) = survey(_AGENT, home=home, incumbent=_superseded(), resources=None)
 
     assert entry.verdict is verdict
 
 
 def test_live_stored_host_identity_retains_a_superseded_envelope(
-    exec_dir: Path, quarantine_dir: Path
+    exec_dir: Path,
+    quarantine_dir: Path,
+    home: Path,
 ) -> None:
     """Resource evidence that contradicts the boot premise vetoes every verdict."""
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
@@ -315,6 +336,7 @@ def test_live_stored_host_identity_retains_a_superseded_envelope(
 
     report = quarantine_stale(
         _AGENT,
+        home=home,
         incumbent=None,
         resources=_resources(ResourceProcess.capture(native)),
         reason="unit test",
@@ -326,7 +348,9 @@ def test_live_stored_host_identity_retains_a_superseded_envelope(
     assert request.exists()
 
 
-def test_reused_pid_is_the_ended_boot_not_a_live_host(exec_dir: Path, quarantine_dir: Path) -> None:
+def test_reused_pid_is_the_ended_boot_not_a_live_host(
+    exec_dir: Path, quarantine_dir: Path, home: Path
+) -> None:
     """A recycled PID means the recorded host ended; the file may be quarantined."""
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
     native = psutil.Process()
@@ -339,6 +363,7 @@ def test_reused_pid_is_the_ended_boot_not_a_live_host(exec_dir: Path, quarantine
 
     report = quarantine_stale(
         _AGENT,
+        home=home,
         incumbent=None,
         resources=_resources(reused),
         reason="unit test",
@@ -348,17 +373,19 @@ def test_reused_pid_is_the_ended_boot_not_a_live_host(exec_dir: Path, quarantine
     assert not request.exists()
 
 
-def test_repeated_quarantine_is_idempotent(exec_dir: Path, quarantine_dir: Path) -> None:
+def test_repeated_quarantine_is_idempotent(
+    exec_dir: Path, quarantine_dir: Path, home: Path
+) -> None:
     first = _write_envelope(exec_dir, "req-first.json", owner=uuid4(), age_s=3600)
     second = _write_envelope(exec_dir, "req-second.json", owner=uuid4(), age_s=3600)
 
-    report = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+    report = quarantine_stale(_AGENT, home=home, incumbent=None, resources=None, reason="unit test")
     assert len(report.quarantined) == 2 and report.event_dir is not None
     receipt = report.event_dir / str(_AGENT) / "receipt.json"
     before = receipt.read_text()
     assert not first.exists() and not second.exists()
 
-    again = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+    again = quarantine_stale(_AGENT, home=home, incumbent=None, resources=None, reason="unit test")
 
     assert again.quarantined == () and again.retained == () and again.event_dir is None
     assert receipt.read_text() == before
@@ -369,7 +396,10 @@ def test_repeated_quarantine_is_idempotent(exec_dir: Path, quarantine_dir: Path)
 
 
 def test_quarantine_move_failure_keeps_the_entry_retained(
-    exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
+    exec_dir: Path,
+    quarantine_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    home: Path,
 ) -> None:
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
 
@@ -378,7 +408,7 @@ def test_quarantine_move_failure_keeps_the_entry_retained(
 
     monkeypatch.setattr(exec_request_evidence.shutil, "move", refuse)
 
-    report = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="unit test")
+    report = quarantine_stale(_AGENT, home=home, incumbent=None, resources=None, reason="unit test")
 
     (entry,) = report.retained
     assert "quarantine failed" in entry.detail
@@ -386,11 +416,13 @@ def test_quarantine_move_failure_keeps_the_entry_retained(
 
 
 def test_diagnostics_name_the_file_the_owner_and_the_commands(
-    exec_dir: Path, quarantine_dir: Path
+    exec_dir: Path,
+    quarantine_dir: Path,
+    home: Path,
 ) -> None:
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
 
-    (entry,) = survey(_AGENT, incumbent=None, resources=None)
+    (entry,) = survey(_AGENT, home=home, incumbent=None, resources=None)
     line = entry.describe()
     hint = exec_request_evidence.disposition_hint(_AGENT)
 
@@ -399,46 +431,60 @@ def test_diagnostics_name_the_file_the_owner_and_the_commands(
 
 
 def test_cli_lists_and_quarantines_reviewed_entries(
-    db_url: str, exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
+    db_url: str,
+    exec_dir: Path,
+    quarantine_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+    home: Path,
 ) -> None:
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
 
-    assert main(["--agent", str(_AGENT)]) == 0
+    assert main(["--agent", str(_AGENT)], home=home) == 0
     listing = capsys.readouterr().out
     assert "would quarantine" in listing and str(request) in listing
 
-    assert main(["--agent", str(_AGENT), "--quarantine", request.name]) == 0
+    assert main(["--agent", str(_AGENT), "--quarantine", request.name], home=home) == 0
     assert "quarantined" in capsys.readouterr().out
     assert not request.exists()
 
 
 def test_cli_refuses_an_unreviewed_retained_entry(
-    db_url: str, exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
+    db_url: str,
+    exec_dir: Path,
+    quarantine_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+    home: Path,
 ) -> None:
     request = _write_envelope(
         exec_dir, payload={"v": 1, "code": "x", "agent_id": _AGENT, "timeout_s": 5.0}, age_s=3600
     )
 
-    assert main(["--agent", str(_AGENT), "--quarantine", request.name]) == 1
+    assert main(["--agent", str(_AGENT), "--quarantine", request.name], home=home) == 1
     assert "refusing" in capsys.readouterr().out
     assert request.exists()
 
 
 def test_cli_force_still_quarantines_retained_evidence(
-    db_url: str, exec_dir: Path, quarantine_dir: Path, capsys: pytest.CaptureFixture[str]
+    db_url: str,
+    exec_dir: Path,
+    quarantine_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+    home: Path,
 ) -> None:
     """--force keeps its review override for everything retention still holds."""
     request = _write_envelope(
         exec_dir, payload={"v": 1, "code": "x", "agent_id": _AGENT, "timeout_s": 5.0}, age_s=3600
     )
 
-    assert main(["--agent", str(_AGENT), "--quarantine", request.name, "--force"]) == 0
+    assert main(["--agent", str(_AGENT), "--quarantine", request.name, "--force"], home=home) == 0
     assert "quarantined" in capsys.readouterr().out
     assert not request.exists()
 
 
 def test_cli_entry_captures_once_and_keeps_the_database_gated(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    home: Path,
 ) -> None:
     image = LoadedCommit(source_root=tmp_path, sha="loaded-before-checkout-moved")
     capture = Mock(return_value=image)
@@ -454,7 +500,7 @@ def test_cli_entry_captures_once_and_keeps_the_database_gated(
     monkeypatch.setattr(exec_request_evidence, "survey", Mock(return_value=[]))
     monkeypatch.setattr(exec_request_evidence, "print_request_evidence", Mock())
 
-    assert main(["--agent", str(_AGENT)]) == 0
+    assert main(["--agent", str(_AGENT)], home=home) == 0
 
     capture.assert_called_once_with()
     create.assert_called_once()
@@ -470,21 +516,27 @@ def test_cli_entry_captures_once_and_keeps_the_database_gated(
 
 def test_cli_entry_propagates_the_original_database_failure(
     monkeypatch: pytest.MonkeyPatch,
+    home: Path,
 ) -> None:
     failure = RuntimeError("original database failure")
     monkeypatch.setattr(exec_request_evidence.Database, "from_settings", Mock(side_effect=failure))
     with pytest.raises(RuntimeError) as caught:
-        main(["--agent", str(_AGENT)])
+        main(["--agent", str(_AGENT)], home=home)
     assert caught.value is failure
 
 
 def test_old_unreadable_request_remains_unknown_without_review(
-    exec_dir: Path, quarantine_dir: Path, monkeypatch: pytest.MonkeyPatch
+    exec_dir: Path,
+    quarantine_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    home: Path,
 ) -> None:
     request = _write_envelope(exec_dir, age_s=1000000)
     _unreadable(request, age_s=1000000)
     _no_processes(monkeypatch)
-    report = quarantine_stale(_AGENT, incumbent=None, resources=None, reason="inspection")
+    report = quarantine_stale(
+        _AGENT, home=home, incumbent=None, resources=None, reason="inspection"
+    )
     assert report.quarantined == ()
     assert len(report.retained) == 1
     assert report.retained[0].verdict is Verdict.UNKNOWN

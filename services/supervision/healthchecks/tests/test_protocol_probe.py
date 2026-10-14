@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from base import paths
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.native_process.root_control import client
 from base.sessions.pty.paths import service_socket_path
@@ -83,9 +82,8 @@ def test_protocol_specific_failure_detail_is_preserved() -> None:
     assert probe.probe_protocol(lambda: result) is result
 
 
-def test_missing_unix_endpoint_is_down(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(paths, "mcp_daemon_shared_socket", lambda: tmp_path / "missing")
-    assert probe.probe("mcp-daemon").verdict.value == "down"
+def test_missing_unix_endpoint_is_down(tmp_path: Path) -> None:
+    assert probe.probe("mcp-daemon", home=tmp_path).verdict.value == "down"
 
 
 def test_protocol_ping_reads_the_pty_service_as_up(pty_service: PtyServiceProcess) -> None:

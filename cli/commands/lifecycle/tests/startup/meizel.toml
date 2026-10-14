@@ -54,7 +54,6 @@ exports = ["test_start_readiness_gate.py"]
 "test_start_health_port_gate.py#monkeypatch.setattr services.supervision.roster.spec.services_for_capabilities_annotated" = 1
 "test_start_partial_stop.py#monkeypatch.setattr base.cluster.port_free" = 1
 "test_start_partial_stop.py#monkeypatch.setattr base.host.proc.hosting_exec_domain" = 1
-"test_start_partial_stop.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_start_partial_stop.py#monkeypatch.setattr base.sessions.hosting.hosting_supervised_session" = 1
 "test_start_partial_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.pause_agents" = 1
 "test_start_partial_stop.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.services_phase_action" = 1

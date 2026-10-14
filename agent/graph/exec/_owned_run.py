@@ -41,7 +41,7 @@ from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import exec_run_dir
+from base.paths import ava_home, exec_run_dir
 
 from ._child_boundary import build_child_env, read_result_envelope, result_from_payload
 from ._output_pipe import ExecOutputPipe
@@ -131,7 +131,10 @@ class OwnedRun:
         self.chunk_publisher = chunk_publisher
         self.request_id = uuid4()
         directory = (
-            (exec_dir or exec_run_dir()) / str(target.agent_id) / "domains" / str(self.request_id)
+            (exec_dir or exec_run_dir(ava_home()))
+            / str(target.agent_id)
+            / "domains"
+            / str(self.request_id)
         ).resolve()
         directory.mkdir(parents=True, mode=0o700)
         self.agent_id = target.agent_id

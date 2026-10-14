@@ -11,6 +11,7 @@ from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.lifecycle import start_serving
 from base.host import proc
 from base.host.permissions_helper.client import HelperFactory
+from base.paths.tests.homes import unit_home as unit_home
 from base.sessions import hosting as sessions_hosting
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
@@ -28,20 +29,20 @@ def _port_always_free(_port: int) -> bool:
 
 
 @pytest.fixture
-def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    home = tmp_path / "home"
-    monkeypatch.setattr(paths, "ava_home", lambda: home)
+def partial_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    checkout = unit_home / "checkout"
+    checkout.mkdir()
     monkeypatch.setattr(cluster, "port_free", _port_always_free)
     prepare_identity(
         IdentityInput(
-            home,
-            tmp_path,
+            unit_home,
+            checkout,
             frozenset({"gateway", "agent-runner"}),
             {"AVA_MACHINE_NAME": "partial"},
         )
     )
     monkeypatch.setattr(service_stop, "require_no_terminals", lambda: None)
-    return home
+    return unit_home
 
 
 def test_configured_without_application_evidence_is_proven_unstarted(partial_home: Path) -> None:
@@ -67,11 +68,11 @@ def test_any_application_evidence_refuses_partial_shortcut(
     if evidence == "serving":
         start_serving.begin_start()
     elif evidence == "manifest":
-        path = paths.root_manifests_path()
+        path = paths.root_manifests_path(paths.ava_home())
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{}")
     else:
-        fd = acquire_instance_lock(paths.root_run_dir())
+        fd = acquire_instance_lock(paths.root_run_dir(paths.ava_home()))
     try:
         with pytest.raises(RuntimeError):
             stop.require_unstarted_initialization()

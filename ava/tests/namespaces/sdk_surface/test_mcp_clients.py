@@ -9,7 +9,7 @@ from ava.boot import process_clients
 from ava.mcps import McpClients
 from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
-from base.paths import mcp_daemon_shared_socket
+from base.paths import ava_home, mcp_daemon_shared_socket
 
 
 class _NoCache:
@@ -45,7 +45,7 @@ def test_sdk_clients_use_separate_live_timeout_readers_and_rebuild_after_close()
     second_remote.list_tools.return_value = []
     first_client._remote = first_remote
     second_client._remote = second_remote
-    socket_path = Path(mcp_daemon_shared_socket())
+    socket_path = Path(mcp_daemon_shared_socket(ava_home()))
     socket_path.parent.mkdir(parents=True, exist_ok=True)
     socket_path.touch()
     previous = process_context.unbind_context()

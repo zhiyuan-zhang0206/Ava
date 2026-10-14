@@ -165,7 +165,7 @@ def require_unstarted_initialization() -> bool:
         return False
     if "gateway" not in intent["roles"]:
         return False  # A joined runner may refer to already-existing external work.
-    if start_serving.state_path().exists() or root_manifests_path().exists():
+    if start_serving.state_path().exists() or root_manifests_path(ava_home()).exists():
         raise RuntimeError("initialization journal conflicts with application launch evidence")
     require_root_absent()
     require_no_terminals()

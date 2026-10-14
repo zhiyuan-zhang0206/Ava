@@ -380,7 +380,7 @@ class ComputerMcpDaemon:
     ) -> None:
         self._db = db
         self._helper = helper
-        self._sock = sock or str(computer_mcp_socket())
+        self._sock = sock or str(computer_mcp_socket(ava_home()))
         # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
         # Scroll without x/y reads the actual native cursor.
         self._pointer: tuple[float, float] | None = None
@@ -727,6 +727,7 @@ async def run(
     config = computer_use_config()
     daemon = ComputerMcpDaemon(config, database(), sock, helper=helper)
     path = Path(daemon._sock)
+    path.parent.mkdir(parents=True, exist_ok=True)
     if await socket_in_use(path):
         logger.error(
             "[computer-mcp] socket {} is already served by a live daemon — "

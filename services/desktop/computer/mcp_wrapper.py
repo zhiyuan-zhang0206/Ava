@@ -28,7 +28,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from base.config import ConfigBoot
-from base.paths import computer_mcp_socket
+from base.paths import ava_home, computer_mcp_socket
 from services.desktop.browser.mcp_socket_bridge import (
     ReconnectingLink,
     SocketLink,
@@ -65,7 +65,9 @@ class Link(SocketLink):
 
 
 async def _connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    return await dial_unix_socket(str(computer_mcp_socket()), service_label="computer MCP daemon")
+    return await dial_unix_socket(
+        str(computer_mcp_socket(ava_home())), service_label="computer MCP daemon"
+    )
 
 
 class _ReconnectingLink(ReconnectingLink):

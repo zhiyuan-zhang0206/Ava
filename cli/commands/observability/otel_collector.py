@@ -38,6 +38,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.release import collector_artifact
 from base.host.atomic_io import write_text_atomic
+from base.paths import otel_collector_config, otel_collector_dir
 from base.telemetry.observability import collector_allowed_for_home
 from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.converge.spec import ConvergeCtx
@@ -520,7 +521,7 @@ def ensure_otel_collector(
             file=sys.stderr,
         )
         return
-    dest_dir = ava_home / "otel-collector"
+    dest_dir = otel_collector_dir(ava_home)
     dest_dir.mkdir(parents=True, exist_ok=True)
     binary = dest_dir / collector_artifact.binary_name()
     marker = dest_dir / collector_artifact.VERSION_MARKER
@@ -537,7 +538,7 @@ def ensure_otel_collector(
             f"  · otel-collector: otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} present"
         )
     write_config(
-        dest_dir / "config.yaml",
+        otel_collector_config(ava_home),
         generate_config(repo, ava_home, roles, database_factory=database_factory, machine=machine),
     )
 
@@ -564,7 +565,7 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
             "AVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
             file=sys.stderr,
         )
-        residual = ctx.ava_home / "otel-collector/config.yaml"
+        residual = otel_collector_config(ctx.ava_home)
         if residual.exists():
             print(
                 f"  ! otel-collector: stale/residual config remains at {residual}; "

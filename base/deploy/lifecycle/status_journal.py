@@ -34,7 +34,7 @@ from typing import Any, cast
 import psutil
 
 from base.log import logger
-from base.paths import run_dir
+from base.paths import ava_home, run_dir
 
 
 @dataclass
@@ -72,7 +72,7 @@ class LifecycleOp:
 
 
 def journal_path() -> Path:
-    return run_dir() / "lifecycle-op.json"
+    return run_dir(ava_home()) / "lifecycle-op.json"
 
 
 def _write(op: LifecycleOp) -> None:

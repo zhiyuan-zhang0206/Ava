@@ -275,11 +275,11 @@ def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
 def _exec_request_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     exec_dir = tmp_path / "exec"
     quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda: exec_dir)
+    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda _home: exec_dir)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         exec_request_evidence,
         "quarantined_exec_requests_dir",
-        lambda: quarantine,
+        lambda _home: quarantine,  # pyright: ignore[reportUnknownArgumentType]
     )
     return exec_dir, quarantine
 

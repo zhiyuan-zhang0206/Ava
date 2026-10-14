@@ -10,14 +10,11 @@
 "test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.canary_async" = 1
 "test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.read_json" = 1
 "test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.websockets.connect" = 1
-"test_healthcheck_computer_mcp.py#monkeypatch.setattr services.supervision.healthchecks.computer_mcp.computer_mcp_socket" = 2
 "test_healthcheck_frontend.py#monkeypatch.setattr base.native_process.root_control.client.owned_process" = 1
 "test_healthcheck_frontend.py#monkeypatch.setattr services.supervision.healthchecks.frontend.settings" = 1
 "test_healthcheck_frontend.py#monkeypatch.setattr services.supervision.healthchecks.frontend.subprocess.run" = 3
 "test_healthcheck_gateway.py#monkeypatch.setattr base.config.settings.services.gateway_health_url" = 1
 "test_healthcheck_gateway.py#monkeypatch.setattr services.supervision.healthchecks.gateway.probe_home" = 1
-"test_healthcheck_insights.py#monkeypatch.setattr services.supervision.healthchecks.insights.insights_pidfile" = 1
-"test_healthcheck_insights.py#monkeypatch.setattr services.supervision.healthchecks.insights.insights_socket" = 1
 "test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_grafana_url" = 1
 "test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_loki_url" = 1
 "test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_prometheus_url" = 1
@@ -55,7 +52,6 @@
 "test_prod_venv.py#monkeypatch.setattr services.supervision.healthchecks.prod_venv.proc.run_bounded" = 3
 "test_prod_venv.py#monkeypatch.setattr services.supervision.healthchecks.prod_venv.shutil.which" = 2
 "test_protocol_probe.py#monkeypatch.setattr base.native_process.root_control.client.owned_process" = 1
-"test_protocol_probe.py#monkeypatch.setattr base.paths.mcp_daemon_shared_socket" = 1
 "test_redis_acl_healthcheck.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.redis.Redis.from_url" = 2
 
 [debt.restricted-python]

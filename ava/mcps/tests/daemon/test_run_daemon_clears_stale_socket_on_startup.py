@@ -7,6 +7,7 @@ import contextlib
 import errno
 import json
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -44,6 +45,7 @@ from ava.mcps.tests.test_daemon import (
 )
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
+from base.paths import mcp_daemon_shared_socket
 from base.paths.home import resolve_ava_home
 
 
@@ -66,6 +68,26 @@ async def test_run_daemon_clears_stale_socket_on_startup(
     daemon_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await daemon_task
+
+
+@pytest.mark.flaky  # real AF_UNIX socket lifecycle: await-until-ready poll
+async def test_run_daemon_creates_the_directory_of_its_socket(short_socket_path: str) -> None:
+    """The path helpers derive paths and create nothing: the daemon that binds owns the directory."""
+    home = Path(short_socket_path).with_suffix("")
+    socket_path = str(mcp_daemon_shared_socket(home))
+    assert not home.exists()
+
+    daemon_task = asyncio.create_task(
+        daemon_mod.run_daemon(socket_path, timeout_seconds=lambda: 15.0)
+    )
+    try:
+        _, writer = await wait_for_daemon_socket(daemon_task, socket_path, timeout=1.5)
+        writer.close()
+    finally:
+        daemon_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await daemon_task
+        shutil.rmtree(home, ignore_errors=True)
 
 
 def test_main_requires_socket_arg(monkeypatch: pytest.MonkeyPatch) -> None:

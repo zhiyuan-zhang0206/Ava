@@ -35,6 +35,7 @@ from base.db.config import DbConfig
 from base.lm.catalog import ModelCatalog
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import insights_pidfile, insights_socket
 from services.derived.insights import daemon
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
@@ -100,6 +101,17 @@ def test_the_socket_is_owner_only_and_replaces_a_predecessors_leftover(short_dir
         mode = stat.S_IMODE(path.stat().st_mode)
         assert stat.S_ISSOCK(path.stat().st_mode)
         assert mode == 0o600
+    finally:
+        sock.close()
+
+
+def test_the_binder_creates_the_directory_of_its_socket(short_dir: Path) -> None:
+    """The path helpers derive paths and create nothing: the process that binds owns the directory."""
+    path = insights_socket(short_dir)
+    assert not path.parent.exists()
+    sock = bind_socket(path)
+    try:
+        assert path.parent == short_dir / "run" and path.exists()
     finally:
         sock.close()
 
@@ -261,7 +273,7 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
     class Store:
         def pool(self, *, max_size: int) -> Any:
             assert max_size == 4
-            assert (short_dir / "insights.pid").exists()
+            assert insights_pidfile(short_dir).exists()
             return pool
 
     db = Store()
@@ -274,11 +286,9 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
             for sock in sockets:
                 sock.close()
 
-    monkeypatch.setattr(daemon, "insights_pidfile", lambda: short_dir / "insights.pid")
-    monkeypatch.setattr(daemon, "insights_socket", lambda: short_dir / "insights.sock")
     monkeypatch.setattr(daemon, "build_model_catalog", lambda: model_catalog)
     monkeypatch.setattr(daemon.uvicorn, "Server", Server)
-    await daemon.run(config=boot, database=lambda: cast(Database, db))
+    await daemon.run(home=short_dir, config=boot, database=lambda: cast(Database, db))
 
     assert len(apps) == 1
     assert apps[0].state.config.run_timeline_message_text_max == 37
@@ -299,8 +309,8 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
         "[2026-10-10 12:00:00]"
     )
     assert closed == [True]
-    assert not (short_dir / "insights.pid").exists()
-    assert not (short_dir / "insights.sock").exists()
+    assert not insights_pidfile(short_dir).exists()
+    assert not insights_socket(short_dir).exists()
 
 
 def _assert_gate_matches_image(
@@ -369,7 +379,7 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
         assert inputs["machine_reader"]() == "insights-entry"
         factories[0]()
 
-    async def work(*, config: ConfigBoot, database: Callable[[], Database]) -> None:
+    async def work(*, home: Path, config: ConfigBoot, database: Callable[[], Database]) -> None:
         stages.append("run")
         assert config is boot
         assert database is factories[0]

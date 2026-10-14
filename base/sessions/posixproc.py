@@ -45,7 +45,7 @@ import psutil
 from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
-from base.paths import logs_dir, run_dir
+from base.paths import ava_home, logs_dir, run_dir
 from base.sessions.record import SessionRecord
 
 __all__ = [
@@ -84,7 +84,7 @@ _KILL_POLL_S = 0.05
 
 
 def _sessions_dir() -> Path:
-    d = run_dir() / "sessions"
+    d = run_dir(ava_home()) / "sessions"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

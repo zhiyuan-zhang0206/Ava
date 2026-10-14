@@ -7,12 +7,17 @@ from ava.mcps import release_agent_chrome_pages
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
+from base.paths import ava_home
+
+
+async def _release_default_chrome_pages(agent_id: int) -> bool:
+    return await release_agent_chrome_pages(agent_id, ava_home())
 
 
 async def release_browser_pages(
     agent_id: int,
     *,
-    page_releaser: Callable[[int], Awaitable[object]] = release_agent_chrome_pages,
+    page_releaser: Callable[[int], Awaitable[object]] = _release_default_chrome_pages,
 ) -> None:
     """Best-effort close of this agent's browser-mcp pages after termination commits."""
     try:
@@ -35,7 +40,7 @@ async def finish_termination(
     cutoff: int | None,
     killer: Callable[[int, int], None] | None,
     *,
-    page_releaser: Callable[[int], Awaitable[object]] = release_agent_chrome_pages,
+    page_releaser: Callable[[int], Awaitable[object]] = _release_default_chrome_pages,
 ) -> None:
     """Attempt every post-commit effect and preserve the first failure, including cancellation."""
     primary_error: BaseException | None = None

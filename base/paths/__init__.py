@@ -21,14 +21,13 @@ def ava_home() -> Path:
     return ensure_private_dir(resolve_ava_home())
 
 
-def run_dir() -> Path:
-    """Runtime directory for pid/sock files ($AVA_HOME/run); create if missing.
+def run_dir(home: Path) -> Path:
+    """Runtime directory for pid/sock files (`<home>/run`).
 
     Keeps per-unit ephemeral runtime artifacts (pidfiles and unix sockets)
-    under one subdirectory so the $AVA_HOME top level stays lean."""
-    target = ava_home() / "run"
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+    under one subdirectory so the home's top level stays lean. Pure: the process
+    that binds a socket or writes a pidfile creates the directory."""
+    return home / "run"
 
 
 def install_registry_path(home: Path) -> Path:
@@ -76,22 +75,22 @@ def logs_dir() -> Path:
     return target
 
 
-def chrome_mcp_socket(cdp_port: int) -> Path:
+def chrome_mcp_socket(home: Path, cdp_port: int) -> Path:
     """Unix socket of the per-machine shared chrome MCP service
-    ($AVA_HOME/run/chrome-mcp.<cdp_port>.sock). Keyed by the CDP port so
+    (`<home>/run/chrome-mcp.<cdp_port>.sock`). Keyed by the CDP port so
     co-hosted clusters (each with its own browser_cdp_port) get distinct
     sockets; the per-agent chrome bridge dials this, the daemon listens on it."""
-    return run_dir() / f"chrome-mcp.{cdp_port}.sock"
+    return run_dir(home) / f"chrome-mcp.{cdp_port}.sock"
 
 
-def permissions_helper_socket(port: int) -> Path:
+def permissions_helper_socket(home: Path, port: int) -> Path:
     """Unix socket of this cluster's macOS permissions helper daemon
-    ($AVA_HOME/run/permissions-helper.<port>.sock). Keyed by the per-cluster
+    (`<home>/run/permissions-helper.<port>.sock`). Keyed by the per-cluster
     helper port so co-hosted clusters get distinct sockets; the per-agent client
     dials this, the signed launchd helper listens on it. (The TCC grant the
     helper relies on is shared machine-wide via a fixed bundle id, but the
     process and socket are per-cluster.)"""
-    return run_dir() / f"permissions-helper.{port}.sock"
+    return run_dir(home) / f"permissions-helper.{port}.sock"
 
 
 def permissions_helper_app_dir() -> Path:
@@ -115,27 +114,25 @@ def traces_dir(home: Path) -> Path:
     return home / "traces"
 
 
-def otel_collector_dir() -> Path:
-    """Per-unit OTel Collector sidecar root ($AVA_HOME/otel-collector); create
-    if missing.
+def otel_collector_dir(home: Path) -> Path:
+    """Per-unit OTel Collector sidecar root (`<home>/otel-collector`).
 
     Owns the pinned otelcol-contrib binary, the generated config.yaml (from
     the repo template, baked at converge) and the file_storage filelog-offsets
     directory. One sidecar per machine — see
-    `cli/commands/lifecycle/converge_host.py:_ensure_otel_collector_step`."""
-    target = ava_home() / "otel-collector"
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+    `cli/commands/lifecycle/converge_host.py:_ensure_otel_collector_step`.
+    Pure: the converge step that installs the binary creates the directory."""
+    return home / "otel-collector"
 
 
-def otel_collector_binary() -> Path:
+def otel_collector_binary(home: Path) -> Path:
     """Path of the pinned otelcol-contrib binary."""
-    return otel_collector_dir() / "otelcol-contrib"
+    return otel_collector_dir(home) / "otelcol-contrib"
 
 
-def otel_collector_config() -> Path:
+def otel_collector_config(home: Path) -> Path:
     """Path of the generated sidecar config.yaml (baked at converge)."""
-    return otel_collector_dir() / "config.yaml"
+    return otel_collector_dir(home) / "config.yaml"
 
 
 def memory_dir() -> Path:
@@ -205,47 +202,41 @@ def workspace_dir_readonly(agent_id: int) -> Path:
     return ava_home() / "workspaces" / str(agent_id)
 
 
-def exec_run_dir() -> Path:
-    """Per-unit exec-subprocess scratch dir ($AVA_HOME/run/exec) — request /
+def exec_run_dir(home: Path) -> Path:
+    """Per-unit exec-subprocess scratch dir (`<home>/run/exec`) — request /
     result envelopes for one execute_code run each (agent/graph/exec/protocol.py),
-    pruned per agent subdir. Create if missing."""
-    target = run_dir() / "exec"
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+    pruned per agent subdir. Pure: the writer of an envelope creates it."""
+    return run_dir(home) / "exec"
 
 
-def root_run_dir() -> Path:
-    """ava-root supervisor runtime dir ($AVA_HOME/run/ava-root). Create if missing.
+def root_run_dir(home: Path) -> Path:
+    """ava-root supervisor runtime dir (`<home>/run/ava-root`).
 
     One directory per (machine x home) unit: the control socket
     (`ava-root.sock`), the instance lock (`ava-root.lock`), the unit log tree
     (`logs/<unit>/output.log`) and the generated unit manifest
     (`manifests.json`) all live here, so the daemon's `--run-dir` argument is
-    this single path."""
-    target = run_dir() / "ava-root"
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+    this single path. Pure: `ava start` creates it before it writes the manifest."""
+    return run_dir(home) / "ava-root"
 
 
-def root_manifests_path() -> Path:
-    """The K2 unit manifest the root supervisor reads ($AVA_HOME/run/ava-root/manifests.json).
+def root_manifests_path(home: Path) -> Path:
+    """The K2 unit manifest the root supervisor reads (`<home>/run/ava-root/manifests.json`).
 
     Regenerated by every root-driven `ava start`
     (`services.supervision.ava_root_glue.manifests.generate`) before the daemon is
     (re)spawned, so the running tree's shape always matches this file at
     launch time."""
-    return root_run_dir() / "manifests.json"
+    return root_run_dir(home) / "manifests.json"
 
 
-def quarantined_exec_requests_dir() -> Path:
-    """Per-unit quarantine for exec request envelopes ($AVA_HOME/quarantined-exec-requests).
+def quarantined_exec_requests_dir(home: Path) -> Path:
+    """Per-unit quarantine for exec request envelopes (`<home>/quarantined-exec-requests`).
 
     Stale evidence moved out of run/exec (base/agents/incarnation/exec_request_evidence.py): the
     files stay for inspection beside their JSON receipt, one event subdirectory
-    per quarantine pass. Create if missing."""
-    target = ava_home() / "quarantined-exec-requests"
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+    per quarantine pass. Pure: the quarantine pass creates it."""
+    return home / "quarantined-exec-requests"
 
 
 def launch_failures_path(home: Path) -> Path:
@@ -282,36 +273,36 @@ def running_sha_path(home: Path) -> Path:
     return home / "running_sha"
 
 
-def computer_mcp_socket() -> Path:
+def computer_mcp_socket(home: Path) -> Path:
     """Unix socket of the per-machine shared computer MCP service
-    ($AVA_HOME/run/computer-mcp.sock). The per-agent bridge / the MCP daemon's
+    (`<home>/run/computer-mcp.sock`). The per-agent bridge / the MCP daemon's
     direct dial connect here; the computer-mcp daemon listens on it. One
     service per machine (the desktop is one shared screen), so no port key."""
-    return run_dir() / "computer-mcp.sock"
+    return run_dir(home) / "computer-mcp.sock"
 
 
-def insights_socket() -> Path:
-    """Unix socket the insights service answers on ($AVA_HOME/run/insights.sock).
+def insights_socket(home: Path) -> Path:
+    """Unix socket the insights service answers on (`<home>/run/insights.sock`).
 
     The service has no authentication of its own: the gateway authenticates the caller and
     proxies to it, and a socket in the home's run directory (mode 0600, bound by the service)
     is reachable by the home's owner only. The service binds here and the gateway dials here.
     """
-    return run_dir() / "insights.sock"
+    return run_dir(home) / "insights.sock"
 
 
-def insights_pidfile() -> Path:
-    """Pidfile of the insights service ($AVA_HOME/run/insights.pid)."""
-    return run_dir() / "insights.pid"
+def insights_pidfile(home: Path) -> Path:
+    """Pidfile of the insights service (`<home>/run/insights.pid`)."""
+    return run_dir(home) / "insights.pid"
 
 
-def mcp_daemon_shared_socket() -> str:
+def mcp_daemon_shared_socket(home: Path) -> str:
     """Filesystem path of the per-machine shared MCP daemon socket — one
-    socket under `$AVA_HOME/run` serving every agent on the machine (the daemon
+    socket under `<home>/run` serving every agent on the machine (the daemon
     isolates sessions per client connection; see ava/mcps/_daemon.py). The
     single source of truth for the naming convention: the daemon binds here and
     the client (ava.mcps) connects here. Lives in base/ so the agent kernel
     can import it without going through the agent-facing `ava.mcps`, which
     AVA_SDK_DISABLE may replace with a stub. Run as an agent-runner service
     (ops roster session "mcp-daemon"), watchdog-managed like browser-mcp."""
-    return str(run_dir() / "mcp_daemon.sock")
+    return str(run_dir(home) / "mcp_daemon.sock")

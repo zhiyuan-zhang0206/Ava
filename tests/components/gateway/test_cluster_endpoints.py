@@ -404,7 +404,7 @@ class TestStatusSnapshot:
         from base.deploy.lifecycle import start_serving
         from base.deploy.state import host_deploy_state
 
-        monkeypatch.setattr(start_serving, "run_dir", lambda: fake_flag.parent)
+        monkeypatch.setattr(start_serving, "run_dir", lambda _home: fake_flag.parent)  # pyright: ignore[reportUnknownArgumentType]
         set_machine_identity(role="agent-runner", name="runner-a")
         host_deploy_state.set_posture(database, "idle", machine=machine_identity.name())
         start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
@@ -524,7 +524,7 @@ class TestStatusSnapshot:
         del fake_flag
         set_machine_identity(role="agent-runner", name="test-host")
 
-        def inspect_root() -> object | None:
+        def inspect_root(*, home: Path) -> object | None:
             if online is None:
                 raise RuntimeError("native root inspection unavailable")
             return object() if online else None

@@ -25,7 +25,7 @@ from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.os_platform import Platform
 from base.native_process.ownership import stable_create_time
-from base.paths import logs_dir, permissions_helper_socket, run_dir
+from base.paths import ava_home, logs_dir, permissions_helper_socket, run_dir
 from base.sessions.protocol import SessionBackend
 from base.sessions.record import SessionRecord
 
@@ -39,7 +39,7 @@ _KILL_CONFIRM_TIMEOUT_S = 5.0
 
 
 def _sessions_dir() -> Path:
-    directory = run_dir() / "sessions"
+    directory = run_dir(ava_home()) / "sessions"
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
@@ -103,7 +103,7 @@ def helper_client() -> PermissionsHelperClient:
     from base.config import settings
 
     return PermissionsHelperClient(
-        permissions_helper_socket(settings.services.permissions_helper_port)
+        permissions_helper_socket(ava_home(), settings.services.permissions_helper_port)
     )
 
 

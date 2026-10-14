@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -20,6 +21,22 @@ from unittest.mock import AsyncMock
 import pytest
 
 import ava.mcps._browser as browser_mod
+from base.config import settings
+from base.paths import chrome_mcp_socket
+
+
+@pytest.fixture
+def browser_home() -> Iterator[Path]:
+    """A home whose browser-mcp socket path fits AF_UNIX (about 104 bytes; pytest's tmp_path is longer)."""
+    with tempfile.TemporaryDirectory(prefix="ava-bh-", dir="/tmp") as name:
+        yield Path(name)
+
+
+def service_socket(home: Path) -> Path:
+    """The browser-mcp socket of `home`, with its run directory created as the service would."""
+    sock = chrome_mcp_socket(home, settings.services.browser_cdp_port)
+    sock.parent.mkdir(parents=True, exist_ok=True)
+    return sock
 
 
 class _FakeWriter:
@@ -130,16 +147,12 @@ async def test_request_id_mismatch_raises() -> None:
 
 
 async def test_request_id_mismatch_reconnects_then_next_call_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
+    browser_home: Path,
 ) -> None:
     """A desynced response rebuilds the socket (ids restart at 1) instead of
     poisoning the session: the call that observed the mismatch raises, and the
     next call succeeds on the fresh connection. The old socket is closed."""
-    from base import paths
-
-    sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
-    with contextlib.suppress(OSError):
-        sock_path.unlink()
+    sock_path = service_socket(browser_home)
 
     connections: int = 0
     closed: int = 0
@@ -166,9 +179,8 @@ async def test_request_id_mismatch_reconnects_then_next_call_succeeds(
                 all_closed.set()
 
     server = await asyncio.start_unix_server(_handle, path=str(sock_path))
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
 
-    session, stack = await browser_mod.connect_browser_direct()
+    session, stack = await browser_mod.connect_browser_direct(browser_home)
     with pytest.raises(RuntimeError, match="response id 99 != request 1"):
         await session.list_tools()
     # The rebuilt connection serves subsequent calls normally.
@@ -187,15 +199,11 @@ async def test_request_id_mismatch_reconnects_then_next_call_succeeds(
 
 
 async def test_corrupt_line_reconnects_then_next_call_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
+    browser_home: Path,
 ) -> None:
     """A non-JSON response line also means the stream is lost — rebuild the
     connection so a single corrupt line cannot brick it for good."""
-    from base import paths
-
-    sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
-    with contextlib.suppress(OSError):
-        sock_path.unlink()
+    sock_path = service_socket(browser_home)
 
     connections: int = 0
     rebuilt = asyncio.Event()
@@ -219,9 +227,8 @@ async def test_corrupt_line_reconnects_then_next_call_succeeds(
             w.close()
 
     server = await asyncio.start_unix_server(_handle, path=str(sock_path))
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
 
-    session, stack = await browser_mod.connect_browser_direct()
+    session, stack = await browser_mod.connect_browser_direct(browser_home)
     with pytest.raises(RuntimeError, match="corrupted line"):
         await session.list_tools()
     result = await session.list_tools()
@@ -254,26 +261,17 @@ async def test_eof_raises_connection_error() -> None:
 # ─── connect + retry ─────────────────────────────────────────────────────
 
 
-async def test_connect_browser_direct_dials_socket(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+async def test_connect_browser_direct_dials_socket(browser_home: Path) -> None:
     """connect_browser_direct opens one unix connection and returns a session
     whose stack closes the writer on exit."""
-    from base import paths
-
-    # AF_UNIX paths cap at ~104 chars; pytest tmp_path is far longer, so use a
-    # short fixed path (test-only, unique per run via pid).
-    sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
-    with contextlib.suppress(OSError):
-        sock_path.unlink()
+    sock_path = service_socket(browser_home)
 
     async def _drop(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
         w.close()
 
     server = await asyncio.start_unix_server(_drop, path=str(sock_path))
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
 
-    session, stack = await browser_mod.connect_browser_direct()
+    session, stack = await browser_mod.connect_browser_direct(browser_home)
     assert isinstance(session, browser_mod.BrowserLineSession)
     await stack.aclose()
     server.close()
@@ -283,18 +281,13 @@ async def test_connect_browser_direct_dials_socket(
 
 
 async def test_connect_browser_direct_retries_until_socket_appears(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, browser_home: Path
 ) -> None:
     """A cold-start race (service socket not yet bound) retries instead of
     failing immediately — mirrors the wrapper's connect retry."""
-    from base import paths
-
-    sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
-    with contextlib.suppress(OSError):
-        sock_path.unlink()
+    sock_path = service_socket(browser_home)
     monkeypatch.setattr(browser_mod, "_CONNECT_ATTEMPTS", 20)
     monkeypatch.setattr(browser_mod, "_CONNECT_DELAY_S", 0.02)
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
 
     server_future: asyncio.Future[asyncio.AbstractServer] = asyncio.Future()
 
@@ -310,7 +303,7 @@ async def test_connect_browser_direct_retries_until_socket_appears(
 
     task = asyncio.create_task(_late_server())
     try:
-        session, stack = await browser_mod.connect_browser_direct()
+        session, stack = await browser_mod.connect_browser_direct(browser_home)
         assert isinstance(session, browser_mod.BrowserLineSession)
         await stack.aclose()
     finally:
@@ -401,15 +394,11 @@ async def test_call_tool_wire_omits_agent_id_when_unset() -> None:
 
 
 async def test_release_agent_chrome_pages_sends_release_and_reports_ok(
-    monkeypatch: pytest.MonkeyPatch,
+    browser_home: Path,
 ) -> None:
     """The exit-hook release dials the service once and sends the release
     request carrying the agent id; a truthful `ok` is returned."""
-    from base import paths
-
-    sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
-    with contextlib.suppress(OSError):
-        sock_path.unlink()
+    sock_path = service_socket(browser_home)
     received: list[dict[str, Any]] = []
 
     async def _answer(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
@@ -420,9 +409,8 @@ async def test_release_agent_chrome_pages_sends_release_and_reports_ok(
         w.close()
 
     server = await asyncio.start_unix_server(_answer, path=str(sock_path))
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
     try:
-        assert await browser_mod.release_agent_chrome_pages(7) is True
+        assert await browser_mod.release_agent_chrome_pages(7, browser_home) is True
     finally:
         server.close()
         await server.wait_closed()
@@ -432,15 +420,9 @@ async def test_release_agent_chrome_pages_sends_release_and_reports_ok(
 
 
 async def test_release_agent_chrome_pages_no_service_returns_false(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, browser_home: Path
 ) -> None:
     """No browser service on this machine (socket absent) must degrade to a
     clean False — the exit path never raises on the cleanup nicety."""
-    from base import paths
-
-    sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
-    with contextlib.suppress(OSError):
-        sock_path.unlink()
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(browser_mod, "_RELEASE_TIMEOUT_S", 0.5)
-    assert await browser_mod.release_agent_chrome_pages(7) is False
+    assert await browser_mod.release_agent_chrome_pages(7, browser_home) is False

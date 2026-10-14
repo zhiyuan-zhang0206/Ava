@@ -215,7 +215,7 @@ async def test_shared_browser_server_connects_direct_no_child(
         "chrome", {}, timeout_seconds=lambda: 15.0, stdio_client=_boom, host=fake_host()
     )
     assert session is browser_session and stack is browser_stack
-    direct.assert_awaited_once_with()
+    direct.assert_awaited_once_with(fake_home)
     assert spawned == []
 
 
@@ -302,7 +302,7 @@ async def test_browser_concurrent_connections_no_id_desync(
 
     server = await asyncio.start_unix_server(_browser_service, path=str(sock_path))
 
-    async def _direct() -> tuple[Any, Any]:
+    async def _direct(home: Path) -> tuple[Any, Any]:
         reader, writer = await asyncio.open_unix_connection(sock_path, limit=64 * 1024 * 1024)
         session = browser_mod.BrowserLineSession(reader, writer, sock=str(sock_path))
         stack = contextlib.AsyncExitStack()
