@@ -114,6 +114,7 @@ def test_shutdown_line_logs_a_registered_event(loguru_records: LogRecords) -> No
     finally:
         signal.signal(signal.SIGTERM, previous)
     assert loguru_records.messages() == ["[pg-backup] received SIGTERM, shutting down"]
+    assert loguru_records[0]["level"].name == "INFO"
     extra = loguru_records[0]["extra"]
     assert extra["service"] == "pg-backup"
     assert extra["sig"] == "SIGTERM"

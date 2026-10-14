@@ -169,6 +169,7 @@ class TestSyntaxFixEvents:
             note="deterministic fixes applied",
         )
         [record] = loguru_records.events("syntax_fix")
+        assert record["level"].name == "INFO"
         captured = record["extra"]
         assert captured["fix_type"] == "rough"
         assert captured["before"] == "print(1\uff0c2)"
