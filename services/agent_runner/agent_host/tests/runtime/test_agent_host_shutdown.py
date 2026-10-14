@@ -325,6 +325,32 @@ def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
         child.close()
 
 
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_internal_sigterm_drains_async_cleanup_before_exit(
+    tmp_path: Path, cleanup_failure: bool
+) -> None:
+    child = spawn_child(
+        tmp_path,
+        module="services.agent_runner.agent_host.daemon",
+        label="agent-host",
+        internal_stop=True,
+        cleanup_failure=cleanup_failure,
+    )
+    try:
+        child.wait_bounded_exit(
+            what="TaskGroup child requested SIGTERM with a wedged executor",
+            expected_codes=(1,) if cleanup_failure else (0,),
+        )
+        markers = child.markers().splitlines()
+        assert markers.index("cleanup-started") < markers.index("cleanup-ran")
+        assert "[agent-host] interrupted, shutting down" in child.log_tail()
+        if cleanup_failure:
+            assert "async shutdown failed" in child.log_tail()
+            assert "surrogate cleanup failure" in child.log_tail()
+    finally:
+        child.close()
+
+
 class _UnreachablePool:
     """Every borrow waits, as a pool whose server is gone does until its timeout."""
 

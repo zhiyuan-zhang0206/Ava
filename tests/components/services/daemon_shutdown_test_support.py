@@ -45,6 +45,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _MARKERS_ENV = "DAEMON_SHUTDOWN_TEST_MARKERS"
 _CHILD_MODULE_ENV = "DAEMON_SHUTDOWN_TEST_MODULE"
 _PRE_READY_ENV = "DAEMON_SHUTDOWN_TEST_PRE_READY"
+_INTERNAL_STOP_ENV = "DAEMON_SHUTDOWN_TEST_INTERNAL_STOP"
+_CLEANUP_FAILURE_ENV = "DAEMON_SHUTDOWN_TEST_CLEANUP_FAILURE"
 _ENDPOINT_ENV = "AVA_TELEMETRY_OTLP_ENDPOINT"
 
 # The child must exit within this bound of SIGTERM — small enough to separate a
@@ -78,6 +80,21 @@ def _noop_schema_gate(*_args: object, **_kwargs: object) -> None:
     """Stand-in for ``assert_schema_current``: the check needs a live cluster."""
 
 
+async def _internal_stop() -> None:
+    await asyncio.sleep(0.1)
+    signal.raise_signal(signal.SIGTERM)
+
+
+async def _wait_for_stop() -> None:
+    if os.environ.get(_INTERNAL_STOP_ENV) == "1":
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(_internal_stop())
+            await asyncio.Event().wait()
+    else:
+        while True:
+            await asyncio.sleep(0.1)
+
+
 def run_child() -> None:
     """Child entry: production ``main()`` with a wedge-shaped ``run()``."""
     import base.deploy.schema.migrations
@@ -103,10 +120,13 @@ def run_child() -> None:
                 # wedge is armed and before `ready` releases the parent.
                 pre_ready()
             _mark("ready")
-            while True:
-                await asyncio.sleep(0.1)
+            await _wait_for_stop()
         finally:
+            _mark("cleanup-started")
+            await asyncio.sleep(0.05)
             _mark("cleanup-ran")
+            if os.environ.get(_CLEANUP_FAILURE_ENV) == "1":
+                raise RuntimeError("surrogate cleanup failure")
 
     mod.run = wedge_run  # type: ignore[attr-defined]  # the signal path must still reach this task's cleanup
     mod.main()
@@ -148,7 +168,9 @@ class Child:
         self.terminated_at = time.monotonic()
         self.proc.send_signal(signal.SIGTERM)
 
-    def wait_bounded_exit(self, *, what: str) -> float:
+    def wait_bounded_exit(
+        self, *, what: str, expected_codes: tuple[int, ...] = (0, -signal.SIGTERM)
+    ) -> float:
         assert self.terminated_at is not None
         try:
             rc = self.proc.wait(timeout=EXIT_BOUND_S + KILL_SLACK_S)
@@ -160,9 +182,7 @@ class Child:
                 f"Markers: {self.markers()!r}\nchild log tail:\n{self.log_tail()}"
             )
         elapsed = time.monotonic() - self.terminated_at
-        assert rc in (0, -signal.SIGTERM), (
-            f"daemon child exited rc={rc} ({what}):\n{self.log_tail()}"
-        )
+        assert rc in expected_codes, f"daemon child exited rc={rc} ({what}):\n{self.log_tail()}"
         assert elapsed < EXIT_BOUND_S, (
             f"daemon child took {elapsed:.1f}s to exit after SIGTERM ({what}); "
             f"bound expected {EXIT_BOUND_S:.0f}s"
@@ -192,6 +212,8 @@ def spawn_child(
     module: str,
     label: str,
     pre_ready: Callable[[], None] | None = None,
+    internal_stop: bool = False,
+    cleanup_failure: bool = False,
 ) -> Child:
     """Spawn ``module``'s production main() with a wedge run(); wait for ready.
 
@@ -216,6 +238,8 @@ def spawn_child(
     env[_MARKERS_ENV] = str(markers_path)
     env[_CHILD_MODULE_ENV] = module
     env[_ENDPOINT_ENV] = endpoint
+    env[_INTERNAL_STOP_ENV] = "1" if internal_stop else "0"
+    env[_CLEANUP_FAILURE_ENV] = "1" if cleanup_failure else "0"
     if pre_ready is not None:
         env[_PRE_READY_ENV] = f"{pre_ready.__module__}:{pre_ready.__qualname__}"
     else:
@@ -233,6 +257,8 @@ def spawn_child(
     )
     child = Child(proc=proc, markers_path=markers_path, log_path=log_path, log_file=log_file)
     child.wait_marker("ready")
+    if internal_stop:
+        child.terminated_at = time.monotonic()
     return child
 
 

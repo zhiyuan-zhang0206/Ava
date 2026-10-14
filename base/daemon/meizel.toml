@@ -3,4 +3,4 @@ exports = ["endpoints.py", "health.py", "health_schema.py", "http_transport.py",
 [uses]
 "health.py" = ["health_schema.py", "http_transport.py", "loop_health.py"]
 "round_loop.py" = ["loop_health.py"]
-"tests" = ["endpoints.py", "health.py", "health_schema.py", "http_transport.py", "loop_health.py", "round_loop.py"]
+"tests" = ["endpoints.py", "health.py", "health_schema.py", "http_transport.py", "loop_health.py", "round_loop.py", "shutdown.py"]

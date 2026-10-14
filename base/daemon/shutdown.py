@@ -31,20 +31,34 @@ import types
 from base.log import logger
 
 
-def cancel_and_drain(runner: asyncio.Runner) -> list[Exception]:
+def cancel_and_drain(
+    runner: asyncio.Runner, *, interrupted_by: KeyboardInterrupt | None = None
+) -> list[Exception]:
     """Cancel loop tasks and return their ordinary failures after cleanup.
 
     ``return_exceptions=True`` lets every task's ``finally`` run. Keep the
     exception objects and their gather order for each daemon's existing log;
     ``CancelledError`` is a BaseException and is deliberately not a failure.
-    Errors from obtaining or draining the loop still propagate to the caller.
+    A TaskGroup may replay the exact stop already caught by the caller. When
+    that object is supplied as ``interrupted_by``, resume the same gather until
+    cleanup completes, without cancelling its tasks again. Another interrupt,
+    or an unknown error obtaining or driving the loop, still propagates.
+    Without an explicit interruption identity, no replay is consumed.
     The default executor is deliberately not drained.
     """
     loop = runner.get_loop()
     tasks = asyncio.all_tasks(loop)
     for task in tasks:
         task.cancel()
-    results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+    pending = asyncio.gather(*tasks, return_exceptions=True)
+    while True:
+        try:
+            results = loop.run_until_complete(pending)
+        except KeyboardInterrupt as repeated:
+            if repeated is not interrupted_by:
+                raise
+        else:
+            break
     return [result for result in results if isinstance(result, Exception)]
 
 
