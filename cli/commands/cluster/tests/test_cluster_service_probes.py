@@ -19,6 +19,9 @@ from cli.commands.cluster.tests.health_probe_inputs import (
 from cli.commands.cluster.tests.health_probe_inputs import (
     provider_guard_healthy as provider_guard_healthy,
 )
+from cli.commands.cluster.tests.health_probe_inputs import (
+    provider_guard_reports as provider_guard_reports,
+)
 from cli.commands.cluster.tests.health_probe_inputs import ran as ran
 from cli.commands.cluster.tests.health_probe_inputs import signals as signals
 from cli.database.runtime import CommandRuntime

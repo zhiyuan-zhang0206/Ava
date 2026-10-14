@@ -156,11 +156,11 @@ class BackupDumpFailed(TypedDict):
 class HealthProbeFailing(TypedDict):
     """`health_probe_failing` payload — cli/commands/cluster/health.py.
 
-    One row per unhealthy probe run, repeated on every run while the condition
-    holds. ``check`` names the failed check (the Grafana grouping key);
-    ``failure_class`` is the probe's reading of the cause (``code`` /
-    ``environment`` / ``maintenance``); ``message`` is the bounded diagnostic
-    and not a grouping key.
+    One row per failed check in an unhealthy probe run, repeated on every run
+    while the condition holds. ``check`` names the failed check (the Grafana
+    grouping key); ``failure_class`` is the probe's reading of the cause
+    (``code`` / ``environment`` / ``maintenance``); ``message`` is the bounded
+    diagnostic and not a grouping key.
     """
 
     check: str
@@ -173,8 +173,8 @@ class HealthProbeRan(TypedDict):
 
     One row per completed probe run, healthy or not: the probe's own heartbeat,
     so its absence (not any failure) is the signal that the probe stopped
-    running. ``unhealthy_checks`` is 0 for a healthy run, 1 when the run
-    stopped at its first failing check.
+    running. ``unhealthy_checks`` counts the run's failed checks (0 for a
+    healthy run).
     """
 
     unhealthy_checks: int
