@@ -14,11 +14,12 @@ from unittest.mock import Mock
 import pytest
 from pydantic import ValidationError
 
-from base import log
 from base.cluster import derive
 from base.config import Settings
 from base.config.service_read import ConfigAuthority
 from base.host.env import bootstrap, dotenv_file
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 
 _OWNER_URL = "postgresql://ava:owner-password@127.0.0.1:5433/ava"
 _RUNNER_URL = "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
@@ -87,17 +88,15 @@ def test_pure_runner_never_projects_a_login(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_malformed_config_read_does_not_log_raw_credentials(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path, loguru_records: LogRecords
 ) -> None:
     """A rejected fresh file read never logs a raw credential-bearing input."""
     runtime = Settings(profile=None)
     authority = ConfigAuthority(runtime, runtime, tmp_path / ".env")
     authority.env_path.write_text("AVA_DB_URL=postgresql://owner-password@[::1\n")
-    warning, debug = Mock(), Mock()
-    monkeypatch.setattr(log.logger, "warning", warning)
-    monkeypatch.setattr(log.logger, "debug", debug)
+    loguru_records.clear()  # building Settings above logs its own warnings; only the read is judged
 
     with pytest.raises(ValidationError):
         authority.current_field_values()
-    warning.assert_not_called()
-    debug.assert_not_called()
+    assert loguru_records.messages("WARNING") == []
+    assert loguru_records.messages("DEBUG") == []

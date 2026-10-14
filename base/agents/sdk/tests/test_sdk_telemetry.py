@@ -23,6 +23,8 @@ from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.call_policy import SamplingPolicy
 from base.agents.sdk.tally import SdkCallTally
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 
 @pytest.fixture
@@ -36,17 +38,6 @@ def _full_sampling(monkeypatch: pytest.MonkeyPatch) -> None:
         return SamplingPolicy()
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-
-
-@pytest.fixture
-def captured(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-
-    def capture(*_args: Any, **kw: Any) -> None:
-        rows.append(kw["attributes"])
-
-    monkeypatch.setattr(telemetry, "emit", capture)
-    return rows
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
@@ -81,15 +72,9 @@ def test_emit_without_execution_tally(
 
 
 def test_call_owns_its_entry_identity_snapshot(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    emitted_events: EmittedEvents, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     """Mutation of the caller's mapping during the body cannot relabel the emitted event."""
-    rows: list[dict[str, Any]] = []
-
-    def capture(*_args: Any, **kwargs: Any) -> None:
-        rows.append(kwargs)
-
-    monkeypatch.setattr(telemetry, "emit", capture)
     identity: dict[str, Any] = {"agent_id": 41, "source": "agent:41"}
 
     def body() -> str:
@@ -107,8 +92,9 @@ def test_call_owns_its_entry_identity_snapshot(
         )
         == "done"
     )
-    assert rows[0]["agent_id"] == 41
-    assert rows[0]["source"] == "agent:41"
+    emitted = next(iter(emitted_events))
+    assert emitted.agent_id == 41
+    assert emitted.source == "agent:41"
 
 
 def test_emit_with_explicit_execution_tally(
@@ -224,7 +210,7 @@ def test_failed_call_still_emits(
 
 
 def test_emit_carries_top_level_duration(
-    captured: list[dict[str, Any]], sampling_owner: call_policy.SamplingPolicyOwner
+    emitted_events: EmittedEvents, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     sdk_usage_telemetry.emit(
         "shell.run",
@@ -233,23 +219,25 @@ def test_emit_carries_top_level_duration(
         identity={},
         sampling_owner=sampling_owner,
     )
-    assert captured == [{"fn": "shell.run", "duration": 0.42, "detail": {"k": 1}, "sample_rate": 1}]
+    assert [event.attributes for event in emitted_events] == [
+        {"fn": "shell.run", "duration": 0.42, "detail": {"k": 1}, "sample_rate": 1}
+    ]
 
 
 def test_default_records_every_call(
-    captured: list[dict[str, Any]], sampling_owner: call_policy.SamplingPolicyOwner
+    emitted_events: EmittedEvents, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     for _ in range(10):
         sdk_usage_telemetry.emit("files.read", identity={}, sampling_owner=sampling_owner)
-    assert len(captured) == 10
-    assert all(row["sample_rate"] == 1 for row in captured)
+    assert len(emitted_events) == 10
+    assert all(event.attributes["sample_rate"] == 1 for event in emitted_events)
 
 
 def test_emit_omits_detail_when_empty(
-    captured: list[dict[str, Any]], sampling_owner: call_policy.SamplingPolicyOwner
+    emitted_events: EmittedEvents, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     sdk_usage_telemetry.emit("files.read", identity={}, sampling_owner=sampling_owner)
-    assert "detail" not in captured[0]
+    assert "detail" not in next(iter(emitted_events)).attributes
 
 
 def test_emit_does_not_classify_transport_errors_or_retry(
@@ -304,7 +292,7 @@ def test_explicit_owner_collects_full_tally_per_fn(
 
 def test_live_sampling_keeps_tally_complete(
     monkeypatch: pytest.MonkeyPatch,
-    captured: list[dict[str, Any]],
+    emitted_events: EmittedEvents,
     sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     selected = iter(range(10))
@@ -340,7 +328,7 @@ def test_live_sampling_keeps_tally_complete(
         tally=tally,
         sampling_owner=sampling_owner,
     )
-    assert [row["sample_rate"] for row in captured] == [10, 1]
+    assert [event.attributes["sample_rate"] for event in emitted_events] == [10, 1]
     assert tally.snapshot() == {"files.read": 11}
 
 
@@ -411,7 +399,7 @@ async def test_invalid_policy_blocks_sdk_side_effects(
 @pytest.mark.parametrize("original", [ValueError("SDK failed"), asyncio.CancelledError()])
 async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
     monkeypatch: pytest.MonkeyPatch,
-    captured: list[dict[str, Any]],
+    emitted_events: EmittedEvents,
     async_call: bool,
     original: BaseException,
     sampling_owner: call_policy.SamplingPolicyOwner,
@@ -473,7 +461,7 @@ async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
     assert caught.value is original
     assert reads == ["read", "read"]
     assert nested == []
-    assert captured[0]["fn"] == "outer.call"
+    assert next(iter(emitted_events)).attributes["fn"] == "outer.call"
     with pytest.raises(TypeError, match="new invalid policy"):
         sdk_usage_telemetry.run_metered(
             "next.call",
@@ -488,7 +476,7 @@ async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
 
 def test_direct_emit_propagates_policy_errors_without_creating_events(
     monkeypatch: pytest.MonkeyPatch,
-    captured: list[dict[str, Any]],
+    emitted_events: EmittedEvents,
     sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     def invalid() -> SamplingPolicy:
@@ -500,7 +488,7 @@ def test_direct_emit_propagates_policy_errors_without_creating_events(
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     with pytest.raises(TypeError, match="invalid policy"):
         sdk_usage_telemetry.emit("files.write", identity={}, sampling_owner=sampling_owner)
-    assert captured == []
+    assert len(emitted_events) == 0
 
 
 def test_tally_counts_a_failed_public_entry_too(

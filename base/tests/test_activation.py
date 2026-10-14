@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.plugins import activation
 
 
@@ -45,24 +47,14 @@ def test_unattributed_firing_records_nothing(monkeypatch: pytest.MonkeyPatch) ->
     assert emitted == []
 
 
-def test_event_carries_the_model_in_force(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_event_carries_the_model_in_force(loguru_records: LogRecords) -> None:
     """Philosophy §6 asks for activation telemetry *per model*: without the
     model on the event, "does model X still need this shim" is unanswerable."""
-    bound: list[dict[str, Any]] = []
-
-    class _Logger:
-        def bind(self, **kwargs: Any) -> _Logger:
-            bound.append(kwargs)
-            return self
-
-        def info(self, _msg: str) -> None: ...
-
-    monkeypatch.setattr(activation, "logger", _Logger())
-
     activation.emit("ava_code", "sdkWraps", "files.read", "inner_calls=0", "deepseek-flash")
 
-    assert len(bound) == 1
-    payload = bound[0]
+    logged = loguru_records.events(activation.PLUGIN_ACTIVATION_EVENT)
+    assert len(logged) == 1
+    payload = logged[0]["extra"]
     assert payload["event"] == activation.PLUGIN_ACTIVATION_EVENT
     assert payload["plugin"] == "ava_code"
     assert payload["surface"] == "sdkWraps"
@@ -73,7 +65,8 @@ def test_event_carries_the_model_in_force(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_emit_failure_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Side-channel contract: a broken sink must not raise into the hook / wrap
-    it was called from."""
+    it was called from. Kept as a patch: the fault is `logger.bind` raising, which no real
+    sink can produce (loguru contains a failing sink's exception itself)."""
 
     class _Broken:
         def bind(self, **_kwargs: Any) -> None:

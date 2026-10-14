@@ -16,6 +16,8 @@ from base import config, telemetry
 from base.db import Database
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from base.telemetry.tests.otlp.identity_inputs import allow_identity, machine_identity
 
 AGENT = 8902
@@ -640,17 +642,16 @@ def test_flush_without_init_is_noop() -> None:
     assert backend._queue.empty()
 
 
-def test_flag_off_disables_export(otlp_backend: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_flag_off_disables_export(
+    otlp_backend: Any, monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+) -> None:
     """AVA_TELEMETRY_OTLP_ENABLED=false -> export is a no-op: no backend
     bring-up, no records, no queue traffic."""
     backend, log_exporter, metric_reader = otlp_backend
     monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", False)
 
-    def fail_emit(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("flag-off must not emit backend status events")
-
-    monkeypatch.setattr(telemetry, "emit", fail_emit)
     backend.export_batch([otlp_test_event()])
+    assert len(emitted_events) == 0, "flag-off must not emit backend status events"
     assert backend._logs is None  # never brought up
     assert backend._queue.empty()
     assert log_exporter.get_finished_logs() == ()

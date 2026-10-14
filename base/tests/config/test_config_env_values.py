@@ -11,9 +11,10 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-import base.log
 from base import config
 from base.config.service_read import ConfigAuthority
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 
 _CONFIG_CHILD = Path(__file__).with_name("_config_child.py")
 
@@ -24,24 +25,19 @@ def authority(tmp_path: Path) -> ConfigAuthority:
     return ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
 
 
-class _RecordingLogger:
-    def __init__(self) -> None:
-        self.warnings: list[str] = []
-        self.debugs: list[str] = []
+class _Logged:
+    """The messages logged so far at each level, read from `loguru_records`."""
 
-    def warning(self, msg: str) -> None:
-        self.warnings.append(msg)
+    def __init__(self, records: LogRecords) -> None:
+        self._records = records
 
-    def debug(self, msg: str) -> None:
-        self.debugs.append(msg)
+    @property
+    def warnings(self) -> list[str]:
+        return self._records.messages("WARNING")
 
-
-def _patch_logger(monkeypatch: pytest.MonkeyPatch) -> _RecordingLogger:
-    rec = _RecordingLogger()
-    # The warning call sites do `from base.log import logger` at call time,
-    # so patching the module attribute is enough.
-    monkeypatch.setattr(base.log, "logger", rec)
-    return rec
+    @property
+    def debugs(self) -> list[str]:
+        return self._records.messages("DEBUG")
 
 
 def test_current_field_values_coerces_secretstr(
@@ -109,7 +105,10 @@ def test_current_field_values_decodes_nodecode_comma_list(
 
 
 def test_current_field_values_decodes_nodecode_comma_list_without_warning(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    authority: ConfigAuthority,
+    loguru_records: LogRecords,
 ):
     """P1 regression: a NoDecode comma-list value is a SUPPORTED .env spelling,
     not a decode failure. Decoding through the owning model must not emit the
@@ -119,7 +118,7 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
     from base.config import runtime_config as rt
     from base.host.env import dotenv_file
 
-    rec = _patch_logger(monkeypatch)
+    rec = _Logged(loguru_records)
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields(
         {
@@ -138,14 +137,17 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
 
 
 def test_current_field_values_decodes_json_array_spelling(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    authority: ConfigAuthority,
+    loguru_records: LogRecords,
 ):
     """The JSON-array spelling the model validators also accept must decode
     through the panel path too — both spellings, not just the comma list."""
     from base.config import runtime_config as rt
     from base.host.env import dotenv_file
 
-    rec = _patch_logger(monkeypatch)
+    rec = _Logged(loguru_records)
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"im_disabled_adapters": '["weixin", "feishu"]'}, set())
 
@@ -156,14 +158,17 @@ def test_current_field_values_decodes_json_array_spelling(
 
 
 def test_current_field_values_decodes_empty_nodecode_list(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    authority: ConfigAuthority,
+    loguru_records: LogRecords,
 ):
     """An empty NoDecode list value decodes to [] (nothing disabled), matching
     Settings construction."""
     from base.config import runtime_config as rt
     from base.host.env import dotenv_file
 
-    rec = _patch_logger(monkeypatch)
+    rec = _Logged(loguru_records)
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"im_disabled_adapters": []}, set())
 
@@ -233,13 +238,16 @@ def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:
 
 
 def test_current_field_values_rejects_undecodable_env_value(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    authority: ConfigAuthority,
+    loguru_records: LogRecords,
 ):
     """Invalid file values fail at the explicit reader without serving boot defaults."""
     from base.config import runtime_config as rt
     from base.host.env import dotenv_file
 
-    rec = _patch_logger(monkeypatch)
+    rec = _Logged(loguru_records)
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"trace_enabled": "banana"}, set())
 
@@ -249,13 +257,16 @@ def test_current_field_values_rejects_undecodable_env_value(
 
 
 def test_current_field_values_rejects_bad_nodecode_list_value(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    authority: ConfigAuthority,
+    loguru_records: LogRecords,
 ):
     """Invalid file values fail at the explicit reader without serving boot defaults."""
     from base.config import runtime_config as rt
     from base.host.env import dotenv_file
 
-    rec = _patch_logger(monkeypatch)
+    rec = _Logged(loguru_records)
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"im_send_retry_delays": "banana,apple"}, set())
 
@@ -265,13 +276,16 @@ def test_current_field_values_rejects_bad_nodecode_list_value(
 
 
 def test_current_field_values_serves_the_explicit_runner_db_projection(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    authority: ConfigAuthority,
+    loguru_records: LogRecords,
 ) -> None:
     """The default-home agent owns a delivered runner login, not its file's owner URL."""
     from base.config import runtime_config as rt
     from base.host.env import dotenv_file
 
-    rec = _patch_logger(monkeypatch)
+    rec = _Logged(loguru_records)
     monkeypatch.setenv("HOME", str(tmp_path))
     home = tmp_path / ".ava"
     home.mkdir()
@@ -291,13 +305,16 @@ def test_current_field_values_serves_the_explicit_runner_db_projection(
 
 
 def test_current_field_values_rejects_bad_db_url_with_runner_projection(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    authority: ConfigAuthority,
+    loguru_records: LogRecords,
 ) -> None:
     """The runner projection never hides malformed file URLs."""
     from base.config import runtime_config as rt
     from base.host.env import dotenv_file
 
-    rec = _patch_logger(monkeypatch)
+    rec = _Logged(loguru_records)
     monkeypatch.setenv("HOME", str(tmp_path))
     home = tmp_path / ".ava"
     home.mkdir()
@@ -314,7 +331,10 @@ def test_current_field_values_rejects_bad_db_url_with_runner_projection(
 
 
 def test_current_field_values_isolates_bad_env_from_good_file_value(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    authority: ConfigAuthority,
+    loguru_records: LogRecords,
 ):
     """QA #1090 repro: a good comma-list FILE value must decode even when
     ANOTHER field of the same domain carries a bad ENV value (absent from the
@@ -324,7 +344,7 @@ def test_current_field_values_isolates_bad_env_from_good_file_value(
     from base.config import runtime_config as rt
     from base.host.env import dotenv_file
 
-    rec = _patch_logger(monkeypatch)
+    rec = _Logged(loguru_records)
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"im_disabled_adapters": ["weixin", "feishu"]}, set())
     # setitem, not setenv: the lint bans setenv on Settings aliases (the

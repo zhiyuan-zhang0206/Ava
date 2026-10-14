@@ -11,7 +11,6 @@ exports = ["fakes.py"]
 "test_bus.py#monkeypatch.setattr base.config.settings.data_plane.events_channel" = 1
 "test_bus.py#monkeypatch.setattr base.events.live.bus.open_async_redis" = 3
 "test_bus.py#monkeypatch.setattr base.events.live.bus.open_sync_redis" = 1
-"test_event_publisher_drop.py#monkeypatch.setattr base.events.live.publisher.logger" = 1
 "test_publish_best_effort.py#monkeypatch.setattr base.events.live.redis_client.auth_retry_jitter" = 1
 "test_publish_best_effort.py#monkeypatch.setattr base.events.live.redis_client.sleep_async" = 1
 "test_publish_best_effort.py#monkeypatch.setattr base.events.live.redis_client.sleep_sync" = 1
