@@ -1,7 +1,7 @@
 exports = ["child_graceful_stop.py"]
 
 [uses]
-"daemon" = ["child_daemon_exit.py", "test_daemon.py"]
+"daemon" = ["child_daemon_exit.py", "child_graceful_stop.py", "test_daemon.py"]
 "test_daemon_part2.py" = ["child_daemon_exit.py"]
 "test_dispatch_lifecycle.py" = ["test_daemon.py"]
 "test_native_restart.py" = ["test_request_identity.py"]
