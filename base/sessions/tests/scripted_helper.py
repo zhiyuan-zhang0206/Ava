@@ -12,6 +12,7 @@ from typing import Any
 from base.host.converge.accessibility import AccessibilityStatus
 from base.host.converge.screen_capture import ScreenCaptureStatus
 from base.host.permissions_helper.client import (
+    HelperAtSocket,
     HelperFactory,
     HelperShutdownResult,
     PermissionsHelperClient,
@@ -20,7 +21,7 @@ from base.host.permissions_helper.client import (
     RootStatus,
 )
 
-__all__ = ["ScriptedHelper", "serve"]
+__all__ = ["ScriptedHelper", "scripted_at", "serve"]
 
 _UNUSED_SOCKET = "/unused.sock"
 
@@ -69,3 +70,8 @@ class ScriptedHelper(PermissionsHelperClient):
 def serve(helper: PermissionsHelperClient) -> HelperFactory:
     """The factory that always hands out `helper`."""
     return lambda: helper
+
+
+def scripted_at(helper: PermissionsHelperClient) -> HelperAtSocket:
+    """The connect function that answers every socket path with `helper`."""
+    return lambda _socket_path: helper

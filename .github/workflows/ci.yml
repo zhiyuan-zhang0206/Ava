@@ -1621,7 +1621,7 @@ jobs:
 
           # Bootstrap failure intentionally fails this lane: the hosted runner's
           # user launchd chain is part of the production contract being tested.
-          lifecycle.install_and_load(app, rebuilt=True)
+          lifecycle.install_and_load(app, rebuilt=True, helper=helper_client)
           assert helper_client().ping()["pong"] is True
           PY
 

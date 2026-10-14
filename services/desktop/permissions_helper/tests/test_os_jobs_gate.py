@@ -18,6 +18,7 @@ import pytest
 from base import paths
 from base.config import settings
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.sessions.tests.refuse_helper import refuse_helper
 
 
 def _allow_pr_flow(*, production: bool) -> None:
@@ -321,7 +322,7 @@ def test_helper_native_effects_require_explicit_test_boundary(boundary: str) -> 
 
     with pytest.raises(pytest.fail.Exception, match="native effect forbidden"):
         if boundary == "converge":
-            permissions_helper.converge()
+            permissions_helper.converge(helper=refuse_helper)
         elif boundary == "build":
             lifecycle.run_tool(["swiftc", "unreachable.swift"])
         elif boundary == "sign":

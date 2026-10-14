@@ -13,6 +13,7 @@ import pytest
 import base.host.system.autostart as system_autostart
 import base.host.system.cron as system_cron
 import services.desktop.permissions_helper.launchd_job as permissions_helper_launchd_job
+from base.host.permissions_helper.client import HelperAtSocket
 from cli import start_identity
 from cli.commands.cluster import home as lifecycle
 
@@ -98,7 +99,7 @@ def test_destroy_checks_helper_before_detaching(
 
     seen: list[Path] = []
 
-    def unregister(target: Path, *, helper_port: int) -> None:
+    def unregister(target: Path, *, helper_port: int, connect: HelperAtSocket) -> None:
         assert (home / "destroy-intent.json").exists()
         assert helper_port == settings.services.permissions_helper_port
         seen.append(target)

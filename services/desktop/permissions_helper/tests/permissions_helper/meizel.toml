@@ -1,5 +1,4 @@
 [debt.first-party-patch]
-"test_foreign_label_job_bound_to_our_socket.py#monkeypatch.setattr base.host.permissions_helper.client.PermissionsHelperClient.ping" = 1
 "test_foreign_label_job_bound_to_our_socket.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.ensure_signing_cert" = 1
 "test_foreign_label_job_bound_to_our_socket.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.helper_socket" = 2
 "test_foreign_label_job_bound_to_our_socket.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_bounded" = 2
@@ -14,10 +13,9 @@
 "test_root_keeper_method_requests_and_results.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.keychain_path" = 1
 "test_root_keeper_method_requests_and_results.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.preflight_signing_smoke" = 1
 "test_root_keeper_method_requests_and_results.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_bounded" = 1
-"test_source_content_change_forces_rebuild.py#monkeypatch.setattr base.host.permissions_helper.client.PermissionsHelperClient.ping" = 2
 "test_source_content_change_forces_rebuild.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_source_content_change_forces_rebuild.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.run_bounded" = 1
-"test_source_content_change_forces_rebuild.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.helper_answers_ping" = 2
+"test_source_content_change_forces_rebuild.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.helper_answers_ping" = 1
 "test_source_content_change_forces_rebuild.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.preflight_signing_smoke" = 1
 "test_source_content_change_forces_rebuild.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_bounded" = 1
 
