@@ -35,7 +35,6 @@ from redis.exceptions import RedisError
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.dataplane import pooler as pooler_files
-from base.config import settings
 from base.host.db_authority.delivery import read_pooler_admin
 from base.log import logger
 from base.native_process.ownership import OwnedProcess, capture_tree
@@ -44,6 +43,7 @@ from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler
+from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.stop_waits import (
     PROCESS_CLEANUP_WAIT_S,
     PROCESS_KILL_WAIT_S,
@@ -189,6 +189,7 @@ async def request_stop(
 
 
 async def _stop(
+    config: DataPlaneConfig,
     deadline: float,
     *,
     save: bool = True,
@@ -199,12 +200,12 @@ async def _stop(
 ) -> list[str]:
     pg = capture_postgres()
     pgb = capture_pooler()
-    port = ownership.configured_redis_port()
+    port = ownership.redis_port_of(config.redis_url)
     if port is None:
         raise RuntimeError("maintenance requires this home's explicit Redis endpoint")
     # The default user is the native instance's admin identity. The runtime URL
     # can carry a restricted ACL user's different password and is not admin auth.
-    password = settings.data_plane.redis_admin_password or None
+    password = config.redis_admin_password or None
     client = Redis(
         host="127.0.0.1",
         port=port,
@@ -268,6 +269,7 @@ async def _stop(
 
 
 def stop(
+    config: DataPlaneConfig,
     timeout: float,
     *,
     save: bool = True,
@@ -277,10 +279,11 @@ def stop(
     producer: Callable[[], EventPipeline],
 ) -> list[str]:
     deadline = deadline_after(timeout)
-    if settings.data_plane.is_remote:
+    if config.is_remote:
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
     return asyncio.run(
         _stop(
+            config,
             deadline,
             save=save,
             notes=notes,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import os
 import secrets
@@ -29,6 +30,7 @@ from base.telemetry import EventPipeline
 from cli.commands.data_plane import _pooler_stop, maintenance_stop
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler, native_birth
+from cli.commands.data_plane.config import DataPlaneConfig
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -120,18 +122,33 @@ def _start_private_pooler(
     pytest.fail(f"no private pooler port could be bound in {_BIND_ATTEMPTS} attempts")
 
 
+def pooler_plane(config: DataPlaneConfig) -> DataPlaneConfig:
+    """The plane the native-pooler fixture stands up: loopback URLs and no Redis admin login."""
+    return dataclasses.replace(
+        config,
+        db_url="postgresql://ava@127.0.0.1:12345/test",
+        redis_url=_ABSENT_REDIS,
+        redis_admin_password="",
+    )
+
+
 @pytest.fixture
 def native_pooler(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postgres_access: None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    postgres_access: None,
+    data_plane_config: DataPlaneConfig,
 ) -> Iterator[tuple[OwnedPooler, str, str]]:
     binary = pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native PgBouncer is not installed")
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:12345/test")
-    monkeypatch.setattr(settings.data_plane, "redis_url", _ABSENT_REDIS)
-    monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
+    # The root diagnostics still read `settings`; they follow this plane until they take a config.
+    plane = pooler_plane(data_plane_config)
+    monkeypatch.setattr(settings.data_plane, "db_url", plane.db_url)
+    monkeypatch.setattr(settings.data_plane, "redis_url", plane.redis_url)
+    monkeypatch.setattr(settings.data_plane, "redis_admin_password", plane.redis_admin_password)
     directory = tmp_path / "pgbouncer"
     directory.mkdir()
     config = directory / "pgbouncer.ini"
@@ -160,6 +177,7 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
     preexisting_drain: bool,
     compensation_retry: bool,
     operator_pipeline: Callable[[], EventPipeline],
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     custodian, pooled, direct = native_pooler
     with psycopg.connect(pooled) as client:
@@ -180,7 +198,9 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
                 if _attempt and compensation_retry:
                     pooler.stop_pgbouncer()
                 else:
-                    maintenance_stop.stop(0.5, producer=operator_pipeline)
+                    maintenance_stop.stop(
+                        pooler_plane(data_plane_config), 0.5, producer=operator_pipeline
+                    )
             except (RuntimeError, TimeoutError) as exc:
                 failure = exc
             assert custodian.identity.live(), "retry must not immediately abort the waiting pooler"

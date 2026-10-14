@@ -61,7 +61,7 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
             _start_commands.cmd_start(
                 persist_services=False,
                 retained_children=[],
-                database_factory=operator_database,
+                database_factory=operator_database,  # pyright: ignore[reportArgumentType] — the real operator factory, typed as a plain callable here
                 producer=operator_pipeline,
                 command=command_runtime,
             )

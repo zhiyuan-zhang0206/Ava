@@ -344,7 +344,7 @@ def test_code_behind_schema_hint_names_working_commands(
 
     monkeypatch.setattr(migrations, "assert_schema_current", _ahead)
 
-    assert _repo_commands.assert_schema_current_or_die() == 1
+    assert _repo_commands.assert_schema_current_or_die("postgresql://ava@127.0.0.1:1/ava") == 1
     err = capsys.readouterr().err
     assert "gateway's revision" in err
     assert _named_commands(err) == {"ava start"}

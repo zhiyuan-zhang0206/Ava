@@ -45,6 +45,7 @@ from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop.stop_support import written as written
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause, pty_close_notices
@@ -82,7 +83,7 @@ def test_keeping_the_pty_sessions_service_preserves_unselected_process_and_real_
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -133,7 +134,7 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     written: list[pty_close_notices.ClosureNotice],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -241,7 +242,7 @@ def test_root_stop_refusal_keeps_hold_without_force(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -274,7 +275,7 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -325,7 +326,7 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
 def test_normal_start_releases_hold_only_after_successful_readiness(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
     drained()
@@ -354,7 +355,7 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
 
 def test_delegated_start_leaves_authorization_and_resume_with_child(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
     drained()
@@ -381,7 +382,7 @@ def test_delegated_start_leaves_authorization_and_resume_with_child(
 
 def test_only_explicit_force_enters_legacy_force_stop(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -418,7 +419,7 @@ def test_only_explicit_force_enters_legacy_force_stop(
 def test_repeated_stop_needs_no_live_database_or_host(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -452,7 +453,7 @@ def test_two_stop_start_cycles_reuse_identity_not_old_operation(
     db_url: str,
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -484,7 +485,7 @@ def test_two_stop_start_cycles_reuse_identity_not_old_operation(
 def test_resource_stop_excludes_concurrent_start(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
     from threading import Event, Thread
@@ -530,7 +531,7 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     written: list[pty_close_notices.ClosureNotice],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -609,7 +610,7 @@ def _stop_with_gateway_data_plane(
 def test_stop_reports_a_data_plane_failure_without_restarting_anything(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -665,7 +666,7 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
 def test_stop_refused_inside_an_exec_domain(
     monkeypatch: pytest.MonkeyPatch,
     leg: str,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -697,7 +698,7 @@ def test_stop_refused_inside_an_exec_domain(
 
 def test_nested_start_receives_the_exact_outer_operation_without_releasing_it(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
     drained()

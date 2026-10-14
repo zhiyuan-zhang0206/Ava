@@ -141,7 +141,6 @@ def test_a_test_in_a_by_design_place_is_never_judged(
         "tests/ui/test_app.py",
         "tests/fixtures/test_plugin.py",
         "tests/factories/test_factory.py",
-        "tests/integration/test_cluster_instance.py",
     ):
         _track(repo, rel)
     assert _run(repo, capsys) == (0, "", "")

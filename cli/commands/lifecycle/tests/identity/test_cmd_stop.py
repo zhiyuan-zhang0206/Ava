@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess as subprocess
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -24,6 +23,7 @@ from cli.commands.lifecycle.tests.identity.restart_inputs import (
 from cli.commands.lifecycle.tests.identity.restart_inputs import (
     root_stop_boundary as root_stop_boundary,
 )
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_fakes import (
     FakeResponse,
@@ -43,7 +43,7 @@ _real_reap_cluster_chrome = _stop_commands.reap_cluster_chrome
 def test_cmd_stop_stop_browser_flag_threads_through(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -99,7 +99,7 @@ def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> 
 def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -140,7 +140,7 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
 def test_cmd_stop_aborted_confirm_does_not_announce(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -170,7 +170,7 @@ def test_cmd_stop_aborted_confirm_does_not_announce(
 def test_cmd_stop_proceeds_when_announce_fails(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,

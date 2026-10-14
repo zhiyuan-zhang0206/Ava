@@ -24,17 +24,20 @@ from base.paths import prod_service_checkout_error
 from base.telemetry import EventPipeline
 from cli.commands._repo import repo_root
 from cli.commands._setup import SetupValues, missing_setup_message
+from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.commands.lifecycle._start_bookmarks import record_running_sha as record_running_sha
 from cli.commands.lifecycle.login_link import print_login_link
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
 from services.supervision.roster.service_spec import ServiceSpec
 
 
 def ensure_gateway_data_plane(
+    config: DataPlaneConfig,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
@@ -48,7 +51,10 @@ def ensure_gateway_data_plane(
     from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 
     return ensure_gateway_data_plane(
-        retained_children=retained_children, database_factory=database_factory, machine=machine
+        config,
+        retained_children=retained_children,
+        database_factory=database_factory,
+        machine=machine,
     )
 
 
@@ -98,7 +104,7 @@ def prepare_cold_start(
     roster: tuple[ServiceSpec, ...],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
@@ -125,8 +131,10 @@ def prepare_cold_start(
     #    $AVA_HOME, on its recorded ports); a runner-only host skips (uses the
     #    central node's DB/Redis). macOS: brew binaries via pg_ctl + redis-server;
     #    Linux: pg_ctl + redis-server. No docker on any POSIX platform.
-    if "gateway" in roles:
+    data_plane = data_plane_config_from_settings() if "gateway" in roles else None
+    if data_plane is not None:
         rc = ensure_gateway_data_plane(
+            data_plane,
             retained_children=retained_children,
             database_factory=database_factory,
             machine=command.machine,
@@ -135,7 +143,7 @@ def prepare_cold_start(
             return rc
         from cli.commands.data_plane.bringup import prepare_gateway_schema
 
-        prepare_gateway_schema()
+        prepare_gateway_schema(data_plane)
     else:
         print("\n→ local services: skipped (agent-runner uses central node's DB/Redis)")
 
@@ -143,11 +151,13 @@ def prepare_cold_start(
     if rc:
         return rc
 
-    if "gateway" in roles:
+    if data_plane is not None:
         from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-        complete_gateway_data_plane(database_factory=database_factory, machine=command.machine)
-    rc = _repo_commands.assert_schema_current_or_die()
+        complete_gateway_data_plane(
+            data_plane, database_factory=database_factory, machine=command.machine
+        )
+    rc = _repo_commands.assert_schema_current_or_die(database_factory.db_url())
     if rc != 0:
         return rc
 
@@ -290,7 +300,7 @@ def _admit_start(
     state: _StartState,
     selection: _Selection,
     *,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int | None:
@@ -325,7 +335,7 @@ def _admit_start(
         return 1
     # A live generation may only be inspected here; pending schema changes
     # require a stopped writer boundary and never run as a repeat-start effect.
-    rc = _repo_commands.assert_schema_current_or_die()
+    rc = _repo_commands.assert_schema_current_or_die(database_factory.db_url())
     if rc:
         return rc
     if state.live:
@@ -430,7 +440,7 @@ def readiness_verdict(launch: Any, wait: Any) -> int | None:
 @resume_after_start
 def cmd_start_body(
     operation: PauseOwnerSnapshot | None,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     disabled_services: tuple[str, ...] = (),
     only_services: tuple[str, ...] = (),
     *,
@@ -553,7 +563,7 @@ def cmd_start(
     runtime: StartRuntime | None = None,
     operation: PauseOwnerSnapshot | None = None,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
     boot_attempt: bool = False,

@@ -20,15 +20,15 @@ def test_a_pure_runners_launcher_delivers_the_installed_capability(
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(runner_home))
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
-    assert bringup.db_delivery("runner") == {
+    assert bringup.db_delivery("runner", remote_data_plane=False) == {
         "AVA_DB_URL": runner_boot.dsn,
         delivery.GENERATION_ENV: "0",
     }
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
-        bringup.db_delivery("gateway")
+        bringup.db_delivery("gateway", remote_data_plane=False)
     # The launch digest binds the capability's non-secret reference.
     assert write_generation(runner_home) == runner_boot.reference
     unit.unit_capability_path(runner_home).unlink()
     assert write_generation(runner_home) is None
     with pytest.raises(unit.UnitCapabilityError, match="holds no database capability"):
-        bringup.db_delivery("runner")
+        bringup.db_delivery("runner", remote_data_plane=False)

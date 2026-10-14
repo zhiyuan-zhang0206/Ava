@@ -195,7 +195,6 @@ def _help_admission() -> None:
         raise AssertionError("help must exit")
     assert "base.config" not in sys.modules
     from base.cluster.dataplane.direct_url import ClusterDirectUrl
-    from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
     from cli.database import operator_database_factory
     from cli.database.runtime import CommandRuntime
@@ -209,15 +208,16 @@ def _help_admission() -> None:
     assert service.min_read_due() is True
     seen: list[ProcessDbGate] = []
 
-    def from_settings(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> object:
+    def open_database(config: object, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> object:
         assert direct_url.local_host == command.machine.host
         assert gate.application_name() == "ava:cli"
         assert gate.min_read_due() is False
         seen.append(gate)
         return object()
 
-    Database.from_settings = from_settings  # pyright: ignore[reportAttributeAccessIssue]
-    factory = operator_database_factory(local_host=command.machine.host)
+    factory = operator_database_factory(
+        local_host=command.machine.host, open_database=open_database
+    )
     assert not seen
     factory()
     factory()

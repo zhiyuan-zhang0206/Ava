@@ -31,6 +31,8 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.telemetry import EventPipeline
+from cli.commands.data_plane.config import DataPlaneConfig
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -66,11 +68,15 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
         return None
 
     def ensure_gateway_data_plane(
-        *, retained_children: object, database_factory: Callable[[], Any], machine: MachineIdentity
+        _config: DataPlaneConfig,
+        *,
+        retained_children: object,
+        database_factory: Callable[[], Any],
+        machine: MachineIdentity,
     ) -> int:
         return 0
 
-    def prepare_gateway_schema() -> None:
+    def prepare_gateway_schema(_config: DataPlaneConfig) -> None:
         return None
 
     def migrate(*, database_factory: Callable[[], Any], machine_name: Callable[[], str]) -> None:
@@ -78,6 +84,7 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
         calls.append("migrate")
 
     def complete_gateway_data_plane(
+        _config: DataPlaneConfig,
         *,
         refresh_schema: bool = True,
         database_factory: Callable[[], Any],
@@ -85,7 +92,7 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
     ) -> None:
         del refresh_schema
 
-    def schema_check() -> int:
+    def schema_check(_db_url: str) -> int:
         calls.append("schema-check")
         return 0
 
@@ -108,7 +115,7 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
 
 def test_start_materializes_after_the_schema_check(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -170,7 +177,7 @@ def test_the_materializer_lives_beside_its_siblings() -> None:
 
 def test_start_adopts_before_it_materializes(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,

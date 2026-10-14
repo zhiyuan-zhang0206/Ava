@@ -23,6 +23,7 @@ from base.telemetry import EventPipeline
 from cli import start_runtime
 from cli.commands.lifecycle import converge_host, start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.roster.service_spec import GATEWAY, ServiceSpec
@@ -94,7 +95,7 @@ def hermetic_start(
     monkeypatch.setattr(service_selection, "selection_path", lambda: tmp_path / "selection.json")
     monkeypatch.setattr(start, "prod_service_checkout_error", _ignoring_args(lambda: None))
     monkeypatch.setattr(start, "ensure_gateway_data_plane", _ignoring_retention(lambda: 0))
-    monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda: None)
+    monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda _config: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(bringup, "complete_gateway_data_plane", _ignoring_args(lambda: None))
     monkeypatch.setattr(materialize, "adopt_local_extensions", _ignoring_args(lambda: None))
     monkeypatch.setattr(materialize, "materialize_cluster_extensions", _ignoring_args(lambda: None))
@@ -120,7 +121,7 @@ def hermetic_start(
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: False))
     monkeypatch.setattr(converge_host, "converge_host", _ignoring_args(lambda: None))
     monkeypatch.setattr(_repo_commands, "register_machine_or_die", _ignoring_args(lambda: 0))
-    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 0)
+    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda _db_url: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_repo_commands, "probe_gateway_or_die", _ignoring_args(lambda: 0))
     monkeypatch.setattr(_root_driver_commands, "launch_service_tree", _launched)
     monkeypatch.setattr(
@@ -142,7 +143,7 @@ def hermetic_start(
 
 def test_unready_frontend_is_failure_and_never_serving(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -166,7 +167,7 @@ def test_unready_frontend_is_failure_and_never_serving(
 
 def test_live_repeat_start_never_runs_mutating_preparation(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -193,7 +194,7 @@ def test_live_repeat_start_never_runs_mutating_preparation(
 def test_start_marks_serving_for_live_and_cold_admission(
     monkeypatch: pytest.MonkeyPatch,
     live: bool,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -214,7 +215,7 @@ def test_start_marks_serving_for_live_and_cold_admission(
 
 def test_changed_live_generation_refuses_before_selection_or_converge(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -251,13 +252,13 @@ def test_changed_live_generation_refuses_before_selection_or_converge(
 
 def test_live_schema_mismatch_refuses_without_applying_migrations(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: True))
-    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 1)
+    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda _db_url: 1)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         start, "cmd_migrations_apply", _ignoring_args(lambda: pytest.fail("no live DDL"))
     )
@@ -279,7 +280,7 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
 
 def test_failed_launch_never_becomes_serving(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -308,7 +309,7 @@ def test_failed_launch_never_becomes_serving(
 
 def test_cold_preparation_receives_candidate_selection_before_publication(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -351,7 +352,7 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
 
 def test_lost_generation_never_reports_serving(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -370,7 +371,7 @@ def test_lost_generation_never_reports_serving(
 
 def test_only_service_persists_for_repeated_start(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -406,7 +407,7 @@ def test_only_service_persists_for_repeated_start(
 
 def test_invalid_selection_never_launches(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -428,7 +429,7 @@ def test_invalid_selection_never_launches(
 
 def test_storage_schema_migration_grants_pooler_precede_application(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -442,7 +443,9 @@ def test_storage_schema_migration_grants_pooler_precede_application(
         _ignoring_retention(lambda: steps.append("storage") or 0),
     )
     monkeypatch.setattr(
-        bringup, "prepare_gateway_schema", lambda: steps.append("baseline-checkpoints")
+        bringup,
+        "prepare_gateway_schema",
+        lambda _config: steps.append("baseline-checkpoints"),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         start, "cmd_migrations_apply", _ignoring_args(lambda: steps.append("migrate") or ["delta"])
@@ -474,7 +477,7 @@ def test_storage_schema_migration_grants_pooler_precede_application(
 def test_internal_start_leaves_boot_publication_to_public_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     ready: bool,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,

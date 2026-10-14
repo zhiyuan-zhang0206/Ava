@@ -26,7 +26,6 @@ eagerly is worse than none:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 import pytest
 
@@ -43,6 +42,7 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     hermetic_start as _base_start,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
 from cli.commands.probe import ReadinessWait
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.roster.service_spec import AGENT_RUNNER, GATEWAY, ServiceSpec
@@ -235,7 +235,7 @@ def test_start_refuses_and_launches_nothing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     hermetic_start: None,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -261,7 +261,7 @@ def test_start_refuses_and_launches_nothing(
 def test_a_clear_roster_starts_normally(
     monkeypatch: pytest.MonkeyPatch,
     hermetic_start: None,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -283,7 +283,7 @@ def test_a_clear_roster_starts_normally(
 def test_a_disabled_service_cannot_block_start(
     monkeypatch: pytest.MonkeyPatch,
     hermetic_start: None,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -308,7 +308,7 @@ def test_a_disabled_service_cannot_block_start(
 def test_optional_port_conflict_does_not_block_core_start(
     monkeypatch: pytest.MonkeyPatch,
     hermetic_start: None,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,

@@ -8,7 +8,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.state import host_deploy_state
-from cli.database import operator_database_factory
+from cli.database import open_operator_database, operator_database_factory
 from ops import agent_pause
 
 __all__ = ["start_cluster_through_ready_gate"]
@@ -17,7 +17,9 @@ __all__ = ["start_cluster_through_ready_gate"]
 def start_cluster_through_ready_gate(
     monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity
 ) -> None:
-    database_factory = operator_database_factory(local_host=machine.host)
+    database_factory = operator_database_factory(
+        local_host=machine.host, open_database=open_operator_database
+    )
     from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle._pause_resume import resume_after_start
 

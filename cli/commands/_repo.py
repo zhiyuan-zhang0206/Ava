@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import NamedTuple
 
 from base.cluster.machine import MachineIdentity, MachineRoles
-from base.config import settings
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
 from base.sessions.env_forwarding import frontend_toolchain_env
@@ -125,8 +124,8 @@ def ensure_frontend_deps(repo: Path) -> None:
     stamp.write_text(want)
 
 
-def assert_schema_current_or_die() -> int:
-    """Verify the DB's applied migration set == the code's required set. Targeted
+def assert_schema_current_or_die(db_url: str) -> int:
+    """Verify the DB at `db_url` has applied exactly the code's required migration set. Targeted
     hints for the two failure shapes (DB behind code / code behind DB)."""
     from base.deploy.schema.migrations import (
         CodeBehindSchema,
@@ -135,7 +134,7 @@ def assert_schema_current_or_die() -> int:
     )
 
     try:
-        assert_schema_current(settings.data_plane.db_url)
+        assert_schema_current(db_url)
     except SchemaVersionMismatch as e:
         print(
             f"  ✗ {e}\n"

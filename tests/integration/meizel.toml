@@ -1,10 +1,6 @@
 [uses]
 "test_schedule_runner_cleanup.py" = ["child_schedule_runner.py"]
 
-[debt.env-patch]
-"test_cluster_instance.py#monkeypatch.setenv os.environ" = 1
-"test_cluster_instance.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
-
 [debt.first-party-patch]
 "child_schedule_runner.py#assignment ava.ensure_plugins_loaded" = 2
 "child_schedule_runner.py#assignment base.config.settings.gateway.schedule_stall_timeout_seconds" = 1
@@ -19,14 +15,6 @@
 "child_schedule_runner.py#assignment services.wake.schedule_manager.engine.runpy.run_path" = 1
 "child_schedule_runner.py#assignment services.wake.schedule_manager.engine.schedule_dir" = 1
 "child_schedule_runner.py#assignment services.wake.schedule_manager.engine.settings.gateway.schedule_stall_timeout_seconds" = 1
-"test_cluster_instance.py#monkeypatch.setattr base.cluster.get_record" = 2
-"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane" = 1
-"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
-"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
-"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.events_channel" = 2
-"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.pgbouncer_enabled" = 1
-"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.redis_admin_password" = 2
-"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
 "test_impersonation_notifications.py#monkeypatch.setattr base.agents.impersonation.relay_inbox" = 1
 "test_impersonation_notifications.py#monkeypatch.setattr base.agents.impersonation.renew" = 1
 "test_impersonation_notifications.py#monkeypatch.setattr base.db.Database.write_transaction" = 1

@@ -566,7 +566,7 @@ def test_plugin_birth_config_is_part_of_the_existing_unit_generation(
         model_config = ConfigDict(frozen=True)
         interval: float = 300
 
-    def no_api_delivery(_cls: str) -> dict[str, str]:
+    def no_api_delivery(_cls: str, *, remote_data_plane: bool) -> dict[str, str]:
         return {}
 
     monkeypatch.setattr(bringup, "api_delivery", no_api_delivery)

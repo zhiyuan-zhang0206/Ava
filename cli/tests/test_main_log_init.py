@@ -36,13 +36,20 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from base.host.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.paths import ava_home
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli import parsers, preflight, start_identity, start_intent
 from cli.commands.lifecycle import stop
-from cli.database import OperatorDatabaseFactory, operator_database_factory, operator_event_pipeline
+from cli.database import (
+    OperatorDatabaseFactory,
+    OperatorEventPipeline,
+    open_operator_database,
+    operator_database_factory,
+    operator_event_pipeline,
+)
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
@@ -322,6 +329,13 @@ def _cold_report(
     return 0
 
 
+def operator_producer(
+    database_factory: OperatorDatabaseFactory, *, machine: MachineIdentity, home: Path
+) -> OperatorEventPipeline:
+    """The producer the entry builds for a command: the operator pipeline over its factory."""
+    return operator_event_pipeline(database_factory, machine=machine, home=home)
+
+
 @pytest.mark.parametrize(
     ("name", "event", "result"),
     [
@@ -343,11 +357,11 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
     factories: list[DatabaseFactory] = []
 
     # Handles are never dialed; the same real operator gate reaches work and writer.
-    from base.db.config import db_config_from_settings
-
-    def construct(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
+    def open_database(
+        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+    ) -> Database:
         gates.append(gate)
-        return Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
+        return open_operator_database(config, gate, direct_url)
 
     def build(
         *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
@@ -371,11 +385,18 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
 
     args = argparse.Namespace(func=dispatch)
     monkeypatch.setattr(telemetry, "init_telemetry", forbidden_binding)
-    monkeypatch.setattr(Database, "from_settings", construct)
     monkeypatch.setattr(telemetry, "build_pipeline", build)
     monkeypatch.setattr(parsers, "parse_args", _parsed_args(args))
     monkeypatch.setattr(preflight, "require_own_checkout", _admitted_checkout)
-    assert _main.main(["status"]) == result
+    assert (
+        _main.run_command(
+            ["status"],
+            retained_children=None,
+            producer_factory=operator_producer,
+            open_database=open_database,
+        )
+        == result
+    )
     if name == "dashboard":
         destination = tmp_path / "lgtm/native/config/provisioning/dashboards/ava-ops-main.json"
         assert destination.read_text() == "previous dashboard"
@@ -393,7 +414,9 @@ def test_quiet_command_does_not_construct_pipeline(
 
     monkeypatch.setattr(telemetry, "build_pipeline", forbidden)
     owner = operator_event_pipeline(
-        operator_database_factory(local_host=command_runtime.machine.host),
+        operator_database_factory(
+            local_host=command_runtime.machine.host, open_database=open_operator_database
+        ),
         machine=command_runtime.machine,
         home=tmp_path,
     )
@@ -423,7 +446,9 @@ def test_unfinished_command_writer_remains_owned_until_join(
     pipeline = telemetry.EventPipeline(writer=write, batch_size=1)
     monkeypatch.setattr(telemetry, "build_pipeline", _owned_pipeline(pipeline))
     owner = operator_event_pipeline(
-        operator_database_factory(local_host=command_runtime.machine.host),
+        operator_database_factory(
+            local_host=command_runtime.machine.host, open_database=open_operator_database
+        ),
         machine=command_runtime.machine,
         home=tmp_path,
     )
@@ -489,8 +514,11 @@ def test_status_handler_body_forwards_the_parsed_namespace(
 
     calls: list[dict[str, object]] = []
 
-    def database_owner(*, local_host: Callable[[], str]) -> OperatorDatabaseFactory:
+    def database_owner(
+        *, local_host: Callable[[], str], open_database: Callable[..., object]
+    ) -> OperatorDatabaseFactory:
         assert callable(local_host)
+        assert open_database is open_operator_database
         return operator_database
 
     monkeypatch.setattr(cli_database, "operator_database_factory", database_owner)

@@ -108,5 +108,4 @@ exports = ["test_start_readiness_gate.py"]
 "test_checkpoint_migration_phase.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.MIGRATIONS" = 2
 
 [debt.unresolved-patch]
-"test_agent_profile_launch_env.py#monkeypatch.setattr type(settings.data_plane).is_remote" = 1
 "test_start_readiness_gate.py#monkeypatch.setattr command_runtime.machine.role" = 1
