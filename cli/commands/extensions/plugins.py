@@ -382,7 +382,9 @@ def _install_dest(pkg_type: str, name: str) -> Path:
     """On-disk install location for a package, by type."""
     from base import paths
 
-    return (paths.plugins_dir() if pkg_type == "plugin" else paths.skills_dir()) / name
+    return (
+        paths.plugins_dir() if pkg_type == "plugin" else paths.skills_dir(paths.ava_home())
+    ) / name
 
 
 def cmd_plugins_uninstall(name: str) -> int:
@@ -402,7 +404,7 @@ def cmd_plugins_uninstall(name: str) -> int:
         shutil.rmtree(dest)
     if pkg.type == "plugin":
         # Its skills were converged into the load dir; drop that copy too.
-        converged = paths.skills_dir() / name
+        converged = paths.skills_dir(paths.ava_home()) / name
         if converged.exists():
             shutil.rmtree(converged)
         # Sweep atomic-install residue so nothing ghost-like survives an

@@ -158,6 +158,7 @@ def prepare_cold_start(
     # data plane is up and known-current, which is the precondition
     # materialization actually has. Reports and continues on failure — a machine
     # that is behind catches up on the next start.
+    from base.paths import ava_home, skills_dir
     from cli.commands.extensions.materialize import (
         adopt_local_extensions,
         materialize_cluster_extensions,
@@ -166,8 +167,13 @@ def prepare_cold_start(
     # Adopt first: a name this machine installed before the registry existed is
     # invisible to the materializer until it has a row, and sweeping first means
     # one pass leaves machine and cluster agreeing rather than two.
-    adopt_local_extensions(database_factory=database_factory, machine_name=command.machine.name)
-    materialize_cluster_extensions(database_factory=database_factory)
+    skills_root = skills_dir(ava_home())
+    adopt_local_extensions(
+        database_factory=database_factory,
+        machine_name=command.machine.name,
+        skills_root=skills_root,
+    )
+    materialize_cluster_extensions(database_factory=database_factory, skills_root=skills_root)
 
     return 0
 
