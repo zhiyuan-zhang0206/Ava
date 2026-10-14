@@ -78,7 +78,7 @@ async def test_run_daemon_creates_the_directory_of_its_socket(short_socket_path:
     assert not home.exists()
 
     daemon_task = asyncio.create_task(
-        daemon_mod.run_daemon(socket_path, timeout_seconds=lambda: 15.0)
+        daemon_mod.run_daemon(socket_path, timeout_seconds=lambda: 15.0, host=fake_host())
     )
     try:
         _, writer = await wait_for_daemon_socket(daemon_task, socket_path, timeout=1.5)
