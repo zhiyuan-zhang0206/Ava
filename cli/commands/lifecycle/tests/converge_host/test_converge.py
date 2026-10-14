@@ -12,6 +12,7 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.deploy.git import cluster_drift
+from base.host.permissions_helper.client import HelperFactory
 from base.sessions.tests.scripted_helper import ScriptedHelper, serve
 from base.telemetry import EventPipeline
 from cli import python_install
@@ -228,7 +229,8 @@ def test_permissions_helper_step_refuses_when_this_process_cannot_sign(
         monkeypatch, tmp_path, operator_database=operator_database, producer=operator_pipeline
     )
 
-    def cannot_sign() -> None:
+    def cannot_sign(*, helper: HelperFactory) -> None:
+        del helper
         raise PermissionsHelperSigningUnavailableError("the login keychain is not unlocked")
 
     monkeypatch.setattr(permissions_helper, "converge", cannot_sign)
@@ -250,7 +252,8 @@ def test_permissions_helper_step_still_aborts_on_a_real_build_defect(
         monkeypatch, tmp_path, operator_database=operator_database, producer=operator_pipeline
     )
 
-    def _boom() -> None:
+    def _boom(*, helper: HelperFactory) -> None:
+        del helper
         raise PermissionsHelperBuildError("swiftc failed (1): syntax error")
 
     monkeypatch.setattr(permissions_helper, "converge", _boom)
@@ -298,7 +301,12 @@ def test_cmd_converge_unconfigured_returns_zero(
     # Unconfigured converge must defer helper ancestry until identity exists.
     # Record that boundary explicitly; reaching it would be a contract failure.
     helper_calls: list[str] = []
-    monkeypatch.setattr(permissions_helper, "converge", lambda: helper_calls.append("helper"))
+
+    def record_helper(*, helper: HelperFactory) -> None:
+        del helper
+        helper_calls.append("helper")
+
+    monkeypatch.setattr(permissions_helper, "converge", record_helper)
     operation = None
     if maintenance_held:
         from datetime import UTC, datetime

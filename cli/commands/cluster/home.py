@@ -101,6 +101,7 @@ def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
         return 1
 
     from base.config import settings
+    from base.host.permissions_helper.client import PermissionsHelperClient
     from base.host.private_storage import write_private_bytes
     from base.native_process.os_platform import file_lock
     from services.desktop.permissions_helper.launchd_job import unregister_helper
@@ -115,7 +116,11 @@ def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
             return rc
         try:
             unregister_scheduled_jobs()
-            unregister_helper(home, helper_port=settings.services.permissions_helper_port)
+            unregister_helper(
+                home,
+                helper_port=settings.services.permissions_helper_port,
+                connect=PermissionsHelperClient,
+            )
         except (OSError, RuntimeError, ValueError, TypeError) as exc:
             print(f"cluster cleanup incomplete: {exc}", file=sys.stderr)
             return 1

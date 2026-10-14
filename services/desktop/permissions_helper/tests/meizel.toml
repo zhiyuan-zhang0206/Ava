@@ -11,8 +11,6 @@
 "test_permissions_helper.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
-"test_ax_tree_wire.py#monkeypatch.setattr base.host.permissions_helper.client.PermissionsHelperClient.call" = 1
-"test_helper_retirement.py#monkeypatch.setattr base.host.permissions_helper.client.PermissionsHelperClient.shutdown_helper" = 2
 "test_helper_retirement.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.capture" = 1
 "test_helper_retirement.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_helper_retirement.py#monkeypatch.setattr base.paths.permissions_helper_app_dir" = 3
