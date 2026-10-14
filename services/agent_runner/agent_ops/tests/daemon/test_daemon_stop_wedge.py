@@ -1,11 +1,10 @@
-"""A stop stays bounded while the user-context watcher is blocked (task #5129).
+"""A stop stays bounded while `watch_to_user` and a blocked worker run (task #5129).
 
-The 2026-10-14 wedge: the watcher's setup ran on the ops event loop, so a
-workspace-churn burst owned the loop for minutes — `/healthz` timed out, SIGTERM
-went unhandled and the unit's stop was refused — and the drain a first SIGTERM
-did reach was then aborted by a retried stop, skipping the hard exit into
-interpreter teardown. This drives the real `daemon.main` stop path with that
-setup blocked, sending the stop twice.
+On 2026-10-14, the drain reached by a first SIGTERM was aborted when the
+TaskGroup replayed the interrupt or when a retried SIGTERM arrived mid-drain,
+skipping `_hard_exit` into interpreter teardown that hung joining default-executor
+threads. This drives the real `daemon.main` stop path with `watch_to_user` and a
+blocked worker thread, sending SIGTERM twice.
 """
 
 from __future__ import annotations
@@ -25,9 +24,6 @@ from base.sessions.tests.poll_until import poll_until
 _CHILD = Path(__file__).with_name("child_stop_blocked_watch.py")
 _REPO = Path(__file__).resolve().parents[5]
 
-# Longer than the child's whole start-to-stop walk, so the watcher's setup is
-# still blocked when the stop arrives.
-_BLOCK_S = 8.0
 # How long the child holds its drain open, so the retried stop lands inside it.
 _HELD_S = 2.0
 # The supervisor's stop window: the child must leave well inside it.
@@ -42,7 +38,7 @@ def _healthz_latency(port: int) -> float:
     return time.monotonic() - started
 
 
-def test_a_stop_stays_bounded_while_the_watcher_setup_is_blocked(unit_home: Path) -> None:
+def test_a_stop_stays_bounded_while_the_watcher_and_blocked_worker_run(unit_home: Path) -> None:
     port = free_port()
     ready, blocked, draining, clean = (
         unit_home / name for name in ("ready", "blocked", "draining", "clean")
@@ -60,7 +56,6 @@ def test_a_stop_stays_bounded_while_the_watcher_setup_is_blocked(unit_home: Path
             str(blocked),
             str(draining),
             str(clean),
-            str(_BLOCK_S),
             str(_HELD_S),
         ],
         cwd=_REPO,
@@ -73,13 +68,13 @@ def test_a_stop_stays_bounded_while_the_watcher_setup_is_blocked(unit_home: Path
         poll_until(
             lambda: ready.exists() and blocked.exists(),
             timeout=30,
-            what="the daemon's health server up and the watcher setup blocked",
+            what="the daemon's health server up and the worker thread blocked",
         )
-        # The setup is blocked on the watcher's own thread: the loop still answers.
+        # The watcher and blocked worker run off the event loop: /healthz answers.
         assert child.poll() is None
         latency = _healthz_latency(port)
         assert latency < 1.0, (
-            f"healthz answered in {latency:.2f}s while the watcher setup was blocked"
+            f"healthz answered in {latency:.2f}s while the watcher and blocked worker ran"
         )
         assert not clean.exists()
 
