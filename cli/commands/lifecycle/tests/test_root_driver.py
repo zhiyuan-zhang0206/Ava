@@ -15,6 +15,7 @@ import pytest
 import base.host.permissions_helper.client as permissions_helper_client
 import base.paths as base_paths
 import cli.commands.lifecycle.start_generation as lifecycle_start_generation
+from base.clock.tests.manual_timers import ManualTimers
 from base.daemon.health import DaemonProbe
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.native_process.ownership import OwnedProcess
@@ -22,6 +23,7 @@ from base.sessions.tests.refuse_helper import refuse_helper
 from base.sessions.tests.scripted_helper import ScriptedHelper, serve
 from cli.commands.data_plane import bringup
 from cli.commands.lifecycle import root_driver as driver
+from cli.commands.lifecycle import root_readiness as readiness
 from services.supervision.roster import plugin_services
 from services.supervision.roster.service_spec import ServiceSpec
 
@@ -50,7 +52,7 @@ def status(*, pid: int = 100, state: str = "running") -> dict[str, Any]:
 
 @pytest.mark.parametrize("verdict", [None, "unavailable", "down", "port-taken"])
 def test_no_missing_or_failed_health_is_ready(verdict: str | None) -> None:
-    assert not driver.unit_ready({"state": "running"}, verdict)
+    assert not readiness.unit_ready({"state": "running"}, verdict)
 
 
 def test_readiness_probes_now_instead_of_believing_cached_health(
@@ -64,8 +66,8 @@ def test_readiness_probes_now_instead_of_believing_cached_health(
         return snapshot
 
     monkeypatch.setattr(driver, "root_status", read_status)
-    result = driver.wait_for_root_services_ready(
-        (spec(probe=lambda: DaemonProbe.down("unready")),), 0
+    result = readiness.wait_for_root_services_ready(
+        (spec(probe=lambda: DaemonProbe.down("unready")),), 0, timers=ManualTimers()
     )
     assert result.unready
 
@@ -79,7 +81,9 @@ def test_raising_identity_probe_reads_unavailable_and_warns() -> None:
     records: list[str] = []
     sink = logger.add(lambda message: records.append(str(message)), level="WARNING")
     try:
-        assert driver.health_verdicts((spec(probe=broken),), status()) == {"gateway": "unavailable"}
+        assert readiness.health_verdicts((spec(probe=broken),), status()) == {
+            "gateway": "unavailable"
+        }
     finally:
         logger.remove(sink)
     assert len(records) == 1
@@ -94,7 +98,9 @@ def test_readiness_uses_one_status_observation(monkeypatch: pytest.MonkeyPatch) 
         return next(snapshots)
 
     monkeypatch.setattr(driver, "root_status", read_status)
-    result = driver.wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
+    result = readiness.wait_for_root_services_ready(
+        (spec(probe=lambda: DaemonProbe.up("ready")),), 0, timers=ManualTimers()
+    )
     assert not result.unready
     assert next(snapshots)["units"][0]["pid"] == 101
 
@@ -106,8 +112,14 @@ def test_fresh_ready_generation_passes(monkeypatch: pytest.MonkeyPatch) -> None:
         return status()
 
     monkeypatch.setattr(driver, "root_status", read_status)
-    result = driver.wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
+    verdicts = iter([DaemonProbe.down("starting"), DaemonProbe.up("ready")])
+    timers = ManualTimers(start=14.0)
+    result = readiness.wait_for_root_services_ready(
+        (spec(probe=lambda: next(verdicts)),), 10.0, timers=timers
+    )
     assert not result.unready
+    assert result.elapsed_s == 0.5
+    assert timers.sleeps == [0.5]
 
 
 def test_optional_failure_does_not_delay_a_ready_core(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,24 +136,22 @@ def test_optional_failure_does_not_delay_a_ready_core(monkeypatch: pytest.Monkey
     def read_status(_client: object) -> dict[str, Any]:
         return snapshot
 
-    def no_optional_wait(_seconds: float) -> None:
-        raise AssertionError("optional services must not delay a ready core")
-
     monkeypatch.setattr(driver, "root_client", object)
     monkeypatch.setattr(driver, "root_status", read_status)
-    monkeypatch.setattr(driver, "poll_sleep", no_optional_wait)
-    result = driver.wait_for_root_services_ready(
+    timers = ManualTimers()
+    result = readiness.wait_for_root_services_ready(
         (spec(probe=lambda: DaemonProbe.up("ready")), background),
         100,
+        timers=timers,
     )
     assert not result.unready
     assert result.non_critical_unready == (background,)
+    assert timers.sleeps == []
 
 
 def test_mac_helper_protocol_refuses_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(driver, "helper_spawn_committed", lambda: True)
     silent = ScriptedHelper(ping=permissions_helper_client.PermissionsHelperError("no socket"))
     with pytest.raises(RuntimeError, match="root_stop_intent_v1"):
         driver.bring_up_root(
@@ -228,8 +238,11 @@ def test_missing_root_ipc_is_unknown_not_positive_exit(monkeypatch: pytest.Monke
         return None
 
     monkeypatch.setattr(driver, "root_status", unavailable)
-    outcome = driver.wait_for_root_services_ready((spec(),), 0)
+    timers = ManualTimers(start=14.0)
+    outcome = readiness.wait_for_root_services_ready((spec(),), 1.0, timers=timers)
     assert outcome.unready and not outcome.sessions_gone
+    assert outcome.elapsed_s == 1.0
+    assert timers.sleeps == [0.5, 0.5]
 
 
 def test_a_stopped_core_unit_is_not_ready_even_if_its_endpoint_answers(
@@ -241,7 +254,9 @@ def test_a_stopped_core_unit_is_not_ready_even_if_its_endpoint_answers(
         return status(state="stopped")
 
     monkeypatch.setattr(driver, "root_status", read_status)
-    result = driver.wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
+    result = readiness.wait_for_root_services_ready(
+        (spec(probe=lambda: DaemonProbe.up("ready")),), 0, timers=ManualTimers()
+    )
     assert result.unready and result.sessions_gone
 
 
@@ -274,7 +289,6 @@ def test_stop_without_root_ipc_cancels_pending_helper_restart(
 ) -> None:
     from base.host.permissions_helper import client
 
-    monkeypatch.setattr(driver, "helper_spawn_committed", lambda: True)
     monkeypatch.setattr(driver, "require_root_absent", lambda: None)
     calls: list[str] = []
 
@@ -296,7 +310,6 @@ def test_linux_root_launch_never_consults_a_helper(
 ) -> None:
     from types import SimpleNamespace
 
-    monkeypatch.setattr(driver.sys, "platform", "linux")
     spawned: list[Path] = []
     children: list[subprocess.Popen[bytes]] = []
 
@@ -326,7 +339,7 @@ def test_linux_root_launch_never_consults_a_helper(
             object(),
             {},
             retained_children=children,
-            helper=refuse_helper,
+            helper=None,
         )
         == status()
     )
@@ -368,9 +381,8 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     monkeypatch.setattr(driver, "tree_manifest", tree)
     monkeypatch.setattr(driver, "root_client", object)
     monkeypatch.setattr(driver, "root_status", snapshot_now)
-    # The recorded root is this process and its helper is the parent, so the real custody
-    # check passes on macOS (elsewhere it stops at the liveness check) and only the
-    # generation comparison can refuse.
+    # The recorded root is this process and its helper is the parent, so the custody check
+    # passes and only the generation comparison can refuse.
     me = OwnedProcess.capture(psutil.Process())
     snapshot["root"] = {"pid": me.pid, "create_time": me.birth, "starttime": me.starttime}
     helper = ScriptedHelper(
@@ -393,6 +405,25 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     assert result.failed
     assert published.read_text() == "old generation"
     assert not {"stop_root", "seed_root"} & set(helper.calls)  # a refused generation never signals
+
+
+def test_a_platform_without_a_helper_asks_only_that_the_root_is_live() -> None:
+    me = OwnedProcess.capture(psutil.Process())
+    live_root = {"root": {"pid": me.pid, "create_time": me.birth, "starttime": me.starttime}}
+    driver.require_root_owner(live_root, helper=None)
+    child = subprocess.Popen(["sleep", "60"])
+    try:
+        born = OwnedProcess.capture(psutil.Process(child.pid))
+    finally:
+        child.kill()
+        child.wait()
+    gone = {"root": {"pid": born.pid, "create_time": born.birth, "starttime": born.starttime}}
+    with pytest.raises(driver.RootDriverError, match="no longer live"):
+        driver.require_root_owner(gone, helper=None)
+
+
+def test_a_platform_without_a_helper_has_no_dormant_helper_root_to_stop() -> None:
+    driver.stop_dormant_helper_root(float("inf"), helper=None)
 
 
 def test_mac_boot_tail_does_not_read_or_notify(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -534,8 +565,6 @@ def test_unusable_helper_socket_requires_positive_native_absence(
 ) -> None:
     from base.host.permissions_helper import client
     from services.desktop.permissions_helper import launchd_job
-
-    monkeypatch.setattr(driver, "helper_spawn_committed", lambda: True)
 
     def query(_target: str, _deadline: float) -> str | None:
         return "state = spawn scheduled" if loaded else None

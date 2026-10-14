@@ -16,10 +16,8 @@ from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
-from base.log import logger
-from base.sessions.helperproc import HELPER_PROTOCOLS, helper_spawn_committed, helper_wire_ok
+from base.sessions.helperproc import HELPER_PROTOCOLS, helper_wire_ok
 from cli.commands.data_plane.config import data_plane_config_from_settings
-from cli.commands.probe import ReadinessWait
 from cli.start_runtime import StartRuntime
 from services.supervision.roster import service_spec
 from services.supervision.roster.service_spec import ServiceSpec
@@ -33,7 +31,7 @@ _WIRING_REF = "services.supervision.ava_root_glue.glue:build_wiring"
 _ROOT_READY_TIMEOUT_S = 30.0
 # Unit stop windows accumulate in dependency order.
 _ROOT_STOP_TIMEOUT_S = 90.0
-_READY_POLL_INTERVAL_S = 0.5
+READY_POLL_INTERVAL_S = 0.5
 poll_sleep = time.sleep  # a named seam tests can patch (the _probe pattern)
 
 
@@ -41,7 +39,7 @@ class RootDriverError(RuntimeError):
     """The root-driven tree could not be brought up, reconciled or stopped."""
 
 
-def complete_boot_start(*, helper: HelperFactory, host: Host) -> None:
+def complete_boot_start(*, helper: HelperFactory | None, host: Host) -> None:
     """Hand Linux systemd the verified root after ordinary readiness succeeds."""
     if host.platform.system != "linux":
         return
@@ -147,7 +145,7 @@ def _call_ok(response: dict[str, Any], what: str) -> None:
         raise RootDriverError(f"{what} failed: {response.get('code')}: {response.get('error')}")
 
 
-def require_root_owner(status: dict[str, Any], *, helper: HelperFactory) -> None:
+def require_root_owner(status: dict[str, Any], *, helper: HelperFactory | None) -> None:
     """Bind every reused or stopped root to its required live native parent."""
     import psutil
 
@@ -158,7 +156,7 @@ def require_root_owner(status: dict[str, Any], *, helper: HelperFactory) -> None
     root = native_identity(status.get("root"))
     if not root.live():
         raise RootDriverError("recorded root native birth is no longer live")
-    if not helper_spawn_committed():
+    if helper is None:
         return
     ping = helper().ping()
     if not all(ping.get(capability) is True for capability in HELPER_PROTOCOLS):
@@ -277,7 +275,7 @@ def await_root_status(
         status = root_status(client)
         if status is not None:
             return status
-        poll_sleep(_READY_POLL_INTERVAL_S)
+        poll_sleep(READY_POLL_INTERVAL_S)
     tail = _log_tail(run_dir / _ROOT_STDERR_LOG)
     raise RootDriverError(
         f"ava-root did not become ready within {timeout_s:.0f}s; log tail:\n{tail}"
@@ -328,7 +326,7 @@ def seed_via_helper(
         seed_error = wire.get("seed_error")
         if seed_error:
             raise RootDriverError(f"the root keeper rejected the seed: {seed_error}")
-        poll_sleep(_READY_POLL_INTERVAL_S)
+        poll_sleep(READY_POLL_INTERVAL_S)
         try:
             wire = helper().root_status()
         except Exception as exc:
@@ -348,10 +346,10 @@ def bring_up_root(
     runtime: StartRuntime | None = None,
     *,
     retained_children: list[subprocess.Popen[bytes]],
-    helper: HelperFactory,
+    helper: HelperFactory | None,
 ) -> dict[str, Any]:
     """Start through the required platform owner; never change ownership on failure."""
-    if helper_spawn_committed():
+    if helper is not None:
         if not helper_wire_ok(helper):
             raise RootDriverError(
                 f"the macOS helper is unreachable or lacks {HELPER_PROTOCOLS}; prepare and "
@@ -382,21 +380,25 @@ def changed_units(manifest: dict[str, object], status: dict[str, Any]) -> set[st
 
 
 def stop_root_process(
-    run_dir: Path, client: Any, status: dict[str, Any], *, timeout_s: float, helper: HelperFactory
+    run_dir: Path,
+    client: Any,
+    status: dict[str, Any],
+    *,
+    timeout_s: float,
+    helper: HelperFactory | None,
 ) -> None:
     """Stop through the keeper on macOS, or SIGTERM; await native root exit."""
     from base.native_process.root_control.client import native_identity
 
     require_root_owner(status, helper=helper)
     identity = native_identity(status["root"])
-    if helper_spawn_committed():
+    if helper is not None:
         if not helper_wire_ok(helper):
             raise RootDriverError(
                 "the required macOS helper is unreachable — refusing to "
                 "signal a helper-seeded root directly (the keeper would restart it); stop it "
                 "through the helper"
             )
-
         try:
             reply = helper().stop_root()
         except Exception as exc:
@@ -410,7 +412,7 @@ def stop_root_process(
         alive = identity.live()
         if not alive and root_status(client) is None:
             return
-        poll_sleep(_READY_POLL_INTERVAL_S)
+        poll_sleep(READY_POLL_INTERVAL_S)
     raise RootDriverError(f"ava-root at {run_dir} did not stop within {timeout_s:.0f}s")
 
 
@@ -494,7 +496,7 @@ def admit_live_start(
     roles: MachineRoles,
     *,
     reconcile: bool,
-    helper: HelperFactory,
+    helper: HelperFactory | None,
 ) -> bool:
     """Observe before any converge/schema write; reuse only identical inputs."""
     from cli.commands.lifecycle.start_generation import launch_digest
@@ -519,7 +521,7 @@ def ensure_root_service_tree(
     roles: MachineRoles,
     reconcile: bool,
     retained_children: list[subprocess.Popen[bytes]],
-    helper: HelperFactory,
+    helper: HelperFactory | None,
     runtime: StartRuntime | None = None,
     honor_restart_budget: bool = False,
 ) -> LaunchOutcome:
@@ -587,7 +589,7 @@ def launch_service_tree(
     *,
     reconcile: bool,
     retained_children: list[subprocess.Popen[bytes]],
-    helper: HelperFactory,
+    helper: HelperFactory | None,
     runtime: StartRuntime | None = None,
     honor_restart_budget: bool = False,
 ) -> LaunchOutcome:
@@ -602,98 +604,6 @@ def launch_service_tree(
         runtime=runtime,
         honor_restart_budget=honor_restart_budget,
     )
-
-
-def wait_for_service_tree(
-    roster: tuple[ServiceSpec, ...],
-    *,
-    timeout_s: float,
-) -> ReadinessWait:
-    """Verify the same root-owned roster after launch."""
-    return wait_for_root_services_ready(roster, timeout_s=timeout_s)
-
-
-def health_verdicts(
-    specs: tuple[ServiceSpec, ...], status: dict[str, Any] | None
-) -> dict[str, str]:
-    """Probe now instead of trusting a cached health result.
-
-    A probe that raises is logged and reads as "unavailable"."""
-    if status is None:
-        return {}
-    verdicts: dict[str, str] = {}
-    for spec in specs:
-        if spec.identity_probe is None:
-            continue
-        try:
-            verdicts[spec.session] = spec.identity_probe().verdict.value
-        except Exception:
-            logger.opt(exception=True).warning(
-                "identity probe for {} raised; treating it as unavailable", spec.session
-            )
-            verdicts[spec.session] = "unavailable"
-    return verdicts
-
-
-def unit_ready(unit: dict[str, Any] | None, verdict: str | None) -> bool:
-    """Require a running unit and a positive protocol response."""
-    if unit is None:
-        return False
-    if unit.get("state") != "running":
-        return False
-    return verdict == "alive"
-
-
-def _unit_gone(unit: dict[str, Any] | None) -> bool:
-    """A stopped unit cannot become ready without explicit reconciliation."""
-    return unit is not None and unit.get("state") == "stopped"
-
-
-def _fresh_readiness_round(
-    client: Any, specs: tuple[ServiceSpec, ...]
-) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    """Observe the service table and ask the current protocol probes."""
-    status = root_status(client)
-    units = root_units(status) if status is not None else {}
-    verdicts = health_verdicts(specs, status)
-    return units, verdicts
-
-
-def _unready_services(
-    specs: tuple[ServiceSpec, ...],
-    units: dict[str, dict[str, Any]],
-    verdicts: dict[str, str],
-) -> tuple[ServiceSpec, ...]:
-    return tuple(
-        spec
-        for spec in specs
-        if not unit_ready(units.get(spec.session), verdicts.get(spec.session))
-    )
-
-
-def wait_for_root_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -> ReadinessWait:
-    """Wait for core services; optional availability is a diagnostic snapshot."""
-    from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
-
-    client = root_client()
-    started_at = time.monotonic()
-    deadline = started_at + timeout_s
-    critical = tuple(s for s in specs if s.session in CRITICAL_SERVICE_SESSIONS)
-    non_critical = tuple(s for s in specs if s.session not in CRITICAL_SERVICE_SESSIONS)
-    while True:
-        units, verdicts = _fresh_readiness_round(client, specs)
-        unready = _unready_services(critical, units, verdicts)
-        non_critical_unready = _unready_services(non_critical, units, verdicts)
-        now = time.monotonic()
-        gone_all = bool(unready) and all(_unit_gone(units.get(s.session)) for s in unready)
-        if not unready or gone_all or now >= deadline:
-            return ReadinessWait(
-                unready,
-                now - started_at,
-                sessions_gone=gone_all,
-                non_critical_unready=non_critical_unready,
-            )
-        poll_sleep(_READY_POLL_INTERVAL_S)
 
 
 def require_root_absent() -> None:
@@ -719,9 +629,9 @@ def root_tree_selection() -> dict[str, str]:
     return {session_name(unit_id): unit_id for unit_id in root_units(status)}
 
 
-def stop_dormant_helper_root(deadline: float, *, helper: HelperFactory) -> None:
+def stop_dormant_helper_root(deadline: float, *, helper: HelperFactory | None) -> None:
     """Revoke a pending keeper restart even when no root IPC is serving."""
-    if not helper_spawn_committed():
+    if helper is None:
         return
     from base.host.permissions_helper.client import PermissionsHelperError
     from services.desktop.permissions_helper.launchd_job import (
@@ -753,7 +663,7 @@ def stop_root_service_tree(
     preserve: frozenset[str],
     timeout_s: float = _ROOT_STOP_TIMEOUT_S,
     force: bool = False,
-    helper: HelperFactory,
+    helper: HelperFactory | None,
 ) -> None:
     """Stop the root-owned tree — everything, or only the units not preserved.
 

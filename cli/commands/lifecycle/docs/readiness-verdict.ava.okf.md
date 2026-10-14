@@ -10,13 +10,13 @@ tags:
 
 # Start readiness verdict
 
-`cli/commands/lifecycle/root_driver.py:wait_for_service_tree` observes the service
+`cli/commands/lifecycle/root_readiness.py:wait_for_service_tree` observes the service
 table and calls the selected services' protocol probes. A running process alone
 is insufficient; the probe must respond. There is no native listener census or
 before/after process-generation proof around read-only health checks.
 
 Only selected core services in `CRITICAL_SERVICE_SESSIONS` gate serving. They
-share `SERVICE_READY_TIMEOUT_S`. Optional services are sampled when the core is
+share `SERVICE_READY_TIMEOUT_S`, measured by the command's injected `Timers`. Optional services are sampled when the core is
 ready; their failures are reported and emitted as `service_start_unready`, without
 another waiting budget or a global startup failure. Optional launch failures also
 do not enter the rollout's fatal launch-failure record.

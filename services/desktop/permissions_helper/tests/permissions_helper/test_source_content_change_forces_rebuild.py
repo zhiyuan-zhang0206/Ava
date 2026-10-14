@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import plistlib
-import time
 from pathlib import Path
 
 import pytest
 
 from base import paths
-from base.host.permissions_helper.client import HelperFactory
+from base.clock.tests.manual_timers import ManualTimers
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.sessions.tests.scripted_helper import ScriptedHelper, serve
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
@@ -516,9 +515,7 @@ def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
     assert "timed out" in reason
 
 
-def test_helper_ping_settles_until_cold_start_answers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_helper_ping_settles_until_cold_start_answers() -> None:
     from base.host.permissions_helper import client
     from services.desktop.permissions_helper import lifecycle
 
@@ -528,7 +525,7 @@ def test_helper_ping_settles_until_cold_start_answers(
         {"pong": False},
         {"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True},
     ]
-    sleeps: list[float] = []
+    timers = ManualTimers()
 
     def ping() -> dict[str, object]:
         reply = replies.pop(0)
@@ -537,10 +534,8 @@ def test_helper_ping_settles_until_cold_start_answers(
         assert isinstance(reply, dict)
         return reply
 
-    monkeypatch.setattr(time, "sleep", sleeps.append)
-
-    assert lifecycle.helper_answers_ping(serve(ScriptedHelper(ping=ping)))
-    assert sleeps == [0.5, 0.5, 0.5]
+    assert lifecycle.helper_answers_ping(serve(ScriptedHelper(ping=ping)), timers)
+    assert timers.sleeps == [0.5, 0.5, 0.5]
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -555,7 +550,9 @@ def test_loaded_helper_changes_refuse_before_any_mutation(
     path = lifecycle.plist_path()
     before = path.read_bytes() if path.exists() else None
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="stop and unregister"):
-        lifecycle.install_and_load(app, rebuilt=not changed, helper=refuse_helper)
+        lifecycle.install_and_load(
+            app, rebuilt=not changed, helper=refuse_helper, timers=ManualTimers()
+        )
     assert (path.read_bytes() if path.exists() else None) == before
     assert run_calls == probe_calls == []
 
@@ -566,14 +563,14 @@ def test_unresponsive_loaded_helper_keeps_unknown_custody(
     from services.desktop.permissions_helper import lifecycle
 
     app, run_calls, probe_calls = install_env(monkeypatch, tmp_path, loaded=True)
-
-    def unanswered(_helper: HelperFactory) -> bool:
-        return False
-
-    monkeypatch.setattr(lifecycle, "helper_answers_ping", unanswered)
+    silent = ScriptedHelper(ping={"pong": False})
+    timers = ManualTimers()
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="custody is unknown"):
-        lifecycle.install_and_load(app, rebuilt=False, helper=refuse_helper)
+        lifecycle.install_and_load(app, rebuilt=False, helper=serve(silent), timers=timers)
     assert run_calls == probe_calls == []
+    # Every attempt asked, and the waits between them never really waited.
+    assert len(silent.calls) > 1 and set(silent.calls) == {"ping"}
+    assert timers.sleeps == [0.5] * (len(silent.calls) - 1)
 
 
 def test_unloaded_helper_bootstraps_and_must_answer_ping(
@@ -592,7 +589,7 @@ def test_unloaded_helper_bootstraps_and_must_answer_ping(
         }
     )
 
-    lifecycle.install_and_load(app, rebuilt=False, helper=serve(helper))
+    lifecycle.install_and_load(app, rebuilt=False, helper=serve(helper), timers=ManualTimers())
 
     assert ["launchctl", "bootstrap", "gui/501", str(lifecycle.plist_path())] in run_calls
     plist = plistlib.loads(lifecycle.plist_path().read_bytes())
@@ -616,9 +613,9 @@ def test_helper_start_clears_shutdown_intent_only_after_native_job_absence(
     marker.chmod(0o600)
     if loaded:
         with pytest.raises(lifecycle.PermissionsHelperBuildError, match="retirement is incomplete"):
-            lifecycle.install_and_load(app, rebuilt=False, helper=helper)
+            lifecycle.install_and_load(app, rebuilt=False, helper=helper, timers=ManualTimers())
         assert marker.read_bytes() == b"stopped\n" and commands == []
     else:
-        lifecycle.install_and_load(app, rebuilt=False, helper=helper)
+        lifecycle.install_and_load(app, rebuilt=False, helper=helper, timers=ManualTimers())
         assert not marker.exists()
         assert [cmd[1] for cmd in commands] == ["bootstrap"]

@@ -17,10 +17,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 import base.paths
+from base.clock import Timers
 from base.config import settings
 from base.host.permissions_helper.client import HelperFactory
 from base.host.proc import run_bounded
@@ -655,7 +655,7 @@ def refuse_foreign_label_jobs() -> None:
         )
 
 
-def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory) -> None:
+def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory, timers: Timers) -> None:
     """Write the LaunchAgent plist and ensure launchd is running this binary.
 
     A loaded helper is only observed. Replacement requires an external stop
@@ -694,7 +694,7 @@ def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory) -> None
         clear_helper_stop_intent(base.paths.ava_home())
         path.write_bytes(new_bytes)
         run_tool(["launchctl", "bootstrap", launchd_domain(), str(path)])
-    if not helper_answers_ping(helper):
+    if not helper_answers_ping(helper, timers):
         raise PermissionsHelperBuildError(
             "permissions helper is unresponsive; custody is unknown. Diagnose the native job "
             "externally; start will not bootout or kickstart its possible ancestor"
@@ -706,7 +706,7 @@ def helper_socket() -> Path:
     return permissions_helper_socket(settings.services.permissions_helper_port)
 
 
-def helper_answers_ping(helper: HelperFactory) -> bool:
+def helper_answers_ping(helper: HelperFactory, timers: Timers) -> bool:
     from base.host.permissions_helper import client
 
     for attempt in range(_HELPER_PING_ATTEMPTS):
@@ -725,7 +725,7 @@ def helper_answers_ping(helper: HelperFactory) -> bool:
                 )
             return True
         if attempt < _HELPER_PING_ATTEMPTS - 1:
-            time.sleep(_HELPER_PING_SETTLE_S)
+            timers.sleep(_HELPER_PING_SETTLE_S)
     return False
 
 
@@ -740,9 +740,9 @@ def _require_usable_socket_paths() -> None:
             )
 
 
-def converge(*, helper: HelperFactory) -> None:
+def converge(*, helper: HelperFactory, timers: Timers) -> None:
     """Idempotent full bring-up: cert, build+sign, load. Raises on any failure."""
     _require_usable_socket_paths()
     ensure_signing_cert()
     app, rebuilt = build_and_sign(destination=settings.services.permissions_helper_artifact_dir)
-    install_and_load(app, rebuilt=rebuilt, helper=helper)
+    install_and_load(app, rebuilt=rebuilt, helper=helper, timers=timers)

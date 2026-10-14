@@ -10,6 +10,7 @@ import pytest
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
+import cli.commands.lifecycle.root_readiness as _root_readiness_commands
 import cli.commands.lifecycle.stop as _stop_commands
 import cli.commands.probe as _probe_commands
 from base.cluster.machine import MachineIdentity
@@ -81,7 +82,7 @@ def restart_command_environment(
         lambda roster, *_a, **_kw: LaunchOutcome(roster, ()),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
-        _root_driver_commands,
+        _root_readiness_commands,
         "wait_for_service_tree",
         lambda *_a, **_kw: _probe_commands.ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )

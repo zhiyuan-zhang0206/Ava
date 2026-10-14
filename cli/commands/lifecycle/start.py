@@ -26,10 +26,11 @@ from base.telemetry import EventPipeline
 from cli.commands._repo import repo_root
 from cli.commands._setup import SetupValues, missing_setup_message
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
+from cli.commands.lifecycle import root_readiness
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
-from cli.commands.lifecycle._start_bookmarks import record_running_sha as record_running_sha
 from cli.commands.lifecycle.login_link import print_login_link
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
+from cli.commands.lifecycle.start_generation import record_running_sha as record_running_sha
 from cli.commands.lifecycle.status import cmd_status
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
@@ -536,9 +537,10 @@ def cmd_start_body(
 
     # Success requires real readiness for every launched service, frontend included.
     print("\n→ waiting for services to come up")
-    wait = _root_driver_commands.wait_for_service_tree(
+    wait = root_readiness.wait_for_service_tree(
         tuple(started),
         timeout_s=SERVICE_READY_TIMEOUT_S,
+        timers=command.timers,
     )
 
     print("\n→ status")

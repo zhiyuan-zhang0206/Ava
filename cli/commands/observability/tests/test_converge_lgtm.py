@@ -18,6 +18,7 @@ import yaml
 from pydantic import SecretStr
 
 from base import config
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -71,6 +72,7 @@ def _ctx(
         machine=machine_from_boot(machine_config_76),
         helper=refuse_helper,
         host=fake_host(),
+        timers=ManualTimers(),
     )
 
 
@@ -716,6 +718,7 @@ def _station_ctx(
         machine=machine_from_boot(machine_config_710),
         helper=refuse_helper,
         host=fake_host(),
+        timers=ManualTimers(),
     )
 
 

@@ -30,6 +30,7 @@ from collections.abc import Callable
 import pytest
 
 import cli.commands.lifecycle.root_driver as _root_driver_commands
+import cli.commands.lifecycle.root_readiness as _root_readiness_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
 import services.supervision.roster.spec as roster_spec
@@ -198,7 +199,7 @@ def hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureReque
     request.getfixturevalue("_base_start")
     monkeypatch.setattr(start_mod, "refuse_occupied_health_ports", _REAL_GATE)
     monkeypatch.setattr(
-        _root_driver_commands,
+        _root_readiness_commands,
         "wait_for_service_tree",
         lambda *_a, **_kw: ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType] — variadic readiness test double
     )

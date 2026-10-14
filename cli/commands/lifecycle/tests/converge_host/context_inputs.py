@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
@@ -63,7 +64,7 @@ def converge_context(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
-    helper: HelperFactory = refuse_helper,
+    helper: HelperFactory | None = refuse_helper,
 ) -> converge_host.ConvergeCtx:
     config = ConfigBoot()
     machine = machine_from_boot(config)
@@ -80,6 +81,7 @@ def converge_context(
         helper=helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
 
 
@@ -133,6 +135,7 @@ def capable_helper_context(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
+    helper: HelperFactory | None = refuse_helper,
 ) -> converge_host.ConvergeCtx:
     """A host the capability probe clears, with an empty .env."""
     ava_home = tmp_path / "avahome"
@@ -147,7 +150,11 @@ def capable_helper_context(
     )
     ctx = replace(
         converge_context(
-            tmp_path, ava_home, operator_database=operator_database, producer=producer
+            tmp_path,
+            ava_home,
+            operator_database=operator_database,
+            producer=producer,
+            helper=helper,
         ),
         host=fake_host(platform=DARWIN_ARM64),
     )

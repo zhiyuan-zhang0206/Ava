@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import logs_job as job
@@ -48,6 +49,7 @@ def test_converge_registers_logs_maintenance(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
     ensure_logs_maintenance(ctx)
     assert calls == ["register"]

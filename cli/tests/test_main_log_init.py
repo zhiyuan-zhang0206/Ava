@@ -30,6 +30,7 @@ import cli.database as cli_database
 import cli.main as _main
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import postgres
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
@@ -324,6 +325,7 @@ def _cold_report(
         services=frozenset({"prometheus"}),
         helper=refuse_helper,
         host=fake_host(platform=DARWIN_ARM64),
+        timers=ManualTimers(),
     )
     lgtm_native.ensure_lgtm_native_step(context)
     return 0

@@ -84,7 +84,7 @@ when the test exits, including an assertion failure.
 
 `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` is deliberately
 not a user-facing verb — it runs as a step of `ava start`, so any restart
-crossing a schema change catches the DB up on its own. `_start_bookmarks` records the running source
+crossing a schema change catches the DB up on its own. `start_generation.record_running_sha` records the running source
 after a successful start. What start treats as already-up, what it waits for,
 and when an unready service becomes exit code 4:
 [[start-readiness.ava.okf.md]].

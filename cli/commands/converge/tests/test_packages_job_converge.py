@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.host.system import packages_job as job
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
@@ -50,6 +51,7 @@ def test_converge_registers_the_refresh_job(
         helper=refuse_helper,
         host=fake_host(),
         services=frozenset(),
+        timers=ManualTimers(),
     )
     ensure_packages_refresh_job(ctx)
     assert calls == ["register"]
