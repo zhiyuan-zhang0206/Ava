@@ -1,3 +1,5 @@
+exports = ["capture"]
+
 [uses]
 "_lower_exit_child.py" = ["otlp"]
 "test_observability.py" = ["otlp"]
