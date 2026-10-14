@@ -8,6 +8,7 @@ kill the archive command it left behind, and say so, without failing the stop.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import subprocess
 import time
@@ -26,6 +27,7 @@ from base.native_process.ownership import capture_tree
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import maintenance_stop as plane
+from cli.commands.data_plane.config import DataPlaneConfig
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -52,19 +54,23 @@ def _hung_archive_args(**_inputs: object) -> list[str]:
     ]
 
 
-def _private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, int]:
-    from base.config import settings
+def _private_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: DataPlaneConfig
+) -> tuple[Path, int, DataPlaneConfig]:
     from base.deploy.tests.containers import free_port
 
     home = tmp_path / "home"
     home.mkdir()
     port = free_port()
     monkeypatch.setenv("AVA_HOME", str(home))
-    monkeypatch.setattr(settings.data_plane, "db_url", f"postgresql://test@127.0.0.1:{port}/test")
-    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{free_port()}")
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
-    return home / "pg", port
+    private = dataclasses.replace(
+        config,
+        db_url=f"postgresql://test@127.0.0.1:{port}/test",
+        redis_url=f"redis://127.0.0.1:{free_port()}",
+        cluster_secret="",
+        redis_admin_password="",
+    )
+    return home / "pg", port, private
 
 
 def _hung_archive_commands(owner: pg.OwnedProcess) -> list[psutil.Process]:
@@ -113,8 +119,9 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
-    data, port = _private_home(tmp_path, monkeypatch)
+    data, port, plane_config = _private_home(tmp_path, monkeypatch, data_plane_config)
     monkeypatch.setattr(instance, "archive_pg_args", _hung_archive_args)
     # Small legs: the reserve is cleanup + kill + cleanup = 3 s, so a 7 s stop gives the
     # fast shutdown 4 s before it is ended.
@@ -130,7 +137,10 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     try:
         assert (
             instance.start_pg(
-                port, retained_children=retained_children, machine=command_runtime.machine
+                plane_config,
+                port,
+                retained_children=retained_children,
+                machine=command_runtime.machine,
             )
             == 0
         )
@@ -141,7 +151,11 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
 
         started = time.monotonic()
         stopped = plane.stop(
-            7, notes=notes, retained_children=retained_children, producer=operator_pipeline
+            plane_config,
+            7,
+            notes=notes,
+            retained_children=retained_children,
+            producer=operator_pipeline,
         )
         elapsed = time.monotonic() - started
 

@@ -24,6 +24,7 @@ from cli.commands.tests.health_port_guard import guard_health_port_gate as guard
 from cli.database import (
     OperatorDatabaseFactory,
     OperatorEventPipeline,
+    open_operator_database,
     operator_database_factory,
     operator_event_pipeline,
 )
@@ -45,7 +46,9 @@ def _cli_orchestration_guards(
 @pytest.fixture
 def operator_database(command_runtime: CommandRuntime) -> OperatorDatabaseFactory:
     """Borrow one real operator factory for this case's explicit CLI inputs."""
-    return operator_database_factory(local_host=command_runtime.machine.host)
+    return operator_database_factory(
+        local_host=command_runtime.machine.host, open_database=open_operator_database
+    )
 
 
 @pytest.fixture

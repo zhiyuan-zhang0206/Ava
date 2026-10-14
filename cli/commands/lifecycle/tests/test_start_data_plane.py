@@ -6,6 +6,7 @@ pg/redis ports. A missing record (defensive) is a hard error, not a silent
 fall-through onto some shared instance.
 """
 
+import dataclasses
 from collections.abc import Callable
 from typing import Any
 
@@ -16,7 +17,9 @@ from base.config import settings
 from base.host.db_authority import api, ledger
 from cli import start_identity
 from cli.commands.data_plane import cluster_instance as _ci
+from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import cluster_record
+from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.lifecycle import start as _start
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -32,24 +35,40 @@ def test_gateway_data_plane_brings_up_own_instance(
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """A born cluster → the per-cluster instance on the record's exact pg/redis
     ports, with each data-plane identity read from its own URL."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType]
     # An established home: its database authority ledger exists.
     monkeypatch.setattr(ledger, "load_ledger", lambda _home: object())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "bearer")
-    monkeypatch.setattr(settings.data_plane, "redis_admin_password", "redis-admin")
-    monkeypatch.setattr(cluster, "redis_password_from_env", lambda: "redis-runtime")
-    monkeypatch.setattr(
-        settings.data_plane, "db_url", "postgresql://ava_main:sek@127.0.0.1:23011/ava_main"
+    data_plane_config = dataclasses.replace(
+        data_plane_config,
+        cluster_secret="bearer",  # noqa: S106
+        redis_admin_password="redis-admin",  # noqa: S106
     )
-    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://ava:sek@127.0.0.1:23012/0")
+    monkeypatch.setattr(cluster, "redis_password_from_env", lambda: "redis-runtime")
+    data_plane_config = dataclasses.replace(
+        data_plane_config,
+        db_url="postgresql://ava_main:sek@127.0.0.1:23011/ava_main",
+        redis_url="redis://ava:sek@127.0.0.1:23012/0",
+    )
+    # `cluster.db_identity()` / `redis_identity()` (base.cluster) still read the global settings.
+    monkeypatch.setattr(settings.data_plane, "db_url", data_plane_config.db_url)
+    monkeypatch.setattr(settings.data_plane, "redis_url", data_plane_config.redis_url)
     own_calls: list[dict[str, object]] = []
-    monkeypatch.setattr(_ci, "ensure_cluster_storage", lambda **kw: own_calls.append(kw) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    stored_with: list[DataPlaneConfig] = []
+
+    def _record_storage(config: DataPlaneConfig, **kwargs: object) -> int:
+        stored_with.append(config)
+        own_calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(_ci, "ensure_cluster_storage", _record_storage)
 
     assert (
         _start.ensure_gateway_data_plane(
+            data_plane_config,
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -66,13 +85,13 @@ def test_gateway_data_plane_brings_up_own_instance(
         {
             "pg_port": 23011,
             "redis_port": 23012,
-            "redis_admin_password": "redis-admin",
             "redis_password": "redis-runtime",
             "redis_user": "ava",
             "retained_children": [],
             "machine": command_runtime.machine,
         }
     ]
+    assert stored_with == [data_plane_config]  # the admin login travels inside the config
 
 
 def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
@@ -81,6 +100,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """A home born before the always-authenticated data plane (no ledger, not a
     first start in progress) is refused before any native effect — never
@@ -91,10 +111,11 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
     monkeypatch.setattr(
         _ci,
         "ensure_cluster_storage",
-        lambda **_kw: pytest.fail("native effect on a legacy home"),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _config, **_kw: pytest.fail("native effect on a legacy home"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert (
         _start.ensure_gateway_data_plane(
+            data_plane_config,
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -109,17 +130,19 @@ def test_gateway_data_plane_no_record_is_error(
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """A not-yet-registered home (defensive) → a hard error, never a bring-up."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _ci,
         "ensure_cluster_storage",
-        lambda **_kw: pytest.fail("bring-up without a record"),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _config, **_kw: pytest.fail("bring-up without a record"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert (
         _start.ensure_gateway_data_plane(
+            data_plane_config,
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -133,6 +156,7 @@ def test_local_launch_without_owner_cannot_publish_authority(
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     from unittest.mock import Mock
 
@@ -142,7 +166,7 @@ def test_local_launch_without_owner_cannot_publish_authority(
     monkeypatch.setattr(api, "publish_telemetry_token", effect)
     with pytest.raises(ValueError, match="caller-owned child retention"):
         bringup.ensure_gateway_data_plane(
-            database_factory=operator_database, machine=command_runtime.machine
+            data_plane_config, database_factory=operator_database, machine=command_runtime.machine
         )
     effect.assert_not_called()
 

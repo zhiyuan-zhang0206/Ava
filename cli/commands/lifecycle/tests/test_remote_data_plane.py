@@ -4,7 +4,7 @@ reachability probes and clear skips instead of managing a foreign service.
 The local instance management surface (`ensure_cluster_storage`,
 `stop_cluster_instance`, the `ava status` data-plane section) must never run
 against a data plane whose URLs name another host — the URL is the switch, and
-the management plane keys off `settings.data_plane.is_remote`.
+the management plane keys off `DataPlaneConfig.is_remote`.
 """
 
 from __future__ import annotations
@@ -17,8 +17,12 @@ import pytest
 from base.agents.context.clients import DatabaseFactory
 from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as ci
+from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.data_plane.tests.data_plane_records import remote_cluster_record
-from cli.commands.data_plane.tests.data_plane_records import remote_urls as remote_urls
+from cli.commands.data_plane.tests.data_plane_records import (
+    remote_data_plane_config as remote_data_plane_config,
+)
 from cli.commands.lifecycle import start as start_mod
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -45,6 +49,7 @@ def test_start_remote_skips_local_instance_and_probes(
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
+    remote_data_plane_config: DataPlaneConfig,
 ) -> None:
     calls: list[str] = []
 
@@ -54,15 +59,23 @@ def test_start_remote_skips_local_instance_and_probes(
 
     monkeypatch.setattr(ci, "ensure_cluster_storage", _no_local_instance)
 
-    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+    def _remote_postgres(
+        _config: DataPlaneConfig, *, database_factory: DatabaseFactory
+    ) -> tuple[bool, str]:
         assert database_factory is operator_database
         return (True, "postgres (10.9.8.7:5432)")
 
     monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
-    monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.9.8.7:6380)"))
+    monkeypatch.setattr(
+        dp,
+        "remote_redis_reachable",
+        lambda _config: (True, "redis (10.9.8.7:6380)"),  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     rc = start_mod.ensure_gateway_data_plane(
-        database_factory=operator_database, machine=command_runtime.machine
+        remote_data_plane_config,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
     )
 
     assert rc == 0
@@ -79,6 +92,7 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
+    remote_data_plane_config: DataPlaneConfig,
 ) -> None:
 
     def _no_local_instance(*_args: object, **_kwargs: object) -> int:
@@ -86,7 +100,9 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
 
     monkeypatch.setattr(ci, "ensure_cluster_storage", _no_local_instance)
 
-    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+    def _remote_postgres(
+        _config: DataPlaneConfig, *, database_factory: DatabaseFactory
+    ) -> tuple[bool, str]:
         assert database_factory is operator_database
         return (False, "postgres (10.9.8.7:5432) connect failed: connection refused")
 
@@ -97,7 +113,9 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
     )
 
     rc = start_mod.ensure_gateway_data_plane(
-        database_factory=operator_database, machine=command_runtime.machine
+        remote_data_plane_config,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
     )
 
     assert rc == 1

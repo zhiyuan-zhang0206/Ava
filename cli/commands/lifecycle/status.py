@@ -24,6 +24,7 @@ from base.deploy.lifecycle import service_selection
 from cli.commands._repo import repo_root
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.bringup import print_data_plane_status
+from cli.commands.data_plane.config import data_plane_config_from_settings
 from cli.commands.lifecycle.hold_report import print_hold_section
 from cli.commands.probe import print_service_row
 from services.supervision.roster import build_services
@@ -87,7 +88,9 @@ def cmd_status(
     runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
     if not runner_only:
         print("\ninfra (pg/redis):")
-        print_data_plane_status(database_factory=database_factory)
+        print_data_plane_status(
+            data_plane_config_from_settings(), database_factory=database_factory
+        )
     else:
         print("\ninfra (pg/redis): skipped (agent-runner uses central node)")
 

@@ -12,6 +12,20 @@ tags:
 `ava start` on a gateway-capable unit brings up the home's own PostgreSQL,
 PgBouncer and Redis before any application service.
 
+## Configuration
+
+The commands read no `settings`. `cli/commands/data_plane/config.py:DataPlaneConfig` is a frozen
+value of the `data_plane` and `services` fields they use (the URLs and both passwords hide from
+the repr; `is_remote` is derived from the two URLs, so a copy with a swapped URL answers for it).
+The composition roots build it once with `data_plane_config_from_settings()`: the `ava start`,
+`ava stop` and `ava status` steps in `cli/commands/lifecycle`, the pooler converge step
+(`ensure_pgbouncer_step`) and the launch-environment builder (`root_driver.service_extra_env`).
+Every function below them takes it as the first parameter. A test builds the same value with
+`data_plane_config_from_boot` and changes a field with `dataclasses.replace`.
+
+Two reads stay outside it on purpose: the walg archive path (`start_pg` reads it from its own
+`ConfigBoot`) and the identities and ports `base.cluster` derives from the global settings.
+
 ## Identity
 
 `cluster_instance` takes separate URL identities: the Postgres database/owner

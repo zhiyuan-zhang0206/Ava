@@ -15,6 +15,7 @@ per-cluster instance with native custody:
 
 from __future__ import annotations
 
+import dataclasses
 import getpass
 import os
 import socket
@@ -45,6 +46,8 @@ from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.paths.home import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors
+from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -135,6 +138,7 @@ def owned_pg(
     monkeypatch: pytest.MonkeyPatch,
     *,
     command_runtime: CommandRuntime,
+    data_plane_config: DataPlaneConfig,
 ) -> Iterator[int]:
     """A home-owned Postgres (native launch receipt, owner-only socket) whose
     cluster record `local_owner_authority` resolves; yields its port."""
@@ -156,7 +160,13 @@ def owned_pg(
     children: list[subprocess.Popen[bytes]] = []
     try:
         assert (
-            ci.start_pg(pg_port, retained_children=children, machine=command_runtime.machine) == 0
+            ci.start_pg(
+                data_plane_config,
+                pg_port,
+                retained_children=children,
+                machine=command_runtime.machine,
+            )
+            == 0
         )
         yield pg_port
     finally:
@@ -266,6 +276,7 @@ def _grant_groups(pg_port: int, identity: str) -> None:
 
 
 def _provision_by_authority(
+    config: DataPlaneConfig,
     pg_port: int,
     identity: str,
     *,
@@ -276,6 +287,7 @@ def _provision_by_authority(
     admin = ci.pg_admin_url(pg_port)
     created = provision_database(identity, base_admin_url=admin, expected_data_dir=_data_dir())
     _prepare_by_authority(
+        config,
         pg_port,
         identity,
         database_created=created,
@@ -286,6 +298,7 @@ def _provision_by_authority(
 
 
 def _prepare_by_authority(
+    config: DataPlaneConfig,
     pg_port: int,
     identity: str,
     *,
@@ -305,7 +318,7 @@ def _prepare_by_authority(
         database_factory=operator_database, machine_name=command_runtime.machine.name
     )
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=_data_dir())
-    prepare_memory_vectors(database_factory=operator_database)
+    prepare_memory_vectors(config, database_factory=operator_database)
     _grant_groups(pg_port, identity)
 
 
@@ -315,9 +328,11 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """Same catalog, same application privileges, only the dial changed."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
+    pgvector_config = dataclasses.replace(data_plane_config, memory_search_backend="pgvector")
     legacy, current = "ava_lgcy", "ava_auth"
     _provision_by_owner_login(
         owned_pg, legacy, get_descriptor(settings.services.embedding_backend).dim
@@ -326,7 +341,11 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
 
     assert (
         _provision_by_authority(
-            owned_pg, current, operator_database=operator_database, command_runtime=command_runtime
+            pgvector_config,
+            owned_pg,
+            current,
+            operator_database=operator_database,
+            command_runtime=command_runtime,
         )
         is True
     )
@@ -342,7 +361,11 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     # A second start over the same home changes nothing.
     assert (
         _provision_by_authority(
-            owned_pg, current, operator_database=operator_database, command_runtime=command_runtime
+            pgvector_config,
+            owned_pg,
+            current,
+            operator_database=operator_database,
+            command_runtime=command_runtime,
         )
         is False
     )
@@ -362,9 +385,11 @@ def test_owner_without_login_keeps_every_admin_path(
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """The owner is born NOLOGIN; it still migrates, provisions and dumps."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
+    pgvector_config = dataclasses.replace(data_plane_config, memory_search_backend="pgvector")
     identity = "ava_nolg"
     _bind_cluster_url(monkeypatch, owned_pg, identity)
     admin = ci.pg_admin_url(owned_pg)
@@ -380,6 +405,7 @@ def test_owner_without_login_keeps_every_admin_path(
         )
 
     _prepare_by_authority(
+        pgvector_config,
         owned_pg,
         identity,
         database_created=created,

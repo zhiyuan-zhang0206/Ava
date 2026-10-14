@@ -258,9 +258,11 @@ def stop_data_plane(
     escalated); `clients` collects the pooler's still-connected clients, reported and
     never acted on.
     """
+    from cli.commands.data_plane.config import data_plane_config_from_settings
     from cli.commands.data_plane.maintenance_stop import stop
 
     return stop(
+        data_plane_config_from_settings(),
         timeout,
         save=save,
         notes=notes,

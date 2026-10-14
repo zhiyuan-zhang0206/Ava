@@ -22,7 +22,7 @@ from base.cluster.machine import MachineIdentity
 from base.telemetry import event_store
 from base.telemetry.metrics import observed_metrics
 from cli import main, parsers
-from cli.database import OperatorDatabaseFactory, OperatorEventPipeline
+from cli.database import OperatorDatabaseFactory, OperatorEventPipeline, open_operator_database
 
 FLUSH_INTERVAL_S = 60
 HOLD_S = 1.5
@@ -75,7 +75,7 @@ def _producer(
 ) -> OperatorEventPipeline:
     del database_factory
     return OperatorEventPipeline(
-        WatchedDatabase(local_host=machine.host),
+        WatchedDatabase(local_host=machine.host, open_database=open_operator_database),
         machine=machine,
         home=home,
         flush_interval_s=FLUSH_INTERVAL_S,
@@ -84,7 +84,12 @@ def _producer(
 
 parsers.build_parser = _build_parser  # pyright: ignore[reportAttributeAccessIssue]
 try:
-    result = main.run_command([], retained_children=None, producer_factory=_producer)
+    result = main.run_command(
+        [],
+        retained_children=None,
+        producer_factory=_producer,
+        open_database=open_operator_database,
+    )
 except RuntimeError as exc:
     assert str(exc) == "handler failure"
 else:

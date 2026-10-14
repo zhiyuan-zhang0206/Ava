@@ -18,12 +18,14 @@ from cli.commands.management import schedules_verify as verify
 def read_rows(out: str) -> None:
     rows: list[tuple[int, str, str]]
     if "database_factory" in inspect.signature(verify._read_schedule_rows).parameters:
-        from cli.database import operator_database_factory
+        from cli.database import open_operator_database, operator_database_factory
         from cli.database.runtime import CommandRuntime
 
         host = CommandRuntime.create().machine.host
         rows = verify._read_schedule_rows(
-            database_factory=operator_database_factory(local_host=host)
+            database_factory=operator_database_factory(
+                local_host=host, open_database=open_operator_database
+            )
         )
     else:
         legacy: Any = verify._read_schedule_rows

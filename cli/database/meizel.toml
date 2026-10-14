@@ -1,4 +1,4 @@
 exports = ["runtime.py", "tests"]
 
 [uses]
-"tests" = ["runtime.py"]
+"tests" = ["__init__.py", "runtime.py"]

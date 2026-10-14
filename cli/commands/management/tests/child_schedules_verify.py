@@ -11,20 +11,28 @@ from pathlib import Path
 
 from base.paths import ava_home
 from cli.commands.management.schedules_verify import _read_schedule_rows, cmd_schedules_verify
-from cli.database import operator_database_factory, operator_event_pipeline
+from cli.database import (
+    open_operator_database,
+    operator_database_factory,
+    operator_event_pipeline,
+)
 from cli.database.runtime import CommandRuntime
 
 
 def _read_table(out: str) -> None:
     command = CommandRuntime.create()
-    database = operator_database_factory(local_host=command.machine.host)
+    database = operator_database_factory(
+        local_host=command.machine.host, open_database=open_operator_database
+    )
     with Path(out).open("w") as handle:
         json.dump(_read_schedule_rows(database_factory=database), handle)
 
 
 def _check_rows(rows_file: str) -> None:
     command = CommandRuntime.create()
-    database = operator_database_factory(local_host=command.machine.host)
+    database = operator_database_factory(
+        local_host=command.machine.host, open_database=open_operator_database
+    )
     producer = operator_event_pipeline(database, machine=command.machine, home=ava_home())
     try:
         sys.exit(

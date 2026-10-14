@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,29 +13,37 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from base.telemetry import EventPipeline
-from cli.database import OperatorDatabaseFactory, operator_database_factory
+from cli.database import (
+    OperatorDatabaseFactory,
+    open_operator_database,
+    operator_database_factory,
+)
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
+def _factory(command: CommandRuntime, open_database: Callable[..., Any]) -> OperatorDatabaseFactory:
+    return operator_database_factory(local_host=command.machine.host, open_database=open_database)
+
+
 def test_operator_handles_share_the_command_gate_without_git(
-    monkeypatch: pytest.MonkeyPatch,
     command_runtime: CommandRuntime,
 ) -> None:
     seen: list[ProcessDbGate] = []
 
-    def from_settings(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
+    def open_database(
+        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+    ) -> Database:
         assert callable(direct_url.local_host)
         seen.append(gate)
         assert gate.application_name() == "ava:cli"
         assert not gate.min_read_due()
         return MagicMock(spec=Database)
 
-    monkeypatch.setattr(Database, "from_settings", from_settings)
-    factory = operator_database_factory(local_host=command_runtime.machine.host)
+    factory = _factory(command_runtime, open_database)
     assert not seen
     factory()
     factory()
@@ -47,19 +56,19 @@ def test_operator_handles_share_the_command_gate_without_git(
 
 
 def test_separate_commands_own_separate_exempt_gates(
-    monkeypatch: pytest.MonkeyPatch,
     command_runtime: CommandRuntime,
 ) -> None:
     seen: list[ProcessDbGate] = []
 
-    def from_settings(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
+    def open_database(
+        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+    ) -> Database:
         assert callable(direct_url.local_host)
         seen.append(gate)
         return MagicMock(spec=Database)
 
-    monkeypatch.setattr(Database, "from_settings", from_settings)
-    operator_database_factory(local_host=command_runtime.machine.host)()
-    operator_database_factory(local_host=command_runtime.machine.host)()
+    _factory(command_runtime, open_database)()
+    _factory(command_runtime, open_database)()
     assert seen[0] is not seen[1]
 
 
@@ -72,7 +81,7 @@ def test_each_operator_handle_reads_the_live_connection_settings(
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
     first_url = "postgresql://operator@127.0.0.1:6101/ava"
     second_url = "postgresql://operator@127.0.0.1:6102/ava"
-    factory = operator_database_factory(local_host=command_runtime.machine.host)
+    factory = _factory(command_runtime, open_operator_database)
     monkeypatch.setattr(settings.data_plane, "db_url", first_url)
     first = factory()
     monkeypatch.setattr(settings.data_plane, "db_url", second_url)
@@ -82,18 +91,18 @@ def test_each_operator_handle_reads_the_live_connection_settings(
 
 
 def test_operator_handle_preserves_the_original_constructor_error(
-    monkeypatch: pytest.MonkeyPatch,
     command_runtime: CommandRuntime,
 ) -> None:
     error = RuntimeError("operator configuration failed")
 
-    def fail(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
+    def open_database(
+        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+    ) -> Database:
         assert not gate.min_read_due()
         raise error
 
-    monkeypatch.setattr(Database, "from_settings", fail)
     with pytest.raises(RuntimeError) as caught:
-        operator_database_factory(local_host=command_runtime.machine.host)()
+        _factory(command_runtime, open_database)()
     assert caught.value is error
 
 
@@ -105,7 +114,7 @@ def test_command_pipeline_is_lazy_and_retains_the_same_database_factory(
     from base.agents.context.clients import DatabaseFactory
     from cli.database import operator_event_pipeline
 
-    factory = operator_database_factory(local_host=command_runtime.machine.host)
+    factory = _factory(command_runtime, open_operator_database)
     pipeline = MagicMock(spec=telemetry.EventPipeline)
     seen: list[DatabaseFactory] = []
 
@@ -131,30 +140,22 @@ def test_recovery_url_handle_keeps_the_operator_gate_and_live_slice(
     monkeypatch: pytest.MonkeyPatch,
     command_runtime: CommandRuntime,
 ) -> None:
-
     from base.config import settings
-    from base.db.config import DbConfig
 
     seen: list[tuple[DbConfig, ProcessDbGate]] = []
-    original_init = Database.__init__
 
-    def initialize(
-        self: Database,
-        config: DbConfig,
-        *,
-        gate: ProcessDbGate | None = None,
-        direct_url: ClusterDirectUrl | None = None,
-    ) -> None:
-        assert gate is not None and not gate.min_read_due()
+    def open_database(
+        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+    ) -> Database:
+        assert not gate.min_read_due()
         seen.append((config, gate))
-        original_init(self, config, gate=gate, direct_url=direct_url)
+        return open_operator_database(config, gate, direct_url)
 
-    monkeypatch.setattr(Database, "__init__", initialize)
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
     live_url = "postgresql://operator@127.0.0.1:6101/ava"
     scratch_url = "postgresql://operator@127.0.0.1:6102/ava"
     monkeypatch.setattr(settings.data_plane, "db_url", live_url)
-    factory = operator_database_factory(local_host=command_runtime.machine.host)
+    factory = _factory(command_runtime, open_database)
     assert not seen
     regular = factory()
     monkeypatch.setattr(settings.data_plane, "db_pool_max_size", 7)
@@ -168,24 +169,24 @@ def test_recovery_url_handle_keeps_the_operator_gate_and_live_slice(
 
 def test_borrowed_cli_context_keeps_the_original_operator_factory(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     from cli.commands.lifecycle.tests.converge_host.context_inputs import converge_context
 
     seen: list[ProcessDbGate] = []
 
-    def from_settings(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
+    def open_database(
+        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+    ) -> Database:
         assert callable(direct_url.local_host)
         seen.append(gate)
         return MagicMock(spec=Database)
 
-    monkeypatch.setattr(Database, "from_settings", from_settings)
+    operator_database = _factory(command_runtime, open_database)
     context = converge_context(
         tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline
     )
-    assert isinstance(operator_database, OperatorDatabaseFactory)
     assert context.database_factory is operator_database
     assert not seen
     context.database_factory()

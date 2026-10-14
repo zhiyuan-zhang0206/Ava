@@ -32,14 +32,15 @@ from base import cluster
 from base.cluster import authority, ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
-from base.db.code_version_gate import ProcessDbGate
 from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.net.url_secret import url_with_userinfo
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
+from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.backup.artifact import passphrase
@@ -58,6 +59,7 @@ class Born:
     home: Path
     record: cluster.ClusterRecord
     values: dict[str, str]
+    plane: DataPlaneConfig
     retained_children: list[subprocess.Popen[bytes]] = field(default_factory=list)
 
     @property
@@ -114,7 +116,13 @@ def _teardown(born: Born) -> None:
         for child in born.retained_children:
             child.wait(timeout=1)
         subprocess.run(
-            [ci.redis_cli_bin(), "-p", str(born.record.ports["redis"]), "shutdown", "nosave"],
+            [
+                ci.redis_cli_bin(born.plane),
+                "-p",
+                str(born.record.ports["redis"]),
+                "shutdown",
+                "nosave",
+            ],
             env=ci.redis_cli_env(born.values["AVA_REDIS_ADMIN_PASSWORD"]),
             check=False,
             capture_output=True,
@@ -173,7 +181,8 @@ def _configure(
         return record
 
     monkeypatch.setattr(cluster, "get_record", _record)
-    return Born(home=home, record=record, values=values)
+    # The config the commands read, built by the production mapping from the settings above.
+    return Born(home=home, record=record, values=values, plane=data_plane_config_from_settings())
 
 
 def test_configured_roster_survives_kernel_reuse_of_closed_ports(
@@ -211,22 +220,23 @@ def test_configured_roster_survives_kernel_reuse_of_closed_ports(
 
 
 def _birth(
-    born: Born, *, operator_database: Callable[[], Any], command_runtime: CommandRuntime
+    born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> None:
     assert (
         bringup.ensure_gateway_data_plane(
+            born.plane,
             retained_children=born.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
         )
         == 0
     )
-    bringup.prepare_gateway_schema()
+    bringup.prepare_gateway_schema(born.plane)
     cmd_migrations_apply(
         database_factory=operator_database, machine_name=command_runtime.machine.name
     )
     bringup.complete_gateway_data_plane(
-        database_factory=operator_database, machine=command_runtime.machine
+        born.plane, database_factory=operator_database, machine=command_runtime.machine
     )
 
 
@@ -249,7 +259,7 @@ def configured(
 
 @pytest.fixture
 def born(
-    configured: Born, *, operator_database: Callable[[], Any], command_runtime: CommandRuntime
+    configured: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> Born:
     _birth(configured, operator_database=operator_database, command_runtime=command_runtime)
     return configured
@@ -273,7 +283,9 @@ def _refused(**kwargs: Any) -> str:
     return message
 
 
-def test_fresh_birth_mints_generation_zero_behind_nologin_owner(born: Born) -> None:
+def test_fresh_birth_mints_generation_zero_behind_nologin_owner(
+    born: Born, operator_database: OperatorDatabaseFactory
+) -> None:
     current = ledger.require_ledger(born.home)
     assert current.owner == "ava"
     assert current.active is not None and current.active.number == 0
@@ -292,7 +304,7 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(born: Born) -> N
             conn, born.home, database="ava", readonly_grantees=bringup.READONLY_GRANTEES
         )
     # The start process adopted the delivered gateway login for its own dials.
-    assert settings.data_plane.db_url == born.dsn("gateway")
+    assert operator_database.db_url() == born.dsn("gateway")
     assert os.environ[delivery.GENERATION_ENV] == "0"
     assert json.loads((born.home / "start-intent.json").read_text())["phase"] == "provisioned"
 
@@ -379,13 +391,13 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
 
 def test_unchanged_userlist_reloads_without_restart(
     born: Born,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
     before = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     bringup.complete_gateway_data_plane(
-        database_factory=operator_database, machine=command_runtime.machine
+        born.plane, database_factory=operator_database, machine=command_runtime.machine
     )
     after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert before is not None and after is not None and before.pid == after.pid
@@ -393,7 +405,7 @@ def test_unchanged_userlist_reloads_without_restart(
 
 def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
     born: Born,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -403,7 +415,7 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
         )
     with pytest.raises(model.CatalogRefusedError, match="ava_g7_runner"):
         bringup.complete_gateway_data_plane(
-            database_factory=operator_database, machine=command_runtime.machine
+            born.plane, database_factory=operator_database, machine=command_runtime.machine
         )
     with born.admin() as conn:
         assert conn.execute(
@@ -414,7 +426,7 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
 
 def test_ordinary_start_holds_on_an_invariant_violation(
     born: Born,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -423,14 +435,14 @@ def test_ordinary_start_holds_on_an_invariant_violation(
         conn.execute("GRANT INSERT ON agents TO foreign_writer")
     with pytest.raises(model.CatalogRefusedError, match="foreign_writer"):
         bringup.complete_gateway_data_plane(
-            database_factory=operator_database, machine=command_runtime.machine
+            born.plane, database_factory=operator_database, machine=command_runtime.machine
         )
 
 
 def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     configured: Born,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -439,6 +451,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     (configured.home / "start-intent.json").write_text(json.dumps(intent))
     assert (
         bringup.ensure_gateway_data_plane(
+            configured.plane,
             retained_children=configured.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -449,14 +462,14 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     assert not (configured.home / "pg").exists()
     with pytest.raises(RuntimeError, match="no database authority ledger"):
         bringup.complete_gateway_data_plane(
-            database_factory=operator_database, machine=command_runtime.machine
+            configured.plane, database_factory=operator_database, machine=command_runtime.machine
         )
 
 
 def test_interrupted_birth_retries_to_the_same_generation(
     configured: Born,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -474,7 +487,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
     assert current.active is None and current.pending is not None and current.pending.number == 0
     monkeypatch.setattr(bringup, "prove_generation_logins", real)
     bringup.complete_gateway_data_plane(
-        database_factory=operator_database, machine=command_runtime.machine
+        configured.plane, database_factory=operator_database, machine=command_runtime.machine
     )
     current = ledger.require_ledger(configured.home)
     assert calls == [0] and current.active is not None and current.active.number == 0
@@ -498,16 +511,16 @@ def test_launched_services_receive_their_class_login_only(
     frontend = ServiceSpec(
         session="frontend", cmd="x", capabilities=frozenset({"gateway"}), requires_db=False
     )
-    assert service_extra_env(gateway)["AVA_DB_URL"] == born.dsn("gateway")
-    assert service_extra_env(runner)["AVA_DB_URL"] == born.dsn("runner")
-    assert service_extra_env(runner)[delivery.GENERATION_ENV] == "0"
-    assert "AVA_DB_URL" not in service_extra_env(frontend)
+    assert service_extra_env(gateway, remote_data_plane=False)["AVA_DB_URL"] == born.dsn("gateway")
+    assert service_extra_env(runner, remote_data_plane=False)["AVA_DB_URL"] == born.dsn("runner")
+    assert service_extra_env(runner, remote_data_plane=False)[delivery.GENERATION_ENV] == "0"
+    assert "AVA_DB_URL" not in service_extra_env(frontend, remote_data_plane=False)
     # The born single box authenticates its API: each service is delivered its class
     # token, the database-free frontend included, and never the root itself.
     tokens = ledger.read_secret(born.home, delivery.active_generation(born.home)).api
-    assert service_extra_env(gateway)[API_TOKEN_ENV] == tokens.gateway
-    assert service_extra_env(runner)[API_TOKEN_ENV] == tokens.runner
-    assert service_extra_env(frontend)[API_TOKEN_ENV] == tokens.gateway
+    assert service_extra_env(gateway, remote_data_plane=False)[API_TOKEN_ENV] == tokens.gateway
+    assert service_extra_env(runner, remote_data_plane=False)[API_TOKEN_ENV] == tokens.runner
+    assert service_extra_env(frontend, remote_data_plane=False)[API_TOKEN_ENV] == tokens.gateway
     root = root_child_env()
     assert "AVA_DB_URL" not in root and delivery.GENERATION_ENV not in root
     assert API_TOKEN_ENV not in root
@@ -520,7 +533,7 @@ def _collector_postgres_receiver(
     born: Born,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> dict[str, Any]:
     """The rendered collector config's PostgreSQL receiver; the whole rendered
@@ -599,7 +612,7 @@ def _scrape_like_the_receiver(receiver: dict[str, Any]) -> None:
 def test_collector_postgres_receiver_keeps_no_credential(
     born: Born,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -642,29 +655,18 @@ def test_collector_postgres_receiver_keeps_no_credential(
 
 
 def test_direct_exemption_dials_postgres_as_the_delivered_login(
-    born: Born,
-    monkeypatch: pytest.MonkeyPatch,
-    database_gate: ProcessDbGate,
-    *,
-    command_runtime: CommandRuntime,
+    born: Born, operator_database: OperatorDatabaseFactory
 ) -> None:
     """With pooling on, the admin-plane `direct=True` dial swaps only the port to
     the real Postgres (this home's own record) and keeps the delivered login."""
-    import base.db
-    from base.cluster.dataplane.direct_url import ClusterDirectUrl, direct_db_url
-
-    direct = direct_db_url(local_host=command_runtime.machine.host)
-    assert direct == url_with_userinfo(
+    handle = operator_database()
+    assert handle.direct_url() == url_with_userinfo(
         born.endpoint().replace(str(born.pooler_port), str(born.pg_port)), *born.login("gateway")
     )
-    with base.db.connect(
-        direct=True,
-        gate=database_gate,
-        direct_url=ClusterDirectUrl(command_runtime.machine.host),
-    ) as conn:
+    with handle.connect(direct=True) as conn:
         assert conn.execute("SELECT inet_server_port(), session_user").fetchone() == (
             born.pg_port,
             born.login("gateway")[0],
         )
-    with base.db.connect(gate=database_gate) as conn:  # pooled: the one access URL
+    with handle.connect() as conn:  # pooled: the one access URL
         assert conn.execute("SELECT session_user").fetchone() == (born.login("gateway")[0],)

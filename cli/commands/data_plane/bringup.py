@@ -28,7 +28,6 @@ from base.cluster import postgres as owned_postgres
 from base.cluster.dataplane import pooler
 from base.cluster.machine import MachineIdentity
 from base.cluster.record import ClusterRecord
-from base.config import settings
 from base.host.db_authority.model import Generation
 from base.host.net.url_secret import url_host
 from base.log import logger
@@ -36,10 +35,13 @@ from base.paths import ava_home
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer
+from cli.commands.data_plane.config import DataPlaneConfig
+from cli.database import OperatorDatabaseFactory
 from services.supervision.roster.service_spec import DbAccess
 
 
 def ensure_gateway_data_plane(
+    config: DataPlaneConfig,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
@@ -50,7 +52,7 @@ def ensure_gateway_data_plane(
     Pooler startup belongs to ``complete_gateway_data_plane``, after schema and
     runner grants. Storage ports always come from this home's reservation.
     """
-    if retained_children is None and not settings.data_plane.is_remote:
+    if retained_children is None and not config.is_remote:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from base.cluster import (
         get_record,
@@ -70,18 +72,18 @@ def ensure_gateway_data_plane(
 
     # The root holding the human secret derives the telemetry token and keeps it where the
     # gateway-side services that probe the observability station can read it.
-    publish_telemetry_token(ava_home().resolve(), settings.data_plane.cluster_secret)
+    publish_telemetry_token(ava_home().resolve(), config.cluster_secret)
 
-    if settings.data_plane.is_remote:
+    if config.is_remote:
         # Remote-managed data plane (Task #1752): the URLs name another host,
         # so there is no local instance to bring up — no initdb, no PgBouncer,
         # no role/ACL provisioning. Startup degrades to a reachability probe of
         # the URLs themselves: unreachable means the gateway cannot serve at
         # all, so fail fast with the dial detail instead of a bare psycopg
         # traceback from the first migration.
-        host = url_host(settings.data_plane.db_url)
+        host = url_host(config.db_url)
         print(f"\n→ data plane remote-managed ({host}) — skipping local instance bring-up")
-        pg_ok, pg_line = remote_pg_reachable(database_factory=database_factory)
+        pg_ok, pg_line = remote_pg_reachable(config, database_factory=database_factory)
         if not pg_ok:
             print(
                 f"  ✗ remote data plane unreachable: {pg_line}\n"
@@ -92,7 +94,7 @@ def ensure_gateway_data_plane(
                 file=sys.stderr,
             )
             return 1
-        redis_ok, redis_line = remote_redis_reachable()
+        redis_ok, redis_line = remote_redis_reachable(config)
         if not redis_ok:
             print(f"  ✗ remote data plane unreachable: {redis_line}", file=sys.stderr)
             return 1
@@ -108,9 +110,9 @@ def ensure_gateway_data_plane(
         print(f"  ✗ {legacy_home_refusal(ava_home().resolve())}", file=sys.stderr)
         return 1
     return instance.ensure_cluster_storage(
+        config,
         pg_port=rec.ports["postgres"],
         redis_port=rec.ports["redis"],
-        redis_admin_password=settings.data_plane.redis_admin_password,
         redis_password=redis_password_from_env(),
         redis_user=redis_identity(),
         retained_children=retained_children,
@@ -118,12 +120,14 @@ def ensure_gateway_data_plane(
     )
 
 
-def remote_plane_host() -> str:
+def remote_plane_host(config: DataPlaneConfig) -> str:
     """The dial host of the remote data plane's db URL — for operator messages."""
-    return url_host(settings.data_plane.db_url)
+    return url_host(config.db_url)
 
 
-def remote_pg_reachable(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+def remote_pg_reachable(
+    config: DataPlaneConfig, *, database_factory: DatabaseFactory
+) -> tuple[bool, str]:
     """Probe a remote-managed Postgres through its own AVA_DB_URL.
 
     The two-stage shape of the local probe, minus the local machinery:
@@ -133,8 +137,8 @@ def remote_pg_reachable(*, database_factory: DatabaseFactory) -> tuple[bool, str
     (ok, detail) and never raises.
     """
 
-    host = url_host(settings.data_plane.db_url)
-    port = urlsplit(settings.data_plane.db_url).port or 5432
+    host = url_host(config.db_url)
+    port = urlsplit(config.db_url).port or 5432
     try:
         with database_factory().connect() as conn:
             conn.execute("select 1")
@@ -145,7 +149,7 @@ def remote_pg_reachable(*, database_factory: DatabaseFactory) -> tuple[bool, str
         return False, f"postgres ({host}:{port}) connect failed: {detail}"
 
 
-def remote_redis_reachable() -> tuple[bool, str]:
+def remote_redis_reachable(config: DataPlaneConfig) -> tuple[bool, str]:
     """Probe a remote-managed Redis through its own AVA_REDIS_URL.
 
     PINGs with the URL's own credentials (redis-py `from_url`), unlike the
@@ -154,11 +158,11 @@ def remote_redis_reachable() -> tuple[bool, str]:
     """
     import redis as _redis
 
-    host = url_host(settings.data_plane.redis_url)
-    port = urlsplit(settings.data_plane.redis_url).port or 6379
+    host = url_host(config.redis_url)
+    port = urlsplit(config.redis_url).port or 6379
     try:
         client = _redis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType]
-            settings.data_plane.redis_url,
+            config.redis_url,
             socket_connect_timeout=3,
         )
         try:
@@ -220,12 +224,12 @@ def warn_orphaned_local_instance() -> None:
         )
 
 
-def prepare_gateway_schema() -> None:
+def prepare_gateway_schema(config: DataPlaneConfig) -> None:
     """Initialize only a journal-owned fresh database, before any pooled login."""
     from base import cluster
     from cli.start_identity import needs_provision
 
-    if settings.data_plane.is_remote or not needs_provision(ava_home()):
+    if config.is_remote or not needs_provision(ava_home()):
         return
     rec = cluster.get_record(ava_home())
     if rec is None:
@@ -250,7 +254,7 @@ def prepare_gateway_schema() -> None:
     )
 
 
-def prepare_memory_vectors(*, database_factory: DatabaseFactory) -> None:
+def prepare_memory_vectors(config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
     """Create or rebuild the pgvector memory table when that backend is selected.
 
     The table is a derived cache keyed to the embedding provider's dimension.
@@ -259,14 +263,14 @@ def prepare_memory_vectors(*, database_factory: DatabaseFactory) -> None:
     refresh; a remote-managed plane uses its provider URL, like its migrations.
     """
 
-    if settings.services.memory_search_backend != "pgvector":
+    if config.memory_search_backend != "pgvector":
         return
     from base.cluster.dataplane.pg_admin import local_owner_authority
     from services.derived.memory_indexer.backends.pgvector import prepare_table
     from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
-    dim = get_descriptor(settings.services.embedding_backend).dim
-    if settings.data_plane.is_remote:
+    dim = get_descriptor(config.embedding_backend).dim
+    if config.is_remote:
         with database_factory().connect(direct=True) as conn:
             prepare_table(conn, dim)
         return
@@ -312,7 +316,7 @@ def db_endpoint() -> str:
     return endpoint
 
 
-def db_delivery(cls: DbAccess) -> dict[str, str]:
+def db_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
     """The launch-environment database delivery for one service of class `cls`.
 
     A local plane delivers the active write generation's `cls` login on the
@@ -332,13 +336,13 @@ def db_delivery(cls: DbAccess) -> dict[str, str]:
         if cls != "runner":
             raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class database service")
         return unit_delivery(ava_home().resolve())
-    if settings.data_plane.is_remote:
+    if remote_data_plane:
         return {}
     grant = write_grant(ava_home().resolve(), cls)
     return {"AVA_DB_URL": grant.dsn(db_endpoint()), GENERATION_ENV: str(grant.number)}
 
 
-def api_delivery(cls: DbAccess) -> dict[str, str]:
+def api_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
     """The launch-environment machine API token for one service of class `cls`.
 
     The cluster's API always authenticates, so every service is delivered a
@@ -356,12 +360,13 @@ def api_delivery(cls: DbAccess) -> dict[str, str]:
         if cls != "runner":
             raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class service")
         return unit_api_delivery(ava_home().resolve())
-    if settings.data_plane.is_remote:
+    if remote_data_plane:
         return {}
     return {API_TOKEN_ENV: api_token(ava_home().resolve(), cls)}
 
 
 def ensure_pooler(
+    config: DataPlaneConfig,
     rec: ClusterRecord,
     database: str,
     home: Path,
@@ -370,7 +375,7 @@ def ensure_pooler(
     machine: MachineIdentity,
 ) -> None:
     """Serve exactly `generation` through the owned pooler (restart on change)."""
-    if not settings.data_plane.pgbouncer_enabled:
+    if not config.pgbouncer_enabled:
         return
     from base.host.db_authority.delivery import read_pooler_admin, render_userlist
 
@@ -399,11 +404,16 @@ def prove_generation_logins(home: Path, generation: Generation, endpoint: str) -
             raise RuntimeError(f"write generation {generation.number} login {role.name}: {error}")
 
 
-def adopt_gateway_login(home: Path, endpoint: str) -> None:
+def adopt_gateway_login(
+    home: Path, endpoint: str, *, database_factory: OperatorDatabaseFactory
+) -> None:
     """Point this operator process at the home's active gateway login.
 
     A start that births (or first admits) the generation has no delivery from
-    its own boot, which ran before the ledger existed."""
+    its own boot, which ran before the ledger existed. The login reaches the
+    process through the environment (children inherit it) and through the
+    operator's database factory, which every later handle and the command's
+    event writer dial through."""
     import os
 
     from base.host.db_authority.delivery import GENERATION_ENV, write_grant
@@ -411,7 +421,7 @@ def adopt_gateway_login(home: Path, endpoint: str) -> None:
     grant = write_grant(home, "gateway")
     os.environ["AVA_DB_URL"] = grant.dsn(endpoint)
     os.environ[GENERATION_ENV] = str(grant.number)
-    settings.data_plane.db_url = os.environ["AVA_DB_URL"]
+    database_factory.adopt_login(os.environ["AVA_DB_URL"])
 
 
 def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) -> Generation:
@@ -465,9 +475,10 @@ def _admitted_generation(
 
 
 def complete_gateway_data_plane(
+    config: DataPlaneConfig,
     *,
     refresh_schema: bool = True,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     machine: MachineIdentity,
 ) -> None:
     """Grant the final schema, establish the write generation, start the pooler,
@@ -486,12 +497,12 @@ def complete_gateway_data_plane(
     from cli.commands.converge.health_preflight import probe_postgres, probe_redis
     from cli.start_identity import mark_phase, needs_provision
 
-    if settings.data_plane.is_remote:
+    if config.is_remote:
         if refresh_schema:
-            prepare_memory_vectors(database_factory=database_factory)
+            prepare_memory_vectors(config, database_factory=database_factory)
         from base.cluster.derive import runner_db_url_projection
 
-        urls = [settings.data_plane.db_url, runner_db_url_projection()]
+        urls = [config.db_url, runner_db_url_projection()]
         for url in urls:
             if error := probe_postgres(url):
                 raise RuntimeError(f"consumer database readiness failed: {error}")
@@ -511,7 +522,7 @@ def complete_gateway_data_plane(
                 base_admin_url=instance.pg_admin_url(rec.ports["postgres"]),
                 expected_data_dir=ava_home() / "pg",
             )
-            prepare_memory_vectors(database_factory=database_factory)
+            prepare_memory_vectors(config, database_factory=database_factory)
         birth = needs_provision(ava_home())
         if not birth and ledger.load_ledger(home) is None:
             raise RuntimeError(legacy_home_refusal(home))
@@ -520,19 +531,19 @@ def complete_gateway_data_plane(
                 generation = _birth_generation(conn, home, database)
             else:
                 generation = _admitted_generation(conn, home, database, refresh=refresh_schema)
-            ensure_pooler(rec, database, home, generation, machine=machine)
+            ensure_pooler(config, rec, database, home, generation, machine=machine)
             prove_generation_logins(home, generation, endpoint)
             if ledger.require_ledger(home).active is None:
                 verified = authority.verify_generation(conn, home)
                 ledger.activate(home, verified)
-        adopt_gateway_login(home, endpoint)
+        adopt_gateway_login(home, endpoint, database_factory=database_factory)
         print(f"  ✓ database write generation {generation.number} admitted")
-    if error := probe_redis(settings.data_plane.redis_url):
+    if error := probe_redis(config.redis_url):
         raise RuntimeError(f"consumer Redis readiness failed: {error}")
     mark_phase(ava_home(), "provisioned")
 
 
-def print_data_plane_status(*, database_factory: DatabaseFactory) -> None:
+def print_data_plane_status(config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
     """Print this cluster's own pg/redis reachability for `ava status`.
 
     Postgres is probed in two stages: `pg_isready` (the server accepts connections)
@@ -551,23 +562,23 @@ def print_data_plane_status(*, database_factory: DatabaseFactory) -> None:
     backend hop. With PgBouncer disabled `pooled_db_url == db_url` and the probe
     is direct anyway."""
 
-    if settings.data_plane.is_remote:
+    if config.is_remote:
         # A remote-managed plane has no local instance to manage — probe the
         # URLs themselves (the switch) and skip the local pooler line.
         print("  · data plane remote-managed — probing the URLs (no local instance)")
-        pg_ok, pg_line = remote_pg_reachable(database_factory=database_factory)
+        pg_ok, pg_line = remote_pg_reachable(config, database_factory=database_factory)
         print(f"  {'✓' if pg_ok else '✗'} {pg_line}")
-        redis_ok, redis_line = remote_redis_reachable()
+        redis_ok, redis_line = remote_redis_reachable(config)
         print(f"  {'✓' if redis_ok else '✗'} {redis_line}")
         return
 
     # Both probes dial the host their own URL names (self-host URLs are
     # loopback-rewritten by DataPlaneSettings). The remote branch above returns
     # before this local probe runs.
-    pg_host = instance.pg_dial_host()
-    redis_host = instance.redis_dial_host()
-    pg_port = urlsplit(settings.data_plane.db_url).port or 5432
-    redis_port = urlsplit(settings.data_plane.redis_url).port or 6379
+    pg_host = instance.pg_dial_host(config)
+    redis_host = instance.redis_dial_host(config)
+    pg_port = urlsplit(config.db_url).port or 5432
+    redis_port = urlsplit(config.redis_url).port or 6379
     if not instance.pg_running(pg_port, pg_host):
         print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
     else:
@@ -580,10 +591,10 @@ def print_data_plane_status(*, database_factory: DatabaseFactory) -> None:
             detail = lines[-1] if lines else "connection failed"
             print(f"  ✗ postgres ({pg_host}:{pg_port}) reachable but connect failed: {detail}")
     print(
-        f"  {'✓' if instance.redis_reachable(redis_port, redis_host) else '✗'} "
+        f"  {'✓' if instance.redis_reachable(config, redis_port, redis_host) else '✗'} "
         f"redis ({redis_host}:{redis_port})"
     )
-    if settings.data_plane.pgbouncer_enabled:
+    if config.pgbouncer_enabled:
         _print_pooler_status()
 
 
@@ -609,6 +620,7 @@ def _print_pooler_status() -> None:
 
 
 def stop_cluster_instance(
+    config: DataPlaneConfig,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
@@ -617,21 +629,21 @@ def stop_cluster_instance(
     counterpart of ensure_cluster_storage for `ava stop` of a cluster running its
     own instance. Best-effort: a not-running instance is a
     no-op success only after native custody closes."""
-    if settings.data_plane.is_remote:
+    if config.is_remote:
         # A remote-managed plane has no local instance to stop — nothing on this
         # box to tear down, and the provider owns the service lifecycle. But a
         # cluster that SWITCHED local→remote may still have its old local
         # instance running; warn so it is torn down deliberately.
-        print(f"\n→ data plane remote-managed ({remote_plane_host()}) — nothing to stop locally")
+        print(
+            f"\n→ data plane remote-managed ({remote_plane_host(config)}) — nothing to stop locally"
+        )
         warn_orphaned_local_instance()
         return 0
     data = instance.pg_data_dir()
-    port = ownership.configured_redis_port()
+    port = ownership.redis_port_of(config.redis_url)
     # Resolve the admin credential before any stop effect: the runtime URL's
     # ACL user can neither AUTH as `default` nor SHUTDOWN (`-@dangerous`).
-    redis_env = (
-        None if port is None else instance.redis_cli_env(settings.data_plane.redis_admin_password)
-    )
+    redis_env = None if port is None else instance.redis_cli_env(config.redis_admin_password)
     print("\n→ stopping per-cluster data plane")
     # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
     # are disconnected before Postgres goes down.
@@ -653,7 +665,7 @@ def stop_cluster_instance(
     print("  ✓ postgres stopped")
     if port is not None:
         subprocess.run(
-            [instance.redis_cli_bin(), "-p", str(port), "shutdown", "nosave"],
+            [instance.redis_cli_bin(config), "-p", str(port), "shutdown", "nosave"],
             env=redis_env,
             check=False,
             capture_output=True,

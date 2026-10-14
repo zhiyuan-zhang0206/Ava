@@ -11,6 +11,7 @@ printing a false `:0` (the 2026-07-20 symptom class).
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
@@ -22,9 +23,9 @@ import cli.commands.data_plane.bringup as dp
 import cli.commands.data_plane.cluster_instance as ci
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.dataplane import pooler as base_pooler
-from base.config import settings
 from base.db.tests.fakes import patch_database
 from base.host.db_authority import delivery
+from cli.commands.data_plane.config import DataPlaneConfig
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _ADMIN = "pooler-admin-fixture"
@@ -34,6 +35,7 @@ def test_pgbouncer_line_uses_registry_port(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """The pooler port is a registry fact only: status derives 6433 from the
     registry (the same value ensure_cluster_instance starts it with) and probes
@@ -46,9 +48,9 @@ def test_pgbouncer_line_uses_registry_port(
     monkeypatch.setattr(
         ci,
         "redis_reachable",
-        lambda _p, _h: False,  # pyright: ignore[reportUnknownArgumentType]
+        lambda _c, _p, _h: False,  # pyright: ignore[reportUnknownArgumentType]
     )  # skip the real redis probe  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
+    data_plane_config = dataclasses.replace(data_plane_config, pgbouncer_enabled=True)
 
     fake_rec = cl.ClusterRecord(
         ports=cast("cl.ClusterPorts", {"pgbouncer": 6433}), gateway_home="/x", created_at=""
@@ -68,7 +70,7 @@ def test_pgbouncer_line_uses_registry_port(
 
     monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", _reachable)
 
-    dp.print_data_plane_status(database_factory=operator_database)
+    dp.print_data_plane_status(data_plane_config, database_factory=operator_database)
     out = capsys.readouterr().out
     assert "pgbouncer (127.0.0.1:6433" in out
     assert "127.0.0.1:0" not in out  # never the stale-settings zero
@@ -80,15 +82,19 @@ def test_status_remote_urls_probe_the_urls_themselves(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """A foreign-host URL makes the data plane remote-managed (Task #1752): the
     status probes must go through the URL dials (`remote_pg_reachable` /
     `remote_redis_reachable`) and never touch the local-instance probes —
     asserted against a foreign host, so a re-hardcoded loopback literal fails
     (matching the test env's own loopback URL would be vacuous)."""
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:p@10.0.0.7:15433/ava")
-    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://ava:p@10.0.0.7:16380/0")
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
+    data_plane_config = dataclasses.replace(
+        data_plane_config,
+        db_url="postgresql://ava:p@10.0.0.7:15433/ava",
+        redis_url="redis://ava:p@10.0.0.7:16380/0",
+        pgbouncer_enabled=False,
+    )
     seen: list[str] = []
 
     def _local_probe(*_args: object, **_kwargs: object) -> object:
@@ -98,14 +104,20 @@ def test_status_remote_urls_probe_the_urls_themselves(
     monkeypatch.setattr(ci, "pg_running", _local_probe)
     monkeypatch.setattr(ci, "redis_reachable", _local_probe)
 
-    def _remote_postgres(*, database_factory: DatabaseFactory) -> tuple[bool, str]:
+    def _remote_postgres(
+        _config: DataPlaneConfig, *, database_factory: DatabaseFactory
+    ) -> tuple[bool, str]:
         assert database_factory is operator_database
         return (True, "postgres (10.0.0.7:15433)")
 
     monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
-    monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.0.0.7:16380)"))
+    monkeypatch.setattr(
+        dp,
+        "remote_redis_reachable",
+        lambda _config: (True, "redis (10.0.0.7:16380)"),  # pyright: ignore[reportUnknownArgumentType]
+    )
 
-    dp.print_data_plane_status(database_factory=operator_database)
+    dp.print_data_plane_status(data_plane_config, database_factory=operator_database)
 
     assert seen == [], "the local-instance probes must not run against a remote plane"
     out = capsys.readouterr().out
@@ -117,16 +129,17 @@ def test_pgbouncer_line_without_registry_record_says_so(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """No registry record (an unusual host): the pooler port is a registry fact,
     so status says it cannot resolve the port instead of printing a false :0."""
     monkeypatch.setattr(ci, "pg_running", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(ci, "redis_reachable", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
+    monkeypatch.setattr(ci, "redis_reachable", lambda _c, _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
+    data_plane_config = dataclasses.replace(data_plane_config, pgbouncer_enabled=True)
     monkeypatch.setattr(cl, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
 
-    dp.print_data_plane_status(database_factory=operator_database)
+    dp.print_data_plane_status(data_plane_config, database_factory=operator_database)
     out = capsys.readouterr().out
     assert "no registry record" in out
     assert "127.0.0.1:0" not in out
@@ -136,6 +149,7 @@ def test_postgres_probe_dials_pooled_front_door(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """The postgres auth probe uses `connect()` — the POOLED front door (PgBouncer
     when enabled, the direct URL when not) — never `connect(direct=True)`.
@@ -145,7 +159,7 @@ def test_postgres_probe_dials_pooled_front_door(
     pass-through backend hop); a direct probe would test a path no consumer uses."""
 
     monkeypatch.setattr(ci, "pg_running", lambda _p, _h: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(ci, "redis_reachable", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "redis_reachable", lambda _c, _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
 
     calls: list[dict[str, object]] = []
 
@@ -165,20 +179,20 @@ def test_postgres_probe_dials_pooled_front_door(
 
     patch_database(monkeypatch, connect=_fake_connect)
     # pgbouncer off: pooled_db_url == db_url, the probe is direct in effect.
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
-    dp.print_data_plane_status(database_factory=operator_database)
+    data_plane_config = dataclasses.replace(data_plane_config, pgbouncer_enabled=False)
+    dp.print_data_plane_status(data_plane_config, database_factory=operator_database)
     assert calls and "direct" not in calls[0]  # never direct=True
 
     # pgbouncer on: the probe still dials the pooled URL, never direct.
     calls.clear()
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
+    data_plane_config = dataclasses.replace(data_plane_config, pgbouncer_enabled=True)
     monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         delivery,
         "read_pooler_admin",
         lambda _home: SimpleNamespace(password=_ADMIN),  # pyright: ignore[reportUnknownArgumentType]
     )
-    dp.print_data_plane_status(database_factory=operator_database)
+    dp.print_data_plane_status(data_plane_config, database_factory=operator_database)
     out = capsys.readouterr().out
     assert calls and "direct" not in calls[0]
     assert "✓ postgres" in out

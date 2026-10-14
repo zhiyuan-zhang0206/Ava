@@ -144,8 +144,13 @@ def main(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     """Run one command with the operator event pipeline as its telemetry producer."""
+    from cli.database import open_operator_database
+
     return run_command(
-        argv, retained_children=retained_children, producer_factory=_operator_producer
+        argv,
+        retained_children=retained_children,
+        producer_factory=_operator_producer,
+        open_database=open_operator_database,
     )
 
 
@@ -160,8 +165,10 @@ def run_command(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None,
     producer_factory: Callable[..., Any],
+    open_database: Callable[[Any, Any, Any], Any],
 ) -> int:
-    """Run one command; `producer_factory(database_factory, machine=, home=)` builds its producer."""
+    """Run one command; `producer_factory(database_factory, machine=, home=)` builds its producer
+    and `open_database(config, gate, direct_url)` every database handle of the command."""
     # Line-buffer stdout so a long command piped into `tee` (every detached rollout /
     # updater session) streams its own progress in real time instead of block-buffering
     # it to the end of the log, out of order against its children's unbuffered output.
@@ -197,7 +204,9 @@ def run_command(
 
     command = CommandRuntime.create()
     args.runtime = command
-    database_factory = operator_database_factory(local_host=command.machine.host)
+    database_factory = operator_database_factory(
+        local_host=command.machine.host, open_database=open_database
+    )
     args.database_factory = database_factory
     args.database_for_url = database_factory.for_url
     producer = producer_factory(database_factory, machine=command.machine, home=ava_home())

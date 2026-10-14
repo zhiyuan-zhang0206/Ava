@@ -35,6 +35,7 @@ from base.config import settings
 from base.paths.home import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
+from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
 from cli.commands.data_plane.pgbouncer import stop_pgbouncer
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -137,19 +138,32 @@ def isolated_cluster(
         # `~/.ava` and take down the production pooler.
         monkeypatch.setenv("AVA_HOME", str(home))
         stop_pgbouncer()
-        subprocess.run(  # noqa: S603
+        subprocess.run(
             [ci.pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )
         for child in retained_children:
             child.wait(timeout=1)
-        subprocess.run(  # noqa: S603
-            [ci.redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
+        subprocess.run(
+            [
+                ci.redis_cli_bin(data_plane_config_from_settings()),
+                "-p",
+                str(redis_port),
+                "shutdown",
+                "nosave",
+            ],
             env=ci.redis_cli_env(_REDIS_ADMIN),  # never `-a` — argv is public
             check=False,
             capture_output=True,
         )
+
+
+@pytest.fixture
+def data_plane_config(isolated_cluster: tuple[int, int]) -> DataPlaneConfig:
+    """What the commands read in this isolated cluster: the production mapping over the
+    settings the fixture pinned (base.cluster still reads those too)."""
+    return data_plane_config_from_settings()
 
 
 def _admin(pg_port: int, database: str) -> psycopg.Connection[tuple[object, ...]]:
@@ -164,13 +178,14 @@ def test_per_cluster_instance_bringup(
     retained_children: list[subprocess.Popen[bytes]],
     *,
     command_machine: MachineIdentity,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     pg_port, redis_port = isolated_cluster
     bearer = settings.data_plane.cluster_secret
     rc = ci.ensure_cluster_storage(
+        data_plane_config,
         pg_port=pg_port,
         redis_port=redis_port,
-        redis_admin_password=_REDIS_ADMIN,
         redis_password=_REDIS_RUNTIME,
         redis_user="ava_tinst",
         retained_children=retained_children,
@@ -240,6 +255,7 @@ def test_bringup_is_idempotent(
     retained_children: list[subprocess.Popen[bytes]],
     *,
     command_machine: MachineIdentity,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """A second ensure on an already-running instance is a no-op success (the warm
     `ava start` path)."""
@@ -247,9 +263,9 @@ def test_bringup_is_idempotent(
     for _ in range(2):
         assert (
             ci.ensure_cluster_storage(
+                data_plane_config,
                 pg_port=pg_port,
                 redis_port=redis_port,
-                redis_admin_password=_REDIS_ADMIN,
                 redis_password=_REDIS_RUNTIME,
                 redis_user="ava_tinst",
                 retained_children=retained_children,
@@ -266,6 +282,7 @@ def test_gateway_cold_start_restores_redis_url_identity(
     operator_database: Callable[[], Any],
     *,
     command_machine: MachineIdentity,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """Official start restores Redis's own ACL after a real RDB-only shutdown."""
     pg_port, redis_port = isolated_cluster
@@ -273,6 +290,7 @@ def test_gateway_cold_start_restores_redis_url_identity(
     _born_intent(home)
     assert (
         ensure_gateway_data_plane(
+            data_plane_config,
             retained_children=retained_children,
             database_factory=operator_database,
             machine=command_machine,
@@ -285,8 +303,8 @@ def test_gateway_cold_start_restores_redis_url_identity(
     with redis.Redis.from_url(settings.data_plane.redis_url) as client:  # pyright: ignore[reportUnknownMemberType]
         assert client.ping()  # pyright: ignore[reportUnknownMemberType]
         assert client.set("continuation", "pending")  # pyright: ignore[reportUnknownMemberType]
-    subprocess.run(  # noqa: S603
-        [ci.redis_cli_bin(), "-p", str(redis_port), "shutdown", "save"],
+    subprocess.run(
+        [ci.redis_cli_bin(data_plane_config), "-p", str(redis_port), "shutdown", "save"],
         env=ci.redis_cli_env(_REDIS_ADMIN),
         check=True,
         capture_output=True,
@@ -294,6 +312,7 @@ def test_gateway_cold_start_restores_redis_url_identity(
     assert (home / "redis" / "dump.rdb").is_file()
     assert (
         ensure_gateway_data_plane(
+            data_plane_config,
             retained_children=retained_children,
             database_factory=operator_database,
             machine=command_machine,
@@ -349,9 +368,11 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
 
     monkeypatch.setattr(cluster, "get_record", _record)
     _born_intent(home)
+    plane = data_plane_config_from_settings()  # after the pins above, as a start reads it
     try:
         assert (
             ensure_gateway_data_plane(
+                plane,
                 retained_children=retained_children,
                 database_factory=operator_database,
                 machine=command_machine,
@@ -369,8 +390,8 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
             assert administrator.ping()  # pyright: ignore[reportUnknownMemberType]
         assert f'requirepass "{admin}"' in (home / "redis" / "redis.conf").read_text()
     finally:
-        subprocess.run(  # noqa: S603
-            [ci.redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
+        subprocess.run(
+            [ci.redis_cli_bin(plane), "-p", str(redis_port), "shutdown", "nosave"],
             env=ci.redis_cli_env(admin),
             check=False,
             capture_output=True,
@@ -382,16 +403,22 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
     retained_children: list[subprocess.Popen[bytes]],
     *,
     command_machine: MachineIdentity,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """TCP ownership does not make another directory's equal Unix port ours."""
     pg_port, _redis_port = isolated_cluster
-    assert ci.start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
+    assert (
+        ci.start_pg(
+            data_plane_config, pg_port, retained_children=retained_children, machine=command_machine
+        )
+        == 0
+    )
     owned_data = resolve_ava_home() / "pg"
     with tempfile.TemporaryDirectory(prefix="ava-pg-foreign-", dir="/tmp") as temporary:
         directory = Path(temporary)
         data = directory / "data"
         ci.initdb(data)
-        subprocess.run(  # noqa: S603 — private test-owned postgres
+        subprocess.run(
             [
                 ci.pg_bin("pg_ctl"),
                 "-D",
@@ -443,7 +470,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
                     is None
                 )
         finally:
-            subprocess.run(  # noqa: S603 — private test-owned postgres
+            subprocess.run(
                 [ci.pg_bin("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
                 check=True,
                 capture_output=True,
@@ -475,6 +502,7 @@ def test_birth_hba_of_a_single_box_has_loopback_lines_only(
     retained_children: list[subprocess.Popen[bytes]],
     *,
     command_machine: MachineIdentity,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """First-start birth of a box that declares no reachable address (the cluster has its
     secret all the same): the hba has loopback SCRAM lines only (no reachable/cidr
@@ -482,9 +510,9 @@ def test_birth_hba_of_a_single_box_has_loopback_lines_only(
     OS-user superuser."""
     pg_port, redis_port = isolated_cluster
     rc = ci.ensure_cluster_storage(
+        data_plane_config,
         pg_port=pg_port,
         redis_port=redis_port,
-        redis_admin_password=_REDIS_ADMIN,
         redis_password=_REDIS_RUNTIME,
         redis_user="ava_tinst",
         retained_children=retained_children,
@@ -503,13 +531,19 @@ def test_rewritten_hba_is_reloaded_into_running_server(
     retained_children: list[subprocess.Popen[bytes]],
     *,
     command_machine: MachineIdentity,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """A running server keeps its last-loaded hba until reloaded. A postmaster
     that still serves a legacy trust hba must, after `start_pg` rewrites the
     file, enforce passwords before start proceeds — the loaded proof, not the
     file on disk."""
     pg_port, _redis_port = isolated_cluster
-    assert ci.start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
+    assert (
+        ci.start_pg(
+            data_plane_config, pg_port, retained_children=retained_children, machine=command_machine
+        )
+        == 0
+    )
     data = resolve_ava_home() / "pg"
     # A legacy postmaster: trust everywhere, reloaded into the running server.
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
@@ -526,7 +560,12 @@ def test_rewritten_hba_is_reloaded_into_running_server(
             assert time.monotonic() < deadline, "legacy trust hba never loaded"
             time.sleep(0.05)
 
-    assert ci.start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
+    assert (
+        ci.start_pg(
+            data_plane_config, pg_port, retained_children=retained_children, machine=command_machine
+        )
+        == 0
+    )
     with pytest.raises(psycopg.OperationalError, match="password"):
         psycopg.connect(
             host="127.0.0.1", port=pg_port, user=getpass.getuser(), password="", dbname="postgres"
@@ -538,12 +577,18 @@ def test_hba_proof_refuses_a_postmaster_still_serving_trust(
     retained_children: list[subprocess.Popen[bytes]],
     *,
     command_machine: MachineIdentity,
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     """The loaded-hba proof is behavioral: a postmaster that still admits a
     password-less dial (a trust line loaded) fails the proof, whatever file is
     on disk."""
     pg_port, _redis_port = isolated_cluster
-    assert ci.start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
+    assert (
+        ci.start_pg(
+            data_plane_config, pg_port, retained_children=retained_children, machine=command_machine
+        )
+        == 0
+    )
     ci.require_authenticated_hba(pg_port, "127.0.0.1")
     data = resolve_ava_home() / "pg"
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")

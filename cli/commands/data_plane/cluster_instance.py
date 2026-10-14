@@ -55,7 +55,7 @@ from base.cluster.dataplane.pg_admin import pg_admin_url as _base_pg_admin_url
 from base.cluster.dataplane.pg_admin import pg_socket_dir as _base_pg_socket_dir
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.host.brew_pin import brew_prefix
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
@@ -63,24 +63,25 @@ from base.host.system.backend import PG_BIN_LINUX
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.native_process.os_platform import is_macos
 from base.paths import ava_home
+from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.walg import warn_archive_inactive
 from services.backup.walg.archive import archive_pg_args
 
 
-def pg_dial_host() -> str:
+def pg_dial_host(config: DataPlaneConfig) -> str:
     """The host this cluster's own Postgres is dialed at — read from this
     cluster's AVA_DB_URL (the URL is the one dial source every consumer uses;
     DataPlaneSettings rewrites a self-host URL to loopback before anything
     dials). The home identity and its URLs exist before native bring-up.
     External data-plane reachability is handled separately by `bringup`.
     """
-    return url_host(settings.data_plane.db_url)
+    return url_host(config.db_url)
 
 
-def redis_dial_host() -> str:
+def redis_dial_host(config: DataPlaneConfig) -> str:
     """The host this cluster's own Redis is dialed at — read from this
     cluster's AVA_REDIS_URL (see `pg_dial_host`)."""
-    return url_host(settings.data_plane.redis_url)
+    return url_host(config.redis_url)
 
 
 # A single cluster's own pg needs far less than a per-host shared budget. `main`
@@ -108,9 +109,9 @@ def pg_template_dir() -> Path:
     return ava_home() / "pg-template-17"
 
 
-def _redis_bin(name: str) -> str:
+def _redis_bin(config: DataPlaneConfig, name: str) -> str:
     """One home-owned pair; an incomplete override never falls back to PATH."""
-    directory = settings.data_plane.redis_bin_dir
+    directory = config.redis_bin_dir
     if directory:
         root = Path(directory)
         for tool in ("redis-server", "redis-cli"):
@@ -121,12 +122,12 @@ def _redis_bin(name: str) -> str:
     return str(brew_prefix("redis@8.2") / "bin" / name) if is_macos() else name
 
 
-def redis_server_bin() -> str:
-    return _redis_bin("redis-server")
+def redis_server_bin(config: DataPlaneConfig) -> str:
+    return _redis_bin(config, "redis-server")
 
 
-def redis_cli_bin() -> str:
-    return _redis_bin("redis-cli")
+def redis_cli_bin(config: DataPlaneConfig) -> str:
+    return _redis_bin(config, "redis-cli")
 
 
 def pg_bin(name: str) -> str:
@@ -164,7 +165,7 @@ def wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
         time.sleep(_BIND_WAIT_INTERVAL_S)
 
 
-def pg_hba_body(*, machine: MachineIdentity) -> str:
+def pg_hba_body(config: DataPlaneConfig, *, machine: MachineIdentity) -> str:
     """Always-authenticated pg_hba.
 
     The OS user (the initdb bootstrap superuser) reaches Postgres only through
@@ -192,7 +193,7 @@ def pg_hba_body(*, machine: MachineIdentity) -> str:
     host = machine.host()
     if host not in port_preflight.LOOPBACK_ALIASES:
         lines.append(f"host all all {host}/32 scram-sha-256")
-    for cidr in (c.strip() for c in settings.data_plane.trusted_cidrs.split(",") if c.strip()):
+    for cidr in (c.strip() for c in config.trusted_cidrs.split(",") if c.strip()):
         lines.append(f"host all all {cidr} scram-sha-256")
     return "\n".join(lines) + "\n"
 
@@ -316,6 +317,7 @@ def pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
 
 
 def start_pg(
+    config: DataPlaneConfig,
     pg_port: int,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -323,18 +325,18 @@ def start_pg(
 ) -> int:
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
-    config = ConfigBoot()
+    walg_boot = ConfigBoot()
 
     def path_reader() -> Path | None:
-        if not config.prepared:
-            config.read_process_environment()
-        return config.view.walg.walg_config_file
+        if not walg_boot.prepared:
+            walg_boot.read_process_environment()
+        return walg_boot.view.walg.walg_config_file
 
     owner = ownership.require_postgres(pg_data_dir(), pg_port, required=False)
     data = ensure_pg_data()
     (data / "pg_ident.conf").write_text(pg_ident_body())
-    (data / "pg_hba.conf").write_text(pg_hba_body(machine=machine))
-    dial_host = pg_dial_host()
+    (data / "pg_hba.conf").write_text(pg_hba_body(config, machine=machine))
+    dial_host = pg_dial_host(config)
     # The wait applies only when this cluster binds a non-loopback reachable address
     # (`port_preflight.bind_addrs`); a loopback host returns immediately.
     if owner is None and not wait_for_reachable_bind(machine=machine):
@@ -395,10 +397,10 @@ def redis_cli_env(redis_admin_password: str) -> dict[str, str]:
     return inherited_process_env({"REDISCLI_AUTH": redis_admin_password})
 
 
-def redis_running(redis_port: int, redis_admin_password: str, host: str = "127.0.0.1") -> bool:
+def redis_running(config: DataPlaneConfig, redis_port: int, host: str = "127.0.0.1") -> bool:
     out = subprocess.run(
-        [redis_cli_bin(), "-h", host, "-p", str(redis_port), "ping"],
-        env=redis_cli_env(redis_admin_password),
+        [redis_cli_bin(config), "-h", host, "-p", str(redis_port), "ping"],
+        env=redis_cli_env(config.redis_admin_password),
         capture_output=True,
         text=True,
         check=False,
@@ -439,24 +441,22 @@ def write_redis_conf(data: Path, redis_admin_password: str) -> Path:
 
 
 def start_redis(
+    config: DataPlaneConfig,
     redis_port: int,
-    redis_admin_password: str,
     runtime_password: str,
     identity: str,
     *,
     machine: MachineIdentity,
 ) -> int:
-    if not (redis_admin_password and runtime_password):
+    if not (config.redis_admin_password and runtime_password):
         raise ValueError("Redis always authenticates: its admin and runtime passwords are required")
-    dial_host = redis_dial_host()
-    if redis_running(redis_port, redis_admin_password, dial_host):
+    dial_host = redis_dial_host(config)
+    if redis_running(config, redis_port, dial_host):
         # Re-affirm the ACL user on every start (survives a restart that drops
         # the in-memory ACL).
-        result = ensure_redis_acl(
-            redis_port, redis_admin_password, runtime_password, identity, dial_host
-        )
+        result = ensure_redis_acl(config, redis_port, runtime_password, identity, dial_host)
         if result == 0:
-            write_redis_conf(ownership.redis_data_dir(), redis_admin_password)
+            write_redis_conf(ownership.redis_data_dir(), config.redis_admin_password)
             print(f"  ✓ redis already running ({dial_host}:{redis_port})")
         return result
     port_preflight.require_listener(None, redis_port, required=False)
@@ -466,8 +466,8 @@ def start_redis(
     data = ownership.redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
-        redis_server_bin(),
-        str(write_redis_conf(data, redis_admin_password)),  # requirepass — see the helper
+        redis_server_bin(config),
+        str(write_redis_conf(data, config.redis_admin_password)),  # requirepass — see the helper
         "--daemonize",
         "yes",
         "--port",
@@ -492,7 +492,7 @@ def start_redis(
         return 1
     # redis-server --daemonize returns immediately; wait for the port to answer.
     for _ in range(60):
-        if redis_running(redis_port, redis_admin_password, dial_host):
+        if redis_running(config, redis_port, dial_host):
             break
         time.sleep(0.1)
     else:
@@ -501,17 +501,15 @@ def start_redis(
     # The runtime URLs carry the identity as username, and redis-py AUTHes as
     # that user, so a missing user would WRONGPASS forever and the redis wake
     # bus would never deliver to agents.
-    result = ensure_redis_acl(
-        redis_port, redis_admin_password, runtime_password, identity, dial_host
-    )
+    result = ensure_redis_acl(config, redis_port, runtime_password, identity, dial_host)
     if result == 0:
         print(f"  ✓ redis started ({dial_host}:{redis_port})")
     return result
 
 
 def ensure_redis_acl(
+    config: DataPlaneConfig,
     redis_port: int,
-    redis_admin_password: str,
     runtime_password: str,
     identity: str,
     redis_host: str,
@@ -521,13 +519,13 @@ def ensure_redis_acl(
     authenticates the `default` admin user, which provisions the ACL user.
     Re-affirmed every start (survives a restart that drops the in-memory ACL).
     Both passwords are always present: Redis never runs without auth."""
-    admin = f"redis://default:{redis_admin_password}@{redis_host}:{redis_port}"
+    admin = f"redis://default:{config.redis_admin_password}@{redis_host}:{redis_port}"
     try:
         ensure_cluster_redis_acl(
             identity,
             redis_admin_url=admin,
             runtime_password=runtime_password,
-            channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
+            channel_prefix=config.events_channel.removesuffix(":events"),
             expected_data_dir=ownership.redis_data_dir(),
         )
     except Exception as exc:
@@ -537,10 +535,10 @@ def ensure_redis_acl(
 
 
 def ensure_cluster_storage(
+    config: DataPlaneConfig,
     *,
     pg_port: int,
     redis_port: int,
-    redis_admin_password: str,
     redis_password: str,
     redis_user: str,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -553,19 +551,19 @@ def ensure_cluster_storage(
         ValueError: a required credential is missing, before any native effect.
             Redis always needs its admin and runtime passwords. Postgres needs
             none: its administrator is the OS user over the owner-only socket."""
-    if not (redis_admin_password and redis_password):
+    if not (config.redis_admin_password and redis_password):
         raise ValueError(
             "Redis always authenticates, but this home has no generated Redis credentials "
             "(AVA_REDIS_ADMIN_PASSWORD / AVA_REDIS_PASSWORD): it was born before Redis "
             "always authenticated and no conversion exists; re-birth it as a new home."
         )
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
-    if (rc := start_pg(pg_port, retained_children=retained_children, machine=machine)) != 0:
+    if (rc := start_pg(config, pg_port, retained_children=retained_children, machine=machine)) != 0:
         return rc
     if (
         rc := start_redis(
+            config,
             redis_port,
-            redis_admin_password,
             redis_password,
             redis_user,
             machine=machine,
@@ -575,7 +573,9 @@ def ensure_cluster_storage(
     return 0
 
 
-def redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
+def redis_reachable(
+    config: DataPlaneConfig, redis_port: int, redis_host: str = "127.0.0.1"
+) -> bool:
     """True if this cluster's Redis answers PING as its `default` user (using
     the gateway-only Redis admin password). Used by `ava status`; degrades to
     False on any error, including a home without its admin password."""
@@ -585,7 +585,7 @@ def redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
     client = _redis.Redis(
         host=redis_host,
         port=redis_port,
-        password=settings.data_plane.redis_admin_password,
+        password=config.redis_admin_password,
         socket_connect_timeout=3,
     )
     try:

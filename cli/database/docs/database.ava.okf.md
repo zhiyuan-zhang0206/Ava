@@ -7,10 +7,23 @@ tags: [cli, database]
 
 # Operator database composition
 
-`cli/database/__init__.py:operator_database_factory(local_host=command.machine.host)` returns one command-owned lazy
-constructor. All handles returned by that constructor share an exempt
+`cli/database/__init__.py:operator_database_factory(local_host=command.machine.host, open_database=...)` returns one
+command-owned lazy constructor. All handles returned by that constructor share an exempt
 `ProcessDbGate`. Construction reads neither Settings nor Git; the first handle
 imports the dial stack, and each handle reads the live connection settings.
+
+`open_database(config, gate, direct_url)` builds each handle and is required: the entry
+(`cli.main.main`) passes `open_operator_database`, which constructs the real `Database`, and a test
+passes a recorder to observe the gate and configuration a handle receives, or a function that raises
+to see the construction error unchanged, without patching anything.
+
+The one exception is the gateway login. A start that births (or first admits) the database
+authority has no login at boot, so the data-plane step calls
+`OperatorDatabaseFactory.adopt_login(url)` once the ledger exists. Handles built afterwards, and
+the command's event writer built on the same factory, dial that URL; `db_url()` names it. Adopting
+the URL already adopted changes nothing, and a different one raises: a process whose login changes
+twice no longer knows which generation it acts as. Handles built before the adoption keep the URL
+they were built with.
 
 Use that same factory for the command's work and telemetry writer. The lock
 retains one gate even when their first calls overlap. Separate commands own

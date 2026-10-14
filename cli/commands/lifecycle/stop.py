@@ -27,6 +27,7 @@ from cli.commands._repo import repo_root
 from cli.commands.lifecycle import _temporary_stop
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import force_close_terminals
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
 
@@ -58,8 +59,13 @@ def _stop_data_plane(
         print("\n→ stop pg/redis: kept up (keep_infra — migrate/start needs DB)")
     else:
         from cli.commands.data_plane.bringup import stop_cluster_instance
+        from cli.commands.data_plane.config import data_plane_config_from_settings
 
-        stop_cluster_instance(retained_children=retained_children, producer=producer)
+        stop_cluster_instance(
+            data_plane_config_from_settings(),
+            retained_children=retained_children,
+            producer=producer,
+        )
 
 
 def reap_cluster_chrome() -> None:
@@ -396,7 +402,7 @@ def _cmd_restart_body(
     *,
     mode: str = "smooth",
     retained_children: list[subprocess.Popen[bytes]] | None = None,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
@@ -567,7 +573,7 @@ def cmd_restart(
     *,
     mode: str = "smooth",
     retained_children: list[subprocess.Popen[bytes]] | None = None,
-    database_factory: DatabaseFactory,
+    database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:

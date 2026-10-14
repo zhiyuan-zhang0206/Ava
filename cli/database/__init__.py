@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from threading import Lock
 from typing import Any, NoReturn
@@ -14,18 +15,53 @@ from base.telemetry import DrainResult, EventPipeline
 __all__ = [
     "OperatorDatabaseFactory",
     "OperatorEventPipeline",
+    "open_operator_database",
     "operator_database_factory",
     "operator_event_pipeline",
 ]
+
+# `open_database(config, gate, direct_url)`: builds one handle. The parameters are `DbConfig`,
+# `ProcessDbGate` and `ClusterDirectUrl` and the result a `Database`; none is imported here
+# because `ava --help` must not load the configuration chain.
+OpenDatabase = Callable[[Any, Any, Any], Any]
 
 
 class OperatorDatabaseFactory:
     """One operator gate for normal handles and URL-specific recovery handles."""
 
-    def __init__(self, *, local_host: Callable[[], str]) -> None:
+    def __init__(self, *, local_host: Callable[[], str], open_database: OpenDatabase) -> None:
         self._local_host = local_host
+        self._open_database = open_database
         self._lock = Lock()
         self._gate: Any = None
+        self._adopted_url: str | None = None
+
+    def adopt_login(self, db_url: str) -> None:
+        """Dial `db_url` (the gateway login of a just-born or just-admitted generation) from now on.
+
+        A start that births the database authority runs its boot before the ledger exists, so the
+        process holds no login until the data-plane step has made one. Every handle this factory
+        gives out afterwards, and the command's event writer built on it, dials the adopted URL;
+        handles given out earlier keep the URL they were built with.
+
+        The transition happens once: adopting the URL already adopted is a no-op, a different one
+        raises, because a process whose login changes twice has lost track of which generation it
+        acts as."""
+        if self._adopted_url is not None and self._adopted_url != db_url:
+            raise RuntimeError("this operator process already adopted a different gateway login")
+        self._adopted_url = db_url
+
+    def db_url(self) -> str:
+        """The access URL a handle from this factory dials: the adopted login, else the settings'."""
+        return self._config().db_url
+
+    def _config(self) -> Any:
+        from base.db.config import db_config_from_settings
+
+        config = db_config_from_settings()
+        if self._adopted_url is None:
+            return config
+        return replace(config, db_url=self._adopted_url)
 
     def _admission_gate(self) -> Any:
         from base.db.code_version_gate import ProcessDbGate
@@ -36,24 +72,16 @@ class OperatorDatabaseFactory:
         return self._gate
 
     def __call__(self) -> Any:
-        from base.cluster.dataplane.direct_url import ClusterDirectUrl
-        from base.db import Database
-
-        return Database.from_settings(
-            gate=self._admission_gate(), direct_url=ClusterDirectUrl(self._local_host)
-        )
+        return self._open(self._config())
 
     def for_url(self, url: str) -> Any:
-        from dataclasses import replace
+        return self._open(replace(self._config(), db_url=url))
 
+    def _open(self, config: Any) -> Any:
         from base.cluster.dataplane.direct_url import ClusterDirectUrl
-        from base.db import Database
-        from base.db.config import db_config_from_settings
 
-        return Database(
-            replace(db_config_from_settings(), db_url=url),
-            gate=self._admission_gate(),
-            direct_url=ClusterDirectUrl(self._local_host),
+        return self._open_database(
+            config, self._admission_gate(), ClusterDirectUrl(self._local_host)
         )
 
 
@@ -61,9 +89,18 @@ def _unavailable_version() -> NoReturn:
     raise RuntimeError("an exempt operator database must not resolve a code version")
 
 
-def operator_database_factory(*, local_host: Callable[[], str]) -> OperatorDatabaseFactory:
+def open_operator_database(config: Any, gate: Any, direct_url: Any) -> Any:
+    """The real handle: a `Database` over `config`, admitted by the operator `gate`."""
+    from base.db import Database
+
+    return Database(config, gate=gate, direct_url=direct_url)
+
+
+def operator_database_factory(
+    *, local_host: Callable[[], str], open_database: OpenDatabase
+) -> OperatorDatabaseFactory:
     """Construct without configuration or Git; each handle reads live settings."""
-    return OperatorDatabaseFactory(local_host=local_host)
+    return OperatorDatabaseFactory(local_host=local_host, open_database=open_database)
 
 
 class OperatorEventPipeline:

@@ -33,6 +33,7 @@ from cli.commands.lifecycle.tests.identity.restart_inputs import (
 from cli.commands.lifecycle.tests.identity.restart_inputs import (
     root_stop_boundary as root_stop_boundary,
 )
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_fakes import (
     FakeResult,
@@ -53,7 +54,7 @@ _real_reap_cluster_chrome = _stop_commands.reap_cluster_chrome
 def test_cmd_restart_succeeds_non_interactively(
     db_url: str,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -94,7 +95,7 @@ def test_cmd_restart_succeeds_non_interactively(
 
 def test_cmd_restart_calls_stop_then_start(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -172,7 +173,7 @@ def test_cmd_restart_calls_stop_then_start(
 def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -253,7 +254,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
 def test_cmd_restart_short_circuits_on_stop_failure(
     db_url: str,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -280,7 +281,7 @@ def test_cmd_restart_short_circuits_on_stop_failure(
 
 def test_cmd_restart_aborts_when_preflight_fails(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -329,7 +330,7 @@ def test_cmd_restart_aborts_when_preflight_fails(
 
 def test_cmd_restart_aborts_when_start_readiness_fails(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -391,7 +392,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(
 
 def test_stop_aborts_on_no(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -415,7 +416,7 @@ def test_stop_aborts_on_no(
 
 def test_stop_proceeds_on_yes(
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
