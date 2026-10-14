@@ -19,7 +19,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from base.host.system.hostport import Host, Platform
+from base.host.system.hostport import Host
+from base.native_process.os_platform import Platform
 
 LINUX_X86 = Platform("linux", "x86_64", "/usr/bin/python3")
 DARWIN_ARM64 = Platform("darwin", "arm64", "/usr/bin/python3")

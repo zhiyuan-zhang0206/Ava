@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from base.host.system.hostport import Platform
+from base.native_process.os_platform import Platform
 from cli.commands.observability import lgtm_native
 
 

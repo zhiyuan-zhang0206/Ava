@@ -27,7 +27,8 @@ from dotenv import dotenv_values
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.host.net.resilience import Policy, retry
-from base.host.system.hostport import Host, Platform
+from base.host.system.hostport import Host
+from base.native_process.os_platform import Platform
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from base.telemetry.lgtm_local import storage_dir as _storage_dir
