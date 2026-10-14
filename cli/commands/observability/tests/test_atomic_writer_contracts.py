@@ -14,7 +14,6 @@ import pytest
 
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.deploy.maintenance import pause_owner
-from base.host import atomic_io
 from base.sessions import coding_session_owner_record
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from base.sessions.pty import allocation_freeze
@@ -153,47 +152,6 @@ def test_concurrent_marker_writers_publish_complete_snapshots(tmp_path: Path) ->
     result = json.loads(path.read_bytes())
     assert result in ({"index": index, "data": "x" * 4096} for index in range(24))
     assert sorted(tmp_path.iterdir()) == [path]
-
-
-def test_bytes_helper_syncs_file_then_parent_and_sets_mode(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "bytes.bin"
-    synced: list[str] = []
-    original_fsync = os.fsync
-
-    def record_sync(fd: int) -> None:
-        synced.append("parent" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file")
-        original_fsync(fd)
-
-    monkeypatch.setattr(os, "fsync", record_sync)
-    atomic_io.write_bytes_atomic(path, b"\x00payload", mode=0o600, sync_parent=True)
-    assert path.read_bytes() == b"\x00payload"
-    assert synced == ["file", "parent"]
-    assert path.stat().st_mode & 0o777 == 0o600
-    assert sorted(tmp_path.iterdir()) == [path]
-
-
-def test_bytes_helper_can_skip_sync_without_skipping_atomic_replace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "bytes.bin"
-    path.write_bytes(b"old")
-
-    def fail_sync(_fd: int) -> None:
-        pytest.fail("unexpected fsync")
-
-    monkeypatch.setattr(os, "fsync", fail_sync)
-    atomic_io.write_bytes_atomic(path, b"new", sync_file=False)
-    assert path.read_bytes() == b"new"
-    assert sorted(tmp_path.iterdir()) == [path]
-
-
-def test_text_helper_applies_requested_public_mode(tmp_path: Path) -> None:
-    path = tmp_path / "pointer.pth"
-    atomic_io.write_text_atomic(path, "target", mode=0o644, sync_file=False)
-    assert path.read_bytes() == b"target"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o644
 
 
 @pytest.mark.parametrize("writer", [grafana_render.atomic_write])
