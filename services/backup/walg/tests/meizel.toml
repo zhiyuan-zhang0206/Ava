@@ -30,7 +30,6 @@ exports = ["support.py"]
 "test_check.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 2
 "test_drill.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.connect" = 1
 "test_drill.py#monkeypatch.setattr services.backup.walg.drill.read_source_facts" = 1
-"test_drill.py#monkeypatch.setattr services.backup.walg.drill.select_throwaway_base" = 1
 "test_drill.py#monkeypatch.setattr services.backup.walg.restore.tempfile.mkdtemp" = 1
 "test_probe.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.connect" = 1
 "test_probe.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.local_owner_authority" = 1

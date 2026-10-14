@@ -1,17 +1,14 @@
 """Per-machine shared computer-use MCP service.
 
-One daemon executes every desktop action on this machine — the executor layer
-of the computer-use capability (task #1101). It sits between agents and the
-desktop:
+One daemon executes every desktop action on this machine, between agents and the desktop:
 
 - Every action goes through the signed permissions helper
   (`base.host.permissions_helper.client`), the only process holding the macOS
   TCC screen-recording / accessibility grants — no new code path ever touches
   CGEvent / screencapture directly.
-- Actions are serialized machine-wide (one asyncio lock around execute): the
-  desktop is one shared screen, and a snapshot's multi-step capture never
-  interleaves with another agent's click (same serial choice the browser-mcp
-  daemon made for the browser).
+- Actions are serialized machine-wide with one asyncio lock around execute.
+  A multi-step snapshot never interleaves with another agent's click, matching
+  the browser-mcp daemon's serialization.
 - Every action is audited as a `computer_action` event (outcome ok / error)
   — facts for later review, nothing is refused here. Per-agent permission
   division is a prompt-level convention between peers (user ruling 2026-08-10),
@@ -779,7 +776,12 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="computer-mcp")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, direct_url=ClusterDirectUrl(machine.host))
+        return Database.from_settings(
+            gate=gate,
+            direct_url=ClusterDirectUrl(
+                machine.host, gateway_url_reader=lambda: machine_config.view.gateway.gateway_url
+            ),
+        )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(

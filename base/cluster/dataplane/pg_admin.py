@@ -190,31 +190,30 @@ class OwnerAuthority:
             yield conn
 
 
-def local_owner_authority() -> OwnerAuthority:
+def local_owner_authority(db_url: str, *, remote_plane: bool) -> OwnerAuthority:
     """Resolve this home's owner authority for its locally owned Postgres.
 
     The socket port comes from this home's registry record; the owner and
-    database are the cluster URL's username and database (names as data).
+    database are the cluster URL's (`db_url`) database name (names as data).
 
     Raises:
-        RuntimeError: the data plane is remote-managed (its provider URL is
+        RuntimeError: the data plane is remote-managed (`remote_plane`; its provider URL is
             the only authority), or this home has no registry record.
     """
-    from base.config import settings
     from base.paths import ava_home
 
-    if settings.data_plane.is_remote:
+    if remote_plane:
         raise RuntimeError("a remote-managed data plane has no local owner authority")
     home = ava_home()
     record = get_record(home)
     if record is None:
         raise RuntimeError(f"no registry record for home {home}; cannot dial its Postgres")
-    database = conninfo_to_dict(settings.data_plane.db_url).get("dbname")
+    database = conninfo_to_dict(db_url).get("dbname")
     if not isinstance(database, str) or not database:
         raise RuntimeError("AVA_DB_URL names no database")
     return OwnerAuthority(
         admin_url=pg_admin_url(record.ports["postgres"]),
         database=database,
-        owner=db_identity(),
+        owner=db_identity(db_url),
         data_dir=home / "pg",
     )

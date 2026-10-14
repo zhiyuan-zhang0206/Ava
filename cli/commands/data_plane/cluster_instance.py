@@ -23,7 +23,7 @@ Model (mirrors `base.cluster.dataplane.pg_tools.throwaway_postgres`, but persist
   (issue #974).
 
 The Postgres db/role and Redis ACL identifiers are independent URL data: callers
-read each from its own `.env` URL (`db_identity()` / `redis_identity()`) and pass
+read each from its supplied URL (`db_identity(db_url)` / `redis_identity(redis_url)`) and pass
 `identity` / `redis_user` explicitly. First-start identity supplies the fixed
 `DATA_PLANE_IDENTITY` for both; later starts preserve different existing names.
 

@@ -9,9 +9,8 @@ import pytest
 
 from base.cluster.transport_encryption import (
     TransportEncryptionUndeclared,
-    verify_transport_encryption,
+    verify_transport_encryption_declaration,
 )
-from base.config import settings
 
 
 def test_test_cluster_declares_transport_encryption() -> None:
@@ -24,21 +23,18 @@ def test_test_cluster_declares_transport_encryption() -> None:
 
 
 def test_open_listener_does_not_require_transport_encryption() -> None:
-    verify_transport_encryption("0.0.0.0", authenticated=False)  # noqa: S104 — test input, not a listener bind
+    verify_transport_encryption_declaration("0.0.0.0", "", authenticated=False)  # noqa: S104 — test input, not a listener bind
 
 
 @pytest.mark.parametrize("bind_host", ("127.0.0.1", "::1", "localhost"))
 def test_loopback_bind_does_not_require_transport_encryption(bind_host: str) -> None:
-    verify_transport_encryption(bind_host, authenticated=True)
+    verify_transport_encryption_declaration(bind_host, "", authenticated=True)
 
 
-def test_undeclared_transport_encryption_refuses_off_box_bind(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.data_plane, "transport_encryption", "")
+def test_undeclared_transport_encryption_refuses_off_box_bind() -> None:
 
     with pytest.raises(TransportEncryptionUndeclared) as exc:
-        verify_transport_encryption("0.0.0.0", authenticated=True)  # noqa: S104 — test input
+        verify_transport_encryption_declaration("0.0.0.0", "", authenticated=True)  # noqa: S104 — test input
 
     message = str(exc.value)
     assert "AVA_TRANSPORT_ENCRYPTION" in message
@@ -47,18 +43,12 @@ def test_undeclared_transport_encryption_refuses_off_box_bind(
 
 
 @pytest.mark.parametrize("mode", ("tls", "mtls", "overlay"))
-def test_declared_transport_encryption_permits_off_box_bind(
-    monkeypatch: pytest.MonkeyPatch, mode: str
-) -> None:
-    monkeypatch.setattr(settings.data_plane, "transport_encryption", mode)
+def test_declared_transport_encryption_permits_off_box_bind(mode: str) -> None:
 
-    verify_transport_encryption("0.0.0.0", authenticated=True)  # noqa: S104 — test input
+    verify_transport_encryption_declaration("0.0.0.0", mode, authenticated=True)  # noqa: S104 — test input
 
 
-def test_invalid_transport_encryption_refuses_off_box_bind(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.data_plane, "transport_encryption", "wireguard")
+def test_invalid_transport_encryption_refuses_off_box_bind() -> None:
 
     with pytest.raises(TransportEncryptionUndeclared):
-        verify_transport_encryption("0.0.0.0", authenticated=True)  # noqa: S104 — test input
+        verify_transport_encryption_declaration("0.0.0.0", "wireguard", authenticated=True)  # noqa: S104 — test input

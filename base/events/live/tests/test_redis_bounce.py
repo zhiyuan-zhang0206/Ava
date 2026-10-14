@@ -31,6 +31,7 @@ import pytest
 import redis
 
 from base.cluster import inbound_channel
+from base.config import settings
 from base.events.live.redis_listener import RedisInboundListener
 
 
@@ -127,7 +128,7 @@ async def test_parked_listener_wakes_after_redis_bounce(
         async def _publish_until_woken() -> None:
             while not wait_task.done():
                 with redis.Redis.from_url(url) as r:  # pyright: ignore[reportUnknownMemberType]
-                    r.publish(inbound_channel(agent_id), "42")  # pyright: ignore[reportUnknownMemberType]
+                    r.publish(inbound_channel(agent_id, settings.data_plane.events_channel), "42")  # pyright: ignore[reportUnknownMemberType]
                 await asyncio.sleep(0.25)
 
         pub_task = asyncio.create_task(_publish_until_woken())

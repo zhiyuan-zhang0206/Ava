@@ -53,9 +53,6 @@ def test_gateway_data_plane_brings_up_own_instance(
         db_url="postgresql://ava_main:sek@127.0.0.1:23011/ava_main",
         redis_url="redis://ava:sek@127.0.0.1:23012/0",
     )
-    # `cluster.db_identity()` / `redis_identity()` (base.cluster) still read the global settings.
-    monkeypatch.setattr(settings.data_plane, "db_url", data_plane_config.db_url)
-    monkeypatch.setattr(settings.data_plane, "redis_url", data_plane_config.redis_url)
     own_calls: list[dict[str, object]] = []
     stored_with: list[DataPlaneConfig] = []
 

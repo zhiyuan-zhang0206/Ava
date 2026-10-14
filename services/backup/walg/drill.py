@@ -43,7 +43,7 @@ from urllib.parse import urlsplit
 import psycopg
 
 from base.cluster.dataplane import pg_admin
-from base.cluster.dataplane.pg_throwaway_base import select_throwaway_base
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, select_throwaway_base
 from base.db import Database, connect_url
 from base.log import logger
 from services.backup.walg.backups import Backup
@@ -184,11 +184,12 @@ def _restore_and_verify(
     reached: int | None,
     report: Report,
     *,
+    throwaway: ThrowawayConfig,
     path_reader: Callable[[], Path | None],
     database_for_url: Callable[[str], Database],
 ) -> str:
     """Restore `backup` to the newest archived segment and verify it; returns the summary."""
-    base = select_throwaway_base(required_bytes(backup, facts))
+    base = select_throwaway_base(required_bytes(backup, facts), override=throwaway.override)
     report(
         f"drill: restoring {backup.name} on {base} to "
         f"{'LSN ' + format_lsn(reached) if reached is not None else 'the end of the archive'}"
@@ -219,6 +220,7 @@ def run_drill(
     report: Report,
     now: Callable[[], datetime],
     *,
+    throwaway: ThrowawayConfig,
     path_reader: Callable[[], Path | None],
     database_for_url: Callable[[str], Database],
 ) -> DrillRecord:
@@ -234,6 +236,7 @@ def run_drill(
             facts,
             reached,
             report,
+            throwaway=throwaway,
             path_reader=path_reader,
             database_for_url=database_for_url,
         )

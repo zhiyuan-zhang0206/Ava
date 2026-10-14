@@ -104,7 +104,7 @@ def identity_from_url(url: str) -> str:
     return user
 
 
-def db_identity() -> str:
+def db_identity(db_url: str) -> str:
     """This cluster's Postgres database / schema-owner identity, read from its own
     db_url's DATABASE name.
 
@@ -114,27 +114,22 @@ def db_identity() -> str:
     (`ava_g0_<class>`) replaces the URL's username, never its database.
 
     Raises:
-        ValueError: db_url names no database."""
-    from base.config import settings
-
-    url = settings.data_plane.db_url
-    database = urlsplit(url).path.strip("/")
+        ValueError: `db_url` names no database."""
+    database = urlsplit(db_url).path.strip("/")
     if not database:
         raise ValueError(
             f"data-plane database URL names no database (the db/owner identity): "
-            f"{redacted_url(url)!r}. Identity is read from the URL as data, never guessed."
+            f"{redacted_url(db_url)!r}. Identity is read from the URL as data, never guessed."
         )
     return database
 
 
-def redis_identity() -> str:
+def redis_identity(redis_url: str) -> str:
     """This cluster's redis ACL user, read from its own redis_url.
 
     Raises:
-        ValueError: redis_url carries no username (see identity_from_url)."""
-    from base.config import settings
-
-    return identity_from_url(settings.data_plane.redis_url)
+        ValueError: `redis_url` carries no username (see identity_from_url)."""
+    return identity_from_url(redis_url)
 
 
 def session_name(service: str) -> str:
@@ -148,14 +143,14 @@ def session_name(service: str) -> str:
     return f"ava-{service}"
 
 
-def fe_build_env() -> str:
+def fe_build_env(*, gateway_port: int, browser_origin: str) -> str:
     """The `NEXT_PUBLIC_*` assignment prefix the frontend's `npm run build` needs.
 
     NEXT_PUBLIC_* are inlined into the JS bundle at build time, not read at
     runtime, and the session env only forwards AVA_* + bootstrap secrets — so a
     NEXT_PUBLIC_GATEWAY_PORT placed in a unit's `.env` never reaches the build
     subprocess. Instead derive it from the single source of truth
-    (AVA_GATEWAY_PORT == settings.gateway.gateway_port) and inject it directly on the
+    (AVA_GATEWAY_PORT == the gateway's `gateway_port` setting) and inject it directly on the
     build command line. The browser then dials `${hostname}:${gateway_port}`
     (ui/web/src/lib/transport/api.ts), correct on any host whose gateway is not on the
     default 8000 (e.g. the prod VPS on 8800, co-located with another service
@@ -166,17 +161,21 @@ def fe_build_env() -> str:
     (services/supervision/healthchecks/frontend.py) — so a watchdog restart can never bake a
     different (stale) gateway port than `ava start` did.
     """
-    from base.config import settings
-
-    gateway_env = f"NEXT_PUBLIC_GATEWAY_PORT={settings.gateway.gateway_port}"
-    if not (origin := settings.gateway.browser_origin):
+    gateway_env = f"NEXT_PUBLIC_GATEWAY_PORT={gateway_port}"
+    if not browser_origin:
         return gateway_env
     # The normal build and watchdog rebuild must carry the same browser entry.
     # Keep this host setting separate from the runner/control-plane gateway URL.
-    return f"{gateway_env} NEXT_PUBLIC_BROWSER_ORIGIN={shlex.quote(origin)}"
+    return f"{gateway_env} NEXT_PUBLIC_BROWSER_ORIGIN={shlex.quote(browser_origin)}"
 
 
-def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
+def frontend_service_cmd(
+    port: int,
+    *,
+    gateway_port: int,
+    browser_origin: str,
+    frontend_dir: str | Path = "ui/web",
+) -> str:
     """The complete frontend service launch command — single source for BOTH
     launch paths: the canonical ServiceSpec (``services/supervision/roster/spec.py``) and the watchdog
     respawn (``services/supervision/healthchecks/frontend.py``). The two drifted once
@@ -194,6 +193,8 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
         port: the cluster-allocated frontend port. Passed explicitly — Next.js
             defaults to 3000 otherwise, and a watchdog restart would silently
             revert the app off-cluster.
+        gateway_port, browser_origin: the gateway's port and the browser entry the build bakes in
+            (see ``fe_build_env``).
         frontend_dir: the directory to ``cd`` into before the build, as the
             session sees it — the spec's session starts at the checkout root
             (``ui/web``), the respawn's at the absolute ``ui/web`` path. The
@@ -202,11 +203,11 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
             ``fe_build_env``.
     """
     frontend_dir = Path(frontend_dir).as_posix()
-    build_env = fe_build_env()
+    build_env = fe_build_env(gateway_port=gateway_port, browser_origin=browser_origin)
     return f"cd {frontend_dir} && {build_env} npm run build && exec npm run start -- -p {port}"
 
 
-def redis_admin_url() -> str:
+def redis_admin_url(redis_url: str, admin_password: str) -> str:
     """libpq-style redis URL connecting as the `default` (admin) user, used to
     provision the cluster's redis ACL user + run admin-plane probes. Not a
     per-cluster runtime identity.
@@ -215,16 +216,13 @@ def redis_admin_url() -> str:
     independent gateway-only credential (`AVA_REDIS_ADMIN_PASSWORD`, also the
     instance's `requirepass`). Host/port come from this cluster's own
     `redis_url` (loopback + its per-cluster port), never a hardcoded 6379."""
-    from base.config import settings
-
-    parts = urlsplit(settings.data_plane.redis_url)
+    parts = urlsplit(redis_url)
     # `parts.port` is None when the URL carries no explicit port — the
     # stringified ":None" would be a connect error with a confusing message
     # (audit 2026-08-08 P3: settings normally carry the port, this is the
     # defensive floor).
     port = parts.port or 6379
-    password = settings.data_plane.redis_admin_password
-    return f"redis://default:{password}@{parts.hostname or '127.0.0.1'}:{port}"
+    return f"redis://default:{admin_password}@{parts.hostname or '127.0.0.1'}:{port}"
 
 
 def redis_password_from_env() -> str:
@@ -274,23 +272,21 @@ def project_runner_db_url(db_url: str, runner_password: str) -> str:
     return url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
 
 
-def redis_channel_prefix() -> str:
+def redis_channel_prefix(events_channel: str) -> str:
     """The pub/sub channel prefix (`ava`) — the events channel is `<prefix>:events`,
     so strip that suffix. Fixed across clusters now that each owns its redis: there
     is no neighbour to prefix away from."""
-    from base.config import settings
-
-    return settings.data_plane.events_channel.removesuffix(":events")
+    return events_channel.removesuffix(":events")
 
 
-def inbound_channel(agent_id: int) -> str:
+def inbound_channel(agent_id: int, events_channel: str) -> str:
     """The Redis pub/sub channel an agent waits on for inbound wake-ups —
-    `ava:inbound:<agent_id>`, via `redis_channel_prefix()`.
+    `ava:inbound:<agent_id>`, via `redis_channel_prefix(events_channel)`.
 
     Publish (`base.agents.inbox.insert.insert_inbound_message` / `insert_compact_request_inbound`,
     `ava.self`) and subscribe (`RedisInboundListener`) both derive the channel here
     so the two halves can never drift."""
-    return f"{redis_channel_prefix()}:inbound:{agent_id}"
+    return f"{redis_channel_prefix(events_channel)}:inbound:{agent_id}"
 
 
 def derive_env(

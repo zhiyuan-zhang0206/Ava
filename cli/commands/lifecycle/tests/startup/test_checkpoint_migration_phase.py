@@ -12,7 +12,7 @@ import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import psycopg
 import pytest
@@ -120,7 +120,12 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(pg_admin, "require_postgres_connection", record_ownership)
     patch_database(monkeypatch, connect=fake_connect)
     patch_database(monkeypatch, direct_url=lambda: "postgresql://direct/ava")
-    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
+
+    def owner_authority(_db_url: str, *, remote_plane: bool) -> pg_admin.OwnerAuthority:
+        assert not remote_plane
+        return authority
+
+    monkeypatch.setattr(pg_admin, "local_owner_authority", owner_authority)
     monkeypatch.setattr(pg_admin.psycopg, "connect", fake_admin_connect)
     monkeypatch.setattr(
         base.deploy.schema.migrations, "apply_pending_migrations", fake_ava_migrations
@@ -145,7 +150,7 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
     from base.cluster.dataplane import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
-    authority = pg_admin.local_owner_authority()
+    authority = pg_admin.local_owner_authority("postgresql://ava@localhost/ava", remote_plane=False)
     applied = cmd_migrations_apply(
         database_factory=operator_database, machine_name=command_runtime.machine.name
     )
@@ -222,9 +227,11 @@ def test_remote_managed_migration_preserves_explicit_provider_authority(
 
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://cache.example/0")
-    monkeypatch.setattr(
-        pg_admin, "local_owner_authority", lambda: pytest.fail("remote plane has no admin")
-    )
+
+    def refuse_local_owner(_db_url: str, *, remote_plane: bool) -> NoReturn:
+        pytest.fail(f"remote plane has no local authority (remote={remote_plane})")
+
+    monkeypatch.setattr(pg_admin, "local_owner_authority", refuse_local_owner)
     assert cmd_migrations_apply(
         database_factory=operator_database, machine_name=command_runtime.machine.name
     ) == ["20260823T000000_example"]
@@ -260,7 +267,12 @@ def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyP
         admin_url=settings.data_plane.db_url, database=database, owner=owner, data_dir=directory
     )
     monkeypatch.setattr(pg_admin, "require_postgres_connection", guard)
-    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
+
+    def owner_authority(_db_url: str, *, remote_plane: bool) -> pg_admin.OwnerAuthority:
+        assert not remote_plane
+        return authority
+
+    monkeypatch.setattr(pg_admin, "local_owner_authority", owner_authority)
 
 
 def test_real_start_phase_converges_ava_then_is_idempotent(

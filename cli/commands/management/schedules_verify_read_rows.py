@@ -21,12 +21,19 @@ def read_rows(out: str) -> None:
         from cli.database import open_operator_database, operator_database_factory
         from cli.database.runtime import CommandRuntime
 
-        host = CommandRuntime.create().machine.host
-        rows = verify._read_schedule_rows(
-            database_factory=operator_database_factory(
-                local_host=host, open_database=open_operator_database
+        command = CommandRuntime.create()
+        if "gateway_url_reader" in inspect.signature(operator_database_factory).parameters:
+            database_factory = operator_database_factory(
+                local_host=command.machine.host,
+                gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
+                open_database=open_operator_database,
             )
-        )
+        else:
+            legacy_factory: Any = operator_database_factory
+            database_factory = legacy_factory(
+                local_host=command.machine.host, open_database=open_operator_database
+            )
+        rows = verify._read_schedule_rows(database_factory=database_factory)
     else:
         legacy: Any = verify._read_schedule_rows
         rows = legacy()

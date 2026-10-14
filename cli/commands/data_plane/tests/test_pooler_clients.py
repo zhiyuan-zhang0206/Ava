@@ -8,6 +8,7 @@ from psycopg import connect
 from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster.dataplane import pooler
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.deploy.tests.containers import postgres
@@ -23,10 +24,10 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_lists_the_open_clients_and_leaves_out_the_console(
-    *, postgres_access: None, machine_identity: MachineIdentity
+    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
 ) -> None:
     with (
-        postgres(machine_name=machine_identity.name) as pg_url,
+        postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url) as pooled,
     ):
         info = conninfo_to_dict(pooled)
@@ -50,10 +51,10 @@ def test_lists_the_open_clients_and_leaves_out_the_console(
 
 
 def test_an_unreadable_console_raises_instead_of_reading_as_no_clients(
-    *, postgres_access: None, machine_identity: MachineIdentity
+    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
 ) -> None:
     with (
-        postgres(machine_name=machine_identity.name) as pg_url,
+        postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url) as pooled,
     ):
         port = int(str(conninfo_to_dict(pooled)["port"]))

@@ -60,7 +60,7 @@ from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
-from base.cluster.transport_encryption import verify_transport_encryption
+from base.cluster.transport_encryption import verify_transport_encryption_declaration
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.daemon.health import start_health_server, stop_health_server
@@ -619,7 +619,9 @@ async def serve_ops_daemon(
         acceptance = boot.ops_acceptance()
         bind_host = boot.ops_bind_host(machine=local_machine)
         if bind_host != "127.0.0.1":
-            verify_transport_encryption(bind_host, authenticated=True)
+            verify_transport_encryption_declaration(
+                bind_host, config.view.data_plane.transport_encryption, authenticated=True
+            )
         endpoint = boot.endpoint(config, runtime=runtime_dir)
         server = await start_health_server(
             "ops",
@@ -697,7 +699,11 @@ def main(*, argv: list[str] | None = None) -> None:
 
     def database() -> Database:
         return Database(
-            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+            db_config_from_boot(config),
+            gate=gate,
+            direct_url=ClusterDirectUrl(
+                machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
+            ),
         )
 
     clients = ClientSet(

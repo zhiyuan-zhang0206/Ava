@@ -260,7 +260,11 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # respawn lost its `exec`, the session validator rejected the command,
             # and a dead frontend could never self-heal).
             # (NEXT_PUBLIC_* is build-time-inlined, so it must reach `npm run build`.)
-            cmd=frontend_service_cmd(_fe_port),
+            cmd=frontend_service_cmd(
+                _fe_port,
+                gateway_port=settings.gateway.gateway_port,  # ambient: S
+                browser_origin=settings.gateway.browser_origin,  # ambient: S
+            ),
             capabilities=GATEWAY,
             # Next.js reaches data only through the gateway HTTP API — no pg client in
             # ui/web/package.json. Reviving it during a DB outage brings the

@@ -26,9 +26,10 @@ async def test_publish_leaves_no_redis_key(database: Database, event_bus: EventB
         insert_inbound_message(conn, agent_id, "wake", "user", bus=event_bus, database=database)
     r = EventBus.from_settings().sync_redis(decode_responses=True)
     try:
+        prefix = redis_channel_prefix(settings.data_plane.events_channel)
         leftover = [
             str(key)  # pyright: ignore[reportUnknownArgumentType]
-            for key in r.scan_iter(match=f"{redis_channel_prefix()}:*{agent_id}*")  # pyright: ignore[reportUnknownMemberType]
+            for key in r.scan_iter(match=f"{prefix}:*{agent_id}*")  # pyright: ignore[reportUnknownMemberType]
         ]
         assert leftover == [], f"publish left Redis keys behind: {leftover}"
     finally:

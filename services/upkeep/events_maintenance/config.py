@@ -50,4 +50,10 @@ def events_maintenance_db(
 ) -> Database:
     """The handle on the cluster database, built where the daemon (or one of its operator
     commands) starts."""
-    return Database(db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(local_host))
+    return Database(
+        db_config_from_boot(config),
+        gate=gate,
+        direct_url=ClusterDirectUrl(
+            local_host, gateway_url_reader=lambda: config.view.gateway.gateway_url
+        ),
+    )

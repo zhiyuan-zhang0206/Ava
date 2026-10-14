@@ -27,7 +27,10 @@ def pg_target() -> PgTarget:
     Raises:
         RuntimeError: the data plane is remote-managed or has no registry record.
     """
-    authority = pg_admin.local_owner_authority()
+    from base.config import settings
+
+    data_plane = settings.data_plane  # ambient: S
+    authority = pg_admin.local_owner_authority(data_plane.db_url, remote_plane=data_plane.is_remote)
     return PgTarget(
         admin_url=authority.admin_url, data_dir=authority.data_dir, database=authority.database
     )

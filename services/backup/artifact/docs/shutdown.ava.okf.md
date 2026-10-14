@@ -10,6 +10,14 @@ tags: []
 The scheduler sends dumps and restore drills to `services/backup/scheduler/worker.py:run_job`. A fixed
 worker in an isolated interpreter and new group performs blocking tools;
 requests and results use unique private staging, and secrets travel on stdin.
+For a restore, the controller captures the throwaway-base override once in a
+frozen `ThrowawayConfig` and sends that value in the private request. The child
+uses it for scratch creation and registration; the parent's sanitizer keeps the
+same value for orphan cleanup even if live configuration changes during the job.
+The controller makes a nonempty override absolute in its own working directory
+without resolving symlinks, so the worker's fixed code-root cwd cannot reinterpret
+a relative operator value.
+Missing or wrongly typed request values fail rather than re-reading Settings.
 
 SIGTERM cancellation asks the worker to unwind normal cleanup. After the
 bounded grace, its controller can KILL the known group and wait for the direct

@@ -14,13 +14,18 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.dataplane.pg_tools import throwaway_postgres
+from base.config import ConfigBoot
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def main() -> int:
-    with throwaway_postgres() as url:
+    config = ConfigBoot()
+    config.read_process_environment()
+    throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+    with throwaway_postgres(config=throwaway) as url:
         u = urlparse(url)
         if not (u.hostname and u.port and u.username):
             raise RuntimeError(f"malformed cluster url: {url}")

@@ -470,7 +470,6 @@ def test_redis_acl_uses_runtime_ping_without_native_custody(
 
     ping = Mock()
     capture = Mock(side_effect=AssertionError("read-only health must not capture native custody"))
-    monkeypatch.setattr(ownership, "configured_redis_port", Mock(return_value=6380))
     monkeypatch.setattr(ownership.RedisConnectionCustody, "capture", capture)
     monkeypatch.setattr(redis_acl, "ping", ping)
     monkeypatch.setattr(

@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from base import cluster
-from base.config import settings
 
 
 def test_home_label_is_basename():
@@ -68,33 +67,25 @@ def test_identity_from_url_error_redacts_password():
     assert "***" in str(excinfo.value)
 
 
-def test_db_identity_refuses_a_settings_url_without_database(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@h:5433")
+def test_db_identity_refuses_a_url_without_database():
     with pytest.raises(ValueError, match="names no database"):
-        cluster.db_identity()
+        cluster.db_identity("postgresql://ava@h:5433")
 
 
-def test_db_identity_reads_the_database_not_a_delivered_login(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_db_identity_reads_the_database_not_a_delivered_login() -> None:
     """A delivered write-generation login replaces the URL's username; the
     schema-owner identity is the database it names."""
-    monkeypatch.setattr(
-        settings.data_plane, "db_url", "postgresql://ava_g3_gateway:pw@127.0.0.1:6433/ava_main"
+    assert (
+        cluster.db_identity("postgresql://ava_g3_gateway:pw@127.0.0.1:6433/ava_main") == "ava_main"
     )
-    assert cluster.db_identity() == "ava_main"
 
 
-def test_db_and_redis_identity_read_settings_urls(monkeypatch: pytest.MonkeyPatch):
+def test_db_and_redis_identity_read_supplied_urls():
     """The runtime accessors read THIS cluster's own URLs — a historical
     identifier (prod's ava_main) keeps working until an ops rename edits the
     URLs; nothing recomputes it."""
-    monkeypatch.setattr(
-        settings.data_plane, "db_url", "postgresql://ava_main:pw@127.0.0.1:5433/ava_main"
-    )
-    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://ava_main:pw@127.0.0.1:6380/0")
-    assert cluster.db_identity() == "ava_main"
-    assert cluster.redis_identity() == "ava_main"
+    assert cluster.db_identity("postgresql://ava_main:pw@127.0.0.1:5433/ava_main") == "ava_main"
+    assert cluster.redis_identity("redis://ava_main:pw@127.0.0.1:6380/0") == "ava_main"
 
 
 def test_session_name_has_no_cluster_segment():

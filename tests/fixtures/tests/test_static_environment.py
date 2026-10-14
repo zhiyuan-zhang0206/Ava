@@ -9,7 +9,8 @@ import redis
 import redis.asyncio
 from psycopg.conninfo import conninfo_to_dict
 
-from base.config import settings
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.config import ConfigBoot, settings
 from base.host.system.cron import os_jobs_enabled
 from tests.fixtures.env_bootstrap import UNPROVISIONED_DB_URL, UNPROVISIONED_REDIS_URL
 from tests.fixtures.static_environment import static_mode
@@ -18,7 +19,8 @@ from tests.fixtures.static_environment import static_mode
 def test_process_environment_keeps_its_home_and_data_plane_boundary(
     pytestconfig: pytest.Config,
     request: pytest.FixtureRequest,
-    process_config: object,
+    process_config: ConfigBoot,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     assert Path(os.environ["AVA_HOME"]) != Path.home() / ".ava"
     assert not os_jobs_enabled(enabled_reader=lambda: settings.general.os_jobs_enabled)
@@ -38,12 +40,21 @@ def test_process_environment_keeps_its_home_and_data_plane_boundary(
             with pytest.raises(pytest.fail.Exception, match="Static tests cannot request"):
                 request.getfixturevalue(fixture)
         with pytest.raises(pytest.fail.Exception, match="Static tests cannot use"):
-            containers.postgres(machine_name=lambda: pytest.fail("Static identity must stay cold"))
+            containers.postgres(
+                config=throwaway_config,
+                machine_name=lambda: pytest.fail("Static identity must stay cold"),
+            )
         with pytest.raises(pytest.fail.Exception, match="Static tests cannot use"):
             containers.redis_server()
     else:
         assert db["dbname"] != "unprovisioned"
         assert settings.data_plane.redis_url != UNPROVISIONED_REDIS_URL
+        expected_override = process_config.view.data_plane.pg_throwaway_base.strip()
+        if expected_override:
+            with psycopg.connect(settings.data_plane.db_url) as connection:
+                row = connection.execute("SHOW data_directory").fetchone()
+            assert row is not None
+            assert Path(row[0]).parents[1] == Path(expected_override).absolute()
 
 
 def test_sync_data_plane_calls_follow_the_process_environment(

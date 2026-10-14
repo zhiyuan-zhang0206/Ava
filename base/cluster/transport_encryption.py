@@ -15,22 +15,6 @@ class TransportEncryptionUndeclared(RuntimeError):  # noqa: N818 — public exce
         )
 
 
-def verify_transport_encryption(bind_host: str, *, authenticated: bool) -> None:
-    """Refuse an off-box bearer-authenticated listener without an encryption
-    declaration. `authenticated`: the listener requires a bearer (the gateway's
-    human secret, or a machine API token on a remote unit)."""
-    if not _requires_transport_encryption_declaration(bind_host, authenticated=authenticated):
-        return
-
-    from base.config import settings
-
-    verify_transport_encryption_declaration(
-        bind_host,
-        settings.data_plane.transport_encryption,
-        authenticated=authenticated,
-    )
-
-
 def verify_transport_encryption_declaration(
     bind_host: str,
     declaration: str,

@@ -56,7 +56,7 @@ def redis_acl() -> DaemonProbe:
     from services.supervision.healthchecks import protocol_probe
     from services.supervision.healthchecks import redis_acl as check
 
-    port = ownership.configured_redis_port()
+    port = ownership.redis_port_of(settings.data_plane.redis_url)  # ambient: S
     if port is None:
         return DaemonProbe.unavailable("no explicit local Redis endpoint")
 

@@ -3,9 +3,8 @@
 It sends due, unpaused check-ins to idle native agents and active impersonators.
 Native clocks start at the last completed turn; impersonation clocks run from
 lease activation regardless of external activity. Each check-in is a durable
-`heartbeat` inbound. The inbound-insert trigger wakes the agent (on any
-machine — cluster-wide, not machine-scoped: unlike the agent host it never touches
-local sessions). Runs on the gateway, one per cluster.
+`heartbeat` inbound. The inbound-insert trigger wakes the agent anywhere in the
+cluster. It runs once per cluster on the gateway and never touches local sessions.
 
 Dispatch is paced for fleet scale: rather than checking in on every due agent in
 one batch per idle window (which would wake 100-300 idle agents simultaneously —
@@ -744,7 +743,9 @@ def main() -> None:
         return Database(
             db_config_from_boot(machine_config),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(
+                machine.host, gateway_url_reader=lambda: machine_config.view.gateway.gateway_url
+            ),
         )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)

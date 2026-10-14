@@ -52,13 +52,17 @@ def test_database_slice_uses_the_supplied_owner_at_each_factory_call(
     second.read_process_environment()
     first.set_field("db_pool_max_size", 13)
     second.set_field("db_pool_max_size", 19)
+    first.set_field("gateway_url", "http://first:8000")
+    second.set_field("gateway_url", "http://second:8000")
     captured: list[DbConfig] = []
+    resolvers: list[ClusterDirectUrl] = []
 
     def database(
         inputs: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
     ) -> Database:
         assert gate is database_gate
         captured.append(inputs)
+        resolvers.append(direct_url)
         return Database(inputs, gate=gate, direct_url=direct_url)
 
     monkeypatch.setattr(maintenance_config, "Database", database)
@@ -73,3 +77,14 @@ def test_database_slice_uses_the_supplied_owner_at_each_factory_call(
         first, gate=database_gate, local_host=lambda: "127.0.0.1"
     )
     assert [inputs.db_pool_max_size for inputs in captured] == [13, 19, 23]
+    assert [resolver.gateway_url_reader() for resolver in resolvers] == [
+        "http://first:8000",
+        "http://second:8000",
+        "http://first:8000",
+    ]
+    first.set_field("gateway_url", "http://updated:8000")
+    assert [resolver.gateway_url_reader() for resolver in resolvers] == [
+        "http://updated:8000",
+        "http://second:8000",
+        "http://updated:8000",
+    ]

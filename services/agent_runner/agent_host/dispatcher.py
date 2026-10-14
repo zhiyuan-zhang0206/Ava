@@ -54,6 +54,7 @@ from functools import partial
 from typing import Protocol, cast
 
 from base.cluster import redis_channel_prefix
+from base.config import settings
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
@@ -509,7 +510,8 @@ class InboundWakeDispatcher:
         with bounded backoff. This shared scan supplies durable wake recovery
         for all agents.
         """
-        pattern = f"{redis_channel_prefix()}{INBOUND_PATTERN_SUFFIX}"
+        prefix = redis_channel_prefix(settings.data_plane.events_channel)  # ambient: S
+        pattern = f"{prefix}{INBOUND_PATTERN_SUFFIX}"
         consecutive_failures = 0
         while True:  # quiesce-exempt: the scan itself is gated by quiesced()
             redis = self._bus.open_async_redis()

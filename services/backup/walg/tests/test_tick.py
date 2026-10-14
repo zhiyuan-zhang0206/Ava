@@ -20,6 +20,7 @@ import psycopg
 import pytest
 
 from base.cluster.dataplane import pg_admin
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -115,6 +116,7 @@ def _run(clock: Clock | None = None) -> tuple[int, list[str]]:
         now=clock or Clock(),
         path_reader=lambda: settings.walg.walg_config_file,
         database_for_url=database_for_url,
+        throwaway=ThrowawayConfig(None),
     )
     return code, lines
 
@@ -548,6 +550,7 @@ class FakeDrill:
         _report: Any,
         now: Any,
         *,
+        throwaway: ThrowawayConfig,
         path_reader: Callable[[], Path | None],
         database_for_url: Callable[[str], Database],
     ) -> state.DrillRecord:
@@ -643,6 +646,7 @@ def test_drill_now_runs_the_drill_and_records_it(sandbox: Sandbox, due_drill: Fa
         now=Clock(),
         path_reader=lambda: settings.walg.walg_config_file,
         database_for_url=_database_factory(),
+        throwaway=ThrowawayConfig(None),
     )
 
     assert code == 0
@@ -661,6 +665,7 @@ def test_drill_now_exits_non_zero_when_the_drill_fails(
             now=Clock(),
             path_reader=lambda: settings.walg.walg_config_file,
             database_for_url=_database_factory(),
+            throwaway=ThrowawayConfig(None),
         )
         == 1
     )
@@ -678,6 +683,7 @@ def test_drill_now_refuses_without_a_backup(sandbox: Sandbox, due_drill: FakeDri
             now=Clock(),
             path_reader=lambda: settings.walg.walg_config_file,
             database_for_url=_database_factory(),
+            throwaway=ThrowawayConfig(None),
         )
         == 1
     )
@@ -696,6 +702,7 @@ def test_drill_now_needs_postgres_and_the_run_lock(
             now=Clock(),
             path_reader=lambda: settings.walg.walg_config_file,
             database_for_url=_database_factory(),
+            throwaway=ThrowawayConfig(None),
         )
         == 1
     )
@@ -710,6 +717,7 @@ def test_drill_now_needs_postgres_and_the_run_lock(
                 now=Clock(),
                 path_reader=lambda: settings.walg.walg_config_file,
                 database_for_url=_database_factory(),
+                throwaway=ThrowawayConfig(None),
             )
             == 1
         )
@@ -728,6 +736,7 @@ def test_drill_now_while_wal_g_is_off_says_so(
             lines.append,
             path_reader=lambda: settings.walg.walg_config_file,
             database_for_url=_database_factory(),
+            throwaway=ThrowawayConfig(None),
         )
         == 1
     )

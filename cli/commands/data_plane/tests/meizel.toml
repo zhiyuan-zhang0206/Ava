@@ -72,7 +72,6 @@ exports = ["data_plane_records.py"]
 "test_start_data_plane.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.local_owner_authority" = 2
 "test_start_data_plane.py#monkeypatch.setattr base.cluster.ensure_pgvector_extension" = 1
 "test_start_data_plane.py#monkeypatch.setattr base.cluster.get_record" = 1
-"test_start_data_plane.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "test_start_data_plane.py#monkeypatch.setattr base.host.db_authority.delivery.ensure_pooler_admin" = 1
 "test_start_data_plane.py#monkeypatch.setattr base.host.db_authority.ledger.activate" = 1
 "test_start_data_plane.py#monkeypatch.setattr base.host.db_authority.ledger.create_ledger" = 1

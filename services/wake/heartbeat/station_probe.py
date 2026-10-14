@@ -162,7 +162,12 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="station")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, direct_url=ClusterDirectUrl(machine.host))
+        return Database.from_settings(
+            gate=gate,
+            direct_url=ClusterDirectUrl(
+                machine.host, gateway_url_reader=lambda: machine_config.view.gateway.gateway_url
+            ),
+        )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(

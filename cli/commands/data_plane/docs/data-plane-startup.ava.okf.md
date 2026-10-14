@@ -23,14 +23,14 @@ The composition roots build it once with `data_plane_config_from_settings()`: th
 Every function below them takes it as the first parameter. A test builds the same value with
 `data_plane_config_from_boot` and changes a field with `dataclasses.replace`.
 
-Two reads stay outside it on purpose: the walg archive path (`start_pg` reads it from its own
-`ConfigBoot`) and the identities and ports `base.cluster` derives from the global settings.
+The walg archive path stays outside it: `start_pg` reads it from its own `ConfigBoot`.
+Identity and port derivation consume the URLs the caller supplies.
 
 ## Identity
 
 `cluster_instance` takes separate URL identities: the Postgres database/owner
-comes from `db_identity()` (the URL's database), the Redis ACL user from
-`redis_identity()`. First-start identity persists the Redis credentials before
+comes from `db_identity(db_url)` (the URL's database), the Redis ACL user from
+`redis_identity(redis_url)`. First-start identity persists the Redis credentials before
 effects, and the identity owner writes each URL before storage comes up; no
 runtime identity backfill exists. Startup refuses missing Redis credentials,
 and a home without a database authority ledger that is not mid-birth, before
@@ -74,7 +74,7 @@ owner (`base.cluster.dataplane.pg_admin`).
 
 The layout and bind facts the cli and the root diagnostics must agree on live in
 `base.cluster`, not in the cli: the Redis data directory and port
-(`ownership.redis_data_dir`, `ownership.configured_redis_port`), the data plane's
+(`ownership.redis_data_dir`, `ownership.redis_port_of`), the data plane's
 bind posture (`port_preflight.bind_addrs`: loopback alone without a cluster secret,
 loopback plus the reachable address with one) and the pooler's files and listener
 probes (`dataplane.pooler`). The cli owns bring-up and stop; the diagnostics only look.

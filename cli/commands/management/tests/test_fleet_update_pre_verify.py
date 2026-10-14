@@ -99,6 +99,32 @@ def test_the_read_step_passes_the_operator_factory_when_the_old_read_wants_one(
     assert json.loads(out.read_text()) == [[1, "digest", "host=gateway"]]
 
 
+def test_the_read_step_passes_the_gateway_reader_when_the_factory_requires_it(
+    tmp_path: Path,
+) -> None:
+    checkout = {
+        **_FACTORY_CHECKOUT,
+        "cli/database/__init__.py": (
+            "def open_operator_database(config, gate, direct_url):\n    return None\n\n\n"
+            "def operator_database_factory(*, local_host, gateway_url_reader, open_database):\n"
+            "    return lambda: local_host + ' gateway=' + gateway_url_reader()\n"
+        ),
+        "cli/database/runtime.py": (
+            "from types import SimpleNamespace\n"
+            + _FACTORY_CHECKOUT["cli/database/runtime.py"]
+            + "\nCommandRuntime.config = SimpleNamespace(view=SimpleNamespace(\n"
+            "    gateway=SimpleNamespace(gateway_url='http://gateway:8000')))\n"
+        ),
+    }
+    _tree(tmp_path / "current", checkout)
+    out = tmp_path / "rows.json"
+    proc = _read_rows(tmp_path / "current", out)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(out.read_text()) == [
+        [1, "digest", "host=gateway gateway=http://gateway:8000"]
+    ]
+
+
 def test_a_failing_read_is_an_error_not_a_fallback(tmp_path: Path) -> None:
     broken = {
         **_OLD_CHECKOUT,

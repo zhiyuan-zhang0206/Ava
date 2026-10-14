@@ -9,6 +9,7 @@ from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.dataplane import walg_binary
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.config import ConfigBoot
 from base.db import Database
 from services.backup.walg import check, probe, state, tick
@@ -52,8 +53,15 @@ def cmd_walg_run(
             config.read_process_environment()
         return config.view.walg.walg_config_file
 
+    if not config.prepared:
+        config.read_process_environment()
+    throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
     return tick.run_tick(
-        database_factory(), _stamped, path_reader=path_reader, database_for_url=database_for_url
+        database_factory(),
+        _stamped,
+        path_reader=path_reader,
+        database_for_url=database_for_url,
+        throwaway=throwaway,
     )
 
 
@@ -70,7 +78,12 @@ def cmd_walg_drill(*, database_for_url: Callable[[str], Database]) -> int:
             config.read_process_environment()
         return config.view.walg.walg_config_file
 
-    return tick.run_drill_now(_stamped, path_reader=path_reader, database_for_url=database_for_url)
+    if not config.prepared:
+        config.read_process_environment()
+    throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+    return tick.run_drill_now(
+        _stamped, path_reader=path_reader, database_for_url=database_for_url, throwaway=throwaway
+    )
 
 
 def cmd_walg_restore(

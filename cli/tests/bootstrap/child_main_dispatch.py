@@ -216,7 +216,9 @@ def _help_admission() -> None:
         return object()
 
     factory = operator_database_factory(
-        local_host=command.machine.host, open_database=open_database
+        local_host=command.machine.host,
+        open_database=open_database,
+        gateway_url_reader=lambda: command.config.view.gateway.gateway_url,
     )
     assert not seen
     factory()

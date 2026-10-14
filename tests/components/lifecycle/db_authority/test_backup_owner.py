@@ -29,6 +29,7 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.conninfo import conninfo_to_dict
 
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -109,7 +110,10 @@ def _assert_owner_dial(conninfo: str) -> None:
 
 
 def test_scheduled_backup_dumps_as_the_owner_and_restores(
-    maintenance: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    maintenance: Born,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     from services.backup import restore_drill
     from services.backup.scheduler import worker
@@ -160,7 +164,11 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     scratch = tmp_path / "scratch"
     scratch.mkdir(mode=0o700)
     report, _elapsed = restore_drill.run_drill(
-        artifact, database_for_url=database_for_url, foreground=True, scratch_root=scratch
+        artifact,
+        database_for_url=database_for_url,
+        foreground=True,
+        scratch_root=scratch,
+        throwaway=throwaway_config,
     )
     assert report.agents == 1
     assert report.sample_agent_id == agent_id

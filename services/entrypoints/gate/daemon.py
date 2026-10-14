@@ -414,7 +414,13 @@ def main() -> None:
     config.boot()
     machine = machine_from_boot(config)
     gate = ProcessDbGate(process="gate", version=CodeVersion(image).get)
-    database = partial(Database.from_settings, gate=gate, direct_url=ClusterDirectUrl(machine.host))
+    database = partial(
+        Database.from_settings,
+        gate=gate,
+        direct_url=ClusterDirectUrl(
+            machine.host, gateway_url_reader=lambda: config.view.gateway.gateway_url
+        ),
+    )
     pipeline = build_pipeline(database=database, machine=machine, home=ava_home().resolve())
     primary: BaseException | None = None
     try:

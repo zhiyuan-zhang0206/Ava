@@ -355,7 +355,11 @@ def main() -> None:
 
     def database() -> Database:
         return Database(
-            db_config_from_boot(boot), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+            db_config_from_boot(boot),
+            gate=gate,
+            direct_url=ClusterDirectUrl(
+                machine.host, gateway_url_reader=lambda: boot.view.gateway.gateway_url
+            ),
         )
 
     pipeline = telemetry.build_pipeline(database=database, machine=machine, home=ava_home())
