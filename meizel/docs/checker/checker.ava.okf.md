@@ -30,8 +30,7 @@ python -m meizel bootstrap --out <dir>
 python -m meizel roles list <role>... | check | write
 ```
 
-`--repo <root>` selects another checkout; `--jobs N` sets parser processes
-(default up to 8). Exit codes: 0 clean, 1 violations, 2 the tool could not run.
+`--repo <root>` selects another checkout; `--jobs N` sets parser processes. Exit codes: 0 clean, 1 violations, 2 the tool could not run.
 
 ## Commands
 
@@ -41,8 +40,8 @@ python -m meizel roles list <role>... | check | write
   `check --changed files...` judges only those files.
 - `debt` manages recorded violations, a per-directory baseline that may only
   shrink: [[meizel/docs/checker/debt.ava.okf.md|recorded debt]].
-- `explain` prints a node's place in its parent's local graph (declared to use
-  and to be used by, exported or not) and the fact edges that cross its boundary.
+- `explain` prints a node's place in its parent's local graph and the fact
+  edges that cross its boundary.
 - `sync --prune` drops stale declarations; `sync --declare` writes the legal new
   dependencies of the changed files: [[meizel/docs/checker/sync.ava.okf.md|keeping manifests current]].
 - `bootstrap --out DIR` writes one `meizel.toml` per directory under `DIR` from
@@ -60,17 +59,18 @@ python -m meizel roles list <role>... | check | write
   `pkg/__init__.py` with `name` recorded as a used name. Resolution follows
   `pythonpath = ["."]`: a dotted name maps to a tracked path, directories
   without `__init__.py` are namespace packages.
-- Attribute use on an imported module (`mod.name`, `pkg.sub.name`), including a
-  deeper submodule reached through the chain.
+- Attribute use on an imported module (`mod.name`, `pkg.sub.name`), through any
+  submodule chain.
 - pytest fixture requests: test and fixture parameters without defaults,
   `usefixtures`, and `getfixturevalue("name")`, resolved to the defining file by
   pytest's order: the file itself, its literal `pytest_plugins`, then each
-  ancestor `conftest.py` and its plugins. Parametrized names and arguments
-  injected by `patch` decorators are not requests.
+  ancestor `conftest.py` and its plugins. Parametrized names and `patch`-injected
+  arguments are not requests.
 - Object-form patching: `monkeypatch.setattr(mod, "name", ...)`,
   `mock.patch.object(mod, "name")`, `patch.multiple(mod, name=...)` use `name`
   in `mod`.
-- `[loads]` declarations (below).
+- `[loads]` declarations (below); `path_scopes.toml` mounts
+  ([[meizel/docs/checker/mounts.ava.okf.md|mounts]]).
 
 ## The rule
 
