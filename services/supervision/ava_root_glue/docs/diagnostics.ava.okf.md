@@ -63,6 +63,14 @@ races a settling worker. An alert backend that hangs retains that check's single
 worker exactly like a hung probe and cannot create concurrent reports or
 diagnostic workers.
 
+Report admission checks the observation's monotonic deadline and shares a short
+lock with monitor stop and cancellation of that round. A late probe cannot
+start a report after its deadline, after its round was cancelled, or after stop
+closed the monitor. Admission is the report's start: an already admitted callback
+runs outside the lock and can finish after stop or timeout, still occupying its
+original worker. Stop never waits on that callback's lock; the same bounded join
+and honest unfinished-worker result apply.
+
 Readiness of native LGTM services belongs to their actual root service specs.
 External station reachability is a remote protocol claim and carries no authority
 over that station's native processes. [[services/supervision/ava_root_glue/docs/ava_root_glue.ava.okf.md|Root wiring]]
