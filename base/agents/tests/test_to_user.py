@@ -6,7 +6,8 @@ from typing import cast
 
 import pytest
 
-from base.agents.to_user import MAX_DOCUMENT_BYTES, ToUserFormat, read_document
+from base.agents.to_user import MAX_DOCUMENT_BYTES, read_document
+from base.host.env.agent_slices import ToUserFormat
 
 
 def test_missing_empty_and_format_selection(tmp_path: Path) -> None:

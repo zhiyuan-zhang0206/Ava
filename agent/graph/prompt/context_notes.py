@@ -277,9 +277,7 @@ def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
     tail = f" Your workspace is {workspace}." if workspace else ""
     if workspace:
         try:
-            document = read_document(
-                workspace_dir(aid), ctx.require_agent().read("agent", "to_user_format")
-            )
+            document = read_document(workspace_dir(aid), ctx.require_agent().prompt.to_user_format)
         except (OSError, ValueError) as exc:
             tail += (
                 f"\nThe shared context file could not be read: {exc}. Repair it in your workspace."

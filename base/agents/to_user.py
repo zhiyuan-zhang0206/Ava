@@ -7,11 +7,11 @@ import os
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ToUserFormat = Literal["html", "markdown"]
+from base.host.env.agent_slices import ToUserFormat
+
 MAX_DOCUMENT_BYTES = 256 * 1024
 
 
