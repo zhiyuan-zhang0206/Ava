@@ -13,7 +13,10 @@ tags:
 The first short viewport fills at most two older pages, stopping once content
 exceeds its height. Reaching the top alone never requests history. A fresh pull
 starting there reveals an 80px native scroll reserve prepared before browser
-hit-testing. Idle scrolling stops at the bottom of that reserve, so it adds no
+hit-testing. A view without available earlier history keeps its natural height
+and scrolling; the reserve is prepared when history becomes available. Once
+prepared, it remains fixed through requests and the final landing. Idle scrolling
+stops at the bottom of that reserve, so it adds no
 visible gap; the first physical wheel can scroll it immediately. The message list follows that
 native scroll downward while a clipped circular progress spinner emerges below
 HeaderBar. There are no visible pull/release instructions. A stationary gesture

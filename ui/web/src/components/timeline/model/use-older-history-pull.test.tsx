@@ -88,6 +88,25 @@ describe("native release-to-load older history", () => {
     return event;
   }
 
+  it("keeps unavailable history in natural flow and prepares only when history arrives", () => {
+    const loadPage = vi.fn(() => true);
+    const intent = vi.fn();
+    const { getByTestId, rerender } = render(<Harness available={false} loadPage={loadPage} intent={intent} />);
+    const viewport = getByTestId("viewport");
+    const space = getByTestId("space");
+    const content = space.nextElementSibling as HTMLElement;
+    expect(space.style.height).toBe("");
+    expect(content.style.minHeight).toBe("");
+    viewport.scrollTop = 40;
+    viewport.dispatchEvent(new Event("scroll"));
+    expect(viewport.scrollTop).toBe(40);
+    expect(wheel(viewport, -10).defaultPrevented).toBe(false);
+    expect(loadPage).not.toHaveBeenCalled();
+    rerender(<Harness available loadPage={loadPage} intent={intent} />);
+    expect(space.style.height).toBe("80px");
+    expect(viewport.scrollTop).toBe(80);
+  });
+
   it("stops an arriving gesture and its momentum at the top until a new gesture starts", () => {
     const { viewport, loadPage, offset } = setup();
     viewport.scrollTop = 120;
