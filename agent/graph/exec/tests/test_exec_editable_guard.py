@@ -13,10 +13,10 @@ import pytest
 from agent.graph.exec import _child_boundary
 from agent.graph.exec._result import ExecChildError, ExecCrashed, ExecDone
 from agent.graph.exec._subprocess import run_in_subprocess
+from ava.tests.fixtures.pin_agent import exec_context
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.release import editable_install
-from tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
 

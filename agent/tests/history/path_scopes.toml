@@ -1,4 +1,4 @@
-"tests.path_scoped.agent_tests" = [
+"agent.tests.agent_tests" = [
     "test_fork_notes.py",
     "test_history_dump.py",
 ]

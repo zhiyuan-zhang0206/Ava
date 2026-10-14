@@ -9,6 +9,7 @@ exports = ["claim"]
 "test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 
 [debt.env-patch]
+"agent_tests.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONIOENCODING" = 1
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONPATH" = 1
 "test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONUTF8" = 1

@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from agent.graph.exec import _subprocess
+from ava.tests.fixtures.pin_agent import exec_context
 from base.db import Database
-from tests.fixtures.pin_agent import exec_context
 
 
 async def test_real_missing_executable_is_not_an_unresolved_child(

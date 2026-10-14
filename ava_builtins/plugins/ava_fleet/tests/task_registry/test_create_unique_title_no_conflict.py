@@ -11,6 +11,7 @@ import psycopg
 import pytest
 
 import ava
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
     ignore_system_note,
@@ -21,7 +22,6 @@ from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
 )
-from tests.fixtures.pin_agent import pin_agent
 
 
 def test_create_unique_title_no_conflict(redis_url: str, db_conn, root_task_id: int):

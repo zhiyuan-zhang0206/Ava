@@ -4,7 +4,7 @@
     "test_manager.py",
     "test_manager_state.py",
 ]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     "test_manager.py",
     "test_manager_state.py",
 ]

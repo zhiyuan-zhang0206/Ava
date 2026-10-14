@@ -1,4 +1,4 @@
-"""ava.watcher generated-file housekeeping: per-agent script dir, stale pruning, session file lifetimes; split from ava/tests/watcher/test_watcher.py (task #4922)."""
+"""ava.watcher generated-file housekeeping: per-agent script dir, stale pruning, session file lifetimes; split from ava/tests/namespaces/watcher/test_watcher.py (task #4922)."""
 
 from __future__ import annotations
 

@@ -166,8 +166,8 @@ def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> Non
 
     from ava.gateway_client import get_born_chain, memory_search
     from ava.gateway_client.transport import agent_jitter_seconds
+    from ava.tests.fixtures.pin_agent import pin_no_identity
     from base.agents.context.identity import AgentIdentity
-    from tests.fixtures.pin_agent import pin_no_identity
 
     seen: list[str] = []
 
@@ -209,8 +209,8 @@ def test_explicit_host_transport_failure_keeps_its_own_client_and_error() -> Non
     import httpx
 
     from ava.gateway_client.transport import get
+    from ava.tests.fixtures.pin_agent import pin_no_identity
     from base.api_contracts.agent_contract import GatewayUnavailable
-    from tests.fixtures.pin_agent import pin_no_identity
 
     def fail(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("expected outage", request=request)

@@ -12,9 +12,9 @@ import psycopg
 import pytest
 
 import ava
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.api_contracts.agent_contract import InvalidModelConfig
 from base.config import settings
-from tests.fixtures.pin_agent import pin_agent
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 

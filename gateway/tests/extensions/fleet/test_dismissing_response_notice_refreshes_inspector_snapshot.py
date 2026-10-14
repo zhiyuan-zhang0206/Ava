@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 import ava
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.observation.snapshot import select_one
 from base.config import settings
 from base.lm.catalog import ModelCatalog
@@ -20,7 +21,6 @@ from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
 )
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import seed_agent
 from ops import lifecycle
-from tests.fixtures.pin_agent import pin_agent
 
 
 def test_dismissing_response_notice_refreshes_inspector_snapshot(

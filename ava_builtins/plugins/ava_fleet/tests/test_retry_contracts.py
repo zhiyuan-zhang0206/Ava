@@ -6,6 +6,11 @@ import httpx
 import pytest
 
 from ava.gateway_client import transport
+from ava.tests.fixtures.model_owner import model_installation as model_installation
+from ava.tests.fixtures.model_owner import sdk_model_owner as sdk_model_owner
+from ava.tests.fixtures.sdk import sdk_environment as sdk_environment
+from ava.tests.fixtures.sdk import sdk_identity as sdk_identity
+from ava.tests.fixtures.sdk import sdk_metering as sdk_metering
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.machine.tests.identity import set_machine_identity as set_machine_identity
@@ -16,11 +21,6 @@ from base.packages.tests.model_catalog import add_models as add_models
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from base.packages.tests.model_catalog import set_prices as set_prices
 from base.paths.tests.homes import unit_home as unit_home
-from tests.fixtures.unit.model_owner import model_installation as model_installation
-from tests.fixtures.unit.model_owner import sdk_model_owner as sdk_model_owner
-from tests.fixtures.unit.sdk import sdk_environment as sdk_environment
-from tests.fixtures.unit.sdk import sdk_identity as sdk_identity
-from tests.fixtures.unit.sdk import sdk_metering as sdk_metering
 
 
 @pytest.mark.parametrize(
@@ -250,8 +250,8 @@ def test_close_page_without_an_open_page_sends_no_write() -> None:
 def test_fleet_current_notice_call_retries_its_observed_intent_under_one_key(
     operation: str, failure: str
 ) -> None:
+    from ava.tests.fixtures.pin_agent import pin_agent
     from ava_builtins.plugins.ava_fleet.plugin import dismiss_notice, edit_notice
-    from tests.fixtures.pin_agent import pin_agent
 
     pin_agent(7)
     writes: list[httpx.Request] = []
@@ -287,8 +287,8 @@ def test_fleet_current_notice_call_retries_its_observed_intent_under_one_key(
 
 @pytest.mark.parametrize("operation", ["edit", "dismiss"])
 def test_fleet_current_notice_call_without_an_open_notice_sends_no_write(operation: str) -> None:
+    from ava.tests.fixtures.pin_agent import pin_agent
     from ava_builtins.plugins.ava_fleet.plugin import dismiss_notice, edit_notice
-    from tests.fixtures.pin_agent import pin_agent
 
     pin_agent(7)
     requests: list[httpx.Request] = []

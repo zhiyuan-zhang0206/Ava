@@ -17,12 +17,12 @@ from agent.graph.exec.tests.cancel_fixture import (
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 # Most tests here drive exec_node/llm_node with mocked run_in_subprocess / a
 # fake cancel_event, so they are deterministic and run in the parallel pool.
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.turn_identity import HostedTurnResources
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 

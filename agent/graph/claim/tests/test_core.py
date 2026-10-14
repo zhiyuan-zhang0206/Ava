@@ -19,6 +19,7 @@ import pytest
 
 import ava
 from ava.sdk_surface.installation import Installation
+from ava.tests.fixtures.pin_agent import pin_agent
 from base import telemetry
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -30,7 +31,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
 from base.paths import ava_home
-from tests.fixtures.pin_agent import pin_agent
 
 
 @pytest.fixture

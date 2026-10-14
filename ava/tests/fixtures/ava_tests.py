@@ -20,14 +20,14 @@ import pytest
 
 import ava
 from ava import shell
-
-# Registers `pty_service` for the paths this module governs.
-from base.sessions.pty.tests.pty_service import pty_service as pty_service
-from tests.fixtures.pin_agent import pin_agent
+from ava.tests.fixtures.pin_agent import pin_agent
 
 # One definition shared with the gateway and integration modules; imported here so it
 # registers for this module's paths.
-from tests.path_scoped.api_keys import mock_api_keys as mock_api_keys
+from base.config.tests.api_keys import mock_api_keys as mock_api_keys
+
+# Registers `pty_service` for the paths this module governs.
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 
 # Parallel xdist worker isolation: pty session records/sockets live under each
 # worker's own tmp test home, so workers cannot collide; still, each worker uses
@@ -40,7 +40,7 @@ _WORKER_NUM = int(re.sub(r"\D", "", os.environ.get("PYTEST_XDIST_WORKER", "")) o
 _TEST_AGENT_BASE = 900_000 + _WORKER_NUM * 10
 
 
-def _ensure_agents_meta_row(agent_id: int | None = None) -> None:
+def ensure_agents_meta_row(agent_id: int | None = None) -> None:
     """Ensure agents_meta has a row for the current agent (shell.sessions.new() reads session_index).
 
     Resets session_index to 0 so each test starts from a clean slate.
@@ -60,7 +60,7 @@ def _ensure_agents_meta_row(agent_id: int | None = None) -> None:
     # ids 900002-900010 into the production agents table. The rule lives in
     # base/db/test_db_guard.py (single source of truth, shared with the
     # session-start guard in tests/fixtures/provisioning.py).
-    assert_test_db_url(str(DB_URL), context="_ensure_agents_meta_row")
+    assert_test_db_url(str(DB_URL), context="ensure_agents_meta_row")
 
     aid = agent_id if agent_id is not None else ava.self.AGENT_ID
     with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
@@ -129,5 +129,5 @@ def _agent_row(_isolated_agent: None, db_conn: object) -> int:
     counter at 0 so each test has a deterministic, independent starting point.
     Returns the agent id in use.
     """
-    _ensure_agents_meta_row()
+    ensure_agents_meta_row()
     return ava.self.AGENT_ID

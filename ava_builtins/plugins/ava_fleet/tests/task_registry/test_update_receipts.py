@@ -7,6 +7,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import _task_receipts, task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent, seed_owned_task
@@ -16,7 +17,6 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from tests.fixtures.pin_agent import pin_agent
 
 
 def _facts(db: psycopg.Connection, tid: int) -> tuple[object, object, object]:

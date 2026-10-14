@@ -7,7 +7,7 @@
 "tests.path_scoped.integration_tests" = [
     "test_cross_machine_dispatch.py",
 ]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     "test_agent_skill_view.py",
     "test_cluster_rpc.py",
     "test_cluster_status_op.py",

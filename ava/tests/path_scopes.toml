@@ -1,6 +1,6 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
-"tests.path_scoped.ava_tests" = [
+"ava.tests.fixtures.ava_tests" = [
     "test_agent_identity.py",
     "test_attachment_transport.py",
     "test_files.py",
@@ -21,11 +21,11 @@
     "test_core.py",
     "test_security.py",
 ]
-"tests.fixtures.unit.model_owner" = [
+"ava.tests.fixtures.model_owner" = [
     "test_attachment_transport.py",
     "test_core.py",
     "test_security.py",
 ]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     "."
 ]

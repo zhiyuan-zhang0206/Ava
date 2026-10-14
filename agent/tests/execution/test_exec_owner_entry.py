@@ -15,6 +15,7 @@ import psutil
 import pytest
 
 from agent.graph.exec.protocol import read_result, write_request
+from ava.tests.fixtures.pin_agent import exec_context
 from base.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,
@@ -25,7 +26,6 @@ from base.agents.incarnation.exec_owner_protocol import (
     validate_native_ready,
 )
 from base.agents.incarnation.resources import ExecAllocation, ResourceProcess
-from tests.fixtures.pin_agent import exec_context
 
 
 def exec_owner_context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:

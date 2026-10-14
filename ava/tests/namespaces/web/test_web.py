@@ -24,8 +24,8 @@ from pydantic import SecretStr
 
 import ava
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
-from ava.tests.web._web_helpers import FakeResp, WebHarness
-from ava.tests.web._web_helpers import web_harness as web_harness
+from ava.tests.namespaces.web._web_helpers import FakeResp, WebHarness
+from ava.tests.namespaces.web._web_helpers import web_harness as web_harness
 from ava.web import FetchError, WebError
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog

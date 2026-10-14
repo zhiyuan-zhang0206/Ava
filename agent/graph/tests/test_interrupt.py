@@ -22,6 +22,7 @@ from agent.graph import _init_context, interrupt
 from agent.graph.hooks import compact
 from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm_errors import LlmLedger
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.clock import Clock
@@ -43,7 +44,6 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _TIMEOUT_S = 5.0
 

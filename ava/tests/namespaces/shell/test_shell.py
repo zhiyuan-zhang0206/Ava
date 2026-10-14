@@ -33,8 +33,8 @@ pytestmark = [
 ]
 
 # The shared PTY/agent isolation fixtures (`pty_service`, `_isolated_agent`,
-# `_agent_row`) and the `_ensure_agents_meta_row` helper live in
-# `tests/path_scoped/ava_tests.py` so both this module and `test_watcher.py` inherit
+# `_agent_row`) and the `ensure_agents_meta_row` helper live in
+# `ava/tests/fixtures/ava_tests.py` so both this module and `test_watcher.py` inherit
 # them.
 
 

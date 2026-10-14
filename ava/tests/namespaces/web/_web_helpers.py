@@ -1,4 +1,4 @@
-"""Shared urllib fakes and the web harness for the ava.web test files; split from ava/tests/web/test_web.py (task #4922)."""
+"""Shared urllib fakes and the web harness for the ava.web test files; split from ava/tests/namespaces/web/test_web.py (task #4922)."""
 
 from __future__ import annotations
 

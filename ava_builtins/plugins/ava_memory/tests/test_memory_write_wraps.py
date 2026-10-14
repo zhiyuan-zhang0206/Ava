@@ -20,8 +20,8 @@ import ava
 from agent.state import build_agent_state
 from ava import gateway_client
 from ava.sdk_surface import install, process_context
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.packages.plugins.extensions import ExtensionRegistry
-from tests.fixtures.pin_agent import pin_agent
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _SHARED = "ava_memory__shared_notes"

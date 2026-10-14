@@ -21,7 +21,7 @@ def _write_isolated_home(home: Path) -> None:
 
     The disable machinery under test needs no plugin surface; this keeps the real
     load light (no DB-touching builtins) and hermetic. Mirrors
-    `ava/tests/watcher/test_watcher_plugin_load.py`'s recipe."""
+    `ava/tests/namespaces/watcher/test_watcher_plugin_load.py`'s recipe."""
     import json
 
     from base import paths

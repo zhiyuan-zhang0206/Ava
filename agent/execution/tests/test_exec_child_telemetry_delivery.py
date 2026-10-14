@@ -36,7 +36,7 @@ from agent.graph.exec.protocol import (
     write_request,
 )
 from ava.sdk_surface import process_context
-from tests.fixtures.pin_agent import exec_context
+from ava.tests.fixtures.pin_agent import exec_context
 
 # Fixed test identity — the child never dials a real DB/Redis here.
 _AGENT_ID = 424242
@@ -279,10 +279,10 @@ def test_unfinished_ordinary_delivery_preserves_success_and_attempts_otlp_tail(
 
     from agent.execution import child
     from agent.graph.exec.protocol import ResultPayload, write_result
+    from ava.tests.fixtures.pin_agent import pin_agent
     from base import telemetry
     from base.agents.context.clients import ClientSet
     from base.telemetry.otlp.telemetry_otlp import ExportingEventPipeline
-    from tests.fixtures.pin_agent import pin_agent
 
     result_path = str(tmp_path / "result.json")
     payload = ResultPayload(kind="done", code_reached=True)

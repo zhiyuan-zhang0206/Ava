@@ -7,6 +7,7 @@ from threading import Event
 import psycopg
 import pytest
 
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
@@ -15,7 +16,6 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from tests.fixtures.pin_agent import pin_agent
 
 
 def test_borrowed_identity_can_replay_native_operation_until_lease_ends(

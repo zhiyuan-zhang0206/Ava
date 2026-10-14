@@ -13,6 +13,7 @@ import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, AgentStatus
 from ava.sdk_surface.installation import Installation
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -21,7 +22,6 @@ from gateway.tests.agents.sdk_support import (
     sdk_via_gateway as sdk_via_gateway,
 )
 from gateway.tests.agents.sdk_support import spawn_agent
-from tests.fixtures.pin_agent import pin_agent
 
 
 class TestGetNeighbors:

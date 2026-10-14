@@ -14,6 +14,7 @@ from agent.graph import llm_node
 from agent.graph.llm_errors import FatalProviderError, LlmLedger
 from agent.graph.tests.test_llm_helpers import CONFIG as _LLM_CONFIG
 from agent.graph.tests.test_llm_helpers import make_runtime as _llm_make_runtime
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents.context import AvaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -35,7 +36,6 @@ from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
     spawn_child_under_idling_ancestor,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 async def test_llm_node_closes_circuit_on_success(

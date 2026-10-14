@@ -1,4 +1,4 @@
-"""Search tests: Brave Search API urllib thin wrapper, no real API calls, monkeypatch `urllib.request.urlopen`; split from ava/tests/web/test_web.py (task #4922)."""
+"""Search tests: Brave Search API urllib thin wrapper, no real API calls, monkeypatch `urllib.request.urlopen`; split from ava/tests/namespaces/web/test_web.py (task #4922)."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ import ava
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.sdk_surface.installation import Installation
 from ava.sdk_surface.settings import config_authority
-from ava.tests.web._web_helpers import FakeResp, WebHarness
-from ava.tests.web._web_helpers import web_harness as web_harness
+from ava.tests.namespaces.web._web_helpers import FakeResp, WebHarness
+from ava.tests.namespaces.web._web_helpers import web_harness as web_harness
 from ava.web import SearchError, WebError, wiring
 from base.config import settings
 from base.config.service_read import ConfigAuthority

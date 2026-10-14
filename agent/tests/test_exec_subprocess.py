@@ -32,14 +32,14 @@ from agent.graph.exec._result import (
 )
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec._subprocess import run_in_subprocess
+from ava.tests.fixtures.pin_agent import exec_context
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.env.dotenv_file import upsert_env
 from base.host.proc import kill_process_tree
 from base.paths import logs_dir
-from tests._test_env_file import rewrite_line
-from tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
 
@@ -160,7 +160,7 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(
     original_env = env_path.read_text()
     log_path = logs_dir() / f"agent-{_AGENT_ID}.log"
     log_offset = log_path.stat().st_size if log_path.exists() else 0
-    rewrite_line(env_path, "AVA_TELEMETRY_OTLP_ENABLED", "true")
+    upsert_env(env_path, {"AVA_TELEMETRY_OTLP_ENABLED": "true"})
     try:
         result = await _run(
             tmp_path,

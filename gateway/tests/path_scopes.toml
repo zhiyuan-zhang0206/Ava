@@ -16,7 +16,7 @@
     "test_status_cluster.py",
     "test_understanding_build_endpoints.py",
 ]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     ".",
 ]
 "tests.fixtures.unit.gateway" = [

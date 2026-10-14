@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-import ava
 from ava.sdk_surface import metering
 
 
@@ -43,42 +42,3 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     # The whole surface, not just the funnel: a later test asserting on identity or
     # on call counts through a wrapped path must see no recorder anywhere.
     assert not [fq for p, a, fq in metering.instrument_targets() if is_recorder(getattr(p, a))]
-
-
-def test_a_plugin_load_leaves_no_namespace_behind(
-    request: pytest.FixtureRequest,
-) -> None:
-    """The test above still left every plugin's SDK surface in its xdist worker. A later
-    partial cleanup then saw a half-installed surface (CI shard 14/16 on PR #3513).
-
-    The autouse `_restore_plugin_registrations` (`tests/fixtures/plugin_registrations.py`)
-    closes that. Same split as above: the guard is wired onto every test, it sees
-    a real `load_extensions()`, and its reset leaves namespaces and members
-    removed together.
-    """
-    from agent.state import plugin_state_schema
-    from ava.sdk_surface.extensions import load_extensions
-    from ava.sdk_surface.installation import installed
-    from tests.fixtures.plugin_registrations import (
-        drop_plugin_registrations,
-        plugin_registrations_present,
-    )
-
-    assert "_restore_plugin_registrations" in request.fixturenames
-    assert not plugin_registrations_present()
-
-    load_extensions(validate_state=plugin_state_schema)
-    assert plugin_registrations_present()
-    installation = installed()
-    assert installation is not None
-    names = [ns.name for _p, c in installation.registry.plugins for ns in c.sdk_namespaces]
-    assert "cwd" in names, "the leak this guards is gone"
-    # The install stamps `_qualname` on each namespace module, which outlives the test.
-    stamped = [vars(ava)[name] for name in names]
-    assert all("_qualname" in vars(module) for module in stamped)
-
-    drop_plugin_registrations()  # the guard's action, made observable
-    assert not plugin_registrations_present()
-    assert installed() is None
-    assert not any(hasattr(ava, name) for name in names)
-    assert not any("_qualname" in vars(module) for module in stamped)

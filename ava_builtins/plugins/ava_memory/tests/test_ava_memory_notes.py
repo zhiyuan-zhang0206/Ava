@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agent.graph.prompt.context_notes import FRAMEWORK_NOTES, context_notes
+from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
@@ -25,7 +26,6 @@ from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 def _default_reader(domain: str, field: str) -> Any:

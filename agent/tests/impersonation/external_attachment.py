@@ -17,6 +17,7 @@ from ava import impersonation
 from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.impersonation import manifest
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -24,7 +25,6 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
-from tests.fixtures.pin_agent import pin_agent
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:

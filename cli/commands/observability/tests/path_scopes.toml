@@ -10,7 +10,7 @@
     "test_otel_port_deviation.py",
     "test_trace_ship.py",
 ]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     "test_atomic_writer_contracts.py",
     "test_converge_lgtm.py",
     "test_lgtm_station.py",

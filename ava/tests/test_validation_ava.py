@@ -15,7 +15,7 @@ from ava import files as _files
 from ava import ui as _ui
 from ava import watcher as _watcher
 from ava.sdk_surface import agent_identity
-from tests.fixtures.pin_agent import pin_agent
+from ava.tests.fixtures.pin_agent import pin_agent
 
 
 class TestFilesEntries:

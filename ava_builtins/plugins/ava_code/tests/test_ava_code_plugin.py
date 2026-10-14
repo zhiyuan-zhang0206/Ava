@@ -15,6 +15,7 @@ import pytest
 import ava
 from agent.state import BaseAgentState, CompactState, build_agent_state
 from ava.sdk_surface import install, process_context
+from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from ava_builtins.plugins.ava_code.tests.surface_support import code_registry
 from base.config.service_read import ConfigAuthority
 from base.lm import factory
@@ -22,7 +23,6 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
 )
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)

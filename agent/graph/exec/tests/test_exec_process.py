@@ -37,13 +37,13 @@ from agent.graph.exec._process import (
 from agent.graph.exec._result import ExecCrashed
 from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import collect_child
+from ava.tests.fixtures.pin_agent import exec_context
 from base.db import Database
 from base.native_process import exec_domain
 from base.native_process.ownership import OwnedProcess
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from base.sessions.posixproc import process_group_has_live_members
-from tests.e2e.process_support import kill_group_or_prove_already_gone
-from tests.fixtures.pin_agent import exec_context
+from base.sessions.pty.tests.process_groups import kill_group_or_prove_already_gone
 
 _AGENT_ID = 424242
 

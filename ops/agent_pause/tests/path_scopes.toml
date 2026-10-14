@@ -5,7 +5,7 @@
     "test_im_bridge_shutdown.py",
     "test_labeler_shutdown.py",
 ]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     "test_delivery_watchdog_shutdown.py",
     "test_im_bridge_shutdown.py",
     "test_labeler_shutdown.py",
