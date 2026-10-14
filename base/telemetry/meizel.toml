@@ -1,4 +1,4 @@
-exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitter.py", "event_store.py", "lgtm_local.py", "loki_index_labels.py", "metrics", "observability.py", "otlp", "pipeline_build.py", "process_logging.py", "station_endpoint.py", "trace_mirror.py", "tracing.py"]
+exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitter.py", "event_store.py", "lgtm_local.py", "loki_index_labels.py", "metrics", "observability.py", "otlp", "pipeline_build.py", "process_logging.py", "station_endpoint.py", "tests", "trace_mirror.py", "tracing.py"]
 
 [uses]
 "__init__.py" = ["delivery", "emitter.py", "pipeline_build.py"]
