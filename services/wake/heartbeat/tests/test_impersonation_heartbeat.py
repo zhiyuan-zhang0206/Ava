@@ -224,8 +224,8 @@ def test_sdk_attachment_can_pause_heartbeat(
     from agent.state import BaseAgentState
     from ava import impersonation
     from ava.impersonation import attachment as attachment_module
+    from ava.tests.fixtures.pin_agent import pin_agent
     from base.agents.sdk import call_policy
-    from tests.fixtures.pin_agent import pin_agent
 
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 

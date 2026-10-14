@@ -22,6 +22,7 @@ from ava import impersonation
 from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.installation import Installation
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
 from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
@@ -33,7 +34,6 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from tests.fixtures.pin_agent import pin_agent
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:

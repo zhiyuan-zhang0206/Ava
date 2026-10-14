@@ -2,7 +2,6 @@
 "test_help_renderer.py" = "executes generated module source to render help for it"
 
 [uses]
-"test_metering.py" = ["child_gate_without_agent_layer.py"]
 "test_sampling_atexit.py" = ["child_sampling_atexit.py"]
 
 [debt.env-patch]

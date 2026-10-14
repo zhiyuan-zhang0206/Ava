@@ -1,11 +1,11 @@
-exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guards.py", "identity_restore.py", "leak_guard.py", "path_scopes.py", "pin_agent.py", "plugin_registrations.py", "provisioning.py", "static_environment.py", "unit"]
+exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guards.py", "identity_restore.py", "leak_guard.py", "path_scopes.py", "plugin_registrations.py", "provisioning.py", "static_environment.py", "unit"]
 
 [uses]
 "guards.py" = ["env_bootstrap.py"]
 "provisioning.py" = ["env_bootstrap.py", "guards.py", "static_environment.py"]
 "static_environment.py" = ["guards.py"]
-"tests" = ["env_bootstrap.py", "guards.py", "provisioning.py", "static_environment.py"]
-"unit" = ["gateway_config.py", "identity_restore.py", "pin_agent.py"]
+"tests" = ["env_bootstrap.py", "guards.py", "plugin_registrations.py", "provisioning.py", "static_environment.py"]
+"unit" = ["gateway_config.py"]
 
 [loads]
 "path_scopes.py" = ["tests/path_scoped"]
@@ -23,8 +23,6 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 "guards.py#monkeypatch.setattr services.derived.labeler.labeler.build_chat_model" = 1
 "guards.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.run_bounded" = 1
 "guards.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_bounded" = 1
-"pin_agent.py#assignment ava.context" = 1
-"pin_agent.py#del ava.context" = 1
 "provisioning.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "provisioning.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
 

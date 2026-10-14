@@ -16,13 +16,13 @@ from loguru import logger
 from agent.graph.exec._child_boundary import result_from_payload
 from agent.graph.exec._result import ExecCrashed, ExecDone
 from agent.graph.exec._subprocess import run_in_subprocess
+from ava.tests.fixtures.pin_agent import exec_context
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.memory_pressure import PressureLevel
 from base.host.proc import kill_process_tree
 from base.native_process.exec_kill_notice import notice_path, read_notice
 from services.agent_runner.agent_host.exec_memory_guard import ExecDomain, ExecMemoryGuard
-from tests.fixtures.pin_agent import exec_context
 
 _GIB = 1024**3
 

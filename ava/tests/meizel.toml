@@ -1,10 +1,21 @@
+exports = ["fixtures"]
+
 [external]
 "test_self_evolution_evaluate.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 
 [uses]
-"test_agent_identity.py" = ["bootstrap"]
+"bootstrap" = ["fixtures"]
+"failures" = ["fixtures"]
+"namespaces" = ["fixtures"]
+"skills" = ["fixtures"]
+"test_agent_identity.py" = ["bootstrap", "fixtures"]
+"test_core.py" = ["fixtures"]
+"test_files.py" = ["fixtures"]
 "test_log_batching.py" = ["bootstrap"]
 "test_metering_ava.py" = ["bootstrap"]
+"test_security.py" = ["fixtures"]
+"test_turn_identity_ava.py" = ["fixtures"]
+"test_validation_ava.py" = ["fixtures"]
 
 [debt.env-patch]
 "test_agent_identity.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 6

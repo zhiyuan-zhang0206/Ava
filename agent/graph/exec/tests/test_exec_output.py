@@ -17,9 +17,9 @@ import pytest
 
 from agent.graph.exec.output import format_elapsed, wrap_code_output
 from agent.graph.exec.tests.output_inputs import CropConfig
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.clock import SYSTEM_TIMERS, Clock
 from base.config import settings
-from tests.fixtures.pin_agent import pin_agent
 
 _TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand

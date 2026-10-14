@@ -5,7 +5,7 @@ A hosted turn context stays authoritative over both."""
 import pytest
 
 import ava
-from tests.fixtures.pin_agent import exec_context, pin_agent, pin_no_identity
+from ava.tests.fixtures.pin_agent import exec_context, pin_agent, pin_no_identity
 
 
 def test_sdk_external_profile_overrides_inherited_agent_identity(

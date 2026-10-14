@@ -21,6 +21,7 @@ from ava.boot import process_clients
 from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
+from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
@@ -35,7 +36,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.loading import registry as registry_module
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:

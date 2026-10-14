@@ -13,6 +13,6 @@
 "tests.path_scoped.services_tests" = [
     "test_native_storage_diagnostics.py",
 ]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     "test_pooler_clients.py",
 ]

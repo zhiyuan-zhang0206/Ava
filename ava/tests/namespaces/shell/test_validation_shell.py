@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from ava import shell as _shell
-from tests.fixtures.pin_agent import pin_agent
+from ava.tests.fixtures.pin_agent import pin_agent
 
 
 class TestShellEntries:

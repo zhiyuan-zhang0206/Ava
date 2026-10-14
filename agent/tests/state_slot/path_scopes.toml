@@ -1,1 +1,1 @@
-"tests.path_scoped.agent_tests" = ["."]
+"agent.tests.agent_tests" = ["."]

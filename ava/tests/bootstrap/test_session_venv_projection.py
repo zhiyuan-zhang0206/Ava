@@ -11,8 +11,8 @@ import pytest
 
 from ava.shell import sessions
 from ava.shell.tests.support import FakeDatabase
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.host.env import bootstrap, dotenv_boot
-from tests.fixtures.pin_agent import pin_agent
 
 _CHILD = Path(__file__).with_name("child_sdk_probes.py")
 

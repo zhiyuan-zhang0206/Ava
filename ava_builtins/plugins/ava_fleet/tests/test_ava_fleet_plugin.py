@@ -27,6 +27,7 @@ import ava.agents
 from agent.graph.prompt.system_prompt import build_system_prompt
 from ava.sdk_surface import install
 from ava.sdk_surface.installation import installed
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet.tests.registry_support import (
     fleet_registry,
     installed_fleet_surface,
@@ -36,7 +37,6 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
-from tests.fixtures.pin_agent import pin_agent
 
 
 def _fleet_slices(**changes: Any) -> AgentSlices:

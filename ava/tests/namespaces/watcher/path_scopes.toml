@@ -1,4 +1,4 @@
-"tests.path_scoped.ava_tests" = [
+"ava.tests.fixtures.ava_tests" = [
     "test_watcher.py",
     "test_watcher_commands.py",
     "test_watcher_files.py",

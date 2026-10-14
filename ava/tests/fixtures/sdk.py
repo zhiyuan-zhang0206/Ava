@@ -6,6 +6,7 @@ neither global guard needs to import the SDK to protect an unrelated collector.
 """
 
 from collections.abc import Iterator
+from types import ModuleType
 
 import pytest
 
@@ -19,7 +20,6 @@ from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
-from tests.fixtures.identity_restore import SdkIdentitySlot
 
 __all__ = ["sdk_environment", "sdk_identity", "sdk_metering"]
 
@@ -57,7 +57,7 @@ def sdk_environment(
 
 
 @pytest.fixture
-def sdk_identity(sdk_environment: AvaContext) -> SdkIdentitySlot[AvaContext]:
+def sdk_identity(sdk_environment: AvaContext) -> ModuleType:
     """Supply the real context slot to the global identity restoration window."""
     return ava
 

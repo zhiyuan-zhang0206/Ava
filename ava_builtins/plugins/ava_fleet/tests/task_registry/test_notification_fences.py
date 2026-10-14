@@ -6,6 +6,7 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
@@ -23,7 +24,6 @@ from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from services.wake.delivery_watchdog.dead_letter import dead_letter_stale_pending_terminated
 from tests.components.ops.resurrection_support import status, terminated
-from tests.fixtures.pin_agent import pin_agent
 
 
 def test_reassigned_task_refuses_delayed_home_wake(

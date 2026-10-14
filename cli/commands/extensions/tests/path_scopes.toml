@@ -5,7 +5,7 @@
 ]
 "base.paths.tests.homes" = ["."]
 "base.cluster.machine.tests.identity" = ["."]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     "test_external_skills.py",
     "test_guide_package.py",
     "test_manifest_gate.py",

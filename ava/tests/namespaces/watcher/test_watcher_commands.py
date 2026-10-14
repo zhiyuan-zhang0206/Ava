@@ -1,4 +1,4 @@
-"""ava.watcher command parsing, validation, and timezone handling; split from ava/tests/watcher/test_watcher.py (task #4922)."""
+"""ava.watcher command parsing, validation, and timezone handling; split from ava/tests/namespaces/watcher/test_watcher.py (task #4922)."""
 
 from __future__ import annotations
 

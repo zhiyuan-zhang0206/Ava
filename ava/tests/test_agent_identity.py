@@ -13,7 +13,7 @@ import pytest
 
 import ava
 from ava.sdk_surface import agent_identity
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
+from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 _CHILD = Path(__file__).parent / "bootstrap" / "child_sdk_probes.py"
 

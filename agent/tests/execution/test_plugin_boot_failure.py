@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from agent.graph.exec.protocol import read_result, write_request
-from tests.fixtures.pin_agent import exec_context
+from ava.tests.fixtures.pin_agent import exec_context
 
 
 @pytest.mark.parametrize("error_type", ["AttributeError", "RuntimeError", "OSError"])

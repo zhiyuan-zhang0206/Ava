@@ -30,6 +30,7 @@ from agent.graph.tests.test_llm_helpers import (
     ledger as ledger,
 )
 from agent.state import AgentState
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.config import settings
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
@@ -37,7 +38,6 @@ from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 async def test_llm_node_billing_error_logs_billing_vendor_and_model(

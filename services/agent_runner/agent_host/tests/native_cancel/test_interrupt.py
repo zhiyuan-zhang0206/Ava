@@ -18,6 +18,8 @@ from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
+from ava.tests.fixtures.pin_agent import exec_context
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents.inbox.native_cancel import accept_native_cancel
 from base.agents.incarnation.exec_owner_protocol import OwnerClosed
 from base.agents.incarnation.native_work_models import NativeCancelMarker
@@ -33,8 +35,6 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.managed_work import managed_work
-from tests.fixtures.pin_agent import exec_context
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 async def test_real_managed_exec_abort_closes_resources_before_original_ack(

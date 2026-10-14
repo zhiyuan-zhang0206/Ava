@@ -34,6 +34,7 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -42,7 +43,6 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 build_model_catalog()
 

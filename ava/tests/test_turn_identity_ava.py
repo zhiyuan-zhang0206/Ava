@@ -8,9 +8,9 @@ import pytest
 
 import ava
 from ava.sdk_surface import agent_identity, process_context
+from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)

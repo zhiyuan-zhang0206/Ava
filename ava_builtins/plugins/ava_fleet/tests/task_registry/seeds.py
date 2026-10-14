@@ -8,8 +8,8 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import task_registry
-from tests.fixtures.pin_agent import pin_agent
 
 
 def seed_agent(db: psycopg.Connection, *, status: str = "running", spawner: str = "test") -> int:

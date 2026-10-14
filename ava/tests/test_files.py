@@ -7,7 +7,7 @@ Relative path behavior: does not depend on system cwd; by default resolves to th
 When identity is not bound (pre-bootstrap, `_agent_id = None`), resolves to `$HOME`.
 `~/...` goes through expanduser and always points to $HOME. Absolute paths are unchanged.
 
-workspace mock: shared `workspace` fixture (tests/fixtures/unit/workspace.py) explicitly pins
+workspace mock: shared `workspace` fixture (ava/tests/fixtures/workspace.py) explicitly pins
 `_agent_id=1` and points `AVA_HOME` to tmp_path, returns the resolution base
 `<tmp>/workspaces/1` (workspace_dir is created on demand, not pre-built).
 
@@ -25,8 +25,8 @@ from unittest.mock import patch
 import pytest
 
 import ava
-from tests.fixtures.pin_agent import pin_no_identity
-from tests.fixtures.unit.workspace import workspace as workspace
+from ava.tests.fixtures.pin_agent import pin_no_identity
+from ava.tests.fixtures.workspace import workspace as workspace
 
 # Permission tests are ineffective when run as root (root bypasses all fs permissions). CI container
 # defaults to root, local dev / prod is non-root.

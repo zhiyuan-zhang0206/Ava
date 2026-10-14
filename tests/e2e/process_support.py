@@ -20,8 +20,8 @@ import psutil
 import pytest
 
 from base.deploy.lifecycle.tests.serving_entrypoint import inject_fixture_gate
-from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty import client as pty_client
+from base.sessions.pty.tests.process_groups import kill_group_or_prove_already_gone
 from tests.e2e._credentials import current_credentials
 
 __all__ = [
@@ -32,8 +32,6 @@ __all__ = [
     "ResidueSweepPlan",
     "dead_server_evidence",
     "fixture_entrypoint",
-    "kill_group_if_alive",
-    "kill_group_or_prove_already_gone",
     "listener_evidence",
     "managed_proc",
     "proc_log_tail",
@@ -137,37 +135,6 @@ def wait_for_port(host: str, port: int, timeout: float = 30.0, *, label: str) ->
     raise RuntimeError(
         f"Waiting for {label} ({host}:{port}) timed out after {timeout}s; last error: {last_err!r}"
     )
-
-
-def kill_group_or_prove_already_gone(
-    proc: subprocess.Popen[bytes] | subprocess.Popen[str], exc: OSError
-) -> None:
-    """After an owned group signal refusal, prove its leader and members are gone.
-
-    Callers create a new session (pgid == pid). A leader can exit between the
-    liveness query and killpg; macOS can return EPERM for a zombie-only group.
-    Require both a bounded leader wait and absence of live group members;
-    an unexplained refusal remains a real teardown failure.
-    """
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        raise AssertionError(
-            f"killpg({proc.pid}, ...) raised {exc!r} but the leader never exited"
-        ) from exc
-    if process_group_has_live_members(proc.pid):
-        raise AssertionError(
-            f"killpg({proc.pid}, ...) raised {exc!r} but its process group still has live members"
-        ) from exc
-
-
-def kill_group_if_alive(proc: subprocess.Popen[bytes] | subprocess.Popen[str]) -> None:
-    """SIGKILL an owned live group, proving it gone if the signal is refused."""
-    if proc.poll() is None:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (PermissionError, ProcessLookupError) as exc:
-            kill_group_or_prove_already_gone(proc, exc)
 
 
 _SIGKILL_GRACE_SEC = 2.0

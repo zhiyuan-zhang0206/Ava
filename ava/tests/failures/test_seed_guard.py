@@ -1,4 +1,4 @@
-"""The _ensure_agents_meta_row seed helper must refuse a production DB URL
+"""The ensure_agents_meta_row seed helper must refuse a production DB URL
 before opening any connection.
 
 2026-08-12 incident class: synthetic agent rows (spawner="test", high-range
@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from base.config import settings
-
 # The module that holds the `tests/ava` fixtures and the seed helper.
-from tests.path_scoped import ava_tests as conftest
+from ava.tests.fixtures import ava_tests as conftest
+from base.config import settings
 
 
 def test_ensure_agents_meta_row_refuses_prod_db(
@@ -26,7 +25,7 @@ def test_ensure_agents_meta_row_refuses_prod_db(
         "postgresql://ava_main:***@10.0.0.2:6433/ava_main",
     )
     with pytest.raises(RuntimeError, match="production database"):
-        conftest._ensure_agents_meta_row(900_000)
+        conftest.ensure_agents_meta_row(900_000)
 
 
 def test_ensure_agents_meta_row_refuses_before_connecting(
@@ -39,8 +38,8 @@ def test_ensure_agents_meta_row_refuses_before_connecting(
     )
 
     def _boom(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("_ensure_agents_meta_row connected despite the guard")
+        raise AssertionError("ensure_agents_meta_row connected despite the guard")
 
     monkeypatch.setattr("psycopg.connect", _boom)
     with pytest.raises(RuntimeError, match="production database"):
-        conftest._ensure_agents_meta_row(900_000)
+        conftest.ensure_agents_meta_row(900_000)

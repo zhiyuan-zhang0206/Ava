@@ -38,11 +38,11 @@ from agent.graph.exec.protocol import (
     write_request,
     write_result,
 )
+from ava.tests.fixtures.pin_agent import exec_context
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.paths import ava_home
-from tests.fixtures.pin_agent import exec_context
 
 _ENVELOPE_CRASH_CHILD = Path(__file__).parent / "resources" / "_envelope_crash_child.py"
 

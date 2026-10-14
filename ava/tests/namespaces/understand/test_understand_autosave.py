@@ -1,4 +1,4 @@
-"""ava.understand auto-save to .exec_output; split from ava/tests/understand/test_understand.py (task #4922)."""
+"""ava.understand auto-save to .exec_output; split from ava/tests/namespaces/understand/test_understand.py (task #4922)."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from ava.tests.understand.provider_support import ProviderCapture
-from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
-from ava.tests.understand.provider_support import understand_deps as understand_deps
+from ava.tests.fixtures.pin_agent import pin_no_identity
+from ava.tests.namespaces.understand.provider_support import ProviderCapture
+from ava.tests.namespaces.understand.provider_support import mock_deepseek as mock_deepseek
+from ava.tests.namespaces.understand.provider_support import understand_deps as understand_deps
 from ava.understand.answer import UnderstandDeps
-from tests.fixtures.pin_agent import pin_no_identity
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 

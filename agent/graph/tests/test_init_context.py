@@ -23,6 +23,7 @@ from agent.graph._init_context import init_context_node
 from agent.graph.hooks import compact
 from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState, ContextReset
+from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
@@ -41,7 +42,6 @@ from base.packages.plugins.extensions import (
     PluginContributions,
 )
 from base.paths import ava_home, skills_dir
-from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _config(tid: int) -> RunnableConfig:

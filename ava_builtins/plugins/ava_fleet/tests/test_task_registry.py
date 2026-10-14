@@ -17,6 +17,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.notes import record_notes
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
@@ -27,7 +28,6 @@ from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
 )
 from base.db import fetch_one
-from tests.fixtures.pin_agent import pin_agent
 
 
 def _persisted_remind_interval_seconds(db: psycopg.Connection, task_id: int) -> int | None:

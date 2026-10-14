@@ -1,6 +1,6 @@
-"tests.path_scoped.agent_tests" = [
+"agent.tests.agent_tests" = [
 ]
-"tests.path_scoped.ava_tests" = [
+"ava.tests.fixtures.ava_tests" = [
     "test_hosted_dispatcher_cancellation.py",
 ]
 "tests.path_scoped.services_tests" = [

@@ -11,8 +11,8 @@ import pytest
 import ava
 from ava.sdk_surface import process_context
 from ava.security import is_flagged, scan_content
+from ava.tests.fixtures.workspace import workspace as workspace
 from base.paths import ava_home
-from tests.fixtures.unit.workspace import workspace as workspace
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 

@@ -30,7 +30,7 @@ from agent.graph.exec.protocol import (
 )
 from ava import boot
 from ava.sdk_surface.installation import Installation
-from tests.fixtures.pin_agent import exec_context
+from ava.tests.fixtures.pin_agent import exec_context
 
 # Fixed test identity — the child never dials a real DB/Redis here.
 AGENT_ID = 424242

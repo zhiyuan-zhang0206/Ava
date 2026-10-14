@@ -10,6 +10,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import _task_creation_receipts, _task_update, task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
@@ -20,7 +21,6 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.tasks import model
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from tests.fixtures.pin_agent import pin_agent
 
 
 def _facts(db: psycopg.Connection) -> tuple[object, ...]:

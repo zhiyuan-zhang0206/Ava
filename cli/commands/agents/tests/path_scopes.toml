@@ -3,7 +3,7 @@
 "tests.path_scoped.cli_tests" = [
     ".",
 ]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     "test_delivery.py",
     "test_impersonation_agents.py",
     "test_impersonation_bridge.py",

@@ -11,10 +11,10 @@ import ava
 from ava.gateway_client.transport import use_client
 from ava.sdk_surface import metering, process_context
 from ava.sdk_surface.installation import Installation
+from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage
 from base.agents.sdk.tally import SdkCallTally
-from tests.fixtures.pin_agent import pin_agent
 
 
 @pytest.mark.parametrize("committed", [False, True])

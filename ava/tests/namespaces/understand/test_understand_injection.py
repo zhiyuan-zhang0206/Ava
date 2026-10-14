@@ -1,4 +1,4 @@
-"""ava.understand input/output injection scanning (understand.input / understand.output findings); split from ava/tests/understand/test_understand.py (task #4922)."""
+"""ava.understand input/output injection scanning (understand.input / understand.output findings); split from ava/tests/namespaces/understand/test_understand.py (task #4922)."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ import pytest
 
 import ava
 from ava.sdk_surface import process_context
-from ava.tests.understand.provider_support import ProviderCapture
-from ava.tests.understand.provider_support import fake_image as fake_image
-from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
-from ava.tests.understand.provider_support import mock_gemini as mock_gemini
-from ava.tests.understand.provider_support import understand_deps as understand_deps
+from ava.tests.namespaces.understand.provider_support import ProviderCapture
+from ava.tests.namespaces.understand.provider_support import fake_image as fake_image
+from ava.tests.namespaces.understand.provider_support import mock_deepseek as mock_deepseek
+from ava.tests.namespaces.understand.provider_support import mock_gemini as mock_gemini
+from ava.tests.namespaces.understand.provider_support import understand_deps as understand_deps
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 

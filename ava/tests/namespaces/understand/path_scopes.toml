@@ -1,4 +1,4 @@
-"tests.path_scoped.ava_tests" = [
+"ava.tests.fixtures.ava_tests" = [
     "test_understand.py",
     "test_understand_autosave.py",
     "test_understand_batch.py",

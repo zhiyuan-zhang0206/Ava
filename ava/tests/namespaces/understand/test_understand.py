@@ -17,17 +17,17 @@ import pytest
 from langchain_core.exceptions import ModelRateLimitError
 
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
-from ava.tests.understand.provider_support import ProviderCapture, run_understand
-from ava.tests.understand.provider_support import fake_image as fake_image
-from ava.tests.understand.provider_support import fake_pdf as fake_pdf
-from ava.tests.understand.provider_support import fake_video as fake_video
-from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
-from ava.tests.understand.provider_support import mock_gemini as mock_gemini
-from ava.tests.understand.provider_support import understand_deps as understand_deps
+from ava.tests.fixtures.pin_agent import pin_no_identity
+from ava.tests.fixtures.workspace import workspace as workspace
+from ava.tests.namespaces.understand.provider_support import ProviderCapture, run_understand
+from ava.tests.namespaces.understand.provider_support import fake_image as fake_image
+from ava.tests.namespaces.understand.provider_support import fake_pdf as fake_pdf
+from ava.tests.namespaces.understand.provider_support import fake_video as fake_video
+from ava.tests.namespaces.understand.provider_support import mock_deepseek as mock_deepseek
+from ava.tests.namespaces.understand.provider_support import mock_gemini as mock_gemini
+from ava.tests.namespaces.understand.provider_support import understand_deps as understand_deps
 from ava.understand import UnderstandError, understand
 from ava.understand.answer import UnderstandDeps
-from tests.fixtures.pin_agent import pin_no_identity
-from tests.fixtures.unit.workspace import workspace as workspace
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 

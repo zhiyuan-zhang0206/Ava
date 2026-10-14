@@ -18,8 +18,8 @@ from langchain_core.exceptions import ModelRateLimitError
 
 import ava
 from ava.sdk_surface import process_context
-from ava.tests.web._web_helpers import FakeResp, SummaryModel, WebHarness
-from ava.tests.web._web_helpers import web_harness as web_harness
+from ava.tests.namespaces.web._web_helpers import FakeResp, SummaryModel, WebHarness
+from ava.tests.namespaces.web._web_helpers import web_harness as web_harness
 from base.config import settings
 from base.lm.catalog.decide.types import Decision, DecisionRequestError, Question
 from base.lm.decision import call as decide_call

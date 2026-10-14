@@ -1,10 +1,10 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
-"tests.path_scoped.agent_tests" = [
+"agent.tests.agent_tests" = [
     "test_circuit_breaker.py",
     "test_maintenance_prior_failure.py",
 ]
-"tests.path_scoped.ava_tests" = [
+"ava.tests.fixtures.ava_tests" = [
 ]
 "tests.path_scoped.services_tests" = [
     "test_turn_dispatcher.py",
@@ -23,6 +23,6 @@
 "base.log.tests.log_records" = [
     "test_circuit_breaker.py",
 ]
-"tests.fixtures.unit.sdk" = [
+"ava.tests.fixtures.sdk" = [
     "."
 ]

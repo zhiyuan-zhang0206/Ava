@@ -7,6 +7,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
@@ -15,7 +16,6 @@ from base.cluster.machine import MachineIdentity
 from gateway.app import app
 from gateway.routers import tasks
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.pin_agent import pin_agent
 
 
 def test_gateway_enqueue_failure_rolls_back_assignment(
