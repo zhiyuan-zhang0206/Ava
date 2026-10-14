@@ -12,6 +12,7 @@ import pytest
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import root_driver
@@ -48,6 +49,8 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_763),
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
 
     def must_not_install(*_args: object, **_kwargs: object) -> None:
@@ -89,6 +92,8 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_798),
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
 
     installed: list[tuple[object, object, object]] = []
@@ -135,6 +140,8 @@ def test_collector_preparation_never_controls_a_running_service_tree(
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_829),
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
 
     def no_root_control() -> None:
@@ -171,6 +178,8 @@ def test_non_lgtm_gateway_reports_and_preserves_residual_config(
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_859),
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
 
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)

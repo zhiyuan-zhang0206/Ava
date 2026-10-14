@@ -10,6 +10,7 @@ import pytest
 
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import walg as converge_walg_module
@@ -54,6 +55,8 @@ def _ctx(
         producer=producer,
         machine=machine_from_boot(config),
         helper=refuse_helper,
+        host=fake_host(),
+        services=frozenset(),
     )
 
 

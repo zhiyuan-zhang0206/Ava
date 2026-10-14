@@ -46,7 +46,6 @@ exports = ["context_inputs.py"]
 "test_converge_firewall.py#monkeypatch.setattr cli.commands.converge.firewall.audit_this_host" = 2
 "test_converge_firewall.py#monkeypatch.setattr cli.commands.converge.firewall.serving_binaries" = 1
 "test_converge_firewall.py#monkeypatch.setattr cli.commands.converge.firewall_command.audit_this_host" = 1
-"test_converge_github_pr.py#monkeypatch.setattr base.deploy.git.github_pr.github_pr_blocker" = 4
 "test_converge_local_git_hooks.py#monkeypatch.setattr cli.commands.converge.steps.repo_root" = 2
 "test_converge_local_git_hooks.py#monkeypatch.setattr cli.commands.converge.steps.subprocess.run" = 3
 "test_converge_ownership.py#monkeypatch.setattr cli.commands.converge.ownership_preflight.collect_ownership_warnings" = 2

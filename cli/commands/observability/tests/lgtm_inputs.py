@@ -7,27 +7,33 @@ from pathlib import Path
 import pytest
 
 from base import config
+from base.host.system.hostport import Host, Platform
+from base.host.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
 from base.packages import dashboard_supply
-from cli.commands.observability import lgtm_native
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-__all__ = ["darwin_rendering", "default_provisioning", "empty_native_versions"]
+__all__ = ["darwin_host", "default_provisioning", "empty_native_versions", "verifying_host"]
 
 _STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
 
 
-def _skip_binary_verification(_home: Path) -> None:
-    """Render fixtures do not install native executable assets."""
+def verifying_host(platform: Platform) -> Host:
+    """A host on `platform` whose pinned Loki parser answers that the config verifies.
+
+    Render fixtures install no native executable, so nothing else is runnable: any other
+    command fails the test.
+    """
+    commands = FakeCommands()
+    commands.on(lambda argv: "-verify-config" in argv, Reply(), repeat=True)
+    return fake_host(commands, platform=platform)
 
 
-@pytest.fixture(autouse=True)
-def darwin_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These existing lifecycle cases exercise the Darwin implementation."""
-    monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(lgtm_native, "verify_loki", _skip_binary_verification)
+@pytest.fixture
+def darwin_host() -> Host:
+    """The Darwin implementation these lifecycle cases exercise."""
+    return verifying_host(DARWIN_ARM64)
 
 
 @pytest.fixture(autouse=True)
@@ -49,5 +55,5 @@ def default_provisioning(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def empty_native_versions(_repo: Path) -> dict[str, dict[str, str]]:
+def empty_native_versions(_repo: Path, *, platform: Platform) -> dict[str, dict[str, str]]:
     return {}
