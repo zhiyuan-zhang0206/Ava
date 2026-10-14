@@ -16,6 +16,24 @@ from base.deploy.maintenance import pause_owner
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import Probe
 from cli.commands.cluster.tests.health_probe_inputs import probe as probe
+from cli.commands.cluster.tests.health_probe_inputs import (
+    provider_guard_healthy as provider_guard_healthy,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    provider_guard_reports as provider_guard_reports,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    quiet_host_health as quiet_host_health,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    quiet_schema_health as quiet_schema_health,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    quiet_service_health as quiet_service_health,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    schema_verdicts as schema_verdicts,
+)
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
@@ -32,9 +50,17 @@ def _no_init(**_kwargs: object) -> None:
 
 @pytest.fixture
 def probe_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection,
+    quiet_schema_health: None,
+    quiet_service_health: None,
+    quiet_host_health: None,
 ) -> Path:
-    """Keep the real DB/count/journal paths; intercept only external side effects."""
+    """Keep the real DB/count/journal paths; intercept only external side effects.
+
+    The checks after the population one are stubbed quiet: every check now runs
+    on every round (task #5064), and the subject here is the population verdict."""
     assert db_conn.execute("SELECT count(*) FROM agents_meta").fetchone() == (0,)
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(service_selection, "ava_home", lambda: tmp_path)

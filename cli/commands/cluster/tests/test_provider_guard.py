@@ -301,11 +301,12 @@ def test_halted_agents_count_db_error_is_fail_open(
 # ─── the combined entry point ────────────────────────────────────────────────
 
 
-def test_provider_guard_failure_reports_balance_before_blocked(
+def test_provider_guard_failures_report_balance_before_blocked(
     monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
-    """One failure at a time, root cause first: a drained balance IS the cause
-    of the halted agents, and funding the account is what unsticks them."""
+    """Both failing checks report, root cause first: a drained balance IS the
+    cause of the halted agents, and funding the account is what unsticks them —
+    but the halted agents report too, never silenced by the balance."""
 
     def _balance() -> str:
         return "balance detail"
@@ -316,47 +317,53 @@ def test_provider_guard_failure_reports_balance_before_blocked(
     monkeypatch.setattr(_provider_guard, "balance_failure", _balance)
     monkeypatch.setattr(_provider_guard, "blocked_agents_failure", _blocked)
 
-    assert _provider_guard.provider_guard_failure(database_factory=operator_database) == (
-        "provider_balance",
-        "FAIL: provider balance \u2014 balance detail",
-    )
+    assert _provider_guard.provider_guard_failures(database_factory=operator_database) == [
+        ("provider_balance", "FAIL: provider balance \u2014 balance detail"),
+        ("provider_blocked_agents", "FAIL: provider blocked agents \u2014 blocked detail"),
+    ]
 
     def _fine() -> None:
         return None
 
     monkeypatch.setattr(_provider_guard, "balance_failure", _fine)
-    assert _provider_guard.provider_guard_failure(database_factory=operator_database) == (
-        "provider_blocked_agents",
-        "FAIL: provider blocked agents \u2014 blocked detail",
-    )
+    assert _provider_guard.provider_guard_failures(database_factory=operator_database) == [
+        ("provider_blocked_agents", "FAIL: provider blocked agents \u2014 blocked detail"),
+    ]
 
 
-def test_run_provider_guard_reports_the_failing_check(
+def test_run_provider_guard_reports_the_failing_checks(
     monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
-    """A failure is handed to the probe's report seam with its check name; a pass reports nothing."""
+    """Every failure is handed to the probe's report seam with its check name and
+    counted; a pass reports nothing and counts zero."""
     reported: list[tuple[str, str]] = []
 
-    def _failing(*, database_factory: DatabaseFactory) -> tuple[str, str]:
-        return "provider_balance", "FAIL: provider balance \u2014 low"
+    def _failing(*, database_factory: DatabaseFactory) -> list[tuple[str, str]]:
+        return [
+            ("provider_balance", "FAIL: provider balance \u2014 low"),
+            ("provider_blocked_agents", "FAIL: provider blocked agents \u2014 halted"),
+        ]
 
-    monkeypatch.setattr(_provider_guard, "provider_guard_failure", _failing)
+    monkeypatch.setattr(_provider_guard, "provider_guard_failures", _failing)
     assert (
         _provider_guard.run_provider_guard(
             report=lambda c, m: reported.append((c, m)), database_factory=operator_database
         )
-        == 1
+        == 2
     )
-    assert reported == [("provider_balance", "FAIL: provider balance \u2014 low")]
+    assert reported == [
+        ("provider_balance", "FAIL: provider balance \u2014 low"),
+        ("provider_blocked_agents", "FAIL: provider blocked agents \u2014 halted"),
+    ]
 
-    def _passing(*, database_factory: DatabaseFactory) -> None:
-        return None
+    def _passing(*, database_factory: DatabaseFactory) -> list[tuple[str, str]]:
+        return []
 
-    monkeypatch.setattr(_provider_guard, "provider_guard_failure", _passing)
+    monkeypatch.setattr(_provider_guard, "provider_guard_failures", _passing)
     assert (
         _provider_guard.run_provider_guard(
             report=lambda c, m: reported.append((c, m)), database_factory=operator_database
         )
-        is None
+        == 0
     )
-    assert len(reported) == 1
+    assert len(reported) == 2

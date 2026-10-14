@@ -18,7 +18,22 @@ from cli.commands.cluster.tests.health_probe_inputs import (
     provider_guard_healthy as provider_guard_healthy,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
+    provider_guard_reports as provider_guard_reports,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    quiet_host_health as quiet_host_health,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    quiet_schema_health as quiet_schema_health,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    quiet_service_health as quiet_service_health,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
     ran as ran,
+)
+from cli.commands.cluster.tests.health_probe_inputs import (
+    schema_verdicts as schema_verdicts,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
     signals as signals,
@@ -88,6 +103,8 @@ def test_repeated_observations_never_mutate_release_state(
 
 
 def test_full_disk_is_reported_when_gateway_is_down(
+    db_url: str,
+    redis_url: str,
     probe: Probe,
     all_checks_pass: None,
     isolated_cluster_home: Path,
@@ -95,12 +112,16 @@ def test_full_disk_is_reported_when_gateway_is_down(
     signals: list[dict[str, object]],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Disk pressure must explain the gateway outage without being short-circuited."""
+    """Disk pressure leads the report of a gateway outage: with no short-circuit,
+    the cause (disk) and the consequence (gateway_liveness) both report in one
+    run, and the cause is first."""
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(
         cluster_health, "disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
     )
 
     assert probe() == 1
-    assert "FAIL: disk usage — data volume 92.4% used (watermark 90%)" in capsys.readouterr().err
-    assert [signal["check"] for signal in signals] == ["disk_usage"]
+    err = capsys.readouterr().err
+    assert "FAIL: disk usage — data volume 92.4% used (watermark 90%)" in err
+    assert "FAIL: gateway liveness" in err
+    assert [signal["check"] for signal in signals] == ["disk_usage", "gateway_liveness"]
