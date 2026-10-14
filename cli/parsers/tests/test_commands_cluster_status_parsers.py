@@ -7,7 +7,7 @@ import pytest
 import cli.commands.cluster.control as cluster_control
 from base.cluster import machine
 from base.host.net import http_dial
-from cli.database.tests.command_fakes import _FakeResponse
+from cli.database.tests.command_fakes import FakeResponse
 from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
 from cli.database.tests.command_fakes import gateway_role_pinned as gateway_role_pinned
 from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
@@ -31,7 +31,7 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
     monkeypatch.setattr(
         http_dial,
         "post",
-        lambda *_a, **_kw: _FakeResponse({"name": "runner-a", "resumed": True}),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_a, **_kw: FakeResponse({"name": "runner-a", "resumed": True}),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert cluster_control.cmd_cluster_resume("runner-a") == 0
     out = capsys.readouterr().out

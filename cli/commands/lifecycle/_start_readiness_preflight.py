@@ -111,7 +111,7 @@ def _prod_checkout_problem(repo: Path) -> str | None:
 def _machine_roles(*, machine: MachineIdentity) -> MachineRoles | None:
     """Resolve this host's roles via the canonical read-only accessor.
 
-    `_roles_or_none` is the same helper `stop` / `status` / `converge/firewall_command.py` use
+    `roles_or_none` is the same helper `stop` / `status` / `converge/firewall_command.py` use
     (read the persisted capability set; None when the identity is not
     resolvable). None here means the caller skips the port checks: the probe
     gate that runs just before this one already refuses on that condition, so
@@ -119,7 +119,7 @@ def _machine_roles(*, machine: MachineIdentity) -> MachineRoles | None:
     """
     import cli.commands._repo as _repo_commands
 
-    return _repo_commands._roles_or_none(machine=machine)
+    return _repo_commands.roles_or_none(machine=machine)
 
 
 def _port_findings(roles: MachineRoles, *, machine: MachineIdentity) -> tuple[list[str], list[str]]:
@@ -137,11 +137,11 @@ def _port_findings(roles: MachineRoles, *, machine: MachineIdentity) -> tuple[li
     import cli.commands.probe as _probe_commands
     import services.supervision.roster as _roster
     from base.deploy.lifecycle.service_selection import resolve_selection
-    from cli.commands.lifecycle.root_driver import _root_tree_roster
+    from cli.commands.lifecycle.root_driver import root_tree_roster
 
     try:
         available = {s.session for s in _roster.build_services()}
-        roster = _root_tree_roster(
+        roster = root_tree_roster(
             roles, resolve_selection(available, persist=False), machine=machine
         )
         occupied = _probe_commands.occupied_health_ports(roster)

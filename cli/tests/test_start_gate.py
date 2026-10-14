@@ -56,7 +56,7 @@ def start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any
 
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    monkeypatch.setattr(start_intent, "_checkout", lambda: checkout)
+    monkeypatch.setattr(start_intent, "checkout", lambda: checkout)
     monkeypatch.setattr(cluster, "port_free", _every_port_free)
     monkeypatch.setattr(startup_support, "init_cli_logging", _no_logging)
     monkeypatch.setattr(lifecycle_start, "cmd_start", runtime)

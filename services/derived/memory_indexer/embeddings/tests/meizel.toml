@@ -21,7 +21,6 @@ exports = ["test_embeddings.py"]
 
 [debt.private-name]
 "embeddings/test_worst_case_single_attempt_has_no_sleep.py -> test_embeddings.py#_provider" = 1
-"test_explicit_inputs.py -> test_embeddings.py#_AsyncClient" = 1
 
 [debt.third-party-patch]
 "test_embeddings.py#monkeypatch.setattr httpx.AsyncClient" = 5

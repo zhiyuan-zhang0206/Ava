@@ -15,7 +15,7 @@ where it matters and stays out of the way where emoji are a deliberate feature.
 
 ## Scope
 
-Scans `.py` under the in-scope dirs (`_SCAN_DIRS`): the framework dirs
+Scans `.py` under the in-scope dirs (`SCAN_DIRS`): the framework dirs
 (`lint_common.FRAMEWORK_DIRS`) plus `scripts/` and `tests/`.
 Deliberate-UX surfaces are exempt and NOT scanned (`_EXEMPT_PREFIXES`):
 
@@ -56,7 +56,7 @@ from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.roles import packages  # noqa: E402 - standalone script
 
 # In-scope dirs scanned by default (no argv); `_EXEMPT_PREFIXES` still applies.
-_SCAN_DIRS = packages("application", "tooling", "tests")
+SCAN_DIRS = packages("application", "tooling", "tests")
 
 # Path prefixes (repo-relative, posix) that are never scanned — deliberate-UX
 # surfaces and prose/content. Checked per file so a pre-commit-passed path under
@@ -192,9 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     # argv = explicit file list (manual run); empty = scan every in-scope dir, or only the
     # changed files of `--only` (the commit hook) under that same scope.
     targets = (
-        [Path(a).resolve() for a in argv]
-        if argv
-        else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
     )
     scope = lint_common.changed_scope(only, _REPO_ROOT)
 

@@ -21,17 +21,17 @@ from base.host.converge.screen_capture import ScreenCaptureState
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
-    _fake_tools,
-    _FakeHelper,
-    _is_whitelisted_file_path,
-    _parse_strings,
-    _ping_reply,
-    _read_line,
-    _sign_command,
-    _stage_bundle,
-    _test_dr,
-    _write_current_build_state,
+    FakeHelper,
+    fake_tools,
+    is_whitelisted_file_path,
+    parse_strings,
+    ping_reply,
+    read_line,
     recorded_argvs,
+    sign_command,
+    stage_bundle,
+    test_dr,
+    write_current_build_state,
 )
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_helper as fake_helper,
@@ -173,11 +173,11 @@ def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
     (downloads / "escape").symlink_to(outside, target_is_directory=True)
 
     roots = [downloads, desktop, incoming]
-    assert _is_whitelisted_file_path(nested_file, roots)
-    assert _is_whitelisted_file_path(nested_file.parent, roots)
-    assert not _is_whitelisted_file_path(sibling_prefix / "report.txt", roots)
-    assert not _is_whitelisted_file_path(downloads / "escape" / "secret.txt", roots)
-    assert not _is_whitelisted_file_path(Path("Downloads/report.txt"), roots)
+    assert is_whitelisted_file_path(nested_file, roots)
+    assert is_whitelisted_file_path(nested_file.parent, roots)
+    assert not is_whitelisted_file_path(sibling_prefix / "report.txt", roots)
+    assert not is_whitelisted_file_path(downloads / "escape" / "secret.txt", roots)
+    assert not is_whitelisted_file_path(Path("Downloads/report.txt"), roots)
 
 
 def test_gui_ops_wire_requests(fake_helper) -> None:
@@ -239,7 +239,7 @@ def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_recv_reassembles_across_chunks(fake_helper) -> None:
     def raw(conn: socket.socket) -> None:
-        _read_line(conn)
+        read_line(conn)
         payload = json.dumps({"id": 1, "ok": True, "result": {"pong": True}}).encode() + b"\n"
         conn.sendall(payload[:5])
         time.sleep(0.05)
@@ -251,13 +251,13 @@ def test_recv_reassembles_across_chunks(fake_helper) -> None:
 def test_closed_without_response_raises(fake_helper) -> None:
     with pytest.raises(PermissionsHelperError, match="closed without a response"):
         PermissionsHelperClient(
-            fake_helper(raw=_read_line)  # pyright: ignore[reportUnknownArgumentType]
+            fake_helper(raw=read_line)  # pyright: ignore[reportUnknownArgumentType]
         ).ping()  # read, then close, no reply
 
 
 def test_truncated_response_raises(fake_helper) -> None:
     def raw(conn: socket.socket) -> None:
-        _read_line(conn)
+        read_line(conn)
         conn.sendall(b'{"id":1,"ok":tr')  # partial JSON, no trailing newline
 
     with pytest.raises(PermissionsHelperError, match="truncated"):
@@ -268,7 +268,7 @@ def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(client, "CALL_TIMEOUT_S", 0.2)
 
     def raw(conn: socket.socket) -> None:
-        _read_line(conn)
+        read_line(conn)
         time.sleep(1.0)  # accept, never reply
 
     with pytest.raises(PermissionsHelperError, match="did not respond"):
@@ -279,7 +279,7 @@ def test_line_limit_guard(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client, "LINE_LIMIT", 16)
 
     def raw(conn: socket.socket) -> None:
-        _read_line(conn)
+        read_line(conn)
         conn.sendall(b"x" * 64)  # oversized, newline-less
 
     with pytest.raises(PermissionsHelperError, match="exceeded line limit"):
@@ -292,12 +292,12 @@ def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client, "CONNECT_DELAY_S", 0.1)
     path = f"/tmp/avah-retry{os.getpid()}.sock"  # noqa: S108 — short path for AF_UNIX
     Path(path).unlink(missing_ok=True)
-    holder: list[_FakeHelper] = []
+    holder: list[FakeHelper] = []
 
     def late_start() -> None:
         time.sleep(0.25)
         holder.append(
-            _FakeHelper(path, lambda req: {"id": req["id"], "ok": True, "result": {"pong": True}})
+            FakeHelper(path, lambda req: {"id": req["id"], "ok": True, "result": {"pong": True}})
         )
 
     t = threading.Thread(target=late_start, daemon=True)
@@ -318,7 +318,7 @@ def test_label_is_per_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     from services.desktop.permissions_helper import lifecycle
 
     monkeypatch.setattr(paths, "ava_home", lambda: Path("/x/.ava-demo"))
-    assert lifecycle._label() == f"com.ava.permissions-helper.{home_slug(Path('/x/.ava-demo'))}"
+    assert lifecycle.label() == f"com.ava.permissions-helper.{home_slug(Path('/x/.ava-demo'))}"
 
 
 def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
@@ -326,7 +326,7 @@ def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
 
     def handler(req: dict) -> dict:
         seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
-        return _ping_reply(True)(req)
+        return ping_reply(True)(req)
 
     status = PermissionsHelperClient(fake_helper(handler)).check_screen_capture()  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["ping"]  # measured in the helper, not in whoever is asking
@@ -335,7 +335,7 @@ def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
 
 
 def test_screen_capture_probe_reports_no_grant(fake_helper) -> None:
-    status = PermissionsHelperClient(fake_helper(_ping_reply(False))).check_screen_capture()  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(ping_reply(False))).check_screen_capture()  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is ScreenCaptureState.NO_GRANT
     assert status.available is False
     # The fix is authorizing the helper, not restarting the cluster from a local
@@ -382,13 +382,13 @@ def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.Monkey
 
 
 def test_accessibility_probe_reads_the_helpers_grant(fake_helper) -> None:
-    status = PermissionsHelperClient(fake_helper(_ping_reply(True, True))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(ping_reply(True, True))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is AccessibilityState.GRANTED
     assert status.available is True
 
 
 def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:
-    status = PermissionsHelperClient(fake_helper(_ping_reply(True, False))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(ping_reply(True, False))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is AccessibilityState.NOT_GRANTED
     assert status.available is False
     assert "System Settings" in status.diagnostic
@@ -431,8 +431,8 @@ def test_panel_locale_catalogs_are_symmetric() -> None:
         / "helper"
         / "locales"
     )
-    en = _parse_strings(locales / "en.lproj" / "Localizable.strings")
-    zh = _parse_strings(locales / "zh-Hans.lproj" / "Localizable.strings")
+    en = parse_strings(locales / "en.lproj" / "Localizable.strings")
+    zh = parse_strings(locales / "zh-Hans.lproj" / "Localizable.strings")
     assert en
     assert set(en) == set(zh)
     assert all(value.isascii() for value in en.values())
@@ -486,12 +486,12 @@ def test_read_dr_accepts_legacy_stderr_stream(
                 cmd,  # pyright: ignore[reportUnknownArgumentType]
                 0,
                 b"",
-                f"designated => {_test_dr()}\n".encode(),
+                f"designated => {test_dr()}\n".encode(),
             )
         raise AssertionError(f"unexpected call {cmd}")
 
     monkeypatch.setattr(lifecycle, "run_bounded", run)  # pyright: ignore[reportUnknownArgumentType]
-    assert lifecycle._read_dr(app) == _test_dr()
+    assert lifecycle.read_dr(app) == test_dr()
 
 
 def test_current_stable_signed_bundle_is_not_resigned(
@@ -501,9 +501,9 @@ def test_current_stable_signed_bundle_is_not_resigned(
     already holds, so the skip-if-up-to-date gate has to survive intact."""
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
-    _write_current_build_state(app, lifecycle._source_content_hash())
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    write_current_build_state(app, lifecycle.source_content_hash())
 
     assert lifecycle.build_and_sign() == (app, False)
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
@@ -519,9 +519,9 @@ def test_keychain_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
         "permissions_helper_keychain",
         "/tmp/ci-signing.keychain-db",  # noqa: S108
     )
-    assert lifecycle._keychain_path() == Path("/tmp/ci-signing.keychain-db")  # noqa: S108
+    assert lifecycle.keychain_path() == Path("/tmp/ci-signing.keychain-db")  # noqa: S108
     monkeypatch.setattr(settings.services, "permissions_helper_keychain", None)
-    assert lifecycle._keychain_path() == Path.home() / "Library" / "Keychains" / "login.keychain-db"
+    assert lifecycle.keychain_path() == Path.home() / "Library" / "Keychains" / "login.keychain-db"
 
 
 def test_signing_cert_import_uses_supported_security_argv(
@@ -531,8 +531,8 @@ def test_signing_cert_import_uses_supported_security_argv(
     from services.desktop.permissions_helper import lifecycle
 
     keychain = tmp_path / "ci-signing.keychain-db"
-    monkeypatch.setattr(lifecycle, "_keychain_path", lambda: keychain)
-    recorded = _fake_tools(monkeypatch, authority=None, identity_output="0 identities found\n")
+    monkeypatch.setattr(lifecycle, "keychain_path", lambda: keychain)
+    recorded = fake_tools(monkeypatch, authority=None, identity_output="0 identities found\n")
 
     lifecycle.ensure_signing_cert()
 
@@ -560,9 +560,9 @@ def test_locked_keychain_does_not_fail_a_current_host(
     ACL, the other pre-sign check that reaches for it."""
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN, keychain_rc=1)
-    _write_current_build_state(app, lifecycle._source_content_hash())
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN, keychain_rc=1)
+    write_current_build_state(app, lifecycle.source_content_hash())
 
     assert lifecycle.build_and_sign() == (app, False)
     assert not any(c[:2] == ["security", "show-keychain-info"] for c in recorded_argvs(recorded))
@@ -574,9 +574,9 @@ def test_current_stable_signed_bundle_skips_signing_smoke(
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
-    _write_current_build_state(app, lifecycle._source_content_hash())
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    write_current_build_state(app, lifecycle.source_content_hash())
     smoke_calls: list[None] = []
     monkeypatch.setattr(lifecycle, "preflight_signing_smoke", lambda: smoke_calls.append(None))
 
@@ -589,31 +589,31 @@ def test_fresh_build_signs_with_the_stable_certificate(
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    recorded = _fake_tools(monkeypatch, authority=None)
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    recorded = fake_tools(monkeypatch, authority=None)
 
     assert lifecycle.build_and_sign() == (app, True)
-    assert _sign_command(recorded) == [
+    assert sign_command(recorded) == [
         "codesign",
         "--force",
         "--sign",
-        lifecycle._CERT_CN,
+        lifecycle.CERT_CN,
         # Hardened runtime: dyld ignores DYLD_* for the helper (review P2-A).
         "--options",
         "runtime",
         # AppleEvents: the entitlement tccd needs to build an attribution
         # chain for helper-spawned osascript/AE children.
         "--entitlements",
-        str(lifecycle._ENTITLEMENTS),
+        str(lifecycle.ENTITLEMENTS),
         "--identifier",
         lifecycle.HELPER_BUNDLE_ID,
         "--requirements",
-        f"=designated => {_test_dr()}",
+        f"=designated => {test_dr()}",
         str(app),
     ]
     state = json.loads((app.parent / "build-state.json").read_text())
-    assert state["source_hash"] == lifecycle._source_content_hash()
-    assert state["dr"] == _test_dr()
+    assert state["source_hash"] == lifecycle.source_content_hash()
+    assert state["dr"] == test_dr()
 
 
 def test_entitlements_request_apple_events_for_spawned_children() -> None:
@@ -641,9 +641,9 @@ def test_source_mtime_change_does_not_rebuild_identical_content(
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
-    _write_current_build_state(app, lifecycle._source_content_hash())
+    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = fake_tools(monkeypatch, authority=lifecycle.CERT_CN)
+    write_current_build_state(app, lifecycle.source_content_hash())
     exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
     newer = exe.stat().st_mtime + 60
     os.utime(lifecycle.SOURCE, (newer, newer))

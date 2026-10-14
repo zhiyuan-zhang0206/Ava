@@ -406,7 +406,7 @@ def test_parent_chain_checks_are_wired_at_host_boot_and_heartbeat() -> None:
     from services.agent_runner.agent_host import daemon
 
     hosted_boot = inspect.getsource(daemon.main)
-    hosted_beat = inspect.getsource(daemon._beat_forever)
+    hosted_beat = inspect.getsource(daemon.beat_forever)
 
     assert "require_helper_parent_chain()" in hosted_boot
     assert "require_helper_parent_chain()" in hosted_beat

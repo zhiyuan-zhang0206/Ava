@@ -7,7 +7,7 @@ import pytest
 import cli.commands.cluster.control as cluster_control
 from base.cluster import machine
 from base.host.net import http_dial
-from cli.database.tests.command_fakes import _FakeResponse
+from cli.database.tests.command_fakes import FakeResponse
 from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
 from cli.database.tests.command_fakes import gateway_role_pinned as gateway_role_pinned
 from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
@@ -214,10 +214,10 @@ def test_cmd_cluster_status_dials_the_derived_read_budget(
     monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 5.0)
     seen: dict[str, object] = {}
 
-    def _fake_get(url: str, **kwargs: object) -> _FakeResponse:
+    def _fake_get(url: str, **kwargs: object) -> FakeResponse:
         seen["url"] = url
         seen["timeout"] = kwargs.get("timeout")
-        return _FakeResponse([])
+        return FakeResponse([])
 
     monkeypatch.setattr("httpx.get", _fake_get)  # pyright: ignore[reportUnknownArgumentType]
     assert cluster_control.cmd_cluster_status() == 0
@@ -294,7 +294,7 @@ def _patch_roster_get(monkeypatch: pytest.MonkeyPatch, roster: list[dict]) -> li
 
     def _fake_get(url, **_kw):
         calls.append(url)  # pyright: ignore[reportUnknownArgumentType]
-        return _FakeResponse(roster)
+        return FakeResponse(roster)
 
     monkeypatch.setattr("httpx.get", _fake_get)  # pyright: ignore[reportUnknownArgumentType]
     return calls
@@ -367,7 +367,7 @@ def test_cmd_cluster_status_fails_fast_on_http_error(
     """A 5xx from the gateway exits 1 with the status named — fail-fast, no
     silent fallback, and no unhandled traceback (#219)."""
     monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr("httpx.get", lambda *_a, **_kw: _FakeResponse([], status_code=503))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("httpx.get", lambda *_a, **_kw: FakeResponse([], status_code=503))  # pyright: ignore[reportUnknownArgumentType]
     rc = cluster_control.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
@@ -395,7 +395,7 @@ def _post_returns(monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]) -
     monkeypatch.setattr(
         http_dial,
         "post",
-        lambda *_a, **_kw: _FakeResponse(payload),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_a, **_kw: FakeResponse(payload),  # pyright: ignore[reportUnknownArgumentType]
     )
 
 

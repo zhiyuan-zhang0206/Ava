@@ -24,7 +24,7 @@ from contextlib import suppress
 from types import FrameType
 
 _BUFFER_SIZE = 65536
-_INITIAL_REBIND_DELAY_S = 1.0
+INITIAL_REBIND_DELAY_S = 1.0
 _MAX_REBIND_DELAY_S = 30.0
 _STOP_TIMEOUT_S = 5.0
 # Consecutive listener failures (bind or accept) without one admitted connection before the
@@ -337,7 +337,7 @@ class RelayService:
             ListenerExhaustedError: the listener failed `MAX_LISTENER_FAILURES` times in a
                 row; an admitted connection clears the count.
         """
-        delay_s = _INITIAL_REBIND_DELAY_S
+        delay_s = INITIAL_REBIND_DELAY_S
         # quiesce-exempt: a TCP relay; no database
         while not self._stopped.is_set():
             listener: socket.socket | None = None
@@ -349,7 +349,7 @@ class RelayService:
                     f"relay listening on {self._listen_address[0]}:{self._listen_address[1]} -> "
                     f"{self._backend_address[0]}:{self._backend_address[1]}"
                 )
-                delay_s = _INITIAL_REBIND_DELAY_S
+                delay_s = INITIAL_REBIND_DELAY_S
                 self._accept(listener)
             except OSError as exc:
                 _log(f"listener bind failed: {exc}; retrying in {delay_s:g}s")

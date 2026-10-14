@@ -25,10 +25,10 @@ from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 from services.desktop.browser import gateway_session, page_lifecycle, session
 from services.desktop.browser.mcp_daemon import (
     ChromeMcpDaemon,
-    _handle_client,
-    _no_page_result,
-    _selected_id,
-    _text_of,
+    handle_client,
+    no_page_result,
+    selected_id,
+    text_of,
 )
 from services.desktop.browser.page_lifecycle import (
     PageRegistry,
@@ -143,7 +143,7 @@ async def test_two_connections_do_not_clobber() -> None:
     assert up.selected == 2  # B selected last
 
     res, a_page = await d.call_tool("take_snapshot", {}, a_page)
-    assert _text_of(res) == "ran take_snapshot on page 1"  # re-pinned to A, not B
+    assert text_of(res) == "ran take_snapshot on page 1"  # re-pinned to A, not B
     assert a_page == 1
 
 
@@ -164,7 +164,7 @@ async def test_page_scoped_no_current_refuses_to_touch_global() -> None:
     up.calls.clear()
 
     res, page = await d.call_tool("take_snapshot", {}, None)
-    assert res.is_error and "No page selected" in _text_of(res)
+    assert res.is_error and "No page selected" in text_of(res)
     assert page is None
     assert up.calls == []  # upstream never touched
 
@@ -198,7 +198,7 @@ async def test_repin_failure_falls_back_to_no_page() -> None:
     d, up = browser_daemon_with_fake_upstream()
     await d.call_tool("new_page", {"url": "real"}, None)  # page 1, selected
     res, page = await d.call_tool("take_snapshot", {}, 99)  # 99 never existed
-    assert res.is_error and "No page selected" in _text_of(res)
+    assert res.is_error and "No page selected" in text_of(res)
     assert page is None
     assert "take_snapshot" not in [c[0] for c in up.calls]  # op never ran
 
@@ -213,8 +213,8 @@ async def test_list_pages_is_not_repinned() -> None:
 
 
 def test_selected_id_parses_marked_line() -> None:
-    assert _selected_id(_ok("  1: https://a\n  2: https://b [selected]")) == 2
-    assert _selected_id(_ok("  1: https://a")) is None
+    assert selected_id(_ok("  1: https://a\n  2: https://b [selected]")) == 2
+    assert selected_id(_ok("  1: https://a")) is None
 
 
 def test_selected_id_parses_isolated_context_suffix() -> None:
@@ -222,19 +222,19 @@ def test_selected_id_parses_isolated_context_suffix() -> None:
     same line; the id must still parse -- the drift left the page with no TTL
     slot and the affinity on the previous tab."""
     text = "  29: Discord (https://discord.com/app) [selected] isolatedContext=reg-7"
-    assert _selected_id(_ok(text)) == 29
+    assert selected_id(_ok(text)) == 29
     # A line without the marker parses to None, isolated suffix or not.
-    assert _selected_id(_ok("  1: https://a\n  2: https://b isolatedContext=x")) is None
+    assert selected_id(_ok("  1: https://a\n  2: https://b isolatedContext=x")) is None
 
 
 def test_selected_id_rejects_marker_inside_title() -> None:
     """A title containing a literal `[selected]` followed by more title text is
     not the marker: the suffix grammar admits only `key=value` tokens, so such
     a line must parse to None (a false pick would mis-affinity the page)."""
-    assert _selected_id(_ok("  3: my [selected] title (https://url)")) is None
+    assert selected_id(_ok("  3: my [selected] title (https://url)")) is None
     # The real marker stays parseable when a title contains the literal too.
     line = "  3: my [selected] title (https://url) [selected] isolatedContext=reg-7"
-    assert _selected_id(_ok(line)) == 3
+    assert selected_id(_ok(line)) == 3
 
 
 def test_next_page_select_normalizes_page_id() -> None:
@@ -250,8 +250,8 @@ def test_next_page_select_normalizes_page_id() -> None:
 
 
 def test_no_page_result_is_marked_error() -> None:
-    res = _no_page_result()
-    assert res.is_error and "No page selected" in _text_of(res)
+    res = no_page_result()
+    assert res.is_error and "No page selected" in text_of(res)
 
 
 def test_text_of_ignores_non_text_blocks() -> None:
@@ -263,7 +263,7 @@ def test_text_of_ignores_non_text_blocks() -> None:
         ],
         is_error=False,
     )
-    assert _text_of(result) == "ab"
+    assert text_of(result) == "ab"
 
 
 class DeadUpstream:
@@ -481,7 +481,7 @@ async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
     # macOS unix sockets cap at ~104-char paths; pytest tmp dirs blow past it.
     sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
-        lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
+        lambda r, w: handle_client(r, w, daemon_ref), path=sock_path
     )
     assert sock_path.exists()
 
@@ -579,7 +579,7 @@ async def test_release_agent_page_wire_method() -> None:
     daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
     sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
-        lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
+        lambda r, w: handle_client(r, w, daemon_ref), path=sock_path
     )
     assert sock_path.exists()
 

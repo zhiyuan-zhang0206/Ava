@@ -138,7 +138,7 @@ def isolated_cluster(
         monkeypatch.setenv("AVA_HOME", str(home))
         stop_pgbouncer()
         subprocess.run(  # noqa: S603
-            [ci._pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
+            [ci.pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )
@@ -319,14 +319,14 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
     """A fresh single-box home is born with a minted cluster secret and generated Redis
     credentials, and the official bring-up serves a Redis that refuses an
     unauthenticated client; the runtime ACL user and the admin user authenticate."""
-    from cli.start_identity import IdentityInput, _gateway_values
+    from cli.start_identity import IdentityInput, gateway_values
 
     pg_port, redis_port = isolated_cluster
     home = resolve_ava_home()
     ports = cluster.new_home_ports()
     ports.update(postgres=pg_port, redis=redis_port, pgbouncer=_free_port())
     record = cluster.ClusterRecord(ports=ports, gateway_home=str(home), created_at="test")
-    values = _gateway_values(
+    values = gateway_values(
         record,
         IdentityInput(
             home,
@@ -393,7 +393,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
         ci.initdb(data)
         subprocess.run(  # noqa: S603 — private test-owned postgres
             [
-                ci._pg_bin("pg_ctl"),
+                ci.pg_bin("pg_ctl"),
                 "-D",
                 str(data),
                 "-l",
@@ -444,7 +444,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
                 )
         finally:
             subprocess.run(  # noqa: S603 — private test-owned postgres
-                [ci._pg_bin("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
+                [ci.pg_bin("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
                 check=True,
                 capture_output=True,
             )

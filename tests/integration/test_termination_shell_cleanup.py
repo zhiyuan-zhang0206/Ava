@@ -19,7 +19,7 @@ from base.agents.incarnation.hosted_force import original_host_force
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from ops.lifecycle.termination import _force_terminate_transaction
+from ops.lifecycle.termination import force_terminate_transaction
 from services.agent_runner.agent_host.tests.lifecycle.test_hosted_lifecycle import (
     terminate_command,
 )
@@ -38,7 +38,7 @@ async def _prepare(
     else:
         with ConnectionPool[psycopg.Connection](conn.info.dsn) as sync_pool:
             receipt = await asyncio.to_thread(
-                _force_terminate_transaction,
+                force_terminate_transaction,
                 agent_id,
                 sync_pool,
                 source="user",

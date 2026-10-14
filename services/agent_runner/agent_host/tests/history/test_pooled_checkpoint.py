@@ -16,7 +16,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation_handoff import flush_checkpoint
 from base.config import settings
-from services.agent_runner.agent_host.daemon import _build_checkpointer
+from services.agent_runner.agent_host.daemon import build_checkpointer
 from services.agent_runner.agent_host.pooled_checkpoint import PooledPostgresSaver
 
 _LOCK_KEY = 918273
@@ -68,7 +68,7 @@ async def test_blocked_agent_checkpoint_does_not_block_another_agent(
     operation: Literal["read", "write"],
 ) -> None:
     async with _pool(2) as pool:
-        saver = await _build_checkpointer(
+        saver = await build_checkpointer(
             cast(AsyncConnectionPool[AsyncConnection], pool),
             read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
         )
@@ -139,7 +139,7 @@ async def test_same_agent_flush_serializes_with_newer_checkpoint(
 ) -> None:
     monkeypatch.setattr(settings.agent, "checkpoint_interval", 4)
     async with _pool(2) as pool:
-        saver = await _build_checkpointer(
+        saver = await build_checkpointer(
             cast(AsyncConnectionPool[AsyncConnection], pool),
             read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
         )

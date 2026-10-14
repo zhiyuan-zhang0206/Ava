@@ -65,8 +65,8 @@ def _script(
     monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", no_sleep)
     if loop == "poll":
         monkeypatch.setattr(heartbeat_daemon, "_sweep_backoff_resets", nothing)
-        monkeypatch.setattr(heartbeat_daemon, "_reconcile_checkin_outcomes", nothing)
-        monkeypatch.setattr(heartbeat_daemon, "_select_idle_agents_needing_heartbeat", empty_poll)
+        monkeypatch.setattr(heartbeat_daemon, "reconcile_checkin_outcomes", nothing)
+        monkeypatch.setattr(heartbeat_daemon, "select_idle_agents_needing_heartbeat", empty_poll)
         monkeypatch.setattr(heartbeat_daemon, "backoff_deadlines", no_deadlines)
     else:
         monkeypatch.setattr(heartbeat_daemon, "run_liveness_pass", liveness_pass)

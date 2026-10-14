@@ -25,7 +25,7 @@ from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
 
 
-def _roles_or_none(*, machine: MachineIdentity) -> MachineRoles | None:
+def roles_or_none(*, machine: MachineIdentity) -> MachineRoles | None:
     """Read the capability set; on missing or invalid value return None — the
     explicit "this host's role is not resolvable yet" state, distinct from a
     (never-valid) empty capability set. stop/status/converge should not be
@@ -38,7 +38,7 @@ def _roles_or_none(*, machine: MachineIdentity) -> MachineRoles | None:
         return None
 
 
-def _repo_root() -> Path:
+def repo_root() -> Path:
     """cli/main.py -> cli/ -> repo root.
 
     cli/commands/ is one level deeper than the old cli/commands.py, so
@@ -82,7 +82,7 @@ def _node_modules_drift(fe: Path, node_modules: Path) -> str | None:
     return None
 
 
-def _ensure_frontend_deps(repo: Path) -> None:
+def ensure_frontend_deps(repo: Path) -> None:
     """Install frontend deps when node_modules is missing OR when
     package-lock.json changed since the last install — `npm run build` without
     the exact locked deps dies immediately and the session exits (hit by

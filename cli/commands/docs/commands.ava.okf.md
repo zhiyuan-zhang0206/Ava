@@ -96,7 +96,7 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
   without waiting for its external queue-store scan.
   Usage: [External agent impersonation](../../../docs/conventions/agents/agent-impersonation.md).
 
-- Which cluster a command acts on comes from `cli/commands/_repo.py:_repo_root` — the
+- Which cluster a command acts on comes from `cli/commands/_repo.py:repo_root` — the
   checkout the running `ava` belongs to — never the current directory.
 - What `ava start` treats as already-up, what it waits for, and when an unready
   service becomes exit code 4 are one subject, in

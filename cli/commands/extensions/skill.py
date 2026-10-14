@@ -309,10 +309,10 @@ def _repo_native_sources(repo: Path | None = None) -> list[Source]:
     reach agents through the project-local mount, not the load dir; issue
     #146). Installed-plugin skills are excluded too (they update via
     `ava plugins upgrade`)."""
-    from cli.commands._repo import _repo_root
+    from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import iter_sources
 
-    sources, _conflicts = iter_sources(repo or _repo_root())
+    sources, _conflicts = iter_sources(repo or repo_root())
     return [s for s in sources if s.bootstrap_only]
 
 
@@ -589,10 +589,10 @@ def cmd_skill_update(
 
     from base import paths
     from base.packages.extensions import install_registry as reg
-    from cli.commands._repo import _repo_root
+    from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import assert_repo_source_bound
 
-    repo = repo or _repo_root()
+    repo = repo or repo_root()
     try:
         assert_repo_source_bound(repo, ava_home())
     except RuntimeError as e:

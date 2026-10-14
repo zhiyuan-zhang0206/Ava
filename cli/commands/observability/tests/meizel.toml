@@ -96,11 +96,6 @@
 "test_trace_ship.py#monkeypatch.setattr base.telemetry.trace_mirror.traces_dir" = 2
 "test_trace_ship.py#monkeypatch.setattr cli.commands.observability.trace.traces_dir" = 11
 
-[debt.private-name]
-"converge_otel_collector/test_session_filelog_receivers_are_disjoint_and_bound.py -> test_converge_otel_collector.py#_ChunkedResp" = 1
-"converge_otel_collector/test_session_filelog_receivers_are_disjoint_and_bound.py -> test_converge_otel_collector.py#_render_real_template" = 1
-"test_otel_port_deviation.py -> test_converge_otel_collector.py#_render_real_template" = 1
-
 [debt.stdlib-patch]
 "test_atomic_writer_contracts.py#monkeypatch.setattr os.fsync" = 4
 "test_atomic_writer_contracts.py#monkeypatch.setattr os.replace" = 1

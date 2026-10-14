@@ -19,7 +19,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
-from ops.lifecycle.termination import _force_terminate_transaction
+from ops.lifecycle.termination import force_terminate_transaction
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.invocation.native_work import (
     recover_native_cancel,
@@ -85,7 +85,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
         await asyncio.wait_for(entered.wait(), 5)
         with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
             _status, _pid, _pages, force, _shell_cutoff = await asyncio.to_thread(
-                _force_terminate_transaction, target.agent_id, pool, source="user"
+                force_terminate_transaction, target.agent_id, pool, source="user"
             )
         running.cancel()
         await asyncio.sleep(0)

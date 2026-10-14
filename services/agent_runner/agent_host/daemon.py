@@ -105,8 +105,8 @@ from .lifecycle.configuration import (
 )
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
-from .pools import close_host_pools as _close_host_pools
-from .stdout_log import _rotate_stdout_log_forever
+from .pools import close_host_pools as close_host_pools
+from .stdout_log import rotate_stdout_log_forever
 
 host_log = logging.getLogger("services.agent_runner.agent_host.daemon")
 
@@ -124,11 +124,11 @@ def _pidfile() -> Path:
 # A fixed timer proves liveness even when no agent has work. The same beat
 # renews hosted agent leases, so its step IS the lattice's renewal interval.
 _LIVENESS_TIMEOUT_S = 60.0
-_LIVENESS_BEAT_STEP_S = AGENT_LEASE_RENEW_INTERVAL_S
-_OWNERSHIP_RENEW_TIMEOUT_S = 10.0
+LIVENESS_BEAT_STEP_S = AGENT_LEASE_RENEW_INTERVAL_S
+OWNERSHIP_RENEW_TIMEOUT_S = 10.0
 # Gateway key presence proves the 15s host loop runs; four missed beats expire it.
 _TURN_PROGRESS_HEARTBEAT_TTL_S = 60
-_TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
+TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
 
 
 # Plugin-discovery watchdog (issue #170): the host loads external plugins
@@ -139,10 +139,10 @@ _TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
 # unimplemented — a second load would leak and fork class identity) but an
 # intentional, ergonomic restart: watch $AVA_HOME/plugins, and on any change
 # exit so the supervisor brings the host back with the new plugin loaded.
-_PLUGINS_POLL_INTERVAL_S = 30.0
+PLUGINS_POLL_INTERVAL_S = 30.0
 
 
-def _plugins_fingerprint() -> str:
+def plugins_fingerprint() -> str:
     """A cheap fingerprint of the external-plugin directory.
 
     One entry per plugin subdirectory: name + plugin.py (size, mtime_ns).
@@ -167,7 +167,7 @@ def _plugins_fingerprint() -> str:
     return "|".join(parts)
 
 
-async def _watch_plugins_for_restart() -> None:
+async def watch_plugins_for_restart() -> None:
     """Exit the host when the plugin directory changes under it.
 
     Runs for the daemon's whole life; on a fingerprint change it logs the
@@ -175,11 +175,11 @@ async def _watch_plugins_for_restart() -> None:
     turns into the KeyboardInterrupt every daemon already unwinds through —
     the drains run, then the supervisor restarts the host fresh.
     """
-    baseline = _plugins_fingerprint()
+    baseline = plugins_fingerprint()
     # quiesce-exempt: watches plugin file fingerprints; no database
     while True:
-        await asyncio.sleep(_PLUGINS_POLL_INTERVAL_S)
-        now = _plugins_fingerprint()
+        await asyncio.sleep(PLUGINS_POLL_INTERVAL_S)
+        now = plugins_fingerprint()
         if now == baseline:
             continue
         host_log.info(
@@ -190,7 +190,7 @@ async def _watch_plugins_for_restart() -> None:
         return
 
 
-async def _publish_turn_progress_heartbeat(
+async def publish_turn_progress_heartbeat(
     bus: EventBus,
     machine: str,
     active_agents: Collection[int],
@@ -207,7 +207,7 @@ async def _publish_turn_progress_heartbeat(
         if snapshot is not None:
             snapshots[str(agent_id)] = snapshot
     try:
-        async with asyncio.timeout(_TURN_PROGRESS_PUBLISH_TIMEOUT_S):
+        async with asyncio.timeout(TURN_PROGRESS_PUBLISH_TIMEOUT_S):
             await bus.async_redis().set(
                 f"host_turn_progress:{machine}",
                 json.dumps(snapshots, separators=(",", ":")),
@@ -216,7 +216,7 @@ async def _publish_turn_progress_heartbeat(
     except TimeoutError:
         host_log.warning(
             "[agent-host] turn-progress heartbeat publish exceeded %.1fs",
-            _TURN_PROGRESS_PUBLISH_TIMEOUT_S,
+            TURN_PROGRESS_PUBLISH_TIMEOUT_S,
         )
         return False
     except (RedisConnectionError, RedisTimeoutError, NoPermissionError, OSError):
@@ -251,7 +251,7 @@ def _report_long_admission_waits(
         )
 
 
-async def _beat_forever(
+async def beat_forever(
     liveness: Liveness,
     host: AgentHost,
     scheduler: TurnScheduler,
@@ -274,7 +274,7 @@ async def _beat_forever(
         # resume refreshes every row this host still owns.
         if not admission.quiesced():
             try:
-                await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
+                await asyncio.wait_for(host.renew_ownership(), timeout=OWNERSHIP_RENEW_TIMEOUT_S)
             except (TimeoutError, psycopg.OperationalError, PoolTimeout):
                 renewal_failures += 1
                 host_log.exception("[agent-host] database renewal failed (%s/3)", renewal_failures)
@@ -282,17 +282,17 @@ async def _beat_forever(
                     raise
             else:
                 renewal_failures = 0
-        published = await _publish_turn_progress_heartbeat(
+        published = await publish_turn_progress_heartbeat(
             bus, machine, scheduler.active_agents, host.turn_progress
         )
         if published and not heartbeat_ok:
             host_log.warning("[agent-host] turn-progress heartbeat publish recovered")
         heartbeat_ok = published
         _report_long_admission_waits(host, read_alert_seconds=read_alert_seconds)
-        await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
+        await asyncio.sleep(LIVENESS_BEAT_STEP_S)
 
 
-async def _ownership_beat_completion(
+async def ownership_beat_completion(
     liveness: Liveness,
     host: AgentHost,
     scheduler: TurnScheduler,
@@ -302,7 +302,7 @@ async def _ownership_beat_completion(
     read_alert_seconds: Callable[[], float],
 ) -> Exception | None:
     """Propagate exhausted renewal failures to the service task group."""
-    await _beat_forever(
+    await beat_forever(
         liveness, host, scheduler, machine, bus, read_alert_seconds=read_alert_seconds
     )
     return None
@@ -321,7 +321,7 @@ async def _start_ownership_beat(
     tasks = asyncio.TaskGroup()
     await tasks.__aenter__()
     beat = tasks.create_task(
-        _ownership_beat_completion(
+        ownership_beat_completion(
             liveness, host, scheduler, machine, bus, read_alert_seconds=read_alert_seconds
         ),
         name="host-ownership-heartbeat",
@@ -329,7 +329,7 @@ async def _start_ownership_beat(
     return tasks, beat
 
 
-async def _stop_ownership_beat(beat: asyncio.Task[Exception | None] | None) -> None:
+async def stop_ownership_beat(beat: asyncio.Task[Exception | None] | None) -> None:
     if beat is not None:
         beat.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -343,7 +343,7 @@ async def _close_ownership_beat(
 ) -> None:
     """Join the heartbeat and close its group without wrapping its retained error."""
     try:
-        await _stop_ownership_beat(beat)
+        await stop_ownership_beat(beat)
     finally:
         if tasks is not None:
             await tasks.__aexit__(None, None, None)
@@ -368,7 +368,7 @@ async def _close_host_runtime(
         cleanup.push_async_callback(scheduler.aclose)
 
 
-def _background_loops(
+def background_loops(
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     db: Database,
     *,
@@ -384,8 +384,8 @@ def _background_loops(
     the gap. `run` starts them in one `TaskGroup`.
     """
     return {
-        "plugins_watch": _watch_plugins_for_restart(),
-        "stdout_log_rotate": _rotate_stdout_log_forever(),
+        "plugins_watch": watch_plugins_for_restart(),
+        "stdout_log_rotate": rotate_stdout_log_forever(),
         "exec_memory_guard": run_memory_guard_forever(host_log),
         "understanding_chunks": understanding_loop_forever(
             control_pool,
@@ -398,7 +398,7 @@ def _background_loops(
     }
 
 
-async def _build_checkpointer(
+async def build_checkpointer(
     pool: AsyncConnectionPool[psycopg.AsyncConnection],
     plugin_state_classes: Iterable[type[BaseModel]] = (),
     *,
@@ -434,7 +434,7 @@ async def _build_checkpointer(
     return checkpointer
 
 
-async def _open_host_pools(
+async def open_host_pools(
     workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
 ) -> None:
@@ -443,18 +443,18 @@ async def _open_host_pools(
     await control_pool.open()
 
 
-async def _close_joined_host_pools(
+async def close_joined_host_pools(
     host: AgentHost | None,
     workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
 ) -> None:
     if host is None or host.resources_joined:
-        await _close_host_pools(workload_pool, control_pool)
+        await close_host_pools(workload_pool, control_pool)
     else:
         host_log.error("[agent-host] resource join unfinished; keeping pools open until hard exit")
 
 
-async def _close_process_owners(
+async def close_process_owners(
     host: AgentHost | None,
     workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
@@ -470,7 +470,7 @@ async def _close_process_owners(
     try:
         async with contextlib.AsyncExitStack() as cleanup:
             cleanup.callback(remove_pidfile, _pidfile())
-            cleanup.push_async_callback(_close_joined_host_pools, host, workload_pool, control_pool)
+            cleanup.push_async_callback(close_joined_host_pools, host, workload_pool, control_pool)
             if host is None and clients is not None:
                 cleanup.callback(clients.close)
             if installation is not None:
@@ -490,7 +490,7 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), _MODULE)
 
 
-def _boot_handles(
+def boot_handles(
     db: Database, config: ConfigBoot
 ) -> tuple[
     AsyncConnectionPool[psycopg.AsyncConnection],
@@ -520,7 +520,7 @@ async def _dispatch_host(
 ) -> None:
     """Run dispatcher siblings, joined before the owned heartbeat and turn drain."""
     async with asyncio.TaskGroup() as background:
-        for name, loop in _background_loops(
+        for name, loop in background_loops(
             control_pool, db, catalog=catalog, config=config
         ).items():
             background.create_task(loop, name=name)
@@ -568,7 +568,7 @@ async def run(
         land_cluster_extensions,
     )
 
-    workload_pool, control_pool, bus, db = _boot_handles(database(), config)
+    workload_pool, control_pool, bus, db = boot_handles(database(), config)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[Exception | None] | None = None
     beat_tasks: asyncio.TaskGroup | None = None
@@ -580,13 +580,13 @@ async def run(
         init_process_scope(machine=machine, home=home)
         land_cluster_extensions(db)
         local_machine = machine.name()
-        await _open_host_pools(workload_pool, control_pool)
+        await open_host_pools(workload_pool, control_pool)
         if clients is None:
             clients = process_clients(database=lambda: db, config=config, machine=machine)
         installation = load_installation(
             config, producer=clients.event_pipeline, load_extensions=_state_gated_loader()
         )
-        checkpointer = await _build_checkpointer(
+        checkpointer = await build_checkpointer(
             workload_pool,
             [cls for _plugin, cls in installation.registry.state_classes()],
             read_checkpoint_interval=lambda: config.view.agent.checkpoint_interval,
@@ -668,7 +668,7 @@ async def run(
                 beat = None  # Runtime cleanup attempted its join even when another stage failed.
                 beat_tasks = None
     finally:
-        await _close_process_owners(
+        await close_process_owners(
             host,
             workload_pool,
             control_pool,

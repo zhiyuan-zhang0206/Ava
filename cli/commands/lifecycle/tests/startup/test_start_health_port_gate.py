@@ -227,7 +227,7 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
         launched.extend(s.session for s in roster)
         return LaunchOutcome(roster, ())
 
-    monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
+    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
     return launched
 
 

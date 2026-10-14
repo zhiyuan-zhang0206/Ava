@@ -289,8 +289,8 @@ def test_cmd_converge_unconfigured_returns_zero(
     seeded_ext = rb.vendored_pg_dir() / "share/postgresql/extension"
     seeded_ext.mkdir(parents=True)
     (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
-    monkeypatch.setattr(_repo_commands, "_repo_root", lambda: repo)
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "repo_root", lambda: repo)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     # The production symlink requires the default home rather than the suite home.
     monkeypatch.setattr(converge_host, "is_default_home", default_home)
@@ -345,7 +345,7 @@ def test_frontend_env_override_guard_passes_clean(
     )  # must not raise
 
 
-@pytest.mark.parametrize("name", _fe_env._FORBIDDEN_FRONTEND_ENV_FILES)
+@pytest.mark.parametrize("name", _fe_env.FORBIDDEN_FRONTEND_ENV_FILES)
 def test_frontend_env_override_guard_rejects_build_time_files(
     tmp_path: Path,
     name,
@@ -394,7 +394,7 @@ def test_frontend_env_override_guard_rejects_next_public_in_unit_env(
 def test_next_public_keys_detects_assignment_shapes(tmp_path: Path, line):
     env = tmp_path / ".env"
     env.write_text(f"AVA_CLUSTER=main\n{line}\n")
-    assert _fe_env._next_public_keys_in_env_file(env)
+    assert _fe_env.next_public_keys_in_env_file(env)
 
 
 def test_next_public_keys_ignores_comments_and_substrings(tmp_path: Path):
@@ -405,11 +405,11 @@ def test_next_public_keys_ignores_comments_and_substrings(tmp_path: Path):
         "MY_NEXT_PUBLIC_THING=1\n"  # substring, not a NEXT_PUBLIC_* key
         "AVA_GATEWAY_PORT=8000\n"
     )
-    assert _fe_env._next_public_keys_in_env_file(env) == []
+    assert _fe_env.next_public_keys_in_env_file(env) == []
 
 
 def test_next_public_keys_absent_file_is_empty(tmp_path: Path):
-    assert _fe_env._next_public_keys_in_env_file(tmp_path / "nope.env") == []
+    assert _fe_env.next_public_keys_in_env_file(tmp_path / "nope.env") == []
 
 
 _DIRECT_URL = "postgresql://ava_main:sek@127.0.0.1:5433/ava_main"
@@ -582,7 +582,7 @@ def test_screen_capture_step_records_the_helpers_answer(
         lambda _self: status,  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    converge_host._ensure_screen_capture(ctx)
+    converge_host.ensure_screen_capture(ctx)
 
     written = read_status()
     assert written is not None
@@ -612,7 +612,7 @@ def test_screen_capture_step_clears_a_stale_file_when_the_grant_is_back(
         lambda _self: ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    converge_host._ensure_screen_capture(ctx)
+    converge_host.ensure_screen_capture(ctx)
     assert read_status() is None
 
 
@@ -649,7 +649,7 @@ def test_screen_capture_step_skips_hosts_with_no_helper(
 
     monkeypatch.setattr(client.PermissionsHelperClient, "check_screen_capture", boom)
 
-    converge_host._ensure_screen_capture(ctx)
+    converge_host.ensure_screen_capture(ctx)
     assert read_status() is None
 
 
@@ -673,7 +673,7 @@ def test_accessibility_step_records_the_helpers_answer(
     )
     monkeypatch.setattr(client.PermissionsHelperClient, "check_accessibility", lambda _self: status)  # pyright: ignore[reportUnknownArgumentType]
 
-    converge_host._ensure_accessibility(ctx)
+    converge_host.ensure_accessibility(ctx)
 
     written = read_status()
     assert written is not None
@@ -703,7 +703,7 @@ def test_accessibility_step_clears_a_stale_file_when_the_grant_is_back(
         lambda _self: AccessibilityStatus(state=AccessibilityState.GRANTED),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    converge_host._ensure_accessibility(ctx)
+    converge_host.ensure_accessibility(ctx)
     assert read_status() is None
 
 
@@ -738,7 +738,7 @@ def test_accessibility_step_skips_hosts_with_no_helper(
 
     monkeypatch.setattr(client.PermissionsHelperClient, "check_accessibility", boom)
 
-    converge_host._ensure_accessibility(ctx)
+    converge_host.ensure_accessibility(ctx)
     assert read_status() is None
 
 
@@ -751,6 +751,6 @@ def test_accessibility_step_follows_the_screen_capture_step():
     accessibility_step = steps[screen_index + 1]
 
     assert accessibility_step.name == "accessibility availability"
-    assert accessibility_step.apply is converge_host._ensure_accessibility
+    assert accessibility_step.apply is converge_host.ensure_accessibility
     assert accessibility_step.roles == screen_step.roles
     assert accessibility_step.requires_unit_config == screen_step.requires_unit_config

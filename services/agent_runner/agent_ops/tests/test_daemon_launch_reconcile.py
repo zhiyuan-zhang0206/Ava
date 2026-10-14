@@ -69,5 +69,5 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
     assert status == OpStatus.COMPLETED
     assert result == {"wake_published": True}
     assert calls == [(attempt, pool)]
-    assert "launch-reconcile" not in rpc._NON_IDEMPOTENT_KINDS
-    assert {"spawn-launch", "lifecycle"} <= rpc._NON_IDEMPOTENT_KINDS
+    assert "launch-reconcile" not in rpc.NON_IDEMPOTENT_KINDS
+    assert {"spawn-launch", "lifecycle"} <= rpc.NON_IDEMPOTENT_KINDS

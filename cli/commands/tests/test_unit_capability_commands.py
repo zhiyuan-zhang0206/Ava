@@ -78,7 +78,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     with pytest.raises(unit.UnitCapabilityError, match="refuses generation 0"):
         unit.install_bundle(runner, _open(bundle), machine=MACHINE, served_endpoint=endpoint)
     assert unit.load_unit_capability(runner) is None
-    bringup._ensure_pooler(
+    bringup.ensure_pooler(
         born.record,
         "ava",
         born.home,

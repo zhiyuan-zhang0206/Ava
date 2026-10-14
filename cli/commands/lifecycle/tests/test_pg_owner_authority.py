@@ -163,7 +163,7 @@ def owned_pg(
         # Re-pin the temp home: teardown must never resolve the operator's home.
         monkeypatch.setenv("AVA_HOME", str(home))
         subprocess.run(
-            [ci._pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
+            [ci.pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )

@@ -22,10 +22,10 @@ from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
-    _reconcile_checkin_outcomes,
-    _select_idle_agents_needing_heartbeat,
-    _send_heartbeat_checkin,
     backoff_deadlines,
+    reconcile_checkin_outcomes,
+    select_idle_agents_needing_heartbeat,
+    send_heartbeat_checkin,
 )
 from services.wake.heartbeat.tests.heartbeat_support import THRESHOLD_S, make_idle
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
@@ -51,7 +51,7 @@ def event_pipeline(
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
-    return dict(_select_idle_agents_needing_heartbeat(pool, THRESHOLD_S))
+    return dict(select_idle_agents_needing_heartbeat(pool, THRESHOLD_S))
 
 
 def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
@@ -99,7 +99,7 @@ class TestSendHeartbeatCheckin:
             database_gate=database_gate,
             machine=machine_identity,
         )
-        _send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
+        send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
         # The emitter drains asynchronously (0.5s cadence) — flush() can
         # race the drain thread for the queue, so poll briefly for the line.
         # The PG events copy was retired at the LGTM cutover (task #1197 close-C)
@@ -159,7 +159,7 @@ class TestSendHeartbeatCheckin:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
+        send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE inbound_messages SET status = 'done' WHERE agent_id = %s", (aid,))
         db_conn.commit()
@@ -187,7 +187,7 @@ class TestSendHeartbeatCheckin:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
+        send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE inbound_messages SET status = 'done' WHERE agent_id = %s", (aid,))
             cur.execute(
@@ -198,10 +198,10 @@ class TestSendHeartbeatCheckin:
         db_conn.commit()
 
         assert aid not in dict(
-            _select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, heartbeat_interval_s=300.0)
+            select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, heartbeat_interval_s=300.0)
         )
         assert aid in dict(
-            _select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, heartbeat_interval_s=15.0)
+            select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, heartbeat_interval_s=15.0)
         )
 
     async def test_publishes_redis_wake_to_target(
@@ -231,7 +231,7 @@ class TestSendHeartbeatCheckin:
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
             await asyncio.sleep(0.2)  # let the subscribe take effect before the publish
             t0 = time.monotonic()
-            await asyncio.to_thread(_send_heartbeat_checkin, pool, database, event_bus, aid, 7.0)
+            await asyncio.to_thread(send_heartbeat_checkin, pool, database, event_bus, aid, 7.0)
             await asyncio.wait_for(wait_task, timeout=5.0)
             assert time.monotonic() - t0 < 5.0, (
                 "heartbeat check-in did not wake the parked listener"
@@ -270,12 +270,12 @@ class TestConsecutiveFailureBackoff:
         )
         # Deadline in the future -> excluded; deadline passed -> selected.
         assert aid not in dict(
-            _select_idle_agents_needing_heartbeat(
+            select_idle_agents_needing_heartbeat(
                 pool, THRESHOLD_S, backoff_until={aid: time.time() + 1000}
             )
         )
         assert aid in dict(
-            _select_idle_agents_needing_heartbeat(
+            select_idle_agents_needing_heartbeat(
                 pool, THRESHOLD_S, backoff_until={aid: time.time() - 1}
             )
         )
@@ -310,7 +310,7 @@ class TestConsecutiveFailureBackoff:
             local_machine=machine_identity,
         )
 
-        selected = _select_idle_agents_needing_heartbeat(
+        selected = select_idle_agents_needing_heartbeat(
             pool,
             THRESHOLD_S,
             limit=1,
@@ -342,7 +342,7 @@ class TestConsecutiveFailureBackoff:
             local_machine=machine_identity,
         )
         pending = _selected(pool)
-        _send_heartbeat_checkin(pool, database, event_bus, aid, pending[aid])
+        send_heartbeat_checkin(pool, database, event_bus, aid, pending[aid])
         if advanced:
             # Still beyond the idle threshold: recovery must use the observed
             # progress, not the independent fresh-activity shortcut.
@@ -354,7 +354,7 @@ class TestConsecutiveFailureBackoff:
                 )
             db_conn.commit()
         streaks: dict[int, int] = {aid: 2}
-        _reconcile_checkin_outcomes(
+        reconcile_checkin_outcomes(
             pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
         assert pending == {}
@@ -384,7 +384,7 @@ class TestConsecutiveFailureBackoff:
         pending: dict[int, float] = {aid: 6.0}
         streaks: dict[int, int] = {}
 
-        _reconcile_checkin_outcomes(
+        reconcile_checkin_outcomes(
             pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
 
@@ -421,7 +421,7 @@ class TestConsecutiveFailureBackoff:
         pending: dict[int, float] = {aid: 6.0}
         streaks: dict[int, int] = {aid: 3}
 
-        _reconcile_checkin_outcomes(
+        reconcile_checkin_outcomes(
             pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
 
@@ -457,7 +457,7 @@ class TestConsecutiveFailureBackoff:
         db_conn.commit()
         streaks: dict[int, int] = {aid: 4}
 
-        _reconcile_checkin_outcomes(
+        reconcile_checkin_outcomes(
             pool, pending_checkin={}, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
 
@@ -487,7 +487,7 @@ class TestConsecutiveFailureBackoff:
         db_conn.commit()
         streaks: dict[int, int] = {aid: 2}
 
-        _reconcile_checkin_outcomes(
+        reconcile_checkin_outcomes(
             pool, pending_checkin={}, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
 

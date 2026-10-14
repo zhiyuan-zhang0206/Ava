@@ -9,8 +9,3 @@ exports = ["computer.py", "control.py", "impersonation.py", "impersonation_adapt
 
 [external]
 "impersonation.py" = "runs the Python the operator pipes in or names as a file"
-
-[debt.private-name]
-"tests/test_delivery.py -> impersonation_relay.py#_MIN_EMIT_INTERVAL_SECONDS" = 1
-"tests/test_impersonation_bridge.py -> impersonation_relay.py#_MIN_EMIT_INTERVAL_SECONDS" = 2
-"tests/test_impersonation_bridge_part2.py -> impersonation_relay.py#_MIN_EMIT_INTERVAL_SECONDS" = 1

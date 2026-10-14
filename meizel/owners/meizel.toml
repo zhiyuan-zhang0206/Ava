@@ -5,4 +5,3 @@ exports = ["clock_lattice.py", "decisions.py"]
 
 [debt.private-name]
 "tests/test_lint_clock_lattice.py -> clock_lattice.py#_REPO_ROOT" = 5
-"tests/test_lint_clock_lattice.py -> clock_lattice.py#_SCAN_DIRS" = 1

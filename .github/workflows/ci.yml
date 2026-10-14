@@ -1528,7 +1528,7 @@ jobs:
                   "-s",
                   "-k",
                   "ci-ava-signing",
-                  str(lifecycle._keychain_path()),
+                  str(lifecycle.keychain_path()),
               ],
               check=True,
           )
@@ -1538,13 +1538,13 @@ jobs:
           # Report all codesigning identities, including invalid ones.
           subprocess.run(["security", "find-identity", "-p", "codesigning"], check=True)
           # Show whether the imported key and certificate are registered.
-          subprocess.run(["security", "dump-keychain", str(lifecycle._keychain_path())], check=True)
+          subprocess.run(["security", "dump-keychain", str(lifecycle.keychain_path())], check=True)
           # Show the keychain search list used by subsequent signing commands.
           subprocess.run(["security", "list-keychains"], check=True)
 
           # Report the keychain lock state without failing the lane.
           subprocess.run(
-              ["security", "show-keychain-info", str(lifecycle._keychain_path())],
+              ["security", "show-keychain-info", str(lifecycle.keychain_path())],
               check=False,
           )
           # Unlock again immediately before signing in case the import relocked it.
@@ -1554,7 +1554,7 @@ jobs:
                   "unlock-keychain",
                   "-p",
                   "ci-ava-signing",
-                  str(lifecycle._keychain_path()),
+                  str(lifecycle.keychain_path()),
               ],
               check=True,
           )
@@ -1568,7 +1568,7 @@ jobs:
           lifecycle._remove_app(app)
           exe = lifecycle._app_executable(app)
           exe.parent.mkdir(parents=True, exist_ok=True)
-          (app / "Contents" / "Info.plist").write_bytes(lifecycle._INFO_PLIST.read_bytes())
+          (app / "Contents" / "Info.plist").write_bytes(lifecycle.INFO_PLIST.read_bytes())
           exe.write_bytes(binary.read_bytes())
           exe.chmod(0o755)
 
@@ -1585,14 +1585,14 @@ jobs:
                   # keep this lane on the same signing policy so codesign
                   # validates the entitlements plist on every PR.
                   "--entitlements",
-                  str(lifecycle._ENTITLEMENTS),
+                  str(lifecycle.ENTITLEMENTS),
                   str(app),
               ]
           )
 
           # Keep designated-requirement readback on the real macOS codesign path. The
           # ad-hoc signature's DR has no "designated =>" line, so assert on the raw
-          # readback (lifecycle._read_dr parses the stable-identity DR shape and is
+          # readback (lifecycle.read_dr parses the stable-identity DR shape and is
           # covered by unit tests + the production preflight gate).
           dr_result = subprocess.run(
               ["codesign", "-d", "-r-", str(app)],
@@ -1641,7 +1641,7 @@ jobs:
         if: ${{ always() }}
         run: |
           export AVA_HOME="${AVA_HOME:-$RUNNER_TEMP/ava-home}"
-          label="$(uv run python -c 'from services.desktop.permissions_helper.lifecycle import _label; print(_label())' 2>/dev/null || true)"
+          label="$(uv run python -c 'from services.desktop.permissions_helper.lifecycle import label; print(label())' 2>/dev/null || true)"
           if [[ -n "$label" ]]; then
             launchctl bootout "gui/$(id -u)/$label" || true
           fi

@@ -20,7 +20,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import invocation
 from services.agent_runner.agent_host.tests.managed_work import managed_work
-from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
+from services.agent_runner.agent_host.tests.native_cancel.test_continuation import install_faults
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
     blocked_host,
 )
@@ -64,7 +64,7 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
             machine=machine_identity,
         )
         ctx = replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
-        faults = _install_faults(monkeypatch, initial.agent_id, fault_site)
+        faults = install_faults(monkeypatch, initial.agent_id, fault_site)
         running = asyncio.create_task(host._invoke_until_done(initial.agent_id, ctx))
         try:
             await asyncio.wait_for(entered.wait(), 5)

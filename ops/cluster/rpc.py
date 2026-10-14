@@ -15,7 +15,7 @@ HTTP call.
       (a definitive, non-retryable absence).
 
   Retry policy: transient infrastructure failures (transport errors, 5xx)
-  retry with bounded exponential backoff + jitter (see `_retry_delay_s`).
+  retry with bounded exponential backoff + jitter (see `retry_delay_s`).
   Business failures (status=="failed") and deterministic rejections (4xx,
   malformed body, unknown machine) never retry. An op whose effect is NOT
   repeatable — lifecycle terminate/restart (a second
@@ -84,7 +84,7 @@ _RETRY_MAX_DELAY_S = 4.0
 # and replays one recorded outcome within an attempt. Lifecycle ops have non-repeatable effects.
 # These are retried only under an idempotency key generated once per dispatch call unless
 # the caller supplies one; retries replay the first stored outcome.
-_NON_IDEMPOTENT_KINDS = frozenset(
+NON_IDEMPOTENT_KINDS = frozenset(
     {
         "spawn-launch",
         "lifecycle",
@@ -99,7 +99,7 @@ _BUSINESS_ID_KEYS = {"spawn-launch": "agent_id"}
 rpc_sleep = asyncio.sleep
 
 
-def _retry_delay_s(attempt: int) -> float:
+def retry_delay_s(attempt: int) -> float:
     """Bounded exponential backoff for retry `attempt` (0-based), jittered ±50%.
 
     base = min(0.5 * 2**attempt, 4.0) seconds — 0.5, 1, 2, then capped at 4.
@@ -126,7 +126,7 @@ def worst_case_dispatch_seconds(timeout_s: float | None = None) -> float:
     return (retries + 1) * attempt_s + backoff * 1.5
 
 
-def _default_idempotency_key(target_machine: str, kind: OpKind, payload: dict[str, Any]) -> str:
+def default_idempotency_key(target_machine: str, kind: OpKind, payload: dict[str, Any]) -> str:
     """Return a target-scoped stable key when the op names its business id."""
     business_id_key = _BUSINESS_ID_KEYS.get(kind)
     business_id = payload.get(business_id_key) if business_id_key is not None else None
@@ -339,7 +339,7 @@ async def dispatch_to_url(
 
     POSTs `{kind, payload}` to `{ops_url}/ops` and returns the op's result dict,
     retrying transient infrastructure failures (transport errors / timeouts and
-    5xx statuses) with bounded exponential backoff + jitter (`_retry_delay_s`).
+    5xx statuses) with bounded exponential backoff + jitter (`retry_delay_s`).
     `retries` caps the extra attempts (default
     `settings.gateway.cluster_rpc_max_retries` / AVA_CLUSTER_RPC_MAX_RETRIES);
     pass 0 for a fail-fast single attempt (e.g. latency-critical status probes,
@@ -376,8 +376,8 @@ async def dispatch_to_url(
     # scoped to its target and full effect payload: re-sending a launch for the
     # same already-created agent must replay, not start a second child.
     # Operations without one retain a fresh UUID.
-    if kind in _NON_IDEMPOTENT_KINDS and idempotency_key is None:
-        idempotency_key = _default_idempotency_key(target_machine, kind, payload)
+    if kind in NON_IDEMPOTENT_KINDS and idempotency_key is None:
+        idempotency_key = default_idempotency_key(target_machine, kind, payload)
     if retries is None:
         retries = settings.gateway.cluster_rpc_max_retries
     retries = max(retries, 0)  # a negative budget means "no attempts" — never
@@ -397,7 +397,7 @@ async def dispatch_to_url(
         except _RetryableFailure as exc:
             last = exc
             if attempt < retries:
-                delay = _retry_delay_s(attempt)
+                delay = retry_delay_s(attempt)
                 # Intermediate transport retries stay quiet; exhaustion is reported below.
                 _log.debug(
                     "cluster_rpc %s -> machine=%s attempt %d/%d failed, retrying in %.1fs: %r",

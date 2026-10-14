@@ -19,7 +19,7 @@ from gateway.app import app
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.tests.lifecycle.creation.test_sdk_strong_creation import httpx_response_of, sdk
 from ops.cluster import rpc
-from ops.lifecycle.launch import _validate_launch_row
+from ops.lifecycle.launch import validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -44,7 +44,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     async def accept(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         # Exercise the runner's real original-attempt/placement fence, rather
         # than treating matching JSON as execution evidence.
-        _validate_launch_row(app.state.db_pool, body, local_machine=machine_identity.name())
+        validate_launch_row(app.state.db_pool, body, local_machine=machine_identity.name())
         launches.append(body)
         return SpawnedAgent(id=body.agent_id)
 

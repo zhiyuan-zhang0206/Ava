@@ -226,7 +226,7 @@ def test_full_scan_fails_on_a_stale_family_module(
     scan_tmp, monkeypatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Only the argument-free full scan (pre-commit, CI) judges the allowlists."""
-    for scan_dir in _lint._SCAN_DIRS:
+    for scan_dir in _lint.SCAN_DIRS:
         (_lint._REPO_ROOT / scan_dir).mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(_lint, "FAMILY_MODULES", ("base/retired_timing.py",))
     monkeypatch.setattr(_lint, "INDEPENDENT_CLOCKS", {})

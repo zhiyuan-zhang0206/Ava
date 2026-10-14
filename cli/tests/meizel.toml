@@ -77,13 +77,13 @@ exports = ["bootstrap"]
 "test_start_gate.py#monkeypatch.setattr cli.commands.cluster.unit_join.join_gateway" = 1
 "test_start_gate.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.complete_boot_start" = 1
 "test_start_gate.py#monkeypatch.setattr cli.commands.lifecycle.start.cmd_start" = 1
-"test_start_gate.py#monkeypatch.setattr cli.start_intent._checkout" = 1
+"test_start_gate.py#monkeypatch.setattr cli.start_intent.checkout" = 1
 "test_start_gate.py#monkeypatch.setattr cli.startup_support.init_cli_logging" = 1
 "test_unit_capability_cli.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_unit_capability_cli.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
 "test_unit_capability_cli.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1
 "test_unit_capability_cli.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
-"test_unit_capability_cli.py#monkeypatch.setattr cli.start_intent._checkout" = 1
+"test_unit_capability_cli.py#monkeypatch.setattr cli.start_intent.checkout" = 1
 
 [debt.private-module]
 "test_unit_capability_cli.py -> bootstrap/_init_identity.py" = 1

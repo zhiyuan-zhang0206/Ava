@@ -164,7 +164,7 @@ def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
     )
     db_conn.commit()
     with db_conn.cursor() as cur, pytest.raises(ResurrectError, match="0 rows"):
-        wake._transition_terminated_to_unclaimed_idling(
+        wake.transition_terminated_to_unclaimed_idling(
             cur,
             aid,
             None,

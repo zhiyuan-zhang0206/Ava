@@ -540,7 +540,7 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
 
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
+    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
 
     def announce(*, machine: MachineIdentity) -> None:
         assert machine is command_runtime.machine

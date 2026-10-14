@@ -23,9 +23,9 @@ from ..test_computer_mcp_daemon import (
     SHORT_SESSION,
     FakeHelper,
     FakeOcr,
-    _call,
-    _ok_result,
+    call,
     computer_daemon,
+    ok_result,
 )
 from ..test_computer_mcp_daemon import (
     audit_log as audit_log,
@@ -58,15 +58,15 @@ async def test_click_text_measures_scale_and_tracks_pointer(
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    result = await _ok_result(d, "click_text", {"text": "search"})
+    result = await ok_result(d, "click_text", {"text": "search"})
     assert result["scale"] == 1.0
     assert ("click", {"x": 540.0, "y": 112.0, "double": False}) in fh.calls
     # A user may move the cursor after click_text: read its live logical position.
-    await _ok_result(d, "scroll", {"dy": -10})
+    await ok_result(d, "scroll", {"dy": -10})
     assert ("scroll", {"x": 321.0, "y": 123.0, "dy": -10}) in fh.calls
     # a plain click converts with the 1x scale click_text measured, not the
     # helper's stale 2x claim
-    await _call(d, "click", {"x": 81, "y": 15})
+    await call(d, "click", {"x": 81, "y": 15})
     assert ("click", {"x": 81.0, "y": 15.0, "double": False}) in fh.calls
 
 
@@ -74,11 +74,11 @@ async def test_type_key_scroll_window_session(
     fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    assert (await _ok_result(d, "type_text", {"text": "\u4f60\u597d"}))["typed"] == 2
-    assert (await _ok_result(d, "key", {"key": "return", "cmd": True}))["pressed"] == 36
-    assert (await _ok_result(d, "scroll", {"x": 5, "y": 6, "dy": -20}))["scrolled"] == -20
-    assert (await _ok_result(d, "window_info", {"owner": "Finder"}))["owner"] == "Finder"
-    assert (await _ok_result(d, "session_info"))["locked"] is False
+    assert (await ok_result(d, "type_text", {"text": "\u4f60\u597d"}))["typed"] == 2
+    assert (await ok_result(d, "key", {"key": "return", "cmd": True}))["pressed"] == 36
+    assert (await ok_result(d, "scroll", {"x": 5, "y": 6, "dy": -20}))["scrolled"] == -20
+    assert (await ok_result(d, "window_info", {"owner": "Finder"}))["owner"] == "Finder"
+    assert (await ok_result(d, "session_info"))["locked"] is False
 
 
 async def test_helper_failure_surfaces_as_error(
@@ -90,7 +90,7 @@ async def test_helper_failure_surfaces_as_error(
 ) -> None:
     fake_helper.click_errors = [PermissionsHelperError("helper down")]
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    resp = await _call(d, "click", {"x": 1, "y": 2})
+    resp = await call(d, "click", {"x": 1, "y": 2})
     assert resp["ok"] is False
     assert "helper down" in resp["error"]
 
@@ -104,7 +104,7 @@ async def test_success_result_is_call_tool_result_dump(
     from mcp import types
 
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    resp = await _call(d, "frontmost_app")
+    resp = await call(d, "frontmost_app")
     assert resp["ok"] is True
     result = types.CallToolResult.model_validate(resp["result"])
     assert result.is_error is False
@@ -120,11 +120,11 @@ async def test_missing_required_argument_fails_cleanly(
     """A missing required argument is a readable tool error, not a bare
     KeyError leaking from the helper call."""
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    resp = await _call(d, "click", {"y": 2})
+    resp = await call(d, "click", {"y": 2})
     assert resp["ok"] is False
     assert "click requires argument 'x'" in resp["error"]
     assert audit_log[0]["payload"]["outcome"] == "error"
-    resp2 = await _call(d, "scroll", {"x": 1, "y": 2})
+    resp2 = await call(d, "scroll", {"x": 1, "y": 2})
     assert resp2["ok"] is False
     assert "scroll requires dx or dy" in resp2["error"]
     assert audit_log[1]["payload"]["outcome"] == "error"
@@ -135,7 +135,7 @@ async def test_window_info_defaults_owner_to_frontmost(
 ) -> None:
     """window_info without owner uses the frontmost app."""
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    result = await _ok_result(d, "window_info")
+    result = await ok_result(d, "window_info")
     assert result["owner"] == "Finder"
     assert ("window_info", {"owner": "Finder"}) in fake_helper.calls
 
@@ -145,11 +145,11 @@ async def test_key_accepts_names_characters_and_keycodes(
 ) -> None:
     """The key tool takes a key name, a single character, or a raw keycode."""
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    assert (await _ok_result(d, "key", {"key": "a"}))["pressed"] == 0
-    assert (await _ok_result(d, "key", {"key": "RETURN"}))["pressed"] == 36
-    assert (await _ok_result(d, "key", {"key": "F5"}))["pressed"] == 96
-    assert (await _ok_result(d, "key", {"key": "up"}))["pressed"] == 126
-    assert (await _ok_result(d, "key", {"keycode": 36}))["pressed"] == 36
+    assert (await ok_result(d, "key", {"key": "a"}))["pressed"] == 0
+    assert (await ok_result(d, "key", {"key": "RETURN"}))["pressed"] == 36
+    assert (await ok_result(d, "key", {"key": "F5"}))["pressed"] == 96
+    assert (await ok_result(d, "key", {"key": "up"}))["pressed"] == 126
+    assert (await ok_result(d, "key", {"keycode": 36}))["pressed"] == 36
     calls = [c for c in fake_helper.calls if c[0] == "key"]
     assert calls == [
         ("key", {"code": 0, "cmd": False}),
@@ -164,11 +164,11 @@ async def test_key_unknown_name_fails_cleanly(
     fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    resp = await _call(d, "key", {"key": "wibble"})
+    resp = await call(d, "key", {"key": "wibble"})
     assert resp["ok"] is False
     assert "unknown key name" in resp["error"]
     assert audit_log[0]["payload"]["outcome"] == "error"
-    resp2 = await _call(d, "key")
+    resp2 = await call(d, "key")
     assert resp2["ok"] is False
     assert "key requires exactly one" in resp2["error"]
 
@@ -179,7 +179,7 @@ async def test_key_result_maps_helper_echo_to_pressed(
     """The daemon's key response carries "pressed" even though the helper
     echoes {"key": code, "cmd": ...} — the contract callers read."""
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    result = await _ok_result(d, "key", {"key": "return", "cmd": True})
+    result = await ok_result(d, "key", {"key": "return", "cmd": True})
     assert result == {"pressed": 36, "cmd": True}
 
 
@@ -188,8 +188,8 @@ async def test_scroll_uses_live_cursor_after_click(
 ) -> None:
     """Scroll follows a cursor moved since the last synthetic click."""
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    await _ok_result(d, "click", {"x": 100, "y": 200})
-    result = await _ok_result(d, "scroll", {"dy": -10})
+    await ok_result(d, "click", {"x": 100, "y": 200})
+    result = await ok_result(d, "scroll", {"dy": -10})
     assert result == {"scrolled": -10}
     assert ("scroll", {"x": 321.0, "y": 123.0, "dy": -10}) in fake_helper.calls
 
@@ -198,7 +198,7 @@ async def test_scroll_uses_live_cursor_before_first_click(
     fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    result = await _ok_result(d, "scroll", {"dy": 5})
+    result = await ok_result(d, "scroll", {"dy": 5})
     assert result == {"scrolled": 5}
     # Live cursor is already logical; never divide it by the screenshot scale.
     assert ("scroll", {"x": 321.0, "y": 123.0, "dy": 5}) in fake_helper.calls
@@ -208,8 +208,8 @@ async def test_scroll_live_cursor_overrides_previous_explicit_position(
     fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    await _ok_result(d, "scroll", {"x": 40, "y": 60, "dy": -5})
-    result = await _ok_result(d, "scroll", {"dy": -1})
+    await ok_result(d, "scroll", {"x": 40, "y": 60, "dy": -5})
+    result = await ok_result(d, "scroll", {"dy": -1})
     assert result == {"scrolled": -1}
     # The second call ignores the previous explicit point when the cursor has moved.
     assert ("scroll", {"x": 321.0, "y": 123.0, "dy": -1}) in fake_helper.calls
@@ -224,7 +224,7 @@ async def test_audit_emitted_on_success(
 ) -> None:
     monkeypatch.setattr(screen_mod, "snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    await _call(d, "click", {"x": 100, "y": 200, "task_id": 42})
+    await call(d, "click", {"x": 100, "y": 200, "task_id": 42})
     assert len(audit_log) == 2  # pyright: ignore[reportUnknownArgumentType]
     start, ev = audit_log
     assert start["event_type"] == "computer_session_start"
@@ -243,7 +243,7 @@ async def test_audit_emitted_on_error(
     fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    await _call(d, "key", {"key": "wibble"})
+    await call(d, "key", {"key": "wibble"})
     assert len(audit_log) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert audit_log[0]["payload"]["outcome"] == "error"
     assert "unknown key name" in audit_log[0]["payload"]["error"]
@@ -253,7 +253,7 @@ async def test_no_audit_row_for_anonymous_call(
     audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
     d = computer_daemon(database_gate=database_gate)
-    await _call(d, "click", {"x": 1, "y": 2}, agent_id=None)
+    await call(d, "click", {"x": 1, "y": 2}, agent_id=None)
     assert audit_log == []
 
 
@@ -270,8 +270,8 @@ async def test_concurrent_calls_are_safe(
     (e.g. Phase 2's queue), and the sync body already prevents interleaving."""
     monkeypatch.setattr(screen_mod, "snapshot_path", lambda _a: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    t1 = asyncio.create_task(_call(d, "click", {"x": 1, "y": 2}))
-    t2 = asyncio.create_task(_call(d, "snapshot"))
+    t1 = asyncio.create_task(call(d, "click", {"x": 1, "y": 2}))
+    t2 = asyncio.create_task(call(d, "snapshot"))
     r1, r2 = await asyncio.gather(t1, t2)
     assert r1["ok"] is True
     assert r2["ok"] is True
@@ -290,9 +290,9 @@ async def test_screen_busy_blocks_second_agent(
 ) -> None:
     d = computer_daemon(**SHORT_SESSION, database_gate=database_gate, helper=fake_helper)
     # agent 7 takes the screen with a click
-    assert (await _call(d, "click", {"x": 1, "y": 2}, agent_id=7))["ok"] is True
+    assert (await call(d, "click", {"x": 1, "y": 2}, agent_id=7))["ok"] is True
     # agent 8's action waits past the tiny queue timeout and fails busy
-    resp = await _call(d, "click", {"x": 3, "y": 4}, agent_id=8)
+    resp = await call(d, "click", {"x": 3, "y": 4}, agent_id=8)
     assert resp["ok"] is False
     assert "screen busy" in resp["error"]
     assert fake_helper.calls.count(("click", {"x": 1.5, "y": 2.0, "double": False})) == 0
@@ -306,9 +306,9 @@ async def test_holder_continues_while_busy(
     database_gate: ProcessDbGate,
 ) -> None:
     d = computer_daemon(**SHORT_SESSION, database_gate=database_gate, helper=fake_helper)
-    await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
+    await call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     # the holder's own next action passes through (lease renewed by the call)
-    resp = await _call(d, "type_text", {"text": "hi"}, agent_id=7)
+    resp = await call(d, "type_text", {"text": "hi"}, agent_id=7)
     assert resp["ok"] is True
 
 
@@ -320,14 +320,14 @@ async def test_release_control_hands_over(
     database_gate: ProcessDbGate,
 ) -> None:
     d = computer_daemon(**SHORT_SESSION, database_gate=database_gate, helper=fake_helper)
-    await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
+    await call(d, "click", {"x": 1, "y": 2}, agent_id=7)
 
     async def waiter() -> Response:
-        return await _call(d, "click", {"x": 3, "y": 4}, agent_id=8)
+        return await call(d, "click", {"x": 3, "y": 4}, agent_id=8)
 
     t = asyncio.create_task(waiter())
     await asyncio.sleep(0.02)  # agent 8 queues up
-    rel = await _call(d, "release_control", {}, agent_id=7)
+    rel = await call(d, "release_control", {}, agent_id=7)
     assert rel["ok"] is True
     assert await t  # agent 8's queued action then runs
     assert any(c[0] == "click" and c[1]["x"] == 1.5 for c in fake_helper.calls)
@@ -341,8 +341,8 @@ async def test_release_control_by_non_holder_fails(
     database_gate: ProcessDbGate,
 ) -> None:
     d = computer_daemon(**SHORT_SESSION, database_gate=database_gate, helper=fake_helper)
-    await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
-    resp = await _call(d, "release_control", {}, agent_id=8)
+    await call(d, "click", {"x": 1, "y": 2}, agent_id=7)
+    resp = await call(d, "release_control", {}, agent_id=8)
     assert resp["ok"] is False
     assert "not the screen holder" in resp["error"]
 
@@ -355,12 +355,12 @@ async def test_operator_force_release_without_identity(
     database_gate: ProcessDbGate,
 ) -> None:
     d = computer_daemon(**SHORT_SESSION, database_gate=database_gate, helper=fake_helper)
-    await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
+    await call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     # CLI path: no agent_id, force=true — releases whoever holds the screen
-    resp = await _call(d, "release_control", {"force": True}, agent_id=None)
+    resp = await call(d, "release_control", {"force": True}, agent_id=None)
     assert resp["ok"] is True
     # screen is free again: a fresh agent acts immediately
-    resp2 = await _call(d, "click", {"x": 5, "y": 6}, agent_id=9)
+    resp2 = await call(d, "click", {"x": 5, "y": 6}, agent_id=9)
     assert resp2["ok"] is True
 
 
@@ -392,7 +392,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
 
     monkeypatch.setattr(manifest, "emit_recorded_central_event", _stage)
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    resp = await _call(d, "click", {"x": 1, "y": 2, "task_id": 42})
+    resp = await call(d, "click", {"x": 1, "y": 2, "task_id": 42})
     assert resp["ok"] is True  # the action itself executed
     assert any("task-session event failed" in w for w in warnings)
     # the computer_action row still landed (the envelope is auxiliary)
@@ -467,9 +467,9 @@ async def test_shutdown_cancels_active_clients(database: Database) -> None:
 
         daemon.handle = stuck_client  # type: ignore[method-assign]
         async with asyncio.TaskGroup() as clients:
-            # _tracked_client registers the done_callback that removes the task from
+            # tracked_client registers the done_callback that removes the task from
             # daemon._clients — the same wiring run() uses.
-            daemon_mod._tracked_client(daemon, clients, None, None)  # type: ignore[arg-type]
+            daemon_mod.tracked_client(daemon, clients, None, None)  # type: ignore[arg-type]
             await started.wait()
 
             # run()'s shutdown path: cancel every tracked client, then gather.
@@ -494,22 +494,22 @@ async def test_high_priority_waiter_jumps_the_queue(
     d = computer_daemon(
         computer_use_lease_s=1.0, computer_use_queue_timeout_s=0.5, database_gate=database_gate
     )
-    await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
+    await call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     order: list[str] = []
 
     async def normal() -> None:
-        await _call(d, "click", {"x": 3, "y": 4}, agent_id=8)
+        await call(d, "click", {"x": 3, "y": 4}, agent_id=8)
         order.append("normal")
 
     async def high() -> None:
-        await _call(d, "click", {"x": 5, "y": 6, "priority": "high"}, agent_id=9)
+        await call(d, "click", {"x": 5, "y": 6, "priority": "high"}, agent_id=9)
         order.append("high")
 
     tn = asyncio.create_task(normal())
     await asyncio.sleep(0.02)  # normal queues first
     th = asyncio.create_task(high())
     await asyncio.sleep(0.05)  # both waiters are in the queue now
-    await _call(d, "release_control", {}, agent_id=7)
+    await call(d, "release_control", {}, agent_id=7)
     await asyncio.gather(tn, th)
     assert order == ["high", "normal"]
 
@@ -529,7 +529,7 @@ async def test_snapshot_audit_carries_png_path(
         lambda _agent_id: "/tmp/snap-trace.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    await _call(d, "snapshot", {"task_id": 42})
+    await call(d, "snapshot", {"task_id": 42})
     actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
     assert actions[0]["payload"]["action"] == "snapshot"
     assert actions[0]["payload"]["path"] == "/tmp/snap-trace.png"  # noqa: S108
