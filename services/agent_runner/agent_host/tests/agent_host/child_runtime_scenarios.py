@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 from services.agent_runner.agent_host import stdout_log
-from services.agent_runner.agent_host.tests.runtime.test_agent_host_shutdown import (
+from services.agent_runner.agent_host.tests.runtime.shutdown.test_agent_host_shutdown import (
     exercise_shutdown,
 )
 from services.agent_runner.agent_host.tests.runtime.test_resource_join import (

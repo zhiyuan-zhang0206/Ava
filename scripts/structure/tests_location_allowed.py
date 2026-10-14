@@ -263,10 +263,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "asserts the conversation-recovery sources named by services/backup/dump.py, the checkpoint module and db/schema.sql are checkpoint tables, not the events archive",
     ),
-    "tests/components/services/test_backup_scheduler_shutdown.py": (
-        "integration",
-        "real signal stop of a scheduler blocked in an ops job: spans base, ops, services.backup.scheduler, no one of which may import all the others",
-    ),
     "tests/skills/test_inspect_a_trace_fetch.py": (
         "contract",
         "tests the scripts of the .agents/skills/inspect-a-trace skill",

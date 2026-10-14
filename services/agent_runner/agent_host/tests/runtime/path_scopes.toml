@@ -5,7 +5,7 @@
     "test_agent_host_abort_reconcile.py",
     "test_agent_host_log_rotate.py",
     "test_agent_host_plugins.py",
-    "test_agent_host_shutdown.py",
+    "shutdown/test_agent_host_shutdown.py",
     "test_agent_host_turn_reconcile.py",
     "test_host_pool_capacity.py",
 ]
