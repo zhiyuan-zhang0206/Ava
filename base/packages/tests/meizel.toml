@@ -1,3 +1,5 @@
+exports = ["plugin_config"]
+
 [uses]
 "bootstrap" = ["providers"]
 "providers" = ["lm"]

@@ -82,7 +82,6 @@ frontend = ["ui"]
 "base/host/env/tests/conftest.py -> tests/fixtures/unit/config_authority.py" = 1
 "base/host/env/tests/conftest.py -> tests/fixtures/unit/generation.py" = 2
 "base/packages/plugins/surface/tests/conftest.py -> tests/fixtures/unit/config_authority.py" = 1
-"base/packages/plugins/tests/conftest.py -> tests/fixtures/model_catalog.py" = 4
 "base/packages/plugins/tests/conftest.py -> tests/fixtures/unit/config_authority.py" = 1
 "base/packages/tests/bootstrap/conftest.py -> tests/fixtures/unit/config_authority.py" = 1
 "base/packages/tests/bootstrap/conftest.py -> tests/fixtures/unit/generation.py" = 2
