@@ -9,13 +9,13 @@ import pytest
 
 from base.agents.context.clients import DatabaseFactory
 from base.deploy.maintenance import admission, pause_owner
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from cli.commands.lifecycle._pause_resume import resume_after_start
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
-from tests.components.agent.test_maintenance import isolate as isolate
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 

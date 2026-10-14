@@ -25,7 +25,3 @@ exports = ["configuration.py"]
 "test_config_boot_owner.py#monkeypatch.setattr base.config._lite.load_ava_env" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config.settings" = 1
 "test_runtime_config.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
-"test_seed_guard.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
-
-[debt.third-party-patch]
-"test_seed_guard.py#monkeypatch.setattr psycopg.connect" = 1

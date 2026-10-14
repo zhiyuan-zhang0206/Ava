@@ -84,10 +84,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "scans the git-driving modules of the whole tree for subprocess.run timeouts",
     ),
-    "tests/components/base/test_runner_role.py": (
-        "contract",
-        "asserts the ava_runner capability matrix declared in db/schema.sql",
-    ),
     "tests/components/base/test_scan_contract.py": (
         "contract",
         "scans every first-party skill of the repository for critical findings",

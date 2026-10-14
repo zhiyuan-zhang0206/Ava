@@ -1,13 +1,16 @@
-exports = ["containers.py"]
+exports = ["containers.py", "db_authority_tests.py", "maintenance_factory.py"]
 
 [uses]
+"authority" = ["db_authority_tests.py"]
 "test_cluster_redis_acl.py" = ["containers.py"]
-"test_pooler_clients.py" = ["containers.py"]
+"test_maintenance_cold.py" = ["maintenance_factory.py"]
 
 [debt.env-patch]
 "test_migration_authority.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
+"maintenance_factory.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"maintenance_factory.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
 "test_maintenance_cold.py#monkeypatch.setattr base.deploy.maintenance.cold.psutil.process_iter" = 1
 "test_migration_authority.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 5
 "test_migrations.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 10

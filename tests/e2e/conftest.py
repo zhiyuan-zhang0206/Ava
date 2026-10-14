@@ -50,8 +50,8 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 
 from base.api_contracts.agent_contract import AgentStatus
+from base.cluster.authority.tests.runner_logins import runner_projection
 from base.config import settings
-from tests._containers import runner_projection
 from tests.e2e._credentials import (
     current_credentials,
     forget_credentials,

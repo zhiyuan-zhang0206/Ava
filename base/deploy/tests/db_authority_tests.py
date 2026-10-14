@@ -51,7 +51,7 @@ from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Generation
 OWNER = "ava_test_owner"
 _TEMPLATE = "ava_test_tmpl"
 _SUPERUSER = "ava"
-_SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
+_SCHEMA = Path(__file__).resolve().parents[3] / "db" / "schema.sql"
 
 _HBA = """\
 # TYPE  DATABASE  USER  ADDRESS       METHOD

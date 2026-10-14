@@ -18,13 +18,12 @@ from base.db import Database
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
+from base.deploy.tests.maintenance_factory import WHEN, maintenance_agent
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.events.live.bus import EventBus
 from ops import agent_pause
 from services.agent_runner.agent_host.lifecycle import maintenance as receipts
 from services.agent_runner.agent_host.scheduling.pending_wakes import held_maintenance_wakes
-from tests.components.agent.test_maintenance import WHEN
-from tests.components.agent.test_maintenance import isolate as isolate
-from tests.factories.maintenance import maintenance_agent
 
 
 class Alerts:
