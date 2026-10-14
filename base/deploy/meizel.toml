@@ -1,5 +1,6 @@
 exports = ["git", "lifecycle", "maintenance", "progress_timeout.py", "release", "schedule_timing.py", "schema", "state", "tests", "timing.py"]
 
 [uses]
+"schema" = ["__init__.py"]
 "tests" = ["maintenance", "progress_timeout.py", "schema", "timing.py"]
 "timing.py" = ["progress_timeout.py", "schedule_timing.py"]

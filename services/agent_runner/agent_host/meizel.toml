@@ -14,4 +14,4 @@ exports = ["daemon.py", "host.py", "invocation", "runtime.py", "settlement.py", 
 "tests" = ["daemon.py", "dispatcher.py", "exec_memory_guard.py", "health_routes.py", "host.py", "invocation", "lifecycle", "pooled_checkpoint.py", "pools.py", "runtime.py", "scheduling", "settlement.py", "stall_guard.py", "stdout_log.py"]
 
 [debt.private-name]
-"tests/runtime/test_agent_host_shutdown.py -> daemon.py#_is_running" = 1
+"tests/runtime/shutdown/test_agent_host_shutdown.py -> daemon.py#_is_running" = 1

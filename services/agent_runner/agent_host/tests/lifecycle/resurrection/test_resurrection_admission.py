@@ -31,16 +31,16 @@ from ops import lifecycle
 from ops.agents import wake
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
-from services.agent_runner.agent_host.tests.lifecycle.test_predecessor_closure import (
-    closed_form,
-    retired,
-)
-from tests.components.ops.resurrection_support import (
+from services.agent_runner.agent_host.tests.lifecycle.resurrection.resurrection_support import (
     force,
     legacy_row,
     status,
     terminated,
     unowned_receipt,
+)
+from services.agent_runner.agent_host.tests.lifecycle.test_predecessor_closure import (
+    closed_form,
+    retired,
 )
 
 

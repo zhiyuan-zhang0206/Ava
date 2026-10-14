@@ -14,14 +14,16 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import wake
-from tests.components.ops.resurrection_support import (
+from services.agent_runner.agent_host.tests.lifecycle.resurrection.resurrection_support import (
     force,
     legacy_row,
     status,
     terminated,
     unowned_receipt,
 )
-from tests.components.ops.test_resurrection_admission import wakes as wakes
+from services.agent_runner.agent_host.tests.lifecycle.resurrection.test_resurrection_admission import (
+    wakes as wakes,
+)
 
 
 class _LegacyArrange(Protocol):

@@ -6,6 +6,7 @@ exports = ["scenario_recording.py", "scenarios"]
 "test_budget_handoff.py" = ["child_budget_writer.py", "scenarios"]
 "test_chat_model.py" = ["scripted_model.py"]
 "test_recording.py" = ["scenario_recording.py", "scripted_model.py"]
+"test_restart_fallback_scenario.py" = ["scenarios"]
 "test_watcher_resurrection.py" = ["scenarios"]
 
 [external]

@@ -21,14 +21,20 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
-from tests.components.ops.resurrection_support import force, status, unowned_receipt
-from tests.components.ops.test_resurrection_admission import (
+from services.agent_runner.agent_host.tests.lifecycle.resurrection.resurrection_support import (
+    force,
+    status,
+    unowned_receipt,
+)
+from services.agent_runner.agent_host.tests.lifecycle.resurrection.test_resurrection_admission import (
     admit_hosted_incarnation,
     managed_restarted,
     resources,
     restarted,
 )
-from tests.components.ops.test_resurrection_admission import wakes as wakes
+from services.agent_runner.agent_host.tests.lifecycle.resurrection.test_resurrection_admission import (
+    wakes as wakes,
+)
 
 
 async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(

@@ -1,5 +1,8 @@
+exports = ["daemon_shutdown.py", "daemon_shutdown_child.py"]
+
 
 [uses]
+"daemon_shutdown.py" = ["daemon_shutdown_child.py"]
 "test_proc.py" = ["_hosting_child.py"]
 
 [debt.first-party-patch]

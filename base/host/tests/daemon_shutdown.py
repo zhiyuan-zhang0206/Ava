@@ -13,9 +13,9 @@ The shape was first proven on a daemon with a multi-minute ``to_thread`` scan
 (task #4218, PR #3045); this module hosts it for the sweep-B daemons (task
 #4239). The child stubs ``main()``'s boot gates that would
 need a live cluster (the schema version check); everything from signal wiring
-down is production code. A caller whose test must observe a precondition before
-the stop window opens hands ``spawn_child`` a ``pre_ready`` callable: the child
-runs it once the wedge is armed, before it signals ``ready``.
+down is production code. Each caller names its own statically imported daemon
+in a child entry next to the daemon tests and passes that entry as a literal
+command to ``spawn_child``.
 
 Reusers must keep both assertions — the ``interrupted`` log line and the
 ``cleanup-ran`` marker: a bounded exit alone would pass even if the drain
@@ -24,15 +24,12 @@ silently stopped reaching ``run()``'s cleanup.
 
 from __future__ import annotations
 
-import asyncio
-import importlib
 import os
 import signal
 import socket
 import subprocess
-import sys
 import time
-from collections.abc import Callable
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,13 +37,14 @@ from typing import IO
 
 import pytest
 
+from base.host.tests.daemon_shutdown_child import (
+    CLEANUP_FAILURE_ENV,
+    INTERNAL_STOP_ENV,
+    MARKERS_ENV,
+)
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-_MARKERS_ENV = "DAEMON_SHUTDOWN_TEST_MARKERS"
-_CHILD_MODULE_ENV = "DAEMON_SHUTDOWN_TEST_MODULE"
-_PRE_READY_ENV = "DAEMON_SHUTDOWN_TEST_PRE_READY"
-_INTERNAL_STOP_ENV = "DAEMON_SHUTDOWN_TEST_INTERNAL_STOP"
-_CLEANUP_FAILURE_ENV = "DAEMON_SHUTDOWN_TEST_CLEANUP_FAILURE"
 _ENDPOINT_ENV = "AVA_TELEMETRY_OTLP_ENDPOINT"
 
 # The child must exit within this bound of SIGTERM — small enough to separate a
@@ -55,81 +53,6 @@ _ENDPOINT_ENV = "AVA_TELEMETRY_OTLP_ENDPOINT"
 # failed assertion carrying the child's log, never as a bare pytest hang.
 EXIT_BOUND_S = 10.0
 KILL_SLACK_S = 15.0
-
-# Long enough to outlive any harness deadline: the daemon must exit regardless
-# of the job still running.
-WEDGE_SECONDS = 600.0
-
-
-def _mark(name: str) -> None:
-    """Append one marker line — the child-to-parent protocol."""
-    with Path(os.environ[_MARKERS_ENV]).open("a", encoding="utf-8") as fh:
-        fh.write(f"{name}\n")
-
-
-def _load_pre_ready_probe() -> Callable[[], None] | None:
-    """Resolve the optional parent-named probe the child runs before ``ready``."""
-    spec = os.environ.get(_PRE_READY_ENV)
-    if not spec:
-        return None
-    module_name, _, attr = spec.partition(":")
-    return getattr(importlib.import_module(module_name), attr)
-
-
-def _noop_schema_gate(*_args: object, **_kwargs: object) -> None:
-    """Stand-in for ``assert_schema_current``: the check needs a live cluster."""
-
-
-async def _internal_stop() -> None:
-    await asyncio.sleep(0.1)
-    signal.raise_signal(signal.SIGTERM)
-
-
-async def _wait_for_stop() -> None:
-    if os.environ.get(_INTERNAL_STOP_ENV) == "1":
-        async with asyncio.TaskGroup() as tasks:
-            tasks.create_task(_internal_stop())
-            await asyncio.Event().wait()
-    else:
-        while True:
-            await asyncio.sleep(0.1)
-
-
-def run_child() -> None:
-    """Child entry: production ``main()`` with a wedge-shaped ``run()``."""
-    import base.deploy.schema.migrations
-
-    mod = importlib.import_module(os.environ[_CHILD_MODULE_ENV])
-    pre_ready = _load_pre_ready_probe()
-
-    # Orthogonal to the exit shape under test and would otherwise dial the
-    # cluster DB; the subprocess stays hermetic from here down everything is
-    # production code.
-    base.deploy.schema.migrations.assert_schema_current = _noop_schema_gate
-
-    async def wedge_run(**_process_inputs: object) -> None:
-        try:
-            # The shape under test: a default-executor job that never finishes
-            # (any in-flight threadpool work at stop), so closing the loop can
-            # only be bounded by refusing the executor join.
-            asyncio.get_running_loop().run_in_executor(None, time.sleep, WEDGE_SECONDS)
-            _mark("wedge-scheduled")
-            if pre_ready is not None:
-                # The caller's precondition (a dead OTLP window, say) must be
-                # observable before the parent signals; run it here, after the
-                # wedge is armed and before `ready` releases the parent.
-                pre_ready()
-            _mark("ready")
-            await _wait_for_stop()
-        finally:
-            _mark("cleanup-started")
-            await asyncio.sleep(0.05)
-            _mark("cleanup-ran")
-            if os.environ.get(_CLEANUP_FAILURE_ENV) == "1":
-                raise RuntimeError("surrogate cleanup failure")
-
-    mod.run = wedge_run  # type: ignore[attr-defined]  # the signal path must still reach this task's cleanup
-    mod.main()
 
 
 @dataclass
@@ -209,18 +132,12 @@ def _free_port() -> int:
 def spawn_child(
     tmp_path: Path,
     *,
-    module: str,
+    command: Sequence[str],
     label: str,
-    pre_ready: Callable[[], None] | None = None,
     internal_stop: bool = False,
     cleanup_failure: bool = False,
 ) -> Child:
-    """Spawn ``module``'s production main() with a wedge run(); wait for ready.
-
-    ``pre_ready`` — an importable module-level callable — runs in the child
-    between arming the wedge and signalling ``ready``, for a precondition the
-    test must observe before the parent signals.
-    """
+    """Start the caller's literal child command and wait for its wedge to be ready."""
     dead_port = _free_port()
     endpoint = f"http://127.0.0.1:{dead_port}"
     markers_path = tmp_path / "markers.txt"
@@ -235,21 +152,16 @@ def spawn_child(
     )
     env = os.environ.copy()
     env["AVA_HOME"] = str(home)
-    env[_MARKERS_ENV] = str(markers_path)
-    env[_CHILD_MODULE_ENV] = module
+    env[MARKERS_ENV] = str(markers_path)
     env[_ENDPOINT_ENV] = endpoint
-    env[_INTERNAL_STOP_ENV] = "1" if internal_stop else "0"
-    env[_CLEANUP_FAILURE_ENV] = "1" if cleanup_failure else "0"
-    if pre_ready is not None:
-        env[_PRE_READY_ENV] = f"{pre_ready.__module__}:{pre_ready.__qualname__}"
-    else:
-        env.pop(_PRE_READY_ENV, None)
+    env[INTERNAL_STOP_ENV] = "1" if internal_stop else "0"
+    env[CLEANUP_FAILURE_ENV] = "1" if cleanup_failure else "0"
     # The helper-chain guard acts on this marker; a test child is not
     # helper-spawned, and inheriting a stray marker would self-exit(70).
     env.pop("AVA_PERMISSIONS_HELPER_PID", None)
     log_file = log_path.open("wb")
-    proc = subprocess.Popen(  # fixed interpreter + in-repo entry, no shell
-        [sys.executable, "-m", "tests.components.services.daemon_shutdown_test_support"],
+    proc = subprocess.Popen(  # noqa: S603 -- callers pass a literal repository test entry, no shell
+        command,
         cwd=_REPO_ROOT,
         env=env,
         stdout=log_file,
@@ -260,7 +172,3 @@ def spawn_child(
     if internal_stop:
         child.terminated_at = time.monotonic()
     return child
-
-
-if __name__ == "__main__":
-    run_child()

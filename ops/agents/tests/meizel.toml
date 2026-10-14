@@ -6,5 +6,3 @@
 "test_agent_forks.py#monkeypatch.setattr base.agents.inbox.insert.publish_inbound_wake" = 1
 "test_agents_internals.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 2
 "test_spawn_audit.py#monkeypatch.setattr base.agents.birth.transaction.record_audit" = 1
-"test_unowned_resurrection_receipts.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
-"test_unowned_resurrection_receipts.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1

@@ -1,16 +1,9 @@
-exports = ["daemon_shutdown_test_support.py", "test_maintenance_readiness.py"]
-
-[uses]
-"test_backup_scheduler_shutdown.py" = ["daemon_shutdown_test_support.py"]
-
-[loads]
-"daemon_shutdown_test_support.py" = ["services/backup/scheduler"]
+exports = ["test_maintenance_readiness.py"]
 
 [debt.env-patch]
 "test_maintenance_readiness.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"daemon_shutdown_test_support.py#assignment base.deploy.schema.migrations.assert_schema_current" = 1
 "test_ava_root_glue_manifests.py#monkeypatch.setattr base.config.settings.gateway.gateway_graceful_shutdown_timeout_seconds" = 1
 "test_ava_root_glue_manifests.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_ava_root_glue_manifests.py#monkeypatch.setattr services.supervision.roster.ava_home" = 1

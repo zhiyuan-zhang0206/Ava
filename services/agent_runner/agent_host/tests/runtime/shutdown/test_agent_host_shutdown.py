@@ -32,6 +32,11 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.tests.daemon_shutdown import (
+    EXIT_BOUND_S,
+    KILL_SLACK_S,
+    spawn_child,
+)
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -39,11 +44,6 @@ from base.packages.composer_commands import CommandCatalog
 from base.telemetry import process_name
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from tests.components.services.daemon_shutdown_test_support import (
-    EXIT_BOUND_S,
-    KILL_SLACK_S,
-    spawn_child,
-)
 
 
 def _note_pidfile_removed(events: list[str], _path: object) -> None:
@@ -110,7 +110,7 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     from agent import graph, process_boot
 
-    from ... import daemon
+    from .... import daemon
 
     events: list[str] = []
 
@@ -243,7 +243,7 @@ def _shutdown_child(failure: str, home: Path) -> subprocess.CompletedProcess[str
     return subprocess.run(  # noqa: S603 -- fixed test helper in this checkout
         [
             sys.executable,
-            str(Path(__file__).resolve().parents[1] / "agent_host" / "child_runtime_scenarios.py"),
+            str(Path(__file__).resolve().parents[2] / "agent_host" / "child_runtime_scenarios.py"),
             "shutdown",
             failure,
             str(home),
@@ -312,7 +312,13 @@ def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
     # assert the relationship, not just the number.
     assert EXIT_BOUND_S + KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
     child = spawn_child(
-        tmp_path, module="services.agent_runner.agent_host.daemon", label="agent-host"
+        tmp_path,
+        command=[
+            sys.executable,
+            "-m",
+            "services.agent_runner.agent_host.tests.runtime.shutdown.child_shutdown",
+        ],
+        label="agent-host",
     )
     try:
         child.terminate()
@@ -331,7 +337,11 @@ def test_internal_sigterm_drains_async_cleanup_before_exit(
 ) -> None:
     child = spawn_child(
         tmp_path,
-        module="services.agent_runner.agent_host.daemon",
+        command=[
+            sys.executable,
+            "-m",
+            "services.agent_runner.agent_host.tests.runtime.shutdown.child_shutdown",
+        ],
         label="agent-host",
         internal_stop=True,
         cleanup_failure=cleanup_failure,
@@ -371,7 +381,7 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
     """A/B/A run 6: with the pooler gone, the stop path's ownership release waited
     out the control pool's 30 s acquire timeout, so ava-root's 10 s TERM window
     expired first and root retained custody of the still-exiting agent-host."""
-    from ... import host as host_mod
+    from .... import host as host_mod
 
     monkeypatch.setattr(host_mod, "RELEASE_OWNER_TIMEOUT_S", 0.05)
     machine_identity.set(name="this-box")
