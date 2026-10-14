@@ -1,5 +1,6 @@
-exports = ["index.py", "names.py", "project_roots.py", "scan.py"]
+exports = ["index.py", "names.py", "project_roots.py", "scan.py", "tree.py"]
 
 [uses]
 "index.py" = ["names.py", "scan.py"]
 "tests" = ["index.py", "names.py", "project_roots.py", "scan.py"]
+"tree.py" = ["names.py"]

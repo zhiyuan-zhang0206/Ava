@@ -32,6 +32,7 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
     RecordingPublisher,
@@ -111,6 +112,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
+        commands=CommandCatalog(skills=list),
     )
     exc = FatalProviderError(
         "provider permanently rejected (HTTP 400): Content Exists Risk",
@@ -209,6 +211,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
+            commands=CommandCatalog(skills=list),
         ),
         agent_id=child_id,
         occurred_at=occurred_at,
@@ -287,6 +290,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
+            commands=CommandCatalog(skills=list),
         ),
         agent_id=child_id,
     )

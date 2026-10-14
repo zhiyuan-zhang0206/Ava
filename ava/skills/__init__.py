@@ -8,12 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from ava.sdk_surface import process_context, skill_sources
-from ava.skills.skill_model import Skill as Skill
-from ava.skills.skill_model import SkillNameCollision as SkillNameCollision
-from ava.skills.skill_model import flatten
-from ava.skills.skill_model import identifier as identifier
-from ava.skills.skill_model import target as target
 from ava.skills.skill_proxies import Namespace, SkillProxy, node_to_obj
+from base.packages.skills.tree import Skill, flatten, identifier
 from base.paths import skills_dir
 
 # Attribution timing: a `skill_invoked` row at depth `"loaded"` — the only

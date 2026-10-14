@@ -27,6 +27,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import settlement as settlement_mod
 from services.agent_runner.agent_host.host import AgentHost
@@ -204,6 +205,7 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
+        commands=CommandCatalog(skills=list),
     )
     slices = AgentSlices.resolve(default_reader=configured_policy().default_reader)
 

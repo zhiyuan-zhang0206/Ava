@@ -27,6 +27,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.packages.composer_commands import CommandCatalog
 from ops import cluster_status
 from ops.lifecycle.termination import force_terminate_transaction
 from services.agent_runner.agent_host import runtime
@@ -117,6 +118,7 @@ async def test_hosted_applies_only_after_continuation_returns(
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
+            commands=CommandCatalog(skills=list),
         )
         host._runtimes[agent_id] = Mock()
         assert [
@@ -199,6 +201,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
+            commands=CommandCatalog(skills=list),
         )
         host._runtimes[agent_id] = Mock()
         original_execute = psycopg.AsyncConnection.execute
@@ -313,6 +316,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     assert agent_id in await host.pending_inbound_wakes()
     assert db_conn.execute(
@@ -379,6 +383,7 @@ async def _run_terminating_turn(
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
+            commands=CommandCatalog(skills=list),
         )
         host._runtimes[agent_id] = Mock()
         assert await host._invoke_until_done(
@@ -536,6 +541,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
+        commands=CommandCatalog(skills=list),
     )
     await admit_hosted_runtime(
         aops_pool, agent_id, "claim-test", host._owner, expected_from="idling", db=database

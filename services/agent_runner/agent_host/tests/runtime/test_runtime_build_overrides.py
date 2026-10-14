@@ -8,6 +8,7 @@ import pytest
 
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.host import AgentHost
@@ -44,6 +45,7 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
         db=Mock(),
         catalog=model_catalog,
         machine=configured_machine(),
+        commands=CommandCatalog(skills=list),
     )
     pins = {"reasoning_effort": "low", "claude_thinking_budget_tokens": 777} if pinned else {}
     slices = AgentSlices.resolve(
@@ -98,6 +100,7 @@ async def test_runtime_build_does_not_repair_a_dangling_history(
         db=Mock(),
         catalog=model_catalog,
         machine=configured_machine(),
+        commands=CommandCatalog(skills=list),
     )
     slices = AgentSlices.resolve({}, default_reader=configured_policy().default_reader)
 

@@ -39,6 +39,7 @@ from base.agents.context import AvaContext
 from base.agents.to_user import read_document
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
+from base.packages.skills.tree import identifier, target
 from base.paths import workspace_dir
 
 # The rank scale for the standing head — the reading order, lowest first:
@@ -359,7 +360,6 @@ def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], l
     Returns ``(sections, injected_identifiers)``, or None when every skill is
     unreadable. Unreadable bodies warn + skip (same posture as the whole-note
     builder) rather than aborting the note."""
-    import ava
 
     sections: list[str] = []
     injected: list[str] = []
@@ -375,8 +375,8 @@ def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], l
                 exc,
             )
             continue
-        sections.append(f"## ava.skills.{ava.skills.target(skill)}\n\n{body}")
-        injected.append(ava.skills.identifier(skill))
+        sections.append(f"## ava.skills.{target(skill)}\n\n{body}")
+        injected.append(identifier(skill))
     if not sections:
         return None
     logger.info("[{}] injecting {} skill(s): {}", label, len(injected), ", ".join(injected))

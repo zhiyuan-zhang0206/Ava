@@ -24,6 +24,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host import invocation, settlement
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import HostPolicy
@@ -44,6 +45,7 @@ def build_agent_host(
         db=Database.from_settings(gate=database_gate),
         catalog=catalog,
         **kwargs,
+        commands=CommandCatalog(skills=list),
     )
 
 

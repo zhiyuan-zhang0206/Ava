@@ -21,6 +21,7 @@ from base.host.env.agent_slices import AgentSlices, Prompt
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import resolve_setting
 from base.packages.skills.names import match_key
+from base.packages.skills.tree import identifier, target
 
 # A description is free-form text from a SKILL.md frontmatter block — including
 # ones dropped into `~/.ava/skills/` by a user or a plugin. A YAML block scalar
@@ -121,7 +122,7 @@ def resolve_prompt_skills(
         # every loaded skill, so skip per-name resolution entirely.
         skills = loaded
     else:
-        by_ident = {match_key(ava.skills.identifier(s)): s for s in loaded}
+        by_ident = {match_key(identifier(s)): s for s in loaded}
         by_name = {match_key(s["name"]): s for s in loaded}
         skills: list[Any] = []
         for name in wanted:
@@ -192,9 +193,8 @@ def _index_line(skill: Any) -> str:
     attribute path (`ava.skills.web_ai.deep_research`), from `ava.skills.target`,
     so an agent can paste the entry straight into `ava.help(...)`.
     A flagged description renders as a security marker (see `_index_description`)."""
-    import ava
 
-    path = ava.skills.target(skill)
+    path = target(skill)
     description = _index_description(skill)
     if description is None:
         return (
@@ -223,10 +223,9 @@ def recall_candidates(prompt: Prompt) -> list[RecallCandidate]:
     one `skills_to_expand_at_start` already put its whole body in front of the agent.
     Which of the rest the agent has already read or been offered this window is
     per-window state, so the caller filters it."""
-    import ava
 
     preloaded = {
-        ava.skills.identifier(s)
+        identifier(s)
         for s in resolve_prompt_skills(
             prompt.skills_to_expand_at_start,
             prompt.sdk_disable,
@@ -235,11 +234,11 @@ def recall_candidates(prompt: Prompt) -> list[RecallCandidate]:
     }
     candidates: list[RecallCandidate] = []
     for skill in indexed_skills(prompt):
-        identifier = ava.skills.identifier(skill)
+        ident = identifier(skill)
         description = _index_description(skill)
-        if description is None or identifier in preloaded:
+        if description is None or ident in preloaded:
             continue
-        candidates.append(RecallCandidate(identifier, description, ava.skills.target(skill)))
+        candidates.append(RecallCandidate(ident, description, target(skill)))
     return candidates
 
 
@@ -250,12 +249,11 @@ def _skill_index_lines(prompt: Prompt) -> list[str]:
     folders without a SKILL.md never hide their otherwise undiscoverable leaves.
     Catalog membership remains complete for drift tracking and preloading.
     """
-    import ava
 
     skills = indexed_skills(prompt)
     if "*" not in prompt.skills_to_inject_into_system_prompt:
         return [_index_line(s) for s in skills]
-    by_path = {match_key(ava.skills.identifier(s)): s for s in skills}
+    by_path = {match_key(identifier(s)): s for s in skills}
     descendants: dict[str, int] = {}
     for path in by_path:
         segments = path.split(".")
@@ -267,10 +265,7 @@ def _skill_index_lines(prompt: Prompt) -> list[str]:
         skill = by_path[path]
         line = _index_line(skill)
         if count:
-            line += (
-                f" ({count} sub-skills; inspect with "
-                f"`ava.help(ava.skills.{ava.skills.target(skill)})`)"
-            )
+            line += f" ({count} sub-skills; inspect with `ava.help(ava.skills.{target(skill)})`)"
         lines.append(line)
     return lines
 
@@ -278,16 +273,14 @@ def _skill_index_lines(prompt: Prompt) -> list[str]:
 def indexed_skill_identifiers(prompt: Prompt) -> set[str]:
     """Display identifiers of `indexed_skills()` — the key a snapshot of the
     index is taken on, and the same string an index line names."""
-    import ava
 
-    return {ava.skills.identifier(s) for s in indexed_skills(prompt)}
+    return {identifier(s) for s in indexed_skills(prompt)}
 
 
 def skill_identifiers(skills: Sequence[Any]) -> list[str]:
     """The display identifiers of `skills` (full `Skill` records), in order."""
-    import ava
 
-    return [ava.skills.identifier(s) for s in skills]
+    return [identifier(s) for s in skills]
 
 
 class IndexDrift(NamedTuple):
@@ -316,11 +309,10 @@ def index_drift(known: set[str], prompt: Prompt) -> IndexDrift:
     fails fast on; dropping it from `identifiers` is enough, and makes a
     reinstall announce itself again."""
     live = indexed_skills(prompt)
-    import ava
 
     return IndexDrift(
-        identifiers={ava.skills.identifier(s) for s in live},
-        added=[s for s in live if ava.skills.identifier(s) not in known],
+        identifiers={identifier(s) for s in live},
+        added=[s for s in live if identifier(s) not in known],
     )
 
 

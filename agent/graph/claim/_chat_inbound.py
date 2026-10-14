@@ -15,7 +15,6 @@ from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
 from agent.messages import inbound_message
-from ava.skills.composer_commands import expand_command
 from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
 from base.agents.messages.inbound_images import parse_upload_url
 from base.agents.messages.injection_scan import scan_inbound_content
@@ -29,6 +28,7 @@ def build_chat_inbound(
     *,
     read_security_enabled: Callable[[], bool],
     envelope_inputs: EnvelopeReadInputs,
+    expand_command: Callable[[str], str],
 ) -> tuple[HumanMessage, SecurityFindingEntry | None]:
     """Build the HumanMessage for a kind='chat' inbound row, plus its scan finding.
 

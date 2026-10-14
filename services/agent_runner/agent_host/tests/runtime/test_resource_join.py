@@ -25,6 +25,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 from ... import daemon
@@ -87,6 +88,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
         catalog=model_catalog,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
+        commands=CommandCatalog(skills=list),
     )
     scope = await host._resource_service.turn()
     failure = ValueError("original late resource error")
@@ -139,6 +141,7 @@ def exercise_unfinished_main() -> None:
             bus=EventBus.from_settings(),
             db=database(),
             clients=clients,
+            commands=CommandCatalog(skills=list),
         )
         marker = Path(os.environ["RESOURCE_JOIN_MARKER"])
         patch = pytest.MonkeyPatch()

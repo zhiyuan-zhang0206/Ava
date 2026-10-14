@@ -7,6 +7,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from base.packages.skills import tree
+
 from . import _state_access
 
 __all_for_ava__ = ["get", "set"]
@@ -57,11 +59,11 @@ def set(path: str | Path) -> None:
         if loaded:
             lines: list[str] = []
             for s in loaded:
-                ident = _ava_skills.identifier(s)
-                target = _ava_skills.target(s)
+                ident = tree.identifier(s)
+                path_attr = tree.target(s)
                 desc = s["description"]
                 path_str = s["path"]
-                lines.append(f"  - {ident} (ava.skills.{target}) — {desc}")
+                lines.append(f"  - {ident} (ava.skills.{path_attr}) — {desc}")
                 lines.append(f"      {path_str}")
             summary = f"Skills available in this repo ({len(loaded)}):\n" + "\n".join(lines)
             _state_access.update_state({"project_skills_note": summary})

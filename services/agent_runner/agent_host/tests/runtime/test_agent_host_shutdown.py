@@ -35,6 +35,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.packages.composer_commands import CommandCatalog
 from base.telemetry import process_name
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
@@ -357,6 +358,7 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
         catalog=model_catalog,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
+        commands=CommandCatalog(skills=list),
     )
     started = time.monotonic()
     with pytest.raises(TimeoutError, match="ownership release"):

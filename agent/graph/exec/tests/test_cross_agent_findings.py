@@ -45,6 +45,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
@@ -92,6 +93,7 @@ class _Turn:
                 bus=EventBus.from_settings(),
                 catalog=build_model_catalog(),
                 clock_factory=Clock.from_settings,
+                commands=CommandCatalog(skills=list),
             )
         )
         self.claimed: list[AnyMessage] = []

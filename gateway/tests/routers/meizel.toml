@@ -6,7 +6,7 @@ exports = ["test_tasks_router.py"]
 "test_task_patch_receipts.py" = ["test_tasks_router.py"]
 
 [debt.first-party-patch]
-"test_commands.py#monkeypatch.setattr ava.skills.composer_commands.discover_commands" = 3
+"test_commands.py#monkeypatch.setattr base.packages.composer_commands.CommandCatalog.discover" = 3
 "test_commands.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 2
 "test_config_api.py#monkeypatch.setattr base.cluster.machines.lookup_role" = 1
 "test_config_api.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1

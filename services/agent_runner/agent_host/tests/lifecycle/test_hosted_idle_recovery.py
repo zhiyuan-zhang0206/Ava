@@ -23,6 +23,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import pause_owner
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.packages.composer_commands import CommandCatalog
 from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
@@ -107,6 +108,7 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
+        commands=CommandCatalog(skills=list),
     )
     assert await host.pending_inbound_wakes() == []
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
