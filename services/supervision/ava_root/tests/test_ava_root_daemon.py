@@ -27,6 +27,7 @@ import pytest
 
 from base.host.system.boot_unit import BootUnitContext
 from base.host.system.hostport import Host
+from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.client import RootClient, RootClientError
 from base.native_process.root_control.ipc import ResponsePayload
 
@@ -723,6 +724,9 @@ def test_health_stop_refusal_preserves_root_and_serving_siblings(short_tmp: Path
     manifests = _write_manifests(short_tmp, units)
     with _daemon(run_dir, manifests, wiring=_wiring("wiring_refused_health")) as (proc, log):
         client = _wait_ready(run_dir, proc, log)
+        original_child = OwnedProcess.capture(
+            psutil.Process(cast(int, _units_of(client.status())[0]["pid"]))
+        )
         try:
             _wait_for(ready.exists, "child did not install its TERM handler")
             _wait_for(
@@ -755,4 +759,6 @@ def test_health_stop_refusal_preserves_root_and_serving_siblings(short_tmp: Path
             assert repaired["restart_failed"] is None and repaired["state"] == "running"
         finally:
             release.touch()
+            # Keep the sentinel until the child consumes it, even if root failed first.
+            _wait_for(lambda: not original_child.live(), "released child did not exit")
     assert proc.returncode == 0, _read_log(log)
