@@ -36,7 +36,9 @@ prepend compensation. The reserve height remains constant after landing,
 avoiding a second reflow or scroll correction. The newly loaded prefix fills the
 space above the unchanged reading anchor. Canceled, failed and empty pulls
 return to the idle boundary with native smooth scrolling (instant with reduced
-motion). Conversation changes discard the gesture; there is no release timer. Deliberate pulls can continue
+motion). A successful page also closes the exposed space when it inserts below
+an unchanged standing-context block rather than above the visible reading anchor.
+Conversation changes discard the gesture; there is no release timer. Deliberate pulls can continue
 through backend `has_more` and `AVA_TIMELINE_COMPACT_HISTORY` depth.
 
 
