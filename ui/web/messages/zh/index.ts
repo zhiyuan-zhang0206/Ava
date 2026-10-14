@@ -13,6 +13,7 @@ import displaySettings from "./interface/displaySettings.json";
 import fleet from "./operations/fleet.json";
 import guide from "./interface/guide.json";
 import insights from "./operations/insights.json";
+import toUser from "./interface/toUser.json";
 import inspector from "./interface/inspector.json";
 import inventory from "./operations/inventory.json";
 import login from "./interface/login.json";
@@ -44,6 +45,7 @@ const messages = {
   guide,
   insights,
   inspector,
+  toUser,
   inventory,
   login,
   markers,

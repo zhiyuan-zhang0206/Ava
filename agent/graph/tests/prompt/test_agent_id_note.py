@@ -118,6 +118,13 @@ def test_workspace_clause_carries_the_concrete_path(
 
     monkeypatch.setattr(context_notes, "workspace_dir", _fake_workspace_dir)
     assert _content().endswith(f" Your workspace is {ws}.")
+    ws.mkdir(parents=True)
+    document = ws / "to_user.html"
+    document.write_text("<p>Waiting on a decision</p>")
+    assert document.read_text() in _content()
+    document.write_text("<p>The decision has arrived</p>")
+    assert document.read_text() in _content()
+    assert "Waiting on a decision" not in _content()
 
 
 def test_workspace_clause_respects_the_section_gate(

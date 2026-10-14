@@ -126,6 +126,7 @@ def _samples() -> dict[str, dict]:
             "agent_id": agent_id,
             "inbound_id": 42,
         },
+        "to_user_changed": {"role": "to_user_changed", "agent_id": agent_id},
         "page_opened": {
             "role": "page_opened",
             "agent_id": agent_id,

@@ -345,6 +345,7 @@ same origin as persistent events but uses an independent schema.
 | `task_created` | ✓ |
 | `task_updated` | ✓ |
 | `timeline_snapshot` | — |
+| `to_user_changed` | ✓ |
 | `token_usage` | — |
 
 ---

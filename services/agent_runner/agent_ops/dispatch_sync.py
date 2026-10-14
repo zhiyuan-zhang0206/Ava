@@ -15,6 +15,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from base.agents.to_user import ToUserReadRequest
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -31,6 +32,7 @@ from ops.rpc_schemas import (
     ShellKillPayload,
     ShellProbePayload,
 )
+from ops.to_user import read_to_user
 
 # The read-modify-write arms are serialized against each other: `config_write` and `inventory_write` both
 # READ their on-disk state, modify it and write it back, so an interleave lands the
@@ -64,6 +66,16 @@ def dispatch_sync(
     the hold's release and unrelated ops reachable.
     """
     match kind:
+        case "to_user_read":
+            request = ToUserReadRequest.model_validate(payload)
+            if pool is None:
+                raise RuntimeError("To user requires the native DB pool")
+            return OpStatus.COMPLETED, read_to_user(
+                pool,
+                request.agent_id,
+                local_machine.name(),
+                default_format=authority.service_field_value("to_user_format"),
+            ).model_dump(mode="json")
         case "upload-receive-v1":
             return _upload_arm(payload, pool, local_machine=local_machine.name())
         case "status_probe":

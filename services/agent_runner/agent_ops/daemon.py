@@ -84,6 +84,7 @@ from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpEnvelope, Op
 from services.agent_runner.agent_ops import boot, health
 from services.agent_runner.agent_ops import maintenance as maintenance_activity
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
+from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 
 _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
 
@@ -648,10 +649,18 @@ async def serve_ops_daemon(
             ops_port=endpoint.health_port,
             home=paths.ava_home(),
         )
+        _, bus = boot.ops_handles(database=database, authority=authority)
         try:
-            async with server:
-                await server.serve_forever()
+            async with server, asyncio.TaskGroup() as background:
+                watcher = background.create_task(
+                    watch_to_user(paths.ava_home() / "workspaces", bus)
+                )
+                try:
+                    await server.serve_forever()
+                finally:
+                    watcher.cancel()
         finally:
+            await bus.async_redis().aclose()
             await stop_health_server(server)
             boot.remove_pidfile(config, runtime=runtime_dir)
     finally:

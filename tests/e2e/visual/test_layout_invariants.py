@@ -237,11 +237,7 @@ def test_inspector_scrollbar_hover_reveal(
         )
         wait_layout_settled(page)
         assert page.evaluate("matchMedia('(hover: hover)').matches")
-        panel = (
-            page.locator("header > span")
-            .get_by_text("Inspector", exact=True)
-            .locator("xpath=ancestor::aside[1]")
-        )
+        panel = page.get_by_role("tabpanel", name="Inspector", exact=True)
         expect(panel).to_be_visible()
         expect(page.locator('[data-testid="timeline-surface"]')).to_be_visible()
         prefix = os.environ.get("AVA_SCROLLBAR_EVIDENCE_PREFIX")

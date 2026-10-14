@@ -465,6 +465,7 @@ export function applySystemEvent(
       // reload handled by useTimeline
     case "label_updated":
       // sidebar behavior — useAgentsCacheSync merges into the agents query cache.
+    case "to_user_changed":
     case "page_opened":
     case "page_closed":
       // page lifecycle consumed independently by the inspector's open-pages

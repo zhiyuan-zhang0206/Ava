@@ -79,6 +79,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
     # observability by the daemons' event emitter via base.telemetry.otlp.telemetry_otlp.
     "runner": frozenset(
         {
+            "agent",  # ops reads the shared workspace document's configured format
             "services",
             "daemon",
             "general",

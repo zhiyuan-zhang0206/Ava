@@ -39,9 +39,9 @@ const ALLOWED_KEYS = new Set<string>([
   "ava.fleet.split",
   "ava.memory.graph.split",
   "ava.run-timeline.split",
-  "ava.home.columns.desktop",
+  "ava.home.columns.context",
   "ava.home.columns.mobile",
-  "ava.home.inspector.desktop",
+  "ava.home.context.desktop",
 ]);
 
 function sourceFiles(): { rel: string; src: string }[] {
