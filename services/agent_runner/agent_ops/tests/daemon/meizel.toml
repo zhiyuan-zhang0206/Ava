@@ -1,3 +1,6 @@
+[uses]
+"test_daemon_stop_wedge.py" = ["child_stop_blocked_watch.py"]
+
 [debt.first-party-patch]
 "test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr ops.cluster.operations.cluster_status_op" = 1
 "test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr ops.host_config.config_audit_read_op" = 1

@@ -43,6 +43,7 @@ import hashlib
 import json
 import logging
 import re
+import signal
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -732,10 +733,19 @@ def main(*, argv: list[str] | None = None) -> None:
                     host=Host.system(),
                 )
             )
-        except KeyboardInterrupt as exc:
-            primary = exc
+        except KeyboardInterrupt as interrupted:
+            primary = interrupted
+            # A retry must not abort the bounded exit. The supervisor retries its
+            # stop's SIGTERM while this drain runs, and a second interrupt raised
+            # inside the drain used to escape here, skip `_hard_exit`, and leave
+            # the process in interpreter teardown joining threads without a bound
+            # (2026-10-14: a stop refused for ~4 minutes while the process was
+            # already past its own cleanup; task #5129).
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
             _log.info("[ops] interrupted, shutting down")
-            failures = cancel_and_drain(runner)
+            # The captured stop identifies the TaskGroup's replay of the same
+            # object, which the drain survives instead of aborting on it.
+            failures = cancel_and_drain(runner, interrupted_by=interrupted)
             if failures:
                 _log.error("[ops] async shutdown failed: %r", failures)
                 code = 1
