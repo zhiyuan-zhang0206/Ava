@@ -9,7 +9,9 @@ from __future__ import annotations
 import dataclasses
 import os
 import stat
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -144,6 +146,60 @@ def test_a_failed_mode_change_removes_the_temporary_file_and_never_replaces(
         writer.write_text(path, "new", mode=0o600)
     assert events == []
     assert path.read_bytes() == b"old"
+    assert sorted(tmp_path.iterdir()) == [path]
+
+
+def test_the_directory_is_synced_only_when_asked(tmp_path: Path) -> None:
+    path = tmp_path / "config.yml"
+    events: list[str] = []
+    writer = AtomicWriter(_recording_fs(events))
+    writer.write_text(path, "café", encoding="utf-8")
+    assert "fsync parent" not in events
+    assert path.read_bytes() == "café".encode()
+    writer.write_text(path, "again", sync_parent=True)
+    assert events[-1] == "fsync parent"
+
+
+def test_the_temporary_file_has_its_final_mode_when_it_is_published(tmp_path: Path) -> None:
+    path = tmp_path / "secret"
+    modes: list[int] = []
+
+    def replace(source: Path, target: Path) -> None:
+        modes.append(stat.S_IMODE(source.stat().st_mode))
+        SYSTEM_FS.replace(source, target)
+
+    AtomicWriter(dataclasses.replace(SYSTEM_FS, replace=replace)).write_text(
+        path, "token", mode=0o600
+    )
+    assert modes == [0o600]
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_concurrent_writers_publish_through_distinct_sibling_temporaries(tmp_path: Path) -> None:
+    path = tmp_path / "config.txt"
+    barrier = Barrier(2)
+    sources: list[Path] = []
+
+    def rendezvous(source: Path, target: Path) -> None:
+        sources.append(source)
+        barrier.wait(timeout=5)
+        SYSTEM_FS.replace(source, target)
+
+    writer = AtomicWriter(dataclasses.replace(SYSTEM_FS, replace=rendezvous))
+    values = ["first" * 4096, "second" * 4096]
+
+    def write(value: str) -> None:
+        writer.write_text(path, value)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(write, values))
+
+    assert path.read_text() in values
+    assert len(set(sources)) == 2
+    assert all(source.parent == path.parent for source in sources)
+    assert all(
+        source.name.startswith(f".{path.name}.") and source.suffix == ".tmp" for source in sources
+    )
     assert sorted(tmp_path.iterdir()) == [path]
 
 

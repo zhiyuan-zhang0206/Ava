@@ -8,7 +8,6 @@ import stat
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
 
 import pytest
 
@@ -88,56 +87,12 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     assert path.stat().st_mode & 0o777 == 0o600
 
 
-@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "locks"])
-def test_marker_replace_failure_keeps_old_content_and_cleans_temps(
-    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "state.json"
-    path.write_bytes(b"old")
-    if case == "start":
-        monkeypatch.setattr(start_serving, "state_path", lambda: path)
-    elif case == "owner":
-
-        def owner_path(*_args: object) -> Path:
-            return path
-
-        monkeypatch.setattr(coding_session_owner_record, "state_path", owner_path)
-
-    def fail_replace(_source: Path, _target: Path) -> None:
-        raise OSError("replace failure")
-
-    monkeypatch.setattr(os, "replace", fail_replace)
-    with pytest.raises(OSError, match="replace failure"):
-        _marker_write(case, path)
-    assert path.read_bytes() == b"old"
-    assert sorted(tmp_path.iterdir()) == [path]
-
-
 @pytest.mark.parametrize("writer", [observatory_urls.atomic_write, otel_collector.atomic_write])
-def test_cli_writer_commits_utf8_without_directory_sync(
-    writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_writer_commits_utf8(writer: Callable[[Path, str], None], tmp_path: Path) -> None:
     path = tmp_path / "config.yml"
     path.write_bytes(b"old")
-    replaced: list[Path] = []
-    original_replace = Path.replace
-
-    def record_replace(source: Path, target: Path) -> Path:
-        replaced.append(source)
-        return original_replace(source, target)
-
-    monkeypatch.setattr(Path, "replace", record_replace)
-    original_fsync = os.fsync
-
-    def fsync_file_only(fd: int) -> None:
-        if stat.S_ISDIR(os.fstat(fd).st_mode):
-            raise OSError("unexpected directory sync")
-        original_fsync(fd)
-
-    monkeypatch.setattr(os, "fsync", fsync_file_only)
     writer(path, "café")
     assert path.read_bytes() == "café".encode()
-    assert len(replaced) == 1
     assert sorted(tmp_path.iterdir()) == [path]
 
 
@@ -151,55 +106,6 @@ def test_concurrent_marker_writers_publish_complete_snapshots(tmp_path: Path) ->
         list(pool.map(write, range(24)))
     result = json.loads(path.read_bytes())
     assert result in ({"index": index, "data": "x" * 4096} for index in range(24))
-    assert sorted(tmp_path.iterdir()) == [path]
-
-
-@pytest.mark.parametrize("writer", [grafana_render.atomic_write])
-def test_visible_text_writers_use_distinct_sibling_temps_under_concurrency(
-    writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "config.txt"
-    barrier = Barrier(2)
-    sources: list[Path] = []
-    original_replace = Path.replace
-
-    def rendezvous(source: Path, target: Path) -> Path:
-        sources.append(source)
-        barrier.wait(timeout=5)
-        return original_replace(source, target)
-
-    monkeypatch.setattr(Path, "replace", rendezvous)
-    values = ["first" * 4096, "second" * 4096]
-
-    def write(value: str) -> None:
-        writer(path, value)
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        list(pool.map(write, values))
-
-    assert path.read_text() in values
-    assert len(set(sources)) == 2
-    assert all(source.parent == path.parent for source in sources)
-    assert all(
-        source.name.startswith(f".{path.name}.") and source.suffix == ".tmp" for source in sources
-    )
-    assert sorted(tmp_path.iterdir()) == [path]
-
-
-@pytest.mark.parametrize("writer", [grafana_render.atomic_write])
-def test_visible_text_writers_clean_temp_after_failed_replace(
-    writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "config.txt"
-    path.write_text("old")
-
-    def fail_replace(_source: Path, _target: Path) -> Path:
-        raise OSError("replace failure")
-
-    monkeypatch.setattr(Path, "replace", fail_replace)
-    with pytest.raises(OSError, match="replace failure"):
-        writer(path, "new")
-    assert path.read_text() == "old"
     assert sorted(tmp_path.iterdir()) == [path]
 
 

@@ -4,6 +4,3 @@
 "test_session_filelog_receivers_are_disjoint_and_bound.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_port" = 2
 "test_session_filelog_receivers_are_disjoint_and_bound.py#monkeypatch.setattr base.deploy.release.collector_artifact.download_and_verify" = 1
 "test_session_filelog_receivers_are_disjoint_and_bound.py#monkeypatch.setattr base.deploy.release.collector_artifact.urllib.request.urlopen" = 2
-
-[debt.stdlib-patch]
-"test_session_filelog_receivers_are_disjoint_and_bound.py#monkeypatch.setattr pathlib.Path.replace" = 1

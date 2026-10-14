@@ -11,7 +11,9 @@ write through one. This module's own tests build ``AtomicWriter(Fs(...))`` with
 the failure they need. Every other module calls ``write_text_atomic``,
 ``write_bytes_atomic`` and ``fsync_parent`` (the writer over ``SYSTEM_FS``) and
 its tests use real files under ``tmp_path``: the commit, cleanup and durability
-contract is this module's, so it is proved here and nowhere else.
+contract is this module's, so it is proved here. A caller whose own policy on a failure
+needs proving (it warns, suppresses, or never syncs) takes a required ``AtomicWriter``;
+the callers that still patch instead are listed above ``SYSTEM_FS``.
 """
 
 from __future__ import annotations
@@ -48,8 +50,20 @@ def _fchmod(fd: int, mode: int) -> None:
     os.fchmod(fd, mode)
 
 
-# The real calls. Each looks the `os` function (or `Path.replace`) up when it is called, so it
-# never captures a function a test has replaced.
+# The real calls.
+#
+# TRANSITIONAL. The three wrappers above look Path.replace, os.fsync and os.fchmod up when they are
+# called, rather than binding them here, only to keep the remaining patches behaving as they did
+# before this seam existed: they patch the shared os module or Path, so they also reach an atomic
+# write. The recorded debt that does:
+#   - os.fsync in cli/commands/observability/tests/test_atomic_writer_contracts.py. It proves a
+#     caller's policy (grafana_render.atomic_write never syncs); the cli observability batch (S9)
+#     gives that writer a required AtomicWriter parameter and the test builds an Fs.
+#   - os.replace, os.fchmod and Path.replace in the tests of modules that do their own replace or
+#     chmod: base/host (private_storage), base/tests/config (dotenv), cli/commands/data_plane,
+#     cli/commands/agents, cli/commands/extensions, agent/graph/exec, services/entrypoints/im_bridge,
+#     ava/tests, scripts/ci and scripts/tests. Each goes with its component's batch.
+# When the last is gone, SYSTEM_FS binds the os functions directly and the wrappers are deleted.
 SYSTEM_FS = Fs(replace=_replace, fsync=_fsync, fchmod=_fchmod)
 
 
