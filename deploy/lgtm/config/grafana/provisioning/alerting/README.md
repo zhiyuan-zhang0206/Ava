@@ -289,6 +289,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `ava-ops-impersonation-notice-failed` | `impersonation_terminal_notice_failed` per lease | 0s | warning | the ended-lease notice's durable retry ledger (a failed single submission is now reported, not retried) |
 | `ava-ops-im-push-failed` | `im_push_failed` (weixin, 2+ failures) | 0s | warning | the push watchdog's cross-channel alert and cooldown |
 | `ava-ops-im-feishu-owner-seed-failed` | `im_feishu_owner_seed_failed` | 0s | warning | a direct owner message |
+| `ava-ops-im-push-stall` | `im_push_health` per leg (`attributes_channel`; pending > 0, last delivery age > 900s) | 2m | warning | nothing: an outbound IM leg could stall with no alert (10-08: Telegram leg silent 54 min, 2 pushes stranded) |
 | `ava-ops-lifecycle-pointer-stuck` | `lifecycle_pointer_stuck` (2h) | 0s | warning | the settle of an unobserved force-terminate fence (boot recovery and the absent-machine sweep): now an operator settles it by hand |
 | `ava-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `ava-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
