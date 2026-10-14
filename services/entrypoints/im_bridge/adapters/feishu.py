@@ -26,6 +26,7 @@ from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
 from services.entrypoints.im_bridge.state import load_switch_state
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
+    HTTPFailure,
     IMAdapter,
     InboundMessage,
     OutboundAdapterKind,
@@ -346,7 +347,9 @@ class FeishuAdapter(IMAdapter):
         )
 
     async def _poll_loop(self, interval: float) -> None:
-        """Poll known chats; only explicit transport failures enter the backoff."""
+        """Poll known chats; a failed round — transport failure, hard HTTP
+        rejection or API rejection — enters the bounded backoff. Unclassified
+        failures still escape to the service task owner."""
         await self._restore_cursors()
         # quiesce-exempt: polls the Feishu API; a cursor is written only when an update arrives, and forwarding goes through the gateway, which refuses business requests in the window
         while True:
@@ -356,9 +359,29 @@ class FeishuAdapter(IMAdapter):
                 try:
                     if not await self._poll_once(chat_id):
                         failed += 1
-                except NETWORK_ERRORS as exc:
+                except (*NETWORK_ERRORS, HTTPFailure, cursors.FeishuListRejected) as exc:
+                    # Failed rounds enter the bounded backoff; a hard rejection
+                    # is logged at error level but must not exit the poll task
+                    # (task #5052).
                     failed += 1
-                    logger.warning("FeishuAdapter: poll transport failed chat={}: {}", chat_id, exc)
+                    if isinstance(exc, HTTPFailure):
+                        logger.error(
+                            "FeishuAdapter: poll failed chat={} status={}: {}",
+                            chat_id,
+                            exc.status,
+                            exc,
+                        )
+                    elif isinstance(exc, cursors.FeishuListRejected):
+                        logger.error(
+                            "FeishuAdapter: poll failed chat={} code={}: {}",
+                            chat_id,
+                            exc.code,
+                            exc,
+                        )
+                    else:
+                        logger.warning(
+                            "FeishuAdapter: poll transport failed chat={}: {}", chat_id, exc
+                        )
             await asyncio.sleep(self._round_delay(failed, total, interval))
 
     def _round_delay(self, failed: int, total: int, interval: float) -> float:

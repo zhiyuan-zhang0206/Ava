@@ -22,6 +22,19 @@ import requests
 from services.entrypoints.im_bridge.types import RetryableTransportError, raise_http_failure
 
 
+class FeishuListRejected(RuntimeError):  # noqa: N818 — reads as the outcome, like its log message "Feishu list rejected"
+    """The list call reached the platform and was rejected at the API level.
+
+    A ``code != 0`` response (quota, permission, invalid container) is not a
+    transport failure and not an HTTP status rejection, but it still fails the
+    poll round: the loop keeps it off the crash path and logs it.
+    """
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def idempotency_key(message_id: str | None) -> str | None:
     """The gateway's keyed-delivery dedup key for one Feishu message (the WS
     and polling paths and every replay resolve to the same inbound)."""
@@ -112,7 +125,7 @@ async def list_chat(rest_client: Any, chat_id: str) -> list[Any]:
     if response.raw is not None and response.raw.status_code != 200:
         raise_http_failure(response.raw.status_code, "Feishu list request failed")
     if response.code != 0:
-        raise RuntimeError(f"Feishu list rejected: code={response.code}")
+        raise FeishuListRejected(response.code, f"Feishu list rejected: code={response.code}")
     data = response.data
     items: list[Any] = list((data.items or []) if data is not None else [])
     items.reverse()

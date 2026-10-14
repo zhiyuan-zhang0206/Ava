@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ssl
 from collections.abc import Callable
 from typing import Any
 
@@ -294,6 +295,88 @@ async def test_getupdates_transport_error_sanitized(env: None) -> None:
             await adapter._get_updates()
     assert "TEST-TOKEN" not in str(exc_info.value)
     assert "api.telegram.org" not in str(exc_info.value)
+
+
+async def test_getupdates_ssl_record_layer_error_sanitized(env: None) -> None:
+    """#5052: a raw ssl.SSLError from the TLS read is classified retryable
+    with the exception type only — no URL and no token in the message."""
+
+    def boom(_request: httpx.Request) -> httpx.Response:
+        raise ssl.SSLError("[SSL] record layer failure (_ssl.c:2580)")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(boom)) as client:
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        with pytest.raises(RetryableTransportError, match="SSLError") as exc_info:
+            await adapter._get_updates()
+    assert "TEST-TOKEN" not in str(exc_info.value)
+    assert "api.telegram.org" not in str(exc_info.value)
+
+
+async def test_poll_loop_survives_a_record_layer_ssl_failure(
+    env: None, loguru_records: LogRecords
+) -> None:
+    """#5052: a TLS read that fails mid-stream (record-layer ssl.SSLError) is
+    retried like any transport error — the poll task must survive instead of
+    exiting the whole bridge."""
+    async with owned_tasks() as _owned_tasks:
+        core = FakeCore()
+        polls = {"count": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "setMyCommands" in str(request.url):
+                return httpx.Response(200, json={"ok": True, "result": True})
+            polls["count"] += 1
+            if polls["count"] == 2:
+                raise ssl.SSLError("[SSL] record layer failure (_ssl.c:2580)")
+            return httpx.Response(200, json={"ok": True, "result": []})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            adapter = TelegramAdapter(
+                core, _config(telegram_reconnect_base_delay_seconds=0.01), client=client
+            )
+            try:
+                await adapter.start(_owned_tasks)
+                await _wait_until(lambda: polls["count"] >= 3, timeout=3)
+                assert adapter._poll_task is not None and not adapter._poll_task.done()
+                assert any(
+                    "telegram poll failed" in message and "SSLError" in message
+                    for message in loguru_records.messages("WARNING")
+                )
+            finally:
+                await adapter.stop()
+
+
+async def test_poll_loop_survives_a_hard_http_rejection(
+    env: None, loguru_records: LogRecords
+) -> None:
+    """#5052: a non-retryable getUpdates status (401) enters the reconnect
+    backoff, logged at error level — it must not end the poll task."""
+    async with owned_tasks() as _owned_tasks:
+        core = FakeCore()
+        polls = {"count": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "setMyCommands" in str(request.url):
+                return httpx.Response(200, json={"ok": True, "result": True})
+            polls["count"] += 1
+            if polls["count"] == 2:
+                return httpx.Response(401, json={"ok": False})
+            return httpx.Response(200, json={"ok": True, "result": []})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            adapter = TelegramAdapter(
+                core, _config(telegram_reconnect_base_delay_seconds=0.01), client=client
+            )
+            try:
+                await adapter.start(_owned_tasks)
+                await _wait_until(lambda: polls["count"] >= 3, timeout=3)
+                assert adapter._poll_task is not None and not adapter._poll_task.done()
+                assert any(
+                    "telegram poll failed" in message and "HTTP 401" in message
+                    for message in loguru_records.messages("ERROR")
+                )
+            finally:
+                await adapter.stop()
 
 
 async def test_media_caption_forwarded_textless_ignored(env: None) -> None:
