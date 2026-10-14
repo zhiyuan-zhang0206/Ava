@@ -73,7 +73,8 @@ violations pass, anything new fails, and the debt may only shrink
   rules cause in the base's unchanged code is reported, because widening a rule grows the
   baselines. The growth the content causes is failed: every debt key the change records must be one
   the new rules find in the base, so a rule change cannot carry a new violation or a moved file.
-  Give a rule change its own PR; a content change queued behind it is judged by totals as before.
+  Give a rule change its own PR. A queued comparison that includes it applies the same key check
+  to the combined change; comparisons without rule changes are judged by totals as before.
 - Patching is debt of every kind: `first-party-patch`, `stdlib-patch`, `third-party-patch`,
   `env-patch` and `unresolved-patch` (a target the imports do not resolve). Do not add one;
   pass the dependency in as an explicit parameter
