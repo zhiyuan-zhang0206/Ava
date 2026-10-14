@@ -29,7 +29,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-from agent.graph.hooks.framework import framework_hooks
+from agent.graph.hooks.framework import hooks_at
 from agent.graph.hooks.node import hook_node
 from agent.graph.llm_errors import LlmLedger
 from agent.impersonation import protect_native_hooks
@@ -46,7 +46,7 @@ from agent.nodes import (
 )
 from agent.state import BaseAgentState, build_agent_state
 from base.agents.context import AvaContext
-from base.packages.plugins.extensions import ExtensionRegistry, GraphHook, HookPoint
+from base.packages.plugins.extensions import ExtensionRegistry
 
 from ._init_context import init_context_node
 from .claim.node import claim_node
@@ -72,16 +72,6 @@ def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
     - No pending + halted=False + messages non-empty → immediately goto before_llm (no block)
     """
     return CLAIM
-
-
-def _hooks_at(
-    point: HookPoint, extensions: ExtensionRegistry
-) -> list[tuple[str | None, GraphHook]]:
-    """The hooks one edge runs: every plugin's, then the framework's own."""
-    framework: list[tuple[str | None, GraphHook]] = [
-        (None, hook) for hook in framework_hooks()[point]
-    ]
-    return [*extensions.hooks(point), *framework]
 
 
 def build_graph(
@@ -144,7 +134,7 @@ def build_graph(
         AFTER_INIT,
         protect_native_hooks(
             hook_node(
-                "after_init", default_next=INIT_CONTEXT, hooks=_hooks_at("after_init", extensions)
+                "after_init", default_next=INIT_CONTEXT, hooks=hooks_at("after_init", extensions)
             )
         ),
         input_schema=state_cls,
@@ -156,7 +146,7 @@ def build_graph(
     g.add_node(  # type: ignore[arg-type]
         BEFORE_LLM,
         protect_native_hooks(
-            hook_node("before_llm", default_next=LLM, hooks=_hooks_at("before_llm", extensions))
+            hook_node("before_llm", default_next=LLM, hooks=hooks_at("before_llm", extensions))
         ),
         input_schema=state_cls,
     )
@@ -164,7 +154,7 @@ def build_graph(
     g.add_node(  # type: ignore[arg-type]
         BEFORE_EXEC,
         protect_native_hooks(
-            hook_node("before_exec", default_next=EXEC, hooks=_hooks_at("before_exec", extensions))
+            hook_node("before_exec", default_next=EXEC, hooks=hooks_at("before_exec", extensions))
         ),
         input_schema=state_cls,
     )
@@ -175,7 +165,7 @@ def build_graph(
             hook_node(
                 "after_exec",
                 default_next=_after_exec_default_next,
-                hooks=_hooks_at("after_exec", extensions),
+                hooks=hooks_at("after_exec", extensions),
             )
         ),
         input_schema=state_cls,

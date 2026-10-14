@@ -16,6 +16,12 @@ Four hook container nodes sit in the LangGraph execution graph (topology: START 
 - `before_exec` — after LLM completion, before code execution
 - `after_exec` — after code execution completion, before the next node
 
+At `before_llm`, tool-pairing repair runs before plugins, followed by the remaining framework
+hooks. Plugin load/declaration order and the remaining framework order are preserved. At other
+hook points, plugins run before framework hooks. Each hook reads the same original state; its
+delta is merged in execution order, without exposing an intermediate repaired state to plugins.
+This keeps a full repair from discarding a plugin note while retaining the plugin's state update.
+
 Plugins declare an **instance** of a `Hook` ABC subclass (PyTorch `nn.Module` shape—base class locks the signature, subclasses fill the body), rather than a bare async function + decorator:
 ```python
 from agent.hooks import Hook

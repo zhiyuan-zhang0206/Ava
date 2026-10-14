@@ -9,6 +9,11 @@ tags:
 
 # Built-in before_llm Hooks
 
+`agent/graph/hooks/framework.py:hooks_at` composes this edge as repair, plugins in their existing declaration
+order, then the remaining framework hooks below. Repair's full-history delta must merge before
+plugin notes so it cannot discard a note while committing the plugin's other state updates.
+Every hook reads the same original state; returned deltas merge through the existing reducers.
+
 - Built-in compact reminder (`agent/graph/hooks/compact.py:_CompactReminderHook`, one of `framework_hooks()`) performs no model call. It injects the once-per-window wind-down reminder below the hard ceiling and defers above it. Automatic summarization runs inside the LLM node, using the same durable-interrupt race as ordinary generation. Interrupted summarization preserves history and the compact version; claim retains command ownership. A successful summary rebuilds context through `init_context`, then returns to claim before the next model request. Agent-authored `compact_summary` inbounds still apply at claim.
 - Built-in repair (`agent/hooks/repair.py:_RepairDanglingToolPairingHook`, ) is also an unconditional built-in before_llm hook, deliberately ordered **before compact**—it reconstructs a dangling tool_use with an interrupted result or drops a tool_result whose carrying tool_use was lost, before the LLM node can submit either normal generation or compaction
 - Built-in skill recall (`agent/graph/hooks/skill_recall.py:SkillRecallHook`) is ordered **before** the drift check. On a turn woken by a person or a schedule it scores the skill index against the recent conversation with one decision-model request and names the best matches in one `skill_recall` note. It keeps its own per-window record (`skill_reads`, `skill_recall`) and clears it after a compaction, defers on `auto_compact_will_fire(state)`, and degrades every failure or timeout (`skill_recall_deadline_seconds`) to no note. See [[agent/graph/docs/skill-recall.ava.okf.md]]
