@@ -26,7 +26,15 @@ from meizel.contracts.manifest import manifest_path
 from meizel.graph.model import Code, MeizelError
 from meizel.graph.universe import MANIFEST, Universe, load_universe, parent_of
 
-__all__ = ["by_target", "changed_outside", "changed_under", "diff", "summarize"]
+__all__ = [
+    "Baselines",
+    "by_target",
+    "changed_under",
+    "diff",
+    "read_baselines",
+    "summarize",
+    "totals_at",
+]
 
 Baselines = dict[str, DebtTable]
 
@@ -183,7 +191,7 @@ def _manifest_texts_at(root: Path, ref: str) -> list[str]:
     return texts
 
 
-def _totals_at(root: Path, ref: str) -> Counter[str]:
+def totals_at(root: Path, ref: str) -> Counter[str]:
     totals: Counter[str] = Counter()
     for text in _manifest_texts_at(root, ref):
         totals.update(_totals_in(text))
@@ -201,19 +209,13 @@ def changed_under(root: Path, ref: str, pathspecs: list[str]) -> list[str]:
     return [p for p in listing.decode().split("\0") if p]
 
 
-def changed_outside(root: Path, ref: str, pathspecs: list[str]) -> list[str]:
-    """The changed files that match none of the pathspecs."""
-    inside = set(changed_under(root, ref, pathspecs))
-    return [p for p in changed_under(root, ref, []) if p not in inside]
-
-
 def diff(root: Path, ref: str) -> tuple[list[str], bool]:
     """Per-code totals against `ref`, and whether any code grew.
 
     Totals, not directories, are compared: debt that moves with a file between directories
     leaves them unchanged.
     """
-    before = _totals_at(root, ref)
+    before = totals_at(root, ref)
     after = Counter(
         {code.value: n for code, n in _by_code(read_baselines(load_universe(root))).items()}
     )

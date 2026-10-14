@@ -68,11 +68,12 @@ violations pass, anything new fails, and the debt may only shrink
   change so the baseline drops with the fix. `python -m meizel debt` shows what
   is left.
 - CI fails when the recorded total grows against the base (`debt diff --on-growth=fail`).
-  The one waiver is decided by path, not by a reader: a pure rule change reports growth as a
-  warning, because widening a rule grows the baselines. Pure means it edits meizel's own rule code
-  (Python under `meizel/` outside tests) and touches nothing but `meizel/`, the `meizel.toml`
-  baselines and `meizel.policy.toml`. A change that also edits product code or tests is not waived,
-  so a rule change gets its own PR.
+  The one exception is a rule change (it edits meizel's own rule code: Python under `meizel/`
+  outside tests), whose growth is split in two by the tool, not by a reader. The growth the new
+  rules cause in the base's unchanged code is reported, because widening a rule grows the
+  baselines. The growth the content causes is failed: every debt key the change records must be one
+  the new rules find in the base, so a rule change cannot carry a new violation or a moved file.
+  Give a rule change its own PR; a content change queued behind it is judged by totals as before.
 - Patching is debt of every kind: `first-party-patch`, `stdlib-patch`, `third-party-patch`,
   `env-patch` and `unresolved-patch` (a target the imports do not resolve). Do not add one;
   pass the dependency in as an explicit parameter

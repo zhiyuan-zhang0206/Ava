@@ -431,3 +431,27 @@ an allowlist inside `meizel/`.
   (`meizel/allowances.py` owns the format). `policy diff` reports a change to any of them in CI, so
   rule code holds no exemption of its own. The lists in `scripts/` outside `meizel/` are not moved
   by this change.
+
+## Addendum (2026-10-14): a rule change's growth is measured, not guessed from the files it touches
+
+The waiver above judged a change "pure" by the paths it touched. In the merge queue that fails for
+the wrong reason: the test branch is the main branch plus every pull request queued ahead, so a
+pure rule change queued behind an ordinary one looks as if it also edits product code (#5799 was
+removed from the queue for it).
+
+- **Two measures.** For a change that edits the rule code, `debt diff` runs the new checker on a
+  throwaway checkout of the base and takes the baseline it would write there (declare the legal
+  edges, record the rest). The *rule growth* is that baseline minus what the base records: the new
+  rules finding old debt, reported and never judged. The *content growth* is what the change
+  records beyond it: judged by `--on-growth`. The base's own recorded debt is the old rules' result,
+  because the base is green.
+- **Keys, not totals, for the content measure.** Every key the change records must be one the new
+  rules find in the base, with no greater count. Totals would let the edges a rule change declares
+  hide a new violation; keys do not. A file moved in the same change is a new key and fails, so
+  moves get their own change.
+- **Other changes are judged by totals**, as before, with no waiver; a content change queued behind
+  a rule change is judged together with it as a rule change, which holds whenever it adds no key.
+- **Fail closed.** A manifest or policy the new checker cannot read in the base stops the comparison;
+  it is never counted as no debt.
+- **No pathspec waiver.** `--waive-only-within` is gone. The base need not be main: a queue parent
+  works the same, because each pull request ahead has already shown that it does not grow.

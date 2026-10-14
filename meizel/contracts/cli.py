@@ -16,11 +16,12 @@ from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
 from meizel.contracts.debt_report import (
     by_target,
-    changed_outside,
     changed_under,
     diff,
     summarize,
+    totals_at,
 )
+from meizel.contracts.debt_rules import rule_diff
 from meizel.contracts.debt_sites import format_sites, sites
 from meizel.contracts.declare import declare
 from meizel.contracts.explain import explain
@@ -222,47 +223,34 @@ def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser
         nargs="+",
         default=[],
         metavar="pathspec",
-        help="a waiver needs the change to touch these git pathspecs (the rule code)",
+        help=(
+            "a change touching these git pathspecs (the rule code) is a rule change: the growth the "
+            "new rules cause in the base's unchanged code is reported, never judged; the growth the "
+            "content causes always is"
+        ),
     )
-    growth.add_argument(
-        "--waive-only-within",
-        nargs="+",
-        default=[],
-        metavar="pathspec",
-        help="a waiver needs every changed file to match these git pathspecs (a pure rule change)",
-    )
-
-
-def _waiver(root: Path, ref: str, touches: list[str], within: list[str]) -> tuple[bool, str]:
-    """Whether the change is a pure rule change, and the sentence that says why not or why."""
-    if not (touches or within):
-        return False, ""
-    rules = changed_under(root, ref, touches) if touches else []
-    if touches and not rules:
-        return False, ""
-    outside = changed_outside(root, ref, within) if within else []
-    if outside:
-        shown = ", ".join(outside[:3]) + (" ..." if len(outside) > 3 else "")
-        return False, f"not waived: the change also edits files outside the rules ({shown})"
-    return True, f"this change edits only the rules ({', '.join(rules[:3])})"
 
 
 def _run_diff(root: Path, ref: str, on_growth: str, args: argparse.Namespace) -> int:
-    lines, grew = diff(root, ref)
-    print("\n".join(lines))
+    rules_changed = bool(args.waive_if_changed) and bool(
+        changed_under(root, ref, args.waive_if_changed)
+    )
+    if rules_changed:
+        result = rule_diff(root, ref, totals_at(root, ref), args.jobs)
+        print("\n".join(result.lines()))
+        print("\n".join(result.explanation()))
+        grew = result.content_grew
+    else:
+        lines, grew = diff(root, ref)
+        print("\n".join(lines))
     if args.by_target:
         print()
         print("\n".join(by_target(root, ref, args.target_prefix, args.depth)))
         print()
     if not grew:
-        print(f"meizel: no growth against {ref}")
+        if not rules_changed:
+            print(f"meizel: no growth against {ref}")
         return 0
-    waived, why = _waiver(root, ref, args.waive_if_changed, args.waive_only_within)
-    if waived and on_growth == "fail":
-        print(f"meizel: growth is reported, not failed: {why}")
-        on_growth = "warn"
-    elif why:
-        print(f"meizel: growth {why}")
     warning = "" if on_growth == "fail" else " warning:"
     print(f"meizel:{warning} recorded debt grew against {ref}", file=sys.stderr)
     return 1 if on_growth == "fail" else 0
