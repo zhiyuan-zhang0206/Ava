@@ -34,7 +34,7 @@ def _drive(
     progress = LoopProgress(loop, timeout_s=5.0)
     config = events_maintenance_config(process_config)
     if loop == "dispatch":
-        return daemon._dispatch_loop(
+        return daemon.dispatch_loop(
             _FAKE_POOL,
             progress,
             config,
@@ -64,7 +64,7 @@ def _script(
         return None
 
     monkeypatch.setattr(daemon, "maintenance_with_liveness", fake_pass)
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", no_sleep)
+    monkeypatch.setattr(daemon, "sleep_with_liveness", no_sleep)
     return lambda: passes
 
 

@@ -31,7 +31,7 @@ def mcp_daemon_probe() -> bool:
         sock.close()
 
 
-def _is_alive() -> bool:
+def is_alive() -> bool:
     """True when the daemon answers a ping; ANY probe failure means "not alive".
 
     The broad except below makes an unforeseen probe failure degrade to a verdict

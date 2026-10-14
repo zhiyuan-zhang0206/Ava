@@ -20,10 +20,10 @@ async def reconcile_launch_op(
     local_machine: str,
 ) -> LaunchReconciled:
     """Repeat a wake hint without inserting a prompt, rotating or forcing a host."""
-    return await asyncio.to_thread(_reconcile, db, bus, body, pool, local_machine=local_machine)
+    return await asyncio.to_thread(reconcile, db, bus, body, pool, local_machine=local_machine)
 
 
-def _reconcile(
+def reconcile(
     db: Database,
     bus: EventBus,
     body: LaunchReconcileRequest,

@@ -5,5 +5,4 @@ exports = ["browser", "computer", "permissions_helper"]
 "tests" = ["browser", "computer"]
 
 [debt.private-name]
-"tests/test_mcp_wrappers.py -> browser/mcp_wrapper.py#_Link" = 1
 "tests/test_mcp_wrappers.py -> browser/mcp_wrapper.py#_ReconnectingLink" = 1

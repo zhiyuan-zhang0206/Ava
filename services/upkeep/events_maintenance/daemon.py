@@ -41,7 +41,7 @@ Usage:
 
 Kept alive by the root supervisor's health monitor through the roster's
 `/healthz` identity probe, so the schema-drift exit in
-`_dispatch_loop` is revived on the next round instead of staying dead. Each loop
+`dispatch_loop` is revived on the next round instead of staying dead. Each loop
 logs an unexpected failed pass and waits out its interval; after five failures in a
 row (`base.daemon.round_loop.RoundFailureBudget`) it raises and the process exits for
 the supervisor. A pass skipped because the database is unreachable does not count.
@@ -238,7 +238,7 @@ def _run_resolution(
     progress.mark_success()
 
 
-def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(
         _pidfile(config, runtime=runtime), "services.upkeep.events_maintenance.daemon"
     ):
@@ -300,7 +300,7 @@ def loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
     return records
 
 
-async def _sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
+async def sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
     """Sleep `total_s`, beating progress every `_LIVENESS_BEAT_STEP_S` so the long
     inter-poll wait keeps /healthz fresh instead of reading as a wedged loop."""
     remaining = total_s
@@ -336,7 +336,7 @@ async def maintenance_with_liveness(
         raise failure
 
 
-async def _dispatch_loop(
+async def dispatch_loop(
     pool: ConnectionPool,
     progress: LoopProgress,
     config: EventsMaintenanceConfig,
@@ -391,7 +391,7 @@ async def _dispatch_loop(
             progress.mark_error(str(exc))
             events_maintenance_log.exception("[events-maintenance] rollup iteration failed")
             failures.failed(exc)
-        await _sleep_with_liveness(progress, interval)
+        await sleep_with_liveness(progress, interval)
 
 
 async def resolution_loop(
@@ -450,7 +450,7 @@ async def resolution_loop(
             progress.mark_error(str(exc))
             events_maintenance_log.exception("[events-maintenance] resolution iteration failed")
             failures.failed(exc)
-        await _sleep_with_liveness(progress, interval)
+        await sleep_with_liveness(progress, interval)
 
 
 async def run(
@@ -469,7 +469,7 @@ async def run(
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
-    _write_pidfile(process_config, runtime=runtime)
+    write_pidfile(process_config, runtime=runtime)
     events_maintenance_log.info(
         "[events-maintenance] pidfile written: %s", _pidfile(process_config, runtime=runtime)
     )
@@ -509,7 +509,7 @@ async def run(
         # the process. Stop cancels its async proxy; main's hard exit never joins
         # the blocking executor thread.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_dispatch_loop(pool, dispatch_progress, config, db, tasks=loops))
+            loops.create_task(dispatch_loop(pool, dispatch_progress, config, db, tasks=loops))
             loops.create_task(resolution_loop(pool, resolution_progress, config, tasks=loops))
             loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
             if alert_progress is not None:

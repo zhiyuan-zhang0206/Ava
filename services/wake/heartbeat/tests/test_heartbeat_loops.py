@@ -55,7 +55,7 @@ def _patch_run(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         return events.append("pidfile")
@@ -64,7 +64,7 @@ def _patch_run(
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     patch_database(monkeypatch, pool=_Pool)
-    monkeypatch.setattr(daemon, "_dispatch_loop", loops["dispatch"])
+    monkeypatch.setattr(daemon, "dispatch_loop", loops["dispatch"])
     monkeypatch.setattr(daemon, "liveness_loop", loops["liveness"])
 
     async def digest_loop(

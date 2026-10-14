@@ -1564,7 +1564,7 @@ jobs:
           app = build_dir / "AvaPermissionsHelper.app"
           build_dir.mkdir(parents=True, exist_ok=True)
           binary = build_dir / "AvaPermissionsHelper"
-          lifecycle._run(["swiftc", "-O", str(lifecycle._SOURCE), "-o", str(binary)])
+          lifecycle._run(["swiftc", "-O", str(lifecycle.SOURCE), "-o", str(binary)])
           lifecycle._remove_app(app)
           exe = lifecycle._app_executable(app)
           exe.parent.mkdir(parents=True, exist_ok=True)

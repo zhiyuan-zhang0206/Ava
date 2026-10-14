@@ -71,7 +71,7 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return _endpoint(config, runtime=runtime).pidfile
 
 
-def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(
         _pidfile(config, runtime=runtime), "services.entrypoints.im_bridge.daemon"
     ):
@@ -319,7 +319,7 @@ async def run(
         )
         sys.exit(1)
 
-    _write_pidfile(process_config, runtime=runtime)
+    write_pidfile(process_config, runtime=runtime)
     _log.info("[im_bridge] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     # The notice bridge reads agent_notices directly (R3 door ④ — decoupled

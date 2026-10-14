@@ -56,7 +56,7 @@ def current_scale(helper: PermissionsHelperClient, measured: float | None) -> fl
     return float(helper.screen_size()["scale"])
 
 
-def _snapshot_path(agent_id: int | None) -> Path:
+def snapshot_path(agent_id: int | None) -> Path:
     """A fresh capture path under $AVA_HOME/logs/computer/snapshots/."""
     directory = logs_dir() / "computer" / "snapshots"
     directory.mkdir(parents=True, exist_ok=True)
@@ -76,7 +76,7 @@ def capture_screen(
     the PNG is the ground truth callers click against; the helper's reported
     scale can be stale (see _pixel_scale).
     """
-    path = _snapshot_path(agent_id)
+    path = snapshot_path(agent_id)
     size = helper.screen_size()
     helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
     pw, ph = png_size(path)
@@ -101,7 +101,7 @@ def capture_region(
         and region.y + region.h <= screen["y"] + screen["h"]
     ):
         raise ComputerUseError("region must be wholly inside the main display")
-    path = _snapshot_path(agent_id)
+    path = snapshot_path(agent_id)
     helper.screencapture_region(region.x, region.y, region.w, region.h, str(path))
     pw, ph = png_size(path)
     scale = _pixel_scale(pw, region.w)

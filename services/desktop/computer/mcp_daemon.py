@@ -672,7 +672,7 @@ class ComputerMcpDaemon:
         emit_recorded_central_event(self._db, event)
 
 
-async def _socket_in_use(path: Path) -> bool:
+async def socket_in_use(path: Path) -> bool:
     """True when a live process is already listening on ``path``.
 
     A successful connect proves an occupant; ``FileNotFoundError`` /
@@ -730,7 +730,7 @@ async def run(
     config = computer_use_config()
     daemon = ComputerMcpDaemon(config, database(), sock, helper=helper)
     path = Path(daemon._sock)
-    if await _socket_in_use(path):
+    if await socket_in_use(path):
         logger.error(
             "[computer-mcp] socket {} is already served by a live daemon — "
             "refusing to start a second instance",

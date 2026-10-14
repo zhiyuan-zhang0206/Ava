@@ -159,7 +159,7 @@ async def test_scheduler_health_uses_entry_image_and_preserves_loop_failure(
         owner.view.services.pg_backup_health_port = 18223
 
     monkeypatch.setattr(daemon, "_is_running", Mock(return_value=False))
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile)
     remove = Mock()
     monkeypatch.setattr(daemon, "_remove_pidfile", remove)
     monkeypatch.setattr(daemon, "start_health_server", start)

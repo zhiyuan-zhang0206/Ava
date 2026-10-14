@@ -373,7 +373,7 @@ async def _run_with_fakes(
     async def socket_free(_path: Path) -> bool:
         return False
 
-    monkeypatch.setattr(daemon_mod, "_socket_in_use", socket_free)
+    monkeypatch.setattr(daemon_mod, "socket_in_use", socket_free)
 
     class FakeSession:
         async def send_ping(self) -> None:

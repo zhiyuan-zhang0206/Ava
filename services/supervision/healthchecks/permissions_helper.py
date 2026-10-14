@@ -107,7 +107,7 @@ class _Observation:
     job: HelperJobState | None = None
 
 
-def _classify(*, ping_ok: bool, job: HelperJobState | None) -> str:
+def classify(*, ping_ok: bool, job: HelperJobState | None) -> str:
     """The LWCR truth table (pure): one failure class per observation.
 
     ``job`` is None when launchd has no readable job. The LWCR class needs the
@@ -162,7 +162,7 @@ def _observe() -> _Observation:
     text = read_helper_job()
     if text is not None:
         job = parse_job_state(text)
-    classification = _classify(ping_ok=False, job=job)
+    classification = classify(ping_ok=False, job=job)
     return _Observation(classification, _detail(classification, job, ping_failure), job)
 
 

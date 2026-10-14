@@ -295,7 +295,7 @@ def test_probe_timeout_serves_down_and_emits_timeout_event(
     """A probe that outlives its budget is a TIMEOUT, not a network outage —
     the distinction the audit needed (a slow gateway needs different surgery
     than a dead one)."""
-    monkeypatch.setattr(gate_daemon, "_PROBE_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(gate_daemon, "PROBE_TIMEOUT_S", 0.2)
     FakeGateway.auth_hook = lambda: time.sleep(1.0)
 
     status, body = _get(servers["gate"] + "/")
@@ -676,13 +676,13 @@ def test_gateway_base_uses_reachable_host(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(
         daemon, "settings", types.SimpleNamespace(gateway=types.SimpleNamespace(gateway_port=8123))
     )
-    assert daemon._gateway_base(local_host=lambda: "10.0.0.2") == "http://10.0.0.2:8123"
+    assert daemon.gateway_base(local_host=lambda: "10.0.0.2") == "http://10.0.0.2:8123"
 
     # Single box: the localhost fallback keeps local browsers working verbatim.
-    assert daemon._gateway_base(local_host=lambda: "localhost") == "http://localhost:8123"
+    assert daemon.gateway_base(local_host=lambda: "localhost") == "http://localhost:8123"
 
     # IPv6 literals need brackets in a netloc.
-    assert daemon._gateway_base(local_host=lambda: "fd00::1") == "http://[fd00::1]:8123"
+    assert daemon.gateway_base(local_host=lambda: "fd00::1") == "http://[fd00::1]:8123"
 
 
 # ── one-time login link on the static login page ─────────────────────────

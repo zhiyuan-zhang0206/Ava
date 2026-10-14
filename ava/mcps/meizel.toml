@@ -11,7 +11,5 @@ exports = ["config.py"]
 [debt.private-name]
 "tests/test_browser.py -> _browser.py#_CONNECT_ATTEMPTS" = 1
 "tests/test_browser.py -> _browser.py#_CONNECT_DELAY_S" = 1
-"tests/test_browser.py -> _browser.py#_LINE_LIMIT" = 1
 "tests/test_browser.py -> _browser.py#_RELEASE_TIMEOUT_S" = 1
 "tests/test_browser.py -> _browser.py#_dial_browser_mcp" = 2
-"tests/test_computer.py -> _computer.py#_LINE_LIMIT" = 1

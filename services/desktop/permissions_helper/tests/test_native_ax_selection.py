@@ -17,7 +17,7 @@ from .. import lifecycle
     sys.platform != "darwin" or shutil.which("swift") is None, reason="needs Swift on macOS"
 )
 def test_native_selection_literal_utf16_ranges(tmp_path: Path) -> None:
-    source = lifecycle._SOURCE.read_text()
+    source = lifecycle.SOURCE.read_text()
     body = (
         "private func axSelectionRange("
         + source.split("private func axSelectionRange(", 1)[1].split(

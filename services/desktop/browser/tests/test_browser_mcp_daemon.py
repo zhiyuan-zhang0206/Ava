@@ -360,7 +360,7 @@ async def test_socket_in_use_false_when_nobody_listens() -> None:
 
     d, sock, cleanup = _short_sock_dir()
     try:
-        assert await mcp_daemon._socket_in_use(sock) is False
+        assert await mcp_daemon.socket_in_use(sock) is False
     finally:
         cleanup(d)
 
@@ -373,7 +373,7 @@ async def test_socket_in_use_true_when_listener_present() -> None:
     d, sock, cleanup = _short_sock_dir()
     server = await asyncio.start_unix_server(lambda _r, w: w.close(), path=str(sock))
     try:
-        assert await mcp_daemon._socket_in_use(sock) is True
+        assert await mcp_daemon.socket_in_use(sock) is True
     finally:
         server.close()
         await server.wait_closed()

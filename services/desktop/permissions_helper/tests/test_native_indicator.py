@@ -384,7 +384,7 @@ print("capture indicator contract passed")
     sys.platform != "darwin" or shutil.which("swift") is None, reason="needs Swift on macOS"
 )
 def test_capture_indicator_window_decisions_and_lease(tmp_path: Path) -> None:
-    source = lifecycle._SOURCE.read_text()
+    source = lifecycle.SOURCE.read_text()
     numbers = (
         "func inputNumber(" + source.split("func inputNumber(", 1)[1].split("func inputBool(", 1)[0]
     )
