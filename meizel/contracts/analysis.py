@@ -18,6 +18,7 @@ from meizel.contracts.rule import Projection, judge, project, relative
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
 from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
+from meizel.language.mounts import mount_facts
 from meizel.language.scan import EXTERNAL_FORMS, FileScan, scan_file
 
 __all__ = ["Analysis", "analyze", "diagnose", "scan_all"]
@@ -343,6 +344,9 @@ def analyze(
     facts = [f for p in judged for f in scans[p].facts]
     facts.extend(_fixture_facts(universe, scans, judged))
     facts.extend(_load_facts(manifests))
+    mounts, unmounted = mount_facts(universe, scope)
+    facts.extend(mounts)
+    diagnostics.extend(unmounted)
     projections, found, needed = _judge_facts(facts, manifests)
     diagnostics.extend(found)
     diagnostics.extend(_source_diagnostics([scans[p] for p in judged], loaders, externals))

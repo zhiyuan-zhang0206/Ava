@@ -37,3 +37,6 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 
 [debt.private-name]
 "agents/tests/test_log_sink.py -> telemetry/process_logging.py#_event_sink" = 1
+
+[debt.undeclared-edge]
+"host/db_authority/tests/path_scopes.toml -> deploy/tests/db_authority_tests.py" = 1
