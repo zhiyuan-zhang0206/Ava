@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from base import db, paths
+from base import db
 from base.packages.extensions import materialize
 from base.telemetry import converge_report
 from cli.commands.converge.rendered_file import write_rendered_guarded
@@ -86,7 +86,6 @@ def test_extensions_kept_local_edits_report_converge_file_preserved(
         return _PoolStub()
 
     monkeypatch.setattr(db.Database, "pool", fake_pool)
-    monkeypatch.setattr(paths, "skills_dir", lambda: tmp_path / "skills")
 
     def kept_edit(_conn: object, *, dest_root: Path) -> SimpleNamespace:
         assert dest_root == tmp_path / "skills"
@@ -96,7 +95,9 @@ def test_extensions_kept_local_edits_report_converge_file_preserved(
 
     monkeypatch.setattr(materialize, "materialize_skills", kept_edit)
 
-    materialize_cluster_extensions(database_factory=operator_database)
+    materialize_cluster_extensions(
+        database_factory=operator_database, skills_root=tmp_path / "skills"
+    )
 
     assert emitted == [
         (

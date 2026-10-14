@@ -77,7 +77,7 @@ def get_skills() -> SkillsView:
     # `ava-code` and a directory still spelled `ava_code/` are one skill —
     # correlate through the fold, not the raw spelling (audit 02 #4).
     by_name = {match_key(p.name): p for p in registry.packages}
-    skills_root = paths.skills_dir()
+    skills_root = paths.skills_dir(paths.ava_home())
 
     rows: list[SkillView] = []
     if skills_root.is_dir():
@@ -118,5 +118,5 @@ def update_skill_enabled(body: SkillEnableUpdate) -> SkillView:
         pkg.enabled = body.enabled
 
     # Build the updated SkillView from the on-disk directory
-    dir_path = paths.skills_dir() / pkg.name
+    dir_path = paths.skills_dir(paths.ava_home()) / pkg.name
     return _build_skill_view(pkg.name, pkg, dir_path)

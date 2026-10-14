@@ -13,7 +13,7 @@ from base.config import ConfigBoot
 from base.config.domains.packages import PackagesSettings
 from base.native_process.os_platform import LockTimeoutError
 from base.packages.extensions import install_registry as reg
-from base.paths import install_registry_path
+from base.paths import ava_home, install_registry_path
 
 
 def _pkg(
@@ -25,7 +25,7 @@ def _pkg(
 
 
 def test_load_missing_file_is_empty(unit_home: Path) -> None:
-    assert not install_registry_path().exists()
+    assert not install_registry_path(ava_home()).exists()
     assert reg.load().packages == []
 
 
@@ -34,7 +34,7 @@ def test_register_save_load_roundtrip(unit_home: Path) -> None:
     reg.register(_pkg("beta", enabled=False))
     loaded = reg.load()
     assert {p.name for p in loaded.packages} == {"alpha", "beta"}
-    assert install_registry_path().exists()
+    assert install_registry_path(ava_home()).exists()
 
 
 def test_register_replaces_same_name(unit_home: Path) -> None:
@@ -71,20 +71,20 @@ def test_enabled_skill_names_filters_type_and_enabled(unit_home: Path) -> None:
 
 
 def test_malformed_json_raises(unit_home: Path) -> None:
-    install_registry_path().write_text("{ not json", encoding="utf-8")
+    install_registry_path(ava_home()).write_text("{ not json", encoding="utf-8")
     with pytest.raises(reg.SchemaInvalid):
         reg.load()
 
 
 def test_empty_file_is_empty_registry(unit_home: Path) -> None:
-    install_registry_path().write_text("   \n", encoding="utf-8")
+    install_registry_path(ava_home()).write_text("   \n", encoding="utf-8")
     assert reg.load().packages == []
 
 
 def test_save_is_atomic_and_leaves_no_temp(unit_home: Path) -> None:
     """save() stages through a temp sibling + rename (audit #2): no `.tmp`
     lingers, and a stale temp from a crashed earlier writer is swept."""
-    stale = install_registry_path().with_name("installed.json.tmp")
+    stale = install_registry_path(ava_home()).with_name("installed.json.tmp")
     stale.write_text("{ truncated", encoding="utf-8")
 
     reg.register(_pkg("alpha"))
@@ -96,7 +96,7 @@ def test_save_is_atomic_and_leaves_no_temp(unit_home: Path) -> None:
     # the on-disk file is complete, parseable JSON
     import json
 
-    json.loads(install_registry_path().read_text(encoding="utf-8"))
+    json.loads(install_registry_path(ava_home()).read_text(encoding="utf-8"))
 
 
 def test_load_raises_on_rows_that_fold_to_one_key(unit_home: Path) -> None:
@@ -105,7 +105,7 @@ def test_load_raises_on_rows_that_fold_to_one_key(unit_home: Path) -> None:
     skill scanner fleet-wide (audit 02 #4) — the read refuses it now."""
     import json
 
-    install_registry_path().write_text(
+    install_registry_path(ava_home()).write_text(
         json.dumps(
             {
                 "packages": [
@@ -205,7 +205,7 @@ def test_v1_file_is_refused(unit_home: Path) -> None:
     """The lazy v1 migration is retired: a v1 file fails fast, never loads."""
     import json
 
-    path = install_registry_path()
+    path = install_registry_path(ava_home())
     path.write_text(
         json.dumps(
             {
@@ -230,7 +230,9 @@ def test_v1_file_is_refused(unit_home: Path) -> None:
 def test_newer_schema_version_is_refused(unit_home: Path) -> None:
     import json
 
-    install_registry_path().write_text(json.dumps({"version": 3, "packages": []}), encoding="utf-8")
+    install_registry_path(ava_home()).write_text(
+        json.dumps({"version": 3, "packages": []}), encoding="utf-8"
+    )
     with pytest.raises(reg.SchemaInvalid):
         reg.load()
 

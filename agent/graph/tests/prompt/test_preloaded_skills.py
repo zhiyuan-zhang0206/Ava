@@ -28,7 +28,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.packages.extensions import install_registry
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.skills.tree import identifier
-from base.paths import skills_dir
+from base.paths import ava_home, skills_dir
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     the real ~/.agents/skills/ never leaks into a scan; fake_skills_dir creates it."""
 
     def _all_enabled() -> set[str]:
-        d = skills_dir()
+        d = skills_dir(ava_home())
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
     monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
@@ -45,7 +45,7 @@ def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def fake_skills_dir(unit_home: Path) -> Path:
-    d = skills_dir()
+    d = skills_dir(ava_home())
     d.mkdir()
     return d
 

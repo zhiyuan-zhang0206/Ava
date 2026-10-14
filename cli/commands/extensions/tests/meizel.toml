@@ -9,7 +9,6 @@
 [debt.first-party-patch]
 "test_cli_pool_teardown.py#monkeypatch.setattr base.packages.extensions.adopt.adopt_local_installs" = 2
 "test_cli_pool_teardown.py#monkeypatch.setattr base.packages.extensions.materialize.materialize_skills" = 2
-"test_cli_pool_teardown.py#monkeypatch.setattr base.paths.skills_dir" = 4
 "test_external_skills.py#monkeypatch.setattr cli.commands.extensions.external_skills._SKILL_NAMES" = 1
 "test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills._SKILL_NAMES" = 1
 "test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.commit_activation" = 2

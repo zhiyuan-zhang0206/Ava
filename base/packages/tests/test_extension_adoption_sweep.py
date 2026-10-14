@@ -51,7 +51,7 @@ def _install_locally(
     """Put a skill on this machine the way a pre-registry install left it: a tree
     under the skills dir and a row in `installed.json`, and NOTHING in the
     cluster."""
-    dest = paths.skills_dir() / name
+    dest = paths.skills_dir(paths.ava_home()) / name
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "SKILL.md").write_text(_SKILL_MD.format(name=name, body=body), encoding="utf-8")
     install_registry.register(
@@ -75,7 +75,9 @@ def test_sweep_uploads_a_pre_registry_install(
         _install_locally("sweep-demo")
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
         assert result.adopted == ["sweep-demo"]
 
@@ -100,7 +102,9 @@ def test_a_swept_name_crosses_to_a_machine_that_never_had_it(
         src = _install_locally("crossing-demo")
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
         original = (src / "SKILL.md").read_text(encoding="utf-8")
 
@@ -108,7 +112,7 @@ def test_a_swept_name_crosses_to_a_machine_that_never_had_it(
         home_b = tmp_path / "home-b"
         from base.packages.extensions import materialize as mat
 
-        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())
+        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir(paths.ava_home()))
         assert result.landed == ["crossing-demo"]
         assert (home_b / "skills" / "crossing-demo" / "SKILL.md").read_text(
             encoding="utf-8"
@@ -129,11 +133,15 @@ def test_the_sweep_is_idempotent(
         _install_locally("idem-sweep")
         with db.pool(gate=database_gate) as pool:
             first = adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
         with db.pool(gate=database_gate) as pool:
             second = adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
 
     assert first.adopted == ["idem-sweep"]
@@ -156,7 +164,9 @@ def test_two_machines_with_identical_content_merge_silently(
             _install_locally("twin-demo", body="Identical on both.")
             with db.pool(gate=database_gate) as pool:
                 result = adopt.adopt_local_installs(
-                    pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                    pool,
+                    skills_root=paths.skills_dir(paths.ava_home()),
+                    machine_name=installing_machine.name(),
                 )
 
     assert result.conflicts == []
@@ -178,14 +188,18 @@ def test_a_disagreement_is_refused_with_both_machines_named(
         _install_locally("clash-demo", body="A's version.")
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
 
     with as_machine(tmp_path / "home-b") as installing_machine:
         local = _install_locally("clash-demo", body="B's version.")
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
 
         assert result.adopted == []
@@ -217,7 +231,9 @@ def test_converge_managed_packages_are_not_adopted(
         _install_locally("plugin-skill", origin="plugin")
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
 
     assert result.adopted == []
@@ -238,7 +254,9 @@ def test_a_locally_disabled_skill_adopts_disabled(
         _install_locally("off-demo", enabled=False)
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
 
     row = reg.get(db_conn, "off-demo")
@@ -262,7 +280,9 @@ def test_local_reviewed_trust_travels(
         _install_locally("trusted-demo", trust="reviewed")
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
 
     row = reg.get(db_conn, "trusted-demo")
@@ -284,14 +304,18 @@ def test_reviewed_row_survives_a_later_unreviewed_machine(
         _install_locally("shared-trust-demo", body="Same bytes.", trust="reviewed")
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
 
     with as_machine(tmp_path / "home-b") as installing_machine:
         _install_locally("shared-trust-demo", body="Same bytes.", trust="unreviewed")
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
         assert result.conflicts == []
         assert result.already_claimed == ["shared-trust-demo"]
@@ -317,7 +341,9 @@ def test_a_tracked_name_missing_from_disk_is_reported_not_invented(
         )
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
-                pool, skills_root=paths.skills_dir(), machine_name=installing_machine.name()
+                pool,
+                skills_root=paths.skills_dir(paths.ava_home()),
+                machine_name=installing_machine.name(),
             )
 
     assert result.missing_tree == ["ghost-demo"]
