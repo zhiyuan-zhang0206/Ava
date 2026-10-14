@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from base.host.system.hostport import Platform
 from cli.commands.observability import lgtm_native
 
 
@@ -57,11 +58,10 @@ def test_versions_file_has_the_pinned_release_assets() -> None:
 def test_platform_tag_supports_darwin_arm64_and_linux_amd64(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
-    assert lgtm_native.platform_tag() == "darwin_arm64"
-
-    monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Linux")
-    assert lgtm_native.platform_tag() is None
-    monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "x86_64")
-    assert lgtm_native.platform_tag() == "linux_amd64"
+    assert (
+        lgtm_native.platform_tag(Platform("darwin", "arm64", "/usr/bin/python3")) == "darwin_arm64"
+    )
+    assert lgtm_native.platform_tag(Platform("linux", "arm64", "/usr/bin/python3")) is None
+    assert (
+        lgtm_native.platform_tag(Platform("linux", "x86_64", "/usr/bin/python3")) == "linux_amd64"
+    )

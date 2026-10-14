@@ -15,6 +15,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.dataplane import pg_runtime, runtime_binaries
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
@@ -89,6 +90,8 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,
+            host=fake_host(),
+            services=frozenset(),
         )
     )
     assert pg_runtime.pg_tool("postgres") == installed / "postgres"
@@ -119,6 +122,8 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,
+            host=fake_host(),
+            services=frozenset(),
         )
     )
 
@@ -149,6 +154,8 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 producer=operator_pipeline,
                 machine=machine_from_boot(config),
                 helper=refuse_helper,
+                host=fake_host(),
+                services=frozenset(),
             )
         )
     ensure_pg_binaries_step(contexts[0])

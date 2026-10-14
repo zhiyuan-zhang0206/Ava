@@ -1,6 +1,7 @@
 [uses]
 "converge_otel_collector" = ["test_converge_otel_collector.py"]
 "test_converge_lgtm.py" = ["lgtm_inputs.py"]
+"test_lgtm_native.py" = ["lgtm_inputs.py"]
 "test_lgtm_station.py" = ["lgtm_inputs.py"]
 "test_otel_port_deviation.py" = ["test_converge_otel_collector.py"]
 
@@ -9,9 +10,6 @@
 "lgtm_inputs.py#monkeypatch.setattr base.config.settings.gateway.gateway_port" = 1
 "lgtm_inputs.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 1
 "lgtm_inputs.py#monkeypatch.setattr base.packages.dashboard_supply.render_dashboard_json" = 1
-"lgtm_inputs.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform.machine" = 1
-"lgtm_inputs.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform.system" = 1
-"lgtm_inputs.py#monkeypatch.setattr cli.commands.observability.lgtm_native.verify_loki" = 1
 "test_atomic_writer_contracts.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
 "test_atomic_writer_contracts.py#monkeypatch.setattr base.sessions.coding_session_owner_record.state_path" = 1
 "test_converge_lgtm.py#monkeypatch.setattr base.config.settings.alerts.grafana_admin_password" = 2
@@ -28,7 +26,6 @@
 "test_converge_lgtm.py#monkeypatch.setattr base.config.settings.telegram.telegram_owner_id" = 1
 "test_converge_lgtm.py#monkeypatch.setattr cli.commands.observability.lgtm_native.ensure_lgtm_native" = 2
 "test_converge_lgtm.py#monkeypatch.setattr cli.commands.observability.lgtm_native.native_versions" = 3
-"test_converge_lgtm.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform_tag" = 3
 "test_converge_otel_collector.py#monkeypatch.setattr base.cluster.get_record" = 1
 "test_converge_otel_collector.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 3
 "test_converge_otel_collector.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
@@ -46,8 +43,6 @@
 "test_converge_otel_collector.py#monkeypatch.setattr base.deploy.release.collector_artifact.download_and_verify" = 3
 "test_converge_otel_collector.py#monkeypatch.setattr base.deploy.release.collector_artifact.platform_tag" = 1
 "test_grafana_render_cmd.py#monkeypatch.setattr cli.commands.observability.grafana_render.provisioning_dashboard" = 2
-"test_lgtm_assets.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform.machine" = 2
-"test_lgtm_assets.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform.system" = 2
 "test_lgtm_native.py#monkeypatch.setattr base.config.settings.observability" = 1
 "test_lgtm_native.py#monkeypatch.setattr base.config.settings.observability.lgtm_grafana_listen_host" = 2
 "test_lgtm_native.py#monkeypatch.setattr base.config.settings.observability.lgtm_listen_host" = 3
@@ -61,20 +56,14 @@
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.download_with_retry" = 1
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.ensure_lgtm_native" = 1
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.native_versions" = 1
-"test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform.machine" = 1
-"test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform.system" = 1
-"test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform_tag" = 6
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.render_configs" = 1
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.render_grafana_admin_password" = 1
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.stream_download" = 2
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.time.monotonic" = 2
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.validate_loki_deploy_config" = 1
-"test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.verify_loki" = 2
 "test_lgtm_native.py#monkeypatch.setattr cli.commands.observability.lgtm_native.write_if_changed" = 1
 "test_lgtm_station.py#monkeypatch.setattr base.config.settings.observability.lgtm_storage_dir" = 3
 "test_lgtm_station.py#monkeypatch.setattr cli.commands.observability.lgtm_native.native_versions" = 2
-"test_lgtm_station.py#monkeypatch.setattr cli.commands.observability.lgtm_native.platform_tag" = 2
-"test_lgtm_validation.py#monkeypatch.setattr cli.commands.observability.lgtm_native.subprocess.run" = 1
 "test_observatory_urls.py#monkeypatch.setattr base.cluster.dataplane.direct_url.get_record" = 1
 "test_observatory_urls.py#monkeypatch.setattr base.cluster.get_record" = 1
 "test_observatory_urls.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2

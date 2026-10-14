@@ -16,6 +16,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity, MachineRole, MachineRoles
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
+from base.host.system.hostport import Host
 from base.telemetry import EventPipeline
 
 ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
@@ -36,7 +37,8 @@ class ConvergeCtx:
     database_factory: DatabaseFactory
     producer: Callable[[], EventPipeline]
     helper: HelperFactory
-    services: frozenset[str] = frozenset()
+    host: Host
+    services: frozenset[str]
 
     def read_config(self) -> ConfigBoot:
         """Read startup inputs on first use, retaining an explicitly prepared owner."""

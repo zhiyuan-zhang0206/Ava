@@ -8,10 +8,8 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import os
-import platform
 import shlex
 import shutil
-import subprocess
 import sys
 import tarfile
 import tempfile
@@ -29,6 +27,7 @@ from dotenv import dotenv_values
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.host.net.resilience import Policy, retry
+from base.host.system.hostport import Host, Platform
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from base.telemetry.lgtm_local import storage_dir as _storage_dir
@@ -68,18 +67,18 @@ _DOWNLOAD_POLICY = Policy(
 )
 
 
-def platform_tag() -> str | None:
-    """Return the pinned release tag for this machine, if native LGTM supports it."""
-    system, machine = platform.system(), platform.machine().lower()
-    if system == "Darwin" and machine in {"arm64", "aarch64"}:
+def platform_tag(platform: Platform) -> str | None:
+    """Return the pinned release tag for a platform, if native LGTM supports it."""
+    machine = platform.machine.lower()
+    if platform.system == "darwin" and machine in {"arm64", "aarch64"}:
         return "darwin_arm64"
-    if system == "Linux" and machine in {"x86_64", "amd64"}:
+    if platform.system == "linux" and machine in {"x86_64", "amd64"}:
         return "linux_amd64"
     return None
 
 
-def native_versions(repo: Path) -> dict[str, dict[str, str]]:
-    tag = platform_tag()
+def native_versions(repo: Path, *, platform: Platform) -> dict[str, dict[str, str]]:
+    tag = platform_tag(platform)
     if tag is None:
         raise RuntimeError("Native LGTM has no pinned assets for this platform")
     return load_versions(repo, tag)
@@ -191,7 +190,9 @@ def _extract_tree(name: str, archive: Path, destination: Path) -> None:
         shutil.move(str(roots[0]), destination)
 
 
-def download_and_verify(name: str, version: str, asset: dict[str, str], native_dir: Path) -> None:
+def download_and_verify(
+    name: str, version: str, asset: dict[str, str], native_dir: Path, *, tag: str
+) -> None:
     """Download, hash-verify, and install one pinned native backend binary."""
     with tempfile.TemporaryDirectory() as temporary_dir:
         archive = Path(temporary_dir) / Path(asset["url"]).name
@@ -209,7 +210,7 @@ def download_and_verify(name: str, version: str, asset: dict[str, str], native_d
         else:
             _extract_member(name, archive, _binary_path(name, native_dir), asset["member"])
     (native_dir / f"version-{name}").write_text(version + "\n", encoding="utf-8")
-    (native_dir / f"platform-{name}").write_text(str(platform_tag()) + "\n", encoding="utf-8")
+    (native_dir / f"platform-{name}").write_text(tag + "\n", encoding="utf-8")
 
 
 def write_if_changed(path: Path, content: str, *, mode: int | None = None) -> None:
@@ -479,11 +480,12 @@ def ensure_lgtm_native(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
+    host: Host,
 ) -> None:
     """Prepare selected pinned binaries and config; lifecycle belongs to ava-root."""
     if not services or services - set(BACKENDS):
         raise ValueError("native LGTM preparation requires selected backend names")
-    tag = platform_tag()
+    tag = platform_tag(host.platform)
     if tag not in SUPPORTED_TAGS:
         raise RuntimeError("Native LGTM has no pinned binaries for this platform")
     native_dir = ava_home / "lgtm/native"
@@ -492,7 +494,7 @@ def ensure_lgtm_native(
     storage = _storage_dir(ava_home)
     for sub in ("", "loki", "prom"):
         (storage / sub).mkdir(parents=True, exist_ok=True)
-    for name, asset in native_versions(repo).items():
+    for name, asset in native_versions(repo, platform=host.platform).items():
         if name not in services:
             continue
         marker = native_dir / f"version-{name}"
@@ -505,7 +507,7 @@ def ensure_lgtm_native(
         if matching_platform and marker.exists() and marker.read_text().strip() == asset["version"]:
             print(f"  · lgtm native: {name} {asset['version']} present")
             continue
-        download_and_verify(name, asset["version"], asset, native_dir)
+        download_and_verify(name, asset["version"], asset, native_dir, tag=tag)
         print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
     render_configs(
         repo,
@@ -519,14 +521,14 @@ def ensure_lgtm_native(
         render_grafana_admin_password(native_dir)
         _render_grafana_telegram_env(native_dir)
     if "loki" in services:
-        verify_loki(ava_home)
+        verify_loki(ava_home, host=host)
 
 
-def verify_loki(home: Path) -> None:
+def verify_loki(home: Path, *, host: Host) -> None:
     """Use the pinned binary's own parser before starting the root generation."""
     from base.telemetry.lgtm_local import binary_path
 
-    result = subprocess.run(
+    result = host.run(
         [
             str(binary_path(home, "loki")),
             f"-config.file={home.resolve()}/lgtm/native/config/loki.yaml",
@@ -534,7 +536,6 @@ def verify_loki(home: Path) -> None:
         ],
         capture_output=True,
         text=True,
-        check=False,
         timeout=30,
     )
     if result.returncode:
@@ -559,4 +560,5 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
         database_factory=ctx.database_factory,
         producer=ctx.producer,
         machine=ctx.machine,
+        host=ctx.host,
     )
