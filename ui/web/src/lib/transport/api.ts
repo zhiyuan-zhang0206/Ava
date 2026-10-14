@@ -8,7 +8,7 @@
 
 import { API_BASE } from "./api-base";
 import { track } from "../telemetry/telemetry";
-import type { NoticesFeed,
+import type { ToUserDocument, NoticesFeed,
   UserSettingListResponse,
   UserSettingRow,
   AgentInspectStatistics,
@@ -591,6 +591,9 @@ export const api = {
   // coalesced list refetches. PageRow.url is a gateway reverse-proxy URL
   // (shape: /pages/<agent_id>-<name>/); the frontend opens it in a new
   // tab.
+
+  getToUser: (agentId: number, signal?: AbortSignal): Promise<ToUserDocument> =>
+    f(`/api/agents/${agentId}/to-user`, { signal }).then(ok<ToUserDocument>),
 
   listPages: (agentId: number): Promise<PageRow[]> => {
     return f(`/api/agents/${agentId}/pages`).then(ok<PageRow[]>);

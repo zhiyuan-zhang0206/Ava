@@ -85,7 +85,7 @@ describe("buildContentSecurityPolicy", () => {
       "connect-src 'self' https://gateway.example.test:8443 wss://gateway.example.test:8443",
     );
     expect(directive(policy, "frame-src")).toBe(
-      "frame-src 'self' https://gateway.example.test:8443",
+      "frame-src 'self' http: https:",
     );
   });
 

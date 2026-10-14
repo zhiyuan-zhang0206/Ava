@@ -18,6 +18,20 @@ from base.config.base import EnvSettings
 
 
 class AgentPromptSettings(EnvSettings):
+    to_user_format: Literal["html", "markdown"] = Field(
+        default="html",
+        alias="AVA_TO_USER_FORMAT",
+        description="Workspace document displayed beside messages: to_user.html or to_user.md.",
+        json_schema_extra={
+            "per_agent": True,
+            "lifecycle": "frozen",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+        },
+    )
+
     sdk_disable: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
         alias="AVA_SDK_DISABLE",

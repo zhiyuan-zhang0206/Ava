@@ -197,9 +197,9 @@ describe("HomeLayout frame contract", () => {
     ]);
     expect(directPanelIds(groups[0])).toEqual(["panel-sidebar", "panel-main"]);
     expect(directPanelIds(groups[1])).toEqual(["panel-timeline", "panel-inspector"]);
-    expect(directPanelDefaults(groups[0])).toEqual([30, 70]);
+    expect(directPanelDefaults(groups[0])).toEqual([16, 84]);
     expect(directPanelDefaults(groups[0]).reduce((sum, size) => sum + size, 0)).toBe(100);
-    expect(directPanelDefaults(groups[1])).toEqual([68, 32]);
+    expect(directPanelDefaults(groups[1])).toEqual([57.143, 42.857]);
     expect(directPanelDefaults(groups[1]).reduce((sum, size) => sum + size, 0)).toBe(100);
   });
 
@@ -290,7 +290,7 @@ describe("HomeLayout frame contract", () => {
 
     clickDirect(groups[0], "layout-commit-drag");
     expect(localStorage.getItem("react-resizable-panels:ava.home.columns.mobile")).not.toBeNull();
-    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.desktop")).toBeNull();
+    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.context")).toBeNull();
   });
 
   it("remounts onto the independent frame when the breakpoint flips", () => {
@@ -336,7 +336,7 @@ describe("HomeLayout frame contract", () => {
     for (const group of groups) {
       clickDirect(group, "layout-commit-drag");
     }
-    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.desktop")).not.toBeNull();
-    expect(localStorage.getItem("react-resizable-panels:ava.home.inspector.desktop")).not.toBeNull();
+    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.context")).not.toBeNull();
+    expect(localStorage.getItem("react-resizable-panels:ava.home.context.desktop")).not.toBeNull();
   });
 });

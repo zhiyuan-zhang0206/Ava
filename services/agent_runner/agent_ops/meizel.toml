@@ -1,8 +1,8 @@
 exports = ["boot.py", "daemon.py", "dispatch_sync.py"]
 
 [uses]
-"daemon.py" = ["boot.py", "dispatch_sync.py", "health.py", "maintenance.py"]
-"tests" = ["boot.py", "daemon.py", "health.py", "maintenance.py"]
+"daemon.py" = ["boot.py", "dispatch_sync.py", "health.py", "maintenance.py", "to_user_watch.py"]
+"tests" = ["boot.py", "daemon.py", "health.py", "maintenance.py", "to_user_watch.py"]
 
 [debt.private-name]
 "tests/child_daemon_exit.py -> daemon.py#_hard_exit" = 2

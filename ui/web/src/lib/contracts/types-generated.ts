@@ -406,6 +406,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/to-user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get To User */
+        get: operations["get_to_user_api_agents__agent_id__to_user_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{agent_id}/to-user/document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** To User Document */
+        get: operations["to_user_document_api_agents__agent_id__to_user_document_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keyed/v1/agents/{agent_id}/retry-launch": {
         parameters: {
             query?: never;
@@ -9028,6 +9062,23 @@ export interface components {
             has_more: boolean;
         };
         /**
+         * ToUserDocument
+         * @description An authoritative file snapshot; missing or empty files have no content.
+         */
+        ToUserDocument: {
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "html" | "markdown";
+            /** Content */
+            content: string | null;
+            /** Version */
+            version: string | null;
+            /** Modified At */
+            modified_at: string | null;
+        };
+        /**
          * TokenUsageResponse
          * @description GET /api/agents/{id}/token-usage response — token usage of the
          *     most recent LLM call. `input_tokens` is context-window occupancy.
@@ -9686,6 +9737,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BornChainResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_to_user_api_agents__agent_id__to_user_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToUserDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    to_user_document_api_agents__agent_id__to_user_document_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
                 };
             };
             /** @description Validation Error */
