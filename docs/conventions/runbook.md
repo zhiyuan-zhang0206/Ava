@@ -447,7 +447,9 @@ itself (its own public key in its own `authorized_keys`):
   interpreter. The table is read by the home's own (OLD) source checkout — the only code
   the database authority admits — through whatever read API that OLD has (a
   no-argument `_read_schedule_rows()` or one taking the operator database factory,
-  chosen by its signature, so OLD may be any older version) and handed to the
+  chosen by its signature). Factory generations receive only their declared local-host,
+  database-opener and gateway-URL-reader dependencies; missing dependencies and real
+  read failures remain errors. The result is handed to the
   worktree as a rows file (`--rows-file`). NEW checks it through its own
   `ava schedules verify --rows-file ... --no-notify` entry point under a throwaway
   `AVA_HOME`, offline, never dialing the database and never calling its Python

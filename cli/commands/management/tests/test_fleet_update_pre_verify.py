@@ -43,7 +43,7 @@ _OLD_CHECKOUT = {
         f"def _read_schedule_rows():\n    return {_OLD_ROWS!r}\n"
     ),
 }
-# A later OLD: the read takes the database factory the operator CLI builds.
+# OLD as of 39d4614: the factory takes only local_host and no opener exists.
 _FACTORY_CHECKOUT = {
     **_packages("cli", "cli/commands", "cli/commands/management", "cli/database"),
     "cli/commands/management/schedules_verify.py": (
@@ -51,24 +51,33 @@ _FACTORY_CHECKOUT = {
         "    return [(1, 'digest', 'host=' + database_factory())]\n"
     ),
     "cli/database/__init__.py": (
-        "def open_operator_database(config, gate, direct_url):\n    return None\n\n\n"
-        "def operator_database_factory(*, local_host, open_database):\n    return lambda: local_host\n"
+        "def operator_database_factory(*, local_host):\n    return local_host\n"
     ),
     "cli/database/runtime.py": (
-        "class _Machine:\n    host = 'gateway'\n\n\n"
+        "class _Machine:\n"
+        "    def host(self):\n        return 'gateway'\n\n\n"
         "class CommandRuntime:\n    machine = _Machine()\n\n"
         "    @classmethod\n    def create(cls):\n        return cls()\n"
+    ),
+}
+# The intermediate factory also requires its concrete database opener.
+_OPENER_CHECKOUT = {
+    **_FACTORY_CHECKOUT,
+    "cli/database/__init__.py": (
+        "def open_operator_database(config, gate, direct_url):\n    return None\n\n\n"
+        "def operator_database_factory(*, local_host, open_database):\n"
+        "    assert open_database is open_operator_database\n    return local_host\n"
     ),
 }
 
 
 def _read_rows(checkout: Path, out: Path) -> subprocess.CompletedProcess[str]:
-    """The read step's python, exactly as the script passes it, from inside `checkout`."""
+    """Execute the read step's source under the OLD checkout's import path."""
     env = {"PATH": os.environ["PATH"], "PYTHONPATH": str(checkout), "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run(
         [
             sys.executable,
-            str(fleet_update.VERIFY_SCRIPTS / "schedules_verify_read_rows.py"),
+            str(Path(__file__).resolve().parents[1] / "schedules_verify_read_rows.py"),
             str(out),
         ],
         cwd=checkout,
@@ -99,15 +108,26 @@ def test_the_read_step_passes_the_operator_factory_when_the_old_read_wants_one(
     assert json.loads(out.read_text()) == [[1, "digest", "host=gateway"]]
 
 
+def test_the_read_step_passes_the_opener_only_when_the_old_factory_needs_it(
+    tmp_path: Path,
+) -> None:
+    _tree(tmp_path / "old", _OPENER_CHECKOUT)
+    out = tmp_path / "rows.json"
+    proc = _read_rows(tmp_path / "old", out)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(out.read_text()) == [[1, "digest", "host=gateway"]]
+
+
 def test_the_read_step_passes_the_gateway_reader_when_the_factory_requires_it(
     tmp_path: Path,
 ) -> None:
     checkout = {
-        **_FACTORY_CHECKOUT,
+        **_OPENER_CHECKOUT,
         "cli/database/__init__.py": (
             "def open_operator_database(config, gate, direct_url):\n    return None\n\n\n"
             "def operator_database_factory(*, local_host, gateway_url_reader, open_database):\n"
-            "    return lambda: local_host + ' gateway=' + gateway_url_reader()\n"
+            "    assert open_database is open_operator_database\n"
+            "    return lambda: local_host() + ' gateway=' + gateway_url_reader()\n"
         ),
         "cli/database/runtime.py": (
             "from types import SimpleNamespace\n"
@@ -135,6 +155,38 @@ def test_a_failing_read_is_an_error_not_a_fallback(tmp_path: Path) -> None:
     _tree(tmp_path / "old", broken)
     proc = _read_rows(tmp_path / "old", tmp_path / "rows.json")
     assert proc.returncode != 0 and "database refused" in proc.stderr
+
+
+@pytest.mark.parametrize("error", ["TypeError", "ImportError"])
+def test_a_failing_factory_is_an_error_not_a_legacy_fallback(tmp_path: Path, error: str) -> None:
+    broken = {
+        **_OPENER_CHECKOUT,
+        "cli/database/__init__.py": (
+            "def open_operator_database(config, gate, direct_url):\n    return None\n\n\n"
+            "def operator_database_factory(*, local_host, open_database):\n"
+            f"    raise {error}('factory refused')\n"
+        ),
+    }
+    _tree(tmp_path / "old", broken)
+    out = tmp_path / "rows.json"
+    proc = _read_rows(tmp_path / "old", out)
+    assert proc.returncode != 0 and f"{error}: factory refused" in proc.stderr
+    assert not out.exists()
+
+
+def test_an_unknown_required_factory_parameter_is_not_silently_replaced(tmp_path: Path) -> None:
+    checkout = {
+        **_FACTORY_CHECKOUT,
+        "cli/database/__init__.py": (
+            "def operator_database_factory(*, local_host, required_new_capability):\n"
+            "    return local_host\n"
+        ),
+    }
+    _tree(tmp_path / "old", checkout)
+    out = tmp_path / "rows.json"
+    proc = _read_rows(tmp_path / "old", out)
+    assert proc.returncode != 0 and "required_new_capability" in proc.stderr
+    assert not out.exists()
 
 
 def test_the_read_script_imports_nothing_from_cli_database_unconditionally() -> None:
@@ -192,7 +244,7 @@ def test_the_real_cli_checks_a_rows_file_offline_under_a_throwaway_home(tmp_path
     proc = subprocess.run(
         [
             sys.executable,
-            str(fleet_update.VERIFY_SCRIPTS / "schedules_verify_check_rows.py"),
+            str(Path(__file__).resolve().parents[1] / "schedules_verify_check_rows.py"),
             str(rows),
         ],
         cwd=repo_root(),
