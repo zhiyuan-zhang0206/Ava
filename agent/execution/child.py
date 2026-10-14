@@ -429,7 +429,7 @@ def run_code(code: str, payload: Any) -> None:
         process_context.bind_context(execution_context)
 
 
-def _finalize_telemetry(*, clients: Any = None) -> None:
+def finalize_telemetry(*, clients: Any = None) -> None:
     """Attempt finite ordinary delivery in life, then flush the available OTLP tail.
 
     A completed barrier observes writer processing, not durable capture. An
@@ -469,7 +469,7 @@ def deliver_envelope_telemetry(*, clients: Any = None) -> None:
     reported failure. Ordinary observation delivery can remain unfinished.
     """
     try:
-        _finalize_telemetry(clients=clients)
+        finalize_telemetry(clients=clients)
     except BaseException:
         logger.opt(exception=True).warning(
             "exec child: telemetry delivery after a crash envelope failed; "
@@ -488,7 +488,7 @@ def deliver_run_telemetry(result_path: str, payload: Any) -> None:
     if payload.kind not in ("done", "lifecycle", "crashed"):
         return
     try:
-        _finalize_telemetry()
+        finalize_telemetry()
     except BaseException as exc:
         logger.opt(exception=True).warning(
             "exec child: post-run telemetry delivery failed (run outcome: {}); "

@@ -56,47 +56,7 @@ def otlp_receiver() -> Any:
     server.server_close()
 
 
-_EXTERNAL_CLI_CHILD = """
-from pathlib import Path
-import os
-import ava
-from ava import impersonation
-from ava.impersonation import attachment as attachment_module
-from agent.extensions import plugin_state_codec
-from base.packages.plugins.loading.registry import build_registry
-from agent.state import build_agent_state, plugin_state_schema
-
-SAMPLE = {sample!r}
-LEASE = {{
-    "id": "lease",
-    "session_id": 0,
-    "agent_id": 424242,
-    "machine": "external-cli-probe",
-    "status": "active",
-    "delta_version": 0,
-    "applied_version": 0,
-    "plugin_delta": [],
-    "automatic": False,
-    "event_delivery_protocol_version": None,
-}}
-
-def require_active(_db, _lease_id, _caller, *, local_machine):
-    assert local_machine == "external-cli-probe"
-    return dict(LEASE)
-
-attachment_module.control.require_active = require_active
-os.environ["AVA_MACHINE_NAME"] = "external-cli-probe"
-attachment_module.process_metadata = lambda: {{"pid": 1}}
-def load_snapshot(_agent_id, **_kwargs):
-    state = build_agent_state(build_registry(validate_state=plugin_state_schema))()
-    state.ava_code__cwd = str(Path(SAMPLE).parent)
-    return state, {{}}, None
-
-plugin_state_codec.load_snapshot = load_snapshot
-
-with impersonation.attach("lease"):
-    assert ava.files.read(SAMPLE) == "tail event"
-"""
+_CHILD = Path(__file__).with_name("child_external_cli.py")
 
 
 def _log_request(raw: bytes) -> Any | None:
@@ -183,15 +143,8 @@ def test_external_cli_tail_sdk_call_reaches_receiver_once_before_exit(
         }
     )
     env.pop("AVA_LOG_DIR", None)
-    proc = subprocess.run(  # noqa: S603 — fixed argv: our own interpreter, inline program
-        [
-            sys.executable,
-            "-I",
-            "-X",
-            "utf8",
-            "-c",
-            _EXTERNAL_CLI_CHILD.format(sample=str(sample)),
-        ],
+    proc = subprocess.run(  # noqa: S603 — fixed argv: our own interpreter and this test's child
+        [sys.executable, "-I", "-X", "utf8", str(_CHILD), str(sample)],
         capture_output=True,
         text=True,
         env=env,

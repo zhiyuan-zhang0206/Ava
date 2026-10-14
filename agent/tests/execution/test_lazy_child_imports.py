@@ -49,6 +49,7 @@ from typing import cast
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_PROBES = Path(__file__).with_name("child_lazy_imports.py")
 
 # Agent-launch markers: with AVA_AGENT_ID forwarded, `import ava` self-loads
 # plugin namespaces (`agent_identity.is_launched_child`), inflating the import by ~13MB
@@ -72,12 +73,11 @@ _CLEAN_ENV_STRIP = frozenset(
 _LANGCHAIN_PREFIXES = ("langchain", "langgraph", "langsmith")
 
 
-def _run_clean_probe(body: str) -> dict[str, object]:
-    """Run `body` in a clean subprocess; return its JSON probe report."""
-    code = f"import json\nimport sys\n\nsys.path.insert(0, {str(_REPO_ROOT)!r})\n{body}"
+def _run_probe(probe: str, *args: str) -> dict[str, object]:
+    """Run one probe of `child_lazy_imports.py` in a clean subprocess; return its JSON report."""
     env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-B", "-X", "utf8", "-c", code],
+        [sys.executable, "-I", "-B", "-X", "utf8", str(_PROBES), probe, *args],
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,
@@ -89,158 +89,44 @@ def _run_clean_probe(body: str) -> dict[str, object]:
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
-_GRAPH_LIGHT = """
-import importlib
-
-importlib.import_module("agent.graph.exec.protocol")
-heavy = sorted(
-    name
-    for name in sys.modules
-    if name
-    in (
-        "agent.graph._build",
-        "agent.graph.claim.node",
-        "agent.graph.llm.node",
-        "agent.graph.exec.node",
-    )
-)
-langchain = sum(1 for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith")))
-print(json.dumps({"heavy": heavy, "langchain": langchain}))
-"""
-
-
 def test_agent_graph_init_stays_lazy_for_light_submodules() -> None:
-    report = _run_clean_probe(_GRAPH_LIGHT)
+    report = _run_probe("graph_light")
     assert report["heavy"] == [], f"node set pulled by the package init: {report['heavy']}"
     assert report["langchain"] == 0, "the package init must not enter langchain"
 
 
-_STATELESS_REQUEST = """
-import tempfile
-from pathlib import Path
-
-from agent.graph.exec.protocol import read_request
-
-req = Path(tempfile.mkdtemp(prefix="lazy-child-")) / "req-x.json"
-req.write_text(
-    json.dumps(
-        {
-            "v": 1,
-            "code": "pass",
-            "agent_id": None,
-            "context": {
-                "identity": {"agent_id": None, "owns_loop": True, "actor": None},
-                "gateway_url": "http://gateway.invalid:8000",
-            },
-            "timeout_s": 1.0,
-        }
-    ),
-    encoding="utf-8",
-)
-payload = read_request(req)
-serde = sorted(
-    name for name in sys.modules if name in ("langgraph.checkpoint.serde.jsonplus", "agent.state")
-)
-print(json.dumps({"state": payload.state, "loaded": serde}))
-"""
-
-
 def test_stateless_request_skips_the_serde() -> None:
-    report = _run_clean_probe(_STATELESS_REQUEST)
+    report = _run_probe("stateless_request")
     assert report["state"] is None
     assert report["loaded"] == [], (
         f"serde/agent.state loaded without a snapshot: {report['loaded']}"
     )
 
 
-_PROCESS_BOOT_IMPORT = """
-import agent.process_boot  # noqa: F401
-
-loaded = sorted(
-    name
-    for name in sys.modules
-    if name in ("base.lm.factory", "langchain_core.language_models.chat_models")
-)
-langchain = sum(1 for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith")))
-print(json.dumps({"loaded": loaded, "langchain": langchain}))
-"""
-
-
 def test_import_process_boot_stays_off_the_lm_stack() -> None:
-    report = _run_clean_probe(_PROCESS_BOOT_IMPORT)
+    report = _run_probe("process_boot_import")
     assert report["loaded"] == [], f"LM stack pulled by the import: {report['loaded']}"
     assert report["langchain"] == 0, "importing the boot helpers must not enter langchain"
 
 
-_REGISTRY_LEAF = """
-import base.lm.registry  # noqa: F401
-
-loaded = sorted(
-    name
-    for name in sys.modules
-    if name in ("base.lm.factory", "base.lm.provider_api")
-    or name.startswith(("langchain", "langgraph", "langsmith"))
-)
-print(json.dumps({"loaded": loaded}))
-"""
-
-
 def test_registry_media_resolution_is_a_data_leaf() -> None:
-    report = _run_clean_probe(_REGISTRY_LEAF)
+    report = _run_probe("registry_leaf")
     assert report["loaded"] == [], f"data leaf pulled the provider stack: {report['loaded']}"
 
 
-_PROVIDER_REGISTRATION_SURFACE = """
-import base.lm.provider_api  # noqa: F401
-
-heavy = sorted(
-    name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
-)
-print(json.dumps({"heavy": heavy}))
-"""
-
-
 def test_provider_registration_surface_stays_off_the_lm_stack() -> None:
-    report = _run_clean_probe(_PROVIDER_REGISTRATION_SURFACE)
+    report = _run_probe("provider_registration_surface")
     assert report["heavy"] == [], f"the registration surface pulled the LM stack: {report['heavy']}"
 
 
-_PROVIDER_PLUGIN_LOAD = """
-from base.packages.plugin_providers import build_model_catalog
-
-catalog = build_model_catalog()
-heavy = sorted(
-    name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
-)
-print(json.dumps({"bindings": len(catalog.bindings), "heavy": heavy}))
-"""
-
-
 def test_loading_provider_plugins_stays_off_the_lm_stack() -> None:
-    report = _run_clean_probe(_PROVIDER_PLUGIN_LOAD)
+    report = _run_probe("provider_plugin_load")
     assert report["bindings"] != 0, "provider registration did not run — the probe is vacuous"
     assert report["heavy"] == [], f"provider plugins pulled the LM stack: {report['heavy']}"
 
 
-_GRAPH_REEXPORTS = """
-from agent.graph import EXEC_CANCEL_NOTE, build_graph, claim_node, exec_node, llm_node
-
-import agent.graph._build as build_module
-
-print(
-    json.dumps(
-        {
-            "identity": build_graph is build_module.build_graph,
-            "callable": all(callable(fn) for fn in (build_graph, claim_node, exec_node, llm_node)),
-            "note": isinstance(EXEC_CANCEL_NOTE, str) and bool(EXEC_CANCEL_NOTE),
-        }
-    )
-)
-"""
-
-
 def test_graph_reexports_resolve_through_the_lazy_getattr() -> None:
-    report = _run_clean_probe(_GRAPH_REEXPORTS)
+    report = _run_probe("graph_reexports")
     assert report == {"identity": True, "callable": True, "note": True}
 
 
@@ -253,45 +139,9 @@ def test_factory_reexports_the_registry_resolution() -> None:
 
 # ── leg-1 (B6): the child's plugin autoload ────────────────────────────────
 
-_PLUGIN_SURFACE_LOAD = """
-import ava
-
-ava.ensure_plugins_loaded(surface=True)
-
-_PLUGIN_ROOTS = ("ava_builtins.plugins.", "plugins.")
-
-
-def _plugin_modules(suffix):
-    return sorted(
-        name
-        for name in sys.modules
-        if name.endswith(suffix) and name.startswith(_PLUGIN_ROOTS)
-    )
-
-
-agent_side = sorted(
-    name
-    for name in sys.modules
-    if name == "agent.state" or name.startswith(("agent.graph", "agent.hooks"))
-)
-heavy = sorted(
-    name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
-)
-print(
-    json.dumps(
-        {
-            "agent_side": agent_side,
-            "heavy": heavy,
-            "faces": _plugin_modules(".agent_runtime"),
-            "surfaces": _plugin_modules(".plugin"),
-        }
-    )
-)
-"""
-
 
 def test_child_surface_load_stays_off_the_agent_runtime() -> None:
-    report = _run_clean_probe(_PLUGIN_SURFACE_LOAD)
+    report = _run_probe("plugin_surface_load")
     surfaces = cast("list[object]", report["surfaces"])
     assert "ava_builtins.plugins.ava_memory.plugin" in surfaces, (
         f"the surface load did not run — the probe is vacuous: {surfaces}"
@@ -303,35 +153,8 @@ def test_child_surface_load_stays_off_the_agent_runtime() -> None:
     assert report["heavy"] == [], f"the surface load pulled the graph/LM stack: {report['heavy']}"
 
 
-_PLUGIN_SURFACE_UPGRADE = """
-import sys
-
-import ava
-
-ava.ensure_plugins_loaded(surface=True)
-surface = sys.modules["ava_builtins.plugins.ava_memory.plugin"]
-
-ava.ensure_plugins_loaded(surface=False)  # the stateful-request upgrade
-faces = sorted(
-    name
-    for name in sys.modules
-    if name.endswith(".agent_runtime")
-    and name.startswith(("ava_builtins.plugins.", "plugins."))
-)
-print(
-    json.dumps(
-        {
-            "same_surface_identity": sys.modules["ava_builtins.plugins.ava_memory.plugin"]
-            is surface,
-            "faces": faces,
-        }
-    )
-)
-"""
-
-
 def test_child_surface_upgrade_loads_faces_without_reexecuting_surfaces() -> None:
-    report = _run_clean_probe(_PLUGIN_SURFACE_UPGRADE)
+    report = _run_probe("plugin_surface_upgrade")
     faces = cast("list[object]", report["faces"])
     assert report["same_surface_identity"] is True, "the upgrade re-executed the surface module"
     assert "ava_builtins.plugins.ava_memory.agent_runtime" in faces, (
@@ -373,103 +196,23 @@ def _craft_stateful_envelope(tmp_path: Path) -> Path:
     return req
 
 
-_STATEFUL_REQUEST_RAW = """
-from pathlib import Path
-
-from agent.graph.exec.protocol import read_request
-
-payload = read_request(Path({req!r}))
-heavy = sorted(
-    name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
-)
-print(
-    json.dumps(
-        {{
-            "state": payload.state,
-            "raw": payload.state_raw is not None,
-            "agent_state": "agent.state" in sys.modules,
-            "heavy": heavy,
-        }}
-    )
-)
-"""
-
-
 def test_stateful_request_reads_raw_and_stays_off_the_serde(tmp_path: Path) -> None:
-    report = _run_clean_probe(
-        _STATEFUL_REQUEST_RAW.format(req=str(_craft_stateful_envelope(tmp_path)))
-    )
+    report = _run_probe("stateful_request_raw", str(_craft_stateful_envelope(tmp_path)))
     assert report["raw"] is True, "the stateful envelope did not carry a raw blob"
     assert report["state"] is None, "read_request decoded eagerly — leg-2 wants it raw"
     assert report["agent_state"] is False, "read_request pulled agent.state"
     assert report["heavy"] == [], f"read_request pulled the serde/LM stack: {report['heavy']}"
 
 
-_CHILD_STATE_LAZY = """
-from pathlib import Path
-
-import ava
-from agent.execution import child as exec_child
-from agent.graph.exec.protocol import read_request
-from ava.sdk_surface import process_context
-
-child = exec_child.import_runtime(0.0)  # the child boot's step that binds the SDK (mirrors `_run`)
-
-
-def _snap(tag):
-    # Child imports may continue while the report is filtered. Observe one table.
-    modules = sys.modules.copy()
-    return {{
-        "tag": tag,
-        "state_is_none": not process_context.in_exec_turn(),
-        "agent_state": "agent.state" in modules,
-        "faces": any(
-            name.endswith(".agent_runtime")
-            and name.startswith(("ava_builtins.plugins.", "plugins."))
-            for name in modules
-        ),
-        "heavy": sorted(
-            name
-            for name in modules
-            if name.startswith(("langchain", "langgraph", "langsmith"))
-        ),
-    }}
-
-
-payload = read_request(Path({req!r}))
-ava.ensure_plugins_loaded()
-boot = _snap("boot")
-exec_child.build_state_slot(child, payload)
-armed = _snap("armed")
-ava.state.materialize()
-touched = _snap("touched")
-print(json.dumps({{"boot": boot, "armed": armed, "touched": touched}}))
-"""
-
-
 @pytest.mark.parametrize("mutate_module_names", [False, True])
 def test_stateful_child_arms_lazily_and_materializes_on_first_use(
     tmp_path: Path, mutate_module_names: bool
 ) -> None:
-    body = _CHILD_STATE_LAZY.format(req=str(_craft_stateful_envelope(tmp_path)))
-    if mutate_module_names:
-        # Force an import-table change during filtering, without timing or retries.
-        body = body.replace(
-            'armed = _snap("armed")',
-            """
-class ImportingModuleName(str):
-    def startswith(self, prefix, *args):
-        sys.modules["lazy_child_snapshot_added"] = None
-        return super().startswith(prefix, *args)
-
-sys.modules[ImportingModuleName("lazy_child_snapshot_trigger")] = None
-armed = _snap("armed")
-assert "lazy_child_snapshot_added" in sys.modules
-del sys.modules["lazy_child_snapshot_trigger"]
-del sys.modules["lazy_child_snapshot_added"]
-""",
-        )
-    report = _run_clean_probe(body)
+    report = _run_probe(
+        "child_state_lazy",
+        str(_craft_stateful_envelope(tmp_path)),
+        "mutate" if mutate_module_names else "plain",
+    )
     boot = cast("dict[str, object]", report["boot"])
     armed = cast("dict[str, object]", report["armed"])
     touched = cast("dict[str, object]", report["touched"])
@@ -488,37 +231,11 @@ del sys.modules["lazy_child_snapshot_added"]
 # ── leg-2 regression (#3665): the first state touch is an update ───────────
 
 
-_CHILD_CWD_SET_FIRST_TOUCH = """
-from pathlib import Path
-
-import ava
-from agent.execution import child as exec_child
-from agent.graph.exec.protocol import read_request
-
-child = exec_child.import_runtime(0.0)  # the child boot's step that binds the SDK (mirrors `_run`)
-payload = read_request(Path({req!r}))
-ava.ensure_plugins_loaded()
-exec_child.build_state_slot(child, payload)
-
-out = {{}}
-try:
-    ava.cwd.set({arg!r})  # the very first state touch — no warm-up read
-    out["set"] = "ok"
-except Exception as e:  # the report carries the failure (type + message)
-    out["set"] = f"{{type(e).__name__}}: {{e}}"
-out["state_update_keys"] = None if ava.state_update is None else sorted(ava.state_update)
-out["cwd_after"] = str(ava.cwd.get())
-print(json.dumps(out))
-"""
-
-
 def test_fresh_child_cwd_set_absolute_first_touch_lands_both_updates(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.mkdir()
-    report = _run_clean_probe(
-        _CHILD_CWD_SET_FIRST_TOUCH.format(
-            req=str(_craft_stateful_envelope(tmp_path)), arg=str(target)
-        )
+    report = _run_probe(
+        "child_cwd_set_first_touch", str(_craft_stateful_envelope(tmp_path)), str(target)
     )
     keys = cast("list[str]", report["state_update_keys"])
     assert report["set"] == "ok", f"cwd.set as the first state touch failed: {report['set']}"
@@ -531,9 +248,7 @@ def test_fresh_child_cwd_set_relative_first_touch_resolves_against_snapshot(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "sub").mkdir()
-    report = _run_clean_probe(
-        _CHILD_CWD_SET_FIRST_TOUCH.format(req=str(_craft_stateful_envelope(tmp_path)), arg="sub")
-    )
+    report = _run_probe("child_cwd_set_first_touch", str(_craft_stateful_envelope(tmp_path)), "sub")
     keys = cast("list[str]", report["state_update_keys"])
     assert report["set"] == "ok", f"cwd.set as the first state touch failed: {report['set']}"
     assert "ava_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
