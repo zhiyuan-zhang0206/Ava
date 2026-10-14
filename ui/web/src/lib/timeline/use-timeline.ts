@@ -1,5 +1,5 @@
 // The selected conversation owns one HTTP tail snapshot and one live view.
-// Switching drops inactive live state; durable older history stays pageable.
+// Switching freezes the reading window in QueryClient and releases live ownership.
 // Snapshot reads and history pages abort when their selection loses ownership.
 // A retained window renders instantly on a switch back; the shared reconcile
 // (agent-reconcile.ts) refreshes the trio with one read on every re-attach.
@@ -29,6 +29,7 @@ import { useCompactHistoryRetention, type OlderSegmentLoadResult } from "./use-c
  * exponentially instead of linearly — fewer scroll-ups needed. */
 const OLDER_BASE_LIMIT = 50;
 const RETAINED_ITEMS_FALLBACK = 250;
+const EMPTY_ITEMS: BackendTimelineItem[] = [];
 import type { BackendTimelineItem, SystemEvent, TimelineResponse } from "../contracts/types";
 import type { ConnectionEvent } from "../transport/useEventStream";
 import { useAgentEventStream } from "../transport/useEventStream";
@@ -99,7 +100,7 @@ export function useTimeline(
   const queryClient = useQueryClient();
 
   const { isVisible } = useAgentReadRepair("timeline", agentId);
-  const { requestReconcile, abortReconcile } = useAgentReconcile(agentId);
+  const { requestReconcile, abortReconcile, isReconciling } = useAgentReconcile(agentId);
   const olderRequest = useRef<AbortController | null>(null);
   const timelineQuery = useQuery({
     queryKey: ["timeline", agentId] as const,
@@ -128,6 +129,7 @@ export function useTimeline(
   }, [agentId, isVisible]);
 
   // -- Subscribe to timeline state from the Zustand store --
+  const activeThreadId = useTimelineStore((s) => s.activeThreadId);
   const items = useTimelineStore((s) => s.items);
   const compactBuffer = useTimelineStore((s) => s.compactBuffer);
   const compactEpoch = useTimelineStore((s) => s.compactEpoch);
@@ -154,15 +156,27 @@ export function useTimeline(
   const compactPending = useRef(false);
 
   const lastAppliedDataRef = useRef<TimelineResponse | null>(null);
+  type ReadingWindow = Pick<ReturnType<typeof useTimelineStore.getState>, "items" | "compactBuffer" | "hasMoreOlder">;
 
   useLayoutEffect(() => {
     seenParseErrors.current.clear();
     compactPending.current = false;
     const cached = agentId === null ? null :
       queryClient.getQueryData<TimelineResponse>(["timeline", agentId]);
-    switchThread(agentId, cached?.items ?? null, cached?.has_more ?? false);
+    queryClient.setQueryDefaults(["timeline-reading-window"], { gcTime: CONVERSATION_RETENTION_MS });
+    const retained = agentId === null ? undefined : queryClient.getQueryData<ReadingWindow>(["timeline-reading-window", agentId]);
+    switchThread(agentId, retained?.items ?? cached?.items ?? null, retained?.hasMoreOlder ?? cached?.has_more ?? false, retained?.compactBuffer);
     lastAppliedDataRef.current = cached ?? null;
-    return () => { switchThread(null, null, false); };
+    if (agentId !== null) queryClient.removeQueries({ queryKey: ["timeline-reading-window", agentId], exact: true });
+    return () => {
+      const view = useTimelineStore.getState();
+      if (agentId !== null && view.activeThreadId === agentId && view.items.length > 0) {
+        queryClient.setQueryData<ReadingWindow>(["timeline-reading-window", agentId], {
+          items: view.items, compactBuffer: view.compactBuffer, hasMoreOlder: view.hasMoreOlder,
+        });
+      }
+      switchThread(null, null, false);
+    };
   }, [agentId, queryClient, switchThread]);
 
   // Apply each distinct authoritative response once.
@@ -430,19 +444,21 @@ export function useTimeline(
     compactTailReady: compactBuffer?.tailReady ?? false,
   });
 
+  const selected = activeThreadId === agentId;
+  const retained = selected || agentId === null ? undefined : queryClient.getQueryData<ReadingWindow>(["timeline-reading-window", agentId]);
   return {
-    items,
-    compactBuffer,
-    streamingCode,
+    items: selected ? items : retained?.items ?? timelineQuery.data?.items ?? EMPTY_ITEMS,
+    compactBuffer: selected ? compactBuffer : retained?.compactBuffer ?? null,
+    streamingCode: selected && streamingCode,
     connectionState,
-    turnActive,
+    turnActive: selected && turnActive,
     isLoading: timelineQuery.isLoading,
-    isRefetching: timelineQuery.isRefetching,
+    isRefetching: timelineQuery.isRefetching || isReconciling,
     error: timelineQuery.error,
-    isFetching: timelineQuery.isFetching,
+    isFetching: timelineQuery.isFetching || isReconciling,
     retryTimeline,
-    hasMoreOlder,
-    loadingOlder,
+    hasMoreOlder: selected ? hasMoreOlder : retained?.hasMoreOlder ?? timelineQuery.data?.has_more ?? false,
+    loadingOlder: selected && loadingOlder,
     loadOlder,
     retainedItemsMax,
   };

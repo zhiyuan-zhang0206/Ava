@@ -770,20 +770,20 @@ describe("scrollToBottomRequest force-scroll signal", () => {
     expect(useTimelineStore.getState().scrollToBottomRequest).toBe(6);
   });
 
-  it("switchThread bumps it (hot-cache agent switch)", () => {
+  it("switchThread preserves it (hot-cache agent switch)", () => {
     act(() => {
       useTimelineStore.setState({ scrollToBottomRequest: 2 });
       useTimelineStore.getState().switchThread(8, [item({ payload: "x" })], false);
     });
-    expect(useTimelineStore.getState().scrollToBottomRequest).toBe(3);
+    expect(useTimelineStore.getState().scrollToBottomRequest).toBe(2);
   });
 
-  it("switchThread bumps it (cold-cache agent switch)", () => {
+  it("switchThread preserves it (cold-cache agent switch)", () => {
     act(() => {
       useTimelineStore.setState({ scrollToBottomRequest: 9 });
       useTimelineStore.getState().switchThread(11, null, false);
     });
-    expect(useTimelineStore.getState().scrollToBottomRequest).toBe(10);
+    expect(useTimelineStore.getState().scrollToBottomRequest).toBe(9);
   });
 
   it("reloadSnapshot does NOT bump it (mid-stream refresh must not force-scroll)", () => {
@@ -1851,5 +1851,18 @@ describe("selected-only live state", () => {
     store.switchThread(1, null, false);
     expect(useTimelineStore.getState().items).toEqual([]);
     expect(Object.keys(useTimelineStore.getState())).not.toContain("threads");
+  });
+});
+
+
+describe("retained compact reading windows", () => {
+  it("restores the old buffer under the new selection epoch", () => {
+    const buffer = { threadId: 42, epoch: 17, rows: [], oldestRealByRank: new Map<number, string>(), tailReady: true };
+    useTimelineStore.getState().switchThread(42, [item({ item_id: "1.0" })], true, buffer);
+    const view = useTimelineStore.getState();
+    expect(view.compactBuffer).toEqual({ ...buffer, epoch: view.compactEpoch });
+    expect(buffer.epoch).toBe(17);
+    expect(() => useTimelineStore.getState().switchThread(43, [], true, buffer)).toThrow("must belong");
+    expect(useTimelineStore.getState().activeThreadId).toBe(42);
   });
 });

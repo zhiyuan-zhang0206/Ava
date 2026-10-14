@@ -15,6 +15,25 @@ import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 
+function historyWheel(viewport: HTMLElement, deltaY: number, momentum: boolean) {
+  const event = new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true });
+  Object.defineProperty(event, "momentum", { value: momentum });
+  Object.defineProperty(viewport, "onscrollend", { value: null, configurable: true });
+  act(() => {
+    viewport.dispatchEvent(event);
+    if (!event.defaultPrevented) {
+      viewport.scrollTop = Math.max(0, viewport.scrollTop + deltaY);
+      viewport.dispatchEvent(new Event("scroll"));
+    }
+  });
+  return event;
+}
+
+function pullOlderAtTop(viewport: HTMLElement) {
+  historyWheel(viewport, -100, false);
+  historyWheel(viewport, -20, true);
+}
+
 // TimelineView is memoized, so a rerender with the same props renders nothing
 // new; the real settings hooks subscribe to their query / store and re-render
 // the view on change. The mocks below reproduce that: a mocked setting change
@@ -293,8 +312,8 @@ describe("timeline document work", () => {
   });
 });
 
-describe("compact history segment dividers", () => {
-  it("shows buffered history with provisional dividers and masks canonical duplicates", () => {
+describe("continuous compact history", () => {
+  it("preserves buffered history and masks canonical duplicates", () => {
     const oldSummary = makeItem({ item_id: "s1.previous.1.0", kind: "inbound_compact_summary", payload: "old summary" });
     const oldest = makeItem({ item_id: "s1.previous.2.0", kind: "agent_chat", payload: "oldest reply" });
     const newSummary = makeItem({ item_id: "1.0", kind: "inbound_compact_summary", payload: "recent summary" });
@@ -319,15 +338,14 @@ describe("compact history segment dividers", () => {
       ]}
       compactBuffer={compactBuffer}
     />);
-    expect(screen.getAllByTestId("compact-history-divider").map((el) => el.dataset.segmentRank))
-      .toEqual(["2", "1", "0"]);
+    expect(screen.queryByTestId("compact-history-divider")).toBeNull();
     expect(screen.getAllByText("oldest reply")).toHaveLength(1);
     expect(screen.getAllByText("recent reply")).toHaveLength(1);
     expect(container.querySelectorAll('[data-timeline-source="buffer"][data-display-rank="1"]')).not.toHaveLength(0);
     expect(container.querySelectorAll('[data-timeline-source="canonical"][data-item-id="1.0"]')).not.toHaveLength(0);
   });
 
-  it("renders one localized divider between each compact summary and its raw history", () => {
+  it("renders each segment in order without compact separators", () => {
     const items = [
       makeItem({
         item_id: "s2.older-boundary.0.0",
@@ -352,17 +370,11 @@ describe("compact history segment dividers", () => {
 
     const { container } = render(<TimelineView items={items} />);
 
-    const dividers = screen.getAllByTestId("compact-history-divider");
-    expect(dividers).toHaveLength(3);
-    expect(dividers.map((divider) => divider.dataset.segmentRank)).toEqual(["2", "1", "0"]);
-    expect(dividers.map((divider) => divider.getAttribute("aria-live"))).toEqual(["off", "off", "off"]);
-    expect(screen.getAllByText("Original history before compact")).toHaveLength(2);
-    // The rank-0 divider marks the live boundary into the current segment (task #3698).
-    expect(screen.getAllByText("Context compacted")).toHaveLength(1);
-    // No arrow glyph on any divider (user feedback 2026-09-17, task #3870).
-    expect(container.textContent).not.toContain("↑");
+    expect(screen.queryByTestId("compact-history-divider")).toBeNull();
+    expect(screen.queryByText("Original history before compact")).toBeNull();
+    expect(screen.queryByText("Context compacted")).toBeNull();
 
-    const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");
+    const timelineColumn = container.querySelector('[role="log"]');
     expect(timelineColumn).not.toBeNull();
     const renderedOrder = Array.from(timelineColumn?.querySelectorAll(":scope > [data-virtual-group] > *") ?? [])
       .filter(
@@ -378,24 +390,21 @@ describe("compact history segment dividers", () => {
     expect(renderedOrder).toEqual([
       "s2.older-boundary.0.0",
       "s2.older-boundary.1.0",
-      "divider:2",
       "s2.older-boundary.2.0",
       "s1.newer-boundary.0.0",
-      "divider:1",
       "s1.newer-boundary.1.0",
-      "divider:0",
       "1.0",
     ]);
   });
 
-  it("renders the divider before raw history when the oldest segment has no summary", () => {
+  it("keeps the oldest segment visible when it has no summary", () => {
     const items = [
       makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
     ];
 
     const { container } = render(<TimelineView items={items} />);
-    const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");
+    const timelineColumn = container.querySelector('[role="log"]');
     const renderedOrder = Array.from(timelineColumn?.querySelectorAll(":scope > [data-virtual-group] > *") ?? [])
       .filter(
         (node) =>
@@ -408,32 +417,30 @@ describe("compact history segment dividers", () => {
           : node.getAttribute("data-item-id"),
       );
 
-    expect(renderedOrder).toEqual(["divider", "s1.old-boundary.0.0", "divider", "1.0"]);
-    // First = the scroll-back rule (rank 1); second marks the live boundary
-    // into the current segment (rank 0, task #3698).
-    expect(
-      screen.getAllByTestId("compact-history-divider").map((d) => d.dataset.segmentRank),
-    ).toEqual(["1", "0"]);
+    expect(renderedOrder).toEqual(["s1.old-boundary.0.0", "1.0"]);
+    expect(screen.queryByTestId("compact-history-divider")).toBeNull();
   });
 
-  it("renders compact-history dividers as pure labels — no load-earlier control anywhere (task #4186)", () => {
+  it("adds no compact separator and reveals the keyboard paging control only on focus", () => {
     const items = [
       makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
     ];
     render(<TimelineView items={items} hasMoreOlder onLoadOlder={vi.fn()} />);
-    // The control and its copy are gone; the dividers keep their descriptive
-    // scroll-back labels as plain rows.
     expect(screen.queryByTestId("load-older-divider")).toBeNull();
     expect(screen.queryByTestId("load-older-button")).toBeNull();
-    expect(screen.queryByText("Load earlier messages")).toBeNull();
-    expect(screen.getByText("Original history before compact")).toBeTruthy();
-    expect(screen.getByText("Context compacted")).toBeTruthy();
-    const dividers = screen.getAllByTestId("compact-history-divider");
-    expect(dividers[0].getAttribute("data-load-control")).toBeNull();
+    expect(screen.queryByTestId("compact-history-divider")).toBeNull();
+    expect(screen.getByTestId("load-older-keyboard").className).toContain("sr-only focus:not-sr-only");
   });
 
-  it("auto-loads when the view reaches the top; repeat scroll events do not double-fire (task #4186)", () => {
+  it("lets a keyboard user request older messages without a wheel gesture", () => {
+    const loadOlder = vi.fn();
+    render(<TimelineView items={[makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })]} hasMoreOlder onLoadOlder={loadOlder} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+    expect(loadOlder).toHaveBeenCalledOnce();
+  });
+
+  it("top arrival does not fetch; a separate pull requests one page only on release", () => {
     const loadOlder = vi.fn();
     const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
     render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
@@ -448,17 +455,26 @@ describe("compact history segment dividers", () => {
     });
     expect(loadOlder).not.toHaveBeenCalled();
 
-    // Reaching the top triggers the load.
+    // Reaching the top never requests history.
     viewport.scrollTop = 0;
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
     });
+    expect(loadOlder).not.toHaveBeenCalled();
+    historyWheel(viewport, -48, false);
+    expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("pulling");
+    expect(screen.getByTestId("load-older-spinner").querySelector(".animate-spin")).not.toBeNull();
+    historyWheel(viewport, -48, false);
+    expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("ready");
+    expect(loadOlder).not.toHaveBeenCalled();
+    historyWheel(viewport, -20, true);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     // Still at the top: the pending anchor gates a second fire.
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
     });
+    historyWheel(viewport, -100, true);
     expect(loadOlder).toHaveBeenCalledTimes(1);
   });
 
@@ -480,7 +496,7 @@ describe("compact history segment dividers", () => {
     expect(loadOlder).not.toHaveBeenCalled(); // load already in flight
   });
 
-  it("a load cycle that ends without a landing releases the anchor — the next top arrival retries (QA #3031)", () => {
+  it("a failed load releases the anchor so the next deliberate pull can retry (QA #3031)", () => {
     const loadOlder = vi.fn();
     const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
     const { rerender } = render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
@@ -488,13 +504,14 @@ describe("compact history segment dividers", () => {
     Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
 
-    // First arrival: fires and captures the anchor.
+    // A released pull captures the anchor before requesting history.
     viewport.scrollTop = 100;
     viewport.dispatchEvent(new Event("scroll"));
     viewport.scrollTop = 0;
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
     });
+    pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     // The fetch goes in flight, then FAILS — items unchanged, loadingOlder
@@ -502,8 +519,11 @@ describe("compact history segment dividers", () => {
     rerender(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
     rerender(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
 
+    viewport.scrollTop = 80;
+    act(() => { viewport.dispatchEvent(new Event("scrollend")); });
+
     // The failed cycle must not hang the gate: leave the top and return —
-    // the reader's next arrival retries.
+    // the reader's next deliberate pull retries.
     viewport.scrollTop = 240;
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
@@ -512,6 +532,7 @@ describe("compact history segment dividers", () => {
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
     });
+    pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(2);
   });
 });
@@ -1521,7 +1542,7 @@ describe("cold-load spinner", () => {
 // jsdom does not render scroll, so the actual scroll-anchoring is not
 // exercised here — see the run-collapse describe block below for the DOM-level
 // piece the anchor lookup depends on (data-turn-member-ids).
-describe("load-older spinner (pinned top overlay)", () => {
+describe("load-older circle (revealed above the messages)", () => {
   it("loadingOlder=false → spinner present but hidden (opacity-0) and hidden from assistive tech", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     const label = screen.getByText(/Loading earlier messages/);
@@ -1543,8 +1564,7 @@ describe("load-older spinner (pinned top overlay)", () => {
     expect(overlay?.querySelector(".animate-spin")).not.toBeNull();
   });
 
-  // An infinite animate-spin under opacity-0 kept the style system and the
-  // compositor busy on every idle frame; only the loading state animates.
+  // An idle overlay must not keep an invisible animation running.
   it("loadingOlder=false → the hidden overlay runs no spin animation", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     const overlay = screen.getByTestId("load-older-spinner");
@@ -1656,6 +1676,7 @@ describe("deep history DOM window", () => {
           act(() => { top = next; fireEvent.scroll(viewport); });
         }
         act(() => { top = 0; fireEvent.scroll(viewport); });
+        pullOlderAtTop(viewport);
         expect(loadOlder).toHaveBeenCalledTimes(1);
       },
     };
@@ -2027,7 +2048,7 @@ describe("deep history DOM window", () => {
 // compensation must add exactly that 250 to scrollTop. The 0.0 node's rect
 // stays PUT (real-layout behavior) — the test proves the anchor skips it.
 // ---------------------------------------------------------------------------
-describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () => {
+describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () => {
   const rect = (top: number): DOMRect =>
     ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
 
@@ -2040,7 +2061,7 @@ describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () =>
     vi.useRealTimers();
   });
 
-  // A real upward movement through a scrollable viewport reaches the top.
+  // Arrive at the boundary, then release a separate deliberate pull.
   const triggerAtTop = (viewport: HTMLElement) => {
     Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
@@ -2050,9 +2071,10 @@ describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () =>
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
     });
+    pullOlderAtTop(viewport);
   };
 
-  it("reaching the top fires loadOlder exactly once (auto-load, task #4186)", () => {
+  it("momentum arrival alone does not load, and a subsequent released pull loads exactly once", () => {
     const loadOlder = vi.fn();
     const items = [
       makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
@@ -2067,10 +2089,12 @@ describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () =>
     viewport.scrollTop = 50;
     viewport.dispatchEvent(new Event("scroll"));
     expect(loadOlder).not.toHaveBeenCalled();
-    // A momentum run lands on scrollTop = 0 — the auto-load fires (and only
-    // once; the pending anchor gates further fires until a landing).
+    // A momentum run stops at the top without requesting a page.
     viewport.scrollTop = 0;
     viewport.dispatchEvent(new Event("scroll"));
+    historyWheel(viewport, -200, true);
+    expect(loadOlder).not.toHaveBeenCalled();
+    pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
     viewport.scrollTop = 0;
     viewport.dispatchEvent(new Event("scroll"));
@@ -2382,7 +2406,7 @@ describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () =>
     expect(viewport.scrollTop).toBe(0);
   });
 
-  it("large-window prepend: fixpoint cv-forcing compensates the full real growth (no estimate-based under-compensation, #2623)", () => {
+  it("materializes the full prepend and keeps its real height after compensation", () => {
     // Models a real large window: rows above the anchor are skipped
     // (content-visibility: auto) and report 80px contain-intrinsic-size
     // estimates until forced 'visible', when they report their real heights.
@@ -2418,7 +2442,7 @@ describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () =>
         const id = this.dataset.itemId ?? "";
         const height =
           id === "0.0" ? PROMPT : this.style.contentVisibility === "visible" ? (realHeights[id] ?? EST) : EST;
-        return tallRect(top, height);
+        return tallRect(top - vp.scrollTop, height);
       },
     );
     const items = [
@@ -2433,6 +2457,7 @@ describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
+    const readingTop = viewport.querySelector<HTMLElement>('[data-item-id="9.0"]')!.getBoundingClientRect().top;
 
     // The older window lands: two tall rows (500/400 real vs 80 estimates)
     // plus two medium rows (90/70 real) above the anchor. Correct
@@ -2454,6 +2479,9 @@ describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () =>
       />,
     );
     expect(viewport.scrollTop).toBe(900);
+    // Restoring content-visibility:auto would shrink the materialized prefix
+    // back to estimates and invalidate the compensation despite the right delta.
+    expect(viewport.querySelector<HTMLElement>('[data-item-id="9.0"]')!.getBoundingClientRect().top).toBe(readingTop);
   });
 
   it("preserves the reading position when the user scrolled during the fetch (document-space delta, not the trigger-time viewport top)", () => {
@@ -4688,7 +4716,7 @@ describe("touch drag vs streaming pin (#1016)", () => {
     fireRO(); // initial RO → pin (already at bottom, no-op)
 
     // The user starts dragging up.
-    viewport.dispatchEvent(new Event("touchstart"));
+    fireEvent.touchStart(viewport, { touches: [{ clientY: 100 }] });
     viewport.scrollTop = 370;
     viewport.dispatchEvent(new Event("scroll")); // 30px up — inside the zone
     expect(viewport.scrollTop).toBe(370); // drag is honored
@@ -4720,7 +4748,7 @@ describe("touch drag vs streaming pin (#1016)", () => {
     viewport.scrollTop = 400;
     viewport.dispatchEvent(new Event("scroll"));
 
-    viewport.dispatchEvent(new Event("touchstart"));
+    fireEvent.touchStart(viewport, { touches: [{ clientY: 100 }] });
     viewport.scrollTop = 200; // dragged far up
     viewport.dispatchEvent(new Event("scroll")); // position rule unsticks
     viewport.dispatchEvent(new Event("touchend"));
@@ -4854,89 +4882,51 @@ describe("bounded timeline history (#4702)", () => {
     expect(useTimelineStore.getState().items).toHaveLength(200);
   });
 
-  // QA nit N1. A landing's compensation echo classifies as "down" without
-  // being user motion; before this guard the echo reset the budget after
-  // every landing, so the three-page cap could never bind (a sustained pull
-  // walked history page after page). The drive below is that pull: fetch
-  // lands (front row changes, scrollByDelta compensates), the browser echoes
-  // the write, and the reader keeps pulling back to the top.
-  it("caps a sustained top-arrival burst at three pages and refills after a pause or a real downward move", () => {
-    let clock = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => clock);
+  it("loads one page per released pull and ignores compensation and momentum after the page lands", () => {
     let rowTop = 0;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
       function (this: HTMLElement) {
-        return rowRect(this.getAttribute("data-item-id") ? rowTop : 0);
+        const viewport = this.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+        const reserve = Number.parseFloat(viewport?.querySelector<HTMLElement>("[data-history-pull-space]")?.style.height ?? "0") || 0;
+        if (!this.getAttribute("data-item-id")) return new DOMRect(0, 0, 400, 600);
+        return rowRect(rowTop + reserve - (viewport?.scrollTop ?? 0));
       },
     );
-
     const loadOlder = vi.fn();
-    const item = (id: number) =>
-      makeItem({ item_id: `${id}.0`, kind: "agent_chat", payload: `row ${id}` });
-    const rows = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10].map(item);
-    let loaded = 1;
-    let items = [rows[0]];
+    const item = (id: number) => makeItem({ item_id: `${id}.0`, kind: "agent_chat", payload: `row ${id}` });
+    const items = [item(100)];
     const { rerender } = render(
       <TimelineView threadKey="42" items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
     const viewport = screen.getByTestId("scroll-viewport");
     geometry(viewport, 1200);
+    viewport.scrollTop = 500;
+    act(() => { fireEvent.scroll(viewport); });
+    viewport.scrollTop = 0;
+    act(() => { fireEvent.scroll(viewport); });
+    expect(loadOlder).not.toHaveBeenCalled();
+    pullOlderAtTop(viewport);
+    expect(loadOlder).toHaveBeenCalledOnce();
 
-    const scrollTo = (next: number) => {
-      viewport.scrollTop = next;
-      act(() => { viewport.dispatchEvent(new Event("scroll")); });
-    };
-    const arriveAtTop = () => {
-      rowTop = 0;
-      scrollTo(0);
-      clock += 10;
-    };
+    rerender(<TimelineView threadKey="42" items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
+    rowTop = 300;
+    rerender(<TimelineView threadKey="42" items={[item(90), ...items]} hasMoreOlder onLoadOlder={loadOlder} />);
+    expect(viewport.scrollTop).toBe(300);
+    act(() => { fireEvent.scroll(viewport); }); // the compensation echo
+    for (let i = 0; i < 6; i++) {
+      expect(historyWheel(viewport, -100, true).defaultPrevented).toBe(true);
+    }
+    expect(viewport.scrollTop).toBe(300);
+    expect(loadOlder).toHaveBeenCalledOnce();
 
-    // Initial arrival: the user scrolls up from mid-history; page one loads.
-    scrollTo(500);
-    clock += 10;
-    arriveAtTop();
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-
-    const cycle = () => {
-      clock += 10;
-      const prev = items;
-      items = [rows[loaded], ...prev];
-      loaded += 1;
-      rowTop = 300;
-      rerender(
-        <TimelineView threadKey="42" items={prev} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />,
-      );
-      rerender(<TimelineView threadKey="42" items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-      scrollTo(300); // the compensation echo — must not refill the budget
-      clock += 10;
-      arriveAtTop();
-    };
-
-    cycle();
+    // A subsequent arrival remains inert. A fresh released pull can load again.
+    rowTop = 0;
+    viewport.scrollTop = 0;
+    act(() => { fireEvent.scroll(viewport); });
+    historyWheel(viewport, -100, true);
+    expect(loadOlder).toHaveBeenCalledOnce();
+    pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(2);
-    cycle();
-    expect(loadOlder).toHaveBeenCalledTimes(3);
-    cycle();
-    expect(loadOlder).toHaveBeenCalledTimes(3); // three-page budget: the 4th arrival is spent
-
-    // A real downward move (no echo pending) refills the burst.
-    scrollTo(240);
-    clock += 10;
-    arriveAtTop();
-    expect(loadOlder).toHaveBeenCalledTimes(4);
-
-    cycle();
-    expect(loadOlder).toHaveBeenCalledTimes(5);
-    cycle();
-    expect(loadOlder).toHaveBeenCalledTimes(6);
-    cycle();
-    expect(loadOlder).toHaveBeenCalledTimes(6); // capped again
-
-    // A 750 ms arrival pause refills it as well.
-    clock += 800;
-    cycle();
-    expect(loadOlder).toHaveBeenCalledTimes(7);
   });
 });
 
@@ -5085,143 +5075,57 @@ describe("TimelineView sticky work block (task #2601)", () => {
   });
 });
 
-describe("TimelineView sticky message header (task #3136)", () => {
-  function makeMockRect(top: number, bottom: number, height: number): DOMRect {
-    return {
-      top,
-      bottom,
-      height,
-      left: 0,
-      right: 400,
-      width: 400,
-      x: 0,
-      y: top,
-      toJSON: () => undefined,
-    };
-  }
-
-  // A top-level message card (primary) followed by one work block (secondary run).
+describe("TimelineView header scrolling scope", () => {
   const items = [
-    makeItem({ item_id: "1.0", kind: "agent_chat", payload: "hello there" }),
-    makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "thinking" }),
-    makeItem({ item_id: "2.1", kind: "agent_code", payload: "code" }),
+    makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "Human message" }),
+    makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "Thinking body" }),
+    makeItem({ item_id: "2.1", kind: "agent_code", payload: "print('result')" }),
+    makeItem({ item_id: "2.2", kind: "code_output", payload: "result" }),
+    makeItem({ item_id: "3.0", kind: "agent_chat", payload: "Agent reply" }),
   ];
 
-  it("marks the top-level card header and every work-block child row, each on its own pin line", () => {
+  it.each(["all", "last", "none"] as const)("keeps primary titles in flow and work/detail titles sticky in %s mode", (mode) => {
+    setToggleState({ detailsMode: mode });
     const { container } = render(<TimelineView items={items} />);
-
-    // Level 1: the top-level message card, pinned below the HeaderBar.
-    const marked = container.querySelectorAll<HTMLElement>('[data-card-sticky="true"]');
-    expect(marked.length).toBe(3); // card 1.0 + work-block children 2.0 / 2.1
-    const cardRow = container.querySelector<HTMLElement>('[data-item-id="1.0"]')!;
-    expect(cardRow.getAttribute("data-turn-child")).toBeNull();
-    const cardToggle = cardRow.querySelector('[data-testid="card-toggle"]')!;
-    expect(cardToggle.className).toContain("sticky");
-    expect(cardToggle.className).toContain("top-11");
-    expect(cardToggle.getAttribute("data-stuck")).toBe("false");
-
-    // Level 2: inside the expanded work block every child row pins nested
-    // under the block's header (task #3215), off the --turn-header-h offset.
-    const turn = container.querySelector('[data-turn-expanded="true"]')!;
-    const innerRows = turn.querySelectorAll<HTMLElement>(".timeline-item");
-    expect(innerRows.length).toBeGreaterThan(0);
-    for (const row of innerRows) {
-      expect(row.getAttribute("data-card-sticky")).toBe("true");
-      expect(row.getAttribute("data-turn-child")).toBe("true");
-      const toggle = row.querySelector('[data-testid="card-toggle"]')!;
-      expect(toggle.className).toContain("sticky");
-      expect(toggle.className).toContain("var(--turn-header-h");
-      expect(toggle.className).toContain("z-[5]");
-      expect(toggle.getAttribute("data-stuck")).toBe("false");
+    for (const toggle of screen.getAllByTestId("turn-toggle")) {
+      if (toggle.getAttribute("data-expanded") === "false") fireEvent.click(toggle);
     }
+    revealCollapsedCards();
+    const titles = [...screen.getAllByTestId("card-toggle"), ...screen.getAllByTestId("turn-toggle")];
+    expect(titles).toHaveLength(6);
+    for (const id of ["1.0", "3.0"]) {
+      const row = container.querySelector<HTMLElement>(`.timeline-item[data-item-id="${id}"]`)!;
+      const title = row.querySelector<HTMLElement>('[data-testid="card-toggle"]')!;
+      expect(row.dataset.cardSticky).toBe("false");
+      expect(title.className).not.toContain("sticky");
+      expect(title.dataset.stuck).toBe("false");
+    }
+    const workTitle = screen.getByTestId("turn-toggle");
+    expect(workTitle.className).toContain("sticky");
+    expect(workTitle.className).toContain("top-11");
+    const detailRows = container.querySelectorAll<HTMLElement>('[data-turn-child="true"]');
+    expect(detailRows).toHaveLength(3);
+    for (const row of detailRows) {
+      const title = row.querySelector<HTMLElement>('[data-testid="card-toggle"]')!;
+      expect(row.dataset.cardSticky).toBe("true");
+      expect(title.className).toContain("sticky");
+      expect(title.className).toContain("var(--turn-header-h");
+    }
+    const viewport = screen.getByTestId("scroll-viewport");
+    act(() => { viewport.scrollTop = 450; fireEvent.scroll(viewport); });
+    for (const title of titles) expect(container.contains(title)).toBe(true);
+    expect(container.querySelector('[style*="--turn-header-h"]')).not.toBeNull();
   });
 
-  it("activates stuck styling on the card header when its row crosses the line", async () => {
-    const { container } = render(<TimelineView items={items} />);
-    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
-    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
-
-    const cardRow = container.querySelector<HTMLElement>('[data-item-id="1.0"]')!;
-    // The card's top crossed the 44px line while its bottom is still in view.
-    vi.spyOn(cardRow, "getBoundingClientRect").mockReturnValue(makeMockRect(10, 700, 690));
-
-    fireEvent.scroll(viewport);
-
-    await waitFor(() => {
-      const cardToggle = cardRow.querySelector('[data-testid="card-toggle"]')!;
-      expect(cardToggle.getAttribute("data-stuck")).toBe("true");
-      expect(cardToggle.className).toContain("backdrop-blur-md");
-      expect(cardToggle.className).toContain("shadow-[");
-      // The work block below stays unpinned — one stuck header at a time.
-      expect(screen.getByTestId("turn-toggle").getAttribute("data-stuck")).toBe("false");
-    });
-  });
-
-  it("pins a work-block child header under the block header and marks it stuck (task #3215)", async () => {
-    const { container } = render(<TimelineView items={items} />);
-    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
-    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
-
-    const turnEl = container.querySelector<HTMLElement>('[data-turn-expanded="true"]')!;
-    vi.spyOn(turnEl, "getBoundingClientRect").mockReturnValue(makeMockRect(10, 700, 690));
-    const turnToggle = screen.getByTestId("turn-toggle");
-    // Pinned block header: top 44 + height 28 ⇒ the child line is 72.
-    vi.spyOn(turnToggle, "getBoundingClientRect").mockReturnValue(makeMockRect(44, 72, 28));
-
-    const childRow = container.querySelector<HTMLElement>(
-      '[data-turn-child="true"][data-item-id="2.0"]',
-    )!;
-    // Child top 60 crossed the 72 line while its bottom stays in view.
-    vi.spyOn(childRow, "getBoundingClientRect").mockReturnValue(makeMockRect(60, 500, 440));
-
-    fireEvent.scroll(viewport);
-
-    await waitFor(() => {
-      const childToggle = childRow.querySelector('[data-testid="card-toggle"]')!;
-      expect(childToggle.getAttribute("data-stuck")).toBe("true");
-      expect(childToggle.className).toContain("backdrop-blur-md");
-      // The block header above stays stuck — both levels pin together now.
-      expect(turnToggle.getAttribute("data-stuck")).toBe("true");
-    });
-  });
-
-  it("releases the pin once the card's range scrolls past the line", async () => {
-    const { container } = render(<TimelineView items={items} />);
-    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
-    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
-
-    const cardRow = container.querySelector<HTMLElement>('[data-item-id="1.0"]')!;
-    const rectSpy = vi
-      .spyOn(cardRow, "getBoundingClientRect")
-      .mockReturnValue(makeMockRect(10, 700, 690));
-    fireEvent.scroll(viewport);
-    await waitFor(() => {
-      expect(
-        cardRow.querySelector('[data-testid="card-toggle"]')!.getAttribute("data-stuck"),
-      ).toBe("true");
-    });
-
-    // Scrolled fully past: bottom above the sticky line + buffer.
-    rectSpy.mockReturnValue(makeMockRect(-900, 40, 940));
-    fireEvent.scroll(viewport);
-    await waitFor(() => {
-      expect(
-        cardRow.querySelector('[data-testid="card-toggle"]')!.getAttribute("data-stuck"),
-      ).toBe("false");
-    });
-  });
-
-  it("collapsing the card drops it from the sticky scan and un-pins it", () => {
-    const { container } = render(<TimelineView items={items} />);
-    const cardRow = container.querySelector<HTMLElement>('[data-item-id="1.0"]')!;
-    const cardToggle = () => cardRow.querySelector<HTMLElement>('[data-testid="card-toggle"]')!;
-    expect(cardRow.getAttribute("data-card-sticky")).toBe("true");
-
-    fireEvent.click(cardToggle());
-
-    expect(cardRow.getAttribute("data-card-sticky")).toBe("false");
-    expect(cardToggle().className).not.toContain("sticky");
-    expect(cardToggle().getAttribute("data-stuck")).toBe("false");
+  it("collapses an expanded work block at the current reading position", () => {
+    render(<TimelineView items={items} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    viewport.scrollTop = 450;
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(viewport.scrollTop).toBe(450);
+    expect(screen.getByText("Human message")).toBeDefined();
+    expect(screen.getByText("Agent reply")).toBeDefined();
   });
 });
 
@@ -5242,4 +5146,19 @@ it("renders image-only human messages during impersonation as thumbnails", () =>
   const { container } = render(<ItemView item={item} streaming={false} />);
   expect(container.querySelector("img")?.getAttribute("src")).toContain("/api/agents/42/uploads/screenshot.png");
   expect(container.textContent).not.toContain("[image]");
+});
+
+
+it("restores expanded work and detail blocks when returning to an agent", () => {
+  setToggleState({ detailsMode: "none" });
+  const work = [makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "Read this detail" })];
+  const { rerender } = render(<TimelineView key="read-A" threadKey="A" scrollMemoryKey="expansion:A" items={work} />);
+  fireEvent.click(screen.getByTestId("turn-toggle"));
+  fireEvent.click(screen.getByTestId("card-toggle"));
+  expect(screen.getByText("Read this detail")).toBeTruthy();
+  rerender(<TimelineView key="read-B" threadKey="B" scrollMemoryKey="expansion:B" items={[]} />);
+  rerender(<TimelineView key="read-A" threadKey="A" scrollMemoryKey="expansion:A" items={work} />);
+  expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByTestId("card-toggle").getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText("Read this detail")).toBeTruthy();
 });

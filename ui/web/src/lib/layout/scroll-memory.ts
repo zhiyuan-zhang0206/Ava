@@ -12,12 +12,10 @@
 // into a new segment gets a fresh id (vendored Next 16.3.4 use-router docs).
 // The client router restores it from its BFCache entry on a traverse
 // regardless of `cacheComponents` (next/dist client router source). A
-// search-param-only switch (e.g. `?agent_id=`) keeps the id, so successive
-// home visits share one slot (the content key guards such a restore). So a
-// restore happens exactly when the
-// browser returns to an entry it kept, never on a fresh navigation: a first
-// visit keeps its own default (timeline pinned to the newest message,
-// terminal pinned to the tail).
+// search-param-only switch keeps the id. Callers scope it by content where
+// independent bookmarks are needed: the timeline adds the agent id, so A/B
+// selections in the same page entry no longer overwrite one another. A new
+// content visit keeps its default; returning restores its own bookmark.
 //
 // In-memory by design: positions are per-tab view state, like the panels'
 // splits; nothing is persisted, and the map is bounded by the tab's session
@@ -33,8 +31,8 @@ export interface SavedScroll {
   /** The visible timeline item and its position inside the viewport. */
   anchor?: { itemId: string; rank: number; viewportTop: number };
   /** Whether the container was following the bottom (new output keeps
-   *  pulling it down) when saved. A follower comes back following, not
-   *  frozen at a stale offset. */
+   *  pulling it down) on return. Terminal panes retain following; timeline
+   *  bookmarks deliberately save false to preserve the last read item. */
   followBottom: boolean;
 }
 

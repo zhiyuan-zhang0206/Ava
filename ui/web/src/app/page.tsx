@@ -299,8 +299,8 @@ function HomeContent({
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_ratio"]);
   const setMobileSidebarOpen = useStore((s) => s.setMobileSidebarOpen);
-  // Single force-scroll signal (timeline-store-owned). Agent switch bumps it
-  // inside switchThread; send bumps it here via requestScrollToBottom.
+  // Sending explicitly returns to the newest message. Selection restores its
+  // own reading bookmark instead of bumping this force-scroll signal.
   const requestScrollToBottom = useTimelineStore((s) => s.requestScrollToBottom);
   // The timeline's scroll position is remembered per history entry, so a
   // browser back/forward returns to the reader's position instead of
@@ -334,9 +334,8 @@ function HomeContent({
     [activeId],
   );
 
-  // Agent switch → force scroll to bottom is bumped by the store's
-  // switchThread (in the same set() that swaps in the new thread's items),
-  // so there is no parent-side switch effect here.
+  // Each selected agent gets a fresh mounted surface, with its own saved
+  // reading position and expansion choices inside this page entry.
 
   const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax, error: timelineError, isFetching, retryTimeline } =
     useTimeline(activeId, showError);
@@ -469,10 +468,11 @@ function HomeContent({
             </div>
           )}
           <TimelineView
+            key={activeId ?? "unselected"}
             items={items}
             compactBuffer={compactBuffer}
             threadKey={activeId != null ? String(activeId) : undefined}
-            scrollMemoryKey={bfcacheId}
+            scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
             streamingCode={streamingCode}
             turnActive={agentBusy}
             onFork={activeId != null ? handleFork : null}
@@ -482,6 +482,7 @@ function HomeContent({
             onLoadOlder={loadOlder}
             retainedItemsMax={retainedItemsMax}
             loading={isLoading}
+            loadingNew={isFetching && items.length > 0}
             maxWidthCss={contentColumnMaxWidth}
           />
           <HeaderBar

@@ -77,8 +77,8 @@ _FRAMES_JS = """
       betweenTop: state.replyTop('TRANSITION_BETWEEN_REPLY'),
       firstNarration: text.includes('TRANSITION_FIRST_NARRATION'),
       secondNarration: text.includes('TRANSITION_SECOND_NARRATION'),
-      ranks: [...root.querySelectorAll('[data-testid="compact-history-divider"]')]
-        .map((node) => node.getAttribute('data-segment-rank')) });
+      ranks: [...new Set([...root.querySelectorAll('[data-display-rank]')]
+        .map((node) => node.getAttribute('data-display-rank')))] });
     if (state.active) requestAnimationFrame(sample);
   }
   window.__compactTransitionFrames = state;
@@ -145,8 +145,8 @@ def _assert_settled_anchor(
     if retention == 0:
         return
     env.page.wait_for_function(
-        "expected => [...document.querySelectorAll('[data-testid=compact-history-divider]')]"
-        ".map(node => node.dataset.segmentRank).join(',') === expected && "
+        "expected => [...new Set([...document.querySelectorAll('[data-display-rank]')]"
+        ".map(node => node.dataset.displayRank))].join(',') === expected && "
         "!document.querySelector('[data-timeline-source=buffer]')",
         arg=ranks,
         timeout=30_000,
