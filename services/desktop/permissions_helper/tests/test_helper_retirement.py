@@ -50,7 +50,7 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
             Path(command[-1]).write_bytes(b"test executable")
         return subprocess.CompletedProcess(command, 0, b"", b"")
 
-    monkeypatch.setattr(lifecycle, "_run", run)
+    monkeypatch.setattr(lifecycle, "run_tool", run)
     app, rebuilt = lifecycle.build_and_sign(destination=candidate)
     assert rebuilt and app == candidate / "AvaPermissionsHelper.app"
     assert sentinel.read_text() == "unchanged installed state"
@@ -109,7 +109,7 @@ def _stale_installed_helper(
             Path(command[-1]).write_bytes(b"new helper")
         return subprocess.CompletedProcess(command, 0, b"", b"")
 
-    monkeypatch.setattr(lifecycle, "_run", run)
+    monkeypatch.setattr(lifecycle, "run_tool", run)
     return exe
 
 
@@ -178,7 +178,7 @@ def test_stale_installed_helper_survives_a_host_that_cannot_sign_or_compile(
     elif failing == "smoke":
         monkeypatch.setattr(lifecycle, "preflight_signing_smoke", fail)
     else:
-        monkeypatch.setattr(lifecycle, "_run", fail)
+        monkeypatch.setattr(lifecycle, "run_tool", fail)
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match=f"{failing} failed"):
         lifecycle.build_and_sign()
     assert exe.read_bytes() == b"old helper"
