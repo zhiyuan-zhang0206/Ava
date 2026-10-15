@@ -1,7 +1,3 @@
-"""Agent process-runtime knobs — AgentRuntimeSettings.
-
-DB wait/pool timeouts and the node-stall hang diagnostic: operational bounds of the agent process itself, independent of what the prompt contains or how memory/compaction behave. Split out of the former flat AgentSettings schema; each field keeps its exact env alias so the .env surface is unchanged."""
-
 from __future__ import annotations
 
 from typing import Literal

@@ -1,7 +1,3 @@
-"""Eval/harness environment — AgentEvalSettings.
-
-Container-mode flags (in-container mount + output dir) and the security-scan gate hermetic benchmark environments disable. Split out of the former flat AgentSettings schema; each field keeps its exact env alias so the .env surface is unchanged."""
-
 from __future__ import annotations
 
 from typing import Annotated

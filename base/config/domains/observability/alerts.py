@@ -1,18 +1,3 @@
-"""Alerts config — AlertsSettings (Task #1224, user design 2026-08-12).
-
-The system→human alert store + notification knobs. Alert is fully separate
-from Notice. Grafana owns rule evaluation (rules as code in
-deploy/lgtm/config/grafana/provisioning/alerting/rules.yml, delivered through the embedded Alertmanager);
-the gateway receives webhook POSTs on /api/alerts, stores them in ``alerts``,
-publishes them on the SSE stream, and fans firing/resolved notifications out
-to the IM channels the user has connected (services/entrypoints/im_bridge daemon) — every
-severity pushes (critical/warning/error, no severity gate). This domain is
-gateway-owned: only the gateway process reads it. The provider-guard
-thresholds (``provider_guard_*``) are read by the cluster health probe's
-provider-account checks (``cli/commands/cluster/_provider_guard.py``) — same
-alert-policy family, same channel.
-"""
-
 from __future__ import annotations
 
 from pydantic import Field, SecretStr

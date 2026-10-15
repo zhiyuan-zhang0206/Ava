@@ -1,11 +1,3 @@
-"""Skill recall — AgentSkillRecallSettings.
-
-Before a turn woken by a person's message or a schedule, one decision-model call scores the
-agent's whole skill index against the recent conversation and the best matches are offered to the
-agent in a system note. Split out of the memory block: it recalls a different pool, with its own
-model, threshold and time budget.
-"""
-
 from __future__ import annotations
 
 from pydantic import Field

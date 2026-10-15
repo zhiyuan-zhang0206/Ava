@@ -1,5 +1,3 @@
-"""Release the compact pointer only after original native execution and cancel closure."""
-
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.compaction.execution import CompactCommand, decode_command, require_receiver

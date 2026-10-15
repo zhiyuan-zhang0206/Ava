@@ -1,5 +1,3 @@
-"""Event contract registry (R2-C) — see contract.py."""
-
 from base.events.contract import (
     EVENTS,
     LLM_ERROR_FAMILY,

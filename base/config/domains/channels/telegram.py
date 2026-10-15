@@ -1,14 +1,3 @@
-"""Telegram config — TelegramSettings.
-
-Split out of the former flat Settings god object; each field keeps its exact
-env alias so the .env surface is unchanged. Aggregated by base/config.
-
-Telegram is not a framework service — the `telegram` skill reads these two values
-and POSTs straight to the Bot API, and converge renders them into the native
-Grafana's direct Telegram contact point (the one alert route that does not pass
-through the gateway). See docs/decisions/extensions/skills/2026-07-22-telegram-out-of-core.md.
-"""
-
 from __future__ import annotations
 
 from pydantic import Field

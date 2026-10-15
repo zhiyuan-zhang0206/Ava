@@ -1,9 +1,3 @@
-"""Role-specific OTLP exporter configuration fragments.
-
-Every exporter keeps a bounded in-memory sending queue: a collector restart drops
-whatever was queued, and `ava trace ship` can replay a mirrored trace gap.
-"""
-
 from __future__ import annotations
 
 BACKEND_EXPORTERS = """

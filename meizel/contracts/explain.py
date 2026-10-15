@@ -1,5 +1,3 @@
-"""`explain <path>`: a node's view of the graph."""
-
 from __future__ import annotations
 
 from collections import defaultdict

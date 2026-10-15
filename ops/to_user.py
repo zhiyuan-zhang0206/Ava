@@ -1,5 +1,3 @@
-"""Home-machine read of the shared user context, through the existing ops server."""
-
 from psycopg_pool import ConnectionPool
 
 from base.agents.to_user import ToUserDocument, read_document
