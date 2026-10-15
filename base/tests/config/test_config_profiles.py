@@ -1,5 +1,3 @@
-"""Per-process profile construction and fail-fast, the D5 full-read guarantee, and restart_required declarations; split from base/tests/test_config.py (task #4922)."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,33 +6,16 @@ import pytest
 
 from base.config.service_read import ConfigAuthority
 
-# ── D5: profile-limited singleton must not shrink the config-service reads ──
-#
-# Under per-process profiles (AVA_PROCESS_PROFILE, Task #856 Phase B) the
-# module singleton constructs only its profile's sub-models and raises
-# AttributeError on a domain outside the profile (fail-fast). The
-# config-SERVICE read paths — bootstrap_config_values (the gateway serves
-# every BOOTSTRAP_FIELDS to agent-runners), current_field_values (the 231-field
-# config panel) and flat_dump (the config-overlay snapshot) — must stay
-# complete, so their explicit authority carries a complete read model (D5). These tests simulate a profile-limited singleton with a proxy
-# that raises exactly like the PR-B construction will.
-
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_service_reads_stay_full_when_singleton_domain_excluded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """bootstrap / current_field_values / flat_dump serve the same complete
-    payload with a gateway-profile-limited singleton as without one."""
     from base import config
 
     real = config.settings
 
     class _GatewayProfileLimited:
-        """Stand-in for the PR-B gateway-profile singleton: the domains the
-        gateway profile excludes raise AttributeError (fail-fast); every other
-        domain reads through to the real singleton."""
-
         def has_domain(self, name: str) -> bool:
             return name not in ("agent", "sandbox", "web") and real.has_domain(name)
 
@@ -59,14 +40,10 @@ def test_service_reads_stay_full_when_singleton_domain_excluded(
     values = authority.current_field_values()
     flat = authority.flat_dump(mode="json")
 
-    # Same payload — the full-instance fallback reads the same os.environ the
-    # singleton did, so nothing may change by swapping in a limited singleton.
     assert served == baseline_bootstrap
     assert values == baseline_values
     assert flat == baseline_flat
 
-    # The excluded domains' fields are genuinely served (not accidentally
-    # absent from both sides): spot-check one field per excluded domain.
     for name in ("exec_timeout_seconds", "prompt_invest_future_enabled", "web_fetch_model"):
         assert name in values, name
         assert name in flat, name
@@ -74,9 +51,6 @@ def test_service_reads_stay_full_when_singleton_domain_excluded(
 
 
 def test_get_field_stays_strict_on_excluded_domain(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`get_field` (the reflective escape hatch) must NOT silently fall back to
-    the full instance — fail-fast is the point of the profile boundary; only
-    the config-service read paths are profile-independent (D5)."""
     from base import config
 
     real = config.settings
@@ -94,19 +68,13 @@ def test_get_field_stays_strict_on_excluded_domain(monkeypatch: pytest.MonkeyPat
         config.get_field("exec_timeout_seconds")
 
 
-# ── Per-process profiles (Task #856 Phase B): construction + fail-fast ──
-
-
 def _profile_settings(monkeypatch: pytest.MonkeyPatch, profile: str):
-    """Build a fresh Settings for `profile` (never the env marker)."""
     from base import config
 
     return config.Settings(profile=profile)
 
 
 def test_gateway_profile_excludes_agent_domains(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Gateway profile: sandbox/agent/web are NOT constructed — access raises an
-    actionable AttributeError; lm/telegram/feishu ARE (real gateway-side reads)."""
     from base import config
 
     s = config.Settings(profile="gateway")
@@ -115,7 +83,7 @@ def test_gateway_profile_excludes_agent_domains(monkeypatch: pytest.MonkeyPatch)
         with pytest.raises(AttributeError) as exc:
             getattr(s, domain)
         assert "gateway" in str(exc.value) and domain in str(exc.value)
-        assert "has_domain" in str(exc.value)  # actionable: points at the escape hatch
+        assert "has_domain" in str(exc.value)
     for domain in (
         "lm",
         "telegram",
@@ -131,8 +99,6 @@ def test_gateway_profile_excludes_agent_domains(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Agent profile constructs its matrix domains; alerts (the gateway ingest's),
-    telegram and feishu remain excluded."""
     from base import config
 
     s = config.Settings(profile="agent")
@@ -156,9 +122,6 @@ def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_keys_of_the_retired_stack_are_inert(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A unit `.env` that still carries the deleted PITR stack's keys must not stop
-    Settings from building: every sub-model ignores keys it does not declare, so
-    an upgrade never has to rewrite a home's `.env` before it can start."""
     import os
 
     from base import config
@@ -179,13 +142,10 @@ def test_keys_of_the_retired_stack_are_inert(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ops reads agent document configuration; browser sandbox and telemetry also
-    belong to support daemons. Agent execution stays in the separate agent host."""
     from base import config
 
     s = config.Settings(profile="runner")
     for domain in (
-        "agent",
         "services",
         "daemon",
         "general",
@@ -196,15 +156,13 @@ def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
         "observability",
     ):
         assert s.has_domain(domain), domain
-    for domain in ("web", "alerts", "telegram", "feishu"):
+    for domain in ("agent", "web", "alerts", "telegram", "feishu"):
         assert not s.has_domain(domain), domain
         with pytest.raises(AttributeError):
             getattr(s, domain)
 
 
 def test_settings_reads_env_profile_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A plain Settings() reads AVA_PROCESS_PROFILE from the environment; with
-    the marker absent it constructs every domain (unchanged behavior)."""
     from base import config
 
     monkeypatch.setenv(config.AVA_PROCESS_PROFILE_ENV, "gateway")
@@ -216,7 +174,6 @@ def test_settings_reads_env_profile_marker(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_unknown_profile_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unknown profile name is a launcher bug — fail at construction."""
     from base import config
 
     with pytest.raises(ValueError):
@@ -224,8 +181,6 @@ def test_unknown_profile_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_explicit_none_profile_is_full(monkeypatch: pytest.MonkeyPatch) -> None:
-    """profile=None (the config-service read paths, D5) builds every domain even
-    when the environment carries a profile marker."""
     from base import config
 
     monkeypatch.setenv(config.AVA_PROCESS_PROFILE_ENV, "gateway")
@@ -237,15 +192,6 @@ def test_explicit_none_profile_is_full(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_bootstrap_and_panel_full_under_real_gateway_profile(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """D5 end-to-end with the REAL profile-limited singleton: swap the module
-    singleton for a gateway-profile Settings (agent/sandbox/web excluded) and
-    the bootstrap payload + config panel + overlay snapshot stay COMPLETE, with
-    the excluded domains' values identical to the full singleton's.
-
-    (In-profile domain values may differ from the pre-swap baseline here
-    because conftest mutates the import-time singleton by setattr — a test
-    artifact; in a real gateway process both instances read the same
-    os.environ, so the values coincide.)"""
     from base import config
 
     authority = ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
@@ -270,46 +216,25 @@ def test_bootstrap_and_panel_full_under_real_gateway_profile(
     values = authority.current_field_values()
     flat = authority.flat_dump(mode="json")
 
-    # Completeness: nothing that was served before disappears under the
-    # profile-limited singleton (the gateway serves all 162 BOOTSTRAP_FIELDS).
     assert set(served) == set(baseline_bootstrap)
     assert set(values) == set(baseline_values)
     assert set(flat) == set(baseline_flat)
-    # Excluded-domain values: identical to the full singleton's (same env).
+
     for alias in excluded_bootstrap_aliases:
-        if alias in baseline_bootstrap:  # None-valued fields are skipped in both
+        if alias in baseline_bootstrap:
             assert served[alias] == baseline_bootstrap[alias], alias
     for name in baseline_values:
         if config.field_domain(name) in excluded_domains:
             assert values[name] == baseline_values[name], name
-    # the fail-fast still protects direct attribute access on the singleton
+
     with pytest.raises(AttributeError):
         _ = config.settings.sandbox
 
 
-# ─── frontend config-group map alignment (ui/web/src/app/control/_config_groups.ts) ───
-
-
-# ─── memory backend switch fields: restart_required must name "gateway" ───
-
-
 def test_memory_backend_switch_fields_require_gateway_restart() -> None:
-    """The backend-switch fields must declare restart_required="gateway".
-
-    AVA_MEMORY_SEARCH_BACKEND is consumed at process boot by the gateway
-    search endpoint (factory.get_backend) and the memory_indexer daemon;
-    switching to 'numpy' also makes the gateway's search path ride the
-    memory_search daemon. All three processes run under the gateway process
-    profile, so the metadata must name "gateway" — an `ava restart` bounces
-    the gateway process AND every gateway-profile daemon. A "" here told the
-    panel/CLI "no restart required" and a backend switch silently stayed
-    unapplied until a manual kickstart (Task #2224).
-    """
     from base.config.domains.services.settings import ServiceSettings
     from base.config.profiles import PROCESS_PROFILES
 
-    # The owning domain must be in the gateway profile for "gateway" to be the
-    # honest value — the consumption matrix, kept in sync with the profile set.
     assert "services" in PROCESS_PROFILES["gateway"]
 
     for name in ("memory_search_backend",):
@@ -319,31 +244,12 @@ def test_memory_backend_switch_fields_require_gateway_restart() -> None:
         assert extra["restart_required"] == "gateway", name
 
 
-# ─── gateway-consumed fields must declare "gateway" restart (batch audit) ───
-
-
 def test_gateway_consumed_fields_declare_gateway_restart() -> None:
-    """Fields read at boot by gateway-profile processes must say "gateway".
-
-    Every field here is consumed by a gateway-profile process (the gateway
-    process itself or a gateway-side daemon: im_bridge / memory_indexer /
-    memory_search). A wrong or empty value tells the panel/CLI the wrong
-    process to restart (Task #2224 follow-up audit):
-
-    - im_* / telegram / feishu: the im_bridge daemon reads them at boot —
-      they said "agent", so an operator restarted the agent process and the
-      change never applied (the bcf966476 fix was lost in the main rebuild).
-    - embedding_backend / memory_embed_timeout_seconds: the memory_indexer /
-      memory_search daemons read them at boot — they said "" (no restart hint
-      at all), the same class #2224 fixed for memory_search_backend.
-    """
     from base.config.domains.channels.feishu import FeishuSettings
     from base.config.domains.channels.telegram import TelegramSettings
     from base.config.domains.services.settings import ServiceSettings
     from base.config.profiles import PROCESS_PROFILES
 
-    # The owning domains must be in the gateway profile for "gateway" to be
-    # the honest value — the consumption matrix, kept in sync with the set.
     for domain in ("services", "telegram", "feishu"):
         assert domain in PROCESS_PROFILES["gateway"]
 
@@ -375,14 +281,7 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
             assert extra["restart_required"] == "gateway", name
 
 
-# ─── restart_required: value domain + consumption-matrix cross-check ───
-
-
 def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A typo'd restart_required can never reach prod boot — it is the operator's
-    only guide for which process to restart, so a bad value must fail fast at
-    registry build, the same seal scope/capability/lifecycle have (the bcf966476
-    fail-fast, lost in the main rebuild and restored by #2227)."""
     from pydantic import Field
 
     from base.config import config_registry
@@ -411,11 +310,6 @@ def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.Mon
 def test_build_registry_rejects_restart_required_for_unconsuming_kind(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """restart_required names a process kind — that kind's config profile must
-    contain the field's domain. The telegram/feishu/im_* fields once said "agent"
-    while only the gateway's im_bridge daemon reads them: the operator restarted
-    the wrong process and the change silently never took effect (#1226 re-landed
-    the value fixes; this check makes the drift class impossible)."""
     from pydantic import Field
 
     from base.config import config_registry
@@ -442,15 +336,11 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind(
 
 
 def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
-    """Metadata-surface belt-and-braces over the registry enforcement: every
-    field's restart_required is in the value domain, and when it names a process
-    kind, the field's domain is in that kind's profile (the profile sets ARE the
-    consumption matrix — test_gateway_consumer_guard keeps them honest)."""
     from typing import Any, cast
 
     from base.config import FIELD_REFS
     from base.config.config_registry import ALLOWED_RESTART_REQUIRED, RESTART_REQUIRED_PROFILE
-    from base.config.profiles import PROCESS_PROFILES
+    from base.config.profiles import PROCESS_PROFILES, ProcessProfile
 
     def _extra(ref: object) -> dict[str, Any]:
         info = getattr(ref, "info", ref)
@@ -467,7 +357,7 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
     for name, ref in FIELD_REFS.items():
         restart = str(_extra(ref).get("restart_required", ""))
         kind = RESTART_REQUIRED_PROFILE.get(restart)
-        if kind is not None and ref.domain not in PROCESS_PROFILES[kind]:  # type: ignore[index]
+        if kind is not None and ref.domain not in PROCESS_PROFILES[cast(ProcessProfile, kind)]:
             wrong_kind.append((name, ref.domain, restart))
     assert not wrong_kind, (
         f"fields whose restart_required names a process kind that does not consume "

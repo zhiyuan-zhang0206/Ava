@@ -69,8 +69,8 @@ factory and authority at their original construction points.
 ## User-context changes
 
 The serving TaskGroup owns `to_user_watch.watch_to_user`. Every 0.5 seconds after
-its preceding scan/publication, it snapshots numeric, non-symlink workspace
-directories and only their immediate `to_user.html` and `to_user.md` entries.
+its preceding scan/publication, outside the maintenance stop window, it snapshots numeric, non-symlink workspace
+directories and only their immediate `to_user.md` entries.
 Scanning runs in a worker thread; it never walks repositories or `node_modules`.
 Each target is identified with `lstat` device, inode, size, nanosecond mtime and
 ctime, including the link itself for a symbolic target. Directory identity uses
@@ -90,3 +90,10 @@ This avoids registering thousands of native watch roots: on macOS, watchfiles
 root during synchronous construction, holding the GIL and starving ops health
 and lifecycle admission. Its polling backend only compares second-resolution
 mtime by default, which misses same-second writes and atomic replacements.
+
+The authenticated `POST /to-user/resource` route reads explicitly referenced files
+through the same worker pool, admission semaphore and maintenance accounting. It
+revalidates the document link chain on the owning machine, returns binary bytes
+and caps each resource at 20 MiB. It does not launch per-agent page servers.
+
+Request receipt and configuration-write invariants live in the child request-ownership document.

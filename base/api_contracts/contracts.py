@@ -1,24 +1,4 @@
-"""Cross-process boundary contracts — the doorplates (R3).
-
-Every cross-process boundary is a door. Each door carries a doorplate
-declaring three things: can it be pushed again (idempotency), is it open
-during a migration (pause exemption), who is responsible for it (truth
-source). A doorplate is code, not a comment: consumers inherit behavior
-from the doorplate instead of guessing.
-
-This module is the ONLY place a route contract is declared — the doorplate
-wall. Route authors add one entry per route they own; the pause middleware
-reads exemptions from here (via `gateway.http.middleware.pause_policy`), the SDK reads
-idempotency from here, and lint forces every gateway route to declare a
-doorplate (`gateway/tests/bootstrap/test_route_contracts_gateway.py`).
-
-Invariants (design concept v0.3):
-1. Declared at the boundary definition — idempotency / exemption are
-   declared here, never copied into callers or comments.
-2. Server promises, clients inherit — callers derive retry / exemption
-   behavior from the contract.
-"""
-
+# ava:ref base/api_contracts/docs/routes.ava.okf.md#route-policy
 from __future__ import annotations
 
 import re
@@ -27,65 +7,23 @@ from enum import StrEnum
 
 
 class Idempotency(StrEnum):
-    """Delivery semantics a client may rely on when re-sending a request.
-
-    IDEMPOTENT: safe to retry blindly — repeating the request cannot
-        change the outcome (reads, CAS state transitions, upserts).
-    NON_IDEMPOTENT: never auto-retry — a retry can duplicate the effect
-        (pure INSERTs: spawn, create, upload).
-    AT_LEAST_ONCE_WITH_KEY: safe to retry with the same ``Idempotency-Key``
-        only when the handler records identity and immutable request matching
-        in the business transaction. A durable receipt proves acceptance, not
-        delivery or execution. Mutable response fields may be recomputed.
-        The handler owns the key in the same commit as its business effect.
-    """
-
     IDEMPOTENT = "idempotent"
     NON_IDEMPOTENT = "non_idempotent"
     AT_LEAST_ONCE_WITH_KEY = "at_least_once_with_key"
 
 
 class PauseSemantics(StrEnum):
-    """Whether a route stays reachable while the cluster is paused
-    (mid-migration, everything else answers 503 + Retry-After).
-
-    CONTROL_PLANE: must survive a migration — the quiesce that owns the
-        pause window depends on it (control/observability surface, agent
-        self-reports). Exempt from the pause 503.
-    DATA_PLANE: default — 503 during the pause window.
-    """
-
     CONTROL_PLANE = "control-plane"
     DATA_PLANE = "data-plane"
 
 
 @dataclass(frozen=True, slots=True)
 class RouteContract:
-    """A route's doorplate: what clients may rely on at this boundary.
-
-    Declared with the defaults most routes need (idempotent, data-plane),
-    so a route author writes only the exceptions — the non-default
-    idempotency, the exemption, and the reason that used to live in
-    middleware comments.
-    """
-
     idempotency: Idempotency = Idempotency.IDEMPOTENT
     pause: PauseSemantics = PauseSemantics.DATA_PLANE
     note: str = ""
 
 
-# ─────────────────────────────────────────────────────────────────────
-# The doorplate wall: every gateway route declares itself here, grouped by
-# router file. Key = (HTTP method, FastAPI path template). Lint forces
-# every app route to have an entry and every entry to be used.
-#
-# Pause-exemption audit: CONTROL_PLANE routes are exactly the surfaces
-# that must stay reachable mid-migration — the /api/cluster/* control
-# plane, the Grafana alerting webhook (a 503 inside the rollout window
-# exhausts Grafana's webhook retries and the alert is lost exactly when
-# alerting matters most), and the bootstrap config read a held runner's
-# start needs. Everything else is data-plane.
-# ─────────────────────────────────────────────────────────────────────
 ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/keyed/v1/agents/{agent_id}/compact-target"): RouteContract(),
     ("GET", "/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}"): RouteContract(),
@@ -93,7 +31,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="original source receipt; durable prepared result and cold application proof are separate",
     ),
-    # Native work commands have their own durable domain owner, never generic inbound.
     ("GET", "/api/keyed/v1/agents/{agent_id}/native-work"): RouteContract(),
     ("GET", "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}"): RouteContract(),
     ("POST", "/api/keyed/v1/agents/{agent_id}/restart-work"): RouteContract(
@@ -104,7 +41,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="original managed work receipt and checkpoint/resource execution proof",
     ),
-    # ── gateway/agents/router.py ───────────────────────────────────
     ("PATCH", "/api/agents/{agent_id}"): RouteContract(note="label patch — CAS update"),
     ("GET", "/api/models"): RouteContract(),
     ("GET", "/api/agents"): RouteContract(note="bounded agent directory page"),
@@ -125,10 +61,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/agents/{agent_id}"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
-    # ── gateway/agents/to_user/document.py ──────────────────────────
     ("GET", "/api/agents/{agent_id}/to-user"): RouteContract(),
-    ("GET", "/api/agents/{agent_id}/to-user/document"): RouteContract(),
-    # ── gateway/alerts/router.py ───────────────────────────────────
+    ("GET", "/api/agents/{agent_id}/to-user/resource"): RouteContract(),
     ("GET", "/api/alerts"): RouteContract(),
     ("GET", "/api/alerts/stream"): RouteContract(
         note="SSE tail — subscribing mid-pause just idles; the UI's initial fetch covers the gap"
@@ -137,7 +71,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         pause=PauseSemantics.CONTROL_PLANE,
         note="Grafana Alertmanager webhook — upsert per (fingerprint, starts_at); a 503 exhausts Grafana retries and the alert is lost",
     ),
-    # ── gateway/http/auth/router.py ───────────────────────────────────
     ("POST", "/api/auth/login"): RouteContract(note="login — repeats just mint a fresh cookie"),
     ("POST", "/api/auth/login-ticket"): RouteContract(
         note="issue a one-time login ticket — every repeat is a distinct short-lived row"
@@ -151,13 +84,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/auth/sessions/{session_id}/revoke"): RouteContract(
         note="session revocation — guarded update; repeats cannot revoke twice"
     ),
-    # ── gateway/cluster/bootstrap.py ───────────────────────────────────
     ("GET", "/api/bootstrap"): RouteContract(
         pause=PauseSemantics.CONTROL_PLANE,
         note="read-only config projection, still authenticated — a held unit's first start "
         "and every runner process's config resolution read it before the hold is released",
     ),
-    # ── gateway/cluster/router.py ───────────────────────────────────
     ("POST", "/api/cluster/stopping"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         PauseSemantics.CONTROL_PLANE,
@@ -196,9 +127,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         PauseSemantics.CONTROL_PLANE,
         note="control-plane op — clears the pause latch (idempotent no-op when not paused)",
     ),
-    # ── gateway/routers/commands.py ───────────────────────────────────
     ("GET", "/api/commands"): RouteContract(),
-    # ── gateway/routers/configuration/runtime.py ───────────────────────────────────
     ("GET", "/api/config"): RouteContract(),
     ("GET", "/api/config/resolved"): RouteContract(),
     ("GET", "/api/config/audit"): RouteContract(),
@@ -207,18 +136,15 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PUT", "/api/config/default-model"): RouteContract(
         note="set default model — PUT is idempotent"
     ),
-    # ── gateway/agents/history/conversation.py ─────────────────────────────
     ("GET", "/api/agents/{agent_id}/conversation-snapshot"): RouteContract(
         note="composed switch refresh — timeline head window + token usage + pending in one read"
     ),
-    # ── gateway/events/router.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/events/stream"): RouteContract(note="SSE live stream"),
     ("GET", "/api/agents/{agent_id}/events"): RouteContract(),
     ("GET", "/api/computer/traces"): RouteContract(
         note="computer-use task replay (Phase 3, task #1101): one task's desktop trail"
     ),
     ("GET", "/api/events"): RouteContract(),
-    # ── gateway/events/resolutions.py ────────────────────────
     ("GET", "/api/event-resolutions"): RouteContract(),
     ("POST", "/api/event-resolutions"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
@@ -227,14 +153,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/event-resolutions/{dismissal_id}/reopen"): RouteContract(
         note="guarded active-state transition — repeats cannot reopen twice"
     ),
-    # ── gateway/routers/fleet_graph.py ───────────────────────────────────
     ("GET", "/api/fleet/graph"): RouteContract(),
-    # ── gateway/routers/frontend_telemetry.py ─────────────────────────
     ("POST", "/api/frontend-telemetry"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note="telemetry ingest — pure INSERT per event; a retry duplicates rows (client never retries)",
     ),
-    # ── gateway/routers/grafana.py ───────────────────────────────────
     ("GET", "/grafana"): RouteContract(note="reverse proxy — semantics follow upstream"),
     ("GET", "/grafana/{rest:path}"): RouteContract(
         note="reverse proxy — semantics follow upstream"
@@ -251,17 +174,14 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PUT", "/grafana/{rest:path}"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="reverse proxy — semantics follow upstream"
     ),
-    # ── gateway/routers/guide.py ───────────────────────────────────
     ("POST", "/api/keyed/v1/guide/draft"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="raw draft identity and original immutable birth snapshot",
     ),
-    # ── gateway/cluster/status.py (health) ───────────────────────────────────
     ("GET", "/api/health"): RouteContract(
         pause=PauseSemantics.CONTROL_PLANE,
         note="gateway identity and database liveness — start must prove readiness before releasing its hold",
     ),
-    # ── gateway/inspect/router.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/inspect/statistics"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/inspect/live"): RouteContract(
         note="uncached live skeleton — cheap window-independent inspector fields",
@@ -269,10 +189,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/inspect/metrics"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/inspect/widgets"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/neighbors"): RouteContract(),
-    # ── gateway/extensions/inventory.py ───────────────────────────────────
     ("GET", "/api/inventory"): RouteContract(),
     ("PUT", "/api/inventory"): RouteContract(note="full inventory replace — PUT is idempotent"),
-    # ── gateway/agents/lifecycle.py ───────────────────────────
     ("POST", "/api/agents/{agent_id}/impersonation/force-expire"): RouteContract(
         note="observed-session CAS close — repeated or stale requests leave the lease unchanged"
     ),
@@ -286,7 +204,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT,
         note="a repeat dispatches another restart; HTTP intent has no durable receipt",
     ),
-    # ── gateway/agents/history/understanding.py ────────────────────────────────────
     ("GET", "/api/agents/{agent_id}/sessions"): RouteContract(
         note="read-only: the agent's sessions with their understanding coverage and build estimate"
     ),
@@ -296,7 +213,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/understanding/builds/{build_id}"): RouteContract(
         note="read-only: a build's job statuses, rebuild state and actual cost"
     ),
-    # ── gateway/mcp_server/router.py ─────────────────────────────
     ("GET", "/api/mcp/clients"): RouteContract(),
     ("POST", "/api/keyed/v1/mcp/clients"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
@@ -305,7 +221,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/mcp/clients/{client_id}/revoke"): RouteContract(
         note="client revocation — guarded update; repeats cannot revoke twice"
     ),
-    # ── gateway/routers/memory.py ───────────────────────────────────
     ("GET", "/api/memory/graph"): RouteContract(),
     ("GET", "/api/memory/note"): RouteContract(note="pure read — one note by relative path"),
     ("GET", "/api/memory/pool"): RouteContract(
@@ -313,12 +228,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("POST", "/api/memory/refresh"): RouteContract(note="re-scan — repeats are harmless"),
     ("POST", "/api/memory/search"): RouteContract(note="pure read"),
-    # ── gateway/events/metrics.py ───────────────────────────────────
     ("GET", "/api/metrics"): RouteContract(),
     ("GET", "/api/metrics/agents"): RouteContract(),
-    # ── gateway/cluster/ops_monitor.py ───────────────────────────────────
     ("GET", "/api/ops/monitor"): RouteContract(),
-    # ── gateway/agents/notices.py ───────────────────────────────────
     ("GET", "/api/notices"): RouteContract(
         note="unified inbox feed — open + awaiting + resolved page (R4 layer 2)"
     ),
@@ -340,14 +252,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="withdraw only the observed global notice; keyed replay never selects a later notice",
     ),
-    # ── gateway/inspect/okf_graph.py ───────────────────────────────────
     ("GET", "/api/okf/graph"): RouteContract(),
-    # ── gateway/extensions/packages.py ───────────────────────────────────
     ("POST", "/api/keyed/v1/packages/draft"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="raw draft identity and original immutable birth snapshot",
     ),
-    # ── gateway/routers/pages.py ───────────────────────────────────
     ("GET", "/api/pages"): RouteContract(),
     ("GET", "/pages/{page_key}"): RouteContract(note="page reverse proxy"),
     ("GET", "/pages/{page_key}/{rest:path}"): RouteContract(note="page reverse proxy"),
@@ -360,14 +269,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="versioned page close requires observed row identity; replay cannot close a later page",
     ),
     ("GET", "/api/agents/{agent_id}/pages"): RouteContract(note="list open pages"),
-    # ── gateway/extensions/plugin_ui.py ───────────────────────────────────
     ("GET", "/api/plugin-ui/{plugin}"): RouteContract(
         note="plugin page mount — trailing-slash redirect"
     ),
     ("GET", "/api/plugin-ui/{plugin}/{rest:path}"): RouteContract(
         note="plugin page mount — static read"
     ),
-    # ── gateway/routers/presets.py ───────────────────────────────────
     ("GET", "/api/presets"): RouteContract(),
     ("GET", "/api/presets/{preset_id}"): RouteContract(),
     ("POST", "/api/presets"): RouteContract(
@@ -375,7 +282,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("PATCH", "/api/presets/{preset_id}"): RouteContract(note="update — repeats are harmless"),
     ("DELETE", "/api/presets/{preset_id}"): RouteContract(note="delete — repeats are harmless"),
-    # ── gateway/schedules/router.py ───────────────────────────────────
     ("GET", "/api/schedules"): RouteContract(),
     ("GET", "/api/schedules/{schedule_id}"): RouteContract(),
     ("GET", "/api/schedules/{schedule_id}/logs"): RouteContract(),
@@ -403,15 +309,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT, note="script edits append versions and can restart the process"
     ),
     ("DELETE", "/api/schedules/{schedule_id}"): RouteContract(note="delete — repeats are harmless"),
-    # ── gateway/routers/settings.py ───────────────────────────────────
     ("GET", "/api/settings"): RouteContract(),
     ("PUT", "/api/settings/{key}"): RouteContract(note="set one key — PUT is idempotent"),
-    # ── gateway/routers/shell.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/shell/{session_id}"): RouteContract(),
-    # ── gateway/extensions/skills.py ───────────────────────────────────
     ("GET", "/api/skills"): RouteContract(),
     ("PUT", "/api/skills"): RouteContract(note="full replace — PUT is idempotent"),
-    # ── gateway/agents/state.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/messages"): RouteContract(
         note="raw checkpoint history — implicit requests return newest 100; start_index pages backward"
     ),
@@ -432,30 +334,24 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="deliver a framework system note (task assign/update/reminder) — renders as a system marker, not peer chat; resurrect is a body choice",
     ),
-    # ── gateway/cluster/status.py ───────────────────────────────────
     ("GET", "/api/stats/dashboard"): RouteContract(),
-    # ── gateway/cluster/alert_classes.py ────────────────────────────
     ("GET", "/api/stats/alert-classes"): RouteContract(),
     ("GET", "/api/stats/alert-classes/samples"): RouteContract(),
     ("GET", "/api/status"): RouteContract(),
     ("GET", "/api/system"): RouteContract(),
     ("GET", "/api/system/all"): RouteContract(),
-    # ── gateway/routers/tasks.py ───────────────────────────────────
     ("GET", "/api/tasks"): RouteContract(),
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="task patch requires a key; immutable result shares the notification transaction",
     ),
-    # ── gateway/agents/history/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/timeline/retained"): RouteContract(
         note="read-only retained boundary window, independent of the live checkpoint head"
     ),
-    # ── gateway/agents/reply_suggestion/router.py ───────────────────────────────────
     ("POST", "/api/agents/{agent_id}/reply-suggestion"): RouteContract(
         note="read-only draft: a decision gate and a chat model call, writing only llm_usage; completed results are cached per agent message",
     ),
-    # ── gateway/routers/insights.py (proxy of services/derived/insights/run_timeline) ──
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
         note="read-only: the understanding tree and the layer-0 message units in a window",
     ),
@@ -474,9 +370,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/insights/{rest:path}"): RouteContract(
         note="read-only: proxied untouched to the insights service, which builds every insights read from the record",
     ),
-    # ── gateway/extensions/ui_contributions.py ───────────────────────────────────
     ("GET", "/api/ui/contributions"): RouteContract(),
-    # ── gateway/routers/upload/router.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/uploads/{filename}"): RouteContract(),
     ("POST", "/api/keyed/v1/agents/{agent_id}/uploads"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
@@ -494,46 +388,24 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
 }
 
 
-# ── template matching (shared by middleware + SDK) ────────────────────
-
 _TEMPLATE_PATH_PARAM = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*:path\}")
 _TEMPLATE_PARAM = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
 
 
 def _template_regex(template: str) -> re.Pattern[str]:
-    """Compile a FastAPI path template to an anchored regex.
 
-    ``{param}`` matches one segment; ``{param:path}`` matches the rest
-    (slashes included). Python's ``re.compile`` caches compiled patterns;
-    template conversion stays local to each lookup.
-    """
     pattern = _TEMPLATE_PATH_PARAM.sub(".*", template)
     pattern = _TEMPLATE_PARAM.sub(r"[^/]+", pattern)
     return re.compile("^" + pattern + "$")
 
 
 def match_path(template: str, path: str) -> bool:
-    """Whether a concrete request ``path`` matches a route ``template``."""
+
     return _template_regex(template).match(path) is not None
 
 
-# ── route lookup (audit gateway.md P2-14) ─────────────────────────────
-#
-# contract_for / exempt_from_pause run on every request, twice (pause +
-# idempotency middlewares), and a compiled-regex match per ROUTE_CONTRACTS
-# entry (~120) is the cost to avoid. Most templates share their second path
-# segment with the concrete paths they match (`/api/agents/{agent_id}`
-# matches paths whose second segment is ``agents``), so only the templates
-# of that segment are regex-matched, then the few wildcard templates (a
-# `{...:path}` segment in the first two slots, which can match any path)
-# last. The segment filter is a string split, cheap next to a regex match,
-# so nothing is indexed or cached.
-
-
 def _index_bucket_key(template: str) -> str | None:
-    """The second path segment of a template, or None when the template can
-    match paths of any second segment (a `{...:path}` wildcard in the first
-    two slots)."""
+
     parts = template.strip("/").split("/")
     if len(parts) < 2 or ":path}" in parts[0] or ":path}" in parts[1]:
         return None
@@ -541,9 +413,7 @@ def _index_bucket_key(template: str) -> str | None:
 
 
 def _contract_candidates(method: str | None, path: str) -> list[tuple[str, RouteContract]]:
-    """The (template, contract) pairs that could match ``path``: templates sharing its
-    second segment first, then the wildcard templates. `method` None = any method
-    (exempt_from_pause does not filter by method)."""
+
     bucket = _index_bucket_key(path)
     keyed = [
         (tpl, contract, _index_bucket_key(tpl))
@@ -558,13 +428,7 @@ def _contract_candidates(method: str | None, path: str) -> list[tuple[str, Route
 
 
 def contract_for(method: str, path: str) -> RouteContract | None:
-    """The contract for a concrete request (``method`` + actual ``path``),
-    or None when no route declares it.
 
-    Used by the SDK to inherit retry behavior: the caller passes the
-    actual request path; the contract's idempotency says what a retry may
-    do.
-    """
     for tpl, contract in _contract_candidates(method, path):
         if match_path(tpl, path):
             return contract
@@ -572,29 +436,13 @@ def contract_for(method: str, path: str) -> RouteContract | None:
 
 
 def idempotency_for(method: str, path: str) -> Idempotency:
-    """The idempotency semantics a caller must honor for a request.
 
-    Unknown routes default to NON_IDEMPOTENT: a route that was not declared
-    (or a path the SDK misspelled) must never be blindly retried — a retry
-    could duplicate the side effect of a POST the doorplate never promised
-    to dedup (#698 spawn-duplicate class). Lint forces every gateway route
-    to be declared, so an unknown path is a caller bug, and the safe
-    default for a bug is "do not auto-retry".
-    """
     c = contract_for(method, path)
     return c.idempotency if c is not None else Idempotency.NON_IDEMPOTENT
 
 
 def exempt_from_pause(method: str, path: str) -> bool:
-    """Whether ``(method, path)`` is declared control-plane (survives a
-    migration).
 
-    The single predicate behind `gateway.http.middleware.pause_policy.should_bypass_pause`
-    — kept here so every consumer shares one matching implementation. The
-    method matters: two methods can share one path template with different
-    pause semantics (POST /api/alerts is the control-plane webhook while
-    GET /api/alerts is ordinary data-plane).
-    """
     return any(
         c.pause is PauseSemantics.CONTROL_PLANE and match_path(tpl, path)
         for tpl, c in _contract_candidates(method, path)

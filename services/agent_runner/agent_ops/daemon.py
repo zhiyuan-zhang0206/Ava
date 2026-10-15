@@ -1,36 +1,10 @@
-"""ava-ops — agent-runner inbound ops server.
-
-The ONLY long-running ava process on an agent-runner the gateway dials
-DIRECTLY (the runner's other services — agent-host, browser,
-mcp-daemon — are local or health-checked). Serves POST /ops; each request
-executes in-process against the `ops` op clusters and returns {status, result}.
-
-Usage: .venv/bin/python -m services.agent_runner.agent_ops.daemon — a per-machine
-singleton via pidfile, supervised by the application root. Registers
-its own unit in `machines` once serving (`boot.register_boot`).
-
-Idempotency keys: an envelope carrying `idempotency_key` is deduplicated
-against the shared `api_idempotency` table (method='ops' rows — migration
-20260808T200000_unify-ops-idempotency): the first dispatch runs the op and
-stores its outcome, later ones replay it, so the gateway's retry of
-non-idempotent ops (spawn / lifecycle) cannot duplicate the
-effect (Task #961).
-
-A central DB pool is shared across all ops; each op manages its connection
-lifetime via `pool.connection()`. Threading: `spawn` / `lifecycle` run on the
-event loop; every other arm is synchronous on this daemon's own pool
-(`bind_dispatch_sync`, the thin binding of `services.agent_runner.agent_ops.dispatch_sync`) —
-none may hold the loop (see that module; `_hard_exit` skips interpreter
-teardown).
-"""
-
+# ava:ref services/agent_runner/agent_ops/docs/request-ownership.ava.okf.md#request-ownership
 from __future__ import annotations
 
 import argparse
 import sys
 
 if __name__ == "__main__":
-    # Reject unknown argv before imports can load Settings or touch local state.
     argparse.ArgumentParser(description=__doc__).parse_args()
     from base.log import prepare_process_logging
 
@@ -86,24 +60,16 @@ from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpEnvelope, Op
 from services.agent_runner.agent_ops import boot, health
 from services.agent_runner.agent_ops import maintenance as maintenance_activity
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
+from services.agent_runner.agent_ops.to_user_resource import resource_route
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 
 _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
 
 
-# ── Ops request identity and response replay ────────────────────────────────
-# Acceptance and execution are not one transaction. Keep claims across errors
-# and retain all ops identities until domain recovery/expiry can prove it safe
-# to retire them. A pending row is inspectable uncertainty, never permission to
-# execute again. The immutable hash rejects key reuse for another operation.
-# A same-key dispatch while the owner is still executing is a caller bug
-# (gateway attempts are sequential); wait briefly for the stored outcome,
-# then fail loud instead of re-executing.
 DEDUP_WAIT_STEP_S = 0.1
-DEDUP_WAIT_ATTEMPTS = 30  # ~3s cap
-# Bounded retry for a connection that dies mid-transaction (Task #1059): the
-# idempotency key makes a re-run safe — a committed claim replays/waits, an
-# uncommitted one re-claims and executes.
+DEDUP_WAIT_ATTEMPTS = 30
+
+
 DISPATCH_RETRY_ATTEMPTS = 3
 _DISPATCH_RETRY_BACKOFF_S = 0.5
 _sleep = asyncio.sleep
@@ -126,11 +92,7 @@ async def run_arm(
     local_machine: MachineIdentity,
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
-    """Run a blocking arm on this invocation's executor and database pool.
 
-    The worker borrows explicit authority, image and machine; its inputs do not
-    depend on loop or worker ambient context.
-    """
     loop = asyncio.get_running_loop()
     active = (kind, time.monotonic())
     active_ops[kind] = active
@@ -167,10 +129,7 @@ def bind_dispatch_sync(
     local_machine: MachineIdentity,
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
-    """Bind blocking arms to this invocation's pool, authority, image and machine.
 
-    `run_arm` retains these inputs across the executor boundary.
-    """
     return dispatch_sync(
         kind,
         payload,
@@ -198,30 +157,7 @@ async def _dispatch(
     local_machine: MachineIdentity,
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
-    """Execute one op in-process by calling the `ops` op clusters.
 
-    `kind` ranges over `ops.rpc_schemas.OpKind` (the canonical op vocabulary);
-    this `match` must stay exhaustive over it, and an unrecognized kind falls
-    through the `case _` to a 'failed' result rather than crashing the ops
-    server. Each arm validates its payload into the per-kind request model and
-    serializes the per-kind result model — the wire contract lives in the models
-    (`ops/rpc_schemas/__init__.py`), not in hand-written isinstance guards here.
-
-    Returns (status, result) where status is 'completed' or 'failed' and result
-    is a JSON-serializable dict (response body on success, error info on
-    failure). The caller serializes this into the /ops HTTP response — every
-    result goes through `.model_dump(mode="json")` so datetime / enum fields land
-    as JSON-native types before json.dumps.
-
-    Wire-protocol errors raised by ops functions (AvaAgentError subclasses such
-    as AgentNotFound / ForkSourceEmpty / MachineNotRegistered) are converted to
-    the OpFailure shape ({"error", "detail", "reason"}) so the gateway's handler
-    can re-emit the original semantics via `_raise_proxied_wire_error_from_payload`.
-    A malformed payload (ValidationError), an unparseable lifecycle path
-    (ValueError), a capture for a session that no longer exists
-    (ShellNotFoundError) or a resurrection refusal (ResurrectRefused) becomes a
-    plain 'failed' result.
-    """
     if not is_op_kind(kind):
         return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
 
@@ -237,9 +173,7 @@ async def _dispatch(
                     catalog=catalog,
                     local_machine=local_machine.name(),
                 )
-                # `exclude_none`: the settlement receipt is present only when a
-                # withdrawn model was rewritten (task #4306) — the common wire
-                # shape stays {"id": ...}.
+
                 return OpStatus.COMPLETED, spawned.model_dump(mode="json", exclude_none=True)
             case "launch-reconcile":
                 from ops.lifecycle.launch_reconcile import reconcile_launch_op
@@ -283,24 +217,14 @@ async def _dispatch(
                     host=host,
                 )
     except AvaAgentError as exc:
-        # Carry both detail and the wire `reason` enum value so the
-        # gateway's `_raise_proxied_wire_error_from_payload` can
-        # reconstruct the same AvaAgentError subclass (`EXCEPTION_BY_REASON[reason]`).
         return OpStatus.FAILED, {
             "error": f"{type(exc).__name__}: {exc}",
             "detail": str(exc),
             "reason": exc.reason.value,
         }
     except (ValidationError, ValueError, InvalidConfigOverlay) as exc:
-        # ValidationError: a payload that failed its per-kind model_validate.
-        # ValueError: lifecycle.lifecycle_op raises it for an unparseable path.
         return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
     except (ShellNotFoundError, ResurrectRefused) as exc:
-        # A capture for a shell session that no longer exists (capture_shell's
-        # business miss) is a normal 'failed' result the gateway turns into its
-        # 404; a resurrection refusal is a durable row verdict the caller
-        # reports by reason. Neither is a dispatch crash for ops_route's
-        # catch-all to log.
         return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
 
 
@@ -320,16 +244,7 @@ async def dispatch_idempotent(
     local_machine: MachineIdentity,
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
-    """Dispatch one op with a dedup key, retrying a pass that dies on a
-    closed DB connection.
 
-    The body is `dispatch_idempotent_pass`; a `psycopg.OperationalError`
-    (a connection that died between checkout and commit) re-runs the whole
-    pass up to `DISPATCH_RETRY_ATTEMPTS` times. Re-running is safe: the
-    dedup claim is atomic, so a retry either re-claims (original claim never
-    committed) or observes the existing row and replays/waits for its outcome.
-    Any other exception propagates unchanged.
-    """
     if not is_op_kind(kind):
         return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
     for attempt in range(DISPATCH_RETRY_ATTEMPTS):
@@ -358,7 +273,7 @@ async def dispatch_idempotent(
                 DISPATCH_RETRY_ATTEMPTS,
             )
             await _sleep(_DISPATCH_RETRY_BACKOFF_S)
-    raise AssertionError("unreachable")  # pragma: no cover — loop always returns or raises
+    raise AssertionError("unreachable")
 
 
 async def dispatch_idempotent_pass(
@@ -377,13 +292,7 @@ async def dispatch_idempotent_pass(
     local_machine: MachineIdentity,
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
-    """Replay one immutable request; unresolved execution never frees its identity.
 
-    A claim cannot prove an external effect happened, so a lost result or owner
-    crash leaves the record pending. Duplicates wait briefly, then fail with an
-    explicit uncertain outcome without dispatching. A domain receipt must own
-    recovery; this response record is not an exactly-once execution framework.
-    """
     if (
         kind == "lifecycle"
         and isinstance(payload.get("path"), str)
@@ -421,8 +330,6 @@ async def dispatch_idempotent_pass(
         )
         owned = cur.fetchone() is not None
     if owned:
-        # Exceptions, cancellation and result-write failure retain the committed
-        # claim. A retry cannot infer that execution had no side effects.
         status, result = await _dispatch(
             kind,
             payload,
@@ -445,7 +352,7 @@ async def dispatch_idempotent_pass(
                 (status, json.dumps(result, default=str), key),
             )
         return status, result
-    # A concurrent duplicate waits for the recorded outcome, never executes twice.
+
     for _ in range(DEDUP_WAIT_ATTEMPTS):
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
@@ -486,12 +393,7 @@ async def ops_route(
     local_machine: MachineIdentity,
     host: Host,
 ) -> tuple[int, bytes, str]:
-    """POST /ops route handler — parse {kind, payload}, dispatch, return result.
 
-    Always responds HTTP 200 with {"status", "result"} once the body parses; a
-    'failed' status is a semantic outcome the gateway re-raises, not an
-    HTTP error. A malformed body (not JSON, missing kind) returns 400.
-    """
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -518,9 +420,6 @@ async def ops_route(
         try:
             with maintenance_activity.admission(envelope.kind, requests=requests):
                 if envelope.idempotency_key is not None:
-                    # Non-idempotent ops retried by the gateway carry a dedup key:
-                    # first dispatch executes + stores, later same-key dispatches
-                    # replay (see dispatch_idempotent).
                     status, result = await dispatch_idempotent(
                         envelope.kind,
                         envelope.payload,
@@ -555,10 +454,7 @@ async def ops_route(
             _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
             status, result = OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
     status = OpStatus(status)
-    # default=str is a last-resort fallback: op results should already be
-    # JSON-native (Pydantic returns go through model_dump(mode="json")), but a
-    # stray non-JSON value (datetime, Path, ...) in a hand-built dict must
-    # degrade to its str() instead of raising here and 500-ing the control plane.
+
     return (
         200,
         json.dumps({"status": status, "result": result}, default=str).encode(),
@@ -581,7 +477,7 @@ async def serve_ops_daemon(
         all_domains=runtime if runtime.profile is None else config.complete_read_model(),
         env_path=paths.ava_home() / ".env",
     )
-    # Request arms and health snapshots share only this daemon invocation's state.
+
     active_ops: ActiveOps = {}
     requests: maintenance_activity.RequestTokens = set()
     workers: maintenance_activity.WorkerFutures = set()
@@ -598,8 +494,6 @@ async def serve_ops_daemon(
 
     our_machine = local_machine.name()
 
-    # Schema-current assertion: if the central DB is ahead of this checkout,
-    # abort before serving any op that assumes its columns.
     from base.deploy.schema.migrations import assert_schema_current
 
     try:
@@ -616,7 +510,6 @@ async def serve_ops_daemon(
     liveness = LivenessGroup()
 
     try:
-        # Every /ops dial presents a machine API token of this generation.
         acceptance = boot.ops_acceptance()
         bind_host = boot.ops_bind_host(machine=local_machine)
         if bind_host != "127.0.0.1":
@@ -643,7 +536,16 @@ async def serve_ops_daemon(
                     pool=pool,
                     local_machine=local_machine,
                     host=host,
-                )
+                ),
+                ("POST", "/to-user/resource"): functools.partial(
+                    resource_route,
+                    pool=pool,
+                    machine=our_machine,
+                    executor=executor,
+                    dispatch_sem=dispatch_sem,
+                    requests=requests,
+                    workers=workers,
+                ),
             },
             liveness=liveness,
             components=lambda: health.ops_components(active_ops),
@@ -715,8 +617,7 @@ def main(*, argv: list[str] | None = None) -> None:
     )
     code = 0
     primary: BaseException | None = None
-    # Drain async cleanup explicitly; Runner.close also joins the default
-    # executor, which may contain a stuck worker and must not delay this exit.
+
     try:
         init_gateway_process(
             name="ops", producer=clients.event_pipeline, machine_reader=machine.name, image=image
@@ -735,16 +636,10 @@ def main(*, argv: list[str] | None = None) -> None:
             )
         except KeyboardInterrupt as interrupted:
             primary = interrupted
-            # A retry must not abort the bounded exit. The supervisor retries its
-            # stop's SIGTERM while this drain runs, and a second interrupt raised
-            # inside the drain used to escape here, skip `_hard_exit`, and leave
-            # the process in interpreter teardown joining threads without a bound
-            # (2026-10-14: a stop refused for ~4 minutes while the process was
-            # already past its own cleanup; task #5129).
+
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
             _log.info("[ops] interrupted, shutting down")
-            # The captured stop identifies the TaskGroup's replay of the same
-            # object, which the drain survives instead of aborting on it.
+
             failures = cancel_and_drain(runner, interrupted_by=interrupted)
             if failures:
                 _log.error("[ops] async shutdown failed: %r", failures)
