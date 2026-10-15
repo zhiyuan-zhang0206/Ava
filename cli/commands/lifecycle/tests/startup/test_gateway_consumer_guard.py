@@ -1,29 +1,3 @@
-"""Guard: gateway-side services must not read agent-runner cluster keys.
-
-If a gateway daemon (im_bridge, heartbeat, etc.) reads a settings field whose
-alias is in AGENT_RUNNER_CLUSTER_ALIASES, the gateway pop would remove that
-field's env var — and the daemon would get a default value instead of the
-operator-configured one. This test scans gateway-side source for settings reads
-and asserts none of them resolve to agent-runner cluster aliases.
-
-The "right" fix when this fires is either:
-- Change the domain's default capability to "gateway" in _DOMAIN_MODELS (if the
-  field is genuinely owned by gateway-side code, like telegram/feishu for im_bridge)
-- Move the field to a gateway-scope domain (services, daemon, gateway)
-- Move the read to a different process (agent-side code should not run in gateway)
-- Consume a popped value with the .env-file fallback when the read must stay in
-  a gateway process (base.host.env.dotenv_file.read_env_aliases) and register it in
-  _FALLBACK_CONSUMED_READS — an explicit, pinned exemption, never a blanket skip
-
-This is the structural enforcement the orchestrator asked for — the consumption
-matrix is the true source of ownership.
-
-On 2026-09-06, four failures on ``refs/pull/1871/merge`` correctly caught
-``base/deploy/timing.py`` entering the gateway closure through a schedule-manager
-import before the PR's in-branch fix landed. That episode was a real guard
-finding, not a flake; do not weaken the scan to make such failures disappear.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -37,13 +11,8 @@ import pytest
 
 from cli.commands.data_plane import bringup
 
-# Intentional import-time isolation: pin settings-lite before any project import
-# can construct config from an inherited environment.
-os.environ["AVA_CONFIG_FETCH"] = (
-    "skip"  # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
-)
+os.environ["AVA_CONFIG_FETCH"] = "skip"
 
-# Gateway-side source roots — daemons that run under the gateway profile.
 _GATEWAY_SOURCE_ROOTS = (
     "gateway/",
     "services/entrypoints/im_bridge/",
@@ -60,15 +29,10 @@ _GATEWAY_SOURCE_ROOTS = (
 
 
 def _repo_root() -> Path:
-    # This test lives at cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py — three
-    # levels below the repo root. parent.parent would land on tests/ and the
-    # scan would silently cover nothing (the guard became a no-op and let the
-    # GEMINI_API_KEY / AVA_MODEL / AVA_LABELER_MODEL P0 through on 2026-08-06).
     return Path(__file__).resolve().parents[5]
 
 
 def _production_py_files(root: Path, prefix: str) -> list[Path]:
-    """Every .py file under one source root, a package's own `tests/` excluded."""
     target = root / prefix
     if not target.is_dir():
         return []
@@ -76,7 +40,6 @@ def _production_py_files(root: Path, prefix: str) -> list[Path]:
 
 
 def _gateway_py_files() -> list[Path]:
-    """Every .py file under gateway-side source roots (excluding tests)."""
     root = _repo_root()
     files: list[Path] = []
     for prefix in _GATEWAY_SOURCE_ROOTS:
@@ -87,10 +50,6 @@ def _gateway_py_files() -> list[Path]:
 
 
 def _extract_settings_reads(source: str) -> list[tuple[str, str]]:
-    """Parse Python source and return [(domain, field), ...] for every
-    `settings.<domain>.<field>` attribute access."""
-    # AST-based extraction — more reliable than regex for nested access.
-    # We look for Attribute nodes where the value is `settings.<domain>.<field>`.
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -100,7 +59,6 @@ def _extract_settings_reads(source: str) -> list[tuple[str, str]]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute):
             continue
-        # Check if this is settings.<domain>.<field>
         if not isinstance(node.value, ast.Attribute):
             continue
         if not isinstance(node.value.value, ast.Name):
@@ -110,27 +68,12 @@ def _extract_settings_reads(source: str) -> list[tuple[str, str]]:
         domain = node.value.attr
         field = node.attr
         if _guarded_by_has_domain(tree, node, domain):
-            # Sanctioned cross-profile read: the module first checks
-            # `settings.has_domain("<domain>")` in an enclosing `if` and only
-            # reads the domain inside that branch (e.g. base/packages/composer_commands.py's
-            # commands_enabled for the gateway's /api/commands dropdown).
-            # The gate proves the author thought about the profile boundary.
             continue
         results.append((domain, field))
     return results
 
 
 def _guarded_by_has_domain(tree: ast.AST, node: ast.AST, domain: str) -> bool:
-    """Whether `node` sits inside an `if settings.has_domain("<domain>"):` guard.
-
-    The sanctioned cross-profile pattern (Task #856): a module that genuinely
-    needs one field from a domain its process profile excludes checks
-    `settings.has_domain(<domain>)` first and reads only inside the branch —
-    the alternative branch resolves the value profile-safely (e.g. from the
-    .env file, like base/lm/factory.py after the gateway pop). The guard
-    proves the author thought about the profile boundary, so the read is not
-    a fail-fast violation. Anything else — an unguarded read — stays flagged.
-    """
     parents: dict[int, ast.AST] = {}
 
     def _link(parent: ast.AST) -> None:
@@ -157,32 +100,19 @@ def _guarded_by_has_domain(tree: ast.AST, node: ast.AST, domain: str) -> bool:
 
 
 def _settings_field_alias(domain: str, field: str) -> str | None:
-    """Return the env alias for a settings field, or None if not found."""
     from base.config import FIELD_REFS, field_alias
 
-    name = field  # field names are globally unique
+    name = field
     if name not in FIELD_REFS:
         return None
     return field_alias(name)
 
 
 def _scan_floor() -> int:
-    """The minimum number of files the gateway-side scan must cover.
-
-    A path-depth regression in `_repo_root()` (2026-08-06: parent.parent on a
-    tests/components/base/ file resolved to tests/, scanning 1 file) silently turns the
-    guard into a no-op and lets the gateway pop remove keys gateway-side
-    processes consume (P0: GEMINI_API_KEY/AVA_MODEL/AVA_LABELER_MODEL). The
-    floor is well under today's 92 files so a legitimate new service or a
-    directory rename has slack, but any root-resolution break collapses below
-    it and fails here."""
     return 50
 
 
 def test_gateway_services_dont_read_agent_runner_cluster_keys() -> None:
-    """Every settings read in gateway-side source must NOT resolve to an
-    agent-runner cluster alias — those aliases are popped from the gateway
-    process's os.environ."""
     from base.host.env.registry import agent_runner_cluster_aliases
 
     runner_cluster_aliases = agent_runner_cluster_aliases()
@@ -194,7 +124,7 @@ def test_gateway_services_dont_read_agent_runner_cluster_keys() -> None:
         f"scan silently disables this guard (the 2026-08-06 P0 failure mode)"
     )
 
-    violations: list[tuple[str, str, str]] = []  # (file, domain.field, alias)
+    violations: list[tuple[str, str, str]] = []
 
     for py_file in files:
         try:
@@ -230,44 +160,14 @@ def test_gateway_services_dont_read_agent_runner_cluster_keys() -> None:
         pytest.fail(msg)
 
 
-# ── Indirect consumption: settings reads in the gateway import closure ──
-#
-# The direct scan above misses reads that happen inside base/ functions the
-# gateway calls (2026-08-06 third cut: validate_model_config reads
-# settings.lm.*_api_key and every spawn 400'd after the pop). This scan walks
-# the repo-internal import closure of the gateway-side roots and flags
-# settings.<domain>.<field> reads whose alias is in the pop set, minus an
-# explicit allowlist of modules that are import-reachable but agent-only at
-# runtime (never executed by a gateway process).
 _AGENT_ONLY_ALLOWLIST = frozenset(
     {
-        # build_chat_model — agent-side only; the gateway reaches
-        # base/lm/factory.py solely for validate_model_config, which reads
-        # keys via get_field with a .env-file fallback (see
-        # base/packages/tests/lm/test_lm_factory.py).
         "base/lm/_providers.py",
-        # helper_client() reads the helper port to build the client for a spawn.
-        # The session backend takes it as a factory and only a spawn calls it —
-        # an agent-runner-side action; the gateway lists sessions and never spawns.
         "base/sessions/helperproc.py",
     }
 )
 
-# Reads of a popped alias that are deliberately fallback-consumed: the module
-# reads the Settings value and — when the gateway profile has popped the
-# env var (Task #856) — falls back to this unit's `.env` file via
-# `base.host.env.dotenv_file.read_env_aliases()`, the sanctioned gateway-side
-# source (same shape as base/lm/factory.py::_ensure_provider_key). Each
-# entry is an explicit, reviewable exemption keyed by (module, field); the
-# companion test below pins every entry to fallback code that actually
-# exists, so the registry can never outlive the code it excuses.
 _FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {
-    # The gateway's reply-suggestion draft model builds `deepseek-flash`
-    # in-process; the gateway profile pops DEEPSEEK_API_KEY from os.environ
-    # (Task #856), so the plugin consumes this unit's `.env` file when the env
-    # var is absent — the same fallback spawn validation reads (Task #1562,
-    # base/lm/factory.py::_ensure_provider_key). The read is consume-only:
-    # the popped key never returns to os.environ.
     ("ava_builtins/plugins/lm_deepseek/provider.py", "deepseek_api_key"): (
         "gateway in-process drafts (reply-suggestion) need the deepseek key the "
         "gateway profile popped; consume-only .env fallback in "
@@ -281,7 +181,7 @@ _GATEWAY_CLOSURE_PACKAGES = (
     "gateway",
     "services",
     "agent",
-    "ops",  # gateway HTTP routes execute ops/* in-process (task #3956)
+    "ops",
 )
 
 
@@ -290,7 +190,6 @@ def _module_name_of(path: Path) -> str:
 
 
 def _resolve_module_file(name: str) -> Path | None:
-    """The repo file a dotted module name resolves to, or None if it is external."""
     root = _repo_root()
     as_module = root / (name.replace(".", "/") + ".py")
     if as_module.exists():
@@ -301,12 +200,6 @@ def _resolve_module_file(name: str) -> Path | None:
     return None
 
 
-# Import edges the closure walk does not follow because the importing function never runs in a
-# gateway process: (importing file, imported module) -> (function holding the import, why). Narrow
-# on purpose: one edge, one function. Empty today: `shell_sessions()` now lives in
-# `ava/shell/sessions.py` itself, so `ava/sdk_surface/settings.py` no longer imports it. An entry
-# is pinned below: the import must still sit in that function and no gateway-side source may
-# name the function.
 _GATEWAY_UNREACHABLE_EDGES: dict[tuple[str, str], tuple[str, str]] = {}
 
 
@@ -314,11 +207,6 @@ def _walk_import_closure(
     roots: tuple[str, ...],
     imported_modules: Callable[[ast.AST], list[str]],
 ) -> set[Path]:
-    """Root .py files + every repo file they transitively import.
-
-    `imported_modules` maps one AST node to the dotted module names it pulls in
-    (empty for non-import nodes), so each closure scan owns its import policy.
-    """
     root = _repo_root()
     frontier: list[str] = []
     for prefix in roots:
@@ -365,13 +253,10 @@ def _gateway_closure_imports(node: ast.AST) -> list[str]:
 
 @lru_cache
 def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
-    """Modules (repo-internal) transitively imported by the gateway-side roots."""
     return _walk_import_closure(roots, _gateway_closure_imports)
 
 
 def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
-    """settings reads in base/ modules reachable from gateway-side code must
-    not resolve to popped aliases, unless the module is agent-only at runtime."""
     from base.config import FIELD_REFS, field_alias
     from base.host.env.registry import agent_runner_cluster_aliases
 
@@ -393,9 +278,6 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
             alias = field_alias(field)
             if alias in runner_cluster_aliases:
                 if (rel, field) in _FALLBACK_CONSUMED_READS:
-                    # Explicit, reviewable exemption: the module consumes this
-                    # value with the .env-file fallback (pinned below) — not a
-                    # blanket skip; the entry names both module and field.
                     continue
                 violations.append((rel, f"{domain}.{field}", alias))
     if violations:
@@ -416,21 +298,6 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
         pytest.fail(msg)
 
 
-# ── Profile domain sets == consumption matrix (bidirectional, Task #856 PR-B) ──
-#
-# PROCESS_PROFILES in base/config names which config DOMAINS each process kind
-# constructs. The sets must equal the consumption matrix: the domains actually
-# read by that kind's source + repo-internal import closure (base/ code runs
-# in every kind). Two directions, both asserted:
-#   1. matrix ⊆ profile — a new settings.<domain> read in a kind's code without
-#      the domain in its profile would fail at runtime (fail-fast) after this
-#      test fails first at CI.
-#   2. profile ⊆ matrix — a domain in a profile that nothing consumes is dead
-#      weight and hides future cross-profile reads (the capability-axis
-#      confusion that caused the 2026-08-06 #1570 P0).
-# The profile sets are NOT the capability display axis — capability is
-# config-panel grouping only, orthogonal to process ownership (see
-# base/config/__init__.py docstring).
 _KIND_ROOTS: dict[str, tuple[str, ...]] = {
     "gateway": (
         "gateway/",
@@ -447,11 +314,6 @@ _KIND_ROOTS: dict[str, tuple[str, ...]] = {
         "agent/",
         "ava/",
         "ava_builtins/",
-        # The hosted agent-host daemon runs the agent kernel + plugins
-        # in-process, so its config consumption is the agent kind's. Missing
-        # from the roots it was invisible to the matrix: the healthcheck's
-        # `runner` launch profile crashed at import (settings.agent read) and
-        # CI could not see it (2026-08-30 soak startup).
         "services/agent_runner/agent_host/",
     ),
     "runner": (
@@ -466,8 +328,6 @@ _KIND_ROOTS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# Repo-internal package prefixes the closure walk follows (everything that can
-# be imported by a process of any kind).
 _CLOSURE_PACKAGES = (
     "base",
     "gateway",
@@ -485,11 +345,6 @@ _CLOSURE_PACKAGES = (
 def _kind_closure_imports(node: ast.AST) -> list[str]:
     if isinstance(node, ast.ImportFrom):
         if node.module and node.module.split(".")[0] in _CLOSURE_PACKAGES and node.level == 0:
-            # `from base import telemetry` names a MODULE inside the
-            # package — push the package AND the full dotted path, or the
-            # submodule never enters the frontier (the existing gateway
-            # closure scan had this blind spot: base/log/__init__.py's lazy
-            # `from base import telemetry` did not pull telemetry.py in).
             return [node.module] + [
                 f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*"
             ]
@@ -501,17 +356,10 @@ def _kind_closure_imports(node: ast.AST) -> list[str]:
 
 @lru_cache
 def _kind_closure(roots: tuple[str, ...]) -> set[Path]:
-    """Root .py files + the repo-internal import closure, for one process kind."""
     return _walk_import_closure(roots, _kind_closure_imports)
 
 
 def _closure_domains(closure: set[Path]) -> set[str]:
-    """Config-domain reads, excluding declared aggregate runtime facts.
-
-    Unknown aggregate attributes still enter the matrix and fail its profile
-    check; only dump-excluded Settings fields outside the domain registry are
-    classified as non-domain facts.
-    """
     from base.config import Settings
     from base.config.config_registry import DOMAIN_ATTRS
     from cli.commands.lifecycle.tests.startup.config_read_facts import explicit_config_reads
@@ -572,7 +420,6 @@ def test_profile_matrix_rejects_an_undeclared_settings_read(tmp_path: Path, read
 
 
 def test_profile_consumption_distinguishes_runtime_facts_from_domains(tmp_path: Path) -> None:
-    """Declared boot facts are not domains; an unknown domain stays visible."""
     source = tmp_path / "consumer.py"
     source.write_text(
         "settings.env_boot.db_authority_refusal\n"
@@ -583,12 +430,6 @@ def test_profile_consumption_distinguishes_runtime_facts_from_domains(tmp_path: 
 
 
 def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The hosted agent-host daemon consumes the agent domain set (it runs the
-    agent kernel in-process, and services/agent_runner/agent_host/ is in the agent kind's
-    roots above). The root launcher, its only launch path, must therefore
-    start it with the `agent` profile — a `runner` profile crashed it at import
-    (2026-08-30 soak startup), and a marker-less launch (full construction)
-    would silently mask any future cross-profile read instead of failing fast."""
     from base.config import PROCESS_PROFILES
     from cli.commands.lifecycle import root_driver
     from services.supervision.roster import build_services
@@ -599,10 +440,6 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     def token_delivery(_cls: str, *, remote_data_plane: bool) -> dict[str, str]:
         return {"AVA_API_TOKEN": "fixture-token"}
 
-    # The launcher binds the database login and API token next to the marker;
-    # neither delivery is under test, so keep them independent of this host's
-    # home (a scratch dir with no installed unit capability, which
-    # api_delivery would otherwise refuse).
     monkeypatch.setattr(bringup, "db_delivery", delivery)
     monkeypatch.setattr(bringup, "api_delivery", token_delivery)
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
@@ -614,7 +451,6 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
 
 
 def test_profile_domains_match_consumption_matrix() -> None:
-    """PROCESS_PROFILES domains == domains each kind's code + closure consumes."""
     from base.config import PROCESS_PROFILES
     from base.config.profiles import ProcessProfile
 
@@ -639,7 +475,6 @@ def test_profile_domains_match_consumption_matrix() -> None:
 
 
 def _function_imports(tree: ast.AST, function: str, module: str) -> bool:
-    """Whether a function named `function` in `tree` holds a `from <module> import ...`."""
     return any(
         isinstance(inner, ast.ImportFrom) and inner.module == module
         for holder in ast.walk(tree)
@@ -649,7 +484,6 @@ def _function_imports(tree: ast.AST, function: str, module: str) -> bool:
 
 
 def _uses_module_function(node: ast.AST, owner: str, function: str) -> bool:
-    """Whether `node` imports `function` from module `owner` or reads it off `owner`'s name."""
     if isinstance(node, ast.ImportFrom):
         return node.module == owner and any(alias.name == function for alias in node.names)
     if isinstance(node, ast.Attribute) and node.attr == function:
@@ -662,13 +496,6 @@ def _uses_module_function(node: ast.AST, owner: str, function: str) -> bool:
 
 
 def test_gateway_unreachable_edges_stay_pinned_to_real_code() -> None:
-    """Every _GATEWAY_UNREACHABLE_EDGES entry must still be a real edge in its named function,
-    and no gateway-side source may use that function of that module.
-
-    The registry excuses one import edge from the closure walk; this pin fails when the import
-    moves or disappears (stale entry) or when gateway code starts calling the function (the
-    excuse no longer holds).
-    """
     root = _repo_root()
     gateway_nodes = [
         node
@@ -689,13 +516,6 @@ def test_gateway_unreachable_edges_stay_pinned_to_real_code() -> None:
 
 
 def test_fallback_consumed_reads_stay_pinned_to_real_fallback_code() -> None:
-    """Every _FALLBACK_CONSUMED_READS entry must cite fallback code that exists.
-
-    The registry excuses a specific (module, field) read from the popped-alias
-    scan; this pin fails the moment the fallback call disappears, so an entry
-    can never silently outlive the code it excuses (no generically weakened
-    scan).
-    """
     root = _repo_root()
     for (rel, field), why in _FALLBACK_CONSUMED_READS.items():
         src = (root / rel).read_text(errors="replace")

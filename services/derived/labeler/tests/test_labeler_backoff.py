@@ -1,5 +1,3 @@
-"""Label dispatch skips prior attempts without an automatic retry ladder."""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,10 +37,6 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
 ) -> None:
-    """The root builds the slice from settings.lm.labeler_model (its own knob), not
-    settings.lm.llm_model (the main reasoning model). Pin the two to different
-    values and assert the model the poll loop's slice carries is the labeler
-    one — guards against a future edit reverting the daemon to llm_model."""
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
     monkeypatch.setattr(settings.lm, "labeler_model", "deepseek-v4-flash")
     config = daemon.labeler_config()
@@ -72,7 +66,6 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
         assert build_chat_model is _reject_build
         assert catalog is model_catalog
         captured.append(cfg.labeler_model)
-        # Break the otherwise-infinite poll loop after the first dispatch.
         raise asyncio.CancelledError
 
     monkeypatch.setattr(daemon, "generate_label_async", _capture)
@@ -98,20 +91,15 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
 
 
 def test_select_unlabeled_excludes_attempted_ids(db_conn: psycopg.Connection) -> None:
-    """The SQL-level exclusion (`AND NOT (t.id = ANY(%s::bigint[]))`) works for
-    both an empty attempted list and a non-empty one — empty selects all, a
-    populated list drops exactly those ids from the LIMIT window."""
     a = create_agent(db_conn)
     b = create_agent(db_conn)
     _seed_chat(db_conn, a)
     _seed_chat(db_conn, b)
 
     with db_conn.cursor() as cur:
-        # Empty attempted -> the array param is `'{}'::bigint[]`, excludes nothing.
         all_ids = {tid for tid, _prompt in daemon.select_unlabeled(cur, [])}
         assert {a, b} <= all_ids
 
-        # a is attempted -> excluded; b still selectable.
         remaining = {tid for tid, _prompt in daemon.select_unlabeled(cur, [a])}
         assert a not in remaining
         assert b in remaining
@@ -123,9 +111,6 @@ def _set_label(db: psycopg.Connection, tid: int, label: str) -> None:
 
 
 def _seed_task_note(db: psycopg.Connection, tid: int, content: str) -> None:
-    """Seed the task-assignment inbound shape: a system_note carrying
-    note_tag='task' (how create_and_assign briefs reach a new worker since
-    the 2026-08-27 task-notification change)."""
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -135,16 +120,11 @@ def _seed_task_note(db: psycopg.Connection, tid: int, content: str) -> None:
 
 
 def test_select_unlabeled_treats_empty_label_as_unset(db_conn: psycopg.Connection) -> None:
-    """A stray label='' row is the same "unset" state as NULL: it must be
-    selected for re-labeling. Regression: the poll's `label IS NULL`
-    predicate skipped '' rows forever, wedging them out of auto-labeling
-    (the labeler's CAS matches the same predicate, so a selected '' row is
-    overwritten, never skipped)."""
     a = create_agent(db_conn)
     _set_label(db_conn, a, "")
     _seed_chat(db_conn, a)
     b = create_agent(db_conn)
-    _set_label(db_conn, b, "")  # '' but no request-bearing inbound -> EXISTS excludes
+    _set_label(db_conn, b, "")
     c = create_agent(db_conn)
     _seed_chat(db_conn, c)
     _set_label(db_conn, c, "already labeled")
@@ -157,11 +137,6 @@ def test_select_unlabeled_treats_empty_label_as_unset(db_conn: psycopg.Connectio
 
 
 def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connection) -> None:
-    """Task-assignment briefs arrive as system_note inbounds (note_tag='task'),
-    not chat: a delegated worker whose only inbound is its assignment must
-    still be selected, with the note content as the label prompt. Regression
-    since the 2026-08-27 task-notification change left such workers without a
-    labelable prompt. Non-task system notes stay excluded."""
     a = create_agent(db_conn)
     _seed_task_note(db_conn, a, 'Task #2669 "ava.ui docs gap" is now assigned to you.')
     b = create_agent(db_conn)

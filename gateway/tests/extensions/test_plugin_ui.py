@@ -1,10 +1,3 @@
-"""GET /api/plugin-ui/{plugin}/... — the plugin page mount.
-
-Real plugin packages on disk with real `ui/` directories, read back through the
-endpoint: what a plugin ships is what the console can embed, and what it does
-not ship is a 404 rather than a path into the rest of the filesystem.
-"""
-
 import json
 from pathlib import Path
 
@@ -32,7 +25,6 @@ def _isolate_plugin_paths(
 
 
 def _write_plugin(name: str, *, files: dict[str, str] | None = None) -> Path:
-    """A plugin package, with `files` laid out under its `ui/` directory."""
     directory = paths.repo_plugins_dir() / name
     directory.mkdir()
     (directory / "plugin.py").write_text('"""A test plugin."""\n', encoding="utf-8")
@@ -59,7 +51,6 @@ def test_serves_the_mount_root_index() -> None:
 
 
 def test_bare_mount_redirects_to_the_trailing_slash() -> None:
-    """A page's relative asset links have to resolve against the mount."""
     _write_plugin("board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": True}}})
 
@@ -70,8 +61,6 @@ def test_bare_mount_redirects_to_the_trailing_slash() -> None:
 
 
 def test_serves_a_subdirectory_index_and_a_nested_asset() -> None:
-    """`page: "board/"` in a nav declaration is a directory URL, and the assets
-    beside it come through the same mount."""
     _write_plugin(
         "board",
         files={"board/index.html": _BOARD, "board/app.js": "console.log(1)\n"},
@@ -89,8 +78,6 @@ def test_serves_a_subdirectory_index_and_a_nested_asset() -> None:
 
 
 def test_directory_without_a_trailing_slash_redirects() -> None:
-    """A page's relative asset links resolve against the URL it loaded from, so
-    `…/board` would send `app.js` one level above where the plugin put it."""
     _write_plugin("board", files={"board/index.html": _BOARD, "board/app.js": "1\n"})
     write_local({"plugins": {"board": {"enabled": True}}})
 
@@ -101,7 +88,6 @@ def test_directory_without_a_trailing_slash_redirects() -> None:
 
 
 def test_dash_spelled_plugin_name_reaches_the_underscore_directory() -> None:
-    """The directory is a Python package; the name a URL carries is dash-spelled."""
     _write_plugin("ava_board", files={"index.html": _BOARD})
     write_local({"plugins": {"ava_board": {"enabled": True}}})
 
@@ -121,8 +107,6 @@ def test_disabled_plugin_has_no_mount(path: str) -> None:
 
 
 def test_unknown_plugin_and_a_plugin_without_pages_answer_alike() -> None:
-    """Same 404 detail for both: the mount does not report a plugin's
-    enable-state (or existence) to a caller that could not otherwise see it."""
     _write_plugin("plain")
     write_local({"plugins": {"plain": {"enabled": True}}})
 
@@ -135,8 +119,6 @@ def test_unknown_plugin_and_a_plugin_without_pages_answer_alike() -> None:
     assert no_pages.json()["detail"] == "no plugin page mount for 'plain'"
 
 
-# Percent-encoded, because an HTTP client collapses a literal `..` before the
-# request leaves it — the segment guard exists for the paths that do arrive.
 @pytest.mark.parametrize("rest", ["%2e%2e/plugin.py", "board/%2e%2e/%2e%2e/plugin.py", "a\\b"])
 def test_traversal_segments_are_refused(rest: str) -> None:
     _write_plugin("board", files={"index.html": _BOARD})
@@ -149,7 +131,6 @@ def test_traversal_segments_are_refused(rest: str) -> None:
 
 
 def test_a_symlink_out_of_the_ui_dir_is_refused() -> None:
-    """The segment check cannot see this one — only the resolved path can."""
     directory = _write_plugin("board", files={"index.html": _BOARD})
     secret = directory.parent.parent / "secret.txt"
     secret.write_text("cluster secret\n", encoding="utf-8")
@@ -172,8 +153,6 @@ def test_missing_file_is_404() -> None:
 
 
 def test_nav_declarations_reach_the_console_attributed() -> None:
-    """The mount serves the page; the aggregation endpoint says where the
-    console links to it."""
     directory = _write_plugin("board", files={"board/index.html": _BOARD})
     (directory / "ava-plugin.json").write_text(
         json.dumps(

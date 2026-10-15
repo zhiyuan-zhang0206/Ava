@@ -1,13 +1,3 @@
-"""Tests for plugins/ava_syntax_fix/plugin.py.
-
-Coverage:
-- fix_chinese_punctuation: convert Chinese punctuation to ASCII
-- detect_missing_imports: detect missing imports
-- insert_imports: insert import statements at the correct position
-- ruff_fix: ruff check --fix (mock subprocess)
-- syntax_fix_before_exec: full pipeline (Chinese punctuation → import → ruff → compile)
-"""
-
 import pathlib
 import shutil
 import subprocess
@@ -34,8 +24,6 @@ from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
     ruff_format,
 )
 
-# --- fix_chinese_punctuation ---
-
 
 class TestFixChinesePunctuation:
     def test_no_chinese_no_change(self):
@@ -44,25 +32,21 @@ class TestFixChinesePunctuation:
         assert n == 0
 
     def test_chinese_comma_to_ascii(self):
-        # \uff0c = fullwidth comma
         code, n = fix_chinese_punctuation("print(1\uff0c2)")
         assert code == "print(1,2)"
         assert n == 1
 
     def test_chinese_period_to_dot(self):
-        # \u3002 = fullwidth period
         code, n = fix_chinese_punctuation("import os\u3002")
         assert code == "import os."
         assert n == 1
 
     def test_chinese_left_quote_to_ascii(self):
-        # \uff08 = fullwidth left paren, \uff09 = fullwidth right paren
         code, n = fix_chinese_punctuation("print\uff081\uff09")
         assert code == "print(1)"
         assert n == 2
 
     def test_multiple_replacements(self):
-        # Multiple Chinese punctuation
         code, n = fix_chinese_punctuation("a\uff0cb\u3002c\uff08d\uff09")
         assert code == "a,b.c(d)"
         assert n == 4
@@ -73,22 +57,17 @@ class TestFixChinesePunctuation:
         assert n == 0
 
     def test_in_string_punctuation_preserved(self):
-        # Fullwidth comma inside a string literal is intended text, not a code
-        # fat-finger -- must be left untouched.
         src = 'msg = "\u4f60\u597d\uff0c\u4e16\u754c"'
         code, n = fix_chinese_punctuation(src)
         assert code == src
         assert n == 0
 
     def test_in_triple_quote_preserved(self):
-        # The agent68 class of bug: a Chinese prompt in a triple-quoted string.
-        # Rewriting fullwidth quotes inside could forge a closing \"\"\" and break
-        # the literal. The string must survive verbatim and still compile.
         src = 'p = """\u95ee\u9898\u80cc\u666f\uff1a\u8bf7\u7528 \u201c\u667a\u80fd\u201d \u6a21\u5f0f\u3002"""'
         code, n = fix_chinese_punctuation(src)
         assert code == src
         assert n == 0
-        compile(code, "<t>", "exec")  # still valid
+        compile(code, "<t>", "exec")
 
     def test_comment_punctuation_preserved(self):
         src = "x = 1  # \u8c03\u7528\uff08\u91cd\u8981\uff09"
@@ -97,51 +76,26 @@ class TestFixChinesePunctuation:
         assert n == 0
 
     def test_code_position_fixed_but_string_preserved(self):
-        # Same line: fullwidth paren in code position is fixed; fullwidth comma
-        # inside the string argument is preserved.
         src = 'print\uff08"a\uff0cb"\uff09'
         code, n = fix_chinese_punctuation(src)
         assert code == 'print("a\uff0cb")'
         assert n == 2
 
     def test_fullwidth_quote_delimiters_fixed_interior_preserved(self):
-        # Model used fullwidth quotes AS string delimiters. Pass 1 converts the
-        # delimiters to ASCII so the body becomes a real string token; pass 2
-        # then leaves the interior comma alone. Delimiters fixed, text intact.
         src = "msg = \u201c\u4f60\u597d\uff0c\u4e16\u754c\u201d"
         code, n = fix_chinese_punctuation(src)
         assert code == 'msg = "\u4f60\u597d\uff0c\u4e16\u754c"'
-        assert n == 2  # only the two quotes; the interior fullwidth comma stays
+        assert n == 2
         compile(code, "<t>", "exec")
 
     def test_tokenize_failure_returns_unchanged(self):
-        # Unterminated paren makes tokenize raise TokenError; rather than risk
-        # corrupting in-string text we return the source unchanged and let
-        # compile()/LLM repair handle it downstream.
         src = 'x = ("a\uff0cb"'
         code, n = fix_chinese_punctuation(src)
         assert code == src
         assert n == 0
 
 
-# --- translate_outside_strings crash guard (gh-149183) ---
-
-
 class TestTranslateOutsideStringsCrashGuard:
-    """The CPython 3.12+ C tokenizer crashes instead of raising a tokenize
-    error on f-string replacement fields that mix '=' (debug), ':'/'!'
-    delimiters and invalid expressions: it computes a negative string length
-    and raises SystemError("Negative size passed to PyUnicode_New")
-    (gh-149183; upstream fix gh-149445 targets 3.15+ only; on 3.13+ the same
-    input surfaces as MemoryError -- the guard degrades both). The
-    punctuation translation must degrade to a no-op instead of aborting the
-    agent host run.
-    """
-
-    # Minimal gh-149183-style trigger, distilled from the 2026-09-09 agent
-    # 3428 incident input: '=' in the replacement field enables the debug
-    # metadata path, and the two '!' attribute expressions desync the
-    # expression buffer offsets so the C tokenizer computes a negative size.
     CRASH_INPUT = (
         "x = f'''() => {\n"
         "      x = 1;\n"
@@ -188,8 +142,6 @@ class TestTranslateOutsideStringsCrashGuard:
         "comma); the guard degrades the 3.12+ crash manifestations",
     )
     def test_escapes_fixer_degrades_on_crash_input(self):
-        # The escape fixer is the next in-process tokenize stage; the same
-        # input must degrade there too instead of crashing the pipeline.
         from ava_builtins.plugins.ava_syntax_fix._escapes import fix_invalid_escapes
 
         code, n = fix_invalid_escapes(self.CRASH_INPUT)
@@ -199,10 +151,6 @@ class TestTranslateOutsideStringsCrashGuard:
     def test_memoryerror_from_tokenizer_degrades_to_noop(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # 3.13+ surfaces the gh-149183 input as MemoryError; the guard must
-        # degrade that too instead of aborting the agent host run. Injected
-        # so the branch runs on every interpreter (CI pins 3.12, where the
-        # real input raises SystemError).
         import tokenize
 
         def boom(_readline: object) -> object:
@@ -235,9 +183,6 @@ class TestTranslateOutsideStringsCrashGuard:
         code, n = translate_outside_strings("print(1\uff0c2)", PUNCT_MAP)
         assert code == "print(1,2)"
         assert n == 1
-
-
-# --- detect_missing_imports ---
 
 
 class TestDetectMissingImports:
@@ -292,23 +237,19 @@ class TestDetectMissingImports:
         assert detect_missing_imports(code) == []
 
     def test_skips_builtins(self):
-        """True, False, None etc. are builtins and should not be auto-imported."""
         assert detect_missing_imports("True") == []
         assert detect_missing_imports("print('hello')") == []
         assert detect_missing_imports("len([1,2])") == []
 
     def test_detects_os_import(self):
-        """os should be auto-imported (it is not in the execution namespace)."""
         result = detect_missing_imports("os.getcwd()")
         assert "import os" in result
 
     def test_detects_sys_import(self):
-        """sys should be auto-imported."""
         result = detect_missing_imports("sys.argv")
         assert "import sys" in result
 
     def test_detects_time_import(self):
-        """time should be auto-imported."""
         result = detect_missing_imports("time.sleep(1)")
         assert "import time" in result
 
@@ -327,55 +268,41 @@ math.sqrt(y)
 re.compile(z)
 """
         result = detect_missing_imports(code)
-        # should be sorted alphabetically
         imports = [s for s in result if s.startswith("import ")]
         assert imports == sorted(imports)
 
     def test_ava_transitive_skipped(self):
-        """os, sys, time are now explicitly imported (no longer transitively available through ava)."""
         code = "os.getcwd()\nsys.argv\ntime.time()"
         result = detect_missing_imports(code)
-        # os, sys, time should all appear in the result
         stmts = set(result)
         assert "import os" in stmts
         assert "import sys" in stmts
         assert "import time" in stmts
 
     def test_ava_detected(self):
-        """ava should be auto-imported in syntax-fix (PR #484 removed auto-import ava from execute_code)."""
         result = detect_missing_imports("ava.files.read('x')")
         assert "import ava" in result
 
     def test_ava_already_imported_skipped(self):
-        """When ava is already imported, do not add it again."""
         code = "import ava\nava.files.read('x')"
         assert detect_missing_imports(code) == []
 
     def test_import_below_first_usage_counts_as_missing(self):
-        """`import os` below the first `os.attr` would NameError at runtime —
-        detector must still flag it so the prepended import resolves the use."""
         code = "os.environ.get('X')\nimport os\nos.walk('/')\n"
         result = detect_missing_imports(code)
         assert "import os" in result
 
     def test_import_above_first_usage_skipped(self):
-        """Standard ordering: import before use — no fresh import needed."""
         code = "import os\nos.environ.get('X')\n"
         assert detect_missing_imports(code) == []
 
     def test_dotted_import_below_first_usage_counts_as_missing(self):
-        """Same rule for dotted modules (urllib.parse etc.)."""
         code = "urllib.parse.urlparse('http://x')\nimport urllib.parse\n"
         assert "import urllib.parse" in detect_missing_imports(code)
 
     def test_from_import_below_first_usage_counts_as_missing(self):
-        """`from json import dumps` below its first attr-use counts as missing
-        too — `json.dumps` on line 1 sees no `json` binding yet."""
         code = "json.dumps({'a': 1})\nfrom json import dumps\n"
         assert "import json" in detect_missing_imports(code)
-
-
-# --- insert_imports ---
 
 
 class TestInsertImports:
@@ -411,7 +338,6 @@ class TestInsertImports:
     def test_empty_imports_no_change(self):
         code = "print(1)"
         result = insert_imports(code, [])
-        # empty import list inserts an empty string at the insert_at position
         assert "print(1)" in result
 
     def test_multiple_imports(self):
@@ -421,16 +347,10 @@ class TestInsertImports:
         assert "import math" in result
 
 
-# --- ruff_fix ---
-
-
 class TestRuffFix:
     def test_ruff_available_runs_fix(self):
-        """Verify ruff is actually called and returns fixed code."""
-        # ruff should be available in dev env
         code = 'import os\nimport os\nprint("\u4f60\u597d")\n'
         result = ruff_fix(code)
-        # ruff should process Unicode source without crashing.
         assert isinstance(result, str)
         assert "\u4f60\u597d" in result
 
@@ -473,12 +393,8 @@ class TestRuffFix:
         assert ruff_fix(code) == code
 
 
-# --- ruff_format ---
-
-
 class TestRuffFormat:
     def test_ruff_available_normalizes_style(self):
-        """ruff format normalizes non-canonical style to canonical (ruff should be available in dev env)."""
         result = ruff_format('message="\u4f60\u597d"\n')
         assert result == 'message = "\u4f60\u597d"\n'
 
@@ -515,12 +431,6 @@ class TestRuffFormat:
             args=["ruff"], returncode=0, stdout="", stderr=""
         )
         assert ruff_format("x=1\n") == "x=1\n"
-
-
-# --- ruff give-up logging (issue #159) ---
-# A ruff pass that gives up must be visible: a timeout / OS error logs a
-# warning with the budget, input size, and errno; a missing ruff logs once per
-# process. The pass-through behavior itself is unchanged.
 
 
 class TestRuffGiveUpLogging:
@@ -589,7 +499,6 @@ class TestRuffGiveUpLogging:
 
     @patch("subprocess.run")
     def test_ruff_missing_reports_each_skipped_stage(self, mock_run, loguru_records):
-        """Every skipped stage remains visible and passes through its source."""
         mock_run.side_effect = FileNotFoundError
         for code in ("a = 1\n", "b = 2\n"):
             assert ruff_fix(code) == code
@@ -614,19 +523,7 @@ class TestRuffGiveUpLogging:
         assert any("errno=28" in m for m in msgs), msgs
 
 
-# --- ruff_executable ---
-
-
 class TestRuffExecutableResolution:
-    """ruff must resolve without the venv's ``bin`` dir on ``PATH``.
-
-    The agent runs as ``<venv>/bin/python`` with the venv never *activated*, so
-    ``PATH`` generally lacks ``<venv>/bin``. Every ruff-backed fixer swallows
-    ``FileNotFoundError`` and returns its input unchanged, so a bare ``"ruff"``
-    lookup degrades the whole missing-import / lint / format stage to a silent
-    no-op there rather than failing loudly.
-    """
-
     def test_resolves_to_the_interpreters_own_ruff(self):
         resolved = pathlib.Path(ruff_executable())
         assert resolved.is_file()
@@ -635,47 +532,15 @@ class TestRuffExecutableResolution:
     def test_ruff_backed_fixers_work_with_ruff_absent_from_path(
         self, monkeypatch: pytest.MonkeyPatch
     ):
-        """The regression itself: empty PATH must not disable the fixers."""
         monkeypatch.setenv("PATH", "")
         assert shutil.which("ruff") is None, "precondition: PATH cannot find ruff"
         assert ruff_format("x=1\n") == "x = 1\n"
         assert "import json" in detect_missing_imports("json.dumps({'a': 1})")
 
 
-# ============================================================================
-# fix_invalid_escapes
-# ============================================================================
-
-
-# ============================================================================
-# syntax_fix_before_exec integration
-# ============================================================================
-
-
-# ============================================================================
-# _is_stdlib_module
-# ============================================================================
-
-
-# LLM repair helpers
-# ============================================================================
-
-
-# ============================================================================
-# Deterministic fixes tests (syntax-fix v3)
-# ============================================================================
-
-
 def is_broken(code: str) -> bool:
-    """True when `code` fails to compile -- used to assert a fixture is a
-    genuine syntax error before a fixer is run against it."""
     try:
         compile(code, "<t>", "exec")
     except SyntaxError:
         return True
     return False
-
-
-# ============================================================================
-# trace-v2 syntax_fix events (task #792 group B)
-# ============================================================================

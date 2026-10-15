@@ -1,13 +1,3 @@
-"""CI blocking gate: the shared five-surface matrix against committed goldens.
-
-Runs the same capture matrix as the post-deploy visual gate (five surfaces x
-two viewports x two themes) against the production frontend build served by
-the e2e stack, then compares the static crops with the committed golden
-captures. Drift fails the test — an intentional UI change must re-mint the
-goldens on the same ubuntu runner via the visual-baselines workflow before the
-PR can merge (generation and comparison share one rendering environment).
-"""
-
 from __future__ import annotations
 
 import json
@@ -71,11 +61,6 @@ def mint_goldens(
     *,
     golden_root: Path = GOLDEN_ROOT,
 ) -> None:
-    """Turn the current captures into the committed golden set.
-
-    Same acceptance rule as the deployment gate's --accept-wave: a run with
-    structural failures can never become the golden.
-    """
     assert not structural, (
         "preview visual gate: refusing to mint goldens from a structurally "
         f"broken run: {structural}"
@@ -107,12 +92,6 @@ def mint_goldens(
 def test_preview_visual_gate(
     playwright_browser: Browser, frontend_proc: None, gateway_proc: str, tmp_path: Path
 ) -> None:
-    """Five-surface matrix against the committed preview goldens.
-
-    ``PREVIEW_GATE_REFRESH=1`` turns the test into a mint run (CI runner only,
-    never a dev machine): current captures replace the goldens instead of being
-    compared, guarded by the same structural-clean rule as --accept-wave.
-    """
     registry = load_ignore_registry(REGISTRY_PATH)
     captures = tmp_path / "captures"
     minting = os.environ.get(REFRESH_ENV) == "1"

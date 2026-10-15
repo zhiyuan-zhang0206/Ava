@@ -1,8 +1,3 @@
-"""`reserve_port`: a port nothing else can take between the pick and the real listener.
-
-It lives here, not in a package `tests/` directory: an e2e module may not import from one
-(`scripts/ci/tests/test_e2e_scope.py`)."""
-
 import contextlib
 import errno
 import socket
@@ -17,8 +12,6 @@ from tests.e2e._ports import (
     reserve_port,
 )
 
-# A block of this file's own, so a concurrent test session or an e2e run on the default
-# block cannot make these candidates busy.
 _BASE = 28000
 _STRIDE = 8
 _ATTEMPTS = 4
@@ -29,7 +22,6 @@ def _reserve(slot: int):
 
 
 def _node_like_listen(port: int) -> socket.socket:
-    """What `next start` does: SO_REUSEADDR, bind, listen."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -57,10 +49,9 @@ def test_a_held_port_cannot_be_taken_by_a_node_like_listener_until_it_is_release
         assert taken.value.errno == errno.EADDRINUSE
     finally:
         reservation.release()
-    # The handoff: once released the process meant to listen can bind it.
     with contextlib.closing(_node_like_listen(reservation.port)) as listener:
         assert listener.getsockname()[1] == reservation.port
-    reservation.release()  # idempotent
+    reservation.release()
 
 
 def test_a_port_stolen_before_the_pick_is_skipped_not_returned(
@@ -71,7 +62,6 @@ def test_a_port_stolen_before_the_pick_is_skipped_not_returned(
     reservation = _reserve(2)
     try:
         assert reservation.port == first_candidate + _STRIDE
-        # and the one it took is held against the same kind of thief
         with pytest.raises(OSError):
             _node_like_listen(reservation.port)
     finally:

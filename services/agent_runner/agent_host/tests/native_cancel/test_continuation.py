@@ -1,5 +1,3 @@
-"""A lost result/commit never starts another native invocation or claims chat."""
-
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
@@ -43,7 +41,6 @@ class _Faults:
 
 
 def install_faults(patch: pytest.MonkeyPatch, agent: int, site: str) -> _Faults:
-    """Faults wrap actual PostgreSQL flush/transactions, never fake production storage."""
     faults = _Faults()
     actual_invoke, actual_flush, actual_tx = (
         host_owner.run_invocation_with_stall_guard,

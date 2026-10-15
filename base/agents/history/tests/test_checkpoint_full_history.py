@@ -1,5 +1,3 @@
-"""Lossless transcript reconstruction across compaction boundaries."""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -30,7 +28,6 @@ def _db(database_gate: ProcessDbGate) -> Database:
 
 
 def test_compact_boundary_lookup_uses_a_closed_autocommit_pool() -> None:
-    """Checkpoint cold reads borrow an autocommit connection from a pool of the handle."""
     from base.agents.history import checkpoint
 
     class _Result:
@@ -80,7 +77,6 @@ def _put_checkpoint(
     metadata: dict[str, object] | None = None,
     version: str,
 ) -> str:
-    """Write one full messages snapshot and return its checkpoint id."""
     checkpoint = empty_checkpoint()
     checkpoint["channel_values"] = {"messages": list(messages)}
     checkpoint["channel_versions"] = {"messages": version, "__start__": "1"}
@@ -320,7 +316,6 @@ def test_load_checkpoint_messages_segment_returns_empty_without_boundaries(
 def test_history_layout_records_each_segments_own_head_and_body_start(
     db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
-    """The stitched list drops the joins' SystemMessages; the layout keeps them."""
     _put_checkpoint(
         "7",
         [SystemMessage(content="system-1"), HumanMessage(content="first task")],
@@ -378,9 +373,6 @@ def test_history_layout_of_a_single_snapshot_and_of_no_checkpoint(
 def test_history_carries_each_sealed_segments_closing_request(
     db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
-    """A boundary's `compact_anchor` metadata comes back per segment; a boundary without one
-    (every compaction before the anchor existed, every no-LLM compaction) and the open segment
-    have None."""
     anchor = {"input_tokens": 1234, "extra_tokens": 56, "model": "m1"}
     _put_checkpoint(
         "8",

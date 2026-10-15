@@ -41,3 +41,11 @@ interception; the event-pipeline sink stays in `base/log/process.py`.
 ## Stdlib interception
 
 `_StdlibInterceptHandler` routes records from stdlib `logging.getLogger(...)` into loguru sinks (many services historically used stdlib logging), otherwise their lines would only appear on stderr and not enter the event stream. Installed on the root logger; `psycopg.pool` recycling noise is gated to ERROR.
+
+## Logging fixture restoration
+
+`tests/stdlib_logging.py` restores logger levels as well as handlers. Levels
+live in the process-global logger manager: a later test may format a bad record
+that an earlier level gate discarded. The fixture restores root and previously
+named levels, and resets newly created loggers to NOTSET; it does not assume
+all third-party loggers began at DEBUG.

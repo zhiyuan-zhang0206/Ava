@@ -1,10 +1,3 @@
-"""Push delivery with an ACK window: the relay delivers full inbox content
-and retries an unacknowledged message once before ending the lease.
-
-The relay never ACKs work itself and never renews the lease; a failed or
-restarted relay cannot lose a pending message.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -151,8 +144,6 @@ class Listener:
 
 
 class FakeClock:
-    """Monotonic test clock patched onto relay.loop_time and relay.asyncio.sleep."""
-
     def __init__(self) -> None:
         self.t = 0.0
 
@@ -202,12 +193,9 @@ def run(
     )
 
 
-# ── Start message and activation pushes ───────────────────────────────────────
-
-
 def test_start_message_then_pending_push_skips_the_merge_window() -> None:
     inbox = Inbox(5, 6)
-    inbox.batch_window = 30.0  # routine rows would wait; activation rows skip it
+    inbox.batch_window = 30.0
     emitted: list[str] = []
 
     def emit(text: str) -> None:
@@ -297,9 +285,6 @@ def test_waits_for_native_consent_then_delivers_start_and_inbox() -> None:
     assert "ids=7" in emitted[1]
 
 
-# ── Merge window and urgency ───────────────────────────────────────────────────
-
-
 def test_fresh_routine_arrival_waits_out_the_merge_window(clock: FakeClock) -> None:
     inbox = Inbox()
     inbox.batch_window = 30.0
@@ -308,9 +293,9 @@ def test_fresh_routine_arrival_waits_out_the_merge_window(clock: FakeClock) -> N
     def waited(n: int) -> None:
         if n == 1:
             inbox.add(8)
-            clock.advance(29.0)  # window still open
+            clock.advance(29.0)
         elif n == 2:
-            clock.advance(30.0)  # window elapsed (59s > 30s deadline from t=29)
+            clock.advance(30.0)
         else:
             inbox.active = False
 
@@ -346,9 +331,6 @@ def test_urgent_arrivals_push_immediately_without_the_merge_window(
     assert f"[id=9] kind={kind} from={source}" in emitted[1]
 
 
-# ── ACK window and re-delivery ─────────────────────────────────────────────────
-
-
 def test_unacknowledged_batch_is_redelivered_after_the_ack_window(clock: FakeClock) -> None:
     inbox = Inbox(11)
     emitted: list[str] = []
@@ -375,7 +357,7 @@ def test_redelivery_covers_only_still_unacknowledged_ids(clock: FakeClock) -> No
 
     def waited(n: int) -> None:
         if n == 1:
-            inbox.ack(11)  # half processed
+            inbox.ack(11)
             clock.advance(inbox.ack_window_seconds + 1)
         else:
             inbox.active = False
@@ -385,7 +367,7 @@ def test_redelivery_covers_only_still_unacknowledged_ids(clock: FakeClock) -> No
     assert len(emitted) == 3
     assert "ids=11,12" in emitted[1]
     assert "ids=12" in emitted[2]
-    assert "[id=11]" not in emitted[2]  # the re-pushed page is {12} only
+    assert "[id=11]" not in emitted[2]
     assert "re-delivery: unacknowledged" in emitted[2]
 
 
@@ -414,7 +396,7 @@ def test_new_message_under_an_outstanding_batch_is_pushed_as_a_new_batch() -> No
 
     def waited(n: int) -> None:
         if n == 1:
-            inbox.add(6)  # no ACK: batch one stays outstanding
+            inbox.add(6)
         else:
             inbox.active = False
 
@@ -424,9 +406,6 @@ def test_new_message_under_an_outstanding_batch_is_pushed_as_a_new_batch() -> No
     assert emitted[0] == inbox.start_message
     assert "ids=5" in emitted[1]
     assert "ids=6" in emitted[2]
-
-
-# ── Failure, expiry and lifecycle ──────────────────────────────────────────────
 
 
 def test_failed_delivery_preserves_pending_and_restart_replays() -> None:
@@ -516,7 +495,7 @@ def test_wait_never_extends_beyond_lease_lifetime() -> None:
     listener = Listener(inbox, waited=waited)
     emitted: list[str] = []
     run(inbox, listener, emitted.append)
-    assert len(emitted) == 2  # start message + the activation-pending push
+    assert len(emitted) == 2
     assert listener.waits
     assert all(timeout <= 8.0 for timeout in listener.waits)
 
@@ -532,9 +511,6 @@ def test_local_clock_cannot_revoke_db_active_lease_or_busy_spin() -> None:
     assert listener.waits == [0.5]
 
 
-# ── Emit rate and envelope bounds ──────────────────────────────────────────────
-
-
 def test_emits_respect_the_monitor_event_rate_across_ack_cycles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -545,7 +521,7 @@ def test_emits_respect_the_monitor_event_rate_across_ack_cycles(
     async def sleep(delay: float) -> None:
         delays.append(delay)
         if len(delays) == 2:
-            inbox.add(3)  # bursts merge inside the debounce window
+            inbox.add(3)
 
     def waited(n: int) -> None:
         if n == 1:
@@ -583,9 +559,6 @@ def test_claude_envelope_truncates_long_content_but_keeps_the_ack_line() -> None
     assert len(body_line[0]) <= relay.PUSH_MAX_CHARS + len(
         " (truncated — run the inbox command to read the full body before acknowledging)"
     )
-
-
-# ── Snapshot bridging ──────────────────────────────────────────────────────────
 
 
 def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
@@ -683,9 +656,6 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
             "memory-only-token",
             local_machine=machine_identity.name(),
         )
-
-
-# ── Command plumbing ───────────────────────────────────────────────────────────
 
 
 def test_write_heartbeat_stops_at_a_terminal_lease(

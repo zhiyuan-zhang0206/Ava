@@ -1,14 +1,3 @@
-"""Bounded wait for in-flight work during preparation (task #3591).
-
-Three states, per the acceptance criteria: work that resolves during the wait
-lets preparation proceed; one that outlives the bound aborts with the wait
-result in the message and an ``exceeded`` event; and a collision-free
-preparation is the unchanged pre-#3591 path. Class separation (maintenance-
-authored commands refuse without waiting; ordinary lifecycle commands wait;
-orphaned ordinary claims settle) and the clean retry boundary (a
-collision freezes nothing) are asserted alongside.
-"""
-
 import asyncio
 import time
 from typing import Any
@@ -39,7 +28,6 @@ from ops.agent_pause.probe import HostIdentity
 def _as_live_host(
     monkeypatch: pytest.MonkeyPatch, owner: UUID, *, machine_identity: MachineIdentity
 ) -> None:
-    """Drive `_prepare` as the live agent-runner host owning `owner`."""
     machine_identity.set(role="agent-runner")
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
     monkeypatch.setattr(agent_pause, "host_identity", lambda: HostIdentity(owner, frozenset()))
@@ -47,7 +35,6 @@ def _as_live_host(
 
 
 def _poll_fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Cap each wait-loop sleep at 50 ms so a collision is re-checked quickly."""
     real_sleep = time.sleep
 
     def short_sleep(seconds: float) -> None:
@@ -57,7 +44,6 @@ def _poll_fast(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _claim(conn: psycopg.Connection[Any], message: int) -> None:
-    """Bring one inbound row to the claimed state the wait must observe."""
     conn.execute(
         "UPDATE inbound_messages SET status='claimed', claimed_at=clock_timestamp() WHERE id=%s",
         (message,),
@@ -65,11 +51,6 @@ def _claim(conn: psycopg.Connection[Any], message: int) -> None:
 
 
 def _resolve_lifecycle_command(conn: psycopg.Connection[Any], command: int) -> None:
-    """Complete a lifecycle command the way the host would (claimed targets, applied, observed).
-
-    `inbound_lifecycle_target_check` requires the target fields on any
-    claimed/done lifecycle row (db/schema.sql:398).
-    """
     conn.execute(
         "UPDATE inbound_messages SET status='done', claimed_at=COALESCE(claimed_at, "
         "clock_timestamp()), target_generation=%s, target_owner=%s, applied_at=clock_timestamp(), "
@@ -86,7 +67,6 @@ async def _live_member(
     *,
     machine_identity: MachineIdentity,
 ) -> int:
-    """An idling hosted agent under the live owner — preparation's original cohort."""
     agent = maintenance_agent(conn, machine_name=machine_identity.name())
     incarnation = await admit_hosted_runtime(
         aops_pool,
@@ -136,12 +116,9 @@ async def test_member_collision_is_waitable_and_freezes_nothing(
     assert raised.value.waitable
     assert raised.value.agent_ids == (agent,)
 
-    # The collision ran before the capture: the journal still holds a clean
-    # preparing boundary, so the retry re-derives the cohort from scratch.
     hold = admission.require_operation("move", WHEN).maintenance
     assert hold is not None and hold.phase == MaintenancePhase.PREPARING and hold.commands == {}
 
-    # The competing terminate resolves; preparation proceeds without the agent.
     _resolve_lifecycle_command(db_conn, command)
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent,))
     db_conn.commit()
@@ -245,7 +222,6 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
     assert not isinstance(raised.value, cohort.LifecycleCollisionError)
     assert "unfinished lifecycle command" in str(raised.value)
 
-    # Fail-closed: nothing was captured, and the hold stays preparing.
     hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.PREPARING and hold.commands == {}
     assert [event.attributes["outcome"] for event in emitted_events] == ["exceeded"]
@@ -446,7 +422,6 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     assert not isinstance(raised.value, cohort.LifecycleCollisionError)
     assert "unfinished lifecycle command" in str(raised.value)
 
-    # Fail-closed: nothing was captured, and the hold stays preparing.
     hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.PREPARING and hold.commands == {} and hold.parked == ()
     assert [event.attributes["outcome"] for event in emitted_events] == ["exceeded"]
@@ -576,12 +551,6 @@ def test_parked_claim_guards_agree_on_waitability(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Both parked guards carry the same rule: ordinary work waits, maintenance refuses.
-
-    ``require_resolved`` sits behind ``refuse_inflight_lifecycle`` as the
-    second guard, and preparation's retry decision depends on the two staying
-    consistent (task #4013).
-    """
     agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "hello", "user", bus=event_bus, database=database

@@ -1,13 +1,3 @@
-"""Agent-lifecycle effect scenarios: what an agent, a peer or the model actually sees.
-
-All use the recording model (`fakes/_recording.py`): real agent turns, real SDK calls from
-a real exec child, and the test asserts on the messages each agent's model was handed.
-
-Two-agent scenarios (`relay`, `spawn`) tell the roles apart the way the fork scenario
-does: a *peer* is the agent whose inbound came from another agent (`source LIKE
-'agent:%'`), committed before its process starts; the initiating agent has none.
-"""
-
 from __future__ import annotations
 
 import psycopg
@@ -43,7 +33,6 @@ def _is_peer(agent_id: int | None) -> bool:
 
 
 def build_relay(model: str, *, agent_id: int | None) -> RecordingModel:
-    """A sends B a message through the SDK; B answers."""
     if _is_peer(agent_id):
         return RecordingModel(agent_id=agent_id, script=(say(PEER_REPLY),))
     code = (
@@ -56,7 +45,6 @@ def build_relay(model: str, *, agent_id: int | None) -> RecordingModel:
 
 
 def build_spawn(model: str, *, agent_id: int | None) -> RecordingModel:
-    """A spawns a child through the SDK with a first prompt; the child answers."""
     if _is_peer(agent_id):
         return RecordingModel(agent_id=agent_id, script=(say(CHILD_REPLY),))
     code = (
@@ -68,12 +56,10 @@ def build_spawn(model: str, *, agent_id: int | None) -> RecordingModel:
 
 
 def build_terminate(model: str, *, agent_id: int | None) -> RecordingModel:
-    """One reply before the external terminate, one after the revival."""
     return RecordingModel(agent_id=agent_id, script=(say("first reply"), say(FINAL)))
 
 
 def build_cancel(model: str, *, agent_id: int | None) -> RecordingModel:
-    """A long exec the test cancels, then a normal reply to the next message."""
     code = (
         "import time\n"
         "print('exec-started')\n"

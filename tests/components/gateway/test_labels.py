@@ -1,9 +1,3 @@
-"""Tests for thread label auto-generation + PATCH endpoint.
-
-`generate_label_async` receives a fake `build_chat_model` factory directly,
-avoiding real DeepSeek calls. Covers CAS / fail-soft on failure / publish event.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -64,8 +58,6 @@ def _label_audit(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, obj
 
 
 class _FakeLLM:
-    """ainvoke returns a fixed content, simulating LLM invocation."""
-
     def __init__(self, content: str) -> None:
         self.content = content
         self.calls: list[Any] = []
@@ -76,14 +68,6 @@ class _FakeLLM:
 
 
 class _FakeLLMWithThinking:
-    """ainvoke returns list content (simulating Anthropic thinking blocks).
-
-    ChatAnthropic with extended thinking returns content as list:
-    [{"type":"thinking","thinking":"...","signature":"sig-..."},
-     {"type":"text","text":"label text"}]
-    str() on this dumps signature into label -- the bug being fixed.
-    """
-
     def __init__(self, text_label: str) -> None:
         self.text_label = text_label
 
@@ -116,7 +100,6 @@ class TestNormalize:
         assert _normalize("\u300c\u6d4b\u8bd5\u4efb\u52a1\u300d") == "\u6d4b\u8bd5\u4efb\u52a1"
 
     def test_truncate_at_max_chars(self) -> None:
-        # Within 64 chars — no truncation
         assert (
             _normalize("\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341")
             == "\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341"
@@ -138,11 +121,6 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
 ) -> None:
-    """A label response is accounted as a batch call before label validation.
-
-    The regression this catches is a provider call that returns an unusable
-    label being absent from the billing ledger despite consuming tokens.
-    """
     emitted: list[tuple[AIMessage, dict[str, object]]] = []
     response = AIMessage(
         content="",
@@ -213,7 +191,7 @@ class TestGenerateLabelAsync:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
     ) -> None:
-        tid = create_agent(db_conn)  # label NULL + label_user_set FALSE by default
+        tid = create_agent(db_conn)
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
@@ -222,7 +200,6 @@ class TestGenerateLabelAsync:
             published.append(payload)
             return 1
 
-        # patch publish path — don't hit real redis
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
         await generate_label_async(
@@ -237,8 +214,6 @@ class TestGenerateLabelAsync:
             overrides=ModelOverrides.from_pins({}),
         )
         assert _label_of(db_conn, tid) == "\u67e5 X \u6a21\u5757"
-        # LLM write does not flip sticky bit — user can still PATCH rename (LLM-written label counts as "not yet user-touched")
-        # only user PATCH flips it
         assert _label_user_set(db_conn, tid) is False
         assert len(published) == 1
         assert '"label_updated"' in published[0]
@@ -255,7 +230,6 @@ class TestGenerateLabelAsync:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
     ) -> None:
-        """When the user has already written a label via PATCH → LLM result should not overwrite."""
         tid = create_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -284,7 +258,6 @@ class TestGenerateLabelAsync:
             overrides=ModelOverrides.from_pins({}),
         )
         assert _label_of(db_conn, tid) == "\u7528\u6237\u6539\u7684"
-        # CAS miss → do not publish
         assert published == []
 
     @pytest.mark.asyncio
@@ -298,11 +271,7 @@ class TestGenerateLabelAsync:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
     ) -> None:
-        """After user PATCH reset writes label back to NULL + label_user_set=TRUE, the LLM
-        result should not hit again (blocked by `AND NOT label_user_set`). This is a critical race —
-        without sticky bit the reset semantics would be broken."""
         tid = create_agent(db_conn)
-        # simulate user PATCH reset (empty string goes through reset branch): write NULL while label_user_set=TRUE
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents SET label=NULL, label_user_set=TRUE WHERE id=%s",
@@ -360,7 +329,6 @@ class TestGenerateLabelAsync:
 
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
-        # A trusted provider transport failure leaves this agent eligible for retry.
         await generate_label_async(
             tid,
             "p",
@@ -386,7 +354,6 @@ class TestGenerateLabelAsync:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
     ) -> None:
-        """LLM returns blank / only quotes → normalize returns "" → do not write to DB, do not publish."""
         tid = create_agent(db_conn)
         published: list[str] = []
 
@@ -422,7 +389,6 @@ class TestGenerateLabelAsync:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
     ) -> None:
-        """content is list [thinking, text] -> only text block extracted, signature NOT in label."""
         tid = create_agent(db_conn)
         published: list[str] = []
 
@@ -458,11 +424,6 @@ class TestGenerateLabelAsync:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
     ) -> None:
-        """content is all thinking blocks with no text -> raw="" -> skip, label stays NULL.
-
-        Edge case: LLM started extended thinking but stopped before generating text
-        (e.g. max_tokens truncated during thinking). Don't crash, don't dump signature.
-        """
         tid = create_agent(db_conn)
 
         class _ThinkingOnlyLLM:
@@ -512,11 +473,6 @@ class TestGenerateLabelAsync:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
     ) -> None:
-        """Multiple text blocks -> joined with space.
-
-        Anthropic protocol allows multiple text blocks interleaved with
-        thinking/tool_use. In practice rare for label gen but don't crash.
-        """
         tid = create_agent(db_conn)
 
         class _MultiTextLLM:
@@ -565,7 +521,6 @@ class TestPatchThread:
         assert _label_user_set(db_conn, tid) is True
 
     def test_patch_reset_also_flips_user_set(self, db_conn: psycopg.Connection) -> None:
-        """Empty string reset is also an active user operation — sticky bit is also flipped TRUE, LLM can no longer overwrite."""
         tid = create_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents SET label='\u4e34\u65f6' WHERE id=%s", (tid,))
@@ -631,11 +586,9 @@ class TestPatchThread:
         with gateway_test_client() as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": "   x   "})
         assert resp.status_code == 204
-        # actually written as stripped "x"
         assert _label_of(db_conn, tid) == "x"
 
     def test_patch_only_whitespace_resets_to_null(self, db_conn: psycopg.Connection) -> None:
-        """All whitespace after strip becomes "" → goes through reset branch."""
         tid = create_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents SET label='something' WHERE id=%s", (tid,))
@@ -652,7 +605,7 @@ class TestPatchThread:
 
     def test_patch_too_long_label_422(self, db_conn: psycopg.Connection) -> None:
         tid = create_agent(db_conn)
-        long_label = "x" * 100  # > 64
+        long_label = "x" * 100
         with gateway_test_client() as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": long_label})
         assert resp.status_code == 422
@@ -662,11 +615,6 @@ class TestSpawnAgentSchedulesLabelGeneration:
     def test_spawn_with_prompt_leaves_label_null(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """POST /api/agents with prompt → label remains NULL.
-
-        Label auto-generation has been moved from the Gateway BackgroundTask to a separate services/derived/labeler daemon.
-        The Gateway spawn endpoint no longer triggers label generation — the labeler daemon asynchronously polls
-        the agents table and discovers new agents to generate labels."""
 
         async def _noop_publish(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
             assert auth_retry is False
@@ -683,7 +631,6 @@ class TestSpawnAgentSchedulesLabelGeneration:
         assert _label_of(db_conn, new_id) is None
 
     def test_spawn_without_prompt_leaves_label_null(self, db_conn: psycopg.Connection) -> None:
-        """Spawn without prompt → label stays NULL."""
         with gateway_test_client() as client:
             resp = spawn_via_http(client, {})
         assert resp.status_code == 201

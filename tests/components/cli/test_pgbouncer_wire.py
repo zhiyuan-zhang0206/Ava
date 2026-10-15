@@ -1,20 +1,3 @@
-"""End-to-end: a real PgBouncer in transaction pooling in front of a throwaway
-Postgres. Proves the load-bearing wire behaviour the unit tests cannot:
-
-- scram-sha-256 client auth against a userlist entry, with a credential-less
-  server hop (here TCP loopback trust — the pooling behavior under test is
-  independent of the hop's auth; the production verifier userlist and SCRAM
-  pass-through socket hop are proven in cli/commands/tests/test_single_box.py),
-- transaction pooling with `prepare_threshold=None` (never prepare) — the same
-  query run across many autocommit transactions never hits "prepared statement
-  does not exist" as different backends are handed out,
-- LangGraph's PostgresSaver setup() DDL + put/get through the pooler (the flagged
-  DDL-through-transaction-pooling risk).
-
-Skipped when pgbouncer is not installed (CI installs it through the
-install-pg-redis composite action; a dev box uses `brew install pgbouncer`).
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -75,11 +58,6 @@ def test_wrong_secret_is_rejected(
 def test_transaction_pooling_never_prepare(
     *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
 ) -> None:
-    """The same query across many autocommit transactions (each may land on a
-    different backend under default_pool_size=2) never errors with
-    prepare_threshold=None — the property that makes transaction pooling safe
-    (psycopg3's `0` prepares on the first execution; two fresh connections
-    preparing the same `_pg3_0` name on one backend collide)."""
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url) as pooled,
@@ -92,18 +70,6 @@ def test_transaction_pooling_never_prepare(
 
 @contextlib.contextmanager
 def _read_only_default_pooler(pg_url: str, pool_size: int = 2) -> Generator[str]:
-    """A pooler whose every session defaults to read-only, checked before yielding.
-
-    The forcing condition for the explicit `SET TRANSACTION READ WRITE`
-    declarations. PgBouncer >= 1.26 keeps one client's `SET
-    default_transaction_read_only` from reaching another, so an unasked-for
-    read-only default now comes from outside the client: a pooler that does not
-    track the parameter (a remote-managed data plane's), or a database or role
-    default, which is what this reproduces. `RESET ALL` restores such a default
-    rather than clearing it, so the session scrub cannot help and only the
-    explicit declaration gets a write through. The probe proves the condition is
-    live, so a passing write is the declaration's doing.
-    """
     with pgbouncer_in_front(pg_url, pool_size=pool_size, read_only_default=True) as pooled:
         with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as probe:
             row = probe.execute("SHOW default_transaction_read_only").fetchone()
@@ -112,12 +78,10 @@ def _read_only_default_pooler(pg_url: str, pool_size: int = 2) -> Generator[str]
 
 
 def _direct_writer(pg_url: str) -> psycopg.Connection:
-    """A direct setup/verify connection that writes despite a read-only default."""
     return psycopg.connect(pg_url, options="-c default_transaction_read_only=off")
 
 
 def _insert_agent(pg_url: str) -> int:
-    """Insert one agent for foreign-keyed PgBouncer wire-test rows."""
     with _direct_writer(pg_url) as conn:
         row = conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
         assert row is not None
@@ -132,8 +96,6 @@ def test_write_transaction_overrides_a_read_only_default_on_connect(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """Rule A writes (`set_posture`'s upsert, opened by `Database.write_transaction()` on its
-    own dial) land in sessions that default to read-only."""
     from base import config
     from base.deploy.state import host_deploy_state
 
@@ -159,7 +121,6 @@ def test_schedule_provision_overrides_a_read_only_default(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """R3 Rule A schedule provisioning declares direct writes read-write."""
     from base import config
     from cli.commands.management.schedules import cmd_schedules_provision
 
@@ -184,7 +145,6 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """Rule B's pool-borrow DELETE declares its transaction writable first."""
     from base import config
     from base.db import pool
     from services.upkeep.ttl_reaper.shells import delete_shell_row
@@ -218,7 +178,6 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
 def test_session_touch_overrides_a_read_only_default(
     *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
 ) -> None:
-    """R3 Rule B session writes declare a raw pool borrow read-write first."""
     from gateway.http.auth.session_store import touch_session
 
     with (
@@ -253,7 +212,6 @@ def test_session_touch_overrides_a_read_only_default(
 def test_async_write_transaction_overrides_a_read_only_default(
     *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
 ) -> None:
-    """Rule C opens an explicit read-write transaction on an autocommit pool."""
     from base.db.transaction import async_write_transaction
 
     async def write_once(pooled: str) -> None:
@@ -288,7 +246,6 @@ def test_plain_autocommit_write_still_fails_under_a_read_only_default(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """The read-only-default tests have teeth: an unpostured pooled write is rejected."""
     from base import config
     from base.db import connect
 
@@ -309,13 +266,6 @@ def test_plain_autocommit_write_still_fails_under_a_read_only_default(
 def test_pooler_isolates_one_clients_read_only_posture_from_another(
     *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
 ) -> None:
-    """PgBouncer >= 1.26 keeps a client's `default_transaction_read_only` to itself.
-
-    With one pooled backend, a client that sets the default read-only and holds
-    its connection shares the backend with a second client, and the second
-    client still sees its own (writable) default: the cross-client leak behind
-    the 2026-09-02 P0 cannot happen in the pooler this repo pins.
-    """
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url, pool_size=1) as pooled,
@@ -333,7 +283,6 @@ def test_pooler_isolates_one_clients_read_only_posture_from_another(
 
 
 def _statement_timeout(conn: psycopg.Connection) -> str:
-    """The backend's statement_timeout as a string, with a row-asserted fetchone."""
     row = conn.execute("SHOW statement_timeout").fetchone()
     assert row is not None
     return str(row[0])
@@ -342,16 +291,11 @@ def _statement_timeout(conn: psycopg.Connection) -> str:
 def test_connect_query_bounds_pooled_backends_at_birth(
     *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
 ) -> None:
-    """A pooled backend is born with statement_timeout=60s via the connect_query,
-    even for a client that never issues the SET itself — the pooler-side half of
-    the statement-timeout delivery. Without connect_query this client (options
-    startup parameter dropped by the pooler, no explicit SET) would see 0."""
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url) as pooled,
         psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as conn,
     ):
-        # No options=, no SET — the backend's connect_query is the only source.
         assert _statement_timeout(conn) == "1min"
 
 
@@ -363,9 +307,6 @@ def test_base_connect_applies_statement_timeout_on_pooled_dial(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """base.db.connect() delivers the statement ceiling through the pooler: the
-    `options` startup parameter is dropped by PgBouncer, so the pooled dial runs
-    the explicit SET (the client-side half of the delivery)."""
     from base import config
 
     with (
@@ -373,12 +314,6 @@ def test_base_connect_applies_statement_timeout_on_pooled_dial(
         pgbouncer_in_front(pg_url) as pooled,
     ):
         dp = config.settings.data_plane
-        # The one-URL design: AVA_DB_URL carries the pooled listener URL; dialing
-        # it (direct=False) is a pooled dial and must issue the SET. The pooled
-        # front door authenticates with scram against the userlist (role
-        # `ava_citest`, the harness secret), so the URL settings carry must use
-        # that role+password — the throwaway pg's own URL user (`ava`) has no
-        # password and is not in the userlist.
         monkeypatch.setattr(dp, "db_url", pooled)
 
         import base.db
@@ -395,8 +330,6 @@ def test_base_pool_applies_statement_timeout_on_pooled_dial(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """base.db.pool() applies the SET on every new backend via the pool's
-    configure hook — a borrowed connection through PgBouncer is bounded."""
     from base import config
 
     with (
@@ -419,10 +352,6 @@ def test_base_pool_applies_statement_timeout_on_pooled_dial(
 def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer(
     *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
 ) -> None:
-    """PostgresSaver.setup() DDL + put/get run through the pooler in transaction
-    mode — the flagged DDL-through-transaction-pooling risk. setup() is idempotent
-    (throwaway pg already has the tables); this asserts it does not choke via the
-    pooler and a checkpoint round-trips."""
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.base import empty_checkpoint
     from langgraph.checkpoint.postgres import PostgresSaver
@@ -444,13 +373,6 @@ def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer(
 def test_admin_probe_reaches_the_bound_address_only(
     *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
 ) -> None:
-    """P4: the admin-console probe authenticates as the pooler admin and dials
-    exactly the address it names — an address pgbouncer did not bind FAILS,
-    while the bound one answers. (Public-bind verification itself reads the
-    socket table, `pgbouncer_public_listener_reachable`, never a self-dial.)
-
-    127.0.0.2 is local on Linux (CI runs this); macOS needs an lo0 alias, so
-    skip there."""
     import sys
 
     from base.cluster.dataplane.pooler import admin_reachable
@@ -466,33 +388,10 @@ def test_admin_probe_reaches_the_bound_address_only(
         assert admin_reachable(listen_port, SECRET, host="127.0.0.1") is False
 
 
-# ── Pooled session-GUC pollution (2026-09-02 P0) ────────────────────────────
-#
-# pgbouncer transaction pooling hands any backend to any client transaction and
-# does NOT reset backend session state on the ordinary release path (the reset
-# runs only in the SV_ACTIVE window, always=0). A session-level SET therefore
-# stays on the shared backend for the next borrower. PgBouncer >= 1.26 tracks
-# the parameters PostgreSQL reports to clients per client, which closed the
-# read-only vector of the 2026-09-02 P0 (500s on the agent message /
-# schedule-stop APIs) for the pooler this repo pins; parameters PostgreSQL
-# does not report (search_path, statement_timeout, lock_timeout, work_mem, …)
-# still leak, and a remote-managed data plane's pooler may track nothing. The
-# client side must scrub the session back to baseline on every pooled use;
-# these tests pin that contract end to end with an untracked poison.
-
 _POISON_SQL = ("SET search_path = nowhere", "SET statement_timeout = 0")
 
 
 def _poison_backend(pooled: str) -> None:
-    """Leave untracked session GUCs on the single pooled backend, then prove
-    they reached the next client.
-
-    One client breaks name resolution (every unqualified statement now fails
-    with UndefinedTable) and lifts the statement ceiling, then disconnects
-    cleanly. A raw client that runs no scrub must observe both on the same
-    backend: if a future pooler or PostgreSQL starts tracking them, this fails
-    loudly instead of letting the scrub tests below pass against a clean
-    backend. The raw client resets nothing, so the backend stays poisoned."""
     with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as polluter:
         for statement in _POISON_SQL:
             polluter.execute(statement)
@@ -510,10 +409,6 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """Pool-level regression: a borrower must never inherit another client's
-    session-level SET. The pool's `check` hook (every borrow) restores the
-    baseline session, so the borrowed session resolves names and carries the
-    statement ceiling again, and an unqualified write succeeds."""
     import base.db as base_db
     from base import config
 
@@ -524,9 +419,6 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         pool = base_db.pool(min_size=1, max_size=1, gate=database_gate)
         try:
-            # Force the pool's physical backend into existence (creation runs the
-            # configure hook) BEFORE poisoning, so the borrow-time check hook —
-            # not backend birth — is what saves the borrower below.
             with pool.connection() as conn:
                 conn.execute("SELECT 1")
             _poison_backend(pooled)
@@ -549,11 +441,6 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """P0 batch-5 regression: the agent message INSERT and the schedule stop
-    UPDATE — the two API writes the user saw 500 — succeed when pgbouncer hands
-    their transaction a backend another client left polluted. Runs the real
-    write helpers through the sanctioned pool path against a poisoned
-    single-backend pooler."""
     import base.db as base_db
     from base import config
     from base.agents.inbox.chat_delivery import insert_chat_inbound_once
@@ -565,8 +452,6 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     ):
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
 
-        # The inbound wake publish needs Redis, which this harness does not run; it never
-        # raises, and the regression target is the durable DB write.
         with psycopg.connect(pg_url, autocommit=True) as admin:
             row = admin.execute(
                 "INSERT INTO agents (label) VALUES ('poison-probe-agent') RETURNING id"
@@ -585,7 +470,6 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
             with pool.connection() as conn:
                 conn.execute("SELECT 1")
             _poison_backend(pooled)
-            # message INSERT (POST /api/agents/{id}/messages durable half)
             with pool.connection() as conn:
                 receipt = insert_chat_inbound_once(
                     conn,
@@ -597,8 +481,6 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
                     publish_wake=publish_wake,
                 )
                 assert receipt.inserted
-            # schedule stop UPDATE (POST /api/schedules/{id}/stop durable half:
-            # SELECT ... FOR UPDATE then UPDATE ... RETURNING)
             row, _enabled_changed = update_blocking(pool, schedule_id, {"enabled": False})
             assert row[4] is False
         finally:
@@ -612,10 +494,6 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """A pooled `base.db.connect()` whose borrow also reads the cluster's minimum
-    code version (the restore's combined statement) still bounds the backend, and
-    the pooler's own client list names the connection `ava:<process>:v<version>`:
-    the observability half of the code-version gate."""
     from base import config
     from base.telemetry import process_name
 
@@ -631,11 +509,10 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
         monotonic = time.monotonic
         try:
             with monkeypatch.context() as clock:
-                # Advance the refresh clock without rewriting the gate's cache.
                 clock.setattr(time, "monotonic", lambda: monotonic() + MIN_REFRESH_INTERVAL_S)
                 assert owner.min_read_due() is True
                 with Database.from_settings(gate=owner).connect() as conn:
-                    assert owner.min_read_due() is False  # the dial did read it
+                    assert owner.min_read_due() is False
                     assert _statement_timeout(conn) == "1min"
                     with psycopg.connect(admin_console_url(pooled), autocommit=True) as console:
                         cursor = console.execute("SHOW CLIENTS")
@@ -644,6 +521,5 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
                             row[columns.index("application_name")] for row in cursor.fetchall()
                         }
         finally:
-            # Restore a real observation after the advanced clock is removed.
             owner.observe_minimum(0)
     assert f"ava:{process_name()}:v4321" in names

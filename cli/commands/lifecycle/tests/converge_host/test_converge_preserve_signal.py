@@ -1,11 +1,3 @@
-"""The converge preserve signal — every preserved destination reports telemetry.
-
-Locks the emission faces added for the #3689 failure mode (a hand-edited LGTM
-dashboard sat frozen for three rollouts because the preserve warning lived only
-in converge output): the rendered-file guard, and the cluster-extension
-materializer's kept-local-edits loop (task #3871).
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -38,7 +30,6 @@ def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
 def test_preserve_hit_reports_converge_file_preserved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A hand-edited rendered destination is kept AND reported as an event."""
     emitted = _capture_emit(monkeypatch)
 
     target = tmp_path / "rendered.yaml"
@@ -64,8 +55,6 @@ def test_preserve_hit_reports_converge_file_preserved(
 
 
 class _PoolStub:
-    """Minimal pool shape for the CLI reader: pool context + connection context."""
-
     def __enter__(self) -> _PoolStub:
         return self
 
@@ -79,7 +68,6 @@ class _PoolStub:
 def test_extensions_kept_local_edits_report_converge_file_preserved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
-    """A kept local extension edit is reported next to its stderr warning."""
     emitted = _capture_emit(monkeypatch)
 
     def fake_pool(_database: db.Database) -> _PoolStub:

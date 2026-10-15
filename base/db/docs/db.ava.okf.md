@@ -34,3 +34,5 @@ error; an explicitly empty gateway URL names no gateway host.
 
 The inbound-message writes, the wake publish and the live-agent reads that once lived in this
 package are owned by [[base/agents/inbox/docs/inbox.ava.okf.md]].
+
+Test admission and dial-fixture evidence: [[test-database-safety.ava.okf.md]].

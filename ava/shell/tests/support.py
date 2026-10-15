@@ -1,11 +1,7 @@
-"""Test support: a database that accepts every shell-session statement."""
-
 from __future__ import annotations
 
 
 class FakeDatabase:
-    """Every statement succeeds; the `session_index` update returns `next_index + 1`."""
-
     def __init__(self, next_index: int = 1) -> None:
         self._row = (next_index + 1,)
 

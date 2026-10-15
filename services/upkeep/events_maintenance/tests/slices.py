@@ -1,5 +1,3 @@
-"""The events-maintenance slice for tests: the daemon's explicit config builder, with overrides."""
-
 from __future__ import annotations
 
 from dataclasses import replace
@@ -25,7 +23,6 @@ def events_maintenance_config(
 def events_maintenance_db(
     process_config: ConfigBoot, *, local_machine: MachineIdentity
 ) -> Database:
-    """The handle on the test database (the settings the suite's conftest points at the throwaway cluster)."""
     version = CodeVersion(LoadedCommit.capture())
     gate = ProcessDbGate(version=version.get, process="events_maintenance_test")
     return maintenance_config.events_maintenance_db(

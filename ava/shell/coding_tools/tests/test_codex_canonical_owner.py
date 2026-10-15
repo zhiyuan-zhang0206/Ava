@@ -1,5 +1,3 @@
-"""Skill-level contracts for isolated Codex launch and terminal supervision."""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -51,7 +49,6 @@ watch_work = _load("watch_work_under_test", _SKILL_DIR / "scripts" / "watch_work
 
 
 def _record_app_server(events: list[str], _endpoint: str, *, log_path: Path | None = None) -> None:
-    """The takeover's readiness wait records as an event; the launch hands it the server log."""
     assert log_path is not None and log_path.name == "app-server.log"
     events.append("app-server")
 
@@ -84,7 +81,6 @@ def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
 
 
 def test_launch_runs_on_the_default_home_with_per_session_overrides(tmp_path: Path) -> None:
-    """No private CODEX_HOME: trust and the update check are per-session -c overrides."""
     workspace = Path(_owner(tmp_path).key.workspace)
 
     argv = shlex.split(codex.codex_command(workspace).split(" && ", 1)[1])
@@ -153,8 +149,6 @@ def test_codex_supervisor_uses_projected_session_environment(
     monkeypatch: pytest.MonkeyPatch,
     bound_agent: BindAgent,
 ) -> None:
-    """The runner's real sessions.new path must not hand the shell a foreign venv
-    that the pty-sessions service's own environment carries."""
     from ava.shell.tests.support import FakeDatabase
     from base.sessions.backend import PtySessionBackend
 
@@ -162,8 +156,6 @@ def test_codex_supervisor_uses_projected_session_environment(
     workspace = Path(owner.key.workspace)
     backend = PtySessionBackend(config=PtyClientConfig())
     report = unit_home / "codex-child-env.json"
-    # The service environment is the shell's base: restart the service with a
-    # foreign virtualenv in it.
     pty_service.stop()
     service = PtyServiceProcess(unit_home, {"VIRTUAL_ENV": str(unit_home / "foreign" / ".venv")})
     service.start()
@@ -175,8 +167,6 @@ def test_codex_supervisor_uses_projected_session_environment(
 
     monkeypatch.setattr(sessions, "workspace_dir", workspace_for_owner)
 
-    # Execute a probe in place of the long-running supervisor; session birth,
-    # env transport, the service's shell spawn, and command delivery remain real.
     def supervisor_probe(_owner: coding_session_owner.CodingSessionOwner, _watcher: Path) -> str:
         return (
             "import json, os; from pathlib import Path; "
@@ -582,13 +572,9 @@ def test_canonical_notifications_never_resurrect_owner(
     assert notes == [(41, "terminal", "task", False)]
 
 
-# ── Receipt checkpoints: a dead session must warn, not roll the launch back ──
-
-
 def test_submission_check_survives_a_dead_session_at_enter(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The Enter retry on a dead pane warns; it must not raise (rollback class)."""
 
     def no_sleep(_seconds: float) -> None:
         return None
@@ -612,7 +598,6 @@ def test_submission_check_survives_a_dead_session_at_enter(
 def test_submission_check_survives_a_dead_session_at_capture(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The polling capture read of a dead pane warns instead of raising."""
 
     def dead_capture(_sid: int, **_kwargs: object) -> str:
         raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
@@ -626,11 +611,6 @@ def test_submission_check_survives_a_dead_session_at_capture(
 def test_submission_check_survives_a_dead_session_after_the_enter_retry(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The post-Enter capture read of a dead pane warns instead of raising.
-
-    The pane looks alive (idle composer) until the Enter retry lands, so the
-    refusal surfaces only at the re-check — the second capture site.
-    """
 
     def no_sleep(_seconds: float) -> None:
         return None

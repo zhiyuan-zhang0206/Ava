@@ -1,13 +1,3 @@
-"""Lock the plugin-metric LogQL cutover (task #180): every shipped plugin
-metric reads the live Loki event stream.
-
-The dashboard JSON (`deploy/lgtm/config/grafana/provisioning/dashboards/
-ava-ops-main.json`) is hand-maintained since the generator did not survive the
-archive->public port — these tests lock the registered specs the JSON mirrors:
-a spec regressing to SQL, rendering without the event-stream selector, or a
-JSON panel drifting from its spec fails here.
-"""
-
 from __future__ import annotations
 
 import json
@@ -27,14 +17,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def registered_metrics() -> list[MetricSpec]:
-    """Every shipped plugin's declared metrics, admitted through the data registry."""
     result = load_repo_plugin_specs()
     assert result.failed == []
     return result.specs
 
 
 def _load_core() -> list[MetricSpec]:
-    """The complete core metric set."""
     return catalog.collect_core_metrics()
 
 
@@ -57,11 +45,6 @@ def test_rendered_queries_target_the_event_stream() -> None:
                 f"{spec.name} lost the event-stream selector"
             )
             assert "| json" in template, f"{spec.name} lost the | json pipeline"
-            # event_name is a promoted stream label (2026-08-23 cutover): the
-            # matcher must sit in the stream selector ({... event_name=...}),
-            # never as a `| event_name` pipeline filter. The {{agent_id}}
-            # inspector placeholder stays in the pipeline (the gateway renders
-            # it per agent).
             assert "| event_name" not in template, (
                 f"{spec.name} filters event_name after | json:\n{template}"
             )
@@ -81,9 +64,6 @@ def test_agent_placeholder_renders_per_agent() -> None:
 
 
 def test_dashboard_json_matches_registrations() -> None:
-    """The merged dashboard mirrors the registered grafana specs panel for
-    panel: same Loki datasource, the rendered expr verbatim, instant queries
-    for stat panels and range queries for the rest."""
     specs = [s for s in registered_metrics() if "grafana" in s.output]
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     data = json.loads(path.read_text())
@@ -98,11 +78,6 @@ def test_dashboard_json_matches_registrations() -> None:
 
 
 def test_plugin_panels_live_under_their_plugin_rows() -> None:
-    """One row per metric-shipping plugin, row header = plugin name — the
-    generated two-tier layout, restored by task #3689: every plugin's Grafana
-    panels must resolve to the section titled with that plugin, so a panel
-    drifting into another section — or a plugin row being renamed or dropped —
-    fails here."""
     specs = [s for s in registered_metrics() if "grafana" in s.output]
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     data = json.loads(path.read_text())
@@ -182,18 +157,6 @@ def _assert_dashboard_panel_matches_spec(panel: dict[str, Any], spec: MetricSpec
 
 
 def test_dashboard_json_matches_core_registrations() -> None:
-    """Every core Grafana spec has one exact dashboard counterpart.
-
-    The dashboard is hand-maintained, so this protects the user-visible
-    queries, datasource, and query mode against either registry or JSON
-    drifting independently. A ``$__range`` aggregate is a window total and
-    must be instant; fixed-width bucket queries must be range queries. The
-    class-resolution gauges are the deliberate Prometheus exception, and the
-    Prometheus tiles in general keep their OTLP-gauge shape: stat and table
-    tiles query instant vectors (``instant: true, range: false``), chart
-    tiles use range queries. Every panel also owns a unique rectangle in the
-    classic Grafana grid.
-    """
     specs = [spec for spec in _load_core() if "grafana" in spec.output]
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     data = json.loads(path.read_text())
@@ -206,8 +169,6 @@ def test_dashboard_json_matches_core_registrations() -> None:
 
 
 def test_dashboard_has_97_loki_targets() -> None:
-    """Recall timing and compaction views each add two Loki targets;
-    the exec-envelope pair adds six, two per panel (task #2174)."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
@@ -220,11 +181,6 @@ def test_dashboard_has_97_loki_targets() -> None:
 
 
 def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
-    """Daemon emission, Prometheus instruments, and the visible tiles share names.
-
-    The unresolved and dismissed tiles together render the total / resolved /
-    net trio (task #1935): each gauge is registered, dispositioned, and
-    wired into the dashboard JSON with the same name."""
 
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION, strip_unit_suffix
 
@@ -242,21 +198,12 @@ def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
 
 
 def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
-    """Gateway emission, Prometheus instrument, and dashboard wiring share names.
-
-    The agent-registry max-id sample (task #2010) is a unit-"1" gauge, so the
-    visible Prometheus metric carries the `_ratio` suffix the OTLP exporter
-    appends — the dashboard must query that exact name, and the growth-rate
-    panel derives from it (``deriv(...[1h]) * 86400``, agents per day)."""
 
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION, strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
     assert METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
     gauge = f"ava_agent_registry_{strip_unit_suffix('max_id')}_ratio"
-    # The gauge is per gateway process (a new series per restart), so the
-    # panels collapse it with max() — the visible curve is the registry
-    # high-water mark, not N overlapping per-lifetime series.
     assert specs["core_agent_max_id"].query == f"max({gauge})"
     assert specs["core_agent_max_id"].query_type == "promql"
     assert specs["core_agent_max_id"].panel == "timeseries"
@@ -265,7 +212,6 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
 
 
 def _pr_flow_daily_query(field: str, unit: str) -> str:
-    """The by-day read-back query of one export-job gauge field."""
     from base.telemetry.otlp.telemetry_otlp import strip_unit_suffix
 
     name = f"ava_pr_flow_daily_{strip_unit_suffix(field)}_{unit}"
@@ -273,8 +219,6 @@ def _pr_flow_daily_query(field: str, unit: str) -> str:
 
 
 def _assert_pr_flow_payload_fields_are_gauges() -> None:
-    """Every payload field behind the panels is absolute state, never a count
-    to accrue across re-emissions."""
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 
     for field in (
@@ -330,18 +274,6 @@ def _assert_pr_flow_tiles_mirror_specs(
 
 
 def test_pr_flow_panels_match_the_otlp_contract() -> None:
-    """Export-job emission, Prometheus instruments, and dashboard tiles share names.
-
-    The daily PR-flow export job (``scripts/ci/pull_requests/pr_flow_export.py``, task #2139)
-    re-emits one absolute sample per complete cluster-tz day as day-labeled
-    OTLP gauges, so each by-day tile reads its series back with ``max by
-    (day) (last_over_time(...[26h]))`` — 26h keeps the last sample alive
-    across the one-shot job's daily cadence, and ``max by (day)`` collapses
-    the per-run process dimensions onto one series per day. The tables
-    additionally join on ``day`` (without the join a table falls back to a
-    per-series frame picker, not one row per day), which is why the JSON
-    carries the joinByField transformation.
-    """
     specs = {spec.name: spec for spec in _load_core()}
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     by_title = {panel.get("title"): panel for panel in json.loads(path.read_text())["panels"]}
@@ -352,7 +284,6 @@ def test_pr_flow_panels_match_the_otlp_contract() -> None:
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:
-    """Loki names and dashboard-wide time-range inheritance are contracts."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     for panel in panels:
@@ -394,7 +325,6 @@ def _assert_llm_usage_panels_filter_telemetry(panels: list[dict[str, Any]]) -> N
 
 
 def test_cost_dashboard_windows_and_telemetry_contract() -> None:
-    """Cost tiles follow the dashboard window; no llm_usage panel reads logs."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     data = json.loads(path.read_text())
     by_title = {panel.get("title"): panel for panel in data["panels"]}

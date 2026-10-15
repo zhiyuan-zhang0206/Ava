@@ -1,15 +1,3 @@
-"""The `ava` names the generated watcher programs import are a contract with programs already
-written to disk.
-
-The cron and one-shot watchers the platform generates import `ava.gateway_client` and
-`ava.sdk_surface.agent_identity` and call `send_message` / `agent_id` to wake their agent. A
-generated program is read once when it launches, but an already-running or restored watcher
-(a renewed session, a restore kit) keeps importing these names for up to a week, so they cannot
-move without regenerating those programs first. This test renders every template, reads which
-`ava` modules and attributes the generated code uses, and checks that exactly those still exist
-with the call shape the generated code relies on.
-"""
-
 import ast
 import inspect
 
@@ -40,7 +28,6 @@ def _rendered_scripts() -> dict[str, str]:
 
 
 def _ava_uses(source: str) -> dict[tuple[str, str], set[str]]:
-    """`{(module, imported name): attributes used}` for every `from ava... import name`."""
     tree = ast.parse(source)
     bound: dict[str, tuple[str, str]] = {}
     for node in ast.walk(tree):
@@ -65,5 +52,5 @@ def test_a_generated_watcher_imports_and_uses_only_the_pinned_ava_names(name: st
 
 def test_the_pinned_names_exist_with_the_call_shape_the_generated_code_uses() -> None:
     wake = inspect.signature(gateway_client.send_message)
-    wake.bind(7, content="wake", source="watcher:12")  # agent_id positional, the rest by keyword
+    wake.bind(7, content="wake", source="watcher:12")
     assert inspect.signature(agent_identity.agent_id).bind().arguments == {}

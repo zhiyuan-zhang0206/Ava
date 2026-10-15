@@ -1,5 +1,3 @@
-"""`debt carry --move-symbol`: recorded debt follows a function or class moved to another file."""
-
 from __future__ import annotations
 
 import tomllib
@@ -57,7 +55,6 @@ def fixture_repo(make_repo: RepoFactory) -> Path:
 
 
 def move_fixture(root: Path, target: str = "app/calls.py") -> None:
-    """Take `fake` out of `app/test_x.py` and put it in `target`, with no rename git can see."""
     write(root, {"app/test_x.py": f"{HEADER}{TEST}", target: f"{HEADER}{FIXTURE}"})
     git(root, "add", "-A")
 

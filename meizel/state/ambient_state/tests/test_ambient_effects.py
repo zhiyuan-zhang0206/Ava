@@ -1,8 +1,3 @@
-"""Unit coverage for the ambient-state rule's effects and boundaries (scripts/structure/
-ambient_state/): what a module reads or calls while it imports, free-floating background work, the
-rule's scope, and the closed lists with their stale entries. State shapes are covered in
-test_ambient_state.py; the gate wiring in scripts/lint/tests/test_ambient_state_gate.py."""
-
 from __future__ import annotations
 
 import ast
@@ -28,16 +23,12 @@ def _sites(
     rel: str = "base/mod.py",
     files: dict[str, str] | None = None,
 ) -> dict[str, int]:
-    """`rule:name -> site count` for one module; `files` are other repo files it can see."""
     for name, content in (files or {}).items():
         _write(root, name, content)
     path = _write(root, rel, source)
     tree = ast.parse(path.read_text(encoding="utf-8"))
     measured = ambient_state.measure(tree, rel, root)
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
-
-
-# --- what a module reads while it imports -----------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -103,9 +94,6 @@ def test_a_platform_constant_is_a_host_fact(tmp_path: pathlib.Path, line: str) -
     assert next(iter(sites)).startswith("host-fact:")
 
 
-# --- calls that run at import ------------------------------------------------------------------------
-
-
 def test_a_bare_call_at_import_is_reported_under_its_resolved_name(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -147,9 +135,6 @@ def test_declarative_wiring_and_main_blocks_are_not_import_time_calls(
             main()
     """
     assert _sites(tmp_path, source) == {}
-
-
-# --- free-floating background work ---------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -216,8 +201,6 @@ def test_tasks_are_counted_per_site_under_the_enclosing_function(tmp_path: pathl
 def test_a_create_task_on_a_taskgroup_or_another_receiver_is_not_reported(
     tmp_path: pathlib.Path, call: str
 ) -> None:
-    """AST cannot prove the receiver is a TaskGroup: any receiver that is neither `asyncio`
-    nor named like a loop passes. That is a known gap, written down in the rule's docs."""
     source = f"""
         import asyncio
 
@@ -242,9 +225,6 @@ def test_a_thread_is_reported_by_function(tmp_path: pathlib.Path, call: str) -> 
             {call}
     """
     assert _sites(tmp_path, source) == {"thread:launch": 1}
-
-
-# --- scope --------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -277,9 +257,6 @@ def test_an_out_of_scope_module_measures_nothing(tmp_path: pathlib.Path) -> None
         "ambient-container:_REGISTRY": 1,
         "ambient-instance:_CLIENT": 1,
     }
-
-
-# --- the closed lists -----------------------------------------------------------------------------------
 
 
 def test_a_sink_facade_file_lets_its_state_through_but_not_its_threads(

@@ -75,3 +75,10 @@ counts its first-parent commits, even if the checkout moves before the first
 version read. An unknown capture stays unknown and raises `CodeVersionError`
 when a gated database needs a version; a later checkout cannot stand in for the
 image the process loaded.
+
+## Clock-epoch test construction
+
+`tests/test_proc_tree.py::test_capture_and_verify_span_clock_epochs` leaves one
+epoch unpatched. The locked psutil macOS correction adds absolute boot-time
+drift for either sign, so symmetric positive/negative patches would model the
+same correction magnitude rather than two distinct epochs.

@@ -1,16 +1,3 @@
-"""A stand-in for the `tart` binary, so the macOS recipes run offline.
-
-The tests copy this file to `<dir>/tart` behind a shebang and point `FAKE_TART_HOME` at
-a directory holding `state.json`:
-
-    {"vms": {"<name>": {"running": false}}, "fail_on": ["<script substring>"],
-     "observer": "<observer.json text>", "logs_b64": "<base64 of a tar.gz>"}
-
-It answers `list`, `clone`, `set`, `run`, `stop`, `delete` and `exec` against that state,
-appends every call (argv, and stdin when `exec -i` was used) to `calls.log`, and makes
-`exec` fail when the script contains one of the `fail_on` strings.
-"""
-
 from __future__ import annotations
 
 import json
@@ -37,7 +24,6 @@ def _record(argv: list[str], stdin: str | None) -> None:
 
 
 def _exec(state: dict[str, Any], rest: list[str]) -> int:
-    """`rest` is what follows `exec` (and its `-i`): the VM name, then the command."""
     name = rest[0]
     if not state["vms"].get(name, {}).get("running"):
         return 1

@@ -19,3 +19,7 @@ it. `base.telemetry.emit` rejects undeclared event names.
 
 - [[base/events/live/docs/live/live.ava.okf.md]] — Live Event Channel (`ava:events`).
 - [[base/api_contracts/docs/caller_identity.ava.okf.md]] — Asserted External Caller Identity.
+
+`tests/test_emit_sites_declared.py` inventories recognized callee spellings with
+literal category/name arguments. Dynamic or f-string names, pass-through values
+and renamed callees it does not resolve remain outside this static census.

@@ -1,5 +1,3 @@
-"""Legacy and partial runtime identities need this lifetime's actual closure receipt."""
-
 from typing import Protocol
 
 import psycopg
@@ -47,7 +45,6 @@ def _legacy_unowned_forced(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """Unowned, but no lifecycle of this runtime left it so."""
     aid = legacy_row(
         db,
         config_authority=config_authority,
@@ -67,9 +64,6 @@ def _legacy_forced_beside_a_marked_neighbour(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """As above while another agent carries both facts: a lifecycle release
-    (its resurrection) and an unowned termination receipt (the force before
-    it). Both facts are per agent, so a neighbour's prove nothing here."""
     other, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
@@ -111,9 +105,6 @@ def _legacy_termination_swept(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """Terminated with no identity and no receipt, as every row the cutover
-    inherits: a later force (a machine-pause sweep) finds it terminated already
-    and records nothing, whatever the row's origin."""
     aid = terminated(
         db,
         None,
@@ -134,7 +125,6 @@ def _partial_identity_forced(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """A born row whose identity is not empty: a historical process kind."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
@@ -157,7 +147,6 @@ def _earlier_life_receipt(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """A receipt ended an earlier life; this life ended without one."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
@@ -174,7 +163,6 @@ def _earlier_life_receipt(
         resurrected_by="user",
         local_machine=machine_identity.name(),
     )
-    # This later life has an unknown allocation; its earlier force receipt cannot close it.
     db.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user', "
         "incarnation_resources=NULL WHERE id=%s",

@@ -1,10 +1,3 @@
-"""The lifecycle status journal: durable phase timeline + final diagnosis.
-
-The whole point of the journal (issue #2123) is that it outlives the CLI
-process: phases are written as they happen and the final result rides out even
-when the operation fails or the process is cut off.
-"""
-
 from __future__ import annotations
 
 import json
@@ -56,12 +49,10 @@ def test_failed_phase_is_recorded_and_reraised(home: Path) -> None:
 
 
 def test_inner_stop_leg_never_hijacks_the_restart_journal(home: Path) -> None:
-    # A restart wraps a stop leg; the stop's begin() must not replace the
-    # restart's journal, and the stop's finish() must not close it either.
     assert journal.begin("restart") is True
     with journal.phase("preflight"):
         pass
-    assert journal.begin("stop") is False  # active journal kept
+    assert journal.begin("stop") is False
     with journal.phase("stop"), journal.phase("drain"):
         pass
     op = journal.read()
@@ -89,16 +80,13 @@ def test_malformed_journal_reads_as_absent(home: Path) -> None:
 
 
 def test_wrong_shape_journal_reads_as_absent(home: Path) -> None:
-    # Parseable JSON with a wrong shape must read as "absent" too: `read()`
-    # sits on the stop/restart path, so a missing pid or a bad field
-    # type must not raise KeyError/TypeError/ValueError mid-operation.
     path = journal.status_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps([{"operation": "stop"}]))  # not an object
+    path.write_text(json.dumps([{"operation": "stop"}]))
     assert journal.read() is None
-    path.write_text(json.dumps({"operation": "stop"}))  # missing pid
+    path.write_text(json.dumps({"operation": "stop"}))
     assert journal.read() is None
-    path.write_text(json.dumps({"operation": "stop", "pid": "x"}))  # bad type
+    path.write_text(json.dumps({"operation": "stop", "pid": "x"}))
     assert journal.read() is None
     path.write_text(json.dumps({"operation": "stop", "pid": 1, "started_at": []}))
     assert journal.read() is None
@@ -107,14 +95,10 @@ def test_wrong_shape_journal_reads_as_absent(home: Path) -> None:
 
 
 def test_journal_survives_an_unfinished_process(home: Path) -> None:
-    # The acceptance shape: the writer dies mid-phase; the last phase shows
-    # started-but-not-finished and complete=False, so a later reader sees the
-    # state and the missing final diagnosis instead of nothing.
     journal.begin("restart")
     with journal.phase("stop"):
         pass
     with pytest.raises(SystemExit), journal.phase("start"):
-        # simulate the process being cut off inside the phase
         raise SystemExit(1)
     op = journal.read()
     assert op is not None
@@ -133,7 +117,6 @@ def test_phase_without_begin_still_journals(home: Path) -> None:
 
 
 def _reaped_pid() -> int:
-    """A pid whose process has exited and been reaped (a dead journal writer)."""
     child = subprocess.Popen([sys.executable, "-c", "pass"])
     assert child.wait(timeout=30) == 0
     return child.pid
@@ -144,15 +127,11 @@ def _op_with_pid(pid: int) -> journal.LifecycleOp:
 
 
 def test_begin_takes_over_a_dead_writers_journal(home: Path) -> None:
-    # The cut-off this journal exists for: a rerun must not keep writing under
-    # the dead run's pid. begin() takes the journal over — refreshing the pid,
-    # carrying the dead run's phase timeline forward, and recording the
-    # superseded identity (task #2898).
     journal.begin("restart")
     with journal.phase("stop"):
         pass
     raw = json.loads(journal.status_path().read_text())
-    raw["pid"] = _reaped_pid()  # simulate the writer dying mid-operation
+    raw["pid"] = _reaped_pid()
     journal.status_path().write_text(json.dumps(raw))
 
     assert journal.begin("restart") is True
@@ -163,15 +142,13 @@ def test_begin_takes_over_a_dead_writers_journal(home: Path) -> None:
     assert op.resumed_from is not None
     assert op.resumed_from.pid == raw["pid"]
     assert op.resumed_from.operation == "restart"
-    assert [p.name for p in op.phases] == ["stop"]  # the dead run's timeline survives
+    assert [p.name for p in op.phases] == ["stop"]
 
 
 def test_writer_alive_tracks_pid_state(home: Path) -> None:
     assert journal.writer_alive(_op_with_pid(os.getpid())) is True
     assert journal.writer_alive(_op_with_pid(_reaped_pid())) is False
 
-    # A zombie has finished executing and can never write again — but it still
-    # holds the pid, so a liveness check that misses it would block takeover.
     zombie = subprocess.Popen([sys.executable, "-c", "pass"])
     try:
         deadline = time.monotonic() + 30
@@ -190,9 +167,6 @@ def test_journal_write_failure_never_breaks_the_operation(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, object]],
 ) -> None:
-    # QA round-1 (#2898): the journal is best-effort by contract — a failing
-    # write warns and the stop/restart proceeds. A parent that is a regular
-    # file makes every mkdir inside _write fail.
     blocked = home / "blocked"
     blocked.write_text("not a directory")
     monkeypatch.setattr(journal, "journal_path", lambda: blocked / "lifecycle-op.json")

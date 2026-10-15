@@ -1,10 +1,3 @@
-"""Memory search cases: the work one search may cost, and stopping it when nobody waits.
-
-One search issues at most `memory_rerank_candidates` decision requests, whatever `k` or the
-exclusion list it carries, and the work stops when the caller's deadline expires or the caller
-disconnects.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -46,9 +39,6 @@ def _name(index: int) -> str:
 
 
 class _Pool:
-    """A pool of notes whose vector order is their index, and a backend that returns the
-    first `k` of it, recording each `k` asked."""
-
     def __init__(self, monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
         from services.derived.memory_indexer.backends import factory
 
@@ -76,8 +66,6 @@ class _Pool:
         monkeypatch.setattr(factory, "get_backend", _Backend)
         patch_provider(monkeypatch, StubProvider)
         monkeypatch.setattr(settings.services, "memory_rerank_candidates", _CANDIDATES)
-        # The handler reads its gate from `app.state`, which only the gateway lifespan fills; a
-        # fresh one per test (a semaphore binds to the loop of its first contended acquire).
         app = memory_search_app()
         app.state.gateway_config = replace(app.state.gateway_config, memory_root=root)
         app.state.memory_search_gate = asyncio.Semaphore(2)
@@ -93,18 +81,13 @@ def _search(**fields: Any) -> dict[str, Any]:
 
 
 def _judged_numbers(judge: Judge) -> list[str]:
-    """The note numbers the decision model was shown, in request order."""
     return [state.split("passage ")[1][:3] for _model, state, _question in judge.calls]
-
-
-# ── the cost of one search ──
 
 
 @pytest.mark.parametrize("excluded", [0, 10, 60])
 def test_decision_requests_do_not_grow_with_the_exclusion_list(
     pool: _Pool, judge: Judge, excluded: int
 ) -> None:
-    """A long-lived session excludes more notes every turn; the ranking work stays the same."""
     with gateway_test_client(config=memory_config(pool.root)) as client:
         resp = client.post(
             "/api/memory/search",
@@ -114,9 +97,7 @@ def test_decision_requests_do_not_grow_with_the_exclusion_list(
     assert resp.status_code == 200
     assert len(judge.calls) == _CANDIDATES
     assert len(resp.json()["results"]) == 3
-    # the closest notes that are not excluded are the ones ranked
     assert sorted(_judged_numbers(judge)) == [f"{i:03d}" for i in range(excluded, excluded + 30)]
-    # vector search is asked for enough notes to fill the candidates after exclusion
     assert pool.asked == [_CANDIDATES + excluded]
 
 
@@ -134,7 +115,6 @@ def test_excluded_notes_never_reach_the_decision_model_or_the_response(
     shown = " ".join(state for _model, state, _question in judge.calls)
     assert "passage 001" not in shown
     assert "passage 002" not in shown
-    # the candidates are filled to the configured count from the next-closest notes
     assert len(judge.calls) == _CANDIDATES
     assert "passage 031" in shown and "passage 032" not in shown
     assert not {r["path"] for r in resp.json()["results"]} & set(excluded)
@@ -144,7 +124,6 @@ def test_excluded_notes_never_reach_the_decision_model_or_the_response(
 def test_a_large_k_does_not_raise_the_decision_request_count(
     pool: _Pool, judge: Judge, k: int
 ) -> None:
-    """Asking for more results than there are candidates ranks the candidates, not `k` notes."""
     with gateway_test_client(config=memory_config(pool.root)) as client:
         resp = client.post("/api/memory/search", json=_search(purpose="search", k=k))
 
@@ -166,8 +145,6 @@ def test_dedup_ranks_its_own_smaller_candidate_count_whatever_k_is(
     assert len(judge.calls) == 7
     assert pool.asked == [7]
 
-
-# ── the exclusion list is validated at the boundary ──
 
 _TOO_MANY = [f"n{i}.md" for i in range(801)]
 _VALID_PATHS = ["a.md", "notes/n001.md", "a b/c-d_e.md", "ünï/çode.md"]
@@ -209,12 +186,10 @@ def test_the_largest_exclusion_list_is_accepted(pool: _Pool) -> None:
         resp = client.post("/api/memory/search", json=_search(exclude=exclude))
 
     assert resp.status_code == 200
-    # the vector service takes at most 1000 notes per query
     assert pool.asked == [_CANDIDATES + 800] and pool.asked[0] <= 1000
 
 
 def test_the_exclusion_limit_fits_the_vector_service_query_limit() -> None:
-    """Vector search is asked for the candidates plus every excluded note in one query."""
     from base.api_contracts.memory_search import MEMORY_SEARCH_MAX_EXCLUDE
     from services.derived.memory_search.app import MAX_K
 
@@ -250,12 +225,7 @@ def _json(fields: dict[str, Any]) -> str:
     return json.dumps(_search(**fields))
 
 
-# ── the work stops when the caller stops waiting ──
-
-
 class _Blocked:
-    """A decision model that never answers and notes which requests were cancelled."""
-
     def __init__(self) -> None:
         self.started = 0
         self.cancelled = 0
@@ -292,7 +262,6 @@ async def test_the_caller_deadline_bounds_the_search_below_the_gateway_deadline(
     assert resp.json()["reason"] == "indexer_unavailable"
     assert "0.3s deadline" in resp.json()["detail"]
     assert elapsed < 5
-    # every decision request that was in flight was cancelled
     assert blocked.started == _CANDIDATES
     assert blocked.cancelled == _CANDIDATES
 
@@ -314,7 +283,6 @@ async def test_a_caller_deadline_above_the_gateway_deadline_does_not_extend_it(
 
 
 def _request_that_disconnects_when(gone: asyncio.Event) -> Request:
-    """A request whose client leaves once `gone` is set, as uvicorn reports it."""
 
     async def receive() -> dict[str, str]:
         if gone.is_set():
@@ -342,7 +310,6 @@ async def test_a_disconnect_cancels_the_decision_requests_still_in_flight(
         assert not handler.done()
 
         gone.set()
-        # The handler ends by itself: a still-running ranking would keep it parked here.
         response = await asyncio.wait_for(asyncio.shield(handler), timeout=5)
     finally:
         handler.cancel()
@@ -367,7 +334,6 @@ async def test_a_connected_caller_gets_the_ranking(pool: _Pool, judge: Judge) ->
 async def test_cancelling_the_search_cancels_every_decision_request(
     pool: _Pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Cancellation of the handler's task reaches the decision calls (no shielded work)."""
     del pool
     blocked = _Blocked()
     monkeypatch.setattr(rerank, "ask_relevance", blocked)

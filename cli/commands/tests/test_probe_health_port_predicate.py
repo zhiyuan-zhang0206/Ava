@@ -1,12 +1,3 @@
-"""Which roster entries `ava start` checks for a foreign occupant before it launches.
-
-The pre-bind occupancy check only works where the occupant answers an Ava `/healthz`
-whose body names its home. That set used to be read off the URL (anything ending in
-`/healthz`), which happened to include the gate; it is now read off declarations:
-`health_name` for a standard daemon, `home_healthz` for the gate. These tests pin
-that the set did not move, and that the gate is in it because it says so.
-"""
-
 from __future__ import annotations
 
 from dataclasses import replace
@@ -29,7 +20,6 @@ def _reports_foreign_occupant(spec: ServiceSpec) -> bool:
 
 
 def _url_suffix_rule(spec: ServiceSpec) -> bool:
-    """The predicate as it was: the URL says so."""
     return spec.curl_url is not None and spec.curl_url.endswith("/healthz")
 
 
@@ -53,7 +43,6 @@ def test_the_gate_is_covered_because_it_declares_a_home_healthz() -> None:
     assert gate.health_name is None
     assert gate.home_healthz is True
 
-    # Withdraw the declaration and the URL alone no longer counts.
     assert not _reports_foreign_occupant(replace(gate, home_healthz=False))
 
 

@@ -1,5 +1,3 @@
-"""Cold hosted metadata is preserved only behind an absent-host proof."""
-
 from collections.abc import Iterator
 from datetime import timedelta
 from typing import Any
@@ -56,10 +54,6 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
     db_conn.commit()
     pause_owner.begin_maintenance("cold", WHEN)
     if not observed:
-        # A restart still claimed is unresolved work, so preparation refuses it unless
-        # no host is running. An observed restart leaves the row parked either way (the
-        # parking rule does not depend on a host being absent); only the cold path
-        # preserves the claimed chat, so it is not run here.
         with pytest.raises(RuntimeError):
             cohort.prepare(
                 db_conn,
@@ -111,15 +105,9 @@ def test_expired_host_lease_does_not_prove_normal_shutdown(
 def test_consumer_scan_skips_a_process_whose_cmdline_read_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A cmdline read that raises (psutil 7.2.2 on macOS raised SystemError
-    mid-iteration) skips that process, not the check: a readable consumer
-    still refuses cold preparation (task #4964)."""
     from base.deploy.maintenance import cold
 
     class _ReadFails:
-        """Unreadable through both the attrs shape and the direct read, so a
-        regression to `process_iter(attrs)` stays caught."""
-
         pid = 424242
 
         @property

@@ -1,5 +1,3 @@
-"""Attachment roots own DB admission, borrowed clients and failed-construction rollback."""
-
 from __future__ import annotations
 
 import os
@@ -27,8 +25,6 @@ from base.host.proc import run_bounded
 
 
 class _RestoreCursor:
-    """A cursor closes independently from its caller's connection."""
-
     def __init__(self, connection: _AttachmentDial) -> None:
         self.connection = connection
 
@@ -46,8 +42,6 @@ class _RestoreCursor:
 
 
 class _AttachmentDial:
-    """Observe the real session restore while keeping this contract off a server."""
-
     def __init__(self) -> None:
         self.closed = False
         self.broken = False
@@ -81,7 +75,6 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A second attachment starts fresh even inside the first one's thirty seconds."""
     now = [100.0]
     dials: list[_AttachmentDial] = []
     require = attachment_module.control.require_active
@@ -333,7 +326,7 @@ def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
 
     def wait(_gate: manifest.LocalCaptureGate, *, timeout: float) -> bool:
         waits.append(timeout)
-        return False  # Pending work retains its own receipt; this probe does not seal it.
+        return False
 
     def open_participant(_db: Database, _lease_id: str, *, agent_id: int, source_key: str) -> bool:
         return True

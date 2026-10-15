@@ -1,18 +1,3 @@
-"""Every event a Postgres reader queries by name is declared `persist=True`.
-
-`telemetry_events` stores the events somebody reads out of it (`base.telemetry.event_store.is_persisted`).
-A reader that names an event the registry does not persist would read an empty set without
-failing, so this test collects the names the readers query and requires each to be persisted:
-
-- the SQL literals of every module that reads `telemetry_events` (`event_name = '...'`,
-  `event_name IN (...)`, `starts_with(event_name, '...')`), found by scanning the source;
-- the name lists the readers pass as parameters, imported from the modules that own them;
-- the events of the inspector metrics, rendered from the metric registry.
-
-A new reader adds its name to one of those three places (or is found by the scan) and the test
-names the event to mark.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -55,7 +40,6 @@ def _string_constants(path: Path) -> str:
 
 
 def _queried_by_sql() -> tuple[dict[str, Path], dict[str, Path]]:
-    """`(names, prefixes)` the readers' SQL literals select on, each with the file naming it."""
     names: dict[str, Path] = {}
     prefixes: dict[str, Path] = {}
     for path in _reader_sources():
@@ -71,7 +55,6 @@ def _queried_by_sql() -> tuple[dict[str, Path], dict[str, Path]]:
 
 
 def _self_evolution_names() -> set[str]:
-    """The names `ava-self-evolution` reads from `/api/events` telemetry (record.py)."""
     path = _ROOT / "ava_builtins/skills/platform/ava-self-evolution/scripts/record.py"
     failures: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -114,7 +97,6 @@ def _inspector_names() -> set[str]:
 
 
 def _unpersisted(names: set[str]) -> list[str]:
-    """Registered telemetry or log events among `names` that are not declared `persist=True`."""
     return sorted(
         name
         for name in names
@@ -129,7 +111,6 @@ def _unpersisted(names: set[str]) -> list[str]:
 
 def test_the_source_scan_still_finds_the_readers() -> None:
     names, _prefixes = _queried_by_sql()
-    # A pattern that stops matching must fail here, not silently weaken the guard below.
     assert {"llm_usage", "turn_end", "sse_drop", "service_started", "syntax_fix"} <= set(names)
     assert len(_reader_sources()) >= 10
 

@@ -1,5 +1,3 @@
-"""base.host.system.cron — fixed labels, launchd ownership, crontab safety."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,7 +33,6 @@ def _plant_plist(fake_home: Path, label: str) -> Path:
 
 
 def _launchctl() -> tuple[FakeCommands, Host]:
-    """A macOS host whose `launchctl` always succeeds, and the commands it was asked."""
     commands = FakeCommands()
     commands.on("launchctl", Reply(), repeat=True)
     return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
@@ -56,7 +53,6 @@ def _never_descendant(_label: str) -> bool:
 def test_register_macos_never_reloads_its_own_launchd_job(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Registration cannot boot out the job containing its own process."""
     label = "com.ava.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
@@ -72,8 +68,6 @@ def test_register_macos_never_reloads_its_own_launchd_job(
 def test_register_macos_still_reloads_from_another_launchd_job(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The self-protection is label-specific: boot autostart also runs
-    ``ava start`` under launchd and must still converge the health probe."""
     plist = _plant_plist(fake_home, "com.ava.health-probe")
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "com.ava.autostart")
@@ -95,10 +89,6 @@ def _crontab(
     write_rc: int = 0,
     write_error: str = "",
 ) -> tuple[FakeCommands, Host]:
-    """A Linux host with `crontab` installed, holding `existing`, and the commands it was asked.
-
-    The generated job line names a fixed `ava` binary, whatever checkout the tests run in.
-    """
     monkeypatch.setattr(cron, "ava_binary_path", _fixed_ava)
     commands = FakeCommands()
     commands.on(["crontab", "-l"], Reply(existing, read_error, read_rc), repeat=True)
@@ -108,7 +98,6 @@ def _crontab(
 
 
 def _written(commands: FakeCommands) -> str | None:
-    """The crontab body the code wrote with `crontab -`, or None when it never wrote."""
     bodies = [str(call.kwargs["input"]) for call in commands.calls if call.argv == ("crontab", "-")]
     return bodies[-1] if bodies else None
 
@@ -116,9 +105,6 @@ def _written(commands: FakeCommands) -> str | None:
 def test_register_linux_aborts_when_crontab_read_fails(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A `crontab -l` failure that is NOT the benign 'no crontab for <user>'
-    (permissions, broken cron) must abort — proceeding would rewrite the user's
-    real crontab from an empty read."""
     commands, host = _crontab(monkeypatch, read_rc=1, read_error="permission denied")
 
     assert cron.register_linux(300, host=host) == 1
@@ -142,19 +128,14 @@ def _brew_ava(*, host: Host) -> str:
 
 
 def test_launchd_path_env_includes_brew_bin(monkeypatch: pytest.MonkeyPatch) -> None:
-    """launchd hands a job a minimal PATH without Homebrew's bin. Both LaunchAgents
-    this repo writes (autostart, watchdog probe) shell out to the repo's tools, so the composed
-    PATH must carry the brew prefix, the dir holding `ava`, and the system dirs."""
     monkeypatch.setattr(cron, "ava_binary_path", _local_ava)
     path = cron.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
-    assert "/opt/homebrew/bin" in path  # brew bin (launchd omits it)
-    assert "/Users/x/.local/bin" in path  # dir holding `ava`
-    assert "/usr/bin" in path  # base system dirs
+    assert "/opt/homebrew/bin" in path
+    assert "/Users/x/.local/bin" in path
+    assert "/usr/bin" in path
 
 
 def test_launchd_path_env_falls_back_without_brew(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No brew on PATH (a fresh box, or launchd's own stripped env): fall back to
-    the standard Apple-silicon / Intel prefixes rather than emitting no brew dir."""
     monkeypatch.setattr(cron, "ava_binary_path", _local_ava)
     path = cron.launchd_path_env(host=fake_host())
     assert "/opt/homebrew/bin" in path
@@ -162,16 +143,9 @@ def test_launchd_path_env_falls_back_without_brew(monkeypatch: pytest.MonkeyPatc
 
 
 def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`ava` living in the brew prefix must not produce a doubled entry."""
     monkeypatch.setattr(cron, "ava_binary_path", _brew_ava)
     host = fake_host(programs={"brew": "/opt/homebrew/bin/brew"})
     assert cron.launchd_path_env(host=host).split(":").count("/opt/homebrew/bin") == 1
-
-
-# ---------------------------------------------------------------------------
-# The crontab entry
-# ---------------------------------------------------------------------------
-# Its marker names the job, not a home: the host runs one cluster.
 
 
 def test_register_linux_stamps_the_fixed_marker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -258,13 +232,11 @@ def test_unregister_linux_removes_only_the_probe_line(monkeypatch: pytest.Monkey
 
 
 def test_unregister_linux_ignores_the_watchdog_probe_lines(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The watchdog probe writes its own crontab lines with its own marker; a
-    health-probe unregister must not sweep them away."""
     probe_line = "*/1 * * * * /x/ava cluster watchdog-probe --role gateway  # ava-watchdog-probe.gateway.ava-mine"
     commands, host = _crontab(monkeypatch, f"{probe_line}\n")
 
     assert cron.unregister_linux(host=host) == 0
-    assert _written(commands) is None  # nothing matched, so the crontab was never rewritten
+    assert _written(commands) is None
 
 
 @pytest.mark.parametrize(
@@ -301,8 +273,6 @@ def test_unregister_linux_messages_and_success_gated_removal(
 def test_unregister_macos_removes_only_the_probe_plist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Filesystem-level proof of the scoping: with another job's plist on disk,
-    unregistering the probe leaves it untouched and boots out the probe's label."""
     monkeypatch.setenv("HOME", str(tmp_path))
     agents = tmp_path / "Library" / "LaunchAgents"
     agents.mkdir(parents=True)
@@ -319,11 +289,7 @@ def test_unregister_macos_removes_only_the_probe_plist(
     assert [argv[-1] for argv in commands.argvs] == [f"gui/{_UID}/com.ava.health-probe"]
 
 
-# ── registration guard: worktree checkout must not register prod's probe ──
-
-
 def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Stub the host's cron registrar to record the interval it is asked for."""
     calls: list[str] = []
 
     def register(interval_s: int, *, host: Host) -> int:
@@ -337,10 +303,6 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_register_refused_for_worktree_checkout_against_prod_home(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Task #1025: a worktree process (a home with its own `source` + another
-    checkout) must not register that home's health-probe plist — the 2026-08-07
-    accident where a worktree-venv debug script rewrote the plist and the probe
-    auto-rolled-back the cluster."""
     prod_home = default_home / ".ava"
     (prod_home / "source").mkdir(parents=True)
     monkeypatch.setattr(paths, "repo_root", lambda: default_home / "Ava" / ".worktrees" / "r4")
@@ -348,13 +310,12 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
 
     cron.register_os_cron(enabled_reader=lambda: True, host=fake_host(platform=DARWIN_ARM64))
 
-    assert calls == []  # registrar never called; registration refused
+    assert calls == []
 
 
 def test_register_allowed_from_the_homes_own_source_checkout(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A home's own `source` checkout registers normally."""
     prod_home = default_home / ".ava"
     (prod_home / "source").mkdir(parents=True)
     monkeypatch.setattr(paths, "repo_root", lambda: prod_home / "source")
@@ -368,7 +329,6 @@ def test_register_allowed_from_the_homes_own_source_checkout(
 def test_register_allowed_for_a_default_home_without_source(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A default home with no checkout of its own runs whichever checkout registers it."""
     monkeypatch.setattr(paths, "repo_root", lambda: default_home / "dev-src")
     calls = _fake_backend(monkeypatch)
 
@@ -380,9 +340,6 @@ def test_register_allowed_for_a_default_home_without_source(
 def test_register_macos_defers_when_ancestry_proves_the_job(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """On current macOS an exec'd descendant reads XPC_SERVICE_NAME="0", not the
-    label (2026-09-17 recurrence), so the live process-tree check must defer
-    even when the environment value is "0"."""
     label = "com.ava.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
@@ -403,8 +360,6 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
 def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The "0" descendant reading must not block a legitimate external converge
-    from applying a pending spec change."""
     plist = _plant_plist(fake_home, "com.ava.health-probe")
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")

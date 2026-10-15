@@ -1,12 +1,3 @@
-"""GET /api/agents/{id}/pending integration tests.
-
-FastAPI TestClient + real ava_test DB. The endpoint returns only the
-queued chat inbounds (status='pending', kind='chat'), oldest first —
-claimed/done rows and control kinds are excluded, because once claimed a
-message shows in the timeline snapshot instead. A multimodal inbound also
-carries its image reference urls so the strip can render thumbnails.
-"""
-
 from uuid import uuid4
 
 import psycopg
@@ -49,7 +40,6 @@ def test_pending_returns_only_pending_chat_oldest_first(
     second = insert_inbound_message(
         db_conn, tid, "second", source="agent:3", bus=event_bus, database=database
     )
-    # claimed + done chat are excluded (they're in the timeline now)
     claimed = insert_inbound_message(
         db_conn, tid, "being processed", source="user", bus=event_bus, database=database
     )
@@ -58,7 +48,6 @@ def test_pending_returns_only_pending_chat_oldest_first(
         db_conn, tid, "already handled", source="user", bus=event_bus, database=database
     )
     _set_status(db_conn, done, "done")
-    # non-chat control kind (compact_request) is excluded even while pending
     insert_compact_request_inbound(db_conn, tid, bus=event_bus, database=database)
 
     with gateway_test_client() as client:
@@ -80,7 +69,6 @@ def test_pending_empty_when_nothing_queued(db_conn: psycopg.Connection) -> None:
 
 
 def test_pending_nonexistent_agent_returns_empty(db_conn: psycopg.Connection) -> None:
-    # Lenient read: no 404 precondition (same as the timeline GET).
     with gateway_test_client() as client:
         resp = client.get("/api/agents/999999/pending")
     assert resp.status_code == 200
@@ -99,9 +87,6 @@ def test_list_pending_inbounds_helper_scopes_by_agent(
 
 
 def _multimodal_payload(urls: list[str]) -> dict[str, object]:
-    """The JSONB shape POST /messages stores for a multimodal message
-    (gateway/agents/state.py:_normalize_message_content): the text
-    part first, then one image_url block per attached image."""
     return {
         "content_blocks": [
             {"type": "text", "text": "look at this"},
@@ -139,10 +124,6 @@ def test_pending_multimodal_message_carries_image_urls(
 def test_pending_keeps_only_renderable_image_refs(
     db_conn: psycopg.Connection, database: Database, event_bus: EventBus
 ) -> None:
-    """The same gate POST /messages applies at write time (_validate_image_ref):
-    one of this agent's uploads carrying a recognized image suffix. Another
-    agent's upload, a non-image suffix, and a non-upload url are all not
-    renderable thumbnails."""
     tid = _seed_agent(db_conn)
     url = f"/api/agents/{tid}/uploads/shot.png"
     payload = _multimodal_payload(
@@ -173,8 +154,6 @@ def test_pending_keeps_only_renderable_image_refs(
 def test_pending_tolerates_malformed_content_blocks(
     db_conn: psycopg.Connection, database: Database, event_bus: EventBus
 ) -> None:
-    """A payload shaped differently than today's writer degrades to "no
-    images" instead of failing the whole queue read."""
     tid = _seed_agent(db_conn)
     payload: dict[str, object] = {
         "content_blocks": [
@@ -196,7 +175,6 @@ def test_pending_tolerates_malformed_content_blocks(
 
 
 def _active_lease(db_conn: psycopg.Connection, agent_id: int) -> str:
-    """A minimal unexpired active lease row (the takeover's delivery authority)."""
     lease_id = str(uuid4())
     with db_conn.cursor() as cur:
         cur.execute(
@@ -215,10 +193,6 @@ def test_active_takeover_hides_transcribed_chat_from_the_strip(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """#3683: a chat the takeover trail has transcribed must not show in both
-    the timeline and the strip. The inbound trigger stamps the session trail
-    (what the timeline renders); the strip drops the row; the row itself
-    stays pending for the ACK/release machinery."""
     tid = _seed_agent(db_conn)
     _active_lease(db_conn, tid)
     mid = insert_inbound_message(
@@ -245,10 +219,6 @@ def test_relay_read_hides_while_live_and_reappears_after_release(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """J1 evidence alone (read by the relay, no trail) hides the row while
-    the lease is live; a release that never ACKed must surface it again for
-    the native agent — delivery evidence counts only while the lease is
-    alive."""
     tid = _seed_agent(db_conn)
     mid = insert_inbound_message(
         db_conn, tid, "read before activation", source="user", bus=event_bus, database=database
@@ -278,11 +248,6 @@ def test_relay_read_hides_while_live_and_reappears_after_release(
 def test_lapsed_lease_does_not_hide(
     db_conn: psycopg.Connection, database: Database, event_bus: EventBus
 ) -> None:
-    """Delivery authority dies with the lease deadline: an active-status row
-    past its expiry must not hide anything (the predicate requires
-    expires_at > now()). Read through the helper — the app-level reaper
-    reaps a lapsed lease and posts its terminal note, which would race this
-    assertion."""
     tid = _seed_agent(db_conn)
     mid = insert_inbound_message(
         db_conn, tid, "late again", source="user", bus=event_bus, database=database
@@ -308,8 +273,6 @@ def test_acked_message_stays_out_of_the_strip_after_release(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """ACK is `done`: excluded as an ordinary settled row, before and after
-    the session ends."""
     tid = _seed_agent(db_conn)
     lease_id = _active_lease(db_conn, tid)
     mid = insert_inbound_message(

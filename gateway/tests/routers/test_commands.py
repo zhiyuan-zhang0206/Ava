@@ -1,5 +1,3 @@
-"""GET /api/commands — serves command metadata (no body) for the autocomplete."""
-
 from collections.abc import Callable
 from typing import NoReturn
 from unittest.mock import MagicMock
@@ -14,7 +12,6 @@ from tests.fixtures.gateway_config import gateway_test_client
 def _one_command(
     name: str, description: str, hint: str, body: str
 ) -> Callable[[CommandCatalog], list[Command]]:
-    """A `CommandCatalog.discover` that lists one command, body included."""
 
     def discover(_catalog: CommandCatalog) -> list[Command]:
         return [
@@ -46,8 +43,6 @@ def _runner_failed() -> cluster_rpc.ClusterOpFailed:
 
 
 def test_endpoint_returns_command_metadata(monkeypatch: pytest.MonkeyPatch):
-    # CommandCatalog.discover yields full Commands (with body); the endpoint must
-    # strip the body and serve only what the dropdown needs.
     monkeypatch.setattr(
         CommandCatalog,
         "discover",
@@ -60,7 +55,6 @@ def test_endpoint_returns_command_metadata(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_endpoint_agent_view_dispatches_to_agents_machine(monkeypatch: pytest.MonkeyPatch):
-    """An agent-scoped request forwards to its runner's new view op."""
     seen: dict[str, object] = {}
 
     async def _dispatch(
@@ -96,7 +90,6 @@ def test_endpoint_agent_view_unavailable_falls_back_locally(
     monkeypatch: pytest.MonkeyPatch,
     failure: Callable[[], Exception],
 ):
-    """A down or version-skewed runner leaves autocomplete usable from the local list."""
     monkeypatch.setattr(
         CommandCatalog,
         "discover",
@@ -115,7 +108,6 @@ def test_endpoint_agent_view_unavailable_falls_back_locally(
 
 
 def test_endpoint_agent_view_missing_agent_falls_back_locally(monkeypatch: pytest.MonkeyPatch):
-    """A missing agents_meta row takes the same backward-compatible fallback."""
     monkeypatch.setattr(
         CommandCatalog,
         "discover",

@@ -1,15 +1,3 @@
-"""GET/PUT /api/inventory router tests — the cross-machine plugin + MCP matrix.
-
-The aggregate fans out an inventory_read to every agent-runner, collapses the
-results into a per-item matrix, and buckets a host whose read raised into
-`unreachable`. These tests stub the public cluster RPC transport so they stay
-deterministic without a real remote runner. Matrix contracts live in test_inventory_matrix.py.
-
-Inventory is agent-runner-only: a gateway row is never a column and is
-rejected as a `?machine=` target. `?machine=` selects a single agent-runner's
-flat view; an unknown / non-agent-runner name 404s before any dispatch.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -36,8 +24,6 @@ from tests.fixtures.gateway_config import gateway_test_client
 def _read(
     plugins: dict[str, Any], mcp_servers: dict[str, Any], machine: str
 ) -> InventoryReadResult:
-    """Build a canned inventory_read result for one host (the model the per-host
-    dispatch now returns; the plugin/MCP item dicts are coerced to InventoryReadItem)."""
     return InventoryReadResult(machine=machine, plugins=plugins, mcp_servers=mcp_servers)
 
 
@@ -95,20 +81,13 @@ def _stub_writes(
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
 
 
-# ── machines-table seeding helper ──
-
-
 def _seed_machine(name: str, *, role: str = "agent-runner", stopped: bool = False) -> None:
-    """Insert a minimal machine row so `_assert_inventory_target` / the aggregate
-    fan-out find it. Defaults to agent-runner (the inventory-eligible role); pass
-    role='gateway' to seed a row that inventory must ignore. The per-test
-    TRUNCATE (conftest) clears it again."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machines (name, gateway_url, role, stopped_at) "
             "VALUES (%s, %s, %s, CASE WHEN %s THEN now() ELSE NULL END) "
             "ON CONFLICT (name) DO NOTHING",
-            (name, "http://remote.invalid:8000", [role], stopped),  # machines.role is TEXT[]
+            (name, "http://remote.invalid:8000", [role], stopped),
         )
         conn.commit()
 
@@ -116,12 +95,7 @@ def _seed_machine(name: str, *, role: str = "agent-runner", stopped: bool = Fals
 REMOTE = "remote-host"
 
 
-# ── GET aggregate ──
-
-
 def test_aggregate_collapse_across_two_machines(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GET /api/inventory (no machine): two machines, A has plugin X enabled, B
-    lacks X -> X row has hosts[A].present True+enabled, hosts[B].present False."""
     _seed_machine("A")
     _seed_machine("B")
 
@@ -147,8 +121,6 @@ def test_aggregate_collapse_across_two_machines(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_aggregate_buckets_unreachable_machine(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A machine whose inventory_read raises ClusterOpUnreachable -> in `unreachable`,
-    excluded from every item's `hosts`."""
     _seed_machine("A")
     _seed_machine("B")
 
@@ -183,19 +155,14 @@ def _snapshot(*, failures: int, age_s: float = 5.0) -> Snapshot:
 
 
 def test_aggregate_skips_stopped_and_known_down_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A host already known down is never dialed: an intentionally stopped row
-    (`stopped_at`) and a host the heartbeat liveness pass has just failed twice
-    (the roster's snapshot) land in `unreachable` directly; the columns stay
-    (task #4127). A host that failed once, or whose snapshot is stale (the pass is
-    not running), is still dialed."""
     for machine in ["A", "B", "C", "D", "E"]:
         _seed_machine(machine, stopped=machine == "B")
 
     def read_snapshots(_pool: ConnectionPool) -> dict[str, Snapshot]:
         return {
-            "C": _snapshot(failures=2),  # known down: skipped
-            "D": _snapshot(failures=1),  # one dropped probe: still dialed
-            "E": _snapshot(failures=5, age_s=3600.0),  # stale: no evidence, dialed
+            "C": _snapshot(failures=2),
+            "D": _snapshot(failures=1),
+            "E": _snapshot(failures=5, age_s=3600.0),
         }
 
     monkeypatch.setattr(snapshots, "read_all_blocking", read_snapshots)
@@ -220,8 +187,6 @@ def test_aggregate_skips_stopped_and_known_down_hosts(monkeypatch: pytest.Monkey
 
 
 def test_aggregate_dials_run_under_the_aggregate_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The gateway keeps no failure memory: every dialed host gets the one bounded
-    budget and one fast retry, and a dial that comes back unreachable is only bucketed."""
     _seed_machine("A")
     _seed_machine("B")
     seen: dict[str, tuple[float, int | None]] = {}
@@ -244,11 +209,7 @@ def test_aggregate_dials_run_under_the_aggregate_budget(monkeypatch: pytest.Monk
     assert seen["A"] == (budget, 1) and seen["B"] == (budget, 1)
 
 
-# ── GET single machine ──
-
-
 def test_get_single_machine_view(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GET ?machine=<remote>: the op's plugin/MCP dicts become sorted flat lists."""
     _seed_machine(REMOTE)
 
     async def fake_read(
@@ -274,7 +235,6 @@ def test_get_single_machine_view(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_get_unknown_machine_404() -> None:
-    """GET ?machine=<unknown> (no row in machines) -> 404 before any dispatch."""
     with gateway_test_client() as client:
         resp = client.get("/api/inventory?machine=ghost-host")
     assert resp.status_code == 404, resp.text
@@ -282,9 +242,6 @@ def test_get_unknown_machine_404() -> None:
 
 
 def test_get_gateway_machine_404() -> None:
-    """GET ?machine=<gateway>: a registered gateway row is not an
-    inventory target -> 404, never reaching dispatch. Guards the leak where the
-    gateway's own host showed plugins/MCP."""
     _seed_machine("gw-host", role="gateway")
     with gateway_test_client() as client:
         resp = client.get("/api/inventory?machine=gw-host")
@@ -293,15 +250,13 @@ def test_get_gateway_machine_404() -> None:
 
 
 def test_aggregate_excludes_gateway_column(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GET /api/inventory exercises the real `_agent_runner_names` SQL: a seeded
-    gateway row is never a column; only the agent-runner fans out."""
     _seed_machine(REMOTE, role="agent-runner")
     _seed_machine("gw-host", role="gateway")
 
     async def fake_read(
         db: Database, target: str, *, timeout_s: float = 0.0, retries: int | None = None
     ) -> InventoryReadResult:
-        assert target == REMOTE  # the gateway must never be dispatched to
+        assert target == REMOTE
         return _read({"X": _plugin(enabled=True)}, {}, REMOTE)
 
     _stub_reads(monkeypatch, fake_read)
@@ -313,7 +268,6 @@ def test_aggregate_excludes_gateway_column(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_get_single_machine_offline_503(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GET ?machine=<known>: the inventory_read times out -> 503."""
     _seed_machine(REMOTE)
 
     async def fake_read(
@@ -329,12 +283,7 @@ def test_get_single_machine_offline_503(monkeypatch: pytest.MonkeyPatch) -> None
     assert REMOTE in resp.json()["detail"]
 
 
-# ── PUT ──
-
-
 def test_put_capability_rejection_surfaced(monkeypatch: pytest.MonkeyPatch) -> None:
-    """PUT where the host-side op rejects a toggle -> applied=False echoed with
-    the per-item verdict."""
     _seed_machine(REMOTE)
 
     async def fake_write(
@@ -364,7 +313,6 @@ def test_put_capability_rejection_surfaced(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_put_unknown_machine_404() -> None:
-    """PUT ?machine=<unknown> -> 404 before any dispatch."""
     with gateway_test_client() as client:
         resp = client.put("/api/inventory?machine=ghost-host", json={"plugins": {"x": True}})
     assert resp.status_code == 404, resp.text
@@ -372,8 +320,6 @@ def test_put_unknown_machine_404() -> None:
 
 
 def test_put_gateway_machine_404() -> None:
-    """PUT ?machine=<gateway> -> 404: the gateway has no inventory to
-    write to."""
     _seed_machine("gw-host", role="gateway")
     with gateway_test_client() as client:
         resp = client.put("/api/inventory?machine=gw-host", json={"plugins": {"x": True}})
@@ -382,8 +328,6 @@ def test_put_gateway_machine_404() -> None:
 
 
 def test_put_missing_machine_400() -> None:
-    """PUT with no ?machine= -> 400: inventory writes have no gateway
-    default target."""
     with gateway_test_client() as client:
         resp = client.put("/api/inventory", json={"plugins": {"x": True}})
     assert resp.status_code == 400, resp.text
@@ -391,8 +335,6 @@ def test_put_missing_machine_400() -> None:
 
 
 def test_put_non_dict_half_422() -> None:
-    """PUT with a non-dict 'plugins' half -> 422: the InventoryWriteRequest body
-    model rejects the malformed shape at FastAPI validation, before the handler."""
     _seed_machine(REMOTE)
     with gateway_test_client() as client:
         resp = client.put(
@@ -404,7 +346,6 @@ def test_put_non_dict_half_422() -> None:
 def test_inventory_uses_each_request_apps_database_and_pool(
     database: Database, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
-    """Two serving apps route SQL and RPC through their own attached resources."""
     _seed_machine(REMOTE)
     seen_databases: list[Database] = []
 

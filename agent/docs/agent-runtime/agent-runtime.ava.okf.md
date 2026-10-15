@@ -112,3 +112,5 @@ independent of model turns and ownership heartbeats. It pages due sessions on
 this machine even after native handoff or agent termination, respects unit
 quiescence, and persists progress and explicit upstream completion receipts.
 See [[base/agents/impersonation/docs/impersonation.ava.okf.md]].
+
+Checkpoint test evidence: [[services/docs/agent_runner_side/checkpoint-test-evidence.ava.okf.md]].

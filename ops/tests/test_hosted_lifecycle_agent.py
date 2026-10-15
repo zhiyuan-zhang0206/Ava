@@ -1,5 +1,3 @@
-"""The agent side of hosted lifecycle application: a stale unapplied pointer closes without retargeting, a restart leaves shell sessions for the later terminate, and an apply without a bound killer refuses a kill request."""
-
 from uuid import uuid4
 
 import psycopg
@@ -62,7 +60,6 @@ def _terminate_command(
 def _record_kills(
     monkeypatch: pytest.MonkeyPatch, *, fail: bool = False
 ) -> list[tuple[int, str | None]]:
-    """Patch the host's kill primitive; record (agent id, status at kill time)."""
     calls: list[tuple[int, str | None]] = []
 
     def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
@@ -111,8 +108,6 @@ async def test_hosted_apply_without_a_bound_killer_refuses_a_kill_request(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Fail fast: a caller that binds no killer cannot silently drop the
-    request — the apply raises and rolls back, the termination stays pending."""
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     command = _terminate_command(db_conn, agent_id, kill=True)

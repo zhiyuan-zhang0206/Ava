@@ -1,18 +1,3 @@
-"""Core observability metrics pack tests (Task #882 migration, #1280 Loki).
-
-Covers the generic observability pack migrated from the retired
-``ava_observability`` plugin to core metrics: registration shape (25 metrics
-across grafana / inspector surfaces, plugin == "core"), the LogQL template
-safety validation, and every rendered query's structure — the stream selector,
-the ``| json`` pipeline, the event_name/category placeholders, and the
-per-panel filter semantics (exec spellings, syntax-fix kinds, halt classes,
-spawner sources, table top-k shapes, agent_id rendering). Turn duration is the
-one PromQL exception: it shares the R18 histogram quantiles. The queries
-themselves were verified against the live Loki stream during the migration
-(task #1280); unit tests lock the registry shape and rendered templates instead
-of executing them (there is no Loki in the test environment).
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -27,7 +12,6 @@ from base.telemetry.metrics.plugin_metrics import (
 )
 
 EXPECTED = {
-    # name -> (panel, output, event_name, category, n_targets)
     "ava_obs_llm_cost_usd": ("timeseries", ["grafana"], "llm_usage", "telemetry", 1),
     "ava_obs_agent_llm_cost_usd": ("timeseries", ["inspector"], "llm_usage", "telemetry", 1),
     "ava_obs_llm_error_rate": ("timeseries", ["grafana", "inspector"], "llm_usage", "telemetry", 2),
@@ -97,9 +81,6 @@ EXPECTED = {
 
 
 def _pack() -> list[MetricSpec]:
-    """The core observability pack, validated. It spans three modules: the task
-    #3697 S1 line-budget split moved the frontend telemetry specs to ``frontend``,
-    and the #2174 split moved the exec-envelope pair to ``exec_envelope``."""
     return [
         catalog.validate_core_metric(spec)
         for module in (observability, exec_envelope, frontend)
@@ -108,11 +89,7 @@ def _pack() -> list[MetricSpec]:
 
 
 def _all_rendered() -> dict[str, list[str]]:
-    """name -> every rendered expr (primary + targets), placeholders filled."""
     return {spec.name: [render_query(spec), *render_targets(spec)[1:]] for spec in _pack()}
-
-
-# ── registration ──────────────────────────────────────────────────────────────
 
 
 def _assert_spec_matches_expected(name: str, spec: MetricSpec) -> None:
@@ -144,7 +121,6 @@ def test_pack_registers_all_metrics() -> None:
 
 
 def test_logql_queries_have_event_stream_and_json() -> None:
-    """Every LogQL query selects the event stream and pipelines | json."""
     for name, exprs in _all_rendered().items():
         if name == "ava_obs_turn_duration_s":
             continue
@@ -152,11 +128,6 @@ def test_logql_queries_have_event_stream_and_json() -> None:
             assert 'service_name="unknown_service"' in expr, name
             assert "| json" in expr, name
             assert "{event_name}" not in expr and "{category}" not in expr, name
-            # event_name/agent_id are promoted stream labels: their matchers
-            # must sit in the stream selector ({... event_name=...}), never as
-            # `| event_name` pipeline filters (task #1467). The {{agent_id}}
-            # inspector placeholder is the one allowed pipeline exception —
-            # the gateway renders it per agent.
             assert "| event_name" not in expr, f"{name}: event_name filter after | json:\n{expr}"
             assert "| agent_id" not in expr.replace("| {{agent_id}}", ""), (
                 f"{name}: agent_id filter after | json:\n{expr}"
@@ -164,9 +135,6 @@ def test_logql_queries_have_event_stream_and_json() -> None:
 
 
 def test_logql_template_validation_rejects_drift() -> None:
-    """The template-form validator refuses: a query that lost the stream
-    selector, one without the json pipeline, and one that hardcodes an
-    event filter instead of the placeholders."""
     from base.telemetry.metrics.logql import validate_logql_template
 
     with pytest.raises(InvalidMetricQuery, match="stream"):
@@ -186,12 +154,7 @@ def test_logql_template_validation_rejects_drift() -> None:
         )
 
 
-# ── cost via the payload cost_usd field (task #2626 / #1280) ─────────────────
-
-
 def test_cost_queries_unwrap_cost_usd() -> None:
-    """Cost panels unwrap attributes_cost_usd from the payload (producer-side
-    catalog pricing, #2626) — the SQL CASE mirroring model rates is gone."""
     specs = {m.name: m for m in _pack()}
     for name in ("ava_obs_llm_cost_usd", "ava_obs_agent_llm_cost_usd"):
         query = specs[name].query
@@ -200,27 +163,14 @@ def test_cost_queries_unwrap_cost_usd() -> None:
         assert "attributes->>'model'" not in query, name
 
 
-# ── per-panel filter semantics (rendered-template locks) ─────────────────────
-
-
 def test_exec_breakdown_covers_every_outcome() -> None:
-    """exec panel series: ok / failed / timeout / cancelled / node_timeout /
-    other — unknown exec* events fall into other."""
     exprs = _all_rendered()["ava_obs_exec_success_rate"]
-    # event_name is a promoted stream label (2026-08-23 cutover, task #1467):
-    # every matcher sits in the stream selector, before the | json stage.
     assert all("event_name=" in e.split("| json")[0] for e in exprs), exprs
     assert 'event_name="exec"' in exprs[0]
     assert 'event_name="exec_failed"' in exprs[1]
     assert 'event_name="exec_timeout"' in exprs[2]
     assert 'event_name="exec_cancelled"' in exprs[3]
     assert 'event_name="exec_node_timeout"' in exprs[4]
-    # other: exec prefix minus every known spelling. Selector matchers are
-    # full-string regexes, so the negated list excludes exactly the named
-    # spellings (the pre-migration pipeline form was substring-based and
-    # matched nothing — exec.* rows all contain "exec"). The FULL matcher is
-    # pinned: adding or removing an exclusion spelling is a deliberate panel
-    # semantic change and must fail here.
     assert (
         'event_name=~"exec.*", '
         'event_name!~"exec|exec_envelope|exec_failed|exec_timeout|'
@@ -232,11 +182,10 @@ def test_turn_ok_rate_math_shape() -> None:
     expr = _all_rendered()["ava_obs_turn_ok_rate"][0]
     assert "100 * sum(count_over_time(" in expr
     assert 'attributes_ok="true"' in expr
-    assert expr.count("sum(count_over_time(") == 2  # ok / total
+    assert expr.count("sum(count_over_time(") == 2
 
 
 def test_turn_duration_uses_the_alert_histogram_quantiles() -> None:
-    """The dashboard follows R18's Prometheus p95 with a p50 companion."""
     spec = {metric.name: metric for metric in _pack()}["ava_obs_turn_duration_s"]
     assert spec.query_type == "promql"
     assert render_targets(spec) == [
@@ -247,11 +196,6 @@ def test_turn_duration_uses_the_alert_histogram_quantiles() -> None:
 
 
 def test_compaction_panels_measure_applied_ratio_and_frequency() -> None:
-    """Only completed compactions feed the ratio and rate panels.
-
-    Requests are audit records and agent-authored summaries can still lose a
-    claim race; the completed event is emitted at the history replacement.
-    """
     rendered = _all_rendered()
     ratio = rendered["ava_obs_compaction_summary_history_ratio"][0]
     rate = rendered["ava_obs_compaction_rate"][0]
@@ -270,7 +214,6 @@ def test_halt_breakdown_buckets() -> None:
     assert 'attributes_body="no tool_call (idle)"' in exprs[0]
     assert 'attributes_body=~".*compact.*"' in exprs[1]
     assert 'attributes_body=~"lifecycle .*"' in exprs[2]
-    # other: none of the above (missing body matches the != / !~ filters)
     assert 'attributes_body!="no tool_call (idle)"' in exprs[3]
     assert 'attributes_body!~".*compact.*"' in exprs[3]
     assert 'attributes_body!~"lifecycle .*"' in exprs[3]
@@ -287,7 +230,6 @@ def test_syntax_fix_kind_buckets() -> None:
         ("bracket_matching", 5),
     ]:
         assert f'attributes_fixes=~".*{needle}.*"' in exprs[idx], needle
-    # other: !~ over the whole known-kind alternation (missing label matches)
     assert (
         'attributes_fixes!~".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*"'
         in exprs[6]
@@ -296,9 +238,6 @@ def test_syntax_fix_kind_buckets() -> None:
 
 def test_lifecycle_and_spawner_window_aggregates() -> None:
     spawner = _all_rendered()["ava_obs_spawn_by_spawner"]
-    # Per-minute normalization: bucketed at $__interval, divided by the
-    # bucket width in minutes so every bar is a rate (FleetView bucket
-    # transparency pass).
     assert spawner == [
         'sum by (source) (count_over_time({service_name="unknown_service", event_name="spawn"} | json | '
         'category="audit" [$__interval])) / ($__interval_ms / 60000)'
@@ -314,7 +253,7 @@ def test_lifecycle_and_spawner_window_aggregates() -> None:
 def test_sdk_call_top_table_shape() -> None:
     expr = _all_rendered()["ava_obs_sdk_call_top"][0]
     assert expr.startswith("topk(20, sum by (attributes_fn) (sum_over_time(")
-    assert "$__range" in expr  # instant query over the whole window
+    assert "$__range" in expr
     assert 'unwrap attributes_sample_rate | __error__=""' in expr
     assert "* 10" not in expr
 
@@ -340,8 +279,6 @@ def test_frontend_table_shapes() -> None:
 
 
 def test_agent_llm_usage_table_columns() -> None:
-    """Four instant targets (calls / in / out / cost), all per-agent, all
-    over the whole window; the cost column unwraps cost_usd."""
     exprs = _all_rendered()["ava_obs_agent_llm_usage_table"]
     assert len(exprs) == 4
     assert "sum by (agent_id) (count_over_time(" in exprs[0]
@@ -354,8 +291,6 @@ def test_agent_llm_usage_table_columns() -> None:
 
 
 def test_inspector_agent_queries_render_agent_id() -> None:
-    """{{agent_id}} renders to agent_id="<n>" (LogQL label filter) and the
-    rendered query passes the rendered-form validation."""
     for name in ("ava_obs_agent_llm_cost_usd", "ava_obs_agent_delivery_stalled_count"):
         spec = next(m for m in _pack() if m.name == name)
         rendered = render_query(spec, agent_id=1234)

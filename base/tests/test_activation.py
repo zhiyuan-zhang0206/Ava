@@ -1,12 +1,3 @@
-"""Unit tests for `base/packages/plugins/activation.py` — the injection-surface
-activation recorder (issue #40, philosophy §6).
-
-Pins the three properties that make it safe to hang off every plugin surface:
-only plugin registrations are recorded, the event carries the model so the
-obsolescence gauge is answerable per model, and recording is a pure side
-channel that swallows its own failures.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -19,7 +10,6 @@ from base.packages.plugins import activation
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]]:
-    """Capture (plugin, surface, identifier, detail) per emitted event."""
     emitted: list[tuple[str, str, str, str]] = []
 
     def spy(plugin: str, surface: str, identifier: str, detail: str, _model: str) -> None:
@@ -38,8 +28,6 @@ def test_records_an_attributed_firing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_unattributed_firing_records_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`plugin=None` is a framework registration or a test's direct call — the
-    gate that keeps the framework from ever showing up as a plugin."""
     emitted = _spy_emit(monkeypatch)
 
     activation.record(None, "hooks", "before_llm", detail="wrote messages", model="m")
@@ -48,8 +36,6 @@ def test_unattributed_firing_records_nothing(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_event_carries_the_model_in_force(loguru_records: LogRecords) -> None:
-    """Philosophy §6 asks for activation telemetry *per model*: without the
-    model on the event, "does model X still need this shim" is unanswerable."""
     activation.emit("ava_code", "sdkWraps", "files.read", "inner_calls=0", "deepseek-flash")
 
     logged = loguru_records.events(activation.PLUGIN_ACTIVATION_EVENT)
@@ -64,9 +50,6 @@ def test_event_carries_the_model_in_force(loguru_records: LogRecords) -> None:
 
 
 def test_emit_failure_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Side-channel contract: a broken sink must not raise into the hook / wrap
-    it was called from. Kept as a patch: the fault is `logger.bind` raising, which no real
-    sink can produce (loguru contains a failing sink's exception itself)."""
 
     class _Broken:
         def bind(self, **_kwargs: Any) -> None:
@@ -78,8 +61,6 @@ def test_emit_failure_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_registered_event_name_is_on_contract() -> None:
-    """The emitter fails loud on an unregistered event name, so the registry
-    entry is part of the contract, not an optional extra."""
     from base.events.contract import EVENTS, payload_keys
 
     spec = EVENTS[activation.PLUGIN_ACTIVATION_EVENT]

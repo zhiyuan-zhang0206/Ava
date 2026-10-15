@@ -1,15 +1,3 @@
-"""Provider account guard — health-probe checks 9-10 (`cli/commands/cluster/_provider_guard.py`).
-
-Failure messages name the configured threshold, never a live reading (a
-ticking balance, a growing halted count); live readings ride stderr detail
-lines only. Read trouble is fail-OPEN: a missing key, an unreadable balance, or
-an unreachable agent table means "cannot judge", not "unhealthy".
-
-The probe-level wiring (the `health_probe_failing` signal, no rollback
-counting) is pinned in `cli/commands/cluster/tests/test_cluster_health.py`
-next to the other checks' integration tests.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -32,20 +20,15 @@ def _secret(value: str) -> SecretStr:
 def _balance_payload(
     total: str, *, currency: str = "CNY", available: bool = True
 ) -> dict[str, Any]:
-    """A DeepSeek /user/balance-shaped payload."""
     return {
         "is_available": available,
         "balance_infos": [{"currency": currency, "total_balance": total}],
     }
 
 
-# ─── check 9: balance runway ─────────────────────────────────────────────────
-
-
 def test_balance_at_the_minimum_passes(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The minimum is inclusive: at the threshold the account is still funded."""
     monkeypatch.setattr(settings.lm, "deepseek_api_key", _secret("sk-test"))
     monkeypatch.setattr(settings.alerts, "provider_guard_balance_min_cny", 500.0)
 
@@ -61,7 +44,6 @@ def test_balance_at_the_minimum_passes(
 def test_balance_below_minimum_reports_a_stable_message(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The message names the configured threshold, never the live balance."""
     monkeypatch.setattr(settings.lm, "deepseek_api_key", _secret("sk-test"))
     monkeypatch.setattr(settings.alerts, "provider_guard_balance_min_cny", 500.0)
     totals = iter(["100.00", "99.50"])
@@ -79,7 +61,7 @@ def test_balance_below_minimum_reports_a_stable_message(
     assert "AVA_PROVIDER_GUARD_BALANCE_MIN_CNY=\u00a5500" in first
     assert "100.00" not in first and "99.50" not in first
     err = capsys.readouterr().err
-    assert "100.00" in err and "99.50" in err  # live readings stay on stderr
+    assert "100.00" in err and "99.50" in err
 
 
 def test_balance_unavailable_account_fails_even_when_funded(
@@ -101,7 +83,6 @@ def test_balance_unavailable_account_fails_even_when_funded(
 def test_balance_without_a_key_skips_without_fetching(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Hosts without the key configured (e.g. runners) pass with a note."""
     monkeypatch.setattr(settings.lm, "deepseek_api_key", None)
     fetches: list[bool] = []
 
@@ -119,7 +100,6 @@ def test_balance_without_a_key_skips_without_fetching(
 def test_balance_read_error_is_fail_open(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A provider API blip is not evidence of a drained account."""
     monkeypatch.setattr(settings.lm, "deepseek_api_key", _secret("sk-test"))
 
     def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
@@ -134,7 +114,6 @@ def test_balance_read_error_is_fail_open(
 def test_balance_without_a_cny_entry_skips(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Only the account's funded currency can be judged against a CNY minimum."""
     monkeypatch.setattr(settings.lm, "deepseek_api_key", _secret("sk-test"))
 
     def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
@@ -173,9 +152,6 @@ def test_fetch_balance_maps_http_failure_to_a_sanitized_read_error(
 
     with pytest.raises(_provider_guard.BalanceReadError, match="HTTP 500"):
         _provider_guard.fetch_balance("https://balance.test", "sk-test", 5.0)
-
-
-# ─── check 10: halted agents ─────────────────────────────────────────────────
 
 
 def test_blocked_agents_at_threshold_reports_a_stable_message(
@@ -248,8 +224,6 @@ def test_blocked_agents_disabled_skips_before_the_query(
 def test_halted_agents_count_reads_the_recovery_breaker_halt(
     monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
-    """`permanent_reject_streak` is the durable halt flag (task #3617) and the
-    window bounds the count to the active wave."""
     from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 
     queries: list[tuple[str, tuple[object, ...]]] = []
@@ -298,15 +272,9 @@ def test_halted_agents_count_db_error_is_fail_open(
     assert _provider_guard.halted_agents_count(24, database_factory=operator_database) is None
 
 
-# ─── the combined entry point ────────────────────────────────────────────────
-
-
 def test_provider_guard_failures_report_balance_before_blocked(
     monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
-    """Both failing checks report, root cause first: a drained balance IS the
-    cause of the halted agents, and funding the account is what unsticks them —
-    but the halted agents report too, never silenced by the balance."""
 
     def _balance() -> str:
         return "balance detail"
@@ -334,8 +302,6 @@ def test_provider_guard_failures_report_balance_before_blocked(
 def test_run_provider_guard_reports_the_failing_checks(
     monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
 ) -> None:
-    """Every failure is handed to the probe's report seam with its check name and
-    counted; a pass reports nothing and counts zero."""
     reported: list[tuple[str, str]] = []
 
     def _failing(*, database_factory: DatabaseFactory) -> list[tuple[str, str]]:

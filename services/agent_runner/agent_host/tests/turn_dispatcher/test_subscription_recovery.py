@@ -1,5 +1,3 @@
-"""Turn dispatcher cases: subscription recovery."""
-
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +23,6 @@ class TestSubscriptionRecovery:
     async def test_db_down_scan_keeps_the_redis_subscription_open(
         self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
-        """The durable backstop may be down while the Redis wake path remains healthy."""
         pubsub = QueueingPubSub()
         clients = patch_redis(monkeypatch, pubsub)
         failures_seen = asyncio.Event()
@@ -65,7 +62,6 @@ class TestSubscriptionRecovery:
     async def test_failing_scan_does_not_interrupt_the_pubsub_fast_path(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A DB outage must not create a gap in the subscription's wake delivery."""
         pubsub = QueueingPubSub()
         clients = patch_redis(monkeypatch, pubsub)
         first_failure = asyncio.Event()
@@ -99,7 +95,6 @@ class TestSubscriptionRecovery:
     async def test_scan_backoff_recovers_on_the_existing_subscription(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A recovered scan resets to its normal cadence without reconnecting Redis."""
         pubsub = QueueingPubSub()
         clients = patch_redis(monkeypatch, pubsub)
         recovered_twice = asyncio.Event()
@@ -141,12 +136,6 @@ class TestSubscriptionRecovery:
     async def test_half_open_subscription_read_is_bounded_and_reconnected(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A peer may stay TCP-connected yet never answer a subscription read.
-
-        The dispatcher must close that connection and establish a fresh one,
-        rather than letting the hosted pending scan and all notifications stop
-        behind a hung `PSUBSCRIBE` read.
-        """
 
         class _HalfOpenPubSub:
             def __init__(self) -> None:
@@ -205,9 +194,6 @@ class TestSubscriptionRecovery:
 
 
 class _ScriptedPubSub:
-    """One subscription whose outcome is scripted: fail to subscribe, drop after one
-    completed read, or stay healthy."""
-
     def __init__(self, behavior: str) -> None:
         self._behavior = behavior
         self._reads = 0
@@ -238,9 +224,6 @@ class _ScriptedRedis:
 
 
 class TestReconnectExhaustion:
-    """A run of subscription failures ends in an exit for the supervisor, not an
-    endless reconnect loop; one completed read starts the count over."""
-
     async def test_consecutive_failures_raise_and_log_an_error_event(
         self, monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
     ) -> None:
@@ -271,8 +254,6 @@ class TestReconnectExhaustion:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         limit = dispatcher.MAX_CONSECUTIVE_RECONNECT_FAILURES
-        # The failures before and after the completed read total well past the
-        # limit, but never `limit` in a row: without the reset this run would end.
         script = ["fail"] * (limit - 1) + ["read_then_drop"] + ["fail"] * (limit - 2) + ["healthy"]
         remaining = iter(script)
         healthy_opened = asyncio.Event()

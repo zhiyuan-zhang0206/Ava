@@ -1,9 +1,3 @@
-"""The commit, cleanup and durability contract of `base.host.atomic_io`.
-
-Failures are caused through an `AtomicWriter` built over the `Fs` a test needs; the module
-functions that every other component calls are the same writer over the real calls.
-"""
-
 from __future__ import annotations
 
 import dataclasses
@@ -20,7 +14,6 @@ from base.host.atomic_io import SYSTEM_FS, AtomicWriter, Fs
 
 
 def _recording_fs(events: list[str]) -> Fs:
-    """The real calls, each noting what it was asked to do first."""
 
     def replace(source: Path, target: Path) -> None:
         events.append(f"replace {source.name} -> {target.name}")

@@ -1,5 +1,3 @@
-"""Daily history scans retain their error timing and belong to individual loops."""
-
 from __future__ import annotations
 
 import asyncio
@@ -23,8 +21,6 @@ from services.upkeep.events_maintenance.tests.test_events_maintenance_resolution
 
 
 class _ScanConnection:
-    """Count actual history SQL while allowing a failed fetch without a DB rollback."""
-
     def __init__(self, connection: psycopg.Connection[Any]) -> None:
         self.connection = connection
         self.scans = 0

@@ -1,16 +1,3 @@
-"""The finished turn's settle-boundary reconcile — `services/agent_runner/agent_host/settlement.py`.
-
-A finished (non-crashed, non-aborted) turn disposes the inbounds it claimed
-at its own settlement point. The caller's completed-turn path has already
-flushed the throttled nstep tail before this settle boundary; the pass runs
-under the turn's own incarnation.
-Every gap skips the pass and leaves the rows to the next cold admission: an
-unresolved turn resource, a replaced runtime, and any failure of the pass
-itself. The dispatch is locked in `test_agent_host.py`; the DB-visible
-consumption is the same `consume_claimed_inbounds` the abort settle and cold
-admission run.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,8 +14,6 @@ from services.agent_runner.agent_host import settlement as settlement_mod
 
 
 class _ReconcileSpy:
-    """Records each pass, the explicit original incarnation, and fails on demand."""
-
     def __init__(self) -> None:
         self.calls: list[tuple[object, int]] = []
         self.bound: list[RuntimeIncarnation | None] = []
@@ -61,7 +46,6 @@ def _incarnation(agent_id: int = 42) -> RuntimeIncarnation:
 async def _run_pass(
     incarnation: RuntimeIncarnation, *, resources: HostedTurnResources | None = None
 ) -> None:
-    """Invoke the pass with sentinel handles — only the patched spy sees them."""
     await settlement_mod.reconcile_inbounds_after_turn(
         cast(AsyncConnectionPool[Any], object()), incarnation, resources=resources
     )
@@ -72,8 +56,6 @@ def _skips(loguru_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 async def test_pass_runs_under_the_turns_own_incarnation(reconcile_spy: _ReconcileSpy) -> None:
-    """The helper must see the turn's incarnation — the inbound-owner lock
-    fences its writes on that lease — and the caller's pool."""
     incarnation = _incarnation()
     await _run_pass(incarnation)
     assert len(reconcile_spy.calls) == 1
@@ -85,17 +67,12 @@ async def test_unresolved_turn_resources_skip(
     reconcile_spy: _ReconcileSpy,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    """An unresolved host resource is a turn that has not settled: the pass
-    must not decide which claimed rows are durable while the turn can still
-    discharge them, and the boot reconcile stays the fallback."""
     resources = HostedTurnResources()
     resources.unresolved[Path("hosted-resource/still-held")] = None
     await _run_pass(_incarnation(), resources=resources)
     assert reconcile_spy.calls == []
     skips = _skips(loguru_records)
     assert [r["extra"]["reason"] for r in skips] == ["resources_unsettled"]
-    # A fail-closed skip is expected, not an anomaly: INFO keeps it out of the
-    # warning surfaces (2026-10-03 triage).
     assert [r["level"].name for r in skips] == ["INFO"]
 
 
@@ -103,8 +80,6 @@ async def test_replaced_runtime_is_a_logged_noop(
     reconcile_spy: _ReconcileSpy,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    """A stale incarnation's pass must neither write nor raise: the lease
-    fence refuses it and the settlement continues as if it had not run."""
     reconcile_spy.fail_with = RuntimeOwnershipLostError("runtime replaced")
     await _run_pass(_incarnation())
     assert len(reconcile_spy.calls) == 1
@@ -117,11 +92,9 @@ async def test_unexpected_failure_is_logged_not_raised(
     reconcile_spy: _ReconcileSpy,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    """The pass is best-effort: a database failure must not become a second
-    turn failure — the next cold admission retries the reconcile."""
     reconcile_spy.fail_with = RuntimeError("database is down")
     await _run_pass(_incarnation())
     failed = [r for r in loguru_records if r["extra"].get("event") == "host_turn_reconcile_failed"]
     assert [r["extra"]["agent_id"] for r in failed] == [42]
-    assert failed[0]["exception"] is not None  # the traceback rides the record (#4964)
+    assert failed[0]["exception"] is not None
     assert failed[0]["exception"].type is RuntimeError

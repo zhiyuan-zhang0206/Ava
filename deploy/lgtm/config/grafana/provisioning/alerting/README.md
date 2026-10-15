@@ -334,3 +334,12 @@ The unified emitter ships every event as an OTLP log (Loki) and every
 telemetry event's numeric payload fields as OTLP metrics (Prometheus); the
 Postgres `events` write was retired with the cutover and the JSONL mirror
 stays as the local copy. These rules read the LGTM side exclusively.
+
+## Metric-name test evidence
+
+Type annotations do not always determine the emitted runtime metric kind.
+`tests/scripts/test_alert_rules.py` keeps explicit runtime-kind pins aligned
+with emit sites. Its non-derived metric table is currently empty. Any proposed addition requires
+a live Prometheus check and a recorded reason; historical samples do not
+establish current emission. Naming and type translation remain owned by the
+[metrics mapping](../../../../../../base/telemetry/otlp/docs/telemetry-otlp/metrics-mapping.ava.okf.md).

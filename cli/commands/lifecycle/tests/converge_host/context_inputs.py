@@ -1,5 +1,3 @@
-"""Real converge context inputs and one explicit operator owner per invocation."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -102,9 +100,6 @@ def pgbouncer_context(
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
 ) -> converge_host.ConvergeCtx:
-    """Wire ensure_pgbouncer_step's deps: a record (pooler 6433 / pg 5433), settings
-    reflecting the toggle, and an optional existing .env carrying
-    AVA_DB_URL."""
     from base import cluster
 
     rec = cluster.ClusterRecord(
@@ -137,7 +132,6 @@ def capable_helper_context(
     producer: Callable[[], EventPipeline],
     helper: HelperFactory | None = refuse_helper,
 ) -> converge_host.ConvergeCtx:
-    """A host the capability probe clears, with an empty .env."""
     ava_home = tmp_path / "avahome"
     ava_home.mkdir()
     (ava_home / ".env").write_text("")

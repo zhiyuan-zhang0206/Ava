@@ -1,5 +1,3 @@
-"""Hosted turn-progress snapshots and their agent-host heartbeat publication."""
-
 from __future__ import annotations
 
 import asyncio
@@ -23,13 +21,6 @@ from ... import daemon as host_daemon
 
 
 class _FakeAdmission:
-    """Minimal stand-in for `AgentHost.admission` — the beat loop's long-wait scan.
-
-    These tests drive `beat_forever` with a host double; the real host always
-    carries a `TurnAdmission` (`services/agent_runner/agent_host/scheduling/admission.py`), so the double
-    carries the same empty-shaped surface.
-    """
-
     limit = 0
     waiting = 0
 
@@ -167,8 +158,6 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
             with pytest.raises(asyncio.CancelledError):
                 await task
 
-    # Canonical order after #1856: liveness first, then DB renewal, then the
-    # best-effort Redis snapshot. A hung progress SET must not stop either.
     assert calls == ["beat", "renew", "set", "set_cancelled"] * 3
     warnings = [record for record in caplog.records if record.name == host_daemon.host_log.name]
     assert len(warnings) == 2
@@ -178,12 +167,6 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
 async def test_beat_skips_ownership_renewal_while_quiesced(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Liveness beats continue across a stop window; lease renewals do not.
-
-    The leases lapse with their TTL while the unit is stopped, and the first
-    beat after resume refreshes every row this host still owns — a tracked
-    decision of the 2026-09-12 fix batch.
-    """
 
     calls: list[str] = []
     state = {"quiesced": True}
@@ -335,7 +318,7 @@ async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
                 assert writes == [[b"SET", b"host_turn_progress:runner-a", b"{}", b"EX", b"60"]] * 2
                 assert not client.connection_pool._in_use_connections
         records = [record for record in caplog.records if record.name == host_daemon.host_log.name]
-        assert len(records) == 1  # The second response was accepted, not swallowed as a failure.
+        assert len(records) == 1
         assert "turn-progress heartbeat publish exceeded" in records[0].message
     finally:
         await client.aclose()

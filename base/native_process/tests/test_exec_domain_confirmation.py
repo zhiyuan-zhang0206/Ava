@@ -1,5 +1,3 @@
-"""Positive managed-domain closure, separate from signal submission or root exit."""
-
 import contextlib
 import os
 import subprocess
@@ -22,7 +20,6 @@ def _ended(identity: psutil.Process) -> bool:
 
 
 def test_real_domain_confirms_grandchild_with_redirected_output(tmp_path: Path) -> None:
-    """An already-exited root and EOF alone do not certify its living member."""
     gate = tmp_path / "gate"
     receipt = tmp_path / "member"
     code = """
@@ -191,7 +188,7 @@ def test_signal_failure_retains_unreaped_owner(
             child.send_signal(9)
         if root.returncode is None:
             with contextlib.suppress(ProcessLookupError, PermissionError):
-                original(root.pid, 9)  # Exact fixture child already signalled above.
+                original(root.pid, 9)
             root.wait(timeout=5)
 
 
@@ -290,7 +287,6 @@ def test_group_listing_names_exited_leader_and_live_members(tmp_path: Path) -> N
             assert time.monotonic() < deadline
             time.sleep(0.01)
         child = int(receipt.read_text())
-        # The unreaped leader stays listed after exit, alongside its live member.
         assert group_closure.group_members(root.pid) == sorted([root.pid, child])
         domain.close_confirmed(time.monotonic() + 5)
         assert group_closure.group_members(root.pid) == [root.pid]
@@ -303,10 +299,6 @@ def test_group_listing_names_exited_leader_and_live_members(tmp_path: Path) -> N
 def _late_listing_domain(
     monkeypatch: pytest.MonkeyPatch, late_rounds: int | None
 ) -> tuple[subprocess.Popen[bytes], _process.ExecProcessDomain, list[str]]:
-    """An empty live sample whose kernel listing names a late member for some rounds.
-
-    `late_rounds=None` keeps listing the late member in every round.
-    """
     root, domain = _process.ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
     )
@@ -324,7 +316,6 @@ def _late_listing_domain(
         assert pgid == root.pid
         events.append("listing")
         rounds = events.count("listing")
-        # A member forked after the sample enumerated PIDs; never signalled by number.
         late = late_rounds is None or rounds <= late_rounds
         return [root.pid, 0x7FFFFFFF] if late else [root.pid]
 
@@ -339,8 +330,6 @@ def test_listed_late_member_forces_another_signal_round(monkeypatch: pytest.Monk
     root, domain, events = _late_listing_domain(monkeypatch, late_rounds=1)
     try:
         domain.close_confirmed(time.monotonic() + 5)
-        # The second round signals before its listing; XNU answers the
-        # zombie-only group with EPERM, which the round then verifies.
         assert events == ["signal", "listing", "signal", "listing"]
         assert root.wait(timeout=5) == -9
     finally:

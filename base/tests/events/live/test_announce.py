@@ -1,5 +1,3 @@
-"""Lifecycle hints remain constant-size and independent of database reads."""
-
 from __future__ import annotations
 
 import json
@@ -22,8 +20,6 @@ def _forbid_snapshot_reads(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _RecordingBus:
-    """An `EventBus` stand-in recording what is published and on which channel."""
-
     channel = "ava:test-events"
 
     def __init__(self) -> None:

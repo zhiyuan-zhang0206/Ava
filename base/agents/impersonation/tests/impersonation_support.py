@@ -1,5 +1,3 @@
-"""Fixtures for impersonation tests."""
-
 from typing import Any
 
 import pytest
@@ -9,7 +7,6 @@ from base.native_process import native_boot_id
 
 
 def request_legacy_leases(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make new automatic leases carry no event protocol (the pre-manifest, replay-read kind)."""
 
     def no_protocol(*, automatic: bool) -> None:
         del automatic
@@ -18,7 +15,6 @@ def request_legacy_leases(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def native_identity(birth: float) -> dict[str, object]:
-    """Explicit synthetic process evidence within this test host's boot scope."""
     import sys
 
     return {
@@ -29,7 +25,6 @@ def native_identity(birth: float) -> dict[str, object]:
 
 
 def recorded_tree() -> dict[str, Any]:
-    """A recorded controller process tree."""
     return {
         "pid": 4242,
         "name": "python3.12",

@@ -1,5 +1,3 @@
-"""A constant-vector stand-in for the embedding provider, shared by the memory indexer's tests."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -9,10 +7,6 @@ FINGERPRINT = "test:gemini:dim=8"
 
 
 class FakeProvider:
-    """Stand-in for `EmbeddingProvider` — records embed calls, returns
-    constant vectors; `fingerprint` is settable so tests can simulate a
-    provider switch."""
-
     def __init__(self, *, fingerprint: str = FINGERPRINT, dim: int = DIM) -> None:
         self.name = "fake"
         self.dim = dim

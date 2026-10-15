@@ -1,5 +1,3 @@
-"""Grafana-truth reconciliation for alert webhooks whose RESOLVE was lost."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -29,7 +27,6 @@ from services.upkeep.events_maintenance.tests.slices import events_maintenance_c
 def _config(
     process_config: ConfigBoot,
 ) -> EventsMaintenanceConfig:
-    """The service's slice with a Grafana credential."""
     return events_maintenance_config(
         process_config, grafana_admin_password=SecretStr("grafana-test-password")
     )
@@ -67,7 +64,6 @@ def _insert_alert(
 
 
 def test_grafana_active_alert_keys_uses_instance_identity() -> None:
-    """The same fingerprint can have several episodes; startsAt is part of truth."""
 
     payload: list[dict[str, Any]] = [
         {
@@ -97,7 +93,6 @@ def test_grafana_active_alert_keys_uses_instance_identity() -> None:
     ],
 )
 def test_grafana_active_alert_keys_rejects_incomplete_snapshots(payload: object) -> None:
-    """Malformed upstream truth must abort the sweep, never resolve by omission."""
 
     with pytest.raises(GrafanaSnapshotError):
         grafana_active_alert_keys(payload)
@@ -180,7 +175,6 @@ def test_reconcile_open_grafana_alerts_resolves_only_snapshot_misses(
         resolved_at,
     )
     assert by_id[active_episode_id][0] == "unresolved"
-    # A row a retired in-process writer left open is not in Grafana's set either: it closes too.
     assert by_id[retired_writer_id][0] == "resolved"
     assert by_id[concurrent_ingest_id][0] == "unresolved"
     assert by_id[already_resolved_id][0] == "resolved"
@@ -250,8 +244,6 @@ async def test_a_grafana_that_cannot_give_a_snapshot_leaves_every_row_and_the_ro
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Grafana down, erroring or malformed is an operating condition: the round logs
-    it, marks the error on its progress, resolves nothing and returns."""
     alert_id = _seed_stale_alert(db_conn)
     progress = LoopProgress("alert-reconciliation", 180.0)
     published: list[dict[str, Any]] = []
@@ -279,8 +271,6 @@ async def test_an_unexpected_error_in_a_round_is_not_swallowed(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """A bug (here a publisher that raises) ends the round and, through the loop,
-    the service; only Grafana's own failures are tolerated."""
     old = datetime.now(UTC) - timedelta(hours=1)
     _insert_alert(db_conn, fingerprint="gone", starts_at=old, updated_at=old)
     db_conn.commit()

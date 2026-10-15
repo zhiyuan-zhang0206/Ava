@@ -1,11 +1,3 @@
-"""services/backup/dump.py — due-ness, prune, foreign-file safety, failure cleanup,
-and a real pg_dump round-trip against the session's provisioned Postgres.
-
-Every clock here is pinned: the module decides *when* in cluster time
-(`AVA_TIMEZONE`) and *names* dumps in UTC, so a test that let either fall back
-to the host's timezone would pass or fail by which machine ran it.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -32,7 +24,6 @@ def bdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _dt(year: int, month: int, day: int, hour: int, minute: int) -> datetime:
-    """A cluster wall-clock instant — the clock is_due() reads."""
     return datetime(year, month, day, hour, minute, tzinfo=ZoneInfo(_CLUSTER_TZ))
 
 
@@ -43,7 +34,6 @@ def _touch(directory: Path, name: str) -> Path:
 
 
 def _disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Skip the off-site leg in tests that only exercise the local pipeline."""
 
     def _skip(_artifact: Path, **_kwargs: object) -> None:
         return None
@@ -51,16 +41,9 @@ def _disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(offsite, "publish", _skip)
 
 
-# ─── the clock the schedule is read on ───
-
-
-# ─── the clock dumps are named on ───
-
-
 def test_run_backup_avoids_overwriting_a_same_second_dump(
     bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
-    """A second managed writer publishes a new encrypted name, not a replacement."""
     existing = _touch(bdir, "whatever-20260808T100000Z.dump.enc")
 
     class _Ok:

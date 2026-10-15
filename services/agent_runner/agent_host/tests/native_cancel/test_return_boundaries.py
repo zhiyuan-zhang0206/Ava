@@ -1,5 +1,3 @@
-"""Native cancellation settles the original returned failure/lifecycle work."""
-
 import asyncio
 from dataclasses import replace
 from typing import Any
@@ -152,7 +150,6 @@ def _assert_original_return_receipt(
     resources: HostedTurnResources,
     failure: FatalProviderError,
 ) -> None:
-    """The returned invocation settles its lifecycle command or exact provider error."""
     if command is not None:
         record = db_conn.execute(
             "SELECT applied_at,observed_at FROM inbound_messages WHERE id=%s", (command,)
@@ -172,7 +169,6 @@ async def blocked_host(
     database_gate: ProcessDbGate,
     machine: MachineIdentity,
 ) -> tuple[Any, Any, AgentHost, AvaContext]:
-    """Build a real blocked graph and host that borrow one explicit machine owner."""
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
     wrap_saver_writes_with_nstep_interval(saver, 100)

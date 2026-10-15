@@ -1,10 +1,3 @@
-"""Which bearer the self-evolution collector presents to the gateway's /api/events.
-
-It resolves the credential through `gateway_auth_headers`, like every other
-client: an agent process presents its host's delivered machine API token and,
-lacking one, fails instead of reading the human secret from the home's `.env`.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -27,8 +20,6 @@ class _EmptyPage:
 
 
 class _RecordingClient:
-    """An /api/events server with no rows that records each request's headers."""
-
     def __init__(self) -> None:
         self.headers: list[dict[str, object]] = []
 

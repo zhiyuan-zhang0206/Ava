@@ -1,5 +1,3 @@
-"""Hosted idle recovery and reaper successor marker lifecycle."""
-
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,8 +39,6 @@ def _unexpected_model(state: BaseAgentState) -> dict[str, object]:
 
 
 def _dead_birth_copy(host_process: ResourceProcess) -> ResourceProcess:
-    """Same PID, different birth: the predecessor has exited, even if its PID
-    was recycled. No real host or test worker is stopped for this evidence."""
     if host_process.starttime is not None:
         return host_process.model_copy(update={"starttime": host_process.starttime + 1})
     return host_process.model_copy(update={"birth": host_process.birth - 60})
@@ -56,9 +52,6 @@ def _mark_predecessor_idle(
     evidence: str,
     released: bool,
 ) -> None:
-    """Idle the agent with the predecessor's incarnation evidence either absent
-    (`legacy`) or present but dead (`managed`), and the lease either released
-    or still (about to be) expired."""
     assert resources.host_process is not None
     dead = _dead_birth_copy(resources.host_process)
     incarnation_resources = (
@@ -136,7 +129,7 @@ class TestReapedSuccessorMarker:
         try:
             original = scheduler.wake(1)
             assert original is not None
-            original.cancel()  # Reap before the first pump runs.
+            original.cancel()
             await poll_until_async(lambda: scheduler.reaped_successor(1) is not None, timeout=3)
             successor = scheduler.reaped_successor(1)
             assert successor is not None

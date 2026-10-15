@@ -1,13 +1,3 @@
-"""Unit contracts for the delayed-mount waits in the shared visual matrix.
-
-The preview gate's home/desktop structural check used to race the inspector
-aside: it mounts only after settings and the active agent resolve, both
-asynchronously, so a single-shot probe could read one aside where two are
-expected. These contracts pin both states deterministically without a browser
-— a scripted page stands in for Playwright — and keep the pre-fix single-shot
-read on record as the red side of the contrast.
-"""
-
 from __future__ import annotations
 
 import time
@@ -31,15 +21,6 @@ ASIDE = "#main-content aside"
 
 
 class _ScriptedPage:
-    """A Playwright Page stand-in driven by a scripted aside-count sequence.
-
-    Every observation (one ``evaluate``) consumes the next count; the last
-    scripted count repeats. A list argument is the visible-count probe; a dict
-    argument is the structural probe, reproduced for the one dimension under
-    test — a declared minimum the current count does not meet. The other probe
-    dimensions are treated as clean.
-    """
-
     def __init__(self, aside_counts: list[int]) -> None:
         self._aside_counts = aside_counts
         self._observations = 0
@@ -77,8 +58,6 @@ class _ScriptedPage:
 
 
 def test_pre_fix_single_shot_probe_races_the_mount_the_fix_passes() -> None:
-    """One scripted timeline, both sides: the second aside appears at the third
-    observation; the pre-fix call reads one, the fixed measurement reads two."""
     timeline = [1, 1, 2, 2]
 
     racing = _ScriptedPage(list(timeline))

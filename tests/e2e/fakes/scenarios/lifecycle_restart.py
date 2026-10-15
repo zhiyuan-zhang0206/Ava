@@ -1,12 +1,3 @@
-"""Self restart selects a fresh hosted fake from the consumed request.
-
-The initial fake requests ava.self.restart(). Once that request is claimed or
-done, later runtime construction selects a follow-up script. Selection is
-independent of successful successor completion: the E2E test separately checks
-the applied/observed lifecycle pointer, new generation and a real follow-up.
-A pending request must not select the successor script.
-"""
-
 from __future__ import annotations
 
 import psycopg
@@ -38,7 +29,6 @@ IDLE_SCRIPT: tuple[AIMessage, ...] = (
 
 
 def _has_consumed_self_restart(agent_id: int | None) -> bool:
-    """A prior self request was consumed, not a claim that restart succeeded."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages "

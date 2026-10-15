@@ -1,5 +1,3 @@
-"""Test support: a stopped helper job definition on disk."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,10 +23,6 @@ def stopped_helper_plist(home: Path, path: Path) -> bytes:
     return body
 
 
-# The inert CoreGraphics substitutes the native input harnesses compile the helper's real
-# bodies against: a recording CGEvent, a Thread whose sleeps are recorded, scripted cursor reads.
-# The helper's own stop-the-held-hold hooks (the monitor timer and the capture badge) are
-# counted here, never started.
 INPUT_HARNESS = r"""
 import Foundation
 import CoreGraphics
@@ -109,22 +103,16 @@ def helper_source() -> str:
 
 
 def between(source: str, start: str, end: str) -> str:
-    """The text from `start` up to (not including) `end`: how a harness takes real helper bodies."""
     return start + source.split(start, 1)[1].split(end, 1)[0]
 
 
 def input_bodies(source: str) -> str:
-    """The input primitives, corner fail-safe and held-button state, as the helper defines them."""
     return between(source, "func rejectUnknownFields(", "func logIndicator(") + between(
         source, "func inputNumber(", "/// Post a synthetic mouse click"
     )
 
 
 def dispatch_stubs(stubbed: list[str]) -> str:
-    """Inert stand-ins for everything `dispatch` reaches that a harness does not run for real.
-
-    Each name in `stubbed` is a helper operation replaced by a counter; the rest of the helper
-    (input primitives, held-button state) is sliced from the real source."""
     stubs = """
 var trusted = true
 func axTrustedOrPrompt() -> Bool { trusted }

@@ -1,20 +1,3 @@
-"""The hosted turn admission gate — services/agent_runner/agent_host/scheduling/admission.py (#3584).
-
-`test_agent_host.py` locks that a configured cap queues excess turns and
-`test_turn_dispatcher.py` locks WHEN agents run. This file locks the gate's own
-contract:
-
-1. **Ticket rotation** — one ticket per agent (TurnScheduler's single flight),
-   arrival-order FIFO service, and a completed turn's next request taken at the
-   tail: no starvation, no overtaking.
-2. **Queued is visible** — the waiter is registered in the gate BEFORE its
-   acquire await and cleared on serve or cancel (``is_waiting``).
-3. **Observability** — depth, ages and served-wait counters for ``/stats``;
-   one ``long_waiters`` report per wait episode.
-4. **Unlimited mode** — ``limit <= 0`` is a state-free no-op (legacy zero
-   semantics).
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +19,6 @@ async def _until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
 
 
 async def _park(gate: TurnAdmission, agent_id: int, entered: asyncio.Event) -> None:
-    """One admitted turn that holds its slot until cancelled."""
     async with gate.admit(agent_id):
         entered.set()
         await asyncio.Event().wait()
@@ -44,7 +26,6 @@ async def _park(gate: TurnAdmission, agent_id: int, entered: asyncio.Event) -> N
 
 class TestQueueFairness:
     async def test_fifo_service_order_under_capacity(self) -> None:
-        """cap=1 with four arrivals: served strictly in arrival order."""
         gate = TurnAdmission(1)
         served: list[int] = []
         finish = {i: asyncio.Event() for i in range(4)}
@@ -75,8 +56,6 @@ class TestQueueFairness:
         assert gate.wait_seconds_max > 0.0
 
     async def test_a_completed_agents_next_ticket_joins_the_tail(self) -> None:
-        """'Completion re-queues at the tail': the successor ticket is taken
-        when it arrives — behind the agents already queued."""
         gate = TurnAdmission(1)
         served: list[str] = []
         finish: dict[str, asyncio.Event] = {}
@@ -117,8 +96,6 @@ class TestQueueFairness:
 
 class TestWaitState:
     async def test_wait_state_is_registered_before_the_acquire_await(self) -> None:
-        """The registry must see a waiter BEFORE it parks — no window in which
-        the scan could cancel the about-to-queue task (review: 3230)."""
         gate = TurnAdmission(1)
         holder_entered = asyncio.Event()
         holder = asyncio.create_task(_park(gate, 1, holder_entered))
@@ -140,7 +117,6 @@ class TestWaitState:
             with suppress(asyncio.CancelledError):
                 await holder
         await _until(entered.is_set)
-        # Cleared as soon as the slot was served, not when the turn ends.
         assert not gate.is_waiting(2)
         await waiter
 
@@ -253,7 +229,7 @@ class TestSchedulerIntegration:
             scheduler.wake(2)
             scheduler.wake(3)
             await _until(lambda: gate.waiting == 2)
-            scheduler.wake(1)  # wake during the turn → a successor becomes pending
+            scheduler.wake(1)
             releases[(1, 1)].set()
             await _until(lambda: served == [(1, 1), (2, 1)])
             releases[(2, 1)].set()
@@ -267,9 +243,6 @@ class TestSchedulerIntegration:
         assert served == [(1, 1), (2, 1), (3, 1), (1, 2)]
 
     async def test_a_queued_request_survives_a_dropped_queue(self) -> None:
-        """Queue positions are in-process; the wake's cause is durable. A
-        dropped queue (host restart) loses no work — the durable scan re-wakes
-        the agents and the fresh queue serves them."""
         gate = TurnAdmission(1)
         served: list[int] = []
         hold_first = asyncio.Event()
@@ -287,7 +260,7 @@ class TestSchedulerIntegration:
         scheduler.wake(3)
         await _until(lambda: gate.waiting == 2)
 
-        await scheduler.aclose()  # the restart: tasks die with the queue
+        await scheduler.aclose()
         assert gate.waiting == 0, "the dropped queue leaves no waiter state"
         assert gate.waits_total == 0, "an unserved wait is not counted as served"
 

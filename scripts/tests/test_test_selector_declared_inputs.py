@@ -1,11 +1,3 @@
-"""What the selector does with inputs the analysis cannot bound, and with declarations of them.
-
-A load it cannot resolve can run any code, so a test that reaches one always runs. A policy
-`[loads]` entry turns the load into a dependency on the named directories and an `[external]`
-entry says the loaded content is not part of the repository; an unanchored file read can only
-matter to a change that includes a data file; an existence probe loads nothing.
-"""
-
 from __future__ import annotations
 
 import json
@@ -23,15 +15,13 @@ def _write(root: Path, name: str, text: str = "") -> None:
 
 
 def _repo(root: Path) -> Path:
-    """Two consumers of one changed module, a filler that keeps subsets under the 80% guard,
-    and a helper whose behavior each test case configures."""
     _write(
         root,
         "pyproject.toml",
         '[tool.pytest.ini_options]\ntestpaths = ["tests", "base/**/tests"]\n',
     )
     _write(root, "base/unrelated/tests/test_filler.py", "def test_filler(): pass\n")
-    _write(root, "base/tests/test_own.py", "def test_own(): pass\n")  # owns base/leaf.py
+    _write(root, "base/tests/test_own.py", "def test_own(): pass\n")
     _write(root, "base/leaf.py")
     _write(root, "base/data.json", "{}\n")
     _write(root, "tests/consumer/test_leaf.py", "from base import leaf\n")
@@ -114,8 +104,6 @@ def test_external_content_is_declared_for_sources_but_not_for_tests(tmp_path: Pa
     result = _select(root, "base/leaf.py")
 
     assert result.decision == "SELECTED", result.as_json()
-    # The source's declaration keeps its consumer out; a listed test may load a repository file by
-    # path, so it keeps running.
     assert "tests/consumer/test_helper.py" not in result.tests
     assert "tests/consumer/test_ext.py" in result.tests
 
@@ -124,7 +112,6 @@ def test_a_declaration_does_not_cover_an_unanchored_read(tmp_path: Path) -> None
     root = _repo(tmp_path)
     _write(root, "tests/support/helper.py", "def load(path):\n    return path.read_text()\n")
     _write(root, "meizel.policy.toml", '[external]\n"tests/support/helper.py" = "x"\n')
-    # [external] is for sources; listing the helper changes nothing about its read of a data file.
     assert "tests/consumer/test_helper.py" in _select(root, "base/data.json").tests
     _write(root, "meizel.policy.toml", '[loads]\n"tests/support/helper.py" = ["base"]\n')
     assert "tests/consumer/test_helper.py" in _select(root, "base/data.json").tests
@@ -194,6 +181,6 @@ def test_known_readers_of_skills_and_okf_documents_are_pinned(
     unrelated = _select(root, "base/leaf.py", "base/NOTES.md")
 
     assert result.decision == "SELECTED", result.as_json()
-    assert reader in result.tests  # pinned though nothing imports it
-    assert "tests/consumer/test_mentions_only.py" not in result.tests  # a docstring reads nothing
+    assert reader in result.tests
+    assert "tests/consumer/test_mentions_only.py" not in result.tests
     assert reader not in unrelated.tests

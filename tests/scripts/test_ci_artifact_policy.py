@@ -1,9 +1,3 @@
-"""CI artifact-publishing contracts after the 2026-09-22 false red.
-
-Artifact-service 403/500 finalization failures must not turn green test jobs red.
-Coverage retries once, then records absent inputs for the unchanged coverage gate.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +10,6 @@ _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 
 def _workflow() -> dict[str, Any]:
-    """Load the workflow while keeping the YAML parser boundary explicit."""
     document = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
     assert isinstance(document, dict)
     return cast("dict[str, Any]", document)
@@ -35,7 +28,6 @@ def _step(job: dict[str, Any], name: str) -> dict[str, Any]:
 
 
 def test_every_artifact_upload_is_non_blocking() -> None:
-    """Artifact transport cannot red a required job after its tests pass."""
     for job_name, job in _workflow_jobs().items():
         for step in cast("list[dict[str, Any]]", job["steps"]):
             uses = step.get("uses")
@@ -47,7 +39,6 @@ def test_every_artifact_upload_is_non_blocking() -> None:
 
 
 def test_coverage_uploads_retry_once_and_expose_the_outcome() -> None:
-    """Coverage uploads retry a transient fault before the gate records a gap."""
     for job_name in ("backend-shard", "backend-serial", "backend-static"):
         job = _workflow_jobs()[job_name]
         upload = _step(job, "Upload coverage data")
@@ -67,7 +58,6 @@ def test_coverage_uploads_retry_once_and_expose_the_outcome() -> None:
 
 
 def test_coverage_gate_records_the_groups_that_arrived() -> None:
-    """The gate scores received coverage while making dropped shard data visible."""
     jobs = _workflow_jobs()
     shard_groups = cast("list[int]", jobs["backend-shard"]["strategy"]["matrix"]["group"])
     expected_groups = " ".join([*(str(group) for group in shard_groups), "serial", "static"])

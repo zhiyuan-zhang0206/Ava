@@ -1,5 +1,3 @@
-"""Chunk trigger rule, chunk cut and chunk location (pure; no database)."""
-
 from __future__ import annotations
 
 import pytest
@@ -31,7 +29,6 @@ def test_chunk_is_measured_from_the_previous_cut_not_from_zero() -> None:
         cut_index=0, cut_tokens=0, input_tokens=60_000, request_len=30, threshold=60_000
     )
     assert first == Chunk(0, 30)
-    # The cut moved to (30, 60_000): 60k more tokens are needed for the next chunk.
     assert (
         plan_chunk(
             cut_index=30, cut_tokens=60_000, input_tokens=119_999, request_len=70, threshold=60_000
@@ -63,20 +60,18 @@ def _msgs(n: int, prefix: str = "m") -> list[BaseMessage]:
 
 
 def _history() -> FullHistory:
-    """Two segments: [head0, a0..a3] and [head1, b0..b2] stitched without the second head."""
     head0, head1 = SystemMessage(content="head0"), SystemMessage(content="head1")
     a, b = _msgs(4, "a"), _msgs(3, "b")
     return FullHistory([*a, *b], (head0, head1), (0, 4))
 
 
 def test_live_chunk_in_the_newest_segment_maps_to_stitched_indices() -> None:
-    # Request list of segment 1: [head1, b0, b1, b2]; chunk [1, 3) = b0, b1.
     located = locate_chunk(
         _history(), start_index=1, end_index=3, end_msg_id="b1", closing_segment=None
     )
     assert [m.id for m in located.messages] == ["b0", "b1"]
     assert located.prefix[0].content == "head1"
-    assert located.span == (4, 5)  # stitched: a0..a3 = 0..3, b0 = 4
+    assert located.span == (4, 5)
 
 
 def test_chunk_starting_at_the_head_excludes_the_head() -> None:
@@ -102,13 +97,11 @@ def test_live_chunk_beyond_the_checkpoint_is_not_ready() -> None:
 
 
 def test_live_chunk_whose_end_id_moved_is_drift() -> None:
-    # Index 2 now holds b1, not the recorded b0: a message was inserted before it.
     with pytest.raises(ChunkDriftError):
         locate_chunk(_history(), start_index=1, end_index=3, end_msg_id="b0", closing_segment=None)
 
 
 def test_closing_chunk_is_read_from_its_segment_and_checked_at_its_end() -> None:
-    # The boundary snapshot of segment 0 holds a0..a3; the job's end (index 5) is a3.
     located = locate_chunk(
         _history(), start_index=2, end_index=5, end_msg_id="a3", closing_segment=0
     )
@@ -117,8 +110,6 @@ def test_closing_chunk_is_read_from_its_segment_and_checked_at_its_end() -> None
 
 
 def test_a_closing_chunk_past_its_snapshot_is_cut_to_it_and_reports_what_is_missing() -> None:
-    # The job's end (index 9) lies past what the boundary snapshot persisted (head + a0..a3 = 5
-    # request positions): the chunk is what the snapshot holds, and the rest is named.
     located = locate_chunk(
         _history(), start_index=2, end_index=9, end_msg_id="gone", closing_segment=0
     )
@@ -140,9 +131,9 @@ def test_a_closing_chunk_with_nothing_left_in_the_snapshot_says_what_it_lacks() 
 
 def test_uncovered_runs_are_what_no_node_reaches() -> None:
     assert uncovered((10, 20), []) == [(10, 20)]
-    assert uncovered((10, 20), [(0, 12)]) == [(13, 20)]  # a prefix
-    assert uncovered((10, 20), [(15, 30)]) == [(10, 14)]  # a tail
-    assert uncovered((10, 20), [(13, 14), (17, 18)]) == [(10, 12), (15, 16), (19, 20)]  # the middle
+    assert uncovered((10, 20), [(0, 12)]) == [(13, 20)]
+    assert uncovered((10, 20), [(15, 30)]) == [(10, 14)]
+    assert uncovered((10, 20), [(13, 14), (17, 18)]) == [(10, 12), (15, 16), (19, 20)]
     assert uncovered((10, 20), [(0, 25)]) == []
     assert uncovered((10, 20), [(8, 11), (11, 14)]) == [(15, 20)]
 

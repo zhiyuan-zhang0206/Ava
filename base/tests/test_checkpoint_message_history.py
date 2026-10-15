@@ -1,5 +1,3 @@
-"""Message resets bound transferred history without changing replay semantics."""
-
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, cast
@@ -118,7 +116,6 @@ async def test_suffix_matches_upstream_and_skips_dead_blobs(
             "dict_overwrite": {"__overwrite__": values},
             "erased_overwrite": {"type": "__overwrite__", "value": values},
         }
-        # These three writes share a checkpoint; lexical task/idx order matters.
         saver.put_writes(reset, [("messages", [_message("same-step-old", 400_000)])], "a")
         saver.put_writes(
             reset,
@@ -130,7 +127,6 @@ async def test_suffix_matches_upstream_and_skips_dead_blobs(
         saver.put_writes(recent, [("messages", [_message("recent", 300_000)])], "recent")
         target = _checkpoint(saver, recent)
         saver.put_writes(target, [("messages", [_message("pending")])], "pending")
-        # A newer reset on a sibling must never become this target's cutoff.
         sibling = _checkpoint(saver, old)
         saver.put_writes(
             sibling,
@@ -156,7 +152,6 @@ async def test_suffix_matches_upstream_and_skips_dead_blobs(
         assert all(
             sum(map(len, batch)) <= history.BODY_BATCH_BYTES or len(batch) == 1 for batch in bodies
         )
-        # A historical request before compaction still gets its original seed.
         past = saver.get_delta_channel_history(config=reset, channels=["messages"])
         assert [m.id for m in fold_history(past["messages"])] == ["seed", "old"]
     async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as async_saver:
@@ -218,7 +213,6 @@ def _assert_suffix_transfer(
     expected_counts: tuple[int, int, int],
     reset: bool,
 ) -> None:
-    """Compare the independent suffix event to bodies actually transferred by Postgres."""
     fetched_bytes = sum(len(blob) for batch in bodies for blob in batch)
     assert suffix["fetched_bytes"] == sum(map(len, bodies[0]))
     assert (

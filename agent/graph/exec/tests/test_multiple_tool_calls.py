@@ -1,5 +1,3 @@
-"""Each tool call keeps its own execution boundary and protocol result."""
-
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -133,7 +131,6 @@ def _runtime(
 def _node_runtime(
     hosted_resources: HostedTurnResources,
 ) -> Runtime[AvaContext]:
-    """Inputs for graph tests that replace the entire child runner."""
     return Runtime(
         context=AvaContext(
             hosted_resources=hosted_resources,
@@ -302,8 +299,6 @@ async def test_findings_of_every_call_in_a_batch_reach_the_state(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Each real child commits its own findings delta and the channel's reducer
-    concatenates them across the batch's passes; nothing is merged into the messages."""
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
@@ -324,8 +319,6 @@ async def test_a_compacting_call_discards_the_findings_of_its_batch(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Claim wipes the history on a compact, so the findings that annotate it go too:
-    those committed by earlier calls of the batch and the compacting call's own."""
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
@@ -440,11 +433,6 @@ async def test_exec_recovers_missing_content_call_without_syntax_plugin(
 
 
 def _ai_with_hallucinated_tool_name() -> AIMessage:
-    # Reproduces django__django-13417 from SWE-bench Verified: DeepSeek (via
-    # the Anthropic-compatible endpoint) returned a tool_use block calling
-    # `ava.files.edit` as if it were a registered tool. Anthropic Claude's
-    # grammar-constrained decoding rejects this, but DeepSeek's compat layer
-    # does not, so the wire reaches exec_node verbatim.
     return AIMessage(
         id="ai_hallucinated",
         content=[],
@@ -482,8 +470,6 @@ async def test_exec_node_feeds_back_on_unknown_tool_name(
 async def test_exec_node_feeds_back_when_code_key_missing(
     hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> None:
-    # execute_code name but malformed args ({} or missing "code" key) — same
-    # KeyError path as the unknown-name case, must also feed back not crash.
     ai = AIMessage(
         id="ai_no_code",
         content=[],

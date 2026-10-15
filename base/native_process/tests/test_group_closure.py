@@ -1,5 +1,3 @@
-"""The shared group-closure core on its default signal (an unowned launch)."""
-
 from __future__ import annotations
 
 import contextlib
@@ -12,7 +10,7 @@ import pytest
 
 from base.native_process import group_closure
 
-_LATE = 0x7FFFFFFF  # A member forked after the signal; never signalled by number.
+_LATE = 0x7FFFFFFF
 
 
 def _leader() -> subprocess.Popen[bytes]:
@@ -24,7 +22,6 @@ def _leader() -> subprocess.Popen[bytes]:
 def _late_listing(
     monkeypatch: pytest.MonkeyPatch, leader: int, late_rounds: int | None
 ) -> list[str]:
-    """Record signals and listings; the listing names a late member for some rounds."""
     events: list[str] = []
     killpg = os.killpg
     listing = group_closure.group_members

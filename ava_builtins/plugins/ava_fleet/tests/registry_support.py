@@ -1,5 +1,3 @@
-"""Test support: the registry the loader would build with only the fleet plugin enabled."""
-
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -16,7 +14,6 @@ def fleet_registry() -> ExtensionRegistry:
 
 @contextmanager
 def installed_fleet_surface() -> Generator[ExtensionRegistry]:
-    """The fleet plugin's SDK surface installed into `ava` for the duration of the block."""
     from ava.sdk_surface import install
     from ava_builtins.plugins.ava_fleet import agent_runtime, default_config, plugin
 
@@ -33,7 +30,6 @@ def installed_fleet_surface() -> Generator[ExtensionRegistry]:
 
 
 def set_fleet_configuration(*, reduce_context_switch: bool) -> None:
-    """Reinstall the actual Fleet faces against a changed authority image."""
     from ava.sdk_surface import install
     from ava_builtins.plugins.ava_fleet import agent_runtime, default_config, plugin
     from base.packages.plugins.config_registration import disk_image_path

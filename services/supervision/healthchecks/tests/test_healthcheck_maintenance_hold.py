@@ -1,5 +1,3 @@
-"""A maintenance hold left in place longer than the configured age raises one alert per hold."""
-
 from __future__ import annotations
 
 import os
@@ -21,8 +19,6 @@ EVENT = "maintenance_hold_overdue"
 
 
 class _Recorder:
-    """The structured log calls so far, as their field dictionaries (read from `loguru_records`)."""
-
     def __init__(self, records: LogRecords) -> None:
         self._records = records
 
@@ -64,7 +60,6 @@ def _watch(now: datetime) -> tuple[MaintenanceHoldWatch, Callable[[datetime], No
 
 
 def _round(watch: MaintenanceHoldWatch) -> bool:
-    """One diagnostic round as the monitor runs it; True when the sample was healthy."""
     result = watch.probe()
     watch.report(result)
     return result.alive
@@ -111,7 +106,7 @@ def test_the_threshold_is_the_configured_age_not_a_constant(recorder: _Recorder)
 
 def test_no_hold_or_a_released_hold_raises_nothing(recorder: _Recorder, journal: Path) -> None:
     watch, _ = _watch(ACQUIRED + timedelta(days=3))
-    assert _round(watch)  # no journal at all
+    assert _round(watch)
     _hold()
     snapshot = pause_owner.read()
     assert snapshot.maintenance is not None
@@ -130,7 +125,7 @@ def test_one_hold_raises_one_event_however_many_rounds_observe_it(recorder: _Rec
         move(ACQUIRED + timedelta(minutes=minutes))
         assert not _round(watch)
     assert len(recorder.events()) == 1
-    assert recorder.events()[0]["held_seconds"] == 31 * 60  # the episode's first observation
+    assert recorder.events()[0]["held_seconds"] == 31 * 60
 
 
 def test_a_released_hold_rearms_the_alert_for_the_next_hold(
@@ -140,7 +135,7 @@ def test_a_released_hold_rearms_the_alert_for_the_next_hold(
     watch, move = _watch(ACQUIRED + timedelta(minutes=31))
     assert not _round(watch)
     journal.unlink()
-    assert _round(watch)  # released: the episode ends
+    assert _round(watch)
     later = ACQUIRED + timedelta(hours=2)
     admission = pause_owner.begin_maintenance("ava-restart-9", later)
     assert admission.created_here
@@ -157,7 +152,7 @@ def test_an_unreadable_journal_is_timed_from_its_mtime_and_never_raises(
     written = ACQUIRED.timestamp()
     os.utime(journal, (written, written))
     watch, move = _watch(ACQUIRED + timedelta(minutes=5))
-    assert _round(watch)  # a fresh corrupt journal is still inside the grace window
+    assert _round(watch)
     move(ACQUIRED + timedelta(minutes=31))
     assert not _round(watch)
     assert not _round(watch)

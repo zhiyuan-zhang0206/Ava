@@ -1,12 +1,3 @@
-"""`AgentEventPublisher` sheds → one structured `sse_drop` event.
-
-The ops monitor panel's SSE-backlog metric reads `sse_drop` events from the
-event store; this locks the emit contract (event name, kind values, payload
-fields, and the cause-routed level) without a live Redis — emit() is
-synchronous and the drop report is rate-limited but fires on the first drop
-(monotonic clock is far past 0).
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -31,43 +22,34 @@ def _publisher(maxsize: int = 2) -> AgentEventPublisher:
 
 
 def _reports(records: LogRecords) -> list[tuple[str, dict[str, Any]]]:
-    """The drop reports logged so far, as (level name, structured fields)."""
     return [(r["level"].name, r["extra"]) for r in records.events("sse_drop")]
 
 
 def test_queue_full_emit_reports_sse_drop_event(loguru_records: LogRecords) -> None:
-    """Filling the queue sheds the newest event and logs one structured
-    `sse_drop` line with kind=queue_full and the payload fields the panel
-    reads (n, aid, queue_size). Local backpressure stays WARNING."""
     pub = _publisher(maxsize=2)
     pub.emit("one")
     pub.emit("two")
     assert _reports(loguru_records) == [], "no drop yet — queue has room"
-    pub.emit("three")  # queue full -> shed -> first (rate-limited) report
-    pub.emit("four")  # still full -> shed, same report window -> no second line
+    pub.emit("three")
+    pub.emit("four")
 
     assert len(_reports(loguru_records)) == 1
     level, kw = _reports(loguru_records)[0]
     assert level == "WARNING"
     assert kw["event"] == "sse_drop"
     assert kw["kind"] == "queue_full"
-    assert kw["n"] == 1  # delta since last report — the second shed waits
+    assert kw["n"] == 1
     assert kw["aid"] == 42
     assert kw["queue_size"] == 2
 
-    # Simulate the rate-limit window elapsing: the next shed reports the
-    # accumulated delta (drops 2..3), so no drop is lost to the rate limit.
     pub._last_warn = 0.0
-    pub.emit("five")  # drop 3 -> reports delta 3-1=2
-    pub.emit("six")  # drop 4 -> same report window, no second line
+    pub.emit("five")
+    pub.emit("six")
     assert len(_reports(loguru_records)) == 2
     assert _reports(loguru_records)[1][1]["n"] == 2
 
 
 def test_publish_error_emit_reports_sse_drop_event(loguru_records: LogRecords) -> None:
-    """A publish failure (redis down / slow) sheds with kind=publish_error and
-    carries the exception repr as detail. The transport-side drop is the
-    flaky-link norm and reports at INFO (2026-10-03 triage)."""
     pub = _publisher()
     pub._note_drop("publish_error", detail="ConnectionError('boom')")
     assert len(_reports(loguru_records)) == 1
@@ -83,10 +65,6 @@ async def test_publish_error_detail_carries_the_class_and_message(
     monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
 ) -> None:
     async with asyncio.TaskGroup() as tasks:
-        """A transport failure's detail keeps the class AND the message: redis-py
-        8.1's repr reads "network:ConnectionError" — the message that names the
-        real fault is gone (task #4964). The report stays INFO: transport-side,
-        not local backpressure (2026-10-03 triage #4)."""
 
         def _boom(_batch: list[str]) -> None:
             raise RedisConnectionError("no route to host")
@@ -111,8 +89,6 @@ async def test_publish_error_detail_carries_the_class_and_message(
 async def test_batch_command_failure_detail_carries_the_class_and_message(
     loguru_records: LogRecords,
 ) -> None:
-    """The per-command shed path describes its failing result the same way
-    (task #4964)."""
     failure = RedisConnectionError("broken pipe")
 
     class _Pipeline:
@@ -135,11 +111,8 @@ async def test_batch_command_failure_detail_carries_the_class_and_message(
 
 
 def test_mixed_window_level_follows_the_worst_drop(loguru_records: LogRecords) -> None:
-    """One queue_full in the report window wins the level, whichever drop came
-    last: a window that shed locally is backpressure, never downplayed by a
-    following transport error."""
     pub = _publisher()
-    pub._last_warn = time.monotonic()  # hold the rate limit: both drops in one window
+    pub._last_warn = time.monotonic()
     pub._note_drop("publish_error", detail="TimeoutError('slow')")
     pub._note_drop("queue_full")
     assert _reports(loguru_records) == []
@@ -147,10 +120,9 @@ def test_mixed_window_level_follows_the_worst_drop(loguru_records: LogRecords) -
     assert len(_reports(loguru_records)) == 1
     level, kw = _reports(loguru_records)[0]
     assert level == "WARNING"
-    assert kw["kind"] == "queue_full"  # the latest cause is still named
+    assert kw["kind"] == "queue_full"
     assert kw["n"] == 2
 
-    # The reverse order (last cause a publish error) still reports WARNING.
     pub._last_warn = time.monotonic()
     pub._note_drop("queue_full")
     pub._note_drop("publish_error", detail="TimeoutError('slow')")

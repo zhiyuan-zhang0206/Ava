@@ -1,11 +1,3 @@
-"""GET /api/ui/contributions — the console-contribution aggregate.
-
-Plugins are written to disk with real `ava-plugin.json` manifests and read back
-through the endpoint, so what the console would receive is what a manifest on
-disk actually produces: the enabled set is honored, declarations are attributed
-to the plugin that made them, and a manifest that no longer validates is loud.
-"""
-
 import json
 from pathlib import Path
 
@@ -40,8 +32,6 @@ def _write_plugin(
     raw: str | None = None,
     manifest: bool = True,
 ) -> None:
-    """A plugin directory with a `plugin.py` and, unless `raw` or `manifest=False` says
-    otherwise, a manifest declaring `ui` (none when `ui` is None)."""
     directory = paths.repo_plugins_dir() / name
     directory.mkdir()
     (directory / "plugin.py").write_text('"""A test plugin."""\n', encoding="utf-8")
@@ -79,16 +69,12 @@ def test_declared_theme_reaches_the_console_attributed() -> None:
                 "plugin": "skins",
                 "name": "solarized",
                 "tokens": {"--background": "oklch(0.99 0.02 90)"},
-                # Explicitly null, not absent: the console distinguishes a pack
-                # that pins both modes from one with a dark half.
                 "dark_tokens": None,
             }
         ]
 
 
 def test_a_packs_dark_half_reaches_the_console() -> None:
-    """`darkTokens` rides the same entry, so the console can pick the half that
-    matches the resolved mode instead of pinning one over both."""
     _write_plugin(
         "skins",
         {
@@ -115,7 +101,6 @@ def test_a_packs_dark_half_reaches_the_console() -> None:
 
 
 def test_disabled_plugin_contributes_nothing() -> None:
-    """The enabled set is the gate — a disabled plugin's skin is not offered."""
     _write_plugin("skins", {"themes": [{"name": "solarized", "tokens": {"--primary": "#111111"}}]})
     write_local({"plugins": {"skins": {"enabled": False}}})
 
@@ -124,7 +109,6 @@ def test_disabled_plugin_contributes_nothing() -> None:
 
 
 def test_two_plugins_merge_and_same_name_stays_distinguishable() -> None:
-    """Names collide across plugins; attribution is what keeps them apart."""
     _write_plugin("skins", {"themes": [{"name": "solarized", "tokens": {"--primary": "#111111"}}]})
     _write_plugin("other", {"themes": [{"name": "solarized", "tokens": {"--primary": "#222222"}}]})
     write_local({"plugins": {"skins": {"enabled": True}, "other": {"enabled": True}}})
@@ -147,7 +131,6 @@ def test_plugin_without_ui_is_skipped() -> None:
 
 
 def test_plugin_without_a_manifest_fails_the_endpoint_naming_it() -> None:
-    """Every plugin ships a manifest; one that does not is loud, not skipped."""
     _write_plugin("plain", None, manifest=False)
     write_local({"plugins": {"plain": {"enabled": True}}})
 
@@ -164,12 +147,7 @@ def _stats(client: TestClient) -> list[dict[str, object]]:
     return r.json()["stats"]
 
 
-# ── statistics-panel cards ─────────────────────────────────────────────
-
-
 def test_stat_cards_reach_the_console_attributed() -> None:
-    """A declared card's identity and label reach the console; the value half
-    arrives separately through the dashboard (keyed by plugin + id)."""
     _write_plugin(
         "usage",
         {
@@ -201,8 +179,6 @@ def test_stat_cards_from_two_plugins_merge_in_plugin_order() -> None:
 
 
 def test_plugin_without_stat_cards_yields_an_empty_list() -> None:
-    """The response always carries the array — the panel renders nothing extra
-    rather than the console guessing at a missing key."""
     _write_plugin("skins", {"themes": [{"name": "x", "tokens": {"--primary": "#111111"}}]})
     write_local({"plugins": {"skins": {"enabled": True}}})
 
@@ -211,8 +187,6 @@ def test_plugin_without_stat_cards_yields_an_empty_list() -> None:
 
 
 def test_invalid_manifest_names_the_plugin() -> None:
-    """The install gate already validated it, so a manifest that fails now means
-    the on-disk copy changed under the cluster — loud, not skipped."""
     _write_plugin(
         "broken",
         None,

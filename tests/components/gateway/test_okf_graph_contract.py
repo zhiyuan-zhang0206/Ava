@@ -1,5 +1,3 @@
-"""Contract: every .ava.okf.md bundle of the repository parses identically through the adapter and the legacy parser."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,7 +7,6 @@ import yaml
 
 
 def _legacy_parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """The pre-#2448 `okf_graph.parse_frontmatter` — reference implementation."""
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         return {}, text
@@ -25,8 +22,6 @@ def _legacy_parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 
 def test_parse_frontmatter_equivalent_to_legacy_on_repo_bundles() -> None:
-    """Every `.ava.okf.md` bundle in the repo parses identically through the
-    adapter and the legacy parser — frontmatter and body, field for field."""
     from base.packages.docs.okf_graph import find_files, parse_frontmatter
 
     repo_root = Path(__file__).resolve().parents[3]

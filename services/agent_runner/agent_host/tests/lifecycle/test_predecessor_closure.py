@@ -1,5 +1,3 @@
-"""Released ownership admits a closed resource set, independent of historical receipts."""
-
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -36,8 +34,6 @@ _DRAIN = {
 
 
 def retired(generation: UUID, owner: UUID, *, open_request: bool = False) -> dict[str, Any]:
-    """`IncarnationResources.model_dump(mode="json")` as the retired runtime wrote
-    it: process receipts carry only pid and wall birth, no boot scope."""
     requests: dict[str, Any] = {}
     if open_request:
         request = str(uuid4())
@@ -69,8 +65,6 @@ def _drained(
     local_machine: MachineIdentity,
     **resources: bool,
 ) -> tuple[int, int, dict[str, Any]]:
-    """An idle agent exactly as the retired drain left it: the applied restart
-    receipt is still the lifecycle pointer and the old owner was released."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
@@ -109,7 +103,6 @@ def _snapshot(db: psycopg.Connection, aid: int, receipt: int) -> tuple[Any, ...]
 
 
 def closed_form(db: psycopg.Connection, aid: int, before: dict[str, Any]) -> IncarnationResources:
-    """Store the closed-predecessor form of the incarnation `before` names."""
     closed = IncarnationResources(
         generation=UUID(before["generation"]), owner=UUID(before["owner"]), requests={}
     )
@@ -213,11 +206,9 @@ async def test_closed_form_is_admitted_exactly_once(
     assert (admitted.generation, admitted.owner) == (successor.generation, successor.owner)
     assert admitted.host_process is not None
     assert admitted.requests == {}
-    # The successor observed the restart receipt: the form is consumed.
     assert admitted_row[0]["lifecycle_command_id"] is None
     assert admitted_row[1]["status"] == "done"
 
-    # Exactly once: the successor now owns the row and its host is still live.
     assert (
         await _admit(
             aops_pool, aid, uuid4(), database_gate=database_gate, local_machine=machine_identity
@@ -245,7 +236,6 @@ async def test_released_closed_form_does_not_need_a_historical_receipt(
         local_machine=machine_identity,
     )
     closed_form(db_conn, aid, before)
-    # The current row owns admission; historical receipt retention does not.
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (aid,))
     db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (receipt,))
     db_conn.commit()
@@ -265,9 +255,6 @@ def _resurrected(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
 ) -> tuple[int, int, dict[str, Any]]:
-    """An agent whose recorded incarnation ended through an applied and observed
-    terminate, then resurrected and never readmitted: idling, its owner
-    released, no lifecycle pointer, the retired value still stored."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
@@ -304,7 +291,6 @@ async def test_a_resurrected_row_never_readmitted_is_admitted_after_release(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Resurrection released the owner and left no pointer or open resources."""
     aid, receipt, before = _resurrected(
         db_conn,
         model_catalog=model_catalog,
@@ -333,9 +319,6 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The next release drains a converted agent: a restart released by the
-    managed host leaves the complete empty set of exactly that incarnation,
-    which the host receipt, a preparation retry and certification all accept."""
     aid, _receipt, before = _drained(
         db_conn,
         model_catalog=model_catalog,
@@ -389,7 +372,6 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     verify_drained(db_conn, hold)
     db_conn.commit()
 
-    # An unclosed or foreign set is not a drained one.
     resources = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (aid,)
     ).fetchone()

@@ -1,5 +1,3 @@
-"""`ava impersonate relay` parses its arguments and carries the codex remote and the content cap down to the relay."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -148,7 +146,6 @@ class Listener:
 
 
 def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
-    """Serve the fake inbox through the public relay calls `cmd_relay` reads it with."""
 
     def lease(_db: object, _bus: object, *_args: object, local_machine: str) -> dict[str, Any]:
         return {
@@ -249,7 +246,6 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
     operator_database: DatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Bound host context and leave failed messages for the native handoff."""
     from cli.commands.agents import impersonation
     from cli.parsers import build_parser
 

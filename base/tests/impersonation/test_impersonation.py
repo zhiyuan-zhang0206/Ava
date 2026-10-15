@@ -1,5 +1,3 @@
-"""Database leases, explicit consent, and durable handoff/inbox invariants."""
-
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -71,8 +69,6 @@ def test_controller_read_that_expires_lease_refreshes_roster(
 
 
 class _ShortLockDatabase:
-    """The `Database` the lease code dials, with a 100 ms lock timeout on every transaction."""
-
     def __init__(self, database: Database) -> None:
         self._database = database
 
@@ -452,8 +448,6 @@ def test_cancel_ack_publishes_committed_completion_once(
     wakes: list[int] = []
 
     def publish(_bus: object, payload: str, *, context: str = "") -> int:
-        # A separate connection must see both writes before the UI is told
-        # the external actor completed cancellation.
         assert db_conn.execute(
             "SELECT i.status,m.acknowledged_at IS NOT NULL FROM inbound_messages i "
             "JOIN agent_impersonation_messages m ON m.inbound_id=i.id "

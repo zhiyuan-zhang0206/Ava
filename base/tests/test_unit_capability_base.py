@@ -1,5 +1,3 @@
-"""A pure runner's boot pass with an installed unit capability: the launched service keeps its unit login over the bootstrap endpoint, a remote unit drops an inherited human secret, a forged login is replaced and refused, an admitted operator process consumes the installed login, and a runner without a capability is refused by name."""
-
 from __future__ import annotations
 
 import json
@@ -22,9 +20,6 @@ _REPO = Path(__file__).resolve().parents[2]
 
 
 def _boot_with_bootstrap() -> dotenv_boot.EnvBootResult:
-    """The runner's boot order: the authority pass, the unit delivery (which
-    supplies the fetch's API token), then the bootstrap payload (the
-    credential-free endpoint)."""
     dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     result = dotenv_boot.deliver_unit_authority()
     bootstrap.apply_bootstrap_values(
@@ -49,8 +44,6 @@ def test_a_launched_service_keeps_its_unit_login_over_the_bootstrap_endpoint(
 def test_a_remote_unit_drops_an_inherited_human_secret(
     runner_boot: unit.UnitCapability,
 ) -> None:
-    """Its `.env` never declares the human secret, so a copy inherited from a
-    shell is dropped: remote-unit processes never hold it."""
     del runner_boot
     os.environ["AVA_CLUSTER_SECRET"] = "inherited-" + "x" * 32
     _boot_with_bootstrap()
@@ -81,7 +74,6 @@ def test_an_admitted_operator_process_consumes_the_installed_login(
     result = _boot_with_bootstrap()
     assert os.environ["AVA_DB_URL"] == runner_boot.dsn
     assert os.environ[delivery.GENERATION_ENV] == "0"
-    # ... and its API token, which the bootstrap fetch then presents.
     assert runner_boot.api is not None and os.environ[API_TOKEN_ENV] == runner_boot.api.token
     assert result.db_authority_refusal is None
 

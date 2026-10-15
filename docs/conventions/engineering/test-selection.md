@@ -325,3 +325,8 @@ staged criteria (a 100+ PR window with a monthly re-measure, every false green
 fixed as a blind-map gap) are not a precondition for this switch. They stay
 recorded here as history, and the false-green rate remains the review signal
 while enforce is live.
+
+The synthetic checkout in `scripts/tests/test_test_selector_owner_rules.py`
+weights durations so both the package subset and top-level-tests fallback stay
+below the 80% guard. This makes the tests exercise owner selection instead of
+an earlier full-suite fallback.

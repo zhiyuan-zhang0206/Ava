@@ -1,17 +1,3 @@
-"""Load an `ava_builtins/skills/` script module by file path, for tests.
-
-`ava_builtins/skills/<group>/<skill>/` directory names are kebab-case, so they are
-never importable Python packages — and Structure Rule 6
-(`meizel/language/path_imports.py`) forbids loading one by file path from
-*inside* `ava_builtins/` too (a skill script imports a sibling only through
-the narrow `__file__`-derived `sys.path` guard, never a loader). Tests are
-outside that scope (pytest manages their own sys.path), so a test loads the
-script under test directly from its file path with the standard
-`importlib.util.spec_from_file_location` recipe — `load_skill_script` below
-just centralizes the handful of lines every such test previously repeated
-inline, and carries the one `[loads]` declaration for them.
-"""
-
 from __future__ import annotations
 
 import importlib.util
@@ -23,13 +9,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def load_skill_script(*parts: str, name: str | None = None) -> ModuleType:
-    """Load `ava_builtins/skills/<parts...>` as a module, executed and
-    registered in `sys.modules` under `name` (default: `"<stem>_under_test"`)
-    so `@dataclass` and similar can resolve the module by name.
-
-    Example: `load_skill_script("integrations", "gmail", "scripts", "imap.py")` loads
-    `ava_builtins/skills/integrations/gmail/scripts/imap.py`.
-    """
     path = _REPO_ROOT.joinpath("ava_builtins", "skills", *parts)
     module_name = name or f"{path.stem}_under_test"
     spec = importlib.util.spec_from_file_location(module_name, path)

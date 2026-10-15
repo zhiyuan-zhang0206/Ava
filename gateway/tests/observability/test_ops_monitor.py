@@ -1,11 +1,3 @@
-"""GET /api/ops/monitor HTTP integration tests — the Postgres read path.
-
-The window's events are real `telemetry_events` rows. Locks the endpoint contract: envelope
-shape, window → bucket sizing, zero-filling, payload field-name wiring from the emit sites
-(kind / latency_ms / name), exact percentiles, and the fixed-grid alignment against
-meta.bucket_starts.
-"""
-
 from __future__ import annotations
 
 import json
@@ -40,7 +32,6 @@ def _add(
 
 
 def _grid_index(ts: datetime, anchor: datetime, window_s: int, bucket_s: int) -> int:
-    """Position of `ts`'s bucket within the API's bucket_starts grid."""
     elapsed = int((ts - GRID_ORIGIN).total_seconds())
     bucket = GRID_ORIGIN + timedelta(seconds=elapsed - (elapsed % bucket_s))
     starts = bucket_start_times(anchor, window_s, bucket_s)
@@ -52,7 +43,6 @@ def _now_ts() -> datetime:
 
 
 def _assert_zero_filled_series(body: dict[str, Any]) -> None:
-    """Every group renders the window's fixed point count of zeroed buckets."""
     assert body["meta"]["window"] == "24h"
     assert body["meta"]["bucket_seconds"] == 1800
     assert len(body["meta"]["bucket_starts"]) == 48
@@ -67,7 +57,6 @@ def _assert_zero_totals(body: dict[str, Any]) -> None:
     assert body["llm"]["totals"]["latency_p50_ms"] is None
     assert body["restarts"]["totals"] == {"service_starts": 0}
     assert body["restarts"]["services"] == []
-    # every llm bucket with no data: percentiles/max None, counts 0
     assert body["llm"]["series"][0] == {
         "bucket": 0,
         "calls": 0,
@@ -82,8 +71,6 @@ def _assert_zero_totals(body: dict[str, Any]) -> None:
 
 
 def test_ops_monitor_empty_envelope_and_zero_fill(db_conn: psycopg.Connection) -> None:
-    """Empty backends -> all groups present, series fully zero-filled at the
-    window's fixed point count (24h -> 48 buckets), totals zero."""
     db_conn.commit()
     with gateway_test_client() as client:
         resp = client.get("/api/ops/monitor")
@@ -94,7 +81,6 @@ def test_ops_monitor_empty_envelope_and_zero_fill(db_conn: psycopg.Connection) -
 
 
 def test_ops_monitor_window_param_sets_bucket_count(db_conn: psycopg.Connection) -> None:
-    """1h -> 60 buckets of 60s; 7d -> 168 buckets of 1h."""
     db_conn.commit()
     with gateway_test_client() as client:
         for window, n, bucket_s in (("1h", 60, 60), ("7d", 168, 3600)):
@@ -109,13 +95,11 @@ def test_ops_monitor_window_param_sets_bucket_count(db_conn: psycopg.Connection)
 
 
 def test_ops_monitor_sse_wires_kind_and_event_log_drop(db_conn: psycopg.Connection) -> None:
-    """sse_drop payload kind maps to queue_full / publish_error (a row
-    without kind counts toward neither); event_log_drop is its own series."""
     now = _now_ts()
     _add(db_conn, event="sse_drop", payload={"kind": "queue_full", "n": 1}, ts_offset_hours=2)
     _add(db_conn, event="sse_drop", payload={"kind": "publish_error", "n": 1}, ts_offset_hours=2)
     _add(db_conn, event="sse_drop", payload={"kind": "publish_error", "n": 1}, ts_offset_hours=5)
-    _add(db_conn, event="sse_drop", payload={"n": 1}, ts_offset_hours=3)  # no kind
+    _add(db_conn, event="sse_drop", payload={"n": 1}, ts_offset_hours=3)
     _add(db_conn, event="event_log_drop", payload={"n": 3}, ts_offset_hours=1)
     db_conn.commit()
     with gateway_test_client() as client:
@@ -132,8 +116,6 @@ def test_ops_monitor_sse_wires_kind_and_event_log_drop(db_conn: psycopg.Connecti
 
 
 def _seed_llm_bucket(db: psycopg.Connection) -> int:
-    """Four llm_usage rows with known latency and a row with none, plus two LLM errors, all in
-    one bucket; returns that bucket's index."""
     i = 40
     inside = bucket_start_times(_now_ts(), 86400, 1800)[i] + timedelta(seconds=60)
     for latency, tokens_in in ((100.0, 600), (300.0, 300), (900.0, 100), (2000.0, 0)):
@@ -144,7 +126,6 @@ def _seed_llm_bucket(db: psycopg.Connection) -> int:
             "reasoning": 0,
         }
         _add(db, event="llm_usage", payload=payload, ts=inside)
-    # a row with no numeric latency counts as a call but not toward the latency figures
     _add(db, event="llm_usage", payload={"in_total": 1}, ts=inside)
     _add(db, event="llm_provider_error", ts=inside)
     _add(db, event="llm_provider_error", ts=inside)
@@ -175,7 +156,7 @@ def test_ops_monitor_llm_percentiles_are_exact_over_the_bucket_rows(
 ) -> None:
     llm, i = _llm_report(db_conn)
     b = llm["series"][i]
-    assert b["latency_p50_ms"] == 600.0  # between 300 and 900
+    assert b["latency_p50_ms"] == 600.0
     assert b["latency_p95_ms"] == pytest.approx(1835.0, abs=0.1)
     assert b["latency_max_ms"] == 2000.0
     assert llm["totals"]["latency_p50_ms"] == 600.0
@@ -185,14 +166,11 @@ def test_ops_monitor_llm_percentiles_are_exact_over_the_bucket_rows(
 
 def test_ops_monitor_llm_tps_is_tokens_over_latency_seconds(db_conn: psycopg.Connection) -> None:
     llm, i = _llm_report(db_conn)
-    # 1201 tokens over 3.3 seconds of latency
     assert llm["series"][i]["tps"] == pytest.approx(363.9, abs=0.1)
     assert llm["totals"]["tps"] == pytest.approx(363.9, abs=0.1)
 
 
 def test_ops_monitor_restarts_wires_service_breakdown(db_conn: psycopg.Connection) -> None:
-    """service_started series plus the whole-window breakdown: services by
-    attributes.name (with last_start)."""
     _add(db_conn, event="service_started", payload={"name": "gateway"}, ts_offset_hours=3)
     _add(db_conn, event="service_started", payload={"name": "gateway"}, ts_offset_hours=1)
     _add(db_conn, event="service_started", payload={"name": "restarter"}, ts_offset_hours=2)
@@ -205,15 +183,12 @@ def test_ops_monitor_restarts_wires_service_breakdown(db_conn: psycopg.Connectio
         {"name": "gateway", "starts": 2, "last_start": restarts["services"][0]["last_start"]},
         {"name": "restarter", "starts": 1, "last_start": restarts["services"][1]["last_start"]},
     ]
-    # last_start is a real ISO timestamp of the most recent service_started
     for s in restarts["services"]:
         assert s["last_start"] is not None
         datetime.fromisoformat(s["last_start"])
 
 
 def test_ops_monitor_grid_alignment(db_conn: psycopg.Connection) -> None:
-    """An event at an exact minute offset lands in the bucket whose start is
-    in meta.bucket_starts (positional alignment of the series arrays)."""
     now = _now_ts()
     _add(db_conn, event="sse_drop", payload={"kind": "queue_full"}, ts_offset_hours=0.5)
     db_conn.commit()
@@ -222,7 +197,6 @@ def test_ops_monitor_grid_alignment(db_conn: psycopg.Connection) -> None:
     meta = body["meta"]
     i = _grid_index(now - timedelta(hours=0.5), now, 86400, 1800)
     assert body["sse"]["series"][i]["queue_full"] == 1
-    # the bucket start for index i is the grid-aligned boundary, not `now`
     start = datetime.fromisoformat(meta["bucket_starts"][i])
     assert start.minute % 30 == 0 and start.second == 0
 

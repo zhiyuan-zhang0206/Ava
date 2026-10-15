@@ -1,14 +1,3 @@
-"""Which credential a process presents to the gateway API (`gateway_bearer`).
-
-The cluster API always authenticates: it delivers every agent host and runner service
-its write generation's machine API token. A process holding that token presents it; an
-operator or gateway-profile process without one presents the human secret it
-legitimately holds; an agent- or runner-profile process without one raises
-instead of silently presenting the human secret. A remote-managed data plane
-keeps no write generations and delivers no token, so its gateway home keeps
-presenting the human secret.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -36,8 +25,6 @@ def _process(
     token: str | None,
     recorded_profile: str | None = None,
 ) -> None:
-    """Make this process look like one launched under `profile` (live marker) or
-    descended from `recorded_profile` (a CLI that popped the marker), holding `token`."""
     for name, value in (
         ("AVA_PROCESS_PROFILE", profile),
         (LAUNCHER_PROFILE_ENV, recorded_profile),
@@ -65,8 +52,6 @@ def test_a_delivered_token_is_presented_before_the_secret(
 def test_a_process_with_no_credential_fails_instead_of_presenting_nothing(
     monkeypatch: pytest.MonkeyPatch, profile: str | None
 ) -> None:
-    """No token and no secret: there is no open posture to send nothing to, whatever the
-    profile (a remote unit's agent or runner has the token or this launch defect)."""
     _process(monkeypatch, profile=profile, token=None)
     with pytest.raises(machine.GatewayApiTokenMissing, match="AVA_API_TOKEN"):
         gateway_auth_headers(_access(""))
@@ -103,7 +88,6 @@ def test_the_failure_is_the_named_error(monkeypatch: pytest.MonkeyPatch) -> None
 def test_a_cli_started_inside_an_agent_is_held_to_the_same_rule(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The CLI entry pops the live marker and records it as AVA_LAUNCHER_PROFILE."""
     _process(monkeypatch, profile=None, token=None, recorded_profile="agent")
     with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):
         gateway_auth_headers(_access(SECRET))
@@ -113,8 +97,6 @@ def test_a_cli_started_inside_an_agent_is_held_to_the_same_rule(
 def test_a_remote_managed_gateway_home_keeps_presenting_the_secret(
     monkeypatch: pytest.MonkeyPatch, profile: str | None
 ) -> None:
-    """The plane keeps no write generations, so the launcher delivers no token
-    (`api_delivery`) and its gateway-local services present the human secret."""
     _process(monkeypatch, profile=profile, token=None)
     _gateway_home_serving(monkeypatch, serves_gateway=True)
     assert gateway_auth_headers(_access(SECRET, remote_plane=True)) == bearer_header(SECRET)
@@ -123,8 +105,6 @@ def test_a_remote_managed_gateway_home_keeps_presenting_the_secret(
 def test_a_unit_that_does_not_serve_the_gateway_is_never_exempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A pure agent-runner takes its token from its installed capability; a
-    foreign data-plane host there is the gateway's, not a remote-managed plane."""
     _process(monkeypatch, profile="runner", token=None)
     _gateway_home_serving(monkeypatch, serves_gateway=False)
     with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):

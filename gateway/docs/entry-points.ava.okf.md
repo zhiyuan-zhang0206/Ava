@@ -41,3 +41,9 @@ Refresh still uses `memory_repo.pull_main(machine=...)`; the indexer and memory
 checkout lifecycle retain their existing composition.
 
 Parent node: [[gateway.ava.okf.md|Gateway]].
+
+The route-contract test recursively follows the current FastAPI include
+wrappers' `effective_candidates` to leaf routes and reads methods from
+`original_route`. Inspecting only the wrapper can omit routes from the contract
+inventory; this describes the integrated route representation, not a promise
+about every future framework version.

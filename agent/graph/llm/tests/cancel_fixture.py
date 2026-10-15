@@ -1,5 +1,3 @@
-"""Cancel-race fixture for the LLM package: tests control the durable-interrupt subscription event."""
-
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -14,7 +12,6 @@ from base.native_process.turn_identity import HostedTurnResources
 
 
 def install_cancel_event(monkeypatch: pytest.MonkeyPatch, event: InterruptEvent) -> None:
-    """Make this package's durable-interrupt subscription yield `event`."""
 
     @asynccontextmanager
     async def fake_subscribe(

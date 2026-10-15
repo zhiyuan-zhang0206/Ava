@@ -89,3 +89,8 @@ inner `_run_turn` task after admission commits and while Redis announcement is
 parked, isolating admission and settlement. The public `run_turn` additionally
 owns resource retention, cancellation forwarding and receipt cleanup; this
 focused test does not exercise that wrapper.
+
+Transcript rotation tests run `child_runtime_scenarios.py` in a fresh child with
+real fd 1: pytest's capture wrapper is not the `fstat`/`dup2` boundary. After
+rotation the child writes through both the descriptor and Python stdout/stderr,
+checking their new destination. This does not prove every Loguru sink path.

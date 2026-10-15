@@ -84,3 +84,10 @@ The entry supplies the version reader of its captured loaded image, the existing
 process label and the CLI exemption posture. Version resolution remains lazy;
 a service's reader must resolve the captured SHA, never the checkout's later
 HEAD. An exempt CLI does not resolve a Git version to name or restore a session.
+
+The real PgBouncer wire tests establish read-only defaults with `SHOW` first.
+Their poisoned-state fixture verifies the dirty search path and timeout through
+an unscrubbed raw connection. The borrow-check tests create the backend before poisoning so a passing borrow
+proves repair on checkout, rather than initial configuration.
+If pooler parameter tracking changes and prevents that state, the fixture must
+fail instead of silently testing a clean backend.

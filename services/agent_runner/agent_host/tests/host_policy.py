@@ -1,5 +1,3 @@
-"""Existing host tests explicitly assemble their process-default policy inputs."""
-
 from typing import Any
 
 from base.agents.impersonation.notes import HandoffNotes
@@ -12,7 +10,6 @@ from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 
 
 def configured_policy(**changes: Any) -> HostPolicy:
-    """Keep legacy config-mutation cases at the test's composition boundary."""
     return HostPolicy(
         max_concurrent_turns=settings.daemon.host_max_concurrent_turns,
         cache=lambda: HostCachePolicy(
@@ -31,7 +28,6 @@ def configured_policy(**changes: Any) -> HostPolicy:
 
 
 def configured_machine(*, name: str | None = None) -> MachineIdentity:
-    """Assemble a test host's machine from its current prepared configuration."""
     machine = machine_from_boot(snapshot_process_config())
     if name is not None:
         machine.set(name=name)
@@ -39,7 +35,6 @@ def configured_machine(*, name: str | None = None) -> MachineIdentity:
 
 
 def assert_sdk_context(expected: object | None, *, bound: bool) -> None:
-    """Observe the existing SDK slot without resolving machine identity."""
     import ava
 
     assert getattr(ava, "context", None) is expected

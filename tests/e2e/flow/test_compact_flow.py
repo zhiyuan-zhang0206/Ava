@@ -1,23 +1,3 @@
-"""Panoramic Case 2 — compact flow: force compact → summary → timeline (#1018).
-
-The #1017 regression path: a UI-triggered compact produced an untagged
-summary message → system_marker source=null → the red "UNRECOGNIZED
-SYSTEM_MARKER" alarm in the browser. PR #1796 fixed the tagging; this test
-locks the full flow in the real browser:
-
-1. user message → reply (conversation content to compress)
-2. Enqueue the native compact envelope through the history fixture
-   → compact_request inbound → claim runs the Compaction LLM (script turn 2)
-   → clean wipe → compact summary stamped ava_msg_type=compact_request
-3. assertions:
-   - REST timeline is [system_prompt, inbound_compact_request] — the chat and
-     reply are gone (clean wipe), the compact envelope took their place
-   - the envelope card ("Compact request") renders in the browser
-   - NO unrecognized-marker alarm + NO `[timeline] unrecognized` console
-     warning — the #1017 regression class
-   - a following message still gets a reply — the agent works post-compact
-"""
-
 from __future__ import annotations
 
 import re
@@ -56,11 +36,6 @@ def _timeline(gateway_url: str, agent_id: int) -> list[dict[str, Any]]:
 def _wait_kinds(
     gateway_url: str, agent_id: int, expected: list[str], timeout: float = 60.0
 ) -> list[dict[str, Any]]:
-    """Poll until `expected` appears as an in-order subsequence of the
-    turn-level kinds (system_markers filtered — boot guidance notes precede
-    the first turn). Subsequence (not equality): the post-compact narration
-    agent_chat can commit a beat after the compact envelope, and the poll
-    must not race it."""
     items: list[dict[str, Any]] = []
 
     def expected_kinds_reached_timeline() -> tuple[bool, object]:
@@ -81,7 +56,6 @@ def _wait_kinds(
 
 
 def _collect_unrecognized_console_warnings(page: Page) -> list[str]:
-    """Return a live list that collects `unrecognized system_marker` console warnings."""
     warnings: list[str] = []
 
     def collect_if_unrecognized(message: ConsoleMessage) -> None:
@@ -93,7 +67,6 @@ def _collect_unrecognized_console_warnings(page: Page) -> list[str]:
 
 
 def _assert_compact_request_finalized(agent_id: int) -> None:
-    """DB: the compact_request inbound was claimed and finalized."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT kind, status FROM inbound_messages WHERE agent_id = %s ORDER BY id",
@@ -112,10 +85,6 @@ def _assert_no_unrecognized_alarm_after_compact(
     assert page.get_by_text(_UNRECOGNIZED_RE).count() == 0, (
         f"unrecognized system_marker alarm rendered after compact — {unrecognized_warnings}"
     )
-    # Pump the playwright loop once before reading the collected list: the
-    # page.on("console") deliveries only run while a call is in flight, so a
-    # warning emitted right before this assert could still be in flight
-    # (task #3927 class).
     page.evaluate("() => 1")
     assert unrecognized_warnings == [], (
         f"[timeline] unrecognized console warnings fired after compact: {unrecognized_warnings}"
@@ -130,24 +99,18 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(
     agent_id = e2e_env.agent_id
     unrecognized_warnings = _collect_unrecognized_console_warnings(page)
 
-    # The compact envelope card is a secondary timeline item; the default
-    # details level "none" (user ruling 2026-09-17) folds secondary items out
-    # of the DOM. Pin the expanded rendering this test asserts on.
     pin_expand_runs_all(e2e_env.gateway_url)
 
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
-    # ── 1. conversation content ──
     page.fill('[data-testid="composer-input"]', "\u4f60\u597d")
     page.click('[data-testid="composer-send"]')
     page.wait_for_selector(f"text={FIRST_REPLY}", timeout=30_000)
     wait_for_status(agent_id, AgentStatus.IDLING.value)
 
-    # ── 2. force compact (native history-rendering fixture) ──
     enqueue_compact_history_fixture(agent_id, database=database)
 
-    # ── 3. compact ran: clean wipe + compact_request envelope ──
     items = _wait_kinds(e2e_env.gateway_url, agent_id, ["inbound_compact_request"])
     envelope = next(it for it in items if it["kind"] == "inbound_compact_request")
     assert envelope["kind"] == "inbound_compact_request", envelope
@@ -156,15 +119,11 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(
 
     _assert_compact_request_finalized(agent_id)
 
-    # Browser: the envelope card renders, and NO #1017-class alarm.
     page.wait_for_selector("text=Compact request", timeout=15_000)
     _assert_no_unrecognized_alarm_after_compact(page, unrecognized_warnings)
 
-    # The post-compact state: the compact transition resumes at LLM, so the
-    # model speaks once after the wipe (narration) before the next message.
     page.wait_for_selector(f"text={POST_COMPACT_NARRATION}", timeout=15_000)
 
-    # ── 4. the agent still works post-compact ──
     page.fill('[data-testid="composer-input"]', "\u8fd8\u5728\u5417")
     page.click('[data-testid="composer-send"]')
     page.wait_for_selector(f"text={POST_COMPACT_REPLY}", timeout=30_000)

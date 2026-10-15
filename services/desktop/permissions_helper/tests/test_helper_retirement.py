@@ -1,5 +1,3 @@
-"""Durable outer-owner intent, helper retirement, and signed-artifact preparation."""
-
 from __future__ import annotations
 
 import json
@@ -82,7 +80,6 @@ def _recorder(events: list[str], event: str, result: object = None) -> Callable[
 def _stale_installed_helper(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[str], *, dr: str = "stable-dr"
 ) -> Path:
-    """A validly signed, stale installed helper; launchd, scan, sign and build steps record."""
     from services.desktop.permissions_helper import launchd_job as jobs
 
     installed = tmp_path / "home" / "helper"
@@ -97,7 +94,7 @@ def _stale_installed_helper(
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
     monkeypatch.setattr(lifecycle, "source_content_hash", lambda: "new")
     monkeypatch.setattr(lifecycle, "pinned_designated_requirement", lambda: "stable-dr")
-    monkeypatch.setattr(lifecycle, "is_valid_stable_app", Path.exists)  # present = validly signed
+    monkeypatch.setattr(lifecycle, "is_valid_stable_app", Path.exists)
     monkeypatch.setattr(jobs, "retirement_query", _recorder(events, "launchd"))
     monkeypatch.setattr(jobs, "executable_pids", _recorder(events, "scan", []))
     monkeypatch.setattr(lifecycle, "keychain_lock_reason", _recorder(events, "keychain"))
@@ -152,12 +149,10 @@ def test_retired_stale_installed_helper_is_replaced_after_signing_checks_and_com
 
     assert lifecycle.build_and_sign() == (exe.parents[2], True)
     assert exe.read_bytes() == b"new helper"
-    # Retirement is proved before the signing probes and again right before removal.
     expected = "launchd scan keychain acl smoke swiftc launchd scan codesign verify"
     assert " ".join(events) == expected
     state = json.loads((exe.parents[3] / "build-state.json").read_text())
     assert (state["source_hash"], state["dr"]) == ("new", "stable-dr")
-    # Grants carry over only under the recorded requirement; a new identity says so instead.
     err = capsys.readouterr().err
     assert ("grants carry over" in err) == (previous_dr == "stable-dr")
     assert ("identity changed" in err) == (previous_dr != "stable-dr")
@@ -212,9 +207,7 @@ def test_replacement_guard_names_a_live_process_running_the_artifact(
 
     monkeypatch.setattr(jobs, "helper_job_loaded", lambda: False)
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path)
-    jobs.require_retired_helper(tmp_path / "unused-executable")  # nothing runs this file
-    # Never exec a copied binary or a fake helper: macOS launch constraints kill it with a
-    # GUI dialog. A live interpreter stands in; sys.executable is a venv symlink.
+    jobs.require_retired_helper(tmp_path / "unused-executable")
     code = "import time; time.sleep(60)"
     child = subprocess.Popen([sys.executable, "-c", code])
     try:
@@ -321,7 +314,6 @@ def test_retained_definition_after_completed_stop_requires_exact_absence(
 
     from services.desktop.permissions_helper import launchd_job as jobs
 
-    # Keep the real UNIX socket below the native sockaddr_un path limit.
     with tempfile.TemporaryDirectory(prefix="avah-", dir="/tmp") as directory:
         home = Path(directory).resolve()
         (home / "run").mkdir()
@@ -375,7 +367,6 @@ def test_helper_socket_inspection_error_retains_definition(
     path = jobs.helper_job_plist_path(home)
     original = stopped_helper_plist(home, path)
     (home / "run").mkdir()
-    # A regular file at the socket address is unknown custody, never absence.
     (home / "run/permissions-helper.23456.sock").write_bytes(b"untrusted socket input")
 
     def absent(_target: str, _deadline: float) -> str | None:
@@ -553,8 +544,6 @@ def test_unproven_shutdown_never_boots_out_native_job(
     assert all(args[0] == "print" for args in commands)
 
 
-# A freshly compiled test binary holds no Screen Recording grant, so the region-capture
-# preflight would reject the request before the controlled child ever runs.
 _REGION_GRANT_GUARD = (
     "    guard CGPreflightScreenCaptureAccess() else {\n"
     '        throw OpError.bad("Screen Recording grant missing for region capture")\n'
@@ -567,9 +556,6 @@ _REGION_GRANT_GUARD = (
     reason="native serial helper request and Foundation child contract",
 )
 def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> None:
-    # Compile the complete daemon and use its actual socket/dispatch/wait path.
-    # Replace only desktop effects with a controlled child; never register TCC,
-    # sign an artifact, load a native job, or invoke the real screenshot tool.
     with tempfile.TemporaryDirectory(prefix="ava-hreq-", dir="/tmp") as directory:
         home = Path(directory).resolve()
         run_dir = home / "run"
@@ -713,7 +699,6 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
         return subprocess.CompletedProcess(args, 113, b"", b"Could not find service")
 
     monkeypatch.setattr(jobs, "retirement_command", command)
-    # Ordinary stop, then the shared destroy boundary, then a cleanup retry.
     jobs.unregister_helper(home, helper_port=23456, connect=connect)
     jobs.unregister_helper(home, helper_port=23456, connect=connect)
     jobs.unregister_helper(home, helper_port=23456, connect=connect)

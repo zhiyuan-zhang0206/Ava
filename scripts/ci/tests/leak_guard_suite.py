@@ -1,20 +1,9 @@
-"""The synthetic suite `test_leak_guard.py` runs real pytest on: known leakers, their victims, clean controls.
-
-It is source text, not collected tests: each file is written into a scratch rootdir that has a
-stand-in first-party package (`leakdemo`) and its own `tests/` directory, so the guard sees the same
-split as in this repository (a production module under the rootdir, test modules below a `tests`
-directory). The `leaker_*` tests are named so the driver can assert the guard blames exactly them;
-every `clean_*` test is a write-up of an idiom this repository uses and must produce no finding.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
 
-# The stand-in first-party package: what the real leakers touch, in miniature.
 PACKAGE = {
     "leakdemo/__init__.py": '"""Stand-in first-party package."""\n',
-    # The boot pass force-assigns a derived key, like `load_ava_env`.
     "leakdemo/boot.py": """
 import os
 
@@ -22,7 +11,6 @@ import os
 def load_env() -> None:
     os.environ["DEMO_HEALTH_PORT"] = "8123"
 """,
-    # The identity holder (the real one is the explicit `ava.context` process slot).
     "leakdemo/identity.py": """
 class _Clients:
     def close(self) -> None:
@@ -42,9 +30,7 @@ def agent_id() -> int | None:
     bound = globals().get("context")
     return None if bound is None else bound.agent_id
 """,
-    # A plugin namespace module (stand-in for `ava_builtins.plugins.ava_code._code_namespace`).
     "leakdemo/nsmod.py": '"""A namespace module."""\n',
-    # Stand-in for `ava.sdk_surface.plugins.install_namespace`: it marks the module object.
     "leakdemo/registry.py": """
 from types import ModuleType
 
@@ -52,7 +38,6 @@ from types import ModuleType
 def install_namespace(module: ModuleType, name: str) -> None:
     module._qualname = f"leakdemo.{name}"  # type: ignore[attr-defined]
 """,
-    # Stand-in for `ava.self`: AGENT_ID is served by the module `__getattr__`, never stored.
     "leakdemo/selfmod.py": """
 from leakdemo import identity
 
@@ -64,7 +49,6 @@ def __getattr__(name: str) -> object:
         return identity.agent_id()
     raise AttributeError(name)
 """,
-    # A lazily-importing package: `__getattr__` imports a submodule and caches the MODULE.
     "leakdemo/lazy_pkg/__init__.py": """
 import importlib
 
@@ -86,7 +70,6 @@ python_files = test_*.py
 asyncio_mode = auto
 """
 
-# `LEAK_SUITE_FAULT` injects a fault into the guard itself (a comma-separated list of the stages to break).
 CONFTEST = '''
 """Suite-shaped fixtures around the guard: the situations that must NOT be reported."""
 
@@ -431,8 +414,6 @@ def test_skipped() -> None:
     raise AssertionError("never runs")
 '''
 
-# The ordering experiment: the same guard registered first or last among two function-scoped autouse
-# plugins. Registered last it compares BEFORE the other plugin's monkeypatch undo.
 ORDER_PLUGIN = """
 import pytest
 
@@ -474,7 +455,6 @@ def _write(root: Path, rel: str, text: str) -> None:
 
 
 def write_suite(root: Path) -> None:
-    """The main suite: every leak class, its victim, the other-state leakers and the clean controls."""
     for rel, text in PACKAGE.items():
         _write(root, rel, text)
     _write(root, "pytest.ini", PYTEST_INI)
@@ -485,7 +465,6 @@ def write_suite(root: Path) -> None:
 
 
 def write_order_suite(root: Path, plugins: list[str]) -> None:
-    """The ordering experiment, with the plugins registered in `plugins` order."""
     for rel, text in PACKAGE.items():
         _write(root, rel, text)
     _write(root, "pytest.ini", PYTEST_INI)

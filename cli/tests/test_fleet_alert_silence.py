@@ -1,5 +1,3 @@
-"""`cli.fleet_alert_silence` against an in-process fake of Grafana's Alertmanager silence API."""
-
 from __future__ import annotations
 
 import base64
@@ -18,8 +16,6 @@ _NOW = datetime(2026, 10, 4, 4, 0, tzinfo=UTC)
 
 
 class FakeGrafana:
-    """Silences kept in memory with Alertmanager's id/state semantics (an expired one stays listed)."""
-
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
         self.calls: list[tuple[str, str]] = []
@@ -123,7 +119,7 @@ def test_a_rerun_extends_the_silence_it_owns_instead_of_stacking_another(
     assert fake.rows[0]["endsAt"] == (_NOW + timedelta(minutes=30, hours=6)).isoformat(
         timespec="seconds"
     )
-    assert fake.rows[0]["startsAt"] == "2026-10-04T04:00:00+00:00"  # the window's true start
+    assert fake.rows[0]["startsAt"] == "2026-10-04T04:00:00+00:00"
 
 
 def test_close_expires_only_the_silences_it_owns(grafana: tuple[FakeGrafana, str]) -> None:
@@ -133,7 +129,7 @@ def test_close_expires_only_the_silences_it_owns(grafana: tuple[FakeGrafana, str
     assert silence.close_window(base, "pw") == [owned]
     states = {row["id"]: row["status"]["state"] for row in fake.rows}
     assert states == {"other": "active", owned: "expired"}
-    assert silence.close_window(base, "pw") == []  # nothing left to close
+    assert silence.close_window(base, "pw") == []
 
 
 def test_main_opens_then_closes_through_the_hosts_settings(

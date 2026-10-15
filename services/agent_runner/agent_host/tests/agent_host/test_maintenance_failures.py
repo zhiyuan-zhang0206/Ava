@@ -1,6 +1,3 @@
-"""A failed continuation is alerted and re-driven, never latched, and a failed wake
-outside the cohort is no continuation failure."""
-
 import asyncio
 from unittest.mock import AsyncMock
 
@@ -30,10 +27,6 @@ from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading imp
 async def test_a_failed_continuation_is_alerted_and_the_held_control_stays_runnable(
     wired: Build, monkeypatch: pytest.MonkeyPatch, alerts: Alerts
 ) -> None:
-    """The turn raises while its restart command is owed: the host reports it and
-    latches nothing in the journal. (This fake pool cannot settle the command, so
-    the held control stays runnable; the settled case is tested against Postgres in
-    `test_maintenance_receipt_grading`.)"""
     host, graph, _pool = wired({11: Row(status="idling")})
     hold = MaintenanceHold(MaintenancePhase.DRAINING, {11: 100})
 
@@ -59,8 +52,6 @@ async def test_a_failed_continuation_is_alerted_and_the_held_control_stays_runna
 
 
 class _BlockedRead:
-    """The first row read is cancelled; subsequent cleanup can read no receipts."""
-
     def __init__(self) -> None:
         self.entered = asyncio.Event()
         self._first_read = True
@@ -98,12 +89,6 @@ async def test_a_wake_cancelled_before_its_row_read_reports_only_owed_continuati
     agent: int,
     reported: bool,
 ) -> None:
-    """FC-10 F20: a stop's SIGTERM cancels every task (`cancel_and_drain`).
-
-    Caught before `read_stored_config` could say "not ours", a wake for
-    another machine's agent, or one for a member already drained, owes no
-    continuation and raises no alert. A member still draining does.
-    """
     host, _graph, pool = wired({})
     blocked = _BlockedRead()
     monkeypatch.setattr(pool, "connection", blocked.connection)
@@ -128,14 +113,10 @@ async def test_a_wake_cancelled_before_its_row_read_reports_only_owed_continuati
 async def test_a_settled_members_held_wake_claims_nothing(
     wired: Build, monkeypatch: pytest.MonkeyPatch, phase: str, agent: int
 ) -> None:
-    """Why its failure is no receipt: after the certified drain a drained or
-    parked member's wake reads the row and returns; it never reaches the held
-    control that claims, so its inbound messages stay pending."""
     host, _graph, pool = wired({agent: Row(status="idling")})
     control = AsyncMock()
     monkeypatch.setattr(host, "_run_held_controls", control)
     fc10_hold(phase, parked=(5,))
     await host.run_turn(agent)
     control.assert_not_awaited()
-    # Pre-turn qualification and the closed-pump compact source read.
     assert pool.reads == 2

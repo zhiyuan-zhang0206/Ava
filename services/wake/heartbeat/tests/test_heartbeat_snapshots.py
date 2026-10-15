@@ -1,6 +1,3 @@
-"""The liveness pass as the roster's writer: every roster-visible agent-runner is
-probed once and snapshotted, and only the rollout targets are judged and alerted."""
-
 from __future__ import annotations
 
 import asyncio
@@ -49,8 +46,6 @@ def _machine(
 
 
 class _Probe:
-    """An injectable status_probe: per-machine answer, or a raise when unreachable."""
-
     def __init__(self, answers: dict[str, dict[str, Any] | None]) -> None:
         self.answers = answers
         self.calls: list[str] = []
@@ -126,7 +121,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
             probe=_Probe({"runner-1": None}),
         )
     )
-    assert _snapshot(db_conn, "runner-1") == (False, 1, "sha-1", True)  # last answer kept
+    assert _snapshot(db_conn, "runner-1") == (False, 1, "sha-1", True)
 
     asyncio.run(
         run_liveness_pass(
@@ -146,7 +141,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
             probe=_Probe({"runner-1": _status("runner-1")}),
         )
     )
-    assert _snapshot(db_conn, "runner-1") == (True, 0, "sha-1", True)  # recovered
+    assert _snapshot(db_conn, "runner-1") == (True, 0, "sha-1", True)
 
 
 def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
@@ -177,8 +172,6 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
 def test_staging_and_stopped_hosts_are_snapshotted_but_not_judged(
     db_conn: psycopg.Connection, pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    """The roster shows them, so it needs their status; the liveness grading and the
-    offline alert stay with the rollout targets."""
     _machine(db_conn, "target")
     _machine(db_conn, "laptop", staging=True)
     _machine(db_conn, "retired", stopped=True)
@@ -190,7 +183,7 @@ def test_staging_and_stopped_hosts_are_snapshotted_but_not_judged(
         )
     )
 
-    assert sorted(probe.calls) == ["laptop", "retired", "target"]  # each dialed once
+    assert sorted(probe.calls) == ["laptop", "retired", "target"]
     assert _snapshot(db_conn, "laptop") == (True, 0, "sha-1", True)
     assert _snapshot(db_conn, "retired") == (False, 1, None, False)
     assert _judged(db_conn) == ["target"]
@@ -218,8 +211,6 @@ def test_paused_and_non_runner_machines_are_not_probed(
 def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
     monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
-    """The roster renders from the snapshot, so the heartbeat service must write it
-    at once rather than leave the roster empty for a pass interval."""
     events: list[str] = []
 
     async def fake_pass(_db: object, _pool: object, _bus: object) -> None:
@@ -272,7 +263,7 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
             )
         )
 
-    assert events == ["pass", "sleep", "pass", "sleep"]  # no hot loop on a failing pass
+    assert events == ["pass", "sleep", "pass", "sleep"]
 
 
 def test_an_unexpected_probe_error_is_not_counted_as_an_unreachable_host() -> None:

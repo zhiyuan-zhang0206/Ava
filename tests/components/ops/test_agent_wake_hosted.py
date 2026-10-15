@@ -1,5 +1,3 @@
-"""Real database resurrection: guarded status transition, durable inbound, and one host wake."""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -30,8 +28,6 @@ def _capture_wakes(monkeypatch: pytest.MonkeyPatch, wakes: list[tuple[int, str]]
     def _record(_db: object, _bus: object, agent_id: int, payload: str) -> None:
         wakes.append((agent_id, payload))
 
-    # Both wake modules publish through their own namespace (the split moved
-    # swap-in / revive to `ops.agent_revive`), so capture both.
     monkeypatch.setattr(wake, "publish_inbound_wake", _record)
     yield
 
@@ -46,7 +42,6 @@ def _park(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """Seed admission input or a terminated hosted incarnation without launching."""
     aid, _birth, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
@@ -88,9 +83,6 @@ def _kind_rows(db: psycopg.Connection, aid: int, kind: str) -> int:
     return row[0]
 
 
-# ── resurrect ────────────────────────────────────────────────────────────────
-
-
 def test_resurrect_agent_hosted_flips_and_wakes(
     db_conn: psycopg.Connection,
     wakes: list[tuple[int, str]],
@@ -102,8 +94,6 @@ def test_resurrect_agent_hosted_flips_and_wakes(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """terminated -> idling + resurrect inbound + one wake; no launch, no
-    pid-confirm polling."""
     aid = _park(
         db_conn,
         status="terminated",
@@ -132,9 +122,6 @@ def test_resurrect_agent_hosted_clears_the_corpse_marker(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A reaper-terminated corpse keeps `last_turn_fatal_at` stamped; the
-    resurrect transition must clear it or the reaper's next beat would
-    re-terminate the freshly revived row (the marker is already past grace)."""
     aid = _park(
         db_conn,
         status="terminated",
@@ -168,8 +155,6 @@ def test_resurrect_agent_hosted_keeps_trigger_guard(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The auto-resurrect trigger CAS semantics are mode-independent: a stale
-    trigger still refuses the transition."""
     aid = _park(
         db_conn,
         status="terminated",
@@ -207,7 +192,6 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An observed termination never revalidates its original runtime token."""
     from uuid import uuid4
 
     from psycopg.types.json import Jsonb
@@ -283,9 +267,6 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     }
 
 
-# ── stale trigger guard: system-reaped crash rows ───────────────────────────
-
-
 def _backdate_before_status(db: psycopg.Connection, aid: int, iid: int) -> None:
     with db.cursor() as cur:
         cur.execute(
@@ -305,8 +286,6 @@ def _reaped_crash_park(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> tuple[int, int]:
-    """terminated + reaper source + retained crash marker + a leftover chat
-    that predates the termination (a legacy recovery-trigger shape)."""
     from base.agents.inbox.insert import insert_inbound_message
 
     aid = _park(
@@ -361,7 +340,6 @@ def test_reaped_crash_row_refuses_leftover_work(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A reaper termination cannot grant old work a fresh activation attempt."""
     from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 
     aid, trigger = _reaped_crash_park(
@@ -396,8 +374,6 @@ def test_operator_death_still_refuses_leftover_work(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The crash marker alone never relaxes the fence: a user kill keeps its
-    contract — the leftover chat cannot undo it."""
     from base.agents.inbox.insert import insert_inbound_message
 
     aid = _park(
@@ -435,7 +411,6 @@ def test_suppressed_wakes_refuse_the_reaped_crash_trigger(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The relaxed fence does not bypass an active automatic-wake suppression."""
     aid, trigger = _reaped_crash_park(
         db_conn,
         config_authority=config_authority,
@@ -466,9 +441,6 @@ def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """After consecutive permanent provider rejections the automatic trigger is
-    refused at the final CAS; the durable streak refuses even with no
-    suppression window set (a claim clears the window by design)."""
     aid, trigger = _reaped_crash_park(
         db_conn,
         config_authority=config_authority,
@@ -497,8 +469,6 @@ def test_system_resurrect_is_not_capped_by_unconsumed_resurrect_rows(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """There is no attempt budget: a new message still resurrects a terminated
-    agent however many earlier resurrect rows were never consumed."""
     from base.agents.inbox.insert import insert_inbound_message
 
     aid = _park(
@@ -534,9 +504,6 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A manual resurrect passes no trigger: the explicit human override
-    bypasses both suppression and the tripped breaker (the breaker record —
-    streak and suppression reason — is retained, auditable)."""
     aid = _park(
         db_conn,
         status="terminated",
@@ -585,7 +552,6 @@ def test_historical_runtime_cannot_be_resurrected(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An absent command pointer cannot adopt a historical or unknown runtime."""
     from base.agents.inbox.insert import insert_inbound_message
     from base.api_contracts.agent_contract import ResurrectRefused
 
@@ -640,7 +606,6 @@ def test_incomplete_hosted_target_requires_cutover(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A hosted label alone cannot replace the retained incarnation authority."""
     from psycopg import sql
 
     from base.api_contracts.agent_contract import ResurrectRefused

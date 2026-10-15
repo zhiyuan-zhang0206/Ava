@@ -20,13 +20,6 @@ def poll_until(
     interval: float = 0.05,
     what: str = "condition",
 ) -> None:
-    """Wait for a condition, reporting its final observed state on timeout.
-
-    Prefer the ``(bool, state)`` form for diagnostic conditions: a plain-bool
-    timeout reports only ``last observed state: False``, which loses the live
-    payload (actual name / evidence / child set) that distinguishes failure
-    modes at the sites this helper was built for.
-    """
     started = time.monotonic()
     deadline = started + timeout
     while time.monotonic() < deadline:
@@ -51,7 +44,6 @@ async def poll_until_async(
     interval: float = 0.01,
     what: str = "condition",
 ) -> None:
-    """Asynchronously wait for a condition and report its last observed state."""
     started = time.monotonic()
     deadline = started + timeout
     while time.monotonic() < deadline:

@@ -51,3 +51,9 @@ terminated owner.
 
 - [[pty_sessions.ava.okf.md|PTY sessions]] — the service and its lifecycle.
 - [[../session-kill.ava.okf.md|session kill]] — the bounded closure guarantee.
+
+`base/sessions/pty/tests/process_groups.py:kill_group_or_prove_already_gone` handles only an
+independent session started by the test (PGID equals PID). After signaling is
+refused, it accepts an already-gone result only after a bounded leader wait and
+confirmation that no live group members remain. This helper does not establish
+the native-process closure proof based on retaining an unreaped leader.
