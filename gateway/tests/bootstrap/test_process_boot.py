@@ -13,6 +13,7 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
+from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -189,8 +190,15 @@ def test_openapi_schema_is_cold(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "/api/health" in schema["paths"]
 
 
-def test_create_app_from_environment_assembles_gateway_config(unit_home: Path) -> None:
-    (unit_home / ".env").write_text("AVA_MACHINE_SERVE_GATEWAY=true\n", encoding="utf-8")
+def test_create_app_from_environment_assembles_gateway_config(
+    config_authority: ConfigAuthority,
+) -> None:
+    config_authority.env_path.write_text(
+        "AVA_MACHINE_SERVE_GATEWAY=true\n"
+        f"AVA_DB_URL={config_authority.service_field_value('db_url')}\n"
+        f"AVA_REDIS_URL={config_authority.service_field_value('redis_url')}\n",
+        encoding="utf-8",
+    )
     saved_env = dict(os.environ)
     try:
         first = gateway_app.create_app_from_environment()
