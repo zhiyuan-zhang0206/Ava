@@ -22,11 +22,13 @@ from base.agents.incarnation.lifecycle_acceptance import (
 from base.agents.incarnation.resource_admission import admit_resources_async
 from base.agents.incarnation.resources import (
     IncarnationResources,
+    ResourceClosureError,
     ResourceEvidenceError,
+    ResourceFenceError,
     ResourceProcess,
     decode_resources,
 )
-from base.agents.observation.evidence import AdmissionOutcome
+from base.agents.observation.evidence import AdmissionOutcome, AdmissionRefusalReason
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.deploy.maintenance import admission
@@ -43,16 +45,36 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 class _HostedAdmissionRefusedError(Exception):
     """Roll back speculative resource transfer before returning a refusal."""
 
-    def __init__(self, outcome: AdmissionOutcome, detail: str | None = None) -> None:
+    def __init__(
+        self,
+        outcome: AdmissionOutcome,
+        detail: str | None = None,
+        reason: AdmissionRefusalReason | None = None,
+    ) -> None:
         self.outcome = outcome
         self.detail = detail
+        self.reason = reason
 
 
 def _refuse_hosted_admission(
     outcome: AdmissionOutcome = AdmissionOutcome.ADMISSION_GUARD_REFUSED,
     detail: str | None = None,
+    reason: AdmissionRefusalReason | None = None,
 ) -> Never:
-    raise _HostedAdmissionRefusedError(outcome, detail)
+    raise _HostedAdmissionRefusedError(outcome, detail, reason)
+
+
+def _evidence_refusal_reason(exc: ResourceEvidenceError) -> AdmissionRefusalReason:
+    """Classify one resource-evidence refusal for the complete record (#5049)."""
+    if isinstance(exc, ResourceClosureError):
+        return (
+            AdmissionRefusalReason.RECEIPT_LESS
+            if exc.receipt_less
+            else AdmissionRefusalReason.SUCCESSOR_CLOSURE
+        )
+    if isinstance(exc, ResourceFenceError):
+        return AdmissionRefusalReason.FENCES
+    return AdmissionRefusalReason.OTHER
 
 
 async def _record_admission_refusal(
@@ -63,10 +85,23 @@ async def _record_admission_refusal(
     attempt_at: datetime,
     outcome: AdmissionOutcome,
     detail: str | None = None,
+    reason: AdmissionRefusalReason | None = None,
 ) -> None:
     """Keep an older, delayed refusal from replacing a later successful claim; a
-    detail is durable row state an operator must resolve, so it is logged loudly."""
-    if detail is not None:
+    detail is durable row state an operator must resolve, so it is logged loudly.
+    A classified evidence refusal additionally lands on the event stream as
+    `host_admission_refused`, so a persistent wedge is visible without reading
+    host logs; the alerting layer picks the pathological shapes (#5049)."""
+    if reason is not None:
+        logger.warning(
+            "agent {agent_id} admission refused ({outcome}, {reason}): {detail}",
+            event="host_admission_refused",
+            agent_id=agent_id,
+            outcome=outcome.value,
+            reason=reason.value,
+            detail=detail or "",
+        )
+    elif detail is not None:
         logger.warning("agent {} admission refused ({}): {}", agent_id, outcome.value, detail)
     async with async_write_transaction(pool) as conn:
         await conn.execute(
@@ -234,7 +269,7 @@ async def _dead_predecessor_evidence(
         current_host = ResourceProcess.capture(host)
         if not prior_resources.host_process.same_birth(current_host):
             if not await asyncio.to_thread(process_ended, prior_resources.host_process):
-                _refuse_hosted_admission()
+                _refuse_hosted_admission(reason=AdmissionRefusalReason.DEAD_OWNER)
             return prior_resources.host_process
         # The same real host may transfer a closed incarnation only through
         # admit_resources_async's durable predecessor check.
@@ -267,7 +302,9 @@ async def _lock_previous(conn: psycopg.AsyncConnection[Any], agent_id: int, owne
         try:
             decode_resources(previous[4])
         except ResourceEvidenceError as exc:
-            _refuse_hosted_admission(AdmissionOutcome.RESOURCE_FENCE, str(exc))
+            _refuse_hosted_admission(
+                AdmissionOutcome.RESOURCE_FENCE, str(exc), reason=AdmissionRefusalReason.OTHER
+            )
     return previous
 
 
@@ -315,12 +352,17 @@ async def admit_hosted_runtime(
                 previous, owner=owner, machine=machine, host=native
             )
 
-            await admit_resources_async(
-                conn,
-                RuntimeIncarnation(agent_id, generation, owner),
-                host_identity,
-                exited_predecessor=exited_predecessor,
-            )
+            try:
+                await admit_resources_async(
+                    conn,
+                    RuntimeIncarnation(agent_id, generation, owner),
+                    host_identity,
+                    exited_predecessor=exited_predecessor,
+                )
+            except ResourceEvidenceError as exc:
+                _refuse_hosted_admission(
+                    AdmissionOutcome.RESOURCE_FENCE, str(exc), reason=_evidence_refusal_reason(exc)
+                )
             # Exact local host death and resource closure are stronger than
             # its remaining lease; the same row lock protects both proofs.
             row = await claim_admission_row(
@@ -356,7 +398,14 @@ async def admit_hosted_runtime(
             recorded.append(await record_audit_async(conn, admitted_event))
     except _HostedAdmissionRefusedError as exc:
         await _record_admission_refusal(
-            pool, agent_id, machine, expected_from, attempt_at, exc.outcome, exc.detail
+            pool,
+            agent_id,
+            machine,
+            expected_from,
+            attempt_at,
+            exc.outcome,
+            exc.detail,
+            exc.reason,
         )
         return None
     for event in recorded:

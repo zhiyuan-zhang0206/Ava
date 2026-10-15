@@ -123,3 +123,42 @@ hold, the managed-resource predecessor rule and the owner CAS are unchanged.
   to refusing the rows they vouched for.
 
 Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../graph/2026-10-03-delete-ava-pause.md).
+
+## Follow-up shipped (2026-10-15, tasks #5049/#5155)
+
+The deferred separate change above shipped as the release record:
+
+- **Release record.** The resurrection transaction flips ownership itself:
+  when the retained incarnation's resource set is closed (no attached
+  requests, not force-frozen, a recorded host process), it records the
+  released generation and owner (`release_target`) inside the existing
+  `lifecycle_release` payload on its own resurrect inbound. The lifecycle
+  `target_generation`/`target_owner` columns stay reserved for
+  restart/terminate commands (`inbound_lifecycle_target_check`); no schema
+  change, no new admission-only field.
+- **Admission.** The successor consumes that generation-scoped record through
+  the ordinary predecessor closure query under four guards re-validated at
+  read time: the exact recorded host process is the admitting one; the set is
+  closed and unfrozen; the row carries no runtime identity; the predecessor
+  life holds no unsettled restart/terminate command. A record that fails a
+  guard — and a release without a record — keeps refusing; closure is read
+  from the record, never derived at admission.
+- **Recording.** Every resource-evidence refusal of admission is recorded in
+  the existing refusal channel (`last_admission_outcome = resource_fence` with
+  a reason code: successor-closure / receipt-less / fences / dead-owner /
+  other) and emitted as the declared `host_admission_refused` event, instead
+  of raising the raw evidence error and crash-looping the dispatcher. The
+  alerting layer (#5015) picks the pathological shapes.
+
+Alternatives rejected in review: relaxing `inbound_lifecycle_target_check`
+(a migration for a binding the payload can carry); admitting on derived
+closure ("closed set + live same host + unowned row" with no record); and
+rewriting the set into a host-less form (same derivation problem; the guards
+need the recorded host identity).
+
+Consequences of the follow-up: a crash death plus resurrection recovers
+without a host restart; receipt-less discharge stays the sanctioned one-click
+fallback (#5049); a successor from another live host still requires the
+recorded host's exit or a receipt (the host-exit guarantee stays #3195); and a
+damaged previous life (an unsettled command) refuses even with a record,
+pinned by the resurrection-fence tests.

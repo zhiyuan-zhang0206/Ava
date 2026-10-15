@@ -1,4 +1,8 @@
-"""Same-host resurrection still requires durable predecessor resource closure."""
+"""Same-host resurrection still requires durable predecessor resource closure.
+
+An unmet closure is a recorded refusal, not a raised crash: the row keeps its
+state and the refusal surfaces on the durable admission record (issue #5049).
+"""
 
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -16,7 +20,6 @@ from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceBirth,
-    ResourceEvidenceError,
     ResourceProcess,
     decode_resources,
 )
@@ -138,10 +141,16 @@ async def test_same_host_cannot_skip_missing_predecessor_evidence(
         )
     db_conn.commit()
 
-    with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
+    assert (
         await admit_hosted_runtime(
             aops_pool, aid, machine_identity.name(), owner, expected_from="idling", db=database
         )
+        is None
+    )
+    # The refusal is recorded, not raised: the wedge is visible without a crash loop.
+    assert db_conn.execute(
+        "SELECT last_admission_outcome FROM agents_meta WHERE id=%s", (aid,)
+    ).fetchone() == ("resource_fence",)
 
     assert db_conn.execute(
         "SELECT status,runtime_generation,runtime_owner,incarnation_resources "

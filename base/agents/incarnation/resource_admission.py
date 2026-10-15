@@ -6,6 +6,15 @@ A successor replaces another incarnation's set only through the predecessor
 receipt rule; the closed-predecessor form (the recorded incarnation with no
 host identity and an empty set) is admitted by that same rule, with no other
 acceptance path.
+
+One release record joins that rule: a resurrection whose ownership flip closed
+out a retained hosted incarnation records the released generation and owner
+(with `lifecycle_release`) on its own resurrect inbound, in the same
+transaction. A successor admits against that record only when the stored set
+is closed and unfrozen, the row is unowned, the exact recorded host process is
+the admitting one, and the predecessor life left no unsettled
+restart/terminate command; the record never admits a different generation or a
+foreign host.
 """
 
 from typing import Any
@@ -16,7 +25,9 @@ from psycopg.types.json import Jsonb
 from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceBirth,
+    ResourceClosureError,
     ResourceEvidenceError,
+    ResourceFenceError,
     ResourceProcess,
     decode_resources,
 )
@@ -36,6 +47,23 @@ PREDECESSOR_RECEIPT = (
     "(i.kind='terminate' AND i.status='done' AND i.observed_at IS NOT NULL))"
 )
 _PREDECESSOR = f"SELECT 1 FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id WHERE {PREDECESSOR_RECEIPT} LIMIT 1"  # noqa: S608 -- constant SQL fragment
+
+# The release record of a resurrection that closed out a retained incarnation,
+# bound to the exact released generation and owner. Valid only while the
+# predecessor life carries no unsettled restart/terminate command (applied or
+# observed, or settled by the resurrect supersession): those are exactly the
+# admission guards the successor re-validates against this record.
+_RELEASED = (
+    "SELECT 1 FROM inbound_messages r WHERE r.agent_id=%s AND r.kind='resurrect' "
+    "AND COALESCE((r.payload -> 'lifecycle_release') = 'true'::jsonb, false) "
+    "AND (r.payload -> 'release_target' ->> 'generation') = %s "
+    "AND (r.payload -> 'release_target' ->> 'owner') = %s "
+    "AND NOT EXISTS (SELECT 1 FROM inbound_messages c WHERE c.agent_id=r.agent_id "
+    "AND c.kind IN ('restart','terminate') AND c.id < r.id "
+    "AND ((c.status IN ('pending','claimed') AND c.applied_at IS NULL) "
+    "OR (c.kind='terminate' AND c.status='claimed' AND c.applied_at IS NOT NULL))) "
+    "LIMIT 1"
+)
 _STORE = "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s"
 # What a drained restart leaves: protocol-zero NULL, or the complete recorded
 # set of exactly the incarnation restart `i` released, empty and unfrozen.
@@ -50,9 +78,41 @@ DRAINED_RESOURCES = (
 
 def _require_same_host(state: IncarnationResources, host: ResourceProcess) -> None:
     if state.frozen_by is not None:
-        raise ResourceEvidenceError("force freezes same-owner admission")
+        raise ResourceFenceError("force freezes same-owner admission")
     if state.host_process is None or not state.host_process.same_birth(host):
-        raise ResourceEvidenceError("same owner changed its actual host process")
+        raise ResourceFenceError("same owner changed its actual host process")
+
+
+def _released_transfer(
+    row: tuple[Any, ...],
+    state: IncarnationResources,
+    host: ResourceProcess,
+    *,
+    released_predecessor: bool,
+) -> bool:
+    """The release record transfers only to the same live host process that
+    recorded it, on a closed set, over a row with no runtime identity left."""
+    return (
+        released_predecessor
+        and row[1] is None
+        and row[2] is None
+        and row[3] is None
+        and not state.requests
+        and state.frozen_by is None
+        and state.host_process is not None
+        and state.host_process.same_birth(host)
+    )
+
+
+def _dead_empty_transfer(
+    state: IncarnationResources, exited_predecessor: ResourceProcess | None
+) -> bool:
+    return (
+        not state.requests
+        and state.frozen_by is None
+        and state.host_process is not None
+        and state.host_process == exited_predecessor
+    )
 
 
 def next_incarnation_resources(
@@ -61,6 +121,7 @@ def next_incarnation_resources(
     host: ResourceProcess,
     *,
     predecessor: bool,
+    released_predecessor: bool = False,
     exited_predecessor: ResourceProcess | None = None,
 ) -> IncarnationResources | None:
     if row[0] is None:
@@ -73,15 +134,12 @@ def next_incarnation_resources(
         if (state.generation, state.owner) == (target.generation, target.owner):
             _require_same_host(state, host)
             return state
-        dead_empty_host = (
-            not state.requests
-            and state.frozen_by is None
-            and state.host_process is not None
-            and state.host_process == exited_predecessor
-        )
-        if state.requests or not (predecessor or dead_empty_host):
-            raise ResourceEvidenceError(
-                "successor lacks complete predecessor resource/lifecycle closure"
+        released = _released_transfer(row, state, host, released_predecessor=released_predecessor)
+        dead_empty_host = _dead_empty_transfer(state, exited_predecessor)
+        if state.requests or not (predecessor or released or dead_empty_host):
+            raise ResourceClosureError(
+                "successor lacks complete predecessor resource/lifecycle closure",
+                receipt_less=bool(state.requests),
             )
     return IncarnationResources(
         generation=target.generation, owner=target.owner, host_process=host, requests={}
@@ -99,6 +157,7 @@ async def admit_resources_async(
     if row is None:
         raise ResourceEvidenceError("resource admission target does not exist")
     predecessor = False
+    released_predecessor = False
     if row[0] is not None:
         state = decode_resources(row[0])
         if isinstance(state, IncarnationResources):
@@ -106,8 +165,23 @@ async def admit_resources_async(
                 await conn.execute(_PREDECESSOR, (target.agent_id, state.generation, state.owner))
             ).fetchone()
             predecessor = receipt is not None
+            if not predecessor:
+                released_predecessor = (
+                    await (
+                        await conn.execute(
+                            _RELEASED,
+                            (target.agent_id, str(state.generation), str(state.owner)),
+                        )
+                    ).fetchone()
+                    is not None
+                )
     value = next_incarnation_resources(
-        row, target, host, predecessor=predecessor, exited_predecessor=exited_predecessor
+        row,
+        target,
+        host,
+        predecessor=predecessor,
+        released_predecessor=released_predecessor,
+        exited_predecessor=exited_predecessor,
     )
     if value is not None:
         await conn.execute(_STORE, (Jsonb(value.model_dump(mode="json")), target.agent_id))

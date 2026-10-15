@@ -16,7 +16,6 @@ from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
-    ResourceEvidenceError,
     ResourceProcess,
     decode_resources,
 )
@@ -92,7 +91,7 @@ async def test_dead_host_does_not_bypass_resource_or_machine_fences(
     database: Database,
 ) -> None:
     agent_id, evidence = _seed(db_conn, exited_host, fence=fence)
-    with pytest.raises(ResourceEvidenceError):
+    assert (
         await admit_hosted_runtime(
             aops_pool,
             agent_id,
@@ -101,6 +100,8 @@ async def test_dead_host_does_not_bypass_resource_or_machine_fences(
             expected_from="running",
             db=database,
         )
+        is None
+    )
     stored = db_conn.execute(
         "SELECT runtime_owner,incarnation_resources,lease_expires_at>clock_timestamp() "
         "FROM agents_meta WHERE id=%s",
@@ -132,7 +133,8 @@ async def test_two_successors_of_dead_host_admit_only_one_owner(
     )
     admitted = [value for value in results if isinstance(value, RuntimeIncarnation)]
     assert len(admitted) == 1
-    assert sum(isinstance(value, ResourceEvidenceError) for value in results) == 1
+    # The loser is a recorded refusal now, not a raised crash.
+    assert sum(value is None for value in results) == 1
     stored = db_conn.execute(
         "SELECT runtime_generation,runtime_owner,incarnation_resources FROM agents_meta WHERE id=%s",
         (agent_id,),

@@ -50,6 +50,19 @@ class AdmissionOutcome(StrEnum):
     ADMISSION_GUARD_REFUSED = "admission_guard_refused"
 
 
+class AdmissionRefusalReason(StrEnum):
+    """Evidence-refusal reason codes recorded beside the admission outcome.
+
+    One classification per recorded refusal, so the recording surface stays
+    complete and the alerting layer picks the pathological shapes (#5049)."""
+
+    SUCCESSOR_CLOSURE = "successor-closure"
+    RECEIPT_LESS = "receipt-less"
+    FENCES = "fences"
+    DEAD_OWNER = "dead-owner"
+    OTHER = "other"
+
+
 class AvailabilityReason(StrEnum):
     UNKNOWN = "unknown"
     HOST_UNAVAILABLE = "host_unavailable"
