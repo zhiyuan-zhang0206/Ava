@@ -1,5 +1,3 @@
-"""`ava backup walg check`: every way setup can be wrong is a named failing step."""
-
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -30,7 +28,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     @contextmanager
     def no_postgres() -> Generator[psycopg.Connection[Any]]:
         raise psycopg.OperationalError("connection refused")
-        yield  # pragma: no cover
+        yield
 
     monkeypatch.setattr(probe, "admin_connection", no_postgres)
     return sandbox
