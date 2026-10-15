@@ -43,6 +43,28 @@ def attribute_docs(body: list[ast.stmt]) -> list[tuple[str, ast.Expr]]:
     return result
 
 
+def indentation(line: str) -> int:
+    return len(line[: len(line) - len(line.lstrip())].expandtabs(8))
+
+
+def body_tail_end(
+    node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]
+) -> int:
+    end = node.end_lineno or node.lineno
+    first = node.body[0]
+    if lines[first.lineno - 1][: first.col_offset].strip():
+        return end
+    body_indent = indentation(lines[first.lineno - 1])
+    for index in range(end, len(lines)):
+        line = lines[index]
+        if not line.strip():
+            continue
+        if not line.lstrip().startswith("#") or indentation(line) < body_indent:
+            break
+        end = index + 1
+    return end
+
+
 class SymbolCollector(ast.NodeVisitor):
     def __init__(self, text: str, fixtures: frozenset[str]) -> None:
         self.symbols = {"<module>": Symbol("<module>", 1, max(1, len(text.splitlines())))}
@@ -52,6 +74,7 @@ class SymbolCollector(ast.NodeVisitor):
         self.docstrings: set[int] = set()
         self.fixtures = fixtures
         self.text = text
+        self.lines = text.splitlines()
 
     def collect_body(
         self, node: ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
@@ -108,7 +131,9 @@ class SymbolCollector(ast.NodeVisitor):
             name in self.symbols,
             isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef),
         )
-        self.definitions.append(self.symbols[name])
+        self.definitions.append(
+            replace(self.symbols[name], end_line=body_tail_end(node, self.lines))
+        )
         self.collect_body(node)
         self.scope.pop()
 
