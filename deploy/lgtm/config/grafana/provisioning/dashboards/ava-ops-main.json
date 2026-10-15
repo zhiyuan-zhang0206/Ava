@@ -27,8 +27,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -63,8 +63,6 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM calls (window)",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -73,11 +71,13 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" [$__range]))",
-     "refId": "A",
+     "legendFormat": "calls",
      "queryType": "instant",
-     "legendFormat": "calls"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM calls (window)",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -87,8 +87,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "orange"
+      "fixedColor": "orange",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -123,8 +123,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Warning (window)",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -133,11 +131,13 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=\"warning\" [$__range]))",
-     "refId": "A",
+     "legendFormat": "warning",
      "queryType": "instant",
-     "legendFormat": "warning"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Warning (window)",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -147,8 +147,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "red"
+      "fixedColor": "red",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -173,6 +173,7 @@
     "colorMode": "value",
     "graphMode": "area",
     "justifyMode": "auto",
+    "noValue": "0",
     "orientation": "auto",
     "reduceOptions": {
      "calcs": [
@@ -181,11 +182,8 @@
      "fields": "",
      "values": false
     },
-    "textMode": "auto",
-    "noValue": "0"
+    "textMode": "auto"
    },
-   "title": "Error (window)",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -194,11 +192,13 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=~\"error|critical\" [$__range]))",
-     "refId": "A",
+     "legendFormat": "error",
      "queryType": "instant",
-     "legendFormat": "error"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Error (window)",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -208,8 +208,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "orange"
+      "fixedColor": "orange",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -244,8 +244,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Unresolved Warning",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -255,11 +253,13 @@
      "editorMode": "code",
      "expr": "ava_resolution_status_unresolved_warnings_ratio",
      "instant": true,
+     "legendFormat": "unresolved_warning",
      "range": false,
-     "refId": "A",
-     "legendFormat": "unresolved_warning"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Unresolved Warning",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -269,8 +269,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "red"
+      "fixedColor": "red",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -295,6 +295,7 @@
     "colorMode": "value",
     "graphMode": "area",
     "justifyMode": "auto",
+    "noValue": "0",
     "orientation": "auto",
     "reduceOptions": {
      "calcs": [
@@ -303,11 +304,8 @@
      "fields": "",
      "values": false
     },
-    "textMode": "auto",
-    "noValue": "0"
+    "textMode": "auto"
    },
-   "title": "Unresolved Error",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -317,11 +315,13 @@
      "editorMode": "code",
      "expr": "ava_resolution_status_unresolved_errors_ratio",
      "instant": true,
+     "legendFormat": "unresolved_error",
      "range": false,
-     "refId": "A",
-     "legendFormat": "unresolved_error"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Unresolved Error",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -331,8 +331,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -367,8 +367,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Live agents",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -385,7 +383,9 @@
       "orderBy": []
      }
     }
-   ]
+   ],
+   "title": "Live agents",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -395,9 +395,10 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
+     "decimals": 2,
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -407,8 +408,7 @@
        }
       ]
      },
-     "unit": "currencyUSD",
-     "decimals": 2
+     "unit": "currencyUSD"
     }
    },
    "gridPos": {
@@ -432,8 +432,6 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM cost (window)",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -442,11 +440,13 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))",
-     "refId": "A",
+     "legendFormat": "llm cost",
      "queryType": "instant",
-     "legendFormat": "llm cost"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM cost (window)",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -456,8 +456,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -492,8 +492,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Tokens (window)",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -502,11 +500,13 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [$__range]))",
-     "refId": "A",
+     "legendFormat": "tokens",
      "queryType": "instant",
-     "legendFormat": "tokens"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Tokens (window)",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -516,8 +516,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -552,8 +552,6 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM input tokens (window)",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -562,11 +560,13 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range]))",
-     "refId": "A",
+     "legendFormat": "input",
      "queryType": "instant",
-     "legendFormat": "input"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM input tokens (window)",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -576,8 +576,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -612,8 +612,6 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM output tokens (window)",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -622,23 +620,28 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [$__range]))",
-     "refId": "A",
+     "legendFormat": "output",
      "queryType": "instant",
-     "legendFormat": "output"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM output tokens (window)",
+   "type": "stat"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Cache-read / input tokens over calls reporting cache usage; unmetered calls are excluded from both sums.",
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
+     "decimals": 2,
+     "noValue": "N/A",
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -648,9 +651,7 @@
        }
       ]
      },
-     "unit": "percent",
-     "decimals": 2,
-     "noValue": "N/A"
+     "unit": "percent"
     }
    },
    "gridPos": {
@@ -674,8 +675,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Cache hit (window)",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -684,12 +683,13 @@
      },
      "editorMode": "code",
      "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [$__range]))",
-     "refId": "A",
+     "legendFormat": "cache hit %",
      "queryType": "instant",
-     "legendFormat": "cache hit %"
+     "refId": "A"
     }
    ],
-   "description": "Cache-read / input tokens over calls reporting cache usage; unmetered calls are excluded from both sums."
+   "title": "Cache hit (window)",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -699,9 +699,10 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
+     "decimals": 1,
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -711,8 +712,7 @@
        }
       ]
      },
-     "unit": "s",
-     "decimals": 1
+     "unit": "s"
     }
    },
    "gridPos": {
@@ -736,8 +736,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Avg turn duration (window)",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -746,11 +744,13 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"turn_end\"} | json | category=\"telemetry\" | attributes_ok=\"true\" | unwrap attributes_duration_seconds [$__range])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"turn_end\"} | json | category=\"telemetry\" | attributes_ok=\"true\" [$__range]))",
-     "refId": "A",
+     "legendFormat": "avg turn s",
      "queryType": "instant",
-     "legendFormat": "avg turn s"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Avg turn duration (window)",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -760,8 +760,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "orange"
+      "fixedColor": "orange",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -796,8 +796,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Dismissed Warning",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -807,11 +805,13 @@
      "editorMode": "code",
      "expr": "ava_resolution_status_dismissed_warnings_ratio",
      "instant": true,
+     "legendFormat": "dismissed_warning",
      "range": false,
-     "refId": "A",
-     "legendFormat": "dismissed_warning"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Dismissed Warning",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -821,8 +821,8 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "red"
+      "fixedColor": "red",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -847,6 +847,7 @@
     "colorMode": "value",
     "graphMode": "area",
     "justifyMode": "auto",
+    "noValue": "0",
     "orientation": "auto",
     "reduceOptions": {
      "calcs": [
@@ -855,11 +856,8 @@
      "fields": "",
      "values": false
     },
-    "textMode": "auto",
-    "noValue": "0"
+    "textMode": "auto"
    },
-   "title": "Dismissed Error",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -869,21 +867,33 @@
      "editorMode": "code",
      "expr": "ava_resolution_status_dismissed_errors_ratio",
      "instant": true,
+     "legendFormat": "dismissed_error",
      "range": false,
-     "refId": "A",
-     "legendFormat": "dismissed_error"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Dismissed Error",
+   "type": "stat"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Per-minute event counts \u2014 5-minute count buckets normalized to per minute (bucket count / 5): warning+error+critical vs all telemetry/log events.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "events/min",
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -898,16 +908,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true,
-      "axisLabel": "events/min"
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -933,8 +934,6 @@
      "sort": "desc"
     }
    },
-   "title": "Event health \u2014 WARNING+ERROR vs total (per minute)",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -943,9 +942,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=~\"warning|error|critical\" [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "warn+error",
      "queryType": "range",
-     "legendFormat": "warn+error"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -954,22 +953,32 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" [5m])) / 5",
-     "refId": "B",
+     "legendFormat": "total",
      "queryType": "range",
-     "legendFormat": "total"
+     "refId": "B"
     }
    ],
-   "description": "Per-minute event counts \u2014 5-minute count buckets normalized to per minute (bucket count / 5): warning+error+critical vs all telemetry/log events."
+   "title": "Event health \u2014 WARNING+ERROR vs total (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Total event-stream rate per bucket \u2014 rate() over the whole stream, events per second (the SQL count * 1000 / interval_ms equivalent). The query covers all event_name/category (the event_name/category fields are nominal metadata, not in WHERE).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -980,15 +989,7 @@
        }
       ]
      },
-     "unit": "ops",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "ops"
     }
    },
    "gridPos": {
@@ -1014,9 +1015,6 @@
      "sort": "desc"
     }
    },
-   "title": "Event rate (events/s)",
-   "type": "timeseries",
-   "description": "Total event-stream rate per bucket \u2014 rate() over the whole stream, events per second (the SQL count * 1000 / interval_ms equivalent). The query covers all event_name/category (the event_name/category fields are nominal metadata, not in WHERE).",
    "targets": [
     {
      "datasource": {
@@ -1025,37 +1023,43 @@
      },
      "editorMode": "code",
      "expr": "sum(rate({service_name=\"unknown_service\"} | json | __error__=\"\" [1m]))",
-     "refId": "A",
+     "legendFormat": "events_per_s",
      "queryType": "range",
-     "legendFormat": "events_per_s"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Event rate (events/s)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Tokens per minute (5-minute buckets / 5): input tokens.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "thresholds": null,
-     "unit": "short",
      "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 25,
+      "axisLabel": "tokens/min",
       "drawStyle": "line",
+      "fillOpacity": 25,
+      "lineInterpolation": "smooth",
       "lineWidth": 1,
+      "showPoints": "never",
       "spanNulls": true,
       "stacking": {
-       "mode": "normal",
-       "group": "A"
-      },
-      "axisLabel": "tokens/min"
-     }
+       "group": "A",
+       "mode": "normal"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -1081,8 +1085,6 @@
      "sort": "desc"
     }
    },
-   "title": "Token usage \u2014 Input (per minute)",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -1091,38 +1093,43 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "in",
      "queryType": "range",
-     "legendFormat": "in"
+     "refId": "A"
     }
    ],
-   "description": "Tokens per minute (5-minute buckets / 5): input tokens."
+   "title": "Token usage \u2014 Input (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Tokens per minute (5-minute buckets / 5): output and reasoning tokens.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "thresholds": null,
-     "unit": "short",
      "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 25,
+      "axisLabel": "tokens/min",
       "drawStyle": "line",
+      "fillOpacity": 25,
+      "lineInterpolation": "smooth",
       "lineWidth": 1,
+      "showPoints": "never",
       "spanNulls": true,
       "stacking": {
-       "mode": "normal",
-       "group": "A"
-      },
-      "axisLabel": "tokens/min"
-     }
+       "group": "A",
+       "mode": "normal"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -1148,8 +1155,6 @@
      "sort": "desc"
     }
    },
-   "title": "Token usage \u2014 Output + Reasoning (per minute)",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -1158,9 +1163,9 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "out",
      "queryType": "range",
-     "legendFormat": "out"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -1169,12 +1174,13 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_reasoning [5m])) / 5",
-     "refId": "B",
+     "legendFormat": "reasoning",
      "queryType": "range",
-     "legendFormat": "reasoning"
+     "refId": "B"
     }
    ],
-   "description": "Tokens per minute (5-minute buckets / 5): output and reasoning tokens."
+   "title": "Token usage \u2014 Output + Reasoning (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
@@ -1185,6 +1191,15 @@
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "axisLabel": "cache hit %",
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -1199,16 +1214,7 @@
        }
       ]
      },
-     "unit": "percent",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true,
-      "axisLabel": "cache hit %"
-     }
+     "unit": "percent"
     }
    },
    "gridPos": {
@@ -1234,8 +1240,6 @@
      "sort": "desc"
     }
    },
-   "title": "Cache hit (token-weighted / max agent / min agent)",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -1244,9 +1248,9 @@
      },
      "editorMode": "code",
      "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m]))",
-     "refId": "A",
+     "legendFormat": "overall",
      "queryType": "range",
-     "legendFormat": "overall"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -1255,9 +1259,9 @@
      },
      "editorMode": "code",
      "expr": "100 * max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m])))",
-     "refId": "B",
+     "legendFormat": "max agent",
      "queryType": "range",
-     "legendFormat": "max agent"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -1266,21 +1270,32 @@
      },
      "editorMode": "code",
      "expr": "100 * min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m])))",
-     "refId": "C",
+     "legendFormat": "min agent",
      "queryType": "range",
-     "legendFormat": "min agent"
+     "refId": "C"
     }
-   ]
+   ],
+   "title": "Cache hit (token-weighted / max agent / min agent)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Share of turn_end with ok='true' per bucket \u2014 turn-level health (LLM call failures, exhausted retries, and interrupted executions all set ok to false). event_name='turn_end', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -1291,15 +1306,7 @@
        }
       ]
      },
-     "unit": "percent",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "percent"
     }
    },
    "gridPos": {
@@ -1325,9 +1332,6 @@
      "sort": "desc"
     }
    },
-   "title": "Turn success rate",
-   "type": "timeseries",
-   "description": "Share of turn_end with ok='true' per bucket \u2014 turn-level health (LLM call failures, exhausted retries, and interrupted executions all set ok to false). event_name='turn_end', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -1336,52 +1340,77 @@
      },
      "editorMode": "code",
      "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"turn_end\"} | json | category=\"telemetry\" | attributes_ok=\"true\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"turn_end\"} | json | category=\"telemetry\" [5m]))",
-     "refId": "A",
+     "legendFormat": "ok_pct",
      "queryType": "range",
-     "legendFormat": "ok_pct"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Turn success rate",
+   "type": "timeseries"
   },
   {
-   "id": 2201,
-   "type": "logs",
-   "title": "Events \u2014 What happened (T0+T1)",
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Business audit facts and anomaly rows (exact tier predicate: warnings+ always, audit rows, and declared-anomaly names at info level). JSON parse failures excluded.",
    "gridPos": {
     "h": 7,
     "w": 24,
     "x": 0,
     "y": 42
    },
+   "id": 2201,
+   "options": {
+    "showTime": true,
+    "sortOrder": "Descending"
+   },
    "targets": [
     {
-     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"checkpoint_write_failed|compact_turn_aborted|dangling_tool_pairing_repaired|db_pool_acquire_slow|db_pool_acquire_timeout|delivery_stalled|error_resolved|event_log_drop|exec_cancelled|exec_failed|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|label_generate_failed|llm_cancelled|llm_provider_error|llm_turn_aborted|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|screen_capture_notify_failed|sse_drop|warning_resolved\")))",
-     "refId": "A",
-     "legendFormat": "events",
      "datasource": {
       "type": "loki",
       "uid": "loki"
      },
      "editorMode": "code",
-     "queryType": "range"
+     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"checkpoint_write_failed|compact_turn_aborted|dangling_tool_pairing_repaired|db_pool_acquire_slow|db_pool_acquire_timeout|delivery_stalled|error_resolved|event_log_drop|exec_cancelled|exec_failed|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|label_generate_failed|llm_cancelled|llm_provider_error|llm_turn_aborted|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|screen_capture_notify_failed|sse_drop|warning_resolved\")))",
+     "legendFormat": "events",
+     "queryType": "range",
+     "refId": "A"
     }
    ],
-   "options": {
-    "showTime": true,
-    "sortOrder": "Descending"
-   },
-   "description": "Business audit facts and anomaly rows (exact tier predicate: warnings+ always, audit rows, and declared-anomaly names at info level). JSON parse failures excluded."
+   "title": "Events \u2014 What happened (T0+T1)",
+   "type": "logs"
   },
   {
-   "id": 2202,
-   "type": "table",
-   "title": "Events \u2014 types",
    "datasource": {
     "type": "loki",
     "uid": "loki"
+   },
+   "description": "Event counts by name, level, and category over the selected dashboard window. Tier is derived by the events API and is not a Loki label, so this query groups only fields Loki stores.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "custom": {
+      "align": "auto",
+      "cellOptions": {
+       "type": "auto"
+      },
+      "filterable": false,
+      "inspect": false
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short"
+    }
    },
    "gridPos": {
     "h": 7,
@@ -1389,19 +1418,7 @@
     "x": 0,
     "y": 49
    },
-   "targets": [
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "expr": "sum by (event_name, level, category) (count_over_time({service_name=\"unknown_service\"} | json | __error__=\"\" [$__range]))",
-     "refId": "A",
-     "queryType": "instant",
-     "legendFormat": "events",
-     "editorMode": "code"
-    }
-   ],
+   "id": 2202,
    "options": {
     "cellHeight": "sm",
     "footer": {
@@ -1413,46 +1430,38 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "description": "Event counts by name, level, and category over the selected dashboard window. Tier is derived by the events API and is not a Loki label, so this query groups only fields Loki stores.",
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "thresholds"
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
      },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "short",
-     "custom": {
-      "align": "auto",
-      "cellOptions": {
-       "type": "auto"
-      },
-      "filterable": false,
-      "inspect": false
-     }
+     "editorMode": "code",
+     "expr": "sum by (event_name, level, category) (count_over_time({service_name=\"unknown_service\"} | json | __error__=\"\" [$__range]))",
+     "legendFormat": "events",
+     "queryType": "instant",
+     "refId": "A"
     }
-   }
+   ],
+   "title": "Events \u2014 types",
+   "type": "table"
   },
   {
-   "id": 2203,
-   "type": "logs",
-   "title": "Events \u2014 raw stream (all, incl. noise)",
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Raw stream for debugging; most rows are internal telemetry. JSON parse failures are excluded.",
    "gridPos": {
     "h": 10,
     "w": 24,
     "x": 0,
     "y": 56
+   },
+   "id": 2203,
+   "options": {
+    "showTime": true,
+    "sortOrder": "Descending"
    },
    "targets": [
     {
@@ -1460,18 +1469,15 @@
       "type": "loki",
       "uid": "loki"
      },
-     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\"",
-     "refId": "A",
-     "legendFormat": "events",
      "editorMode": "code",
-     "queryType": "range"
+     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\"",
+     "legendFormat": "events",
+     "queryType": "range",
+     "refId": "A"
     }
    ],
-   "options": {
-    "showTime": true,
-    "sortOrder": "Descending"
-   },
-   "description": "Raw stream for debugging; most rows are internal telemetry. JSON parse failures are excluded."
+   "title": "Events \u2014 raw stream (all, incl. noise)",
+   "type": "logs"
   },
   {
    "collapsed": false,
@@ -1496,6 +1502,15 @@
      "color": {
       "mode": "palette-classic"
      },
+     "custom": {
+      "axisLabel": "tokens/s",
+      "drawStyle": "line",
+      "fillOpacity": 25,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
+     },
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -1509,16 +1524,7 @@
        }
       ]
      },
-     "unit": "tok/s",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 25,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true,
-      "axisLabel": "tokens/s"
-     }
+     "unit": "tok/s"
     }
    },
    "gridPos": {
@@ -1544,8 +1550,6 @@
      "sort": "desc"
     }
    },
-   "title": "LLM throughput tokens/s",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -1554,32 +1558,39 @@
      },
      "editorMode": "code",
      "expr": "sum(rate({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [1m])) + sum(rate({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_out_total [1m])) + sum(rate({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_reasoning [1m]))",
-     "refId": "A",
+     "legendFormat": "tokens/s",
      "queryType": "range",
-     "legendFormat": "tokens/s"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM throughput tokens/s",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Input throughput = \u03a3(in_total) \u00f7 \u03a3(latency_sec), tok/s. in_total is the log_llm_usage total input tokens (incl. cache_read; ~99.5% cache hits over the last 24h, so input TPS \u2248 cache/prefill read throughput). latency is the llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "tok/s",
      "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 25,
+      "axisLabel": "in tokens/s",
       "drawStyle": "line",
+      "fillOpacity": 25,
+      "lineInterpolation": "smooth",
       "lineWidth": 1,
-      "spanNulls": true,
-      "axisLabel": "in tokens/s"
-     }
+      "showPoints": "never",
+      "spanNulls": true
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "tok/s"
     }
    },
    "gridPos": {
@@ -1605,9 +1616,6 @@
      "sort": "desc"
     }
    },
-   "title": "Input TPS (avg / max agent / min agent)",
-   "type": "timeseries",
-   "description": "Input throughput = \u03a3(in_total) \u00f7 \u03a3(latency_sec), tok/s. in_total is the log_llm_usage total input tokens (incl. cache_read; ~99.5% cache hits over the last 24h, so input TPS \u2248 cache/prefill read throughput). latency is the llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
    "targets": [
     {
      "datasource": {
@@ -1616,9 +1624,9 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_in_total [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000",
-     "refId": "A",
+     "legendFormat": "avg in tokens/s",
      "queryType": "range",
-     "legendFormat": "avg in tokens/s"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -1627,9 +1635,9 @@
      },
      "editorMode": "code",
      "expr": "max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_in_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
-     "refId": "B",
+     "legendFormat": "max in tokens/s",
      "queryType": "range",
-     "legendFormat": "max in tokens/s"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -1638,32 +1646,39 @@
      },
      "editorMode": "code",
      "expr": "min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_in_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
-     "refId": "C",
+     "legendFormat": "min in tokens/s",
      "queryType": "range",
-     "legendFormat": "min in tokens/s"
+     "refId": "C"
     }
-   ]
+   ],
+   "title": "Input TPS (avg / max agent / min agent)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Output throughput = \u03a3(out_total) \u00f7 \u03a3(latency_sec), tok/s. out_total is the log_llm_usage total output tokens, incl. reasoning (Anthropic thinking / OpenAI reasoning both count into output_tokens; base/lm/usage.py does not add them again) \u2014 i.e. pure decode generation speed (~79 tok/s measured over the last 24h). latency is the llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "tok/s",
      "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 25,
+      "axisLabel": "out tokens/s",
       "drawStyle": "line",
+      "fillOpacity": 25,
+      "lineInterpolation": "smooth",
       "lineWidth": 1,
-      "spanNulls": true,
-      "axisLabel": "out tokens/s"
-     }
+      "showPoints": "never",
+      "spanNulls": true
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "tok/s"
     }
    },
    "gridPos": {
@@ -1689,9 +1704,6 @@
      "sort": "desc"
     }
    },
-   "title": "Output TPS (avg / max agent / min agent)",
-   "type": "timeseries",
-   "description": "Output throughput = \u03a3(out_total) \u00f7 \u03a3(latency_sec), tok/s. out_total is the log_llm_usage total output tokens, incl. reasoning (Anthropic thinking / OpenAI reasoning both count into output_tokens; base/lm/usage.py does not add them again) \u2014 i.e. pure decode generation speed (~79 tok/s measured over the last 24h). latency is the llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
    "targets": [
     {
      "datasource": {
@@ -1700,9 +1712,9 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_out_total [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000",
-     "refId": "A",
+     "legendFormat": "avg out tokens/s",
      "queryType": "range",
-     "legendFormat": "avg out tokens/s"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -1711,9 +1723,9 @@
      },
      "editorMode": "code",
      "expr": "max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
-     "refId": "B",
+     "legendFormat": "max out tokens/s",
      "queryType": "range",
-     "legendFormat": "max out tokens/s"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -1722,32 +1734,39 @@
      },
      "editorMode": "code",
      "expr": "min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_latency_ms!=\"\" | unwrap attributes_latency_ms [5m])) * 1000)",
-     "refId": "C",
+     "legendFormat": "min out tokens/s",
      "queryType": "range",
-     "legendFormat": "min out tokens/s"
+     "refId": "C"
     }
-   ]
+   ],
+   "title": "Output TPS (avg / max agent / min agent)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Gen-stage output throughput = \u03a3(out_total) \u00f7 \u03a3(decode_sec), tok/s. decode_ms is the 2026-08-04 new instrumentation (stream last chunk \u2212 first chunk arrival, excluding network/queue/prefill); out_total is the log_llm_usage total output tokens (incl. reasoning). Only calls after the decode_ms instrumentation went live are counted (attributes ? 'decode_ms'); non-streaming fallback / empty-stream calls with decode_ms=NULL do not count. avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "tok/s",
      "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 25,
+      "axisLabel": "out tokens/s",
       "drawStyle": "line",
+      "fillOpacity": 25,
+      "lineInterpolation": "smooth",
       "lineWidth": 1,
-      "spanNulls": true,
-      "axisLabel": "out tokens/s"
-     }
+      "showPoints": "never",
+      "spanNulls": true
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "tok/s"
     }
    },
    "gridPos": {
@@ -1773,9 +1792,6 @@
      "sort": "desc"
     }
    },
-   "title": "Gen-stage output TPS (avg / max agent / min agent)",
-   "type": "timeseries",
-   "description": "Gen-stage output throughput = \u03a3(out_total) \u00f7 \u03a3(decode_sec), tok/s. decode_ms is the 2026-08-04 new instrumentation (stream last chunk \u2212 first chunk arrival, excluding network/queue/prefill); out_total is the log_llm_usage total output tokens (incl. reasoning). Only calls after the decode_ms instrumentation went live are counted (attributes ? 'decode_ms'); non-streaming fallback / empty-stream calls with decode_ms=NULL do not count. avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
    "targets": [
     {
      "datasource": {
@@ -1784,9 +1800,9 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_out_total [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_decode_ms [5m])) * 1000",
-     "refId": "A",
+     "legendFormat": "avg gen out tokens/s",
      "queryType": "range",
-     "legendFormat": "avg gen out tokens/s"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -1795,9 +1811,9 @@
      },
      "editorMode": "code",
      "expr": "max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_decode_ms [5m])) * 1000)",
-     "refId": "B",
+     "legendFormat": "max gen out tokens/s",
      "queryType": "range",
-     "legendFormat": "max gen out tokens/s"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -1806,34 +1822,40 @@
      },
      "editorMode": "code",
      "expr": "min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_out_total [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_decode_ms!=\"\" | unwrap attributes_decode_ms [5m])) * 1000)",
-     "refId": "C",
+     "legendFormat": "min gen out tokens/s",
      "queryType": "range",
-     "legendFormat": "min gen out tokens/s"
+     "refId": "C"
     }
-   ]
+   ],
+   "title": "Gen-stage output TPS (avg / max agent / min agent)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "LLM usage calls in 30-minute buckets, normalized to a per-minute rate (bucket count / 30).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "thresholds": null,
-     "unit": "short",
      "custom": {
-      "stacking": {
-       "mode": "normal",
-       "group": "A"
-      },
+      "barAlignment": 0,
+      "drawStyle": "bars",
       "fillOpacity": 85,
       "lineWidth": 1,
-      "drawStyle": "bars",
-      "barAlignment": 0
-     }
+      "stacking": {
+       "group": "A",
+       "mode": "normal"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -1853,17 +1875,15 @@
      "placement": "bottom",
      "showLegend": true
     },
+    "orientation": "auto",
     "tooltip": {
      "mode": "multi",
      "sort": "desc"
     },
-    "orientation": "auto",
+    "xField": "Time",
     "xTickLabelRotation": 0,
-    "xTickLabelSpacing": 100,
-    "xField": "Time"
+    "xTickLabelSpacing": 100
    },
-   "title": "LLM calls / minute",
-   "type": "barchart",
    "targets": [
     {
      "datasource": {
@@ -1872,22 +1892,32 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" [30m])) / 30",
-     "refId": "A",
+     "legendFormat": "calls",
      "queryType": "range",
-     "legendFormat": "calls"
+     "refId": "A"
     }
    ],
-   "description": "LLM usage calls in 30-minute buckets, normalized to a per-minute rate (bucket count / 30)."
+   "title": "LLM calls / minute",
+   "type": "barchart"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "LLM call cost per minute \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in base/lm/pricing/__init__.py, unpriced models carry no cost_usd and are skipped); 30-minute buckets normalized to per-minute USD (bucket sum / 30). event_name='llm_usage', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -1898,15 +1928,7 @@
        }
       ]
      },
-     "unit": "currencyUSD",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "currencyUSD"
     }
    },
    "gridPos": {
@@ -1932,9 +1954,6 @@
      "sort": "desc"
     }
    },
-   "title": "LLM cost (per minute)",
-   "type": "timeseries",
-   "description": "LLM call cost per minute \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in base/lm/pricing/__init__.py, unpriced models carry no cost_usd and are skipped); 30-minute buckets normalized to per-minute USD (bucket sum / 30). event_name='llm_usage', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -1943,21 +1962,32 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [30m])) / 30",
-     "refId": "A",
+     "legendFormat": "cost usd",
      "queryType": "range",
-     "legendFormat": "cost usd"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM cost (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "LLM failure signals per minute (5-minute buckets / 5): llm_provider_error (provider rejection / classification error) and llm_turn_aborted (turn aborted after retries exhausted). The event_name field is spec metadata; the query covers both failure events (all telemetry).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -1968,15 +1998,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -2002,9 +2024,6 @@
      "sort": "desc"
     }
    },
-   "title": "LLM errors (per minute)",
-   "type": "timeseries",
-   "description": "LLM failure signals per minute (5-minute buckets / 5): llm_provider_error (provider rejection / classification error) and llm_turn_aborted (turn aborted after retries exhausted). The event_name field is spec metadata; the query covers both failure events (all telemetry).",
    "targets": [
     {
      "datasource": {
@@ -2013,9 +2032,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_provider_error\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "provider_error",
      "queryType": "range",
-     "legendFormat": "provider_error"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -2024,21 +2043,32 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_turn_aborted\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "B",
+     "legendFormat": "turn_aborted",
      "queryType": "range",
-     "legendFormat": "turn_aborted"
+     "refId": "B"
     }
-   ]
+   ],
+   "title": "LLM errors (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Per-agent LLM call count / in / out tokens / cost (window-accumulated; cost via the cost_usd payload field, same as the LLM cost panel; agents without cost_usd count NULL). Restores the retired Metrics page's per-agent breakdown table (2026-08-06 user request: 'bring back the big pile of metrics like SDK calls'). event_name='llm_usage', category='telemetry', Top 20 by cost descending. One instant target per column; Grafana joins them on the shared agent_id label.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "thresholds"
+     },
+     "custom": {
+      "align": "auto",
+      "cellOptions": {
+       "type": "auto"
+      },
+      "filterable": false,
+      "inspect": false
      },
      "thresholds": {
       "mode": "absolute",
@@ -2049,15 +2079,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "align": "auto",
-      "cellOptions": {
-       "type": "auto"
-      },
-      "filterable": false,
-      "inspect": false
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -2078,9 +2100,6 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "title": "Per-agent LLM usage (Top 20)",
-   "type": "table",
-   "description": "Per-agent LLM call count / in / out tokens / cost (window-accumulated; cost via the cost_usd payload field, same as the LLM cost panel; agents without cost_usd count NULL). Restores the retired Metrics page's per-agent breakdown table (2026-08-06 user request: 'bring back the big pile of metrics like SDK calls'). event_name='llm_usage', category='telemetry', Top 20 by cost descending. One instant target per column; Grafana joins them on the shared agent_id label.",
    "targets": [
     {
      "datasource": {
@@ -2089,9 +2108,9 @@
      },
      "editorMode": "code",
      "expr": "sum by (agent_id) (count_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" [$__range]))",
-     "refId": "A",
+     "legendFormat": "{{agent_id}}",
      "queryType": "instant",
-     "legendFormat": "{{agent_id}}"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -2100,9 +2119,9 @@
      },
      "editorMode": "code",
      "expr": "sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range]))",
-     "refId": "B",
+     "legendFormat": "{{agent_id}}",
      "queryType": "instant",
-     "legendFormat": "{{agent_id}}"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -2111,9 +2130,9 @@
      },
      "editorMode": "code",
      "expr": "sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_out_total [$__range]))",
-     "refId": "C",
+     "legendFormat": "{{agent_id}}",
      "queryType": "instant",
-     "legendFormat": "{{agent_id}}"
+     "refId": "C"
     },
     {
      "datasource": {
@@ -2122,11 +2141,13 @@
      },
      "editorMode": "code",
      "expr": "sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))",
-     "refId": "D",
+     "legendFormat": "{{agent_id}}",
      "queryType": "instant",
-     "legendFormat": "{{agent_id}}"
+     "refId": "D"
     }
-   ]
+   ],
+   "title": "Per-agent LLM usage (Top 20)",
+   "type": "table"
   },
   {
    "collapsed": false,
@@ -2151,6 +2172,15 @@
      "color": {
       "mode": "palette-classic"
      },
+     "custom": {
+      "axisLabel": "ms",
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
+     },
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -2160,16 +2190,7 @@
        }
       ]
      },
-     "unit": "ms",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true,
-      "axisLabel": "ms"
-     }
+     "unit": "ms"
     }
    },
    "gridPos": {
@@ -2195,8 +2216,6 @@
      "sort": "desc"
     }
    },
-   "title": "Gateway latency \u2014 p50/p95/p99/max",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -2205,9 +2224,9 @@
      },
      "editorMode": "code",
      "expr": "max(max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p50_ms [1m]))",
-     "refId": "A",
+     "legendFormat": "p50",
      "queryType": "range",
-     "legendFormat": "p50"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -2216,9 +2235,9 @@
      },
      "editorMode": "code",
      "expr": "max(max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p95_ms [1m]))",
-     "refId": "B",
+     "legendFormat": "p95",
      "queryType": "range",
-     "legendFormat": "p95"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -2227,9 +2246,9 @@
      },
      "editorMode": "code",
      "expr": "max(max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p99_ms [1m]))",
-     "refId": "D",
+     "legendFormat": "p99",
      "queryType": "range",
-     "legendFormat": "p99"
+     "refId": "C"
     },
     {
      "datasource": {
@@ -2238,11 +2257,13 @@
      },
      "editorMode": "code",
      "expr": "max(max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_max_ms [1m]))",
-     "refId": "C",
+     "legendFormat": "max",
      "queryType": "range",
-     "legendFormat": "max"
+     "refId": "D"
     }
-   ]
+   ],
+   "title": "Gateway latency \u2014 p50/p95/p99/max",
+   "type": "timeseries"
   },
   {
    "datasource": {
@@ -2254,6 +2275,15 @@
      "color": {
       "mode": "palette-classic"
      },
+     "custom": {
+      "axisLabel": "ms",
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
+     },
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -2263,16 +2293,7 @@
        }
       ]
      },
-     "unit": "ms",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true,
-      "axisLabel": "ms"
-     }
+     "unit": "ms"
     }
    },
    "gridPos": {
@@ -2298,8 +2319,6 @@
      "sort": "desc"
     }
    },
-   "title": "Gateway latency p95/p99 by route",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -2308,9 +2327,9 @@
      },
      "editorMode": "code",
      "expr": "max by (attributes_route) (max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p95_ms [1m]))",
-     "refId": "A",
+     "legendFormat": "p95 {{attributes_route}}",
      "queryType": "range",
-     "legendFormat": "p95 {{attributes_route}}"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -2319,21 +2338,32 @@
      },
      "editorMode": "code",
      "expr": "max by (attributes_route) (max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_p99_ms [1m]))",
-     "refId": "B",
+     "legendFormat": "p99 {{attributes_route}}",
      "queryType": "range",
-     "legendFormat": "p99 {{attributes_route}}"
+     "refId": "B"
     }
-   ]
+   ],
+   "title": "Gateway latency p95/p99 by route",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
+   "description": "p50 and p95 of the Prometheus ava_turn_end_duration_seconds histogram. The p95 uses the same source and quantile as alert rule R18: histogram_quantile(0.95, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m]))).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -2344,15 +2374,7 @@
        }
       ]
      },
-     "unit": "s",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "s"
     }
    },
    "gridPos": {
@@ -2378,9 +2400,6 @@
      "sort": "desc"
     }
    },
-   "title": "Turn duration (p50/p95)",
-   "type": "timeseries",
-   "description": "p50 and p95 of the Prometheus ava_turn_end_duration_seconds histogram. The p95 uses the same source and quantile as alert rule R18: histogram_quantile(0.95, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m]))).",
    "targets": [
     {
      "datasource": {
@@ -2389,9 +2408,9 @@
      },
      "editorMode": "code",
      "expr": "histogram_quantile(0.95, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
-     "refId": "A",
+     "legendFormat": "p95_s",
      "queryType": "range",
-     "legendFormat": "p95_s"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -2400,11 +2419,13 @@
      },
      "editorMode": "code",
      "expr": "histogram_quantile(0.5, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
-     "refId": "B",
+     "legendFormat": "p50_s",
      "queryType": "range",
-     "legendFormat": "p50_s"
+     "refId": "B"
     }
-   ]
+   ],
+   "title": "Turn duration (p50/p95)",
+   "type": "timeseries"
   },
   {
    "datasource": {
@@ -2416,6 +2437,14 @@
      "color": {
       "mode": "palette-classic"
      },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
+     },
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -2425,15 +2454,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -2459,8 +2480,6 @@
      "sort": "desc"
     }
    },
-   "title": "Gateway latency sample count by route",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -2469,21 +2488,32 @@
      },
      "editorMode": "code",
      "expr": "max by (attributes_route) (max_over_time({service_name=\"unknown_service\", event_name=\"gateway_latency\"} | json | category=~\"telemetry|log\" | unwrap attributes_count [1m]))",
-     "refId": "A",
+     "legendFormat": "{{attributes_route}}",
      "queryType": "range",
-     "legendFormat": "{{attributes_route}}"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Gateway latency sample count by route",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Exec outcome breakdown per minute (5-minute buckets / 5): ok = event_name='exec'; failures split by event_name (exec_failed / exec_timeout / exec_cancelled / exec_node_timeout; unknown exec* events fall into other). event_name='exec', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -2494,15 +2524,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -2528,9 +2550,6 @@
      "sort": "desc"
     }
    },
-   "title": "Exec outcomes (per minute)",
-   "type": "timeseries",
-   "description": "Exec outcome breakdown per minute (5-minute buckets / 5): ok = event_name='exec'; failures split by event_name (exec_failed / exec_timeout / exec_cancelled / exec_node_timeout; unknown exec* events fall into other). event_name='exec', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -2539,9 +2558,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"exec\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "ok",
      "queryType": "range",
-     "legendFormat": "ok"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -2550,9 +2569,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"exec_failed\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "B",
+     "legendFormat": "failed",
      "queryType": "range",
-     "legendFormat": "failed"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -2561,9 +2580,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"exec_timeout\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "C",
+     "legendFormat": "timeout",
      "queryType": "range",
-     "legendFormat": "timeout"
+     "refId": "C"
     },
     {
      "datasource": {
@@ -2572,9 +2591,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"exec_cancelled\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "D",
+     "legendFormat": "cancelled",
      "queryType": "range",
-     "legendFormat": "cancelled"
+     "refId": "D"
     },
     {
      "datasource": {
@@ -2583,9 +2602,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"exec_node_timeout\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "E",
+     "legendFormat": "node_timeout",
      "queryType": "range",
-     "legendFormat": "node_timeout"
+     "refId": "E"
     },
     {
      "datasource": {
@@ -2594,21 +2613,32 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=~\"exec.*\", event_name!~\"exec|exec_envelope|exec_failed|exec_timeout|exec_cancelled|exec_node_timeout\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "F",
+     "legendFormat": "other",
      "queryType": "range",
-     "legendFormat": "other"
+     "refId": "F"
     }
-   ]
+   ],
+   "title": "Exec outcomes (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Syntax-fix trigger counts per minute (5-minute buckets / 5), bucketed by the fix kinds in attributes.fixes (substring regex matching; an event with several fix kinds counts once per kind, 'none'/null/unknown goes to other). event_name='syntax_fix', category='telemetry' (90d retention).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -2619,15 +2649,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -2653,9 +2675,6 @@
      "sort": "desc"
     }
    },
-   "title": "Syntax fix triggers by kind (per minute)",
-   "type": "timeseries",
-   "description": "Syntax-fix trigger counts per minute (5-minute buckets / 5), bucketed by the fix kinds in attributes.fixes (substring regex matching; an event with several fix kinds counts once per kind, 'none'/null/unknown goes to other). event_name='syntax_fix', category='telemetry' (90d retention).",
    "targets": [
     {
      "datasource": {
@@ -2664,9 +2683,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*ruff_format.*\" [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "ruff_format",
      "queryType": "range",
-     "legendFormat": "ruff_format"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -2675,9 +2694,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*ruff.*\" | attributes_fixes!~\".*ruff_format.*\" [5m])) / 5",
-     "refId": "B",
+     "legendFormat": "ruff",
      "queryType": "range",
-     "legendFormat": "ruff"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -2686,9 +2705,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*invalid_escape.*\" [5m])) / 5",
-     "refId": "C",
+     "legendFormat": "invalid_escape",
      "queryType": "range",
-     "legendFormat": "invalid_escape"
+     "refId": "C"
     },
     {
      "datasource": {
@@ -2697,9 +2716,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*missing_imports.*\" [5m])) / 5",
-     "refId": "D",
+     "legendFormat": "missing_imports",
      "queryType": "range",
-     "legendFormat": "missing_imports"
+     "refId": "D"
     },
     {
      "datasource": {
@@ -2708,9 +2727,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*chinese_punct.*\" [5m])) / 5",
-     "refId": "E",
+     "legendFormat": "chinese_punct",
      "queryType": "range",
-     "legendFormat": "chinese_punct"
+     "refId": "E"
     },
     {
      "datasource": {
@@ -2719,9 +2738,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes=~\".*bracket_matching.*\" [5m])) / 5",
-     "refId": "F",
+     "legendFormat": "bracket_matching",
      "queryType": "range",
-     "legendFormat": "bracket_matching"
+     "refId": "F"
     },
     {
      "datasource": {
@@ -2730,21 +2749,32 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=\"telemetry\" | attributes_fixes!~\".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*\" [5m])) / 5",
-     "refId": "G",
+     "legendFormat": "other",
      "queryType": "range",
-     "legendFormat": "other"
+     "refId": "G"
     }
-   ]
+   ],
+   "title": "Syntax fix triggers by kind (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Halt events classified by body per minute (5-minute buckets / 5): idle ('no tool_call (idle)'), compact ('system_halt (compact)'), lifecycle ('lifecycle AgentTermination / AgentRestart'), other. event_name='halt', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -2755,15 +2785,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -2789,9 +2811,6 @@
      "sort": "desc"
     }
    },
-   "title": "Halt classes (per minute)",
-   "type": "timeseries",
-   "description": "Halt events classified by body per minute (5-minute buckets / 5): idle ('no tool_call (idle)'), compact ('system_halt (compact)'), lifecycle ('lifecycle AgentTermination / AgentRestart'), other. event_name='halt', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -2800,9 +2819,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"halt\"} | json | category=\"telemetry\" | attributes_body=\"no tool_call (idle)\" [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "idle",
      "queryType": "range",
-     "legendFormat": "idle"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -2811,9 +2830,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"halt\"} | json | category=\"telemetry\" | attributes_body=~\".*compact.*\" [5m])) / 5",
-     "refId": "B",
+     "legendFormat": "compact",
      "queryType": "range",
-     "legendFormat": "compact"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -2822,9 +2841,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"halt\"} | json | category=\"telemetry\" | attributes_body=~\"lifecycle .*\" [5m])) / 5",
-     "refId": "C",
+     "legendFormat": "lifecycle",
      "queryType": "range",
-     "legendFormat": "lifecycle"
+     "refId": "C"
     },
     {
      "datasource": {
@@ -2833,21 +2852,32 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"halt\"} | json | category=\"telemetry\" | attributes_body!=\"no tool_call (idle)\" | attributes_body!~\".*compact.*\" | attributes_body!~\"lifecycle .*\" [5m])) / 5",
-     "refId": "D",
+     "legendFormat": "other",
      "queryType": "range",
-     "legendFormat": "other"
+     "refId": "D"
     }
-   ]
+   ],
+   "title": "Halt classes (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Top 20 sdk_call grouped by attributes.fn \u2014 runtime call-frequency ranking, replacing the retired Metrics page's sdk_usage text ranking. event_name='sdk_call', category='telemetry'. Table panel (instant query over the whole window).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "thresholds"
+     },
+     "custom": {
+      "align": "auto",
+      "cellOptions": {
+       "type": "auto"
+      },
+      "filterable": false,
+      "inspect": false
      },
      "thresholds": {
       "mode": "absolute",
@@ -2858,15 +2888,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "align": "auto",
-      "cellOptions": {
-       "type": "auto"
-      },
-      "filterable": false,
-      "inspect": false
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -2887,9 +2909,6 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "title": "SDK calls (Top 20)",
-   "type": "table",
-   "description": "Top 20 sdk_call grouped by attributes.fn \u2014 runtime call-frequency ranking, replacing the retired Metrics page's sdk_usage text ranking. event_name='sdk_call', category='telemetry'. Table panel (instant query over the whole window).",
    "targets": [
     {
      "datasource": {
@@ -2898,21 +2917,32 @@
      },
      "editorMode": "code",
      "expr": "topk(20, sum by (attributes_fn) (sum_over_time({service_name=\"unknown_service\", event_name=\"sdk_call\"} | json | category=\"telemetry\" | unwrap attributes_sample_rate | __error__=\"\" [$__range])))",
-     "refId": "A",
+     "legendFormat": "{{attributes_fn}}",
      "queryType": "instant",
-     "legendFormat": "{{attributes_fn}}"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "SDK calls (Top 20)",
+   "type": "table"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Frontend interaction volume per minute (5-minute buckets / 5, total frontend_interaction events): the entry panel of user-modeling telemetry, doubling as volume monitoring \u2014 an abnormal interaction spike (an instrumentation loop bug) is immediately visible here. event_name='frontend_interaction', category='telemetry', source='user'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -2923,15 +2953,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -2957,9 +2979,6 @@
      "sort": "desc"
     }
    },
-   "title": "Frontend interactions (per minute)",
-   "type": "timeseries",
-   "description": "Frontend interaction volume per minute (5-minute buckets / 5, total frontend_interaction events): the entry panel of user-modeling telemetry, doubling as volume monitoring \u2014 an abnormal interaction spike (an instrumentation loop bug) is immediately visible here. event_name='frontend_interaction', category='telemetry', source='user'.",
    "targets": [
     {
      "datasource": {
@@ -2968,21 +2987,32 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"frontend_interaction\"} | json | category=\"telemetry\" | source=\"user\" [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "interactions",
      "queryType": "range",
-     "legendFormat": "interactions"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Frontend interactions (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Top 15 in-window interactions grouped by attributes.element \u2014 ranking of the interaction points users click/trigger most (spawn/composer-send/setting-change/page-view/...). event_name='frontend_interaction', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "thresholds"
+     },
+     "custom": {
+      "align": "auto",
+      "cellOptions": {
+       "type": "auto"
+      },
+      "filterable": false,
+      "inspect": false
      },
      "thresholds": {
       "mode": "absolute",
@@ -2993,15 +3023,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "align": "auto",
-      "cellOptions": {
-       "type": "auto"
-      },
-      "filterable": false,
-      "inspect": false
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -3022,9 +3044,6 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "title": "Frontend interactions (Top 15 elements)",
-   "type": "table",
-   "description": "Top 15 in-window interactions grouped by attributes.element \u2014 ranking of the interaction points users click/trigger most (spawn/composer-send/setting-change/page-view/...). event_name='frontend_interaction', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -3033,21 +3052,32 @@
      },
      "editorMode": "code",
      "expr": "topk(15, sum by (attributes_element) (count_over_time({service_name=\"unknown_service\", event_name=\"frontend_interaction\"} | json | category=\"telemetry\" | source=\"user\" [$__range])))",
-     "refId": "A",
+     "legendFormat": "{{attributes_element}}",
      "queryType": "instant",
-     "legendFormat": "{{attributes_element}}"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Frontend interactions (Top 15 elements)",
+   "type": "table"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Top 15 in-window page views (element='page-view') grouped by attributes.page \u2014 which screens users spend the most time on. event_name='frontend_interaction', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "thresholds"
+     },
+     "custom": {
+      "align": "auto",
+      "cellOptions": {
+       "type": "auto"
+      },
+      "filterable": false,
+      "inspect": false
      },
      "thresholds": {
       "mode": "absolute",
@@ -3058,15 +3088,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "align": "auto",
-      "cellOptions": {
-       "type": "auto"
-      },
-      "filterable": false,
-      "inspect": false
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -3087,9 +3109,6 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "title": "Frontend page views (Top 15)",
-   "type": "table",
-   "description": "Top 15 in-window page views (element='page-view') grouped by attributes.page \u2014 which screens users spend the most time on. event_name='frontend_interaction', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -3098,21 +3117,32 @@
      },
      "editorMode": "code",
      "expr": "topk(15, sum by (attributes_page) (count_over_time({service_name=\"unknown_service\", event_name=\"frontend_interaction\"} | json | category=\"telemetry\" | source=\"user\" | attributes_element=\"page-view\" [$__range])))",
-     "refId": "A",
+     "legendFormat": "{{attributes_page}}",
      "queryType": "instant",
-     "legendFormat": "{{attributes_page}}"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Frontend page views (Top 15)",
+   "type": "table"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Top 15 in-window user setting changes (element='setting-change') grouped by attributes.key \u2014 which settings/layout/preferences users adjusted (display.* / behavior.* keys). event_name='frontend_interaction', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "thresholds"
+     },
+     "custom": {
+      "align": "auto",
+      "cellOptions": {
+       "type": "auto"
+      },
+      "filterable": false,
+      "inspect": false
      },
      "thresholds": {
       "mode": "absolute",
@@ -3123,15 +3153,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "align": "auto",
-      "cellOptions": {
-       "type": "auto"
-      },
-      "filterable": false,
-      "inspect": false
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -3152,9 +3174,6 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "title": "Settings changes (Top 15)",
-   "type": "table",
-   "description": "Top 15 in-window user setting changes (element='setting-change') grouped by attributes.key \u2014 which settings/layout/preferences users adjusted (display.* / behavior.* keys). event_name='frontend_interaction', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -3163,11 +3182,13 @@
      },
      "editorMode": "code",
      "expr": "topk(15, sum by (attributes_key) (count_over_time({service_name=\"unknown_service\", event_name=\"frontend_interaction\"} | json | category=\"telemetry\" | source=\"user\" | attributes_element=\"setting-change\" [$__range])))",
-     "refId": "A",
+     "legendFormat": "{{attributes_key}}",
      "queryType": "instant",
-     "legendFormat": "{{attributes_key}}"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Settings changes (Top 15)",
+   "type": "table"
   },
   {
    "datasource": {
@@ -3371,10 +3392,21 @@
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Spawn rate per minute: counts bucketed at $__interval and normalized (bucket count / interval seconds * 60). The source label carries the spawner and is rendered directly in the chart legend. event_name='spawn', category='audit'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "barAlignment": 0,
+      "drawStyle": "bars",
+      "fillOpacity": 85,
+      "lineWidth": 1,
+      "stacking": {
+       "group": "A",
+       "mode": "normal"
+      }
      },
      "thresholds": {
       "mode": "absolute",
@@ -3385,17 +3417,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "stacking": {
-       "mode": "normal",
-       "group": "A"
-      },
-      "fillOpacity": 85,
-      "lineWidth": 1,
-      "drawStyle": "bars",
-      "barAlignment": 0
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -3415,18 +3437,15 @@
      "placement": "bottom",
      "showLegend": true
     },
+    "orientation": "auto",
     "tooltip": {
      "mode": "multi",
      "sort": "desc"
     },
-    "orientation": "auto",
+    "xField": "Time",
     "xTickLabelRotation": -45,
-    "xTickLabelSpacing": 100,
-    "xField": "Time"
+    "xTickLabelSpacing": 100
    },
-   "title": "Agent spawns / minute (by source)",
-   "type": "barchart",
-   "description": "Spawn rate per minute: counts bucketed at $__interval and normalized (bucket count / interval seconds * 60). The source label carries the spawner and is rendered directly in the chart legend. event_name='spawn', category='audit'.",
    "targets": [
     {
      "datasource": {
@@ -3436,20 +3455,33 @@
      "editorMode": "code",
      "expr": "sum by (source) (count_over_time({service_name=\"unknown_service\", event_name=\"spawn\"} | json | category=\"audit\" [$__interval])) / ($__interval_ms / 60000)",
      "legendFormat": "{{source}}",
-     "refId": "A",
-     "queryType": "range"
+     "queryType": "range",
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Agent spawns / minute (by source)",
+   "type": "barchart"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Lifecycle-event rate per minute: counts bucketed at $__interval and normalized (bucket count / interval seconds * 60), grouped by event name: spawn / terminate / restart / resurrect / fork. category='audit'.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "barAlignment": 0,
+      "drawStyle": "bars",
+      "fillOpacity": 85,
+      "lineWidth": 1,
+      "stacking": {
+       "group": "A",
+       "mode": "normal"
+      }
      },
      "thresholds": {
       "mode": "absolute",
@@ -3460,17 +3492,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "stacking": {
-       "mode": "normal",
-       "group": "A"
-      },
-      "fillOpacity": 85,
-      "lineWidth": 1,
-      "drawStyle": "bars",
-      "barAlignment": 0
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -3490,18 +3512,15 @@
      "placement": "bottom",
      "showLegend": true
     },
+    "orientation": "auto",
     "tooltip": {
      "mode": "multi",
      "sort": "desc"
     },
-    "orientation": "auto",
+    "xField": "Time",
     "xTickLabelRotation": -45,
-    "xTickLabelSpacing": 100,
-    "xField": "Time"
+    "xTickLabelSpacing": 100
    },
-   "title": "Agent lifecycle / minute",
-   "type": "barchart",
-   "description": "Lifecycle-event rate per minute: counts bucketed at $__interval and normalized (bucket count / interval seconds * 60), grouped by event name: spawn / terminate / restart / resurrect / fork. category='audit'.",
    "targets": [
     {
      "datasource": {
@@ -3511,16 +3530,19 @@
      "editorMode": "code",
      "expr": "sum by (event_name) (count_over_time({service_name=\"unknown_service\", event_name=~\"^(spawn|terminate|restart|resurrect|fork)$\"} | json | category=\"audit\" [$__interval])) / ($__interval_ms / 60000)",
      "legendFormat": "{{event_name}}",
-     "refId": "A",
-     "queryType": "range"
+     "queryType": "range",
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Agent lifecycle / minute",
+   "type": "barchart"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Windowed delivery_stalled total \u2014 a delivery-watchdog row signal (a raw window count, not a per-minute rate). event_name='delivery_stalled', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -3559,9 +3581,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Delivery stalled (window)",
-   "type": "stat",
-   "description": "Windowed delivery_stalled total \u2014 a delivery-watchdog row signal (a raw window count, not a per-minute rate). event_name='delivery_stalled', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -3570,21 +3589,34 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_stalled\"} | json | category=\"telemetry\" [$__range]))",
-     "refId": "A",
+     "legendFormat": "stalled",
      "queryType": "instant",
-     "legendFormat": "stalled"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Delivery stalled (window)",
+   "type": "stat"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Window totals by stall-age bucket \u2014 explicit exception to the per-minute basis (categorized counts, not rates).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "barAlignment": 0,
+      "drawStyle": "bars",
+      "fillOpacity": 85,
+      "lineWidth": 1,
+      "stacking": {
+       "group": "A",
+       "mode": "normal"
+      }
      },
      "thresholds": {
       "mode": "absolute",
@@ -3599,17 +3631,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "stacking": {
-       "mode": "normal",
-       "group": "A"
-      },
-      "fillOpacity": 85,
-      "lineWidth": 1,
-      "drawStyle": "bars",
-      "barAlignment": 0
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -3629,17 +3651,15 @@
      "placement": "bottom",
      "showLegend": true
     },
+    "orientation": "auto",
     "tooltip": {
      "mode": "multi",
      "sort": "desc"
     },
-    "orientation": "auto",
+    "xField": "Time",
     "xTickLabelRotation": 0,
-    "xTickLabelSpacing": 100,
-    "xField": "Time"
+    "xTickLabelSpacing": 100
    },
-   "title": "SSE backlog \u2014 delivery_stalled (by stall seconds)",
-   "type": "barchart",
    "targets": [
     {
      "datasource": {
@@ -3648,9 +3668,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_stalled\"} | json | category=~\"telemetry|log\" | attributes_age_s < 60 [$__range]))",
-     "refId": "A",
+     "legendFormat": "stalled <60s",
      "queryType": "instant",
-     "legendFormat": "stalled <60s"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -3659,9 +3679,9 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_stalled\"} | json | category=~\"telemetry|log\" | attributes_age_s >= 60 | attributes_age_s < 600 [$__range]))",
-     "refId": "B",
+     "legendFormat": "stalled 60-600s",
      "queryType": "instant",
-     "legendFormat": "stalled 60-600s"
+     "refId": "B"
     },
     {
      "datasource": {
@@ -3670,12 +3690,13 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_stalled\"} | json | category=~\"telemetry|log\" | attributes_age_s >= 600 [$__range]))",
-     "refId": "C",
+     "legendFormat": "stalled >600s",
      "queryType": "instant",
-     "legendFormat": "stalled >600s"
+     "refId": "C"
     }
    ],
-   "description": "Window totals by stall-age bucket \u2014 explicit exception to the per-minute basis (categorized counts, not rates)."
+   "title": "SSE backlog \u2014 delivery_stalled (by stall seconds)",
+   "type": "barchart"
   },
   {
    "datasource": {
@@ -3686,8 +3707,14 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
      },
      "thresholds": {
       "mode": "absolute",
@@ -3698,13 +3725,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -3725,8 +3746,6 @@
      "sort": "desc"
     }
    },
-   "title": "Max Agent ID",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -3739,7 +3758,9 @@
      "queryType": "range",
      "refId": "A"
     }
-   ]
+   ],
+   "title": "Max Agent ID",
+   "type": "timeseries"
   },
   {
    "datasource": {
@@ -3750,8 +3771,14 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "purple"
+      "fixedColor": "purple",
+      "mode": "fixed"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
      },
      "thresholds": {
       "mode": "absolute",
@@ -3762,13 +3789,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -3789,8 +3810,6 @@
      "sort": "desc"
     }
    },
-   "title": "Max Agent ID growth rate",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -3803,7 +3822,9 @@
      "queryType": "range",
      "refId": "A"
     }
-   ]
+   ],
+   "title": "Max Agent ID growth rate",
+   "type": "timeseries"
   },
   {
    "collapsed": false,
@@ -3823,10 +3844,19 @@
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Share of task_update events with status='done' \u2014 only updates carrying a status count toward the denominator (event_name='task_update', category='audit').",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -3837,15 +3867,7 @@
        }
       ]
      },
-     "unit": "percent",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "percent"
     }
    },
    "gridPos": {
@@ -3871,9 +3893,6 @@
      "sort": "desc"
     }
    },
-   "title": "Task completion rate",
-   "type": "timeseries",
-   "description": "Share of task_update events with status='done' \u2014 only updates carrying a status count toward the denominator (event_name='task_update', category='audit').",
    "targets": [
     {
      "datasource": {
@@ -3882,11 +3901,13 @@
      },
      "editorMode": "code",
      "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status=\"done\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status!=\"\" [5m]))",
-     "refId": "A",
+     "legendFormat": "done %",
      "queryType": "range",
-     "legendFormat": "done %"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Task completion rate",
+   "type": "timeseries"
   },
   {
    "collapsed": false,
@@ -3906,10 +3927,19 @@
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Completed passive-recall passes per minute (5-minute buckets / 5) \u2014 how often recall searches the memory pool and scores the results (event_name='passive_recall', level='info', category='telemetry', 90d retention).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -3920,15 +3950,7 @@
        }
       ]
      },
-     "unit": "ops",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "ops"
     }
    },
    "gridPos": {
@@ -3954,9 +3976,6 @@
      "sort": "desc"
     }
    },
-   "title": "Memory recall runs (per minute)",
-   "type": "timeseries",
-   "description": "Completed passive-recall passes per minute (5-minute buckets / 5) \u2014 how often recall searches the memory pool and scores the results (event_name='passive_recall', level='info', category='telemetry', 90d retention).",
    "targets": [
     {
      "datasource": {
@@ -3965,21 +3984,32 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "runs",
      "queryType": "range",
-     "legendFormat": "runs"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Memory recall runs (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Share of completed recall passes that injected 0 notes \u2014 recall-quality signal: a high share means no searched note clears the score threshold (or the threshold is set too high) (event_name='passive_recall', category='telemetry').",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -3990,15 +4020,7 @@
        }
       ]
      },
-     "unit": "percent",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "percent"
     }
    },
    "gridPos": {
@@ -4024,9 +4046,6 @@
      "sort": "desc"
     }
    },
-   "title": "Empty recall ratio",
-   "type": "timeseries",
-   "description": "Share of completed recall passes that injected 0 notes \u2014 recall-quality signal: a high share means no searched note clears the score threshold (or the threshold is set too high) (event_name='passive_recall', category='telemetry').",
    "targets": [
     {
      "datasource": {
@@ -4035,21 +4054,32 @@
      },
      "editorMode": "code",
      "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" | attributes_injected=\"0\" [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" [5m]))",
-     "refId": "A",
+     "legendFormat": "empty %",
      "queryType": "range",
-     "legendFormat": "empty %"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Empty recall ratio",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Share of recall passes that ran out of memory_recall_deadline_seconds and skipped injection for that turn \u2014 a spiking rate points at a slow search endpoint or ranking model (event_name='passive_recall', category='telemetry').",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -4068,15 +4098,7 @@
        }
       ]
      },
-     "unit": "percent",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "percent"
     }
    },
    "gridPos": {
@@ -4102,9 +4124,6 @@
      "sort": "desc"
     }
    },
-   "title": "Recall deadline skip ratio",
-   "type": "timeseries",
-   "description": "Share of recall passes that ran out of memory_recall_deadline_seconds and skipped injection for that turn \u2014 a spiking rate points at a slow search endpoint or ranking model (event_name='passive_recall', category='telemetry').",
    "targets": [
     {
      "datasource": {
@@ -4113,22 +4132,25 @@
      },
      "editorMode": "code",
      "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_body =~ \"skip: recall exceeded.*\" [5m])) / (sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" [5m])) + sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_body =~ \"skip: recall exceeded.*\" [5m])))",
-     "refId": "A",
+     "legendFormat": "skipped %",
      "queryType": "range",
-     "legendFormat": "skipped %"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Recall deadline skip ratio",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Total recall passes that ran out of their deadline in the current window \u2014 each left that turn without recall (event_name='passive_recall', category='telemetry').",
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -4163,9 +4185,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Recall deadline skips (window)",
-   "type": "stat",
-   "description": "Total recall passes that ran out of their deadline in the current window \u2014 each left that turn without recall (event_name='passive_recall', category='telemetry').",
    "targets": [
     {
      "datasource": {
@@ -4174,21 +4193,32 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_body =~ \"skip: recall exceeded.*\" [$__range]))",
-     "refId": "A",
+     "legendFormat": "skips",
      "queryType": "instant",
-     "legendFormat": "skips"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Recall deadline skips (window)",
+   "type": "stat"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Average successful passive-recall search duration in milliseconds \u2014 the search request including the gateway's ranking of the retrieved chunks (5-minute buckets; event_name='passive_recall', category='telemetry').",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -4199,15 +4229,7 @@
        }
       ]
      },
-     "unit": "ms",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "ms"
     }
    },
    "gridPos": {
@@ -4233,9 +4255,6 @@
      "sort": "desc"
     }
    },
-   "title": "Memory recall search latency",
-   "type": "timeseries",
-   "description": "Average successful passive-recall search duration in milliseconds \u2014 the search request including the gateway's ranking of the retrieved chunks (5-minute buckets; event_name='passive_recall', category='telemetry').",
    "targets": [
     {
      "datasource": {
@@ -4244,21 +4263,32 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" | unwrap attributes_search_ms [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_search_ms!=\"\" [5m]))",
-     "refId": "A",
+     "legendFormat": "avg search ms",
      "queryType": "range",
-     "legendFormat": "avg search ms"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Memory recall search latency",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Average notes injected per completed passive-recall pass (5-minute buckets; event_name='passive_recall', category='telemetry') \u2014 how many of the searched notes clear the score threshold.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -4269,15 +4299,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -4303,9 +4325,6 @@
      "sort": "desc"
     }
    },
-   "title": "Memory recall injected notes",
-   "type": "timeseries",
-   "description": "Average notes injected per completed passive-recall pass (5-minute buckets; event_name='passive_recall', category='telemetry') \u2014 how many of the searched notes clear the score threshold.",
    "targets": [
     {
      "datasource": {
@@ -4314,11 +4333,13 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_injected!=\"\" | unwrap attributes_injected [5m])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"passive_recall\"} | json | category=~\"telemetry\" | level=\"info\" | attributes_injected!=\"\" [5m]))",
-     "refId": "A",
+     "legendFormat": "avg injected",
      "queryType": "range",
-     "legendFormat": "avg injected"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Memory recall injected notes",
+   "type": "timeseries"
   },
   {
    "collapsed": false,
@@ -4338,10 +4359,19 @@
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Syntax_fix events per minute (5-minute buckets / 5) \u2014 how often the repair pipeline fixes syntax errors in LLM-produced code (event_name='syntax_fix', category='telemetry', 90d retention).",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -4352,15 +4382,7 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -4386,9 +4408,6 @@
      "sort": "desc"
     }
    },
-   "title": "Syntax fix count (per minute)",
-   "type": "timeseries",
-   "description": "Syntax_fix events per minute (5-minute buckets / 5) \u2014 how often the repair pipeline fixes syntax errors in LLM-produced code (event_name='syntax_fix', category='telemetry', 90d retention).",
    "targets": [
     {
      "datasource": {
@@ -4397,22 +4416,25 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry\" [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "fixes",
      "queryType": "range",
-     "legendFormat": "fixes"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Syntax fix count (per minute)",
+   "type": "timeseries"
   },
   {
    "datasource": {
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Total syntax_fix events in the current window (event_name='syntax_fix', category='telemetry').",
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
      },
      "thresholds": {
       "mode": "absolute",
@@ -4447,9 +4469,6 @@
     },
     "textMode": "auto"
    },
-   "title": "Syntax fixes (window)",
-   "type": "stat",
-   "description": "Total syntax_fix events in the current window (event_name='syntax_fix', category='telemetry').",
    "targets": [
     {
      "datasource": {
@@ -4458,11 +4477,13 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry\" [$__range]))",
-     "refId": "A",
+     "legendFormat": "fixes",
      "queryType": "instant",
-     "legendFormat": "fixes"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Syntax fixes (window)",
+   "type": "stat"
   },
   {
    "collapsed": false,
@@ -4478,13 +4499,35 @@
    "type": "row"
   },
   {
-   "id": 2101,
-   "type": "timeseries",
-   "title": "CPU utilization",
-   "description": "Non-idle CPU averaged over the machine's cores. Alert R8 fires above 0.90 sustained 15m.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
+   },
+   "description": "Non-idle CPU averaged over the machine's cores. Alert R8 fires above 0.90 sustained 15m.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
+     },
+     "max": 1,
+     "min": 0,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "percentunit"
+    }
    },
    "gridPos": {
     "h": 8,
@@ -4492,55 +4535,64 @@
     "x": 0,
     "y": 223
    },
+   "id": 2101,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
    "targets": [
     {
-     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
      "expr": "1 - avg by (machine_name) (system_cpu_utilization_ratio{state=\"idle\"})",
      "legendFormat": "{{machine_name}}",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
+     "queryType": "range",
+     "refId": "A"
     }
    ],
+   "title": "CPU utilization",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Used fraction of RAM, reclaimable cache excluded \u2014 real pressure. Alert R9 above 0.90 sustained 15m.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "percentunit",
      "custom": {
       "drawStyle": "line",
-      "lineWidth": 1,
       "fillOpacity": 8,
+      "lineWidth": 1,
       "showPoints": "never"
      },
+     "max": 1,
      "min": 0,
-     "max": 1
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "percentunit"
     }
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   }
-  },
-  {
-   "id": 2102,
-   "type": "timeseries",
-   "title": "Memory used",
-   "description": "Used fraction of RAM, reclaimable cache excluded \u2014 real pressure. Alert R9 above 0.90 sustained 15m.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
    },
    "gridPos": {
     "h": 8,
@@ -4548,35 +4600,70 @@
     "x": 12,
     "y": 223
    },
+   "id": 2102,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
    "targets": [
     {
-     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
      "expr": "avg by (machine_name) (system_memory_utilization_ratio{state=\"used\"})",
      "legendFormat": "{{machine_name}}",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
+     "queryType": "range",
+     "refId": "A"
     }
    ],
+   "title": "Memory used",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Runnable-thread load. Compare against the machine's core count, which the CPU panel normalizes away.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "percentunit",
      "custom": {
       "drawStyle": "line",
-      "lineWidth": 1,
       "fillOpacity": 8,
+      "lineWidth": 1,
       "showPoints": "never"
      },
-     "min": 0,
-     "max": 1
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short"
     }
    },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 231
+   },
+   "id": 2103,
    "options": {
     "legend": {
      "displayMode": "list",
@@ -4587,92 +4674,75 @@
      "mode": "multi",
      "sort": "desc"
     }
-   }
-  },
-  {
-   "id": 2103,
-   "type": "timeseries",
-   "title": "Load average",
-   "description": "Runnable-thread load. Compare against the machine's core count, which the CPU panel normalizes away.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "h": 8,
-    "w": 12,
-    "x": 0,
-    "y": 231
    },
    "targets": [
     {
-     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
      "expr": "system_cpu_load_average_1m",
      "legendFormat": "{{machine_name}} 1m",
+     "queryType": "range",
+     "refId": "A"
+    },
+    {
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "queryType": "range"
-    },
-    {
-     "refId": "B",
      "expr": "system_cpu_load_average_5m",
      "legendFormat": "{{machine_name}} 5m",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
+     "queryType": "range",
+     "refId": "B"
     },
     {
-     "refId": "C",
-     "expr": "system_cpu_load_average_15m",
-     "legendFormat": "{{machine_name}} 15m",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "queryType": "range"
+     "expr": "system_cpu_load_average_15m",
+     "legendFormat": "{{machine_name}} 15m",
+     "queryType": "range",
+     "refId": "C"
     }
    ],
+   "title": "Load average",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Per-mountpoint fullness \u2014 the pg data dir, the traces mirror and the LGTM volumes live on these. Alert R10 above 0.90. On macOS every volume of one APFS container reports the container's fullness.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "short",
      "custom": {
       "drawStyle": "line",
-      "lineWidth": 1,
       "fillOpacity": 8,
+      "lineWidth": 1,
       "showPoints": "never"
-     }
+     },
+     "max": 1,
+     "min": 0,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "percentunit"
     }
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   }
-  },
-  {
-   "id": 2104,
-   "type": "timeseries",
-   "title": "Filesystem used",
-   "description": "Per-mountpoint fullness \u2014 the pg data dir, the traces mirror and the LGTM volumes live on these. Alert R10 above 0.90. On macOS every volume of one APFS container reports the container's fullness.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
    },
    "gridPos": {
     "h": 8,
@@ -4680,163 +4750,189 @@
     "x": 12,
     "y": 231
    },
+   "id": 2104,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
    "targets": [
     {
-     "refId": "A",
-     "expr": "max by (machine_name, mountpoint) (system_filesystem_utilization_ratio)",
-     "legendFormat": "{{machine_name}} {{mountpoint}}",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "queryType": "range"
+     "expr": "max by (machine_name, mountpoint) (system_filesystem_utilization_ratio)",
+     "legendFormat": "{{machine_name}} {{mountpoint}}",
+     "queryType": "range",
+     "refId": "A"
     }
    ],
+   "title": "Filesystem used",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Bytes read/written per second across all devices.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "percentunit",
      "custom": {
       "drawStyle": "line",
-      "lineWidth": 1,
       "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "Bps"
+    }
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 239
+   },
+   "id": 2105,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "sum by (machine_name, direction) (rate(system_disk_io_bytes_total[5m]))",
+     "legendFormat": "{{machine_name}} {{direction}}",
+     "queryType": "range",
+     "refId": "A"
+    }
+   ],
+   "title": "Disk throughput",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Bytes per second across physical + tunnel interfaces (the sidecar filters macOS's virtual ones out).",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "Bps"
+    }
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 239
+   },
+   "id": 2106,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "sum by (machine_name, direction) (rate(system_network_io_bytes_total[5m]))",
+     "legendFormat": "{{machine_name}} {{direction}}",
+     "queryType": "range",
+     "refId": "A"
+    }
+   ],
+   "title": "Network throughput",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Open backends against the server's own max_connections. Alert R11 fires above 80% of max. PgBouncer has no OTel receiver \u2014 pool saturation surfaces here, at Postgres.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
       "showPoints": "never"
      },
      "min": 0,
-     "max": 1
-    }
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   }
-  },
-  {
-   "id": 2105,
-   "type": "timeseries",
-   "title": "Disk throughput",
-   "description": "Bytes read/written per second across all devices.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "h": 8,
-    "w": 12,
-    "x": 0,
-    "y": 239
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "sum by (machine_name, direction) (rate(system_disk_io_bytes_total[5m]))",
-     "legendFormat": "{{machine_name}} {{direction}}",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
      },
-     "editorMode": "code",
-     "queryType": "range"
+     "unit": "short"
     }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "palette-classic"
-     },
-     "unit": "Bps",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     }
-    }
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   }
-  },
-  {
-   "id": 2106,
-   "type": "timeseries",
-   "title": "Network throughput",
-   "description": "Bytes per second across physical + tunnel interfaces (the sidecar filters macOS's virtual ones out).",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "h": 8,
-    "w": 12,
-    "x": 12,
-    "y": 239
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "sum by (machine_name, direction) (rate(system_network_io_bytes_total[5m]))",
-     "legendFormat": "{{machine_name}} {{direction}}",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "palette-classic"
-     },
-     "unit": "Bps",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     }
-    }
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   }
-  },
-  {
-   "id": 2107,
-   "type": "timeseries",
-   "title": "Postgres connections",
-   "description": "Open backends against the server's own max_connections. Alert R11 fires above 80% of max. PgBouncer has no OTel receiver \u2014 pool saturation surfaces here, at Postgres.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
    },
    "gridPos": {
     "h": 8,
@@ -4844,65 +4940,73 @@
     "x": 0,
     "y": 247
    },
+   "id": 2107,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
    "targets": [
     {
-     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
      "expr": "max by (machine_name) (postgresql_backends)",
      "legendFormat": "{{machine_name}} backends",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
+     "queryType": "range",
+     "refId": "A"
     },
     {
-     "refId": "B",
-     "expr": "max by (machine_name) (postgresql_connection_max)",
-     "legendFormat": "{{machine_name}} max_connections",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "queryType": "range"
+     "expr": "max by (machine_name) (postgresql_connection_max)",
+     "legendFormat": "{{machine_name}} max_connections",
+     "queryType": "range",
+     "refId": "B"
     }
    ],
+   "title": "Postgres connections",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Commit and rollback rate. A rollback rate tracking the commit rate means transactions are failing, not that traffic is low.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "short",
      "custom": {
       "drawStyle": "line",
-      "lineWidth": 1,
       "fillOpacity": 8,
+      "lineWidth": 1,
       "showPoints": "never"
      },
-     "min": 0
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "ops"
     }
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   }
-  },
-  {
-   "id": 2108,
-   "type": "timeseries",
-   "title": "Postgres transactions",
-   "description": "Commit and rollback rate. A rollback rate tracking the commit rate means transactions are failing, not that traffic is low.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
    },
    "gridPos": {
     "h": 8,
@@ -4910,44 +5014,81 @@
     "x": 12,
     "y": 247
    },
+   "id": 2108,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
    "targets": [
     {
-     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
      "expr": "sum by (machine_name) (rate(postgresql_commits_total[5m]))",
      "legendFormat": "{{machine_name}} commits/s",
+     "queryType": "range",
+     "refId": "A"
+    },
+    {
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "queryType": "range"
-    },
-    {
-     "refId": "B",
      "expr": "sum by (machine_name) (rate(postgresql_rollbacks_total[5m]))",
      "legendFormat": "{{machine_name}} rollbacks/s",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
+     "queryType": "range",
+     "refId": "B"
     }
    ],
+   "title": "Postgres transactions",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "On-disk size of the cluster's own database \u2014 the slow half of the disk-watermark story.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "ops",
      "custom": {
       "drawStyle": "line",
-      "lineWidth": 1,
       "fillOpacity": 8,
+      "lineWidth": 1,
       "showPoints": "never"
-     }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "bytes"
     }
    },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 255
+   },
+   "id": 2109,
    "options": {
     "legend": {
      "displayMode": "list",
@@ -4958,70 +5099,51 @@
      "mode": "multi",
      "sort": "desc"
     }
-   }
-  },
-  {
-   "id": 2109,
-   "type": "timeseries",
-   "title": "Database size",
-   "description": "On-disk size of the cluster's own database \u2014 the slow half of the disk-watermark story.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "h": 8,
-    "w": 12,
-    "x": 0,
-    "y": 255
    },
    "targets": [
     {
-     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
      "expr": "max by (machine_name) (postgresql_db_size_bytes)",
      "legendFormat": "{{machine_name}}",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
+     "queryType": "range",
+     "refId": "A"
     }
    ],
+   "title": "Database size",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Resident Redis footprint. Alert R12 fires above 2 GiB sustained; rss above used means fragmentation.",
    "fieldConfig": {
     "defaults": {
      "color": {
       "mode": "palette-classic"
      },
-     "unit": "bytes",
      "custom": {
       "drawStyle": "line",
-      "lineWidth": 1,
       "fillOpacity": 8,
+      "lineWidth": 1,
       "showPoints": "never"
-     }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "bytes"
     }
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   }
-  },
-  {
-   "id": 2110,
-   "type": "timeseries",
-   "title": "Redis memory",
-   "description": "Resident Redis footprint. Alert R12 fires above 2 GiB sustained; rss above used means fragmentation.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
    },
    "gridPos": {
     "h": 8,
@@ -5029,44 +5151,7 @@
     "x": 12,
     "y": 255
    },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "max by (machine_name) (redis_memory_used_bytes)",
-     "legendFormat": "{{machine_name}} used",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
-    },
-    {
-     "refId": "B",
-     "expr": "max by (machine_name) (redis_memory_rss_bytes)",
-     "legendFormat": "{{machine_name}} rss",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "palette-classic"
-     },
-     "unit": "bytes",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     }
-    }
-   },
+   "id": 2110,
    "options": {
     "legend": {
      "displayMode": "list",
@@ -5077,16 +5162,63 @@
      "mode": "multi",
      "sort": "desc"
     }
-   }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (machine_name) (redis_memory_used_bytes)",
+     "legendFormat": "{{machine_name}} used",
+     "queryType": "range",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (machine_name) (redis_memory_rss_bytes)",
+     "legendFormat": "{{machine_name}} rss",
+     "queryType": "range",
+     "refId": "B"
+    }
+   ],
+   "title": "Redis memory",
+   "type": "timeseries"
   },
   {
-   "id": 2111,
-   "type": "timeseries",
-   "title": "Redis clients and evictions",
-   "description": "Any eviction rate above zero means Redis hit maxmemory and is dropping live keys \u2014 cluster state loss, not a cache miss.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
+   },
+   "description": "Any eviction rate above zero means Redis hit maxmemory and is dropping live keys \u2014 cluster state loss, not a cache miss.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
+     },
+     "min": 0,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short"
+    }
    },
    "gridPos": {
     "h": 8,
@@ -5094,45 +5226,7 @@
     "x": 0,
     "y": 263
    },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "max by (machine_name) (redis_clients_connected)",
-     "legendFormat": "{{machine_name}} clients",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
-    },
-    {
-     "refId": "B",
-     "expr": "sum by (machine_name) (rate(redis_keys_evicted_total[5m]))",
-     "legendFormat": "{{machine_name}} evictions/s",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "palette-classic"
-     },
-     "unit": "short",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     },
-     "min": 0
-    }
-   },
+   "id": 2111,
    "options": {
     "legend": {
      "displayMode": "list",
@@ -5143,16 +5237,62 @@
      "mode": "multi",
      "sort": "desc"
     }
-   }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (machine_name) (redis_clients_connected)",
+     "legendFormat": "{{machine_name}} clients",
+     "queryType": "range",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "sum by (machine_name) (rate(redis_keys_evicted_total[5m]))",
+     "legendFormat": "{{machine_name}} evictions/s",
+     "queryType": "range",
+     "refId": "B"
+    }
+   ],
+   "title": "Redis clients and evictions",
+   "type": "timeseries"
   },
   {
-   "id": 2112,
-   "type": "timeseries",
-   "title": "Redis throughput",
-   "description": "Commands per second, as Redis itself reports it.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
+   },
+   "description": "Commands per second, as Redis itself reports it.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "ops"
+    }
    },
    "gridPos": {
     "h": 8,
@@ -5160,33 +5300,7 @@
     "x": 12,
     "y": 263
    },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "max by (machine_name) (redis_commands_per_second)",
-     "legendFormat": "{{machine_name}}",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "queryType": "range"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "palette-classic"
-     },
-     "unit": "ops",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     }
-    }
-   },
+   "id": 2112,
    "options": {
     "legend": {
      "displayMode": "list",
@@ -5197,7 +5311,22 @@
      "mode": "multi",
      "sort": "desc"
     }
-   }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (machine_name) (redis_commands_per_second)",
+     "legendFormat": "{{machine_name}}",
+     "queryType": "range",
+     "refId": "A"
+    }
+   ],
+   "title": "Redis throughput",
+   "type": "timeseries"
   },
   {
    "datasource": {
@@ -5208,8 +5337,14 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
      },
      "thresholds": {
       "mode": "absolute",
@@ -5220,25 +5355,19 @@
        },
        {
         "color": "yellow",
-        "value": 30000
+        "value": 30000.0
        },
        {
         "color": "orange",
-        "value": 50000
+        "value": 50000.0
        },
        {
         "color": "red",
-        "value": 100000
+        "value": 100000.0
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
@@ -5259,8 +5388,6 @@
      "sort": "desc"
     }
    },
-   "title": "Memory search rows",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -5273,7 +5400,9 @@
      "queryType": "range",
      "refId": "A"
     }
-   ]
+   ],
+   "title": "Memory search rows",
+   "type": "timeseries"
   },
   {
    "datasource": {
@@ -5284,8 +5413,14 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "purple"
+      "fixedColor": "purple",
+      "mode": "fixed"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
      },
      "thresholds": {
       "mode": "absolute",
@@ -5296,13 +5431,7 @@
        }
       ]
      },
-     "unit": "s",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     }
+     "unit": "s"
     }
    },
    "gridPos": {
@@ -5323,8 +5452,6 @@
      "sort": "desc"
     }
    },
-   "title": "Memory search npz save duration",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -5337,7 +5464,9 @@
      "queryType": "range",
      "refId": "A"
     }
-   ]
+   ],
+   "title": "Memory search npz save duration",
+   "type": "timeseries"
   },
   {
    "collapsed": false,
@@ -5398,8 +5527,6 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM cost estimate \u2014 day pace",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -5408,11 +5535,13 @@
      },
      "editorMode": "code",
      "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
-     "refId": "A",
+     "legendFormat": "today est.",
      "queryType": "instant",
-     "legendFormat": "today est."
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM cost estimate \u2014 day pace",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -5460,8 +5589,6 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM cost estimate \u2014 30-day pace",
-   "type": "stat",
    "targets": [
     {
      "datasource": {
@@ -5470,11 +5597,13 @@
      },
      "editorMode": "code",
      "expr": "(sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
-     "refId": "A",
+     "legendFormat": "month est.",
      "queryType": "instant",
-     "legendFormat": "month est."
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM cost estimate \u2014 30-day pace",
+   "type": "stat"
   },
   {
    "datasource": {
@@ -5486,6 +5615,16 @@
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "barAlignment": 0,
+      "drawStyle": "bars",
+      "fillOpacity": 85,
+      "lineWidth": 1,
+      "stacking": {
+       "group": "A",
+       "mode": "normal"
+      }
      },
      "thresholds": {
       "mode": "absolute",
@@ -5520,8 +5659,6 @@
     "xTickLabelRotation": 0,
     "xTickLabelSpacing": 100
    },
-   "title": "LLM cost / minute",
-   "type": "barchart",
    "targets": [
     {
      "datasource": {
@@ -5530,11 +5667,13 @@
      },
      "editorMode": "code",
      "expr": "sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__interval])) / ($__interval_ms / 60000)",
-     "refId": "A",
+     "legendFormat": "cost usd",
      "queryType": "range",
-     "legendFormat": "cost usd"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM cost / minute",
+   "type": "barchart"
   },
   {
    "datasource": {
@@ -5569,8 +5708,6 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "title": "LLM cost by model (Top 20)",
-   "type": "table",
    "targets": [
     {
      "datasource": {
@@ -5579,11 +5716,13 @@
      },
      "editorMode": "code",
      "expr": "topk(20, sum by (attributes_model) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_model!=\"\" | unwrap attributes_cost_usd [$__range])))",
-     "refId": "A",
+     "legendFormat": "{{attributes_model}}",
      "queryType": "instant",
-     "legendFormat": "{{attributes_model}}"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM cost by model (Top 20)",
+   "type": "table"
   },
   {
    "datasource": {
@@ -5618,8 +5757,6 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "title": "LLM cost by agent (Top 20)",
-   "type": "table",
    "targets": [
     {
      "datasource": {
@@ -5628,11 +5765,13 @@
      },
      "editorMode": "code",
      "expr": "topk(20, sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_cost_usd [$__range])))",
-     "refId": "A",
+     "legendFormat": "{{agent_id}}",
      "queryType": "instant",
-     "legendFormat": "{{agent_id}}"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "LLM cost by agent (Top 20)",
+   "type": "table"
   },
   {
    "datasource": {
@@ -5644,6 +5783,14 @@
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -5675,8 +5822,6 @@
      "sort": "desc"
     }
    },
-   "title": "Compaction ratio (summary/history)",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -5685,11 +5830,13 @@
      },
      "editorMode": "code",
      "expr": "avg(100 * avg_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | unwrap attributes_summary_history_ratio [$__interval]))",
-     "refId": "A",
+     "legendFormat": "summary/history %",
      "queryType": "range",
-     "legendFormat": "summary/history %"
+     "refId": "A"
     }
-   ]
+   ],
+   "title": "Compaction ratio (summary/history)",
+   "type": "timeseries"
   },
   {
    "datasource": {
@@ -5701,6 +5848,14 @@
     "defaults": {
      "color": {
       "mode": "palette-classic"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 12,
+      "lineInterpolation": "smooth",
+      "lineWidth": 1,
+      "showPoints": "never",
+      "spanNulls": true
      },
      "thresholds": {
       "mode": "absolute",
@@ -5732,8 +5887,6 @@
      "sort": "desc"
     }
    },
-   "title": "Completed compactions (per minute)",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -5742,11 +5895,124 @@
      },
      "editorMode": "code",
      "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "A",
+     "legendFormat": "all/min",
      "queryType": "range",
-     "legendFormat": "compactions/min"
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=\"compact_summary\" | attributes_reminder_shown=\"true\" [5m])) / 5",
+     "legendFormat": "soft after reminder/min",
+     "queryType": "range",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=\"compact_summary\" | attributes_reminder_shown=\"false\" [5m])) / 5",
+     "legendFormat": "proactive/min",
+     "queryType": "range",
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=\"auto\" | attributes_reminder_shown=\"true\" [5m])) / 5",
+     "legendFormat": "hard after reminder/min",
+     "queryType": "range",
+     "refId": "D"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=\"auto\" | attributes_reminder_shown=\"false\" [5m])) / 5",
+     "legendFormat": "hard without reminder/min",
+     "queryType": "range",
+     "refId": "E"
     }
-   ]
+   ],
+   "title": "Completed compactions (per minute)",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Agent-authored completed compactions / (agent-authored + hard automatic). Manual compact requests and events predating reminder attribution are excluded. Zero soft completions with hard completions is 0%; no completions is no data. The second ratio counts only agent-authored completions after a soft reminder: this is the preparation coverage target, so proactive compactions cannot hide missing plugin delivery. Neither ratio proves files were saved.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "fixedColor": "blue",
+      "mode": "fixed"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "percent"
+    }
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 8,
+    "x": 0,
+    "y": 304
+   },
+   "id": 52,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "last"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "100 * (sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=\"compact_summary\" | attributes_reminder_shown=~\"true|false\" [$__range])) or (0 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=~\"compact_summary|auto\" | attributes_reminder_shown=~\"true|false\" [$__range])))) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=~\"compact_summary|auto\" | attributes_reminder_shown=~\"true|false\" [$__range]))",
+     "legendFormat": "agent-authored %",
+     "queryType": "instant",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "100 * (sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=\"compact_summary\" | attributes_reminder_shown=\"true\" [$__range])) or (0 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=~\"compact_summary|auto\" | attributes_reminder_shown=~\"true|false\" [$__range])))) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | attributes_compact_kind=~\"compact_summary|auto\" | attributes_reminder_shown=~\"true|false\" [$__range]))",
+     "legendFormat": "after soft reminder %",
+     "queryType": "instant",
+     "refId": "B"
+    }
+   ],
+   "title": "Soft compactions (target >=95% after reminder)",
+   "type": "stat"
   },
   {
    "collapsed": false,
@@ -5754,7 +6020,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 304
+    "y": 308
    },
    "id": 2008,
    "panels": [],
@@ -5780,7 +6046,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 305
+    "y": 309
    },
    "id": 2401,
    "options": {
@@ -5794,8 +6060,6 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "title": "PR ready to merged \u2014 median / p90 (by day)",
-   "type": "table",
    "targets": [
     {
      "datasource": {
@@ -5806,9 +6070,9 @@
      "expr": "max by (day) (last_over_time(ava_pr_flow_daily_ready_to_merge_median_seconds[26h]))",
      "format": "table",
      "instant": true,
+     "legendFormat": "median",
      "range": false,
-     "refId": "A",
-     "legendFormat": "median"
+     "refId": "A"
     },
     {
      "datasource": {
@@ -5819,11 +6083,12 @@
      "expr": "max by (day) (last_over_time(ava_pr_flow_daily_ready_to_merge_p90_seconds[26h]))",
      "format": "table",
      "instant": true,
+     "legendFormat": "p90",
      "range": false,
-     "refId": "B",
-     "legendFormat": "p90"
+     "refId": "B"
     }
    ],
+   "title": "PR ready to merged \u2014 median / p90 (by day)",
    "transformations": [
     {
      "id": "joinByField",
@@ -5845,7 +6110,8 @@
       }
      }
     }
-   ]
+   ],
+   "type": "table"
   },
   {
    "datasource": {
@@ -5856,8 +6122,14 @@
    "fieldConfig": {
     "defaults": {
      "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
+      "fixedColor": "blue",
+      "mode": "fixed"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 1,
+      "showPoints": "never"
      },
      "thresholds": {
       "mode": "absolute",
@@ -5868,20 +6140,14 @@
        }
       ]
      },
-     "unit": "short",
-     "custom": {
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "fillOpacity": 8,
-      "showPoints": "never"
-     }
+     "unit": "short"
     }
    },
    "gridPos": {
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 305
+    "y": 309
    },
    "id": 2402,
    "options": {
@@ -5895,8 +6161,6 @@
      "sort": "desc"
     }
    },
-   "title": "Trunk queue depth",
-   "type": "timeseries",
    "targets": [
     {
      "datasource": {
@@ -5909,7 +6173,9 @@
      "queryType": "range",
      "refId": "A"
     }
-   ]
+   ],
+   "title": "Trunk queue depth",
+   "type": "timeseries"
   },
   {
    "datasource": {
@@ -5930,7 +6196,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 312
+    "y": 316
    },
    "id": 2404,
    "options": {
@@ -5944,8 +6210,6 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "title": "Flake \u2014 new quarantines (by day)",
-   "type": "table",
    "targets": [
     {
      "datasource": {
@@ -5956,11 +6220,12 @@
      "expr": "max by (day) (last_over_time(ava_pr_flow_daily_flake_new_quarantines_ratio[26h]))",
      "format": "table",
      "instant": true,
+     "legendFormat": "new quarantines",
      "range": false,
-     "refId": "A",
-     "legendFormat": "new quarantines"
+     "refId": "A"
     }
    ],
+   "title": "Flake \u2014 new quarantines (by day)",
    "transformations": [
     {
      "id": "joinByField",
@@ -5980,116 +6245,589 @@
       }
      }
     }
-   ]
+   ],
+   "type": "table"
   },
   {
    "collapsed": false,
-   "gridPos": {"h": 1, "w": 24, "x": 0, "y": 319},
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 323
+   },
    "id": 2009,
    "panels": [],
    "title": "Dev/CI",
    "type": "row"
   },
   {
-   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
    "description": "Attributed CI wall time per completed PR by complete cluster-time day: median and p90 minutes. Zombie wall-clock artifacts, instant skips, and watchdog reruns are excluded from duration sums.",
-   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "m"}},
-   "gridPos": {"h": 7, "w": 12, "x": 0, "y": 320},
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "m"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 324
+   },
    "id": 2501,
-   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
    "targets": [
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_duration_median_minutes_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "median", "range": false, "refId": "A"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_duration_p90_minutes_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "p90", "range": false, "refId": "B"}
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_duration_median_minutes_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "median",
+     "range": false,
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_duration_p90_minutes_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "p90",
+     "range": false,
+     "refId": "B"
+    }
    ],
-   "title": "Per-PR CI duration — median / p90 (by day)",
+   "title": "Per-PR CI duration \u2014 median / p90 (by day)",
    "transformations": [
-    {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
-    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true}, "renameByName": {"Value #A": "median", "Value #B": "p90"}}}
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "day",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time 1": true,
+       "Time 2": true
+      },
+      "renameByName": {
+       "Value #A": "median",
+       "Value #B": "p90"
+      }
+     }
+    }
    ],
    "type": "table"
   },
   {
-   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
    "description": "Attributed CI trigger count per completed PR by complete cluster-time day. The executed median filters instant-skip, watchdog, and proof workflows.",
-   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
-   "gridPos": {"h": 7, "w": 12, "x": 12, "y": 320},
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 324
+   },
    "id": 2502,
-   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
    "targets": [
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_runs_median_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "median", "range": false, "refId": "A"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_runs_p90_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "p90", "range": false, "refId": "B"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_runs_executed_median_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "median executed", "range": false, "refId": "C"}
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_runs_median_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "median",
+     "range": false,
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_runs_p90_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "p90",
+     "range": false,
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_per_pr_runs_executed_median_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "median executed",
+     "range": false,
+     "refId": "C"
+    }
    ],
-   "title": "Per-PR CI runs — median / p90 (by day)",
+   "title": "Per-PR CI runs \u2014 median / p90 (by day)",
    "transformations": [
-    {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
-    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true, "Time 3": true}, "renameByName": {"Value #A": "median", "Value #B": "p90", "Value #C": "median executed"}}}
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "day",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time 1": true,
+       "Time 2": true,
+       "Time 3": true
+      },
+      "renameByName": {
+       "Value #A": "median",
+       "Value #B": "p90",
+       "Value #C": "median executed"
+      }
+     }
+    }
    ],
    "type": "table"
   },
   {
-   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
    "description": "CI-red, rerun-to-green, failed retry, and v1 first-pass PR share by complete cluster-time day. First pass excludes watchdog, proof, instant-skip, and zombie runs.",
-   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
-   "gridPos": {"h": 7, "w": 12, "x": 0, "y": 327},
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 331
+   },
    "id": 2503,
-   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
    "targets": [
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_failed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "failed", "range": false, "refId": "A"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_self_healed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "self-healed", "range": false, "refId": "B"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_retried_failed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "failed after retry", "range": false, "refId": "C"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_first_pass_pr_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "first-pass share", "range": false, "refId": "D"}
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_failed_runs_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "failed",
+     "range": false,
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_self_healed_runs_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "self-healed",
+     "range": false,
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_retried_failed_runs_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "failed after retry",
+     "range": false,
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_first_pass_pr_share_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "first-pass share",
+     "range": false,
+     "refId": "D"
+    }
    ],
    "title": "CI failures & self-healing (by day)",
    "transformations": [
-    {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
-    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true}, "renameByName": {"Value #A": "failed", "Value #B": "self-healed", "Value #C": "failed after retry", "Value #D": "first-pass share"}}}
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "day",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time 1": true,
+       "Time 2": true,
+       "Time 3": true,
+       "Time 4": true
+      },
+      "renameByName": {
+       "Value #A": "failed",
+       "Value #B": "self-healed",
+       "Value #C": "failed after retry",
+       "Value #D": "first-pass share"
+      }
+     }
+    }
    ],
    "type": "table"
   },
   {
-   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
    "description": "Trailing-window workflow ranking by failures, run volume, completed-PR appearance, self-healing, and retry share. The explicit watchdog label keeps its designed noise filterable.",
-   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
-   "gridPos": {"h": 7, "w": 12, "x": 12, "y": 327},
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 331
+   },
    "id": 2504,
-   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
    "targets": [
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_failed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "failed", "range": false, "refId": "A"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "runs", "range": false, "refId": "B"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_pr_appearance_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "PR appearance share", "range": false, "refId": "C"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_self_healed_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "self-healed", "range": false, "refId": "D"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_retry_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "retry share", "range": false, "refId": "E"}
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_failed_runs_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "failed",
+     "range": false,
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_runs_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "runs",
+     "range": false,
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_pr_appearance_share_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "PR appearance share",
+     "range": false,
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_self_healed_runs_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "self-healed",
+     "range": false,
+     "refId": "D"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (workflow) (last_over_time(ava_ci_workflow_window_retry_share_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "retry share",
+     "range": false,
+     "refId": "E"
+    }
    ],
    "title": "Most fragile workflows (trailing window)",
    "transformations": [
-    {"id": "joinByField", "options": {"byField": "workflow", "mode": "outer"}},
-    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true}, "renameByName": {"Value #A": "failed", "Value #B": "runs", "Value #C": "PR appearance share", "Value #D": "self-healed", "Value #E": "retry share"}}}
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "workflow",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time 1": true,
+       "Time 2": true,
+       "Time 3": true,
+       "Time 4": true,
+       "Time 5": true
+      },
+      "renameByName": {
+       "Value #A": "failed",
+       "Value #B": "runs",
+       "Value #C": "PR appearance share",
+       "Value #D": "self-healed",
+       "Value #E": "retry share"
+      }
+     }
+    }
    ],
    "type": "table"
   },
   {
-   "datasource": {"type": "prometheus", "uid": "prometheus"},
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
    "description": "The deduplicated white-run share and its instant-skip, superseded, abandoned, and retry components by complete cluster-time day.",
-   "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
-   "gridPos": {"h": 7, "w": 12, "x": 0, "y": 334},
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 338
+   },
    "id": 2505,
-   "options": {"cellHeight": "sm", "footer": {"countRows": false, "enablePagination": true, "show": false}, "showHeader": true, "showTypeIcons": false, "sortBy": []},
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
    "targets": [
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_white_run_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "white share", "range": false, "refId": "A"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_instant_skip_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "instant skip", "range": false, "refId": "B"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_superseded_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "superseded", "range": false, "refId": "C"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_abandoned_runs_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "abandoned", "range": false, "refId": "D"},
-    {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (day) (last_over_time(ava_ci_runs_daily_retry_share_ratio[26h]))", "format": "table", "instant": true, "legendFormat": "retry share", "range": false, "refId": "E"}
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_white_run_share_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "white share",
+     "range": false,
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_instant_skip_runs_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "instant skip",
+     "range": false,
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_superseded_runs_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "superseded",
+     "range": false,
+     "refId": "C"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_abandoned_runs_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "abandoned",
+     "range": false,
+     "refId": "D"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "editorMode": "code",
+     "expr": "max by (day) (last_over_time(ava_ci_runs_daily_retry_share_ratio[26h]))",
+     "format": "table",
+     "instant": true,
+     "legendFormat": "retry share",
+     "range": false,
+     "refId": "E"
+    }
    ],
    "title": "White-run classes (by day)",
    "transformations": [
-    {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
-    {"id": "organize", "options": {"excludeByName": {"Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true}, "renameByName": {"Value #A": "white share", "Value #B": "instant skip", "Value #C": "superseded", "Value #D": "abandoned", "Value #E": "retry share"}}}
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "day",
+      "mode": "outer"
+     }
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time 1": true,
+       "Time 2": true,
+       "Time 3": true,
+       "Time 4": true,
+       "Time 5": true
+      },
+      "renameByName": {
+       "Value #A": "white share",
+       "Value #B": "instant skip",
+       "Value #C": "superseded",
+       "Value #D": "abandoned",
+       "Value #E": "retry share"
+      }
+     }
+    }
    ],
    "type": "table"
   }
  ],
+ "preload": true,
  "refresh": "10m",
  "schemaVersion": 39,
  "tags": [
@@ -6108,6 +6846,5 @@
  "timezone": "Asia/Shanghai",
  "title": "Ava Ops",
  "uid": "ava-ops-main",
- "version": 6,
- "preload": true
+ "version": 6
 }

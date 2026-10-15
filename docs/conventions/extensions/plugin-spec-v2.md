@@ -92,6 +92,7 @@ Example (the shape `ava_code` would declare):
     "sdkNamespaces": ["cwd"],
     "sdkWraps": ["files.read"],
     "systemPromptSections": ["context_file"],
+    "compactReminderSections": ["prepare_compaction"],
     "opsServices": ["task_maintenance"],
     "config": { "schema": "default_config.py", "perAgentFields": ["marker"] },
     "skills": ["skills/"],
@@ -113,6 +114,29 @@ Example (the shape `ava_code` would declare):
 ```
 
 ### Field semantics
+
+`compactReminderSections` declares function names contributed through
+`PluginContributions.compact_reminder_sections` in `agent_runtime.py`.
+Each function has the same signature as a system prompt section:
+`section(slices: AgentSlices, *, catalog: ModelCatalog) -> str`. It must be
+short and side-effect-free: return instructions for the agent, or an empty
+string to opt out. It must not call a model, write files or change routing.
+Non-string returns fail explicitly.
+
+The framework calls these functions only when its soft compact reminder
+fires, in plugin load order then declaration order, and appends each non-empty
+result with its plugin name to one system note. It records a
+`plugin_activation` on this surface for each included section. The existing
+compact bookmark owns once-per-window delivery and re-arms after compaction;
+contributors need no state, thresholds or graph hook. Disabled plugins
+contribute nothing. Runtime manifest gating and `ava plugins inspect` include
+this surface.
+
+The agent still has ordinary tools to perform the requested preparation.
+This is best-effort preparation, not a callback executed on every compact:
+hard automatic compaction and manual requests may bypass it. Do not rely on
+it for the only copy of critical state. See
+[context management](../../../agent/graph/docs/context-window/context-window.ava.okf.md).
 
 | Field | Meaning | Closes |
 |---|---|---|

@@ -1,58 +1,3 @@
-"""Core observability metrics — the ava_observability pack, migrated to core (Task #882)
-and from Postgres-event SQL to Loki LogQL (Task #1280).
-
-The generic observability pack (originally the W18 ``ava_observability``
-plugin, retired with this migration): cluster-wide and per-agent metrics over
-the unified ``events`` stream in Loki — LLM spend and health, turn outcomes,
-exec outcomes, code-repair triggers, agent lifecycle, SDK usage, delivery
-health and the total event rate. Replaces the information content of the
-retired Metrics page (base/telemetry/metrics/report.py).
-
-Migrated plugin -> core (user ruling 2026-08-06: core metrics + plugin
-metrics two-tier architecture): the 21 MetricSpec definitions below are returned
-by ``core_metrics()`` and validated by ``catalog.validate_core_metric`` instead of
-the data registry's admission — the same query safety validation, ``plugin``
-auto-filled to "core" (``catalog.collect_core_metrics`` calls this module through the
-``_CORE_DEFINITION_MODULES`` tuple); templates use the
-{event_name}/{category} placeholders and, on inspector-only metrics, the
-{{agent_id}} placeholder.
-
-Query dialect (Task #1280): every query reads the event stream from Loki —
-``{service_name="unknown_service"} | json`` then label filters on the
-flattened event fields (the same read the alert rules and the core panels
-use; agent_id/event_name are promoted index labels since the 2026-08-23
-cutover, see base/telemetry/loki_index_labels.py — per-agent queries may match them
-in the selector, the fleet-wide queries here keep the base form). Event
-attributes unwrap via ``attributes_<key>``; the numeric payload
-fields (in_total/out_total/cost_usd/...) come straight from the event JSON —
-cost_usd has ridden in every llm_usage payload since #2626, so the cost
-panels unwrap it instead of mirroring MODEL_PRICING into SQL (405 ruling,
-2026-08-14). Multi-series panels name their targets with per-target
-``legendFormat`` values because LogQL aggregates carry no labels.
-
-Data provenance (verified against the live prod stream, 2026-08-04):
-- llm_usage ~41.3k rows/7d, category=telemetry; attributes carry model /
-  in_total / out_total / cache_read / reasoning / latency_ms / cost_usd.
-- turn_end ~41.4k rows/7d: attributes ok ('true'/'false') + duration_seconds;
-  ok=true 166.7k / ok=false 4.9k all-time (~97%).
-- exec 36.5k ok / 1235 exec_failed / 1 exec_node_timeout per 7d;
-  failure event names emitted as exec_failed / exec_timeout /
-  exec_cancelled / exec_node_timeout.
-- syntax_fix 9.8k rows/7d, category=telemetry (final caliber, 2026-08-05,
-  tracker #762 — pre-caliber rows were backfilled by the accompanying migration);
-  attributes.fixes is a comma list,
-  e.g. "invalid_escape(38),ruff_format"; fixes seen: ruff_format, ruff,
-  invalid_escape, missing_imports, chinese_punct, bracket_matching,
-  escape_inner_quotes, fstring_expr, nested_triple_quote, backslash_trailing.
-- sdk_call 58.7k rows/7d: attributes.fn ("shell.run" style), category=telemetry.
-- halt 3.9k rows/7d: attributes.body = 'no tool_call (idle)' /
-  'system_halt (compact)' / 'lifecycle AgentTermination'.
-- spawn (audit) 404 rows/7d: the events.source column carries the spawner
-  ('agent:N' dominant, plus 'user' / 'cron').
-- delivery_stalled 10.4k rows/7d, category=telemetry (the delivery watchdog
-  emits it explicitly with attributes age_s).
-"""
-
 from __future__ import annotations
 
 from base.events.contract import (
@@ -66,9 +11,6 @@ from base.events.contract import (
 from base.telemetry.metrics.logql import event_count
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
-# ── LogQL fragments (Task #1280) ──────────────────────────────────────────────
-# Attribute labels are derived from the payload-key contract (a renamed
-# payload key fails loudly here instead of silently NULLing out).
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
 _TURN_ATTR = {k: f"attributes_{k}" for k in TURN_END_KEYS}
 _HALT_ATTR = {k: f"attributes_{k}" for k in HALT_KEYS}
@@ -77,11 +19,9 @@ _FRONTEND_ATTR = {k: f"attributes_{k}" for k in FRONTEND_INTERACTION_KEYS}
 _SDK_ATTR = {k: f"attributes_{k}" for k in SDK_CALL_KEYS}
 
 
-# ── LLM ──────────────────────────────────────────────────────────────────────
-
-
 def core_metrics() -> list[MetricSpec]:
-    """This module's core metrics, in registration order."""
+    # ava:ref base/telemetry/metrics/docs/core-observability.ava.okf.md#query-measurement-scope
+    # ava:ref base/telemetry/metrics/docs/core-observability.ava.okf.md#compaction-effectiveness-denominator
     specs: list[MetricSpec] = []
     specs.append(
         MetricSpec(
@@ -231,8 +171,6 @@ def core_metrics() -> list[MetricSpec]:
         )
     )
 
-    # ── compaction ───────────────────────────────────────────────────────────────
-
     specs.append(
         MetricSpec(
             name="ava_obs_compaction_summary_history_ratio",
@@ -250,9 +188,6 @@ def core_metrics() -> list[MetricSpec]:
             unit="percent",
             panel="timeseries",
             query_type="logql",
-            # avg() collapses the per-event label explosion (trace/span/agent
-            # labels) into one series: unwrapped, the panel renders dozens of
-            # one-point lines — sparse near-empty (task #4204).
             query=(
                 'avg(100 * avg_over_time({service_name="unknown_service", event_name={event_name}} | json | '
                 "category={category} | unwrap attributes_summary_history_ratio [$__interval]))"
@@ -283,7 +218,27 @@ def core_metrics() -> list[MetricSpec]:
             panel="timeseries",
             query_type="logql",
             query=event_count("category={category}", "5m", matchers="event_name={event_name}"),
-            target_names=["compactions/min"],
+            targets=[
+                event_count(
+                    "category={category} "
+                    f'| attributes_compact_kind="{kind}" | attributes_reminder_shown="{reminded}"',
+                    "5m",
+                    matchers="event_name={event_name}",
+                )
+                for kind, reminded in (
+                    ("compact_summary", "true"),
+                    ("compact_summary", "false"),
+                    ("auto", "true"),
+                    ("auto", "false"),
+                )
+            ],
+            target_names=[
+                "all/min",
+                "soft after reminder/min",
+                "proactive/min",
+                "hard after reminder/min",
+                "hard without reminder/min",
+            ],
             output=["grafana"],
             thresholds=[],
             panel_id=51,
@@ -292,7 +247,53 @@ def core_metrics() -> list[MetricSpec]:
         )
     )
 
-    # ── exec ─────────────────────────────────────────────────────────────────────
+    automatic_windows = event_count(
+        'category={category} | attributes_compact_kind=~"compact_summary|auto" '
+        '| attributes_reminder_shown=~"true|false"',
+        "$__range",
+        matchers="event_name={event_name}",
+    )
+    soft_windows = event_count(
+        'category={category} | attributes_compact_kind="compact_summary" '
+        '| attributes_reminder_shown=~"true|false"',
+        "$__range",
+        matchers="event_name={event_name}",
+    )
+    reminded_windows = event_count(
+        'category={category} | attributes_compact_kind="compact_summary" '
+        '| attributes_reminder_shown="true"',
+        "$__range",
+        matchers="event_name={event_name}",
+    )
+    specs.append(
+        MetricSpec(
+            name="ava_obs_compaction_soft_share",
+            title="Soft compactions (target >=95% after reminder)",
+            description=(
+                "Agent-authored completed compactions / (agent-authored + hard automatic). "
+                "Manual compact requests and events predating reminder attribution are excluded. "
+                "Zero soft completions with hard completions is 0%; no completions is no data. "
+                "The second ratio counts only agent-authored completions after a soft reminder: "
+                "this is the preparation coverage target, so proactive compactions cannot "
+                "hide missing plugin delivery. Neither ratio proves files were saved."
+            ),
+            event_name="compaction_completed",
+            category="telemetry",
+            unit="percent",
+            panel="stat",
+            query_type="logql",
+            query=f"100 * ({soft_windows} or (0 * {automatic_windows})) / {automatic_windows}",
+            targets=[
+                f"100 * ({reminded_windows} or (0 * {automatic_windows})) / {automatic_windows}"
+            ],
+            target_names=["agent-authored %", "after soft reminder %"],
+            output=["grafana"],
+            thresholds=[],
+            panel_id=52,
+            section="Cost analysis",
+            order=7,
+        )
+    )
 
     specs.append(
         MetricSpec(
@@ -328,15 +329,6 @@ def core_metrics() -> list[MetricSpec]:
                     matchers='event_name="exec_cancelled"',
                 ),
                 event_count("category={category}", "5m", matchers='event_name="exec_node_timeout"'),
-                # other: every exec* event outside the known spellings. Stream
-                # selector matchers are full-string regexes, so the selector
-                # keeps exactly the named spellings out (the pre-selector
-                # pipeline form was substring-based and matched nothing).
-                # exec_envelope is excluded by PM ruling (2026-08-31): it is the
-                # execution envelope, not an outcome-accounting event — its
-                # volume (~3x the ok rate) would dominate and misread as unknown
-                # exec failures; its transfer-cost display is tracked separately
-                # (task #2174).
                 event_count(
                     "category={category}",
                     "5m",
@@ -362,8 +354,6 @@ def core_metrics() -> list[MetricSpec]:
             position=(12, 120),
         )
     )
-
-    # ── code repair (syntax_fix) ─────────────────────────────────────────────────
 
     specs.append(
         MetricSpec(
@@ -413,8 +403,6 @@ def core_metrics() -> list[MetricSpec]:
                     "5m",
                     matchers="event_name={event_name}",
                 ),
-                # other: missing/none/unknown kinds — !~ matches lines where the
-                # label is absent (empty), which is the SQL `IS NULL` branch.
                 event_count(
                     f"category={{category}} | "
                     f'{_FIX_ATTR["fixes"]}!~".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*"',
@@ -437,8 +425,6 @@ def core_metrics() -> list[MetricSpec]:
             order=5,
         )
     )
-
-    # ── lifecycle (audit) ────────────────────────────────────────────────────────
 
     specs.append(
         MetricSpec(
@@ -465,7 +451,6 @@ def core_metrics() -> list[MetricSpec]:
             section="Fleet",
             order=0,
             target_names=["{{source}}"],
-            # Rotate the crowded labels on the half-width Fleet pair (task #4204).
             options={"xTickLabelRotation": -45},
         )
     )
@@ -495,12 +480,9 @@ def core_metrics() -> list[MetricSpec]:
             section="Fleet",
             order=1,
             target_names=["{{event_name}}"],
-            # Rotate the crowded labels on the half-width Fleet pair (task #4204).
             options={"xTickLabelRotation": -45},
         )
     )
-
-    # ── SDK usage ────────────────────────────────────────────────────────────────
 
     specs.append(
         MetricSpec(
@@ -528,8 +510,6 @@ def core_metrics() -> list[MetricSpec]:
             order=7,
         )
     )
-
-    # ── per-agent LLM usage (the retired Metrics page's per-agent breakdown) ─────
 
     specs.append(
         MetricSpec(
@@ -573,8 +553,6 @@ def core_metrics() -> list[MetricSpec]:
         )
     )
 
-    # ── halt classification ──────────────────────────────────────────────────────
-
     specs.append(
         MetricSpec(
             name="ava_obs_halt_breakdown",
@@ -607,8 +585,6 @@ def core_metrics() -> list[MetricSpec]:
                     "5m",
                     matchers="event_name={event_name}",
                 ),
-                # other: not idle/compact/lifecycle (missing body matches too —
-                # the SQL `body IS NULL` branch).
                 event_count(
                     f"category={{category}} | "
                     f'{_HALT_ATTR["body"]}!="no tool_call (idle)" | '
@@ -625,8 +601,6 @@ def core_metrics() -> list[MetricSpec]:
             order=6,
         )
     )
-
-    # ── delivery health ──────────────────────────────────────────────────────────
 
     specs.append(
         MetricSpec(
@@ -679,8 +653,6 @@ def core_metrics() -> list[MetricSpec]:
             output=["inspector"],
         )
     )
-
-    # ── total stream rate ────────────────────────────────────────────────────────
 
     specs.append(
         MetricSpec(

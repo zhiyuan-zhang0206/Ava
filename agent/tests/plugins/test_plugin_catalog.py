@@ -1,15 +1,3 @@
-"""The `ava plugins inspect` catalog — per-machine view of what plugins declare, diff.
-
-The plugins here are written to disk and loaded through the real
-`load_extensions`, so what the catalog reports is what an actual plugin load
-produced: the SDK surface is what the plugin's `plugin.py` `contribute()` declares, and hooks, state and
-prompt sections are what its `agent_runtime.py` `contribute()` declares — not anything the test hands
-the registry. The load gate of
-`base.packages.plugins.loading.registry.build_registry` (a plugin whose manifest and `contribute()`
-disagree, or whose state declaration is invalid, is left out and reported) is covered at the
-bottom, on the same harness.
-"""
-
 import json
 from pathlib import Path
 
@@ -86,7 +74,6 @@ def contribute() -> PluginContributions:
 
 
 def _demo_manifest(name: str, *, runtime: bool) -> str:
-    """The manifest `_DEMO_PLUGIN` (and `_DEMO_RUNTIME` when `runtime`) agree with."""
     contributions: dict[str, list[str]] = {"sdkWraps": ["files.read"]}
     if runtime:
         contributions |= {"hooks": ["before_llm"], "systemPromptSections": ["demo_section"]}
@@ -104,7 +91,6 @@ def _demo_manifest(name: str, *, runtime: bool) -> str:
 def _write_plugin(
     name: str, body: str, *, manifest: str | None = None, runtime: str | None = None
 ) -> Path:
-    """A plugin on disk; its manifest defaults to the one `_DEMO_PLUGIN` agrees with."""
     plugin_dir = paths.repo_plugins_dir() / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body)
@@ -121,8 +107,6 @@ def _enable(**plugins: bool) -> None:
 
 
 def test_every_surface_entry_point_renders_its_live_signature():
-    """`SURFACES` holds live declaration types; each must render a signature that
-    names the type where it is defined."""
     for surface in catalog_mod.SURFACES:
         assert surface.entry_points, f"{surface.id} lists no entry point"
         for entry_point in surface.entry_points:
@@ -132,8 +116,6 @@ def test_every_surface_entry_point_renders_its_live_signature():
 
 
 def test_declarations_are_attributed_to_the_declaring_plugin():
-    """Every surface a plugin declared shows up under its name, keyed the way the
-    manifest declares it."""
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
@@ -157,8 +139,6 @@ def test_declarations_are_attributed_to_the_declaring_plugin():
 
 
 def test_a_disabled_plugin_reports_no_declarations():
-    """A disabled plugin is never imported, so the honest answer is its
-    enable-state and nothing else — not a guess read off its source."""
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=False)
 
@@ -169,8 +149,6 @@ def test_a_disabled_plugin_reports_no_declarations():
 
 
 def test_a_reload_does_not_accumulate_contributions():
-    """Each load reads the declarations afresh (and reinstalls the SDK surface over the previous
-    install's undo), so a second load reports one contribution per surface, not two."""
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
@@ -181,9 +159,6 @@ def test_a_reload_does_not_accumulate_contributions():
 
 
 def test_framework_hooks_are_not_reported_as_plugin_contributions():
-    """The catalog is plugin contributions only. The framework's own hooks (repair, compact,
-    capability drift) are `framework_hooks()`, outside every plugin's declaration; reporting
-    them would make the catalog describe code no plugin contributed."""
     from agent.graph.hooks.framework import framework_hooks
 
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
@@ -251,10 +226,6 @@ def contribute() -> PluginContributions:
 
 
 def test_declared_vs_registered_reports_both_directions():
-    """A manifest surface the plugin does not provide, and a provided surface the manifest does not
-    declare — the two halves of the S3 gate, reported rather than enforced. The report reads
-    `declarations()`, which is ungated, so a plugin the load gate excludes still shows both
-    directions here."""
     _write_plugin("declared", _DECLARED_PLUGIN, manifest=_MANIFEST, runtime=_DECLARED_RUNTIME)
     _enable(declared=True)
 
@@ -271,8 +242,6 @@ def test_declared_vs_registered_reports_both_directions():
 
 
 def test_a_plugin_without_a_manifest_fails_the_catalog():
-    """`ava plugins inspect` cannot describe a plugin that declares nothing to diff against: the
-    missing manifest raises rather than reading as an empty diff."""
     plugin_dir = _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     (plugin_dir / "ava-plugin.json").unlink()
     _enable(demo=True)
@@ -282,10 +251,6 @@ def test_a_plugin_without_a_manifest_fails_the_catalog():
 
 
 def test_install_time_manifest_keys_have_no_runtime_registry():
-    """`skills` / `commands` / `mcpServers` / `opsServices` settle on disk at
-    install time and `ui` is read straight from the manifest by the console;
-    none of them is a `PluginContributions` field a face declares, so the diff must not be able to
-    call them missing."""
     assert {
         "skills",
         "commands",
@@ -300,20 +265,16 @@ def test_unknown_plugin_fails_fast_and_names_the_installed_ones():
     _enable(demo=True)
     catalog = catalog_mod.build_catalog()
 
-    with pytest.raises(catalog_mod.UnknownPlugin, match="demo"):
+    with pytest.raises(catalog_mod.UnknownPluginError, match="demo"):
         catalog.plugin("nope")
 
 
 def test_a_dashed_name_resolves_to_the_plugin_directory():
-    """`ava plugins inspect ava-code` addresses the `ava_code` directory, the
-    same folding `plugins_config.load` does for a hand-edited config."""
     _write_plugin("demo_plugin", _DEMO_PLUGIN)
     _enable(demo_plugin=True)
 
     assert catalog_mod.build_catalog().plugin("demo-plugin").name == "demo_plugin"
 
-
-# ── the load gate: build_registry() admits a plugin only when its declaration is sound ──
 
 _HOOK_POINTS = ("after_init", "before_llm", "before_exec", "after_exec")
 
@@ -321,7 +282,6 @@ _HOOK_POINTS = ("after_init", "before_llm", "before_exec", "after_exec")
 def _gate_runtime(
     hooks: tuple[str, ...] = (), *, section: bool = True, state: str | None = None
 ) -> str:
-    """A face whose `contribute()` provides the given hook points, a section and optional state."""
     classes = "".join(
         f"class _{point.title().replace('_', '')}Hook(Hook):\n"
         "    async def __call__(self, state, runtime, config, /):\n"
@@ -366,7 +326,6 @@ _GATE_PLUGIN = '__description__ = "a plugin under the load gate"\n'
 
 @pytest.fixture
 def load_failures(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, BaseException]]:
-    """Every plugin load failure the gate reports, as (plugin, exception)."""
     failures: list[tuple[str, BaseException]] = []
 
     def spy(name: str, exc: BaseException) -> None:
@@ -377,10 +336,9 @@ def load_failures(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, BaseExcept
 
 
 def _registered() -> dict[str, tuple[str, ...]]:
-    """What a fresh load admits (the gate, then the SDK install): plugin -> its declared hook points."""
     registry = load_extensions(validate_state=plugin_state_schema).registry
     return {
-        name: tuple(point for point in _HOOK_POINTS if contributions.hooks(point))  # pyright: ignore[reportArgumentType]
+        name: tuple(point for point in _HOOK_POINTS if contributions.hooks(point))
         for name, contributions in registry.plugins
     }
 
@@ -423,8 +381,6 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
     provided_hooks: tuple[str, ...],
     problem: str,
 ):
-    """Both directions refuse the whole plugin, with a load report naming the difference; the
-    other plugins' declarations are unaffected."""
     _write_plugin(
         "gate_bad",
         _GATE_PLUGIN,
@@ -444,7 +400,6 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
     assert name == "gate_bad"
     assert isinstance(exc, ContributionMismatch)
     assert problem in str(exc)
-    # The ungated read the catalog uses still sees the excluded plugin's declaration.
     assert "gate_bad" in {declared for declared, _dir, _c in declarations()}
 
 
@@ -487,8 +442,6 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_sections_is_excluded
 
 
 def test_a_plugin_without_a_manifest_is_excluded(load_failures: list[tuple[str, BaseException]]):
-    """A plugin with no `ava-plugin.json` is a load failure of that plugin, whatever its
-    `contribute()` provides; the other plugins load."""
     bare = _write_plugin(
         "gate_bare", _GATE_PLUGIN, runtime=_gate_runtime(("before_llm", "after_exec"))
     )
@@ -511,8 +464,6 @@ def test_a_plugin_without_a_manifest_is_excluded(load_failures: list[tuple[str, 
 def test_an_invalid_state_declaration_excludes_the_plugin(
     load_failures: list[tuple[str, BaseException]],
 ):
-    """A core channel (`halted`) is framework-managed every turn: a plugin declaring it is a load
-    failure of that plugin, and its other declarations go too."""
     core_state = "class GateState(BaseModel):\n    halted: bool = False\n"
     ok_manifest = _gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",))
     _write_plugin(
