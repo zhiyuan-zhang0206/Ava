@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from base.config import ConfigBoot
+from base.cluster.machine import MachineRoleMissing
 from base.config.tests.configuration import snapshot_process_config
 from base.packages.docs.notes import Note
 from base.paths import ava_home
@@ -28,7 +28,7 @@ def _memory_config(root: Path) -> GatewayConfig:
 
 @pytest.mark.parametrize("serve_runner", [False, True], ids=["gateway-only", "combined"])
 def test_memory_root_captures_boot_roles(serve_runner: bool) -> None:
-    owner = ConfigBoot()
+    owner = snapshot_process_config()
     owner.set_field("machine_serve_gateway", True)
     owner.set_field("machine_serve_agent_runner", serve_runner)
     expected = ava_home() / ("gateway/memory" if serve_runner else "memory")
@@ -38,6 +38,16 @@ def test_memory_root_captures_boot_roles(serve_runner: bool) -> None:
 
     assert config.memory_root == expected
     assert gateway_config_from_boot(owner).memory_root != expected
+
+
+def test_memory_root_rejects_missing_machine_roles() -> None:
+    owner = snapshot_process_config()
+    owner.set_field("machine_serve_gateway", False)
+    owner.set_field("machine_serve_agent_runner", False)
+    owner.set_field("machine_serve_observability_station", False)
+
+    with pytest.raises(MachineRoleMissing):
+        gateway_config_from_boot(owner)
 
 
 def _init_repo(root: Path) -> None:

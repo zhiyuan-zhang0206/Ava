@@ -189,7 +189,8 @@ def test_openapi_schema_is_cold(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "/api/health" in schema["paths"]
 
 
-def test_create_app_from_environment_assembles_gateway_config() -> None:
+def test_create_app_from_environment_assembles_gateway_config(unit_home: Path) -> None:
+    (unit_home / ".env").write_text("AVA_MACHINE_SERVE_GATEWAY=true\n", encoding="utf-8")
     saved_env = dict(os.environ)
     try:
         first = gateway_app.create_app_from_environment()
