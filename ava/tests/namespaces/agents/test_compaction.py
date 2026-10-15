@@ -12,7 +12,7 @@ import pytest
 
 import ava
 from ava.agents import compaction
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from ava.sdk_surface import agent_identity
 from base.agents.compaction.models import (
     CompactAcceptance,
@@ -71,7 +71,7 @@ def test_fixed_routes_keep_original_source_and_distinguish_status() -> None:
     with (
         patch.dict(os.environ),  # restore the cold config owner's real environment delivery
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         target = compaction.observe(42)
         accepted = compaction.submit(target, idempotency_key="intent")
@@ -97,7 +97,7 @@ def test_lost_response_is_retried_with_the_same_source() -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         assert compaction.submit(TARGET, idempotency_key="intent") == ACCEPTED
     assert len(calls) == 2
@@ -118,7 +118,7 @@ def test_refusal_never_falls_back_or_retries(status: int) -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(httpx.HTTPStatusError),
     ):
         compaction.submit(TARGET, idempotency_key="intent")
@@ -150,7 +150,7 @@ def test_mismatched_response_fails_closed(operation: str) -> None:
                 )
             ),
         ) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(ValueError, match="another"),
     ):
         if operation == "observe":
@@ -180,7 +180,7 @@ def test_copied_invalid_target_is_revalidated_before_http(field: str) -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(unexpected)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(ValueError),
     ):
         compaction.submit(TARGET.model_copy(update=changes), idempotency_key="intent")

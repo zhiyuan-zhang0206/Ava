@@ -7,15 +7,19 @@ Data-plane behaviour unit tests live in `gateway/tests/routers/test_memory_searc
 only tests the SDK ↔ gateway wire and PATH prefix conversion.
 """
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import NamedTuple
 
+import httpx
 import pytest
 
 import ava
+from ava.gateway_client import use_client
 from ava.sdk_surface import install
 from ava_builtins.plugins.ava_memory import plugin as memory_plugin
+from base.agents.context.gateway_client.memory_search import MemorySearchResult
 from base.packages.plugins.extensions import ExtensionRegistry
 
 # ── Plugin simulation: install the ava_memory SDK surface ───────────────
@@ -100,103 +104,89 @@ def test_path_docs_carry_the_note_format(name: str) -> None:
 # ── search SDK layer (HTTP wire) ─────────────────────────────────────────
 
 
-def test_search_forwards_query_and_k_to_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
-    """SDK passes query + k to `gateway_client.memory_search`, no other processing."""
-    from ava import gateway_client
+class _SearchWire(NamedTuple):
+    requests: list[httpx.Request]
+    results: list[MemorySearchResult]
 
-    captured: dict[str, Any] = {}
 
-    def _fake(
-        query: str, k: int, *, purpose: str, timeout: float | None = None
-    ) -> list[dict[str, str]]:
-        captured["query"] = query
-        captured["k"] = k
-        return []
+@pytest.fixture
+def search_wire() -> Iterator[_SearchWire]:
+    wire = _SearchWire([], [])
 
-    monkeypatch.setattr(gateway_client, "memory_search", _fake)
+    def respond(request: httpx.Request) -> httpx.Response:
+        wire.requests.append(request)
+        assert request.method == "POST"
+        assert request.url.path == "/api/memory/search"
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "path": hit.path,
+                        "description": hit.description,
+                        "tags": hit.tags,
+                        "score": hit.score,
+                        "chunk": hit.chunk,
+                    }
+                    for hit in wire.results
+                ]
+            },
+        )
+
+    with (
+        httpx.Client(
+            base_url="http://gateway.test", transport=httpx.MockTransport(respond)
+        ) as client,
+        use_client(client),
+    ):
+        yield wire
+
+
+def test_search_forwards_query_and_k_to_gateway(search_wire: _SearchWire) -> None:
+    """The SDK sends the query and result limit through the memory-search wire contract."""
     ava.memory.search("test query", k=7)
-    assert captured == {"query": "test query", "k": 7}
+    [request] = search_wire.requests
+    assert json.loads(request.content) == {"query": "test query", "k": 7, "purpose": "search"}
 
 
-def test_search_default_k_is_5(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_default_k_is_5(search_wire: _SearchWire) -> None:
     """`k` default = 5 (consistent with gateway endpoint schema)."""
-    from ava import gateway_client
-
-    captured: dict[str, Any] = {}
-
-    def _fake(
-        query: str, k: int, *, purpose: str, timeout: float | None = None
-    ) -> list[dict[str, str]]:
-        captured["k"] = k
-        return []
-
-    monkeypatch.setattr(gateway_client, "memory_search", _fake)
     ava.memory.search("q")
-    assert captured["k"] == 5
+    [request] = search_wire.requests
+    assert json.loads(request.content)["k"] == 5
 
 
-def test_search_defaults_timeout_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No `timeout` passed → the client's dedicated default applies
-    (gateway deadline + margin); the SDK does not invent one."""
-    from ava import gateway_client
-
-    captured: dict[str, Any] = {}
-
-    def _fake(
-        query: str, k: int, *, purpose: str, timeout: float | None = None
-    ) -> list[dict[str, str]]:
-        captured["timeout"] = timeout
-        return []
-
-    monkeypatch.setattr(gateway_client, "memory_search", _fake)
+def test_search_defaults_timeout_to_none(search_wire: _SearchWire) -> None:
+    """No `timeout` leaves the gateway deadline unspecified on the wire."""
     ava.memory.search("q")
-    assert captured["timeout"] is None
+    [request] = search_wire.requests
+    assert "deadline_seconds" not in json.loads(request.content)
 
 
-def test_search_forwards_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A caller-provided `timeout` reaches the gateway client unmodified."""
-    from ava import gateway_client
-
-    captured: dict[str, Any] = {}
-
-    def _fake(
-        query: str, k: int, *, purpose: str, timeout: float | None = None
-    ) -> list[dict[str, str]]:
-        captured["timeout"] = timeout
-        return []
-
-    monkeypatch.setattr(gateway_client, "memory_search", _fake)
+def test_search_forwards_timeout(search_wire: _SearchWire) -> None:
+    """A caller-provided `timeout` reaches the gateway unmodified, with an HTTP margin."""
     ava.memory.search("q", timeout=7.0)
-    assert captured["timeout"] == 7.0
+    [request] = search_wire.requests
+    assert json.loads(request.content)["deadline_seconds"] == 7.0
+    assert request.extensions["timeout"]["read"] == 10.0
 
 
-def test_search_rejects_non_number_timeout() -> None:
-    """A non-numeric `timeout` fails loud at the SDK boundary — the public
-    path's coerce, not the wire (the fixture wrapper bypasses `search_unwrapped`'s
-    validation, so exercise `search_unwrapped` directly)."""
+def test_search_rejects_non_number_timeout(search_wire: _SearchWire) -> None:
+    """A non-numeric `timeout` fails at the SDK boundary before any HTTP request."""
     from ava_builtins.plugins.ava_memory.sdk import search_unwrapped as sdk_search
 
     with pytest.raises(TypeError, match="timeout must be"):
         sdk_search("q", timeout="fast")  # type: ignore[arg-type]
+    assert search_wire.requests == []
 
 
-def test_search_prefixes_paths_with_memory_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Gateway returns relative paths; SDK prefixes `ava.memory.PATH` → absolute Path.
-
-    fs-neutral design: regardless of whether the primary fs is /Users/x or /home/y,
-    the gateway returns relative paths like `notes/foo.md`; the SDK joins them back
-    to the local machine's memory pool on the caller side.
-    """
-    from ava import gateway_client
-    from ava.gateway_client import MemorySearchResult
-
-    monkeypatch.setattr(
-        gateway_client,
-        "memory_search",
-        lambda _q, _k, **_kw: [  # pyright: ignore[reportUnknownArgumentType]
+def test_search_prefixes_paths_with_memory_path(search_wire: _SearchWire) -> None:
+    """Gateway-relative paths become absolute paths in this machine's memory pool."""
+    search_wire.results.extend(
+        [
             MemorySearchResult("notes/foo.md", "desc1", (), 0.9, "foo passage"),
             MemorySearchResult("bar.md", "", (), 0.4, "bar passage"),
-        ],
+        ]
     )
     results = ava.memory.search("any")
     assert [m.path for m in results] == [
@@ -206,11 +196,8 @@ def test_search_prefixes_paths_with_memory_path(monkeypatch: pytest.MonkeyPatch)
     assert all(m.path.is_absolute() for m in results)
 
 
-def test_search_empty_result(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_empty_result(search_wire: _SearchWire) -> None:
     """Gateway returns [] (no match) → SDK also returns []."""
-    from ava import gateway_client
-
-    monkeypatch.setattr(gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
     assert ava.memory.search("nothing matches") == []
 
 
@@ -257,20 +244,15 @@ def test_search_detailed_removed() -> None:
 # -- search returns MemoryMatch tuples --
 
 
-def test_search_returns_named_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_returns_named_matches(search_wire: _SearchWire) -> None:
     """Each match carries the absolute path, description, tags, score and chunk, in order."""
-    from ava import gateway_client
-    from ava.gateway_client import MemorySearchResult
-
-    monkeypatch.setattr(
-        gateway_client,
-        "memory_search",
-        lambda _q, _k, **_kw: [  # pyright: ignore[reportUnknownArgumentType]
+    search_wire.results.extend(
+        [
             MemorySearchResult(
                 "notes/project.md", "Project note", ("type/project", "x"), 0.82, "the passage"
             ),
             MemorySearchResult("bar.md", "", (), 0.3, "other"),
-        ],
+        ]
     )
     results = ava.memory.search("project")
     assert results == [
@@ -294,26 +276,13 @@ def test_memory_match_is_exported_for_help() -> None:
     assert ava.memory.MemoryMatch._fields == ("path", "description", "tags", "score", "chunk")
 
 
-def test_search_empty_result_desc(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_empty_result_desc(search_wire: _SearchWire) -> None:
     """No matches returns empty list."""
-    from ava import gateway_client
-
-    monkeypatch.setattr(gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
     assert ava.memory.search("nothing") == []
 
 
-def test_search_default_k_desc(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_default_k_desc(search_wire: _SearchWire) -> None:
     """Default k=5."""
-    from ava import gateway_client
-
-    captured: dict[str, int] = {}
-
-    def _fake(
-        query: str, k: int, *, purpose: str, timeout: float | None = None
-    ) -> list[dict[str, str]]:
-        captured["k"] = k
-        return []
-
-    monkeypatch.setattr(gateway_client, "memory_search", _fake)
     ava.memory.search("q")
-    assert captured["k"] == 5
+    [request] = search_wire.requests
+    assert json.loads(request.content)["k"] == 5

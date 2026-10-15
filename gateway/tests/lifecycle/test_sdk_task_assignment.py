@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from ava.tests.fixtures.pin_agent import pin_agent
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.task_registry import TaskAssignment
@@ -69,7 +69,7 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
         return _response(response)
 
     http.post.side_effect = submit
-    with transport.use_client(http):
+    with use_client(http):
         with pytest.raises(GatewayUnavailable):
             _sdk(body)
         lost_attempts = len(captured)
@@ -103,7 +103,7 @@ def test_unavailable_atomic_route_refuses_without_separate_spawn(
             return _response(endpoint.post(path, json=kwargs["json"], headers=kwargs["headers"]))
 
         http.post.side_effect = submit
-        with transport.use_client(http), pytest.raises(httpx.HTTPStatusError):
+        with use_client(http), pytest.raises(httpx.HTTPStatusError):
             _sdk(body)
     assert http.post.call_count == 1
     assert http.post.call_args.args == (PATH,)
@@ -120,7 +120,7 @@ def test_borrowed_lease_is_rejected_before_http_or_validation(
         body["actor_agent_id"], lease=ExternalLease(body["actor_agent_id"], validated, lambda: None)
     )
     http = MagicMock()
-    with transport.use_client(http), pytest.raises(ValueError, match="borrowed lease"):
+    with use_client(http), pytest.raises(ValueError, match="borrowed lease"):
         task_registry.create_and_assign(
             "X",
             "Y",
@@ -152,7 +152,7 @@ def test_missing_invalid_key_and_retired_flag_fail_before_http(
 ) -> None:
     pin_agent(body["actor_agent_id"])
     http = MagicMock()
-    with transport.use_client(http), pytest.raises(error):
+    with use_client(http), pytest.raises(error):
         task_registry.create_and_assign("X", "Y", parent=body["task"]["parent"], **kwargs)
     http.post.assert_not_called()
 
@@ -166,7 +166,7 @@ def test_same_principal_key_actor_drift_conflicts(
         return _response(client.post(path, json=kwargs["json"], headers=kwargs["headers"]))
 
     http.post.side_effect = submit
-    with transport.use_client(http):
+    with use_client(http):
         original = _sdk(body)
         another = db_conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
         assert another is not None
@@ -192,7 +192,7 @@ def test_assignment_uses_only_the_requested_preset(
         return _response(response)
 
     http.post.side_effect = submit
-    with transport.use_client(http):
+    with use_client(http):
         task, agent_id = _sdk(
             body, preset=None, config_overlay={"preset": "coder"} if preset_in_overlay else None
         )

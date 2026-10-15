@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from ava import agents, gateway_client
-from ava.gateway_client.transport import use_client
+from ava.gateway_client import use_client
 from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity, ExternalLease

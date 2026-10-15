@@ -29,7 +29,6 @@ exports = ["fixtures"]
 
 [debt.first-party-patch]
 "test_agent_identity.py#monkeypatch.setattr ava.DB.cursor" = 1
-"test_agent_identity.py#monkeypatch.setattr ava.gateway_client.post" = 1
 "test_attachment_transport.py#assignment ava.state" = 1
 "test_attachment_transport.py#assignment ava.state_update" = 1
 "test_attachment_transport.py#monkeypatch.setattr ava.__plugin_installation__" = 9

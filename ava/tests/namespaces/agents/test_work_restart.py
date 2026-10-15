@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from ava.agents import work
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from ava.sdk_surface import agent_identity
 from ava.tests.fixtures.pin_agent import pin_agent
 from ava.tests.namespaces.agents.test_work import TARGET
@@ -42,7 +42,7 @@ def test_restart_and_status_use_exact_guarded_command() -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         accepted = work.restart(
             TARGET, idempotency_key="intent", config_overlay=ACCEPTED.config_overlay
@@ -76,7 +76,7 @@ def test_restart_is_retried_with_the_same_identity_after_a_lost_response(failure
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         assert (
             work.restart(TARGET, idempotency_key="intent", config_overlay=ACCEPTED.config_overlay)
@@ -100,7 +100,7 @@ def test_refused_or_unsupported_restart_never_falls_back(status: int) -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(httpx.HTTPStatusError),
     ):
         work.restart(TARGET, idempotency_key="intent")
@@ -118,7 +118,7 @@ def test_another_acceptance_is_rejected(operation: str) -> None:
                 lambda _: httpx.Response(200, json=body.model_dump(mode="json"))
             ),
         ) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(ValueError, match="another"),
     ):
         if operation == "restart":
@@ -139,7 +139,7 @@ def test_invalid_copied_identity_is_revalidated_before_http(operation: str) -> N
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(unexpected)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(ValueError),
     ):
         if operation == "restart":
@@ -175,7 +175,7 @@ def test_restart_without_identity_fails_before_http(monkeypatch: pytest.MonkeyPa
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(unexpected)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(RuntimeError, match="no established actor or agent identity"),
     ):
         work.restart(TARGET, idempotency_key="intent")
@@ -193,7 +193,7 @@ def test_restart_stamps_system_actor(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         assert work.restart(TARGET, idempotency_key="intent") == ACCEPTED
     assert len(calls) == 1

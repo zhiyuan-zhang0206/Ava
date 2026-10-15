@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
 from ava.agents import work
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
@@ -55,7 +55,7 @@ async def test_sdk_replays_original_command_after_lost_response_and_owner_change
             headers={"Authorization": f"Bearer {secret}"},
             transport=httpx.MockTransport(handle),
         ) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         observed = work.observe(target.agent_id)
         assert observed == target

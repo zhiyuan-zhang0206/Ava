@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import ava
-from ava.gateway_client.transport import use_client
+from ava.gateway_client import use_client
 from ava.sdk_surface.installation import Installation
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity

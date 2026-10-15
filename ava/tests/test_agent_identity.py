@@ -9,6 +9,7 @@ would silently reopen the watcher-compacts-its-own-agent bug) fails loudly.
 
 from pathlib import Path
 
+import httpx
 import pytest
 
 import ava
@@ -146,16 +147,17 @@ def test_require_actor_binds_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_lifecycle_default_source_requires_identity_before_http(
     action: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import ava.gateway_client as client
-
-    pin_no_identity()
+    pin_agent(None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
-    def forbidden(*_args: object, **_kwargs: object) -> None:
+    def forbidden(request: httpx.Request) -> httpx.Response:
         raise AssertionError("missing provenance cannot reach HTTP")
 
-    monkeypatch.setattr(client, "post", forbidden)
-    with pytest.raises(RuntimeError, match="no established actor or agent identity"):
+    with (
+        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(forbidden)) as http,
+        ava.context.clients.using_gateway(http),
+        pytest.raises(RuntimeError, match="no established actor or agent identity"),
+    ):
         if action == "terminate":
             ava.agents.terminate(7)
         elif action == "restart":

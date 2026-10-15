@@ -8,6 +8,7 @@ tests drive the real hook with the recall pass stubbed, so they cover the gate
 `agent/graph/tests/prompt/test_memory_recall.py` owns.
 """
 
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,8 +22,9 @@ from langgraph.runtime import Runtime
 from agent.graph.recall.memory_recall import PassiveRecall
 from agent.messages import NoteTag, inbound_message, system_note_message
 from agent.state import CompactState, MemoryState, build_agent_state
-from ava import gateway_client
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
+from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
@@ -168,7 +170,7 @@ async def test_gateway_error_leaves_the_turn_running(
     This is the shape that killed agent 405 on 2026-08-07: the hook runs inside
     `before_llm`, so an exception from the search unwinds the graph and ends the
     agent process. The real `passive_memory_recall` runs here (the other tests
-    stub it), with only the gateway call replaced, so the assertion is that the
+    stub it), with the gateway returning an HTTP 500, so the assertion is that the
     turn continues with no recall to add.
     """
     from base.config import settings
@@ -176,21 +178,38 @@ async def test_gateway_error_leaves_the_turn_running(
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
     monkeypatch.setattr(_loaded, "auto_compact_will_fire", _compact_disabled)  # pyright: ignore[reportUnknownArgumentType]
 
-    request = httpx.Request("POST", "http://gateway.test/api/memory/search")
+    requests: list[httpx.Request] = []
 
-    def _boom(_query: str, _k: int, *, context: AvaContext, **_search: Any):
-        raise httpx.HTTPStatusError(
-            "Server error '500'", request=request, response=httpx.Response(500, request=request)
-        )
-
-    monkeypatch.setattr(gateway_client, "memory_search", _boom)
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.method == "POST"
+        assert request.url.path == "/api/memory/search"
+        return httpx.Response(500, text="Server error")
 
     hook = _loaded.passive_memory_recall_before_llm
     state = _state([AIMessage(content="prev", id="a0"), _inbound("user")])
-
-    assert (
-        await hook(state, _runtime(model_catalog, database_gate=database_gate), _config()) is None
+    clients = ClientSet(
+        factories={
+            GatewayTransportInputs: lambda: GatewayTransportInputs(
+                max_retries_reader=lambda: 1,
+                retry_delay_reader=lambda: 0.0,
+                memory_deadline_reader=lambda: 15.0,
+            )
+        }
     )
+    original = _runtime(model_catalog, database_gate=database_gate)
+    runtime = Runtime(context=replace(original.context, clients=clients))
+    try:
+        with (
+            httpx.Client(
+                base_url="http://gateway.test", transport=httpx.MockTransport(respond)
+            ) as client,
+            clients.using_gateway(client),
+        ):
+            assert await hook(state, runtime, _config()) is None
+        assert len(requests) == 1
+    finally:
+        clients.close()
 
 
 async def test_recall_deadline_exceeded_skips_recall_this_turn(

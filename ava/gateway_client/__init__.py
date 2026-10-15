@@ -1,191 +1,77 @@
-"""SDK ↔ Gateway HTTP client.
+"""Typed gateway operations for the process-local SDK.
 
-The package door is the client — typed gateway operations the SDK namespaces
-call. `transport` is the HTTP layer under it: the process-wide httpx client,
-retry/backoff, and wire-error translation. Other `ava` modules that read a raw
-gateway route use `transport` directly.
-
-The agent process's `ava.agents.*` no longer directly connects to the DB —
-three gateway ops (spawn / send_message / get_last_message)
-all go through this module calling gateway HTTP routes. See the
-"error-wire protocol" section at the top of `base/api_contracts/agent_contract.py`.
-
-Design trade-offs:
-- **Synchronous httpx.Client**: agent code is sync; introducing async
-  isn't worth the cost. An HTTP round-trip on localhost is a few ms, not
-  in the same order of magnitude as DB writes.
-- **module-level singleton client**: process-wide shared connection pool.
-- **Error mapping**:
-  - Transient failures — the `httpx.TransportError` family (connect/read/
-    write/pool timeout, connection refused, DNS failure, protocol error,
-    etc.) and HTTP 429/5xx responses → retried up to 3 times with bounded
-    exponential backoff + per-agent jitter; on full failure, raise
-    `GatewayUnavailable` (transport) or surface the wire error /
-    `HTTPStatusError` (HTTP)
-  - HTTP non-2xx with wire-contract JSON body → go through
-    `raise_from_response`, reverse-lookup `EXCEPTION_BY_REASON` by
-    `reason` field to rebuild AvaAgentError subclass
-  - HTTP non-2xx with non-JSON body / missing reason field (FastAPI default
-    500, `ErrorReason(...)` ValueError, etc.) → fall through to
-    `resp.raise_for_status()` raising `httpx.HTTPStatusError`; fail fast
-    so the caller sees the full stack trace; don't swallow. The status is
-    raised cleanly — outside the parse's except handler — so the original
-    status code is never masked by a chained `KeyError: 'reason'` (task #1205)
-- **Retry policy**: transient failures — the `httpx.TransportError` family
-  AND HTTP 429/5xx responses — are retried up to 3 times with bounded
-  exponential backoff (1s → 2s → 4s → 8s cap) plus a deterministic per-agent
-  jitter offset (the heartbeat-daemon de-phasing pattern: a correlated
-  outage hits every agent at the same moment, and a fleet-wide identical
-  schedule would retry in lockstep). 4xx stay non-retried — the wire
-  `reason` is authoritative application semantics (AgentNotFound,
-  MachineNotRegistered, ...); retrying cannot change the result.
-  Retrying is gated on idempotency: a request marked `idempotent=False`
-  (spawn / send_message — a re-send can duplicate the effect) is retried
-  only on connect-family failures, which provably never reached the server;
-  a ReadTimeout or an HTTP 5xx on such a request means "outcome unknown"
-  and is surfaced immediately instead of re-sent.
-  Scenarios retry covers:
-  - Gateway is restarting (ConnectError → wait for new process to ready)
-  - Gateway just exited, residual TCP connections (ConnectError / RemoteProtocolError)
-  - Transient network jitter (ReadTimeout)
-  - Backend blip behind the gateway (HTTP 429/500/502/503/504 — e.g. the
-    memory-indexer 500 that crashed an agent's graph before this policy,
-    task #960)
-  Scenarios retry doesn't cover:
-  - HTTP 4xx (AgentNotFound, MachineNotRegistered, etc.) — application-
-    layer semantics; retrying doesn't change the result
-  - ReadTimeout / HTTP 5xx on a non-idempotent request — the server may
-    have acted on it; re-sending duplicates the effect (spawn → twin,
-    send_message → duplicate inbound)
+The SDK resolves its existing process context; the base gateway client owns
+HTTP, retry policy and wire-error translation for explicit contexts.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Collection
-from typing import Any, Literal, NamedTuple
+from collections.abc import Generator
+from contextlib import contextmanager
+from typing import Any, Literal
+from uuid import UUID
 
 import ava.sdk_surface.agent_identity
-from ava.gateway_client.launch_retry import get_launch_attempt as get_launch_attempt
-from ava.gateway_client.launch_retry import retry_launch as retry_launch
-from ava.gateway_client.transport import (
-    MEMORY_SEARCH_MAX_RETRIES,
-    get,
-    memory_search_timeout,
-    post,
-    raise_from_response,
-)
-from ava.gateway_client.transport import (
-    MEMORY_SEARCH_TIMEOUT_MARGIN_S as MEMORY_SEARCH_TIMEOUT_MARGIN_S,
-)
-from ava.gateway_client.transport import (
-    patch as patch,
-)
+from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
+from base.agents.context.gateway_client import launch_retry as _launch_retry
+from base.agents.context.gateway_client import transport as _transport
 from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
-from base.api_contracts.memory_search import MemorySearchPurpose
 from base.log import logger
 
 
-class MemorySearchResult(NamedTuple):
-    """One memory-search hit as the SDK boundary sees it.
-
-    The single client-side shape for a search result, so every consumer
-    (`ava.memory.search`, passive recall) reads the same fields instead of
-    re-parsing the wire dict — a new field added here flows to all of them.
-
-    path: memory-pool-relative path of the note.
-    description: the note's frontmatter `description`, extracted server-side;
-        empty string when the note has none (never synthesized from title/body).
-    tags: the note's frontmatter `tags`, including its `type/<x>`; empty when it
-        has none. What lets a caller weigh a hit by the kind of note it is, not
-        just by how it scored.
-    score: the ranking model's probability (0..1) that `chunk` is relevant to
-        the query.
-    chunk: the text of the note's best-matching chunk, or its description line.
-    """
-
-    path: str
-    description: str
-    tags: tuple[str, ...]
-    score: float
-    chunk: str
+def _ctx(context: AvaContext | None) -> AvaContext:
+    return context if context is not None else process_context.current_context()
 
 
-def memory_search(
-    query: str,
-    k: int,
+def get(
+    path: str,
     *,
-    purpose: MemorySearchPurpose,
-    exclude: Collection[str] = (),
-    timeout: float | None = None,
-    attempts: int = MEMORY_SEARCH_MAX_RETRIES,
+    params: dict[str, Any] | None = None,
+    timeout: _transport.TransportTimeout | None = None,
+    max_retries: int | None = None,
     context: AvaContext | None = None,
-) -> list[MemorySearchResult]:
-    """POST /api/memory/search → list of `MemorySearchResult`, most relevant first.
+) -> _transport.TransportResponse:
+    """Read a gateway route using an explicit context or the SDK process context.
 
-    The gateway embeds the query, retrieves candidate chunks from the memory-search
-    service, and has a decision model score each chunk's relevance (see
-    `MemorySearchResult`). Returns relative paths with frontmatter
-    descriptions extracted server-side, so callers do not need to
-    re-read every file to get a summary.
-
-    Semantically a read (idempotent): a transient backend 5xx (the
-    2026-08-07 memory-indexer 500 class) is retried once with backoff +
-    jitter before surfacing, so a blip self-heals instead of reaching the
-    caller — and a persistent failure (the gateway's own deadline 503, a
-    congested gate) surfaces as `IndexerUnavailable` without stacking
-    attempts behind it.
-
-    `purpose` says why the query was issued ("recall": passive recall, the query is the recent
-    conversation; "search": an agent's own search; "dedup": the duplicate check on a note just
-    written, the query is that note), which selects the question the gateway's ranking model
-    answers.
-
-    `exclude` lists memory-pool-relative note paths the gateway leaves out before ranking: they
-    cost no ranking request and take no candidate slot. At most `k` results come back, and never
-    more than the notes the gateway ranks per search.
-
-    `timeout` is how long one attempt may take (seconds). It travels in the request, so the gateway
-    stops ranking when it passes: a call whose caller has stopped waiting must not keep spending
-    ranking requests. The HTTP timeout is `timeout` plus a 3s margin, so the gateway's answer
-    (`IndexerUnavailable`) arrives before the client reads out and reports `GatewayUnavailable`.
-    The default is no request deadline, and the gateway's own search deadline plus the margin
-    (18s at default settings) as the HTTP timeout.
-
-    `attempts` is how many times a transient failure is tried in all (default 2: one retry). A
-    caller that gives up on its own deadline passes 1: a retry would start a second search after
-    the caller has stopped waiting for the first.
+    Keep the context's HTTP client, timeout and bounded retry policy. A shared
+    host must supply its context; it cannot borrow an ambient agent identity.
     """
-    import httpx
-
-    body: dict[str, object] = {"query": query, "k": k, "purpose": purpose}
-    if exclude:
-        body["exclude"] = sorted(exclude)
-    if timeout is not None:
-        body["deadline_seconds"] = timeout
-    resp = post(
-        "/api/memory/search",
-        body,
-        timeout=(
-            httpx.Timeout(timeout + MEMORY_SEARCH_TIMEOUT_MARGIN_S)
-            if timeout is not None
-            else memory_search_timeout(context)
-        ),
-        max_retries=attempts,
-        context=context,
+    return _transport.get(
+        path, params=params, timeout=timeout, max_retries=max_retries, context=_ctx(context)
     )
-    raise_from_response(resp)
-    return [
-        MemorySearchResult(
-            path=r["path"],
-            description=r["description"],
-            tags=tuple(r["tags"]),
-            score=float(r["score"]),
-            chunk=r["chunk"],
-        )
-        for r in resp.json()["results"]
-    ]
+
+
+@contextmanager
+def use_client(client: Any) -> Generator[Any]:
+    """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an
+    in-process gateway, or any `httpx.Client` — then put back whichever client was there before."""
+    with process_context.current_context().clients.using_gateway(client):
+        yield client
+
+
+def get_launch_attempt(agent_id: int) -> UUID:
+    """Read the current metadata attempt; an absent old field is not evidence."""
+    _launch_retry.validate_agent_id(agent_id, operation="launch attempt observation")
+    return _launch_retry.get_launch_attempt(agent_id, context=_ctx(None))
+
+
+def retry_launch(
+    agent_id: int,
+    *,
+    idempotency_key: str,
+    expected_prior_attempt_id: str | UUID,
+) -> int:
+    """Retry one observed attempt through the fixed guarded operation."""
+    _launch_retry.validate_retry_admission(key=idempotency_key, prior=expected_prior_attempt_id)
+    _launch_retry.validate_agent_id(agent_id, operation="guarded launch retry")
+    return _launch_retry.retry_launch(
+        agent_id,
+        idempotency_key=idempotency_key,
+        expected_prior_attempt_id=expected_prior_attempt_id,
+        context=_ctx(None),
+    )
 
 
 def spawn(
@@ -218,12 +104,10 @@ def spawn(
         body["label"] = label
     # Every retry keeps the caller's key, body and fixed admission path, so an
     # ambiguous outcome is retried and the server replays the original creation.
-    resp = post(
-        "/api/keyed/v1/agents",
-        body,
-        idempotency_key=idempotency_key,
+    resp = _transport.post(
+        "/api/keyed/v1/agents", body, idempotency_key=idempotency_key, context=_ctx(None)
     )
-    raise_from_response(resp)
+    _transport.raise_from_response(resp)
     data = resp.json()
     normalized = data.get("config_normalized")
     if normalized:
@@ -257,7 +141,7 @@ def send_message(
 
     import httpx
 
-    response = post(
+    response = _transport.post(
         f"/api/agents/{agent_id}/messages",
         {
             "content": content,
@@ -266,8 +150,9 @@ def send_message(
         },
         timeout=httpx.Timeout(120.0),
         idempotency_key=str(uuid4()),
+        context=_ctx(None),
     )
-    raise_from_response(response)
+    _transport.raise_from_response(response)
 
 
 def send_system_note(
@@ -300,20 +185,23 @@ def send_system_note(
     }
     if task_id is not None:
         body["task_id"] = task_id
-    resp = post(
+    resp = _transport.post(
         f"/api/agents/{agent_id}/system-note",
         body,
         timeout=httpx.Timeout(120.0),
         idempotency_key=idempotency_key,
+        context=_ctx(None),
     )
-    raise_from_response(resp)
+    _transport.raise_from_response(resp)
     return int(resp.json()["inbound_id"])
 
 
 def get_last_message(agent_id: int, caller: str) -> str | None:
     """GET /api/agents/{id}/last-message → the agent's most recent AI turn text."""
-    resp = get(f"/api/agents/{agent_id}/last-message", params={"caller": caller})
-    raise_from_response(resp)
+    resp = _transport.get(
+        f"/api/agents/{agent_id}/last-message", params={"caller": caller}, context=_ctx(None)
+    )
+    _transport.raise_from_response(resp)
     return resp.json()["text"]
 
 
@@ -323,8 +211,12 @@ def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict]:
     Each dict has id / label / status / depth / score, strongest first
     (order preserved from the gateway).
     """
-    resp = get(f"/api/agents/{agent_id}/neighbors", params={"depth": depth, "limit": limit})
-    raise_from_response(resp)
+    resp = _transport.get(
+        f"/api/agents/{agent_id}/neighbors",
+        params={"depth": depth, "limit": limit},
+        context=_ctx(None),
+    )
+    _transport.raise_from_response(resp)
     return resp.json()["neighbors"]
 
 
@@ -333,8 +225,10 @@ def get_ancestors(agent_id: int) -> list[dict]:
     chain above `agent_id`, nearest ancestor first (the gateway walks to the
     top, so the neighbors `depth`/`limit` params do not apply). Same dict
     shape as get_neighbors."""
-    resp = get(f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20})
-    raise_from_response(resp)
+    resp = _transport.get(
+        f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20}, context=_ctx(None)
+    )
+    _transport.raise_from_response(resp)
     return resp.json()["ancestors"]
 
 
@@ -358,13 +252,13 @@ def get_born_chain(agent_id: int, *, context: AvaContext | None = None) -> list[
     `_BORN_CHAIN_TIMEOUT_S`); callers degrade on `GatewayUnavailable`."""
     import httpx
 
-    resp = get(
+    resp = _transport.get(
         f"/api/agents/{agent_id}/born-chain",
         timeout=httpx.Timeout(_BORN_CHAIN_TIMEOUT_S),
         max_retries=1,
-        context=context,
+        context=_ctx(context),
     )
-    raise_from_response(resp)
+    _transport.raise_from_response(resp)
     return resp.json()["ancestors"]
 
 
@@ -379,8 +273,8 @@ def list_agents(
     params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
     if before_id is not None:
         params["before_id"] = before_id
-    resp = get("/api/agents", params=params)
-    raise_from_response(resp)
+    resp = _transport.get("/api/agents", params=params, context=_ctx(None))
+    _transport.raise_from_response(resp)
     return resp.json()
 
 
@@ -390,14 +284,16 @@ def patch_label(agent_id: int, label: str, *, source: Literal["user", "self"] = 
     The label sticks (the background labeler no longer renames it), the change is
     audited as `label_change` with `source`, and every client's view refreshes live.
     """
-    resp = patch(f"/api/agents/{agent_id}", json={"label": label, "source": source})
-    raise_from_response(resp)
+    resp = _transport.patch(
+        f"/api/agents/{agent_id}", json={"label": label, "source": source}, context=_ctx(None)
+    )
+    _transport.raise_from_response(resp)
 
 
 def get_agent(agent_id: int) -> dict[str, Any]:
     """Read an agent directly, independently of directory scope or pagination."""
-    resp = get(f"/api/agents/{agent_id}")
-    raise_from_response(resp)
+    resp = _transport.get(f"/api/agents/{agent_id}", context=_ctx(None))
+    _transport.raise_from_response(resp)
     return resp.json()
 
 
@@ -438,8 +334,8 @@ def terminate(
         body["force"] = True
     if kill_all_shell_sessions:
         body["kill_all_shell_sessions"] = True
-    resp = post(f"/api/agents/{agent_id}/terminate", body)
-    raise_from_response(resp)
+    resp = _transport.post(f"/api/agents/{agent_id}/terminate", body, context=_ctx(None))
+    _transport.raise_from_response(resp)
     return resp.json()
 
 
@@ -454,8 +350,8 @@ def restart(agent_id: int, *, source: str | None = None) -> str:
         body["source"] = source
     else:
         body["source"] = ava.sdk_surface.agent_identity.require_actor()
-    resp = post(f"/api/agents/{agent_id}/restart", body)
-    raise_from_response(resp)
+    resp = _transport.post(f"/api/agents/{agent_id}/restart", body, context=_ctx(None))
+    _transport.raise_from_response(resp)
     return resp.json()["status"]
 
 
@@ -473,8 +369,8 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
         body["resurrected_by"] = resurrected_by
     else:
         body["resurrected_by"] = ava.sdk_surface.agent_identity.require_actor()
-    resp = post(f"/api/agents/{agent_id}/resurrect", body)
-    raise_from_response(resp)
+    resp = _transport.post(f"/api/agents/{agent_id}/resurrect", body, context=_ctx(None))
+    _transport.raise_from_response(resp)
     return resp.json()["status"]
 
 
@@ -504,12 +400,13 @@ def register_page(
         body["serve_dir"] = serve_dir
     if ttl_seconds is not None:
         body["ttl_seconds"] = ttl_seconds
-    resp = post(
+    resp = _transport.post(
         f"/api/keyed/v1/agents/{agent_id}/pages",
         body,
         idempotency_key=uuid.uuid4().hex,
+        context=_ctx(None),
     )
-    raise_from_response(resp)
+    _transport.raise_from_response(resp)
     return resp.json()
 
 
@@ -524,31 +421,32 @@ def close_page(agent_id: int, name: str) -> bool:
     observed = next((p for p in list_open_pages(agent_id) if p["name"] == name), None)
     if observed is None:
         return False
-    resp = post(
+    resp = _transport.post(
         f"/api/keyed/v1/agents/{agent_id}/pages/{name}/close",
         {"expected_page_id": observed["id"]},
         idempotency_key=uuid.uuid4().hex,
+        context=_ctx(None),
     )
-    raise_from_response(resp)
+    _transport.raise_from_response(resp)
     return True
 
 
 def list_open_pages(agent_id: int) -> list[dict]:
     """GET /api/agents/{id}/pages → the agent's open PageRow dicts."""
-    resp = get(f"/api/agents/{agent_id}/pages")
-    raise_from_response(resp)
+    resp = _transport.get(f"/api/agents/{agent_id}/pages", context=_ctx(None))
+    _transport.raise_from_response(resp)
     return list(resp.json())
 
 
 def list_machines() -> list[dict]:
     """GET /api/cluster/machines → list of {name, description, live} dicts."""
-    resp = get("/api/cluster/machines")
-    raise_from_response(resp)
+    resp = _transport.get("/api/cluster/machines", context=_ctx(None))
+    _transport.raise_from_response(resp)
     return list(resp.json())
 
 
 def list_presets() -> list[dict]:
     """GET /api/presets → list of preset dicts, ordered by name."""
-    resp = get("/api/presets")
-    raise_from_response(resp)
+    resp = _transport.get("/api/presets", context=_ctx(None))
+    _transport.raise_from_response(resp)
     return list(resp.json())

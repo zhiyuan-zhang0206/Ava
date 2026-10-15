@@ -17,7 +17,6 @@
 "test_capabilities_index.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_reported" = 1
 "test_conversation_prompt.py#monkeypatch.setattr base.config.settings.agent.agent_communication_style" = 3
 "test_conversation_prompt.py#monkeypatch.setattr base.config.settings.agent.prompt_output_conciseness_enabled" = 1
-"test_memory_recall.py#monkeypatch.setattr agent.graph.recall.memory_recall.gateway_client.memory_search" = 4
 "test_memory_recall.py#monkeypatch.setattr agent.graph.recall.memory_recall.memory_dir" = 1
 "test_memory_recall.py#monkeypatch.setattr base.config.settings.agent.eval_isolation" = 1
 "test_memory_recall.py#monkeypatch.setattr base.config.settings.agent.memory_recall_deadline_seconds" = 1

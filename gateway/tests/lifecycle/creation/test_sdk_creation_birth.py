@@ -9,7 +9,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -66,7 +66,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
         return httpx_response_of(response)
 
     http.post.side_effect = submit
-    with transport.use_client(http):
+    with use_client(http):
         with gateway_test_client(
             app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
         ) as target:

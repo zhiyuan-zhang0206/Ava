@@ -29,8 +29,6 @@ exports = ["registry_support.py", "task_registry"]
 "test_task_maintenance_daemon_part2.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_maintenance.daemon.announce_reminder" = 1
 "test_task_registry.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
 "test_task_registry.py#patch.object ava_builtins.plugins.ava_fleet.task_registry.is_terminated" = 1
-"test_validation_ava_fleet.py#monkeypatch.setattr ava.gateway_client.post" = 1
-"test_validation_ava_fleet.py#monkeypatch.setattr ava.gateway_client.raise_from_response" = 1
 "test_validation_ava_fleet.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_registry.update" = 1
 "test_validation_ava_fleet.py#monkeypatch.setattr base.events.live.announce.publish_task_created_sync" = 1
 
