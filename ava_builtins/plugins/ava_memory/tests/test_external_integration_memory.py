@@ -1,5 +1,3 @@
-"""An external attachment's personal memory folder uses the borrowed identity, and the personal index rechecks the lease before any filesystem effect."""
-
 from collections.abc import Iterator
 from contextlib import closing
 from dataclasses import replace
@@ -24,7 +22,8 @@ from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -58,7 +57,7 @@ def native_checkpoint(
     request.addfinalizer(process_context.unbind_exec_turn)
 
     def loader_stub(**_kwargs: object) -> None:
-        """Accept the `surface` kwarg attach passes (ignored)."""
+        pass
 
     monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
     extensions = ExtensionRegistry(
@@ -67,7 +66,6 @@ def native_checkpoint(
     installation = replace(model_installation, registry=extensions, faces=True)
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
 
-    # The attachment builds its state class from the loaded plugins' registry; hand it ours.
     def build_registry(*, validate_state: object = None) -> ExtensionRegistry:
         return extensions
 
@@ -218,7 +216,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         db_conn.commit()
         with pytest.raises(leases.ImpersonationError, match="expired"):
             if operation == "personal_path":
-                _ = sdk.PERSONAL_PATH  # pyright: ignore[reportAttributeAccessIssue]  # module __getattr__
+                _ = sdk.PERSONAL_PATH
             else:
                 context = replace(
                     ava.context,

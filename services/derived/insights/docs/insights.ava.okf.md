@@ -36,6 +36,20 @@ SIGTERM is ignored after interruption so it cannot abort that bounded drain.
 Run context model fallback uses the same process configuration owner through an
 explicit live default-model reader; it never reads another process settings facade.
 
+## Daemon composition
+
+The daemon reads its render policy and ClockConfig from its own live boot, then builds immutable handles per read. Its small pool is for short model/config row lookups; history and audit operations retain their own Database reads. The pidfile-admitted daemon replaces a predecessor's leftover socket. A restrictive umask covers the interval before chmod, and the binding owner creates the socket directory because path helpers are pure.
+
+The process checks schema before serving. Its signal path uses an explicit Runner and hard exit rather than waiting for the default executor to finish cold history work; uvicorn reraises the signal after graceful stop. Repeated SIGTERM is ignored during the bounded exit.
+
+```ava-contract
+id = "daemon-live-clock-owner"
+kind = "invariant"
+statement = "The daemon retains its supplied configuration owner: later model, timestamp and timezone edits are visible through that app's readers, while the owned pool and socket close at exit."
+code = ["services/derived/insights/daemon.py:<module>"]
+tests = ["services/derived/insights/tests/test_insights_service.py::test_daemon_binds_live_rendering_to_its_configuration_owner"]
+```
+
 ```ava-contract
 id = "insights-service-ownership"
 kind = "invariant"

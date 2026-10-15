@@ -9,7 +9,8 @@ import pytest
 from ava.sdk_surface import install, process_context, settings
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
 from base.packages.plugins.extensions import ExtensionRegistry
 

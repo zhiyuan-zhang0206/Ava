@@ -1,17 +1,4 @@
-"""Gateway-owned scheduler for the daily local Postgres dump.
-
-The dump runs in this supervised process so its one-hour subprocess deadline
-cannot delay a watchdog round. Its health component reports the age of the
-last successful backup; the watchdog therefore only probes and restarts this
-daemon when its schedule has stopped making progress.
-
-A failed dump is attempted once per cluster day: the daemon reports it through
-the `backup_dump_failed` event and its health detail, then waits for the next
-backup hour. A degraded health component would make the watchdog restart the
-daemon, and a restarted daemon dumps again at once, so a failure is deliberately
-not reported as a degraded status; only a missing success for
-`BACKUP_STALE_AFTER_S` is.
-"""
+# ava:ref services/backup/scheduler/docs/timing-and-exit.ava.okf.md#daily-dump-policy
 
 from __future__ import annotations
 
@@ -26,7 +13,8 @@ from datetime import time as clock_time
 from pathlib import Path
 
 from base import telemetry
-from base.clock import SYSTEM_TIMERS, Clock, Timers, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock, Timers
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -71,8 +59,6 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 
 @dataclass
 class BackupState:
-    """Scheduler state, owned by its event-loop thread and read by `/healthz`."""
-
     started_at: float
     running: bool = False
     last_attempt: float | None = None
@@ -107,19 +93,12 @@ def _remove_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
 
 
 def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
-    """Whether this daemon already owns its pidfile."""
     return pidfile_holds_daemon(
         _pidfile(config, runtime=runtime), "services.backup.scheduler.daemon"
     )
 
 
 def backup_components(state: BackupState, *, clock: Clock) -> list[dict[str, object]]:
-    """Report scheduler progress; a running dump is healthy until it returns.
-
-    `run_backup` has its own one-hour bound. A just-booted cluster gets one
-    schedule-plus-slack interval before it is judged overdue, preserving the
-    first-run catch-up behaviour without declaring a new service unhealthy.
-    """
     wall_time = clock.now().timestamp()
     if state.running:
         status = OK
@@ -155,7 +134,6 @@ def backup_components(state: BackupState, *, clock: Clock) -> list[dict[str, obj
 
 
 async def sleep_in_chunks(seconds: float, *, timers: Timers) -> None:
-    """Sleep in bounded chunks so SIGTERM reaches the scheduler promptly."""
     remaining = seconds
     while remaining > 0:
         chunk = min(remaining, _SLEEP_CHUNK_S)
@@ -164,7 +142,6 @@ async def sleep_in_chunks(seconds: float, *, timers: Timers) -> None:
 
 
 def seconds_until_next_backup_hour(now: datetime, *, config: ConfigBoot, clock: Clock) -> float:
-    """Seconds from `now` to the next configured backup hour on the cluster clock."""
     local_now = now.astimezone(cluster_tz(clock_factory=lambda: clock))
     backup_hour = config.view.services.backup_hour
     next_date = local_now.date()
@@ -179,7 +156,6 @@ def seconds_until_next_backup_hour(now: datetime, *, config: ConfigBoot, clock: 
 
 
 async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot, clock: Clock) -> None:
-    """Run one weekly local restore proof without re-running the daily dump."""
     try:
         if not local_dump_restore_due(
             now,
@@ -203,7 +179,6 @@ async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot, clock
 
 
 async def backup_loop(state: BackupState, *, config: ConfigBoot, clock: Clock) -> None:
-    """Run due dumps; a failed dump is reported and not attempted again before the next backup hour."""
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
     # quiesce-exempt: pg_dump dials the direct URL read-only, not the pool; a held pause must not stop backups
     while True:
@@ -241,7 +216,6 @@ async def backup_loop(state: BackupState, *, config: ConfigBoot, clock: Clock) -
 
 
 async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: Clock) -> None:
-    """Own the pidfile and health server for the backup scheduler."""
     if _is_running(config, runtime=runtime):
         _log.info(
             "[pg-backup] daemon already running (pidfile=%s), exiting",
@@ -267,8 +241,8 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: 
         _log.info("[pg-backup] daemon stopped")
 
 
+# ava:ref services/backup/scheduler/docs/timing-and-exit.ava.okf.md#bounded-backup-exit
 def main() -> None:
-    """Entry point for the gateway service session."""
     from base.deploy.schema.migrations import assert_schema_current
 
     config = ConfigBoot()
@@ -298,11 +272,7 @@ def main() -> None:
     )
     install_graceful_shutdown("pg_backup")
     code = 0
-    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
-    # awaits `shutdown_default_executor`, joining the default executor's
-    # workers — and a stop signal must never wait on those (see `_hard_exit`).
-    # The runner is therefore never closed: after the explicit drain below,
-    # teardown is skipped by the hard exit.
+
     runner = asyncio.Runner()
     try:
         runner.run(
@@ -314,12 +284,9 @@ def main() -> None:
             )
         )
     except KeyboardInterrupt:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         _log.info("[pg-backup] interrupted, shutting down")
-        # The signal path skips Runner's own cancellation, so drain the loop's
-        # tasks explicitly: `run`'s finally still stops the health server and
-        # removes the pidfile, and an in-flight dump job is cancelled and reaped
-        # with its own cleanup. The executor is deliberately NOT drained.
+
         failures = cancel_and_drain(runner)
         if failures:
             _log.error("[pg-backup] async shutdown failed: %r", failures)

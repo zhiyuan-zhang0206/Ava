@@ -1,9 +1,4 @@
-"""Consumer-local SDK composition from the prepared process configuration.
-
-Each test owns one lazy ClientSet, machine identity and clock factory. Guards receive
-the SDK identity slot and recorder teardown through ordinary fixture overrides;
-neither global guard needs to import the SDK to protect an unrelated collector.
-"""
+# ava:ref ava/tests/fixtures/docs/sdk-composition.ava.okf.md#fixture-clock-owner
 
 from collections.abc import Iterator
 from types import ModuleType
@@ -16,7 +11,8 @@ from ava.sdk_surface import metering, process_context
 from ava.sdk_surface.installation import installed
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot

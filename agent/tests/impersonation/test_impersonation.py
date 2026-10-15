@@ -1,5 +1,3 @@
-"""Takeover barriers: consent, resource closure, checkpoint ordering and replay."""
-
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -28,7 +26,8 @@ from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.lifecycle import AgentImpersonation
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.tests.configuration import snapshot_process_config
@@ -131,6 +130,7 @@ async def test_hold_ends_before_claim_or_compaction(
     hook.assert_not_awaited()
 
 
+# ava:ref agent/tests/impersonation/docs/checkpoint-receipt.ava.okf.md#checkpoint-receipt-retry
 async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
@@ -151,7 +151,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     def idle(_state: State) -> dict[str, Any]:
         return {}
 
-    builder.add_node("idle", idle)  # type: ignore[arg-type]
+    builder.add_node("idle", idle)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
     builder.add_edge(START, "idle")
     builder.add_edge("idle", END)
     graph: Any = builder.compile(checkpointer=MemorySaver())  # pyright: ignore[reportUnknownMemberType]
@@ -161,7 +161,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
 
     def decode(delta: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
-        assert state_cls is State  # the class the graph runs on
+        assert state_cls is State
         return delta
 
     monkeypatch.setattr(plugin_state_codec, "decode_plugin_delta", decode)
@@ -233,9 +233,6 @@ def test_exec_envelope_carries_parent_incarnation(
         incarnation=incarnation,
     )
     assert read_request(path).incarnation == incarnation
-
-
-# ── Relay establishment gate and supervision ────────────────────────────────
 
 
 def _relay_session(
@@ -558,7 +555,7 @@ async def test_claim_gate_records_a_stale_relay_as_degraded_and_never_replaces_i
     monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     assert decision is not None and decision.goto == END
-    # No replacement is ever minted or spawned, and the stale child is left alone.
+
     provision.assert_not_called()
     spawn.assert_not_called()
     terminated.assert_not_called()

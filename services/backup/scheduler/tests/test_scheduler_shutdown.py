@@ -1,10 +1,3 @@
-"""Real signals stop the scheduler's worker and clean its private staging.
-
-The controller gives the known worker/group a bounded chance to unwind before
-escalating. These tests exercise blocking backup stages and real temporary
-Postgres startup/shutdown; they do not prove every descendant disappeared.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +17,8 @@ from unittest.mock import AsyncMock, patch
 import psutil
 import pytest
 
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.config import ConfigBoot, ensure_eager
 from base.db import Database
@@ -35,8 +29,7 @@ from services.backup.scheduler.operation.worker_process import CompletedOperatio
 
 @pytest.fixture
 def postgres_base(tmp_path: Path) -> Iterator[Path]:
-    # Keep the Unix socket path below macOS's AF_UNIX limit. The parent owns
-    # cleanup because SIGKILL can bypass a child process's context managers.
+
     with tempfile.TemporaryDirectory(dir="/tmp", prefix="bkpg-") as base:
         yield Path(base)
     pgdata = tmp_path / "pgdata"
@@ -44,11 +37,12 @@ def postgres_base(tmp_path: Path) -> Iterator[Path]:
         assert not Path(pgdata.read_text()).exists()
 
 
+# ava:ref services/backup/scheduler/docs/timing-and-exit.ava.okf.md#shutdown-harness-processes
 def _block(root: Path, mode: str) -> None:
     if mode == "stubborn":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     (root / "worker").write_text(str(os.getpid()))
-    subprocess.run(  # noqa: S603 -- fixed disposable test child
+    subprocess.run(  # noqa: S603
         [
             sys.executable,
             str(Path(__file__).with_name("shutdown_blocker.py")),
@@ -61,7 +55,6 @@ def _block(root: Path, mode: str) -> None:
 
 
 def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
-    """Run the real scheduled preparation with one blocking pipeline stage."""
     from services.backup import dump as backup
     from services.backup.artifact import offsite
 
@@ -116,7 +109,6 @@ def _restore(root: Path, mode: str, postgres_base: Path) -> None:
 
 
 def exercise_job(root: Path, mode: str, postgres_base: Path) -> None:
-    """The operation worker's real entry, with only its external effects patched."""
     from services.backup import restore_drill
 
     def restore(
@@ -155,8 +147,7 @@ def _operation_harness(root: Path, mode: str, postgres_base: Path):
             assert isinstance(raw_base, str)
             captured = Path(raw_base)
             assert captured.is_absolute() and captured.samefile(postgres_base)
-        # Only the trusted worker entry changes. Production bootstrap, launch,
-        # logs, process group and cancellation execute without private patches.
+
         return await run(
             "services.backup.scheduler.tests.shutdown_worker",
             request,
@@ -176,7 +167,7 @@ def _operation_harness(root: Path, mode: str, postgres_base: Path):
 
 
 def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
-    # This child is not pytest: patching a settings attribute needs the eager chain.
+
     ensure_eager()
     state = daemon.BackupState(started_at=SYSTEM_TIMERS.monotonic())
     pidfile = root / "daemon.pid"
@@ -273,16 +264,14 @@ def _terminate_and_assert_reaped(tmp_path: Path, process: subprocess.Popen[str])
 
 
 def _assert_backup_artifacts(tmp_path: Path, artifacts: Path) -> None:
-    # Cancellation never publishes the new artifact or retains decrypted
-    # staging. The previously published backup remains untouched.
+
     assert not list((tmp_path / "backups" / "operations").glob("*/.operation-*"))
     assert not (tmp_path / "backups" / "quarantine").exists()
     assert [path.name for path in artifacts.iterdir()] == ["retained.dump.enc"]
 
 
 def _kill_harness_processes(tmp_path: Path, process: subprocess.Popen[str]) -> None:
-    # Clean only PIDs written by this disposable harness, including on a
-    # negative control where a scheduler leaves its job blocked.
+
     for name in ("child", "worker", "postgres"):
         path = tmp_path / name
         if path.exists():
@@ -293,6 +282,7 @@ def _kill_harness_processes(tmp_path: Path, process: subprocess.Popen[str]) -> N
     process.communicate(timeout=5)
 
 
+# ava:ref services/backup/scheduler/docs/timing-and-exit.ava.okf.md#shutdown-harness-processes
 def _assert_sigterm_reaps_job_before_scheduler_exits(
     tmp_path: Path, mode: str, postgres_base: Path
 ) -> None:
@@ -300,7 +290,7 @@ def _assert_sigterm_reaps_job_before_scheduler_exits(
     artifacts.mkdir()
     retained = artifacts / "retained.dump.enc"
     retained.write_bytes(b"previous complete backup")
-    process = subprocess.Popen(  # noqa: S603 -- fixed disposable scheduler harness
+    process = subprocess.Popen(  # noqa: S603
         [
             sys.executable,
             str(Path(__file__).with_name("shutdown_daemon.py")),
@@ -339,18 +329,15 @@ def test_killed_restore_uses_parent_owned_postgres_base(
     tmp_path: Path, postgres_base: Path
 ) -> None:
     _assert_sigterm_reaps_job_before_scheduler_exits(tmp_path, "restore-stubborn", postgres_base)
-    # The controller starts in tmp_path with a relative override. Its worker
-    # starts at the repository root, yet creation and parent cleanup agree.
+
     assert Path((tmp_path / "pgdata").read_text()).is_relative_to(postgres_base)
-    # The killed worker bypassed its context manager. The sanitizer uses the
-    # existing temporary-cluster owner lock and native shutdown to clean it.
+
     assert not list(postgres_base.glob("ava-pg-*"))
 
 
 async def test_restore_job_accepts_clean_foreground_postgres_exit(
     tmp_path: Path, postgres_base: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A real foreground postmaster that stops cleanly lets the job succeed."""
     monkeypatch.setattr(worker, "ava_home", lambda: tmp_path)
     config = ConfigBoot()
     config.view.data_plane.pg_throwaway_base = str(postgres_base)
@@ -364,8 +351,7 @@ async def test_restore_job_accepts_clean_foreground_postgres_exit(
         env: dict[str, str],
     ) -> CompletedOperation:
         assert request["pg_throwaway_base"] == str(postgres_base)
-        # A live configuration edit after launch must not retarget parent cleanup
-        # or the child restore away from the captured request.
+
         config.view.data_plane.pg_throwaway_base = str(tmp_path / "later-root")
         return await run(module, request, kind=kind, env=env)
 

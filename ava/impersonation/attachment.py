@@ -1,9 +1,4 @@
-"""Attach local Python tools to a trusted external controller lease."""
-
-# The attachment behind `ava.impersonation.attach` (its door loads this module on
-# first use: it is heavy and `import ava` must not pay for it). The checkpoint-
-# compatible plugin-delta codec and snapshot reader are the agent kernel's
-# (`agent.extensions.plugin_state_codec`), shared with its takeover return path.
+# ava:ref ava/impersonation/docs/attachment-contracts.ava.okf.md#attachment-capture-lifetime
 
 from __future__ import annotations
 
@@ -23,7 +18,8 @@ from base.agents import impersonation as control
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -43,19 +39,10 @@ _close_flush_permission = local()
 
 
 def _close_flush_permitted() -> bool:
-    """Whether this synchronous close operation may finish its own flush."""
     return bool(getattr(_close_flush_permission, "allowed", False))
 
 
 def _deliver_telemetry_before_detach(*, clients: ClientSet) -> None:
-    """Ship an external attachment's tail records while its interpreter lives.
-
-    An SDK call can be the final operation in `ava impersonate exec`. The normal
-    atexit drain has already proved insufficient for first-time OTLP setup in
-    that shape, while an attachment close still runs in the live interpreter.
-    Mirror the exec-child delivery order without importing telemetry for an
-    attachment that emitted no records.
-    """
     if "base.telemetry" not in sys.modules:
         return
     from base import telemetry
@@ -82,8 +69,6 @@ def _deliver_telemetry_before_detach(*, clients: ClientSet) -> None:
 
 
 def _refuse_unless_attachable() -> AvaContext | None:
-    """The process's own context, when nothing forbids attaching to it: no attachment yet, and
-    no native agent runtime."""
     if process_context.is_host_process():
         raise RuntimeError("a native agent runtime cannot attach an external controller")
     bound = process_context.ambient_context()
@@ -98,12 +83,6 @@ def _refuse_unless_attachable() -> AvaContext | None:
 def _attachment_database(
     bound: AvaContext | None, *, config: ConfigBoot | None, machine: MachineIdentity
 ) -> DatabaseFactory:
-    """Borrow an existing owner's factory or create this attachment's fresh gate.
-
-    Independently opened attachments do not share a check timestamp. A factory
-    can refresh its configuration and return many handles without resetting the
-    same attachment's admission gate.
-    """
     if bound is not None:
         return bound.clients.database
     if config is None:
@@ -120,24 +99,10 @@ def _attachment_database(
 
 
 def _agent_codec() -> Any:
-    """The agent kernel's plugin-state codec: the one place `ava` reaches `agent` by name.
-
-    A bare script that attaches needs the kernel's state codec and state admission
-    check, and `ava` sits below `agent`. This load is declared in this directory's
-    `meizel.toml` as a debt: the plugin system review replaces it with a codec the
-    plugin system provides.
-    """
     return importlib.import_module("agent.extensions.plugin_state_codec")
 
 
 class Attachment:
-    """One local SDK attachment; use a context manager or explicitly close it.
-
-    `flush()` journals plugin state updates under the lease's version check.
-    The native graph applies that journal after release or expiry. Ordinary
-    SDK effects happen when called; they are not rolled back by an exception.
-    """
-
     def __init__(
         self, lease_id: str, *, agent_id: int | None = None, session_id: int | None = None
     ) -> None:
@@ -149,15 +114,15 @@ class Attachment:
         self._closed = False
         self._closing = False
         self._stack = ExitStack()
-        # The attached agent's pins and plugin-config view (`ava.sdk_surface.settings.attached_agent_view` reads it through the lease), once loaded.
+
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
         self._event_gate: Any = None
         self._call_lock = Lock()
-        # The process's own context, put back at detach; `_bound` says this attachment bound one.
+
         self._prior_context = bound
         self._bound = False
         self._own_clients: ClientSet | None = None
-        # The agent state class the snapshot loaded into (set before the constructor returns).
+
         self._state_cls: type[Any]
         if process_context.in_exec_turn():
             raise RuntimeError("an exec turn cannot attach an external controller")
@@ -210,10 +175,7 @@ class Attachment:
         self.agent_id = int(lease["agent_id"])
         self.session_id = int(lease["session_id"])
         self._version = int(lease["delta_version"])
-        # Native load: load_snapshot below rebuilds the checkpoint state
-        # (build_agent_state().model_validate), which needs the plugins'
-        # state fields registered — the surface-only default would silently
-        # drop them (review finding, #2616).
+
         self._bind_borrowed_context()
         initialize_context(
             process_context.current_context(),
@@ -238,8 +200,7 @@ class Attachment:
         )
         self._state_cls = type(state)
         self._resolve_config(overlay, birth)
-        # Native applies journal entries only after the controller releases
-        # the lease. Already applied entries belong to the checkpoint.
+
         receipt = state.impersonation_applied
         checkpoint_version = receipt["version"] if receipt.get("lease_id") == self.lease_id else 0
         applied = max(lease["applied_version"], checkpoint_version)
@@ -252,10 +213,6 @@ class Attachment:
         process_context.set_state_update({})
 
     def native_snapshot(self) -> Any:
-        """The agent's saved state, as its checkpoint holds it.
-
-        Unlike `ava.state` this excludes the journal replay, so a controller's staged
-        updates cannot stand in for what the agent itself saved."""
         self._validate()
         snapshot, _overlay, _birth = _agent_codec().load_snapshot(
             self.agent_id, database=self._database()
@@ -278,8 +235,6 @@ class Attachment:
         )
 
     def _bind_borrowed_context(self) -> None:
-        """Bind the borrowed identity for the attachment's lifetime (`_detach` puts the process's
-        own context back), over whatever identity the process already had."""
         borrowed = ExternalLease(
             agent_id=self.agent_id, validate=self._validate, config=lambda: self.config
         )
@@ -304,7 +259,6 @@ class Attachment:
         )
 
     def admit_sdk_call(self) -> Any:
-        """Snapshot this call's original gate before its body can run."""
         with self._call_lock:
             if self._closed or self._closing:
                 raise RuntimeError("external attachment is closing or closed")
@@ -319,7 +273,6 @@ class Attachment:
                 return gate.admit()
 
     def capture_local_event(self, event: Any) -> Any:
-        """Capture a direct audit using this attachment's own retained receipt."""
         from base.agents.impersonation.manifest import capture_local_event
 
         return capture_local_event(event, gate=self._event_gate)
@@ -343,11 +296,9 @@ class Attachment:
         return self.agent_id
 
     def flush(self) -> None:
-        """Durably stage this attachment's new plugin delta; never renew the lease."""
         self._flush(allow_closing=_close_flush_permitted())
 
     def _flush(self, *, allow_closing: bool) -> None:
-        """Stage plugin state; attachment close alone may finish this operation."""
 
         if self._closing and not allow_closing:
             raise RuntimeError("external attachment is closing")
@@ -368,7 +319,6 @@ class Attachment:
             update.clear()
 
     def close(self) -> None:
-        """Flush plugin changes and remove the borrowed identity even if flushing fails."""
         if self._closed:
             self._close_owned_clients()
             return
@@ -385,8 +335,7 @@ class Attachment:
                 _close_flush_permission.allowed = was_permitted
         except BaseException as exc:
             primary = exc
-        # Receipt closure precedes observation delivery and detach. Every cleanup
-        # runs; a later failure cannot replace the exact original close error.
+
         for cleanup in (
             self._seal_event_participant,
             self._deliver_telemetry,
@@ -411,7 +360,6 @@ class Attachment:
         _deliver_telemetry_before_detach(clients=clients)
 
     def _open_event_participant(self) -> None:
-        """Register this controller before it can emit a protocol-v1 event."""
         from base.agents.impersonation.manifest import (
             LocalCaptureGate,
             LocalParticipant,
@@ -434,7 +382,6 @@ class Attachment:
             self._event_gate = LocalCaptureGate(participant)
 
     def _seal_event_participant(self) -> None:
-        """Close admission, drain local SDK work, then seal the durable receipt."""
         if self._event_gate is None:
             return
         from base.agents.impersonation.manifest import (
@@ -446,30 +393,23 @@ class Attachment:
             self._event_gate,
             timeout=self._event_seal_wait_reader(),
         )
-        # A call still running after the wait seals its own source when it drains; the
-        # wait never turns a live source into an empty or failed receipt. An ended lease
-        # that keeps an open source is signalled by state (impersonation_event_log_incomplete).
+
         if drained:
             seal_local_participant(self._event_gate)
 
     def _begin_event_participant_close(self) -> None:
-        """Atomically start close and fence new SDK admission."""
         if self._event_gate is None:
             with self._call_lock:
                 self._closing = True
             return
         from base.agents.impersonation.manifest import begin_local_participant_close
 
-        # The gate lock makes setting `_closing` and closing admission one
-        # linearization point. A call admitted before it may drain; one that
-        # starts after it is rejected by its public call admission owner.
         begin_local_participant_close(
             self._event_gate,
             lambda: setattr(self, "_closing", True),
         )
 
     def _detach(self) -> None:
-        """Drop local bindings without reading or writing the lease."""
 
         if self._closed:
             return
@@ -530,15 +470,6 @@ class Attachment:
 
 
 def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
-    """Borrow an active, unexpired agent identity in this local Python process.
-
-    Use the session's integer id together with its owning agent id. Attaching
-    needs no credential: the caller must descend from the session's recorded
-    controller process tree, rechecked on every lease use. The attachment loads
-    the agent's saved configuration and plugin state. SDK calls and
-    plugin-state operations recheck the lease. Direct reads of loaded Python
-    objects do not. Attaching never renews the lease.
-    """
     if isinstance(session_id, int) and not isinstance(session_id, bool) and agent_id is not None:
         return Attachment("", agent_id=agent_id, session_id=session_id)
     if isinstance(session_id, str) and agent_id is None:

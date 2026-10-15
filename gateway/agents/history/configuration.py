@@ -1,7 +1,8 @@
-"""Compose history readers from the gateway's actual configuration authority."""
+# ava:ref gateway/agents/history/docs/configuration.ava.okf.md#live-history-owner
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
 from base.config.domains.agent.runtime import AgentRuntimeSettings
 from base.config.service_read import ConfigAuthority
@@ -11,7 +12,6 @@ __all__ = ["timeline_policy", "understanding_policy"]
 
 
 def timeline_policy(config: ConfigBoot) -> TimelineReadPolicy:
-    """Capture an owner without reading policy until the request needs it."""
     return TimelineReadPolicy(
         rendering=TimelineReadInputs(
             clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
@@ -41,7 +41,6 @@ def _enabled(config: ConfigBoot, authority: ConfigAuthority) -> bool:
 
 
 def understanding_policy(config: ConfigBoot, authority: ConfigAuthority) -> UnderstandingReadPolicy:
-    """Keep gateway-profile file reads live without constructing the agent domain."""
     return UnderstandingReadPolicy(
         rendering=timeline_policy(config).rendering,
         hierarchy_model=lambda: config.view.lm.hierarchy_model,
