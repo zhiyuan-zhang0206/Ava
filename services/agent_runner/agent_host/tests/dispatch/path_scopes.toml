@@ -1,4 +1,4 @@
-"tests.path_scoped.services_tests" = [
+"services.backup.artifact.tests.passphrase" = [
     "test_host_turn_progress_publish.py",
     "test_turn_admission.py",
 ]

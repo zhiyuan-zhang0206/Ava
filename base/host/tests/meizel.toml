@@ -1,4 +1,4 @@
-exports = ["daemon_shutdown.py", "daemon_shutdown_child.py"]
+exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 
 
 [uses]

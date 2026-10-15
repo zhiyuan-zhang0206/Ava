@@ -1,4 +1,4 @@
-exports = ["cli_tests.py", "gateway_tests.py", "integration_tests.py", "services_tests.py", "structure_tests.py"]
+exports = ["cli_tests.py", "gateway_tests.py", "integration_tests.py", "structure_tests.py"]
 
 [uses]
 "integration_tests.py" = ["gateway_tests.py"]

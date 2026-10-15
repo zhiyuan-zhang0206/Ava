@@ -12,6 +12,7 @@ default, so it can be closed by group rather than left to escape untracked.
 keep it under its line ceiling: the former holds the throwaway data-directory
 host facts and disk-headroom policy, the latter watches a throwaway cluster for
 a stall a timed-out test suite would otherwise leave unexplained. ``pooler`` is the
-PgBouncer observation half shared by the cli and the root diagnostics: where the
-pooler's files live and whether its listeners answer.
+PgBouncer binary location and observation half shared by the cli, verification,
+and the root diagnostics: where the pooler binary and files live and whether its
+listeners answer.
 """

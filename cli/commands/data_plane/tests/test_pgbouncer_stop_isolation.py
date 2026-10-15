@@ -19,6 +19,7 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
+from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.machine import MachineIdentity
 from cli.commands.data_plane import pgbouncer as pgb
 from cli.database.tests.command_inputs import command_machine as command_machine
@@ -168,7 +169,7 @@ def test_start_does_not_reload_a_recycled_pid(
 ) -> None:
     """A foreign live PID leaves custody unresolved; start neither signals nor writes."""
     _write_pidfile(home, os.getpid())
-    monkeypatch.setattr(pgb, "pgbouncer_bin", lambda: str(Path(__file__)))
+    monkeypatch.setattr(base_pooler, "pgbouncer_bin", lambda: str(Path(__file__)))
     monkeypatch.setattr(pgb, "write_config", Mock(side_effect=AssertionError("foreign PID")))
     with pytest.raises(RuntimeError, match="cannot verify this home's PgBouncer"):
         pgb.ensure_pgbouncer(

@@ -1,7 +1,7 @@
 "agent.tests.agent_tests" = [
     "test_boot_extension_materialize.py",
 ]
-"tests.path_scoped.services_tests" = [
+"services.backup.artifact.tests.passphrase" = [
     "test_agent_host_abort_reconcile.py",
     "test_agent_host_log_rotate.py",
     "test_agent_host_plugins.py",

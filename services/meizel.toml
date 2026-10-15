@@ -1,14 +1,16 @@
 exports = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfile.py", "redis_bridge", "supervision", "upkeep", "wake"]
 
 [uses]
-"agent_runner" = ["pidfile.py"]
+"agent_runner" = ["backup", "pidfile.py"]
 "backup" = ["pidfile.py"]
-"derived" = ["pidfile.py"]
-"entrypoints" = ["pidfile.py"]
-"supervision" = ["agent_runner", "derived", "desktop", "entrypoints", "redis_bridge", "wake"]
+"derived" = ["backup", "pidfile.py"]
+"desktop" = ["backup"]
+"entrypoints" = ["backup", "pidfile.py"]
+"redis_bridge" = ["backup"]
+"supervision" = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "redis_bridge", "wake"]
 "tests" = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfile.py", "upkeep", "wake"]
-"upkeep" = ["pidfile.py"]
-"wake" = ["pidfile.py"]
+"upkeep" = ["backup", "pidfile.py"]
+"wake" = ["backup", "pidfile.py"]
 
 [debt.private-name]
 "tests/test_backup_process_composition.py -> backup/scheduler/daemon.py#_hard_exit" = 1

@@ -66,7 +66,7 @@ def _noop_write(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     # pgbouncer_bin shells out (`brew --prefix pgbouncer` on macOS); stub it so the
     # fake start path never touches subprocess.
-    monkeypatch.setattr(_pb, "pgbouncer_bin", lambda: "/opt/homebrew/bin/pgbouncer")
+    monkeypatch.setattr(base_pooler, "pgbouncer_bin", lambda: "/opt/homebrew/bin/pgbouncer")
 
 
 def _fake_start(monkeypatch: pytest.MonkeyPatch, *, rc: int = 0) -> list[list[str]]:

@@ -31,9 +31,14 @@ def _progress() -> LoopProgress:
     return LoopProgress("test", 60.0)
 
 
-async def _reap(pool: ConnectionPool, *, database_gate: ProcessDbGate) -> list[tuple[int, int]]:
+async def _reap(
+    pool: ConnectionPool, *, database_gate: ProcessDbGate, bus: EventBus | None = None
+) -> list[tuple[int, int]]:
     return await reap_expired_shells(
-        pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), _progress()
+        pool,
+        Database.from_settings(gate=database_gate),
+        bus or EventBus.from_settings(),
+        _progress(),
     )
 
 
@@ -87,6 +92,7 @@ def _insert_shell_row(
 async def test_reap_expired_shells_deletes_on_killed(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
+    event_bus: EventBus,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -116,7 +122,7 @@ async def test_reap_expired_shells_deletes_on_killed(
         "dispatch_to_machine",
         _dispatch,
     )
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
+    reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
 
     assert reaped == [(aid, 3)]
     with db_conn.cursor() as cur:
@@ -359,6 +365,7 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     """A watcher (`ava.watcher.at/cron/launch`) is just an `agent_shell_ttls`
     row with no registry of its own (docs/decisions/2026-09-27-watchers-are-never-
@@ -387,7 +394,7 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
         ).model_dump()
 
     monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
+    reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
 
     assert reaped == [(aid, 7)]
     with db_conn.cursor() as cur:

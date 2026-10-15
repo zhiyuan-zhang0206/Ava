@@ -10,7 +10,7 @@
     "test_start_data_plane.py",
     "test_remote_data_plane.py",
 ]
-"tests.path_scoped.services_tests" = [
+"services.backup.artifact.tests.passphrase" = [
     "test_native_storage_diagnostics.py",
 ]
 "ava.tests.fixtures.sdk" = [

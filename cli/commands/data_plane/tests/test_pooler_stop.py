@@ -141,7 +141,7 @@ def native_pooler(
     data_plane_config: DataPlaneConfig,
     throwaway_config: ThrowawayConfig,
 ) -> Iterator[tuple[OwnedPooler, str, str]]:
-    binary = pooler.pgbouncer_bin()
+    binary = base_pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native PgBouncer is not installed")
     monkeypatch.setenv("AVA_HOME", str(tmp_path))

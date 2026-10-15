@@ -106,7 +106,7 @@ def test_foreign_pooler_listener_refuses_before_config_or_signal(
     command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(pooler, "pgbouncer_bin", lambda: __file__)
+    monkeypatch.setattr(base_pooler, "pgbouncer_bin", lambda: __file__)
     monkeypatch.setattr(port_preflight, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(pooler, "write_config", lambda **_kw: pytest.fail("must not write"))  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     with pytest.raises(RuntimeError, match="no owned data-plane process"):
@@ -127,7 +127,7 @@ def test_pooler_birth_change_prevents_reload(
     command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(pooler, "pgbouncer_bin", lambda: __file__)
+    monkeypatch.setattr(base_pooler, "pgbouncer_bin", lambda: __file__)
     monkeypatch.setattr(
         ownership,
         "pooler",

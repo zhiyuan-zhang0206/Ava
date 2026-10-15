@@ -47,7 +47,7 @@ from services.backup.artifact import passphrase
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = pytest.mark.skipif(
-    not (Path(pooler.pgbouncer_bin()).exists() or shutil.which(pooler.pgbouncer_bin())),
+    not (Path(base_pooler.pgbouncer_bin()).exists() or shutil.which(base_pooler.pgbouncer_bin())),
     reason="pgbouncer not installed (brew/apt)",
 )
 
