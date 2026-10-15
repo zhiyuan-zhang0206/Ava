@@ -13,6 +13,8 @@ class NoteKind(StrEnum):
     COMMENT = "comment"
     DOCSTRING = "docstring"
     UNUSED_STRING = "unused-string"
+    LINT_DIRECTIVE = "lint-directive"
+    MACHINE = "machine"
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,7 @@ class Note:
     end_line: int
     text: str
     owner: str
+    lexical_owner: str = ""
 
 
 @dataclass(frozen=True)

@@ -66,6 +66,16 @@ labels and wrappers do not resolve; use a concrete test definition. An exact
 `/** @deprecated */` is machine syntax only when TypeScript attaches it to a
 named declaration symbol. Prose-bearing or unattached JSDoc remains a finding.
 
+Python lint directives retain their exact tool syntax and bind rationale to the
+nearest lexical function/class, or the module outside a definition. This is
+separate from assignment ownership used by ordinary references and SDK attribute
+help. The ambient audit retains its own batch vocabulary and caller inventory;
+the parser only admits a single batch token on a call that audit examines.
+Quiesce markers use an exact typed reference; the existing stop-window lint still
+owns loop placement and stale-marker checks. No rule registry, runtime import or
+path exemption is added. Unchanged directives are not globally migrated by
+reference-only validation.
+
 The checker proves syntax and reference integrity, not external-source freshness,
 test execution or semantic truth. The contribution's independent review owns
 those judgments. The current migration and reviewer rules are in
@@ -88,3 +98,11 @@ tests = ["scripts/content_lint/code_comments/tests/test_api.py::test_module_prop
 ```
 
 Parent: [[scripts/content_lint/docs/content_lint.ava.okf.md]].
+
+```ava-contract
+id = "python-machine-directives"
+kind = "invariant"
+statement = "Strict Python lint directives contain only explicit Ruff or Pyright rule lists and use a valid rationale bound to the same lexical definition, never a local assignment, sibling or enclosing definition. Ambient markers remain audited call data and quiesce markers remain exact bound references consumed by the existing stop-window check. Ordinary prose and unbounded suppressions remain rejected."
+code = ["scripts/content_lint/code_comments/directives.py:ambient_call_lines", "scripts/content_lint/code_comments/directives.py:comment_kind", "scripts/content_lint/code_comments/check.py:check_notes"]
+tests = ["scripts/content_lint/code_comments/tests/test_directives.py::test_line_directive_uses_its_definition_contract", "scripts/content_lint/code_comments/tests/test_directives.py::test_directive_cannot_borrow_sibling_or_outer_rationale", "scripts/content_lint/code_comments/tests/test_directives.py::test_signature_and_method_directives_bind_the_method", "scripts/content_lint/code_comments/tests/test_directives.py::test_unbounded_or_prose_directives_stay_rejected", "scripts/content_lint/code_comments/tests/test_directives.py::test_ambient_marker_only_names_an_audited_call", "scripts/content_lint/code_comments/tests/test_directives.py::test_quiesce_consumer_keeps_loop_and_stale_marker_checks"]
+```

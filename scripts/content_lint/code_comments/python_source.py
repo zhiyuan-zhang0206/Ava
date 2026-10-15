@@ -5,6 +5,11 @@ import re
 import tokenize
 from itertools import pairwise
 
+from scripts.content_lint.code_comments.directives import (
+    ambient_call_lines,
+    comment_kind,
+    is_quiesce_reference,
+)
 from scripts.content_lint.code_comments.model import Note, NoteKind, Source, Symbol
 
 
@@ -37,6 +42,7 @@ def attribute_docs(body: list[ast.stmt]) -> list[tuple[str, ast.Expr]]:
 class SymbolCollector(ast.NodeVisitor):
     def __init__(self, text: str) -> None:
         self.symbols = {"<module>": Symbol("<module>", 1, max(1, len(text.splitlines())))}
+        self.definitions = dict(self.symbols)
         self.notes: list[Note] = []
         self.scope: list[str] = []
         self.docstrings: set[int] = set()
@@ -90,6 +96,7 @@ class SymbolCollector(ast.NodeVisitor):
             name in self.symbols,
             isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef),
         )
+        self.definitions[name] = self.symbols[name]
         self.collect_body(node)
         self.scope.pop()
 
@@ -156,6 +163,7 @@ def parse_python(path: str, text: str) -> Source:
     tree = ast.parse(text, filename=path)
     collector = SymbolCollector(text)
     collector.visit(tree)
+    ambient_lines = ambient_call_lines(path, tree)
     for item in tokenize.generate_tokens(io.StringIO(text).readline):
         if item.type != tokenize.COMMENT:
             continue
@@ -163,9 +171,15 @@ def parse_python(path: str, text: str) -> Source:
             r"#!/usr/bin/(?:env python(?:3(?:\.12)?)?|python3(?:\.12)?)", item.string
         ):
             continue
-        owner = comment_owner(collector.symbols, item.start[0])
+        kind = comment_kind(item.string, item.start[0], ambient_lines)
+        lexical_owner = comment_owner(collector.definitions, item.start[0])
+        owner = (
+            lexical_owner
+            if kind == NoteKind.LINT_DIRECTIVE or is_quiesce_reference(item.string)
+            else comment_owner(collector.symbols, item.start[0])
+        )
         collector.notes.append(
-            Note(NoteKind.COMMENT, item.start[0], item.end[0], item.string, owner)
+            Note(kind, item.start[0], item.end[0], item.string, owner, lexical_owner)
         )
     return Source(
         path,

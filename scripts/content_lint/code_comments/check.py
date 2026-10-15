@@ -1,17 +1,13 @@
-import re
 import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from scripts.codegen.sdk_surface.contracts import MemberProof, query
-from scripts.content_lint.code_comments.model import Contract, Finding, Kind, NoteKind, Source
+from scripts.content_lint.code_comments.directives import reference_key
+from scripts.content_lint.code_comments.model import Contract, Finding, Kind, Note, NoteKind, Source
 from scripts.content_lint.code_comments.python_source import parse_python
 from scripts.content_lint.code_comments.records import canonical_path, parse_document
 from scripts.structure.placement import ModuleIndex
-
-REFERENCE = re.compile(
-    r"(?:#|//) ava:ref ([A-Za-z0-9_./-]+\.ava\.okf\.md#[a-z][a-z0-9]*(?:-[a-z0-9]+)*)"
-)
 
 
 def test_anchor(anchor: str) -> tuple[str, str]:
@@ -140,6 +136,41 @@ def check_reference(
     return None
 
 
+def rationale_owners(source: Source, contracts: dict[str, Contract]) -> set[str]:
+    return {
+        note.owner
+        for note in source.notes
+        if note.kind == NoteKind.COMMENT
+        and (key := reference_key(note.text, python=source.path.endswith(".py"))) is not None
+        and check_reference(source.path, note.owner, note.line, key, contracts) is None
+    }
+
+
+def unreferenced_note(
+    path: str, note: Note, rationales: set[str], *, strict: bool
+) -> Finding | None:
+    if note.kind == NoteKind.MACHINE:
+        return None
+    if note.kind == NoteKind.LINT_DIRECTIVE:
+        if strict and note.owner not in rationales:
+            return Finding(
+                path,
+                note.line,
+                "directive-owner",
+                "line directive needs a valid typed rationale bound to its definition",
+            )
+        return None
+    if strict or (note.kind == NoteKind.COMMENT and "ava:ref" in note.text):
+        return Finding(
+            path,
+            note.line,
+            "free-comment",
+            f"{note.kind}: remove redundant prose or move the fact to a typed document contract",
+        )
+    return None
+
+
+# ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-machine-directives
 def check_notes(
     source: Source, contracts: dict[str, Contract], *, strict: bool
 ) -> tuple[list[Finding], set[str]]:
@@ -151,29 +182,28 @@ def check_notes(
         if contract.kind == Kind.API
         for anchor in contract.code
     }
+    rationales = rationale_owners(source, contracts)
     for note in source.notes:
         if note.kind == NoteKind.DOCSTRING:
             contract = api_by_symbol.get(f"{source.path}:{note.owner}")
             if contract is not None and note.text == contract.statement:
                 used.add(contract.key)
                 continue
-        match = REFERENCE.fullmatch(note.text) if note.kind == NoteKind.COMMENT else None
-        if match:
-            key = match[1]
+        key = (
+            reference_key(note.text, python=source.path.endswith(".py"))
+            if note.kind == NoteKind.COMMENT
+            else None
+        )
+        if key is not None:
             problem = check_reference(source.path, note.owner, note.line, key, contracts)
             if problem is not None:
                 findings.append(problem)
             else:
                 used.add(key)
-        elif strict or (note.kind == NoteKind.COMMENT and "ava:ref" in note.text):
-            findings.append(
-                Finding(
-                    source.path,
-                    note.line,
-                    "free-comment",
-                    f"{note.kind}: remove redundant prose or move the fact to a typed document contract",
-                )
-            )
+        elif (
+            problem := unreferenced_note(source.path, note, rationales, strict=strict)
+        ) is not None:
+            findings.append(problem)
     return findings, used
 
 

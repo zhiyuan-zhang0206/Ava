@@ -72,7 +72,8 @@ def test_free_text_and_suppressions_are_not_escape_hatches(tmp_path: Path, comme
     source["pkg/core.py"] += comment + "\n"
     repo = repository(tmp_path, source)
     assert any(
-        item.code == "free-comment" for item in check(repo, strict_paths=repo.files).findings
+        item.code in {"free-comment", "directive-owner"}
+        for item in check(repo, strict_paths=repo.files).findings
     )
 
 
