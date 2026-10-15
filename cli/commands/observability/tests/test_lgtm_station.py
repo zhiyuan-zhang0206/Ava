@@ -1,5 +1,3 @@
-"""Station-role converge and configured native storage retain explicit machine inputs."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -38,9 +36,6 @@ def test_station_role_renders_full_native_set_without_marker(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    """Dry-run: a second machine declaring the station role renders the FULL
-    native set — configs, launchd plists, and storage dirs — with no marker
-    and no version downloads (the WP1 acceptance render)."""
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "station-home"
     agents_dir = tmp_path / "LaunchAgents"
@@ -65,8 +60,6 @@ def test_station_role_renders_full_native_set_without_marker(
     assert (native_dir / "data" / "loki").is_dir()
     assert (native_dir / "data" / "prom").is_dir()
     rendered_loki = (native_dir / "config" / "loki.yaml").read_text(encoding="utf-8")
-    # No unsubstituted render token survives (the template's {{...}} comment
-    # prose is the only legit brace text).
     assert "{{AVA_HOME}}" not in rendered_loki
     assert "{{LGTM_STORAGE_DIR}}" not in rendered_loki
 
@@ -79,9 +72,6 @@ def test_native_storage_dir_default_matches_historical_layout(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    """Empty AVA_LGTM_STORAGE_DIR renders the historical
-    $AVA_HOME/lgtm/native/data paths byte-for-byte — the macmini re-render
-    diff stays empty (the storage-parameterization zero-regression contract)."""
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
@@ -113,8 +103,6 @@ def test_native_storage_dir_parameterized(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    """A per-machine AVA_LGTM_STORAGE_DIR moves the Loki filesystem store and
-    the Prometheus TSDB onto the configured data volume."""
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
@@ -147,8 +135,6 @@ def test_station_role_creates_configured_storage_dirs(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    """The converge render creates the configured storage root plus the loki
-    and prom subdirs (start.sh parity for a custom data volume)."""
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "station-home"
     agents_dir = tmp_path / "LaunchAgents"

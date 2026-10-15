@@ -1,5 +1,3 @@
-"""The relay credential pipe and the real database effect of a dead relay child."""
-
 from __future__ import annotations
 
 import subprocess
@@ -74,7 +72,6 @@ def active_codex_lease(
     from base.native_process.runtime_incarnation import RuntimeIncarnation
     from base.sessions import env_forwarding
 
-    # The real relay boots this test-owned unit instead of inheriting cluster secrets.
     url = config_authority.runtime.data_plane.db_url
     assert_test_db_url(url, context="real impersonation relay fixture")
     config_authority.env_path.write_text(
@@ -84,8 +81,6 @@ def active_codex_lease(
         encoding="utf-8",
     )
 
-    # Test-only gateway isolation is the same skip posture as env_bootstrap;
-    # production still re-sources its admitted unit configuration normally.
     forwarded = env_forwarding.forward_env_dict()
     monkeypatch.setattr(
         env_forwarding,
@@ -180,7 +175,7 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
     assert after["expires_at"] == current["expires_at"]
     leases.relay_heartbeat(
         database, session["id"], "old-private", local_machine=machine_identity.name()
-    )  # the credential is unchanged
+    )
 
 
 @pytest.mark.parametrize("error", [None, "TimeoutError: ambiguous acceptance"])
@@ -199,7 +194,6 @@ async def test_ended_lease_notice_is_submitted_once_and_a_failure_is_reported_no
     monkeypatch.setattr(impersonation, "terminate_relay", Mock())
     send = Mock(return_value=error)
     monkeypatch.setattr(terminal_notices, "send_ended_notice", send)
-    # Every later pass finds no child left to announce for: there is no retry.
     for _ in range(3):
         await impersonation.supervise_relay(
             db, MagicMock(), None, 42, gate_ctx.relays, incarnation=None

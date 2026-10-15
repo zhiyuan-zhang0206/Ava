@@ -1,5 +1,3 @@
-"""Status-only SQL boundaries retain the lease lifecycle vocabulary."""
-
 import json
 from typing import Any
 from uuid import uuid4
@@ -61,7 +59,6 @@ def test_public_readers_reject_invalid_raw_status(
     def execute(*_args: object) -> None:
         pass
 
-    # Supply every projection field so an unrelated missing key cannot fake a rejection.
     fields = (
         "name",
         "executor_name",

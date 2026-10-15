@@ -1,10 +1,3 @@
-"""base.host.converge.google_drive: detect a writable Google Drive synced folder.
-
-`Path.home()` resolves through `$HOME` (CPython); tests patch it to a tmp dir
-and patch `gd.sys.platform` so the per-OS candidate logic runs regardless of the
-host the suite executes on.
-"""
-
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -13,18 +6,13 @@ import pytest
 
 import base.host.converge.google_drive as gd
 
-# Permission test no-ops as root (root bypasses fs perms); CI runs as root.
 _skip_if_root = pytest.mark.skipif(
     os.geteuid() == 0, reason="root bypasses fs perms — readonly-dir test no-op as root"
 )
 
 
-# ── is_writable round-trip ──────────────────────────────────────────────
-
-
 def test_is_writable_true_and_cleans_up(tmp_path: Path) -> None:
     assert gd.is_writable(tmp_path) is True
-    # the probe file is removed after the round-trip — nothing left behind
     assert list(tmp_path.glob(".ava_drive_check_*")) == []
 
 
@@ -49,9 +37,6 @@ def test_is_writable_false_for_readonly_dir(tmp_path: Path) -> None:
         d.chmod(0o700)
 
 
-# ── find_writable_google_drive ───────────────────────────────────────────
-
-
 def test_find_returns_first_writable_candidate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -73,13 +58,9 @@ def test_find_none_when_no_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
     assert gd.find_writable_google_drive() is None
 
 
-# ── candidate_drive_dirs per-OS ──────────────────────────────────────────
-
-
 def test_macos_candidates_point_at_my_drive(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """macOS CloudStorage entry -> its `My Drive` subfolder (mount root is not writable)."""
     mount = tmp_path / "Library" / "CloudStorage" / "GoogleDrive-someone@example.com" / "My Drive"
     mount.mkdir(parents=True)
     monkeypatch.setattr(gd, "is_macos", lambda: True)

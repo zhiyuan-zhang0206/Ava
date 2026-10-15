@@ -1,12 +1,3 @@
-"""`close_all`: the one terminal closure, run by the service that holds the masters.
-
-Real shells, real signals. The shells get SIGHUP and a known foreground group
-gets SIGTERM; known targets alive when the grace ends receive SIGKILL
-(docs/decisions/runtime/processes/shutdown/2026-09-28-stop-escalates-to-sigkill.md). A busy session whose shell
-the closure verified gone comes back in `Outcome.closed`, which is what a stop
-turns into owner notices.
-"""
-
 from __future__ import annotations
 
 import threading
@@ -53,8 +44,6 @@ def test_a_regular_job_and_its_shell_close_within_the_grace(unit_home: Path) -> 
 
 
 def test_an_idle_session_closes_silently(unit_home: Path) -> None:
-    """Idle is a shell with nothing beyond it: it is closed, and it is not busy, so the
-    outcome names nothing to tell its owner (issue #2044 #3)."""
     (unit_home / ".bash_profile").write_text("PS1='ava-idle-shell> '\n")
     name = "ava-agent-987-shell-2044-idle"
     new(name, unit_home, {"HOME": str(unit_home)})
@@ -69,7 +58,6 @@ def test_an_idle_session_closes_silently(unit_home: Path) -> None:
 
 
 def test_a_restart_loop_shell_cannot_outlive_the_closure(unit_home: Path) -> None:
-    """HUP goes to the shell first, then the known foreground job gets TERM."""
     name = "ava-agent-987-shell-2045-loop"
     new(name, unit_home, cmd=jobs.LOOP_SHELL)
     shell = support.shell_process(name)
@@ -101,7 +89,6 @@ def test_a_job_that_ignores_termination_is_killed_after_its_grace(unit_home: Pat
 def test_an_untracked_nohup_job_does_not_block_terminal_closure(
     unit_home: Path, *, background_exited: bool
 ) -> None:
-    """Close the known terminal whether an untracked background job lives or exits."""
     name = "ava-agent-987-shell-2049-nohup"
     new(name, unit_home)
     shell = support.shell_process(name)
@@ -117,7 +104,6 @@ def test_an_untracked_nohup_job_does_not_block_terminal_closure(
         outcome = client.close_all(grace_s=1.0, kill_s=3.0)
         assert jobs.wait_exit(shell.pid), "the known shell must close"
         assert client.list_sessions() == [], "the master must close despite a leftover job"
-        # The shell/OS may also end an untracked job; its survival is not promised.
         assert outcome.survivors == (), "untracked jobs are not certified or reported"
     finally:
         jobs.kill_quietly(member)
@@ -162,9 +148,6 @@ def test_a_closure_over_no_sessions_is_empty() -> None:
 
 
 def test_no_session_is_born_while_the_closure_runs(unit_home: Path) -> None:
-    """A stop closes the terminals after the agents drained; an allocation that slips in
-    meanwhile would outlive the closure. Allocation is refused for its duration and open
-    again once it is done."""
     jobs.start("ava-agent-987-shell-2060-slow", unit_home, jobs.STUBBORN)
     output_until("ava-agent-987-shell-2060-slow", "stubborn-ready")
     closing = threading.Thread(target=client.close_all, kwargs={"grace_s": 3.0, "kill_s": 3.0})

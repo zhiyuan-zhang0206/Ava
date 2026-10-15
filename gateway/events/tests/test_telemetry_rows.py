@@ -1,5 +1,3 @@
-"""`telemetry_rows` answers the Loki reader's filters from `telemetry_events`."""
-
 from __future__ import annotations
 
 import json
@@ -152,10 +150,10 @@ def test_grep_matches_the_name_source_and_payload_text_ignoring_case(
 
 
 def test_tiers_follow_the_declared_tier_and_severity(db_conn: psycopg.Connection) -> None:
-    _put(db_conn, "llm_usage", seconds=1)  # observation
-    _put(db_conn, "llm_provider_error", seconds=2)  # declared anomaly
-    _put(db_conn, "log", seconds=3, category="log", level="warning")  # anomaly by level
-    _put(db_conn, "hook_timing", seconds=4)  # declared noise
+    _put(db_conn, "llm_usage", seconds=1)
+    _put(db_conn, "llm_provider_error", seconds=2)
+    _put(db_conn, "log", seconds=3, category="log", level="warning")
+    _put(db_conn, "hook_timing", seconds=4)
 
     assert sorted(_names(db_conn, tiers=["anomaly"])) == ["llm_provider_error", "log"]
     assert _names(db_conn, tiers=["noise"]) == ["hook_timing"]

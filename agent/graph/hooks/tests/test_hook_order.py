@@ -1,5 +1,3 @@
-"""Repair and plugin deltas coexist without changing a hook pass's input state."""
-
 from typing import Any
 
 import pytest
@@ -75,8 +73,6 @@ async def test_repair_preserves_the_plugin_note_and_state_across_turns() -> None
         ]
     )
     before = state.model_dump()
-    # Keep the real composer order for the two co-writers. Other framework hooks
-    # need model/catalog inputs unrelated to repairing this interrupted tool call.
     hooks = [
         (plugin, hook)
         for plugin, hook in hooks_at("before_llm", extensions)
@@ -108,7 +104,6 @@ async def test_repair_preserves_the_plugin_note_and_state_across_turns() -> None
 @pytest.mark.parametrize("point", ["after_init", "before_llm", "before_exec", "after_exec"])
 def test_only_repair_precedes_plugins_and_every_other_order_is_preserved(point: HookPoint) -> None:
     first, second, third = (NoticeHook(name) for name in ("first", "second", "third"))
-    # Multiple declarations in one plugin and multiple plugins both retain order.
     declarations = dict.fromkeys(
         ("after_init", "before_llm", "before_exec", "after_exec"), (first, second)
     )

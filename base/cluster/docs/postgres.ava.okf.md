@@ -71,3 +71,10 @@ and application processes log in only as write generations
 (`base.cluster.authority`). `OwnerAuthority.verified_conninfo` gives a
 client that cannot run the custody check itself (`pg_dump`) the same password-free, owner-equivalent view after one custody-checked
 session.
+
+## Orphan regression probe
+
+The isolated `dataplane/tests/_orphan_owner_child.py` takes a throwaway base
+and URL-file path, then waits for its parent to kill it. It retains the entered
+context manager as `cm`: dropping that reference can finalize the generator
+and run teardown, invalidating the orphan-sweep scenario before owner death.

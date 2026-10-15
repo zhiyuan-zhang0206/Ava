@@ -1,5 +1,3 @@
-"""Tests for base.host.system.backend — platform dispatch + capability queries."""
-
 from __future__ import annotations
 
 import pytest
@@ -17,9 +15,7 @@ from base.host.system.tests.fake_commands import LINUX_X86, fake_host
 
 
 def test_get_backend_returns_correct_type() -> None:
-    """On macOS CI / dev, get_backend() returns MacPlatformBackend."""
     backend = get_backend()
-    # All implementations are PlatformBackend instances
     assert isinstance(backend, PlatformBackend)
 
 
@@ -31,24 +27,20 @@ def test_unsupported_host_does_not_select_linux_jobs(monkeypatch: pytest.MonkeyP
 
 
 def test_mac_backend_venv_bin_dir() -> None:
-    """macOS venv uses 'bin' directory."""
     backend = MacPlatformBackend()
     assert backend.venv_bin_dir_name() == "bin"
 
 
 def test_linux_backend_venv_bin_dir() -> None:
-    """Linux venv uses 'bin' directory."""
     backend = LinuxPlatformBackend()
     assert backend.venv_bin_dir_name() == "bin"
 
 
 def test_backend_type_is_stable_across_calls() -> None:
-    """get_backend() selects the same platform backend class on every call."""
     assert type(get_backend()) is type(get_backend())
 
 
 def test_venv_python_path() -> None:
-    """venv_python() returns a path inside the repo's .venv."""
     backend = MacPlatformBackend()
     path = backend.venv_python()
     assert ".venv" in path

@@ -1,10 +1,3 @@
-"""base/events/contract.py — R2-C event contract registry tests.
-
-The registry is the single source of truth for event names (design-r2 §4.3):
-one declaration per event; every derived view (category projection, families,
-payload keys) is a pure function of it.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -21,8 +14,6 @@ from base.events.contract import (
 
 
 def test_registry_keys_match_spec_names() -> None:
-    """Every dict key equals its spec's name — a copy-paste drift in the
-    registry itself must fail fast."""
     for key, spec in EVENTS.items():
         assert spec.name == key, f"key {key!r} != spec.name {spec.name!r}"
 
@@ -62,8 +53,6 @@ def test_tier_for_fails_fast_when_a_registered_event_lacks_a_tier(
 
 
 def test_dual_category_status_change() -> None:
-    """status_change genuinely carries both categories: the loguru side emits
-    telemetry, audit_events emits audit (registry.md §2/§3)."""
     spec = EVENTS["status_change"]
     assert spec.category == "telemetry"
     assert "audit" in spec.extra_categories
@@ -84,12 +73,10 @@ def test_root_unit_failure_payloads_name_the_evidence() -> None:
 
 
 def test_exec_child_boot_payload_exposes_ready_duration() -> None:
-    """The exec-child readiness event owns the boot duration measurement."""
     assert payload_keys("exec_child_boot") == ("duration_ms",)
 
 
 def test_compaction_completion_payload_exposes_ratio_and_frequency() -> None:
-    """Completed compactions report a character ratio and an event counter."""
     assert payload_keys("compaction_completed") == (
         "compact_kind",
         "compactions",
@@ -100,14 +87,12 @@ def test_compaction_completion_payload_exposes_ratio_and_frequency() -> None:
 
 
 def test_recovery_drill_failed_payload() -> None:
-    """A failed drill names its proof type without placing failure detail in labels."""
     from base.events.contract import payload_keys
 
     assert payload_keys("recovery_drill_failed") == ("drill", "detail")
 
 
 def test_backup_dump_failed_payload() -> None:
-    """A failed daily dump carries only its bounded diagnostic."""
     from base.events.contract import payload_keys
 
     assert payload_keys("backup_dump_failed") == ("detail",)
@@ -117,17 +102,14 @@ def test_category_for_kind() -> None:
     assert category_for_kind("llm_usage") == "telemetry"
     assert category_for_kind("spawn") == "audit"
     assert category_for_kind("log") == "log"
-    assert category_for_kind("no_such_event") == "log"  # pre-registry fallback
+    assert category_for_kind("no_such_event") == "log"
 
 
 def test_node_enter_is_file_destination() -> None:
-    """node_enter is sink-filtered out of the event stream (PR #1758) — the
-    registry carries the destination so readers know where to look."""
     assert EVENTS["node_enter"].destination == "file"
 
 
 def test_llm_error_family_covers_provider_failures_and_turn_aborts() -> None:
-    """The current LLM error family comes from its shared declaration."""
     fam = family_events(LLM_ERROR_FAMILY)
     assert fam == (
         "llm_turn_aborted",
@@ -196,7 +178,7 @@ _DECLARED_PAYLOAD_KEYS = {
     ),
     "otlp_backend_disabled": ("reason", "endpoint"),
     "otlp_backend_recovered": ("endpoint", "disabled_s"),
-    "log": ("msg",),  # loguru bare-log payload
+    "log": ("msg",),
 }
 
 
@@ -210,10 +192,6 @@ def test_payload_keys_unknown_event_empty() -> None:
 
 
 def test_class_resolution_markers_are_telemetry_category() -> None:
-    """Class-resolution transitions are telemetry so their state can be observed.
-
-    The class keys make Loki's immutable-state transition explicit.
-    """
     for name in ("warning_resolved", "error_resolved", "warning_reopened", "error_reopened"):
         spec = EVENTS[name]
         assert spec.category == "telemetry"
@@ -240,9 +218,6 @@ def test_class_resolution_markers_are_telemetry_category() -> None:
 
 
 def test_computer_session_events_registered_as_audit() -> None:
-    """The task-session envelope events (Phase 2, task #1101) are declared —
-    without a spec, telemetry.emit raises ValueError and the daemon's suppress
-    used to swallow it silently (task #1136)."""
     from base.events.declarations.audit import ComputerSessionEnd, ComputerSessionStart
 
     start = EVENTS["computer_session_start"]

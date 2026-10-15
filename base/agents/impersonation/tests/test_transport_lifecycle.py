@@ -1,5 +1,3 @@
-"""Authority, terminal receipts and recovery CAS under actual database contention."""
-
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any
@@ -219,7 +217,6 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, replacement["id"], owner)
-    # A later edit of old routing columns does not redirect its immutable notice.
     db_conn.execute(
         "UPDATE agent_impersonations SET relay_thread_id=%s,relay_codex_remote=%s WHERE id=%s",
         (replacement["relay_thread_id"], replacement["relay_codex_remote"], session["id"]),

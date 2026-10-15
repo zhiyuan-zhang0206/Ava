@@ -77,3 +77,15 @@ supervisor recovery; backlog recovery does not weaken that resource boundary.
 Guarded manual compact requires the actual host producer and cold application
 proof: [[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md]]. Legacy compaction
 and older runners do not acquire this capability from installed routes/schema.
+
+## Hosted failure regression boundaries
+
+`agent_host/tests/dispatch/test_failure_report_cutoff.py` runs synchronous
+inbound INSERTs off the event loop: they can wait for the same agent's
+inbound-owner lock held by settlement, whose task needs that loop to proceed.
+
+`agent_host/tests/lifecycle/test_hosted_ownership_agent_host.py` cancels the
+inner `_run_turn` task after admission commits and while Redis announcement is
+parked, isolating admission and settlement. The public `run_turn` additionally
+owns resource retention, cancellation forwarding and receipt cleanup; this
+focused test does not exercise that wrapper.

@@ -1,22 +1,3 @@
-"""Fork identity + prompt cross-process e2e — a forked agent learns who it is
-and sees its prompt before the first turn.
-
-Full cycle:
-  1. source agent runs one turn (so it has a checkpoint to fork from), idles
-  2. test forks it via POST /api/keyed/v1/agents (fork_from=source, prompt=FORK_PROMPT)
-     -> spawn_agent copies the checkpoint + INSERTs a kind='fork' lifecycle
-        inbound in the same transaction, then the prompt as a separate
-        pre-launch insert; both committed before the forked process launches
-  3. forked process boots, its first claim grabs [fork marker, prompt] together,
-     dispatches the identity marker + the prompt, runs its turn, idles
-
-Asserts on the FORKED agent (new id, new process):
-- inbound_messages has exactly [fork, chat] (identity marker + the prompt)
-- timeline carries the lifecycle_fork system marker and the prompt's chat item
-- its reply is FORK_OK — the forked fake only emits that when its first-turn
-  context held BOTH the marker and the prompt (see fakes/scenarios/fork_identity)
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -41,12 +22,10 @@ def test_fork_delivers_identity_marker_and_prompt(e2e_env: E2EEnv) -> None:
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
-    # turn 1: source runs a turn so it commits a checkpoint the fork can copy.
     page.fill('[data-testid="composer-input"]', "\u6e90 agent \u8dd1\u4e00\u8f6e")
     page.click('[data-testid="composer-send"]')
     wait_for_status(source_id, AgentStatus.IDLING.value)
 
-    # fork the source, carrying a redirect prompt.
     resp = post_spawn(
         e2e_env.gateway_url,
         {
@@ -55,18 +34,15 @@ def test_fork_delivers_identity_marker_and_prompt(e2e_env: E2EEnv) -> None:
             "prompt": FORK_PROMPT,
             "prompt_source": "user",
         },
-        timeout=90.0,  # spawn waits launch-confirm (25s e2e) + generous headroom
+        timeout=90.0,
     )
     resp.raise_for_status()
     forked_id = int(resp.json()["id"])
     assert forked_id != source_id
 
     try:
-        # forked process boots, claims [fork marker, prompt], runs its turn, idles.
         wait_for_status(forked_id, AgentStatus.IDLING.value)
 
-        # DB: the forked agent received exactly the fork lifecycle marker then the
-        # prompt — both committed before launch, so both in its first claim batch.
         with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT kind FROM inbound_messages WHERE agent_id = %s ORDER BY id", (forked_id,)
@@ -74,11 +50,6 @@ def test_fork_delivers_identity_marker_and_prompt(e2e_env: E2EEnv) -> None:
             kinds = [r[0] for r in cur.fetchall()]
         assert kinds == ["fork", "chat"], kinds
 
-        # Timeline (REST): the identity marker + prompt are in the forked agent's
-        # message context, and its FORK_OK reply proves the model saw both.
-        # Poll, not one-shot: status flips to IDLING at claim entry while the
-        # turn's checkpoint write can still be in flight — a single GET races
-        # that commit (caught live: replies=[] with kinds already committed).
         deadline = time.monotonic() + 90.0
         while True:
             items = httpx.get(
@@ -99,10 +70,6 @@ def test_fork_delivers_identity_marker_and_prompt(e2e_env: E2EEnv) -> None:
             f"replies={replies}"
         )
     finally:
-        # The test spawned this agent directly (not via the spawned_agent fixture),
-        # so terminate it before the function-scoped gateway tears down — a process
-        # still alive at gateway death lingers holding DB conns and races the next
-        # test's spawn (same reasoning as the spawned_agent fixture teardown).
         with contextlib.suppress(Exception):
             httpx.post(f"{e2e_env.gateway_url}/api/agents/{forked_id}/terminate", timeout=5.0)
             wait_for_status(forked_id, AgentStatus.TERMINATED.value, timeout=10.0)

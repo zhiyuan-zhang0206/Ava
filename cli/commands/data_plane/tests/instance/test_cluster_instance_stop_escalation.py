@@ -1,11 +1,3 @@
-"""The cluster-instance stop legs report a Postgres escalation like the journaled legs.
-
-`stop_cluster_instance` serves `ava stop --force` (via `_stop_data_plane`) and
-`ava cluster instance stop`. Neither owns a stop journal, but both must still be
-loud: stderr plus the `postgres_stop_escalated` event
-(docs/decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md).
-"""
-
 from __future__ import annotations
 
 import dataclasses
@@ -53,7 +45,6 @@ def test_stop_cluster_instance_reports_an_escalation(
     monkeypatch.setattr(instance.owned_postgres, "stop", fake_stop)
     monkeypatch.setattr(pgbouncer, "stop_pgbouncer", fake_pgbouncer_stop)
 
-    # A loopback plane whose Redis URL names no port: nothing for the redis half of the stop.
     local_plane = dataclasses.replace(
         data_plane_config, db_url="postgresql://ava@127.0.0.1/ava", redis_url="redis://127.0.0.1"
     )

@@ -34,3 +34,11 @@ unfinished actual worker. The native orphan probe runs the real child and SDK,
 enters a `ctypes.CDLL` sleep, terminates only its direct parent, and collects
 the child's actual 124 exit status. Linux subreaper custody is local to that
 isolated probe; macOS observes the status through kernel kqueue.
+
+## Probe assumptions
+
+`tests/_deadline_probe.py` uses Linux `prctl(36)` (`PR_SET_CHILD_SUBREAPER`)
+only in the isolated probe. On macOS, `0x04000000` is XNU's `NOTE_EXITSTATUS`,
+which requests exit status for a process the caller may signal.
+`test_deadline_subprocess.py` keeps the permit pipe's writer open during
+permit-wait expiry: `communicate()` would close stdin and exercise EOF instead.

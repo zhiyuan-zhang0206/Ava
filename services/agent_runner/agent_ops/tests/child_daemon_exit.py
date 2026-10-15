@@ -1,9 +1,3 @@
-"""Child entry for the ops daemon's process-exit tests.
-
-Usage: `child_daemon_exit.py <scenario> [args]`, run in a fresh interpreter
-because each scenario ends in the shared `_hard_exit` and never returns.
-"""
-
 import pathlib
 import sys
 import time
@@ -25,7 +19,7 @@ def _crash() -> None:
     daemon.init_gateway_process = _silent
     daemon.install_graceful_shutdown = _silent
     daemon.serve_ops_daemon = _boom
-    sys.argv[1:] = []  # the daemon parses its own argv
+    sys.argv[1:] = []
     daemon.main()
 
 

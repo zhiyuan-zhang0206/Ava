@@ -16,7 +16,7 @@ _ADMISSION_CHECKS = frozenset(
         "doc lints (pre-commit family)",
     }
 )
-_EXPECTED_CHECKS = _ADMISSION_CHECKS  # legacy alias for the drift tests below
+_EXPECTED_CHECKS = _ADMISSION_CHECKS
 
 _TRUNK_FIXTURE = """
 version: 0.1

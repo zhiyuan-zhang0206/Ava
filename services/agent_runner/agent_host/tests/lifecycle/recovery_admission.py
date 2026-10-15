@@ -1,5 +1,3 @@
-"""Public PostgreSQL admission and checkpoint fixtures for host consumers."""
-
 from typing import Any
 from uuid import uuid4
 
@@ -62,7 +60,6 @@ async def checkpoint_graph(
 ) -> tuple[Any, AsyncPostgresSaver]:
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
-    # Delta write model (#3180): fold delta-written messages on read (daemon parity).
     wrap_saver_reads_with_delta_reconstruction(saver)
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
     builder.add_node("work", node)

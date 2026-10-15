@@ -1,5 +1,3 @@
-"""The claim package's by-who rendering, restart-completed marker, idle snapshot and idle predicate."""
-
 from unittest.mock import MagicMock
 
 import psycopg
@@ -17,17 +15,12 @@ from base.lm.catalog import ModelCatalog
 
 
 def test_by_who_self_returns_yourself():
-    """source 'self' (ava.self.terminate/restart self-invocation) → 'yourself'.
-    Lock down that the literal 'self' cannot be mutated to 'SELF' / 'XXselfXX' / '' etc. by mutmut."""
     from agent.graph.claim.node import by_who
 
     assert by_who("self") == "yourself"
 
 
 def test_by_who_uppercase_self_passthrough():
-    """source is case-sensitive — 'SELF' does not match the 'self' branch, falls back to
-    return original value. `by_who` does not do case-folding (to avoid mistakenly treating
-    'Self' / 'SELF' as self-trigger)."""
     from agent.graph.claim.node import by_who
 
     assert by_who("SELF") == "SELF"
@@ -36,8 +29,6 @@ def test_by_who_uppercase_self_passthrough():
 
 
 def test_by_who_external_source_passthrough():
-    """Non self source ('user' / 'agent:42' / 'system')
-    returns as-is — the marker text shows who triggered it at a glance."""
     from agent.graph.claim.node import by_who
 
     assert by_who("user") == "user"
@@ -47,27 +38,22 @@ def test_by_who_external_source_passthrough():
 
 
 def test_by_who_self_prefix_does_not_match_self():
-    """'self_xxx' / 'selfish' should not be recognized as 'self' (literal == comparison,
-    not startswith)."""
     from agent.graph.claim.node import by_who
 
-    # anti-regression: changing to startswith("self") would make this test fail
     assert by_who("selfish") == "selfish"
     assert by_who("self_other") == "self_other"
-    assert by_who("self:other") == "self:other"  # only self is specifically handled
+    assert by_who("self:other") == "self:other"
 
 
 def test_render_restart_completed_marker_system_update_no_by_clause():
-    """source='system:update' → 'updated and restarted' with no trailing 'by ...' noise."""
     from agent.graph.claim.node import render_restart_completed_marker
 
     text = render_restart_completed_marker("system:update", timestamp_prefix=lambda: "")
     assert "updated and restarted" in text
-    assert "by " not in text  # no actor suffix for system-driven rollout
+    assert "by " not in text
 
 
 def test_render_restart_completed_marker_plain_self_unchanged():
-    """source='self' (ordinary restart, not update) → 'restarted by yourself', no 'updated'."""
     from agent.graph.claim.node import render_restart_completed_marker
 
     text = render_restart_completed_marker("self", timestamp_prefix=lambda: "")
@@ -76,7 +62,6 @@ def test_render_restart_completed_marker_plain_self_unchanged():
 
 
 def test_render_restart_completed_marker_external_source_unchanged():
-    """Non-update sources → plain 'restarted by <source>' wording."""
     from agent.graph.claim.node import render_restart_completed_marker
 
     text = render_restart_completed_marker("user", timestamp_prefix=lambda: "")
@@ -94,10 +79,6 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """Turn-end fallback: when claim is about to idle (no conversation yet),
-    the wrapper must pass full_window=True so the enter snapshot is the full
-    window — the only race-free view of the finished turn (reconnect GET can
-    read a lagging checkpoint). Pins the will_idle wiring."""
     import json
 
     from langchain_core.messages import SystemMessage
@@ -125,20 +106,12 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
         json.loads(c.args[0]) for c in pub.emit.call_args_list if "timeline_snapshot" in c.args[0]
     ]
     assert len(snaps) == 1
-    # will_idle=True (no conversation) → full-window: msg_count = full length,
-    # window renders the whole (short) history — including the system-prompt
-    # item (no Aw-Snap drop rule anymore: incremental snapshots never carry
-    # 0.0 by construction, full-window ones are rare and the frontend's
-    # id-replace merge keeps a single copy either way).
     assert snaps[0]["msg_count"] == 1
     assert [it["item_id"] for it in snaps[0]["items"]] == ["0.0"]
     assert snaps[0]["items"][0]["kind"] == "system_prompt"
 
 
 def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
-    """One idle predicate for the impl branch and the wrapper's snapshot path:
-    a trailing end-of-session note waives the fresh-window term (resume), and
-    an open breaker parks idle (the wrapper previously omitted that arm)."""
     from datetime import UTC, datetime
 
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -150,7 +123,7 @@ def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
 
     fresh = AgentState()
     fresh.messages = [SystemMessage(content="prompt")]
-    assert claim_will_idle(fresh)  # no conversation yet: idle
+    assert claim_will_idle(fresh)
 
     resume = AgentState()
     resume.impersonation_handoff_id = "7:0"
@@ -159,10 +132,10 @@ def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
     )
     note.id = "impersonation-handoff:7:0"
     resume.messages = [SystemMessage(content="prompt"), note]
-    assert not claim_will_idle(resume)  # the note must get its first turn
+    assert not claim_will_idle(resume)
 
     resume.halted = True
-    assert claim_will_idle(resume)  # an ended turn still wins
+    assert claim_will_idle(resume)
 
     parked = AgentState()
     parked.messages = [HumanMessage(content="hello")]

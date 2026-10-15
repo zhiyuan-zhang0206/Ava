@@ -1,5 +1,3 @@
-"""A fresh execution child reports its original plugin boot error before running code."""
-
 from __future__ import annotations
 
 import json
@@ -71,7 +69,6 @@ def test_child_plugin_binding_failure_keeps_original_boot_error(
         "AVA_PROCESS_PROFILE": "agent",
         "AVA_EXEC_REQUEST_FILE": str(request),
         "AVA_EXEC_RESULT_FILE": str(result),
-        # The old skipped-binding path proceeded here and replaced the bug with KeyError.
         "AVA_AGENT_CONFIG_OVERLAY": json.dumps({"value": 2}),
     }
     env.pop("AVA_AGENT_ID", None)

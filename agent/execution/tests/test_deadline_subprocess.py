@@ -1,5 +1,3 @@
-"""Real independent deadline exits, including an orphan executing native code."""
-
 from __future__ import annotations
 
 import hashlib
@@ -63,7 +61,6 @@ def _start(context: OwnerContext, path: Path, *, mode: str | None = None) -> psu
         if mode is None
         else [str(_PROBE), mode, str(path), str(path.with_suffix(".native"))]
     )
-    # This launch handle guards cleanup signals against native PID reuse.
     return psutil.Popen(
         argv,
         stdin=subprocess.PIPE,
@@ -128,7 +125,6 @@ def test_permit_wait_is_independently_bounded(tmp_path: Path) -> None:
     process = _start(context, path)
     started = time.monotonic()
     try:
-        # Retain the pipe writer: communicate() would close stdin and test EOF.
         assert process.wait(timeout=5) == 124
         assert time.monotonic() - started < 5
         assert not context.result_path.exists()

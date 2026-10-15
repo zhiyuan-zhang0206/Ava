@@ -1,10 +1,3 @@
-"""`services.pidfile` — shared daemon pidfile discipline (audit round 2, P1).
-
-The two historical failure modes under test: pid reuse (a stale pidfile
-whose pid was recycled makes every start misjudge "already running") and
-the write race (two daemons both pass the guard, both write, both run).
-"""
-
 from __future__ import annotations
 
 import os
@@ -52,7 +45,6 @@ def test_daemon_guard_checks_only_current_pidfile(
     process_config: ConfigBoot,
     tmp_path: Path,
 ) -> None:
-    """Each singleton guard reads the path its daemon writes, exactly once."""
     module_name = daemon.__name__
     calls: list[tuple[Path, str]] = []
 
@@ -83,31 +75,26 @@ def test_acquire_writes_own_pid(tmp_path: Any) -> None:
 
 
 def test_acquire_refuses_live_instance(tmp_path: Any) -> None:
-    """A pidfile held by a live process running the same module is refused."""
     pidfile = tmp_path / "svc.pid"
     cmdline = process_cmdline(os.getpid())
     assert cmdline
     identity = " ".join(cmdline)
     assert acquire_pidfile(pidfile, identity) is True
-    # second claim, same module, same live process -> refused, file untouched
     assert acquire_pidfile(pidfile, identity) is False
     assert pidfile.read_text().strip() == str(os.getpid())
 
 
 def test_acquire_reclaims_stale_dead_pid(tmp_path: Any) -> None:
     pidfile = tmp_path / "svc.pid"
-    pidfile.write_text("99999999\n")  # pid far above any live process
+    pidfile.write_text("99999999\n")
     assert pidfile_holds_daemon(pidfile, "svc.daemon") is False
     assert acquire_pidfile(pidfile, "svc.daemon") is True
     assert pidfile.read_text().strip() == str(os.getpid())
 
 
 def test_acquire_reclaims_recycled_pid(tmp_path: Any) -> None:
-    """Regression: a stale pidfile whose pid was recycled by an unrelated
-    process (live, but argv does not name the daemon) must be reclaimed,
-    not mistaken for a running instance."""
     pidfile = tmp_path / "svc.pid"
-    pidfile.write_text(f"{os.getpid()}\n")  # live pid, unrelated argv
+    pidfile.write_text(f"{os.getpid()}\n")
     assert pidfile_holds_daemon(pidfile, "svc.daemon") is False
     assert acquire_pidfile(pidfile, "svc.daemon") is True
 
@@ -128,4 +115,4 @@ def test_remove_pidfile_idempotent(tmp_path: Any) -> None:
     pidfile.write_text("1\n")
     remove_pidfile(pidfile)
     assert not pidfile.exists()
-    remove_pidfile(pidfile)  # must not raise
+    remove_pidfile(pidfile)

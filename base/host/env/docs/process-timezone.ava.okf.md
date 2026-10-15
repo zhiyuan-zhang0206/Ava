@@ -32,3 +32,11 @@ standalone configuration owner does not import a private operation from the
 root Settings facade. The exact entry module and its static `__all__` declare
 this operation alongside the owner's existing environment delivery interfaces.
 This change does not retire the legacy Settings facade or its full-build graph.
+
+## Backup filename test premise
+
+`base/tests/config/test_dotenv_file.py` places the host and decoy cluster zones
+26 hours apart, so their calendar dates differ at every instant. It samples
+before and after snapshot creation to tolerate crossing the host's midnight.
+Restoring the `TZ` environment variable also requires `time.tzset()` to restore
+the C library's cached timezone for later tests.

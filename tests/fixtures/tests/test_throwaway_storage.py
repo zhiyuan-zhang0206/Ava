@@ -1,5 +1,3 @@
-"""The fixture's explicit storage override reaches real, isolated Postgres clusters."""
-
 from __future__ import annotations
 
 import os
@@ -13,7 +11,6 @@ _PROBE = Path(__file__).with_name("child_throwaway_storage.py")
 
 
 def test_ci_throwaway_storage_reaches_separate_clusters_and_cleans_them() -> None:
-    # Postgres Unix sockets need a short path, including on macOS.
     with tempfile.TemporaryDirectory(prefix="ava-ci-pg-", dir="/tmp") as directory:
         scratch = Path(directory) / "pg"
         scratch.mkdir()

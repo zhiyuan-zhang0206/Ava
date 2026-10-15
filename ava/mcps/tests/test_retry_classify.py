@@ -1,5 +1,3 @@
-"""An MCP tool with an uncertain result must not execute twice."""
-
 from __future__ import annotations
 
 import asyncio
@@ -61,7 +59,7 @@ def test_unrelated_io_failure_is_not_a_transport_retry() -> None:
 
 def test_daemon_reply_lost_does_not_fall_back_locally(monkeypatch: pytest.MonkeyPatch) -> None:
     sock = MagicMock()
-    sock.recv.return_value = b""  # daemon may have executed the tool
+    sock.recv.return_value = b""
     client = remote_mod.RemoteMCPClient("unused")
     monkeypatch.setattr(socket, "socket", MagicMock(return_value=sock))
 

@@ -1,5 +1,3 @@
-"""`base.agents.history.hierarchy.serve` — stored nodes served with their two cost figures."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -38,7 +36,7 @@ def node(
 ) -> StoredNode:
     return StoredNode(
         id=node_id,
-        depth=level,  # StoredNode.depth is the ENGINE level (1 = finest)
+        depth=level,
         span_start=span[0],
         span_end=span[1],
         start_ts=start,
@@ -78,8 +76,8 @@ def test_a_node_carries_the_cost_of_the_job_or_check_that_wrote_it() -> None:
     check = GenerationUsage(calls=1, input=50, cache_read=0, output=9, seconds=3.0)
     nodes = [
         node(1, level=1, span=(0, 2), job_id=7),
-        node(2, level=1, span=(3, 4), job_id=7),  # a second group of the same job
-        node(3, level=1, span=(5, 5)),  # written before the link existed
+        node(2, level=1, span=(3, 4), job_id=7),
+        node(3, level=1, span=(5, 5)),
         node(4, level=2, span=(0, 4), check_key="ck"),
     ]
     first, second, unlinked, parent = serve_nodes(
@@ -124,7 +122,7 @@ def test_a_node_is_placed_on_the_read_times_of_its_first_and_last_message() -> N
     )
     assert (first.start, first.end) == (T0, T0 + timedelta(minutes=5))
     assert (second.start, second.end) == (T0 + timedelta(minutes=5), T0 + timedelta(minutes=9))
-    assert first.end <= second.start  # the stored times of these two overlapped
+    assert first.end <= second.start
     assert (parent.start, parent.end) == (T0, T0 + timedelta(minutes=9))
 
 
@@ -132,8 +130,6 @@ def test_a_node_sits_on_the_blocks_it_covers_so_neighbours_abut_where_their_span
     def at(minute: int) -> datetime:
         return T0 + timedelta(minutes=minute)
 
-    # Message 2 is a turn whose generation began when message 1 was read: its thinking block
-    # starts at minute 1, not at its own read time (minute 4).
     blocks = [
         DisplayBlock("inbound", 0, 0, at(0), at(0), "user", "hi"),
         DisplayBlock("inbound", 1, 1, at(1), at(1), "user", "again"),
@@ -154,6 +150,6 @@ def test_a_node_sits_on_the_blocks_it_covers_so_neighbours_abut_where_their_span
         blocks,
     )
     assert (first.start, first.end) == (at(0), at(1))
-    assert (second.start, second.end) == (at(1), at(6))  # not minute 4: its thinking is its own
+    assert (second.start, second.end) == (at(1), at(6))
     assert first.end == second.start
     assert (parent.start, parent.end) == (at(0), at(6))

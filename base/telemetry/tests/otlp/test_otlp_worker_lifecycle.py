@@ -1,5 +1,3 @@
-"""Real owned Thread proofs for bounded OTLP init, flush and teardown."""
-
 from __future__ import annotations
 
 import threading
@@ -245,7 +243,7 @@ def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk(
     event = otlp_test_event()
     backend.defer_until_exit()
     backend.export_batch([event])
-    assert reads == []  # holding remains cold; the flag is read only at bring-up
+    assert reads == []
     result = backend.shutdown()
     assert reads == [False]
     assert backend._closed.is_set()

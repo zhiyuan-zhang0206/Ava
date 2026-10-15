@@ -1,5 +1,3 @@
-"""Schema reset convergence and partial-history protection."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,13 +29,9 @@ def test_apply_pending_squashes_orphaned_applied_names(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The v0.1.0 reset scenario: the DB's applied set holds pre-reset migration
-    names whose files no longer exist in migrations/. apply converges them away
-    (schema unchanged — the baseline already carries their effect) and then
-    applies what is pending; a second apply is a no-op."""
-    _ = db_conn  # fixture reseeds the baseline
+    _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
-    init_repo(tmp_path)  # migrations/ = tmp_path, git-tracked anchor applies
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
@@ -58,9 +52,6 @@ def test_apply_pending_squash_then_apply_pending(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Squash and forward-apply compose in one call: an orphaned pre-reset name
-    is converged away AND a pending migration (the v010 anchor, say) applies
-    in the same run."""
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
     (tmp_path / f"{SYN}.sql").write_text("CREATE TABLE syn_squash_t (id int);")
@@ -89,9 +80,6 @@ def test_squash_does_not_touch_baseline_or_pending(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Convergence is precise: the baseline sentinel is never deleted, and a name
-    that is BOTH applied and present as a file is not touched (its row stays,
-    nothing to squash)."""
     _ = db_conn
     (tmp_path / f"{SYN}.sql").write_text("CREATE TABLE syn_keep_t (id int);")
     init_repo(tmp_path)
@@ -100,9 +88,7 @@ def test_squash_does_not_touch_baseline_or_pending(
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (SYN,))
     try:
         with psycopg.connect(db_url()) as fresh:
-            assert (
-                apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
-            )  # SYN applied; nothing pending
+            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(BASELINE_NAME,), (SYN,)]
@@ -118,25 +104,17 @@ def test_squash_authority_checked_even_without_pending(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A squash is a mutation: a non-gateway checkout that would only ever
-    trigger the squash path (no pending files) must still be refused."""
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
     init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
-        # Give the DB a gateway identity so _assert_migration_authority has
-        # something to refuse: without any machine_units rows the authority
-        # check passes vacuously (a fresh, unclaimed DB).
         c.execute(
             "INSERT INTO machine_units (machine_name, home, serve_gateway) "
             "VALUES ('real-gateway', '/real/home', true)"
         )
     try:
-        # Point the checkout identity somewhere that is NOT the DB's gateway
-        # unit; _assert_migration_authority must fire even though pending == [].
-
         monkeypatch.setenv("AVA_HOME", str(tmp_path / "not-the-gateways-home"))
         from base.deploy.schema.migrations import MigrationAuthorityMismatch
 
@@ -144,7 +122,7 @@ def test_squash_authority_checked_even_without_pending(
             try:
                 apply_pending_migrations(fresh, machine_name=machine_identity.name)
             except MigrationAuthorityMismatch:
-                pass  # expected: squash refused for non-gateway
+                pass
             else:
                 raise AssertionError("squash without authority must be refused")
     finally:
@@ -160,8 +138,6 @@ def test_squash_logs_the_converged_names(
     loguru_records: list[dict[str, Any]],
     machine_identity: MachineIdentity,
 ) -> None:
-    """The convergence is loud: the log names every orphaned applied name so an
-    operator can audit what the reset folded away."""
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
     init_repo(tmp_path)
@@ -185,13 +161,10 @@ def test_squash_refuses_partial_pre_reset_history(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """P1 guard: a DB holding only PART of the pre-v0.1.0 history must be
-    refused, never silently converged — deleting its tracking rows would
-    certify a schema that never ran the missing migrations."""
     from base.deploy.schema.migrations import V010_PRE_RESET_SET, MigrationHistoryGap
 
     assert len(V010_PRE_RESET_SET) == 59, "frozen set drifted"
-    partial = sorted(V010_PRE_RESET_SET)[:24]  # the 8/1-cluster shape
+    partial = sorted(V010_PRE_RESET_SET)[:24]
     init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
@@ -203,7 +176,6 @@ def test_squash_refuses_partial_pre_reset_history(
             pytest.raises(MigrationHistoryGap),
         ):
             apply_pending_migrations(fresh, machine_name=machine_identity.name)
-        # nothing was deleted by the refusal
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM schema_migrations")
             surviving = cur.fetchone()
@@ -220,9 +192,6 @@ def test_squash_converges_full_pre_reset_history(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A DB that ran the COMPLETE pre-reset history converges cleanly: the
-    baseline carries the net effect of all 59, so deleting their tracking rows
-    is safe and leaves applied == required."""
     from base.deploy.schema.migrations import V010_PRE_RESET_SET
 
     all_names = sorted(V010_PRE_RESET_SET)
@@ -249,9 +218,6 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A pre-reset-era name NOT in the frozen set is an unknown: the guard
-    ignores it (it is not part of the squashed history), and convergence still
-    deletes it like any other orphan — the frozen set only gates the 59."""
     _ = db_conn
     init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
@@ -302,8 +268,6 @@ def test_current_reset_converges_complete_history(
         set_table_to,
     )
 
-    # Concurrent upstream deltas remain executable and are already represented
-    # in this test DB's schema. Preserve their stamps when modeling the reset.
     predecessor = set(PRE_RESET_SET) | (set(schema_sql_stamped_migration_names()) - {RESET_ANCHOR})
     set_table_to(db_conn, "set", predecessor)
     with psycopg.connect(db_url()) as conn:
@@ -357,8 +321,6 @@ def test_reset_anchor_and_history_deletion_roll_back_together(
         raise RuntimeError("interrupted after history deletion")
 
     monkeypatch.setattr(migrations, "squash_history", interrupted)
-    # Autocommit removes any incidental outer transaction: the reset itself
-    # must own its atomicity even when no caller transaction can rescue it.
     with psycopg.connect(db_url(), autocommit=True) as conn:
         with pytest.raises(RuntimeError, match="interrupted"):
             migrations.apply_pending_migrations(conn, machine_name=machine_identity.name)

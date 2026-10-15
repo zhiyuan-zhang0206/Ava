@@ -1,5 +1,3 @@
-"""Resource prerequisites follow fixture dependencies rather than test paths."""
-
 from pathlib import Path
 
 import pytest
@@ -16,7 +14,6 @@ def test_direct_unit_does_not_request_e2e_process_environment(
 def test_missing_frontend_skips_only_its_fixture_consumers(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A separate pytest process owns Playwright's soft-assertion scope and bootstrap.
     monkeypatch.setenv("PYTHONPATH", str(Path(__file__).resolve().parents[2]))
     pytester.makeconftest(
         """
@@ -63,16 +60,6 @@ def test_missing_frontend_skips_only_its_fixture_consumers(
 def test_browser_contexts_need_no_minted_credentials(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A session without the e2e stack still creates browser contexts.
-
-    The visual-baselines workflow renders `tests/e2e/visual/test_visual_regression.py`
-    standalone — no `e2e_process_env`, no gateway. Its session runs with the autouse
-    client-credential hook installed but nothing minted, so `install_browser_login`'s
-    serving probe must answer "nothing to log in to" without a request; a probe that
-    reaches for the missing mint turns every context creation into a setup error. The
-    child session reproduces that exact shape: the real hook from the real fixture
-    module, and no mint.
-    """
     monkeypatch.setenv("PYTHONPATH", str(Path(__file__).resolve().parents[2]))
     pytester.makeconftest(
         """

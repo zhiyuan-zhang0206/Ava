@@ -1,11 +1,3 @@
-"""Shell-closure notices written by the stop's `terminals` phase (issue #2044).
-
-Real persistent shells in a real pty-sessions service, closed by `ava stop`: which
-notices are built, where in the stop they are written (before the data plane stops,
-over one dial that depends on the unit's roles), and what a failed write does to
-the stop.
-"""
-
 from __future__ import annotations
 
 import shlex
@@ -55,7 +47,6 @@ def test_busy_fixture_waits_for_the_job_after_a_login_helper(
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
 ) -> None:
-    """A login-profile child is not evidence that the requested job started."""
     name = "ava-agent-987-shell-2044-login-readiness"
     release = home / "release-login-helper"
     startup = home / "login-helper.py"
@@ -76,8 +67,6 @@ def test_busy_fixture_waits_for_the_job_after_a_login_helper(
             release.touch()
         return output
 
-    # Release the native profile gate on its first real captured output. The
-    # old child-existence helper returns before this and sees no job marker.
     monkeypatch.setattr(pty_shells, "screen", screen)
     try:
         busy_session(home, name, jobs.TERM_OK, pty_reaper)
@@ -97,8 +86,6 @@ def test_stop_records_notice_for_verified_closed_busy_session(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A busy session verified closed gets one notice, written by the stop
-    itself (issue #2044)."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     name = "ava-agent-987-shell-2044-busy"
@@ -146,10 +133,6 @@ def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_s
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The write is one call inside the `terminals` phase, with the database
-    still up: a gateway unit dials its own Postgres directly, a runner-only
-    unit (no local data plane to stop) dials its configured URL. Nothing is
-    written once the data-plane phase has begun."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     command_runtime.machine.set(role=roles)
@@ -197,8 +180,6 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """End to end through the real write: the owner of the closed busy session
-    has one pending system inbound naming the closure when the stop returns."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     monkeypatch.setattr(pty_close_notices, "write_notices", WRITE_NOTICES)
@@ -248,9 +229,6 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The database became unreachable after the stop began: the notice is not
-    dropped quietly — stderr names its agent and session — and the stop, whose
-    terminals are closed either way, still succeeds."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
 
@@ -289,9 +267,6 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """No service listens: what its ledger last saw running was lost to the service dying,
-    before this stop, so the owner is told that — even when the crash had already ended
-    every process of the session — and the stop's own hold is not blamed."""
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
     child = subprocess.Popen(["true"])

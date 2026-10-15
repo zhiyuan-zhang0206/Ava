@@ -1,5 +1,3 @@
-"""Manual compaction SDK validates exact source, receipt, status and retry inputs."""
-
 import contextlib
 import io
 import json
@@ -69,7 +67,7 @@ def test_fixed_routes_keep_original_source_and_distinguish_status() -> None:
         return httpx.Response(202 if len(calls) == 2 else 200, json=body.model_dump(mode="json"))
 
     with (
-        patch.dict(os.environ),  # restore the cold config owner's real environment delivery
+        patch.dict(os.environ),
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
         use_client(http),
     ):

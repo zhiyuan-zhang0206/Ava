@@ -1,5 +1,3 @@
-"""Bounded checkout dependency checks, including real isolated import evidence."""
-
 from __future__ import annotations
 
 import subprocess
@@ -72,8 +70,6 @@ def test_real_isolated_import_detects_damage_without_writes(
     tmp_path: Path,
     damage: str,
 ) -> None:
-    # A disposable stdlib-only venv with four tiny packages. No production files
-    # or uv invocation; the real child must discover its own site-packages.
     (tmp_path / ".venv/bin/python").unlink()
     venv.EnvBuilder(with_pip=False, symlinks=True).create(tmp_path / ".venv")
     site = next((tmp_path / ".venv/lib").glob("python*/site-packages"))
@@ -84,7 +80,6 @@ def test_real_isolated_import_detects_damage_without_writes(
         package.mkdir()
         if damage != "hollow":
             (package / "__init__.py").write_text("")
-    # Even a good shadow package on PYTHONPATH must not hide the missing one.
     shadow = tmp_path / "shadow"
     shadow.mkdir()
     (shadow / "psycopg.py").write_text("")

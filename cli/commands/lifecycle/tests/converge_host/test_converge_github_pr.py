@@ -1,9 +1,3 @@
-"""Converge github-PR step: fail fast when this host cannot open+merge memory PRs.
-
-The step asks `github_pr_blocker` about the converge context's own `Host`, so each case scripts
-what that host finds and answers instead of replacing the blocker.
-"""
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -63,7 +57,7 @@ def test_raises_when_gh_is_not_authenticated(
     )
     with pytest.raises(RuntimeError, match="not authenticated"):
         cv.ensure_github_pr(ctx)
-    assert commands.argvs == [("gh", "auth", "status")]  # asked through the context's own host
+    assert commands.argvs == [("gh", "auth", "status")]
 
 
 def test_raises_when_pr_blocked(
@@ -75,7 +69,7 @@ def test_raises_when_pr_blocked(
         tmp_path,
         operator_database=operator_database,
         producer=operator_pipeline,
-        host=fake_host(),  # no `gh` on this host
+        host=fake_host(),
     )
     with pytest.raises(RuntimeError, match="gh CLI not installed"):
         cv.ensure_github_pr(ctx)
@@ -86,16 +80,15 @@ def test_skips_on_single_box(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """A single box (also carries gateway) consolidates memory locally — skip the gate."""
     commands = FakeCommands()
     ctx = _ctx(
         tmp_path,
         operator_database=operator_database,
         producer=operator_pipeline,
-        host=fake_host(commands),  # no `gh` here: running the gate would raise
+        host=fake_host(commands),
         roles=frozenset({"gateway", "agent-runner"}),
     )
-    cv.ensure_github_pr(ctx)  # no raise
+    cv.ensure_github_pr(ctx)
     assert commands.calls == []
 
 
@@ -104,15 +97,14 @@ def test_skips_when_opt_out(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """AVA_REQUIRE_GITHUB_PR=false opts a split runner out of the gate."""
     ctx = _ctx(
         tmp_path,
         operator_database=operator_database,
         producer=operator_pipeline,
-        host=fake_host(),  # no `gh` here: running the gate would raise
+        host=fake_host(),
     )
     ctx.config.set_field("require_github_pr", False)
-    cv.ensure_github_pr(ctx)  # no raise
+    cv.ensure_github_pr(ctx)
 
 
 def test_step_registered_agent_runner_only() -> None:

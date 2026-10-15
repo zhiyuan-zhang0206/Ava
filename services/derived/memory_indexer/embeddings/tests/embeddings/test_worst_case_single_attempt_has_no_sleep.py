@@ -1,5 +1,3 @@
-"""Embeddings cases: worst case single attempt has no sleep."""
-
 from __future__ import annotations
 
 import asyncio
@@ -61,7 +59,6 @@ def test_worst_case_single_attempt_has_no_sleep(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_factory_default_is_gemini(model_catalog: ModelCatalog) -> None:
-    """The unset switch yields the Gemini provider — behavior unchanged."""
     from base.config import settings
 
     assert settings.services.embedding_backend == "gemini"
@@ -79,9 +76,6 @@ def test_factory_default_is_gemini(model_catalog: ModelCatalog) -> None:
 def test_factory_unknown_backend_fails_fast(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
-    """An unrecognized AVA_EMBEDDING_BACKEND must not silently fall back to
-    gemini — a typo would keep the old provider while the operator believes
-    the switch happened."""
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "embedding_backend", "openai")
@@ -97,7 +91,6 @@ def test_factory_unknown_backend_fails_fast(
 def test_factory_provider_named_dispatch(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
-    """AVA_EMBEDDING_BACKEND=gemini yields the Gemini adapter."""
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "embedding_backend", "gemini")
@@ -121,7 +114,6 @@ def test_embed_trickle_total_deadline(
     attempts: int,
     model_catalog: ModelCatalog,
 ) -> None:
-    """Bound one attempt AND retry exhaustion on real sockets, despite timely reads."""
     from base.host.net import resilience
 
     endpoint, requests = trickle_server
@@ -161,7 +153,6 @@ def test_embed_trickle_total_deadline(
     assert isinstance(error.value.__cause__, httpx.ReadTimeout)
     assert len(requests) == attempts
     assert attempts * timeout <= elapsed < attempts * (timeout + 0.2)
-    # Even all retries finish before one complete 2s trickle response.
     assert elapsed < 2
 
 
@@ -173,7 +164,6 @@ def test_embed_compressed_trickle_deadline(
     mode: str,
     model_catalog: ModelCatalog,
 ) -> None:
-    """Gzip metadata cannot hide body reads from the deadline or retry budget."""
     from base.host.net import resilience
 
     timeout = 0.2
@@ -213,7 +203,6 @@ def test_embed_compressed_trickle_deadline(
         assert isinstance(error.value.__cause__, httpx.ReadTimeout)
         assert len(requests) == attempts
         assert attempts * timeout <= elapsed < attempts * (timeout + 0.2)
-        # All retries must end before the first gzip filename finishes dripping (2.25s).
         assert elapsed < 2
 
 
@@ -227,7 +216,6 @@ def test_embed_framing_drip_deadline(
     attempts: int,
     model_catalog: ModelCatalog,
 ) -> None:
-    """Chunk extensions and trailers cannot hide timely reads from cancellation."""
     from base.host.net import resilience
 
     timeout = 0.2
@@ -285,12 +273,11 @@ def test_embed_framing_drip_deadline(
         assert len(started_attempts) == attempts
         assert framing_started.is_set()
         assert attempts * timeout <= elapsed < attempts * (timeout + 0.2)
-        assert elapsed < 2  # Cancel all attempts before one framing drip completes.
+        assert elapsed < 2
 
 
 @pytest.mark.parametrize("chunked", [False, True])
 def test_embed_gzip_response_round_trip(monkeypatch: pytest.MonkeyPatch, chunked: bool) -> None:
-    """HTTPX decoding preserves gzip, including chunked transfer."""
     with embedding_server(compressed=True, chunked=chunked, drip=False) as (endpoint, requests):
         monkeypatch.setattr(gemini, "ENDPOINT", endpoint)
         result = _provider().embed_batch(["hello"])
@@ -307,7 +294,6 @@ def test_embed_slow_error_body_preserves_status(
     status: int,
     model_catalog: ModelCatalog,
 ) -> None:
-    """Real HTTPX rejects error headers immediately, preserving classification and delay."""
     from base.host.net import resilience
 
     classified: list[Exception] = []
@@ -358,9 +344,9 @@ def test_embed_slow_error_body_preserves_status(
             result = invoke()
             np.testing.assert_array_equal(result, np.ones((1, DIM), dtype=np.float32))
             assert len(requests) == 2
-            assert retry_waits == [7.0]  # Retry-After wins over the tiny policy backoff.
+            assert retry_waits == [7.0]
         elapsed = time.monotonic() - started
-        assert elapsed < 0.25  # The error body would take 2s; even one timeout is 0.3s.
+        assert elapsed < 0.25
         assert len(classified) == 1
         status_error = classified[0]
         assert isinstance(status_error, httpx.HTTPStatusError)
@@ -372,7 +358,6 @@ def test_embed_slow_error_body_preserves_status(
 def test_sync_embed_slow_resolver_deadline(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
-    """The sync caller returns at the deadline while its DNS thread finishes later."""
     real_getaddrinfo = socket.getaddrinfo
     finished = threading.Event()
     resolver_calls: list[object] = []
@@ -404,11 +389,10 @@ def test_sync_embed_slow_resolver_deadline(
             elapsed = time.monotonic() - started
             assert isinstance(error.value.__cause__, httpx.ReadTimeout)
             assert len(resolver_calls) == 1
-            assert not requests  # Cancellation occurs before opening the local socket.
+            assert not requests
             assert 0.1 <= elapsed < 0.3
             assert not finished.is_set()
         finally:
-            # Join our finite stub before its monkeypatch and server are torn down.
             assert finished.wait(timeout=2)
 
 

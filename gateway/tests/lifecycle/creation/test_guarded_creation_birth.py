@@ -1,5 +1,3 @@
-"""Guarded plain creation retains its original birth across mutable launch state."""
-
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from typing import Any, LiteralString
@@ -76,8 +74,6 @@ def test_original_manifest_precedes_mutable_config_and_defaults(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Omitted server-side placement remains the same semantic request. A later
-    # default or operator overlay must not redefine the committed launch manifest.
     body = {"prompt": "one goal", "prompt_source": "user"}
     first = client.post(PATH, json=body, headers=HEADERS)
     assert first.status_code == 201, first.text

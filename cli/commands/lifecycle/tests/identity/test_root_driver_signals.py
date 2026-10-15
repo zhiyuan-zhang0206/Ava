@@ -1,8 +1,3 @@
-"""Root driver signal delivery: pid reuse, start-tick identity and reaping boundaries.
-
-Split from `test_root_driver.py`, which holds the readiness and launch-input tests and the shared helpers.
-"""
-
 from __future__ import annotations
 
 import os
@@ -19,7 +14,6 @@ from cli.commands.lifecycle.tests.test_root_driver import (
     status,
 )
 
-# Keep the public readiness entry point real when this owner suite reaches it.
 pytestmark = pytest.mark.real_service_readiness_gate
 
 
@@ -30,7 +24,7 @@ def _mock_pidfd_delivery(monkeypatch: pytest.MonkeyPatch, signals: list[str]) ->
         return os.open(os.devnull, os.O_RDONLY)
 
     def deliver(descriptor: int, signum: int) -> None:
-        os.fstat(descriptor)  # The native handle must remain open during delivery.
+        os.fstat(descriptor)
         signals.append("term" if signum == signal.SIGTERM else "kill")
 
     monkeypatch.setattr(proc_tree, "sys", SimpleNamespace(platform="linux"))
@@ -64,15 +58,13 @@ def test_signals_reject_reuse_inside_legacy_birth_tolerance(
         return NativeProcess()
 
     def live(_self: OwnedProcess) -> bool:
-        # The old generation was alive at the pre-observation. PID reuse happens
-        # before the signal's psutil handle is captured.
         return True
 
     def capture(_process: object) -> OwnedProcess:
         return replacement
 
     def legacy_match(_self: OwnedProcess, _process: object) -> bool:
-        return True  # Both births fit the retired +/- 2 second compatibility window.
+        return True
 
     monkeypatch.setattr(psutil, "Process", process)
     monkeypatch.setattr(OwnedProcess, "live", live)
@@ -170,8 +162,6 @@ def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(
         while psutil.Process(pid).status() != psutil.STATUS_ZOMBIE:
             assert time.monotonic() < deadline, "child did not exit"
             time.sleep(0.01)
-        # Popen cleans its abandoned-child table here. Our retained child must
-        # stay unreaped while the caller retains it after the launch returns.
         subprocess.run([sys.executable, "-c", "pass"], check=True, timeout=5)
         assert psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
     finally:

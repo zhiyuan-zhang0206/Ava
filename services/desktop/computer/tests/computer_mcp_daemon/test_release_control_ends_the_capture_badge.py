@@ -1,10 +1,3 @@
-"""Computer mcp daemon cases: handing the screen over ends the capture badge.
-
-The helper shows the badge itself, per input, on the window the input lands on; the daemon
-only asks it to end the badge when the screen is released. That is display-only, so a failed
-stop is logged and never fails the release.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -47,7 +40,6 @@ async def test_a_refused_release_keeps_the_badge(
 ) -> None:
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     assert (await call(d, "type_text", {"text": "hi"}))["ok"] is True
-    # Another agent cannot end this agent's badge by releasing a screen it does not hold.
     refused = await call(d, "release_control", agent_id=8)
     assert refused["ok"] is False
     assert _stops(fake_helper) == 0

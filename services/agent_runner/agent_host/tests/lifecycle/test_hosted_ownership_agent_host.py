@@ -1,5 +1,3 @@
-"""The agent host settles and refuses turns according to hosted ownership."""
-
 import asyncio
 from unittest.mock import Mock
 from uuid import uuid4
@@ -39,13 +37,6 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
 ) -> None:
-    """The optional Redis announce is downstream of the durable status flip.
-
-    Model the exact half-open #5740 boundary: admission committed ``running``,
-    then PUBLISH parked before the graph could claim its pending inbound. A
-    work-task cancellation at that await must still settle the same incarnation
-    to ``idling``; its live host lease must not preserve a false running row.
-    """
     from base.native_process.turn_identity import HostedTurnResources
     from services.agent_runner.agent_host.host import AgentHost
 
@@ -91,9 +82,6 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
         catalog=model_catalog,
         commands=CommandCatalog(skills=list),
     )
-    # Exercise the owned work task itself. ``run_turn`` deliberately shields
-    # this inner task from scheduler cancellation; injecting cancellation at
-    # the exact inner boundary proves that boundary is independently clean.
     task = asyncio.create_task(host._run_turn(agent_id, resources=HostedTurnResources()))
     await asyncio.wait_for(announce_entered.wait(), timeout=2.0)
     assert db_conn.execute(

@@ -1,11 +1,3 @@
-"""Tests for gateway/schedules/router.py — the /api/schedules HTTP surface.
-
-Driven through gateway_test_client() against the real test DB. The manager's session
-control paths (sync/capture) are neutralized by the autouse
-`_guard_schedule_manager` fixture, so these assert HTTP + DB behavior; the
-manager's real convergence logic is covered in test_schedule_manager.py.
-"""
-
 from __future__ import annotations
 
 import psycopg
@@ -65,8 +57,6 @@ class TestReadUpdateDelete:
             assert client.get("/api/schedules/9999").status_code == 404
 
     def test_list_omits_script(self, db_conn: psycopg.Connection) -> None:
-        # The gateway lifespan seeds nothing: the built-in schedules are provisioned
-        # by the schedule-manager service at its start, so the list is the created row.
         with gateway_test_client() as client:
             _create(client, name="a")
             rows = client.get("/api/schedules").json()
@@ -80,7 +70,7 @@ class TestReadUpdateDelete:
             r = client.put(f"/api/schedules/{sid}", json={"description": "changed"})
         assert r.status_code == 200
         assert r.json()["description"] == "changed"
-        assert _versions(db_conn, "e") == ["initial"]  # no new version for a metadata-only edit
+        assert _versions(db_conn, "e") == ["initial"]
 
     def test_put_invalid_script_400(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
@@ -99,7 +89,6 @@ class TestReadUpdateDelete:
     def test_put_enabled_change_routes_through_immediate_session_sync(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The CLI's update --disable surface shares stop's immediate reap path."""
         from gateway.schedules import session_control
 
         synced: list[int] = []
@@ -119,7 +108,6 @@ class TestReadUpdateDelete:
     def test_put_same_enabled_value_does_not_sync(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A no-op --enable must not interrupt an already-live schedule."""
         from gateway.schedules import session_control
 
         synced: list[int] = []
@@ -153,10 +141,6 @@ class TestSyncRequests:
     def test_control_writes_one_queued_request_per_schedule(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """The API does not call the schedule-manager service: start / stop / delete
-        leave a row it consumes. Repeats for one schedule collapse to one row, and a
-        deleted schedule's request survives its row (the orphan session still needs
-        killing)."""
         with gateway_test_client() as client:
             sid = _create(client, name="q", enabled=False).json()["id"]
             client.post(f"/api/schedules/{sid}/start")
@@ -219,9 +203,6 @@ class TestLogsRuns:
     def test_logs_strips_trailing_blank_rows(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The live capture pads the screen to the terminal height — trailing
-        blank rows are stripped so `logs --lines N` shows the content tail
-        (the runner's output sits above blank display rows once scrolled)."""
         from gateway.schedules import session_control
 
         async def _fake_capture(schedule_id: int, lines: int) -> str:
@@ -237,22 +218,19 @@ class TestLogsRuns:
     def test_logs_small_lines_window_expands_to_display_height(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A `--lines N` smaller than the terminal height must still show the
-        runner's output: the capture window widens to cover the display
-        padding, blank rows are stripped, then the tail is trimmed to N."""
         from gateway.schedules import session_control
 
         seen: list[int] = []
 
         async def _fake_capture(schedule_id: int, lines: int) -> str:
             seen.append(lines)
-            return "line one\nline two\n\n\n\n"  # display-padded screen
+            return "line one\nline two\n\n\n\n"
 
         monkeypatch.setattr(session_control, "capture", _fake_capture)
         with gateway_test_client() as client:
             sid = _create(client, name="l").json()["id"]
             body = client.get(f"/api/schedules/{sid}/logs?lines=3").json()
-        assert seen == [200]  # window widened
+        assert seen == [200]
         assert body["source"] == "live"
         assert body["lines"] == ["line one", "line two"]
 
@@ -264,9 +242,6 @@ class TestLogsRuns:
         assert body["lines"] == []
 
     def test_logs_reads_pty_transcript_for_dead_session(self, db_conn: psycopg.Connection) -> None:
-        """No live session -> the schedule session's PTY transcript file
-        supplies the output: a finished/crashed runner's output survives the
-        session being reaped, where scrollback was lost."""
         from base.cluster import session_name
         from base.sessions.backend import get_shell_backend
 
@@ -288,9 +263,6 @@ class TestLogsRuns:
     def test_runs_default_limit_comes_from_display_config(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The implicit page is ``settings.display.schedules_runs_default_limit``
-        (``AVA_SCHEDULES_RUNS_DEFAULT_LIMIT``); the literal 50 is only that
-        field's default, not a hard-coded page size."""
         from base.config import settings
 
         monkeypatch.setattr(settings.display, "schedules_runs_default_limit", 1)
@@ -308,8 +280,6 @@ class TestLogsRuns:
             assert client.get("/api/schedules/9999/runs").status_code == 404
 
     def test_runs_shows_in_progress_null_row(self, db_conn: psycopg.Connection) -> None:
-        # QA P3-6: a run in progress (ok IS NULL) is visible in the run
-        # history — the "…" row the drawer renders for a live run.
         with gateway_test_client() as client:
             sid = _create(client, name="r2").json()["id"]
             with db_conn.cursor() as cur:
@@ -321,9 +291,6 @@ class TestLogsRuns:
         assert body[0]["note"] is None
 
     def test_runs_orders_newest_first_with_id_tiebreak(self, db_conn: psycopg.Connection) -> None:
-        # QA P3-4: ORDER BY ran_at DESC needs a secondary key — two rows with
-        # the same ran_at (same transaction timestamp here) must still come
-        # back newest-id-first, deterministically.
         with gateway_test_client() as client:
             sid = _create(client, name="r3").json()["id"]
             with db_conn.cursor() as cur:

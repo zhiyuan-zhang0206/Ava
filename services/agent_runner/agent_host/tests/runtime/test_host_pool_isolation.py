@@ -1,5 +1,3 @@
-"""Hosted turn admission preserves independent workload and control pools."""
-
 from __future__ import annotations
 
 from typing import Any, cast
@@ -38,7 +36,6 @@ class TestPoolIsolation:
     def test_pool_capacity_is_independent_of_agent_admission(
         self, monkeypatch: pytest.MonkeyPatch, turn_limit: int, database: Database
     ) -> None:
-        """Admitting more agents must not expand either database client pool."""
         from base.clock import SYSTEM_TIMERS
         from services.agent_runner.agent_host.pools import build_control_pool, build_shared_pool
 
@@ -62,7 +59,6 @@ class TestPoolIsolation:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A busy turn may use the work pool without consuming control capacity."""
         import services.agent_runner.agent_host.host as host_mod
         from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -102,7 +98,6 @@ class TestPoolIsolation:
             return False
 
         monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
-        # This force fixture has no strong native-work command.
         monkeypatch.setattr(host_mod, "recover_native_cancel", AsyncMock(return_value=True))
         monkeypatch.setattr(
             native_work,
@@ -125,7 +120,6 @@ class TestPoolIsolation:
         await host.run_turn(11)
 
         assert turn_pool.reads == 0
-        # Pre-turn config plus the quiescent compact source qualification.
         assert control_pool.reads == 2
         assert graph.observations[-1].ops_pool is turn_pool
         assert calls == [("admit", control_pool), ("settle", control_pool), ("force", control_pool)]

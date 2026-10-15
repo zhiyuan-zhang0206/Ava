@@ -1,5 +1,3 @@
-"""Gateway bootstrap publishes relay routing independently of local listeners."""
-
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -35,7 +33,6 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     operator_database: Callable[[], Any],
     command_machine: MachineIdentity,
 ) -> None:
-    """The current split and a mirrored-loopback migration both keep local ports."""
     (tmp_path / ".env").write_text(
         "AVA_MACHINE_SERVE_GATEWAY=true\n"
         f"AVA_DB_URL={config.settings.data_plane.db_url}\n"
@@ -76,8 +73,6 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     )
     monkeypatch.setattr(config.settings, "observability", settings)
     command_machine.set(name="relay-test-runner")
-    # The runner renders its relay from its capability's telemetry token (the
-    # gateway derived it from its secret); the runner holds no human secret.
     telemetry = telemetry_token("relay-test-token")
     capability = SimpleNamespace(api=SimpleNamespace(telemetry=telemetry))
 
@@ -150,7 +145,6 @@ def test_local_otlp_config_stays_host_owned(config_authority: ConfigAuthority) -
 
 
 def test_explicit_local_collector_endpoint_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Exercise a fresh Settings construction, not the module-load singleton.
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     local = ObservabilitySettings.model_validate({"AVA_TELEMETRY_OTLP_PORT": 4319})
     assert local.telemetry_otlp_endpoint == "http://127.0.0.1:4319"

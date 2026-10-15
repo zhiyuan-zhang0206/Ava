@@ -1,5 +1,3 @@
-"""Cross-domain stop budget for the backup scheduler's wedged executor."""
-
 import sys
 from pathlib import Path
 
@@ -12,9 +10,6 @@ from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 
 
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
-    """SIGTERM exits within the bound while a wedged default-executor job stands."""
-    # The exit bound only matters relative to the stop budget it protects:
-    # assert the relationship, not just the number.
     assert EXIT_BOUND_S + KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
     child = spawn_child(
         tmp_path,

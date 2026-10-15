@@ -1,6 +1,3 @@
-"""The circuit-breaker audit event is recorded in `audit_events`, and a failed write
-is reported without undoing the breaker (the state is already set)."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -108,7 +105,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
 
     monkeypatch.setattr(audit_events, "record_audit_standalone_async", refuse)
 
-    emitted_events.clear()  # spawning the agent above emitted its own events
+    emitted_events.clear()
 
     update = await _handle_fatal_llm_error(
         _overflow(),

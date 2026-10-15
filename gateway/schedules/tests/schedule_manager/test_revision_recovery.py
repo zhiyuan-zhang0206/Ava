@@ -1,5 +1,3 @@
-"""Convergence retries recover the existing revision, including acknowledgement loss."""
-
 from pathlib import Path
 
 import psycopg
@@ -99,7 +97,6 @@ def test_acknowledgement_loss_adopts_session_across_manager_restart(
     with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
         assert manager.ScheduleManager(pool).sync_one(sid)
-        # Simulate crash after convergence but before queue acknowledgement.
         assert requests.consume_requests(pool, manager.ScheduleManager(pool)) == 1
     assert backend.launches == 1
     assert backend.killed == []
@@ -237,7 +234,6 @@ def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """The one-second retry of a blocked sync request ends: error, one alert, request gone."""
     sid = _insert(db_conn)
     name = session_name(f"schedule-{sid}")
     backend.commands[name] = (
@@ -258,14 +254,14 @@ def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an
         mgr = manager.ScheduleManager(pool)
         session_control.enqueue_blocking(pool, sid)
         while clock["t"] < 1000.0 + manager.BLOCKED_GIVE_UP_AFTER_S:
-            assert requests.consume_requests(pool, mgr) == 0  # still blocked: requeued
+            assert requests.consume_requests(pool, mgr) == 0
             clock["t"] += 30
         assert emitted_events.names() == []
-        assert requests.consume_requests(pool, mgr) == 1  # the window ended: consumed
+        assert requests.consume_requests(pool, mgr) == 1
         killed = list(backend.killed)
         for _ in range(3):
             clock["t"] += 1
-            assert requests.consume_requests(pool, mgr) == 0  # nothing left to retry
+            assert requests.consume_requests(pool, mgr) == 0
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
     assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
         "error",
@@ -273,7 +269,7 @@ def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an
     assert emitted_events.names() == ["schedule_convergence_abandoned"]
     assert backend.killed == killed
     assert backend.launches == 0
-    assert name in backend.commands  # the process is left alone
+    assert name in backend.commands
 
 
 def test_a_failed_schedule_does_not_block_other_queued_revisions(

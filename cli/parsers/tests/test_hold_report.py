@@ -1,5 +1,3 @@
-"""`ava status` reports the maintenance hold: a human section, and `--json` for machine readers."""
-
 import json
 
 import pytest
@@ -17,7 +15,7 @@ def _json_hold(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
     args = build_parser().parse_args(["status", "--json"])
     assert args.func(args) == 0
     out = capsys.readouterr().out
-    assert out.count("\n") == 1  # one object, nothing else on stdout
+    assert out.count("\n") == 1
     return json.loads(out)["hold"]
 
 
@@ -33,8 +31,6 @@ _HOLD_KEYS = {"status", "operation", "acquired_at", "maintenance", "scope"}
 def test_status_json_hold_has_exactly_the_documented_keys(
     capsys: pytest.CaptureFixture[str], isolate: None
 ) -> None:
-    """The fleet update reads `status` and `maintenance.phase` from this object, so its shape is a
-    contract: a key added or dropped here must be a deliberate change to this set."""
     assert set(_json_hold(capsys)) == _HOLD_KEYS
     pause_owner.begin_maintenance("local", WHEN)
     assert set(_json_hold(capsys)) == _HOLD_KEYS

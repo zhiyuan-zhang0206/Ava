@@ -1,10 +1,3 @@
-"""`gateway.routers.fleet_tokens` — the fleet graph's token sums over every window shape.
-
-One agent has `llm_usage` rows across forty days. The ledger is rolled from those rows and the old
-days are folded, as the maintenance daemon would; each window then reads the totals, the ledger days
-and the raw tail in parts, and must equal the sum of the raw rows in that window.
-"""
-
 from __future__ import annotations
 
 import json
@@ -65,7 +58,7 @@ def _brute(db: psycopg.Connection, agent: int, start: datetime | None) -> tuple[
 @pytest.fixture
 def agent(db: psycopg.Connection) -> int:
     agent = _agent(db)
-    for age_hours in range(1, 24 * 40, 7):  # a row every seven hours for forty days
+    for age_hours in range(1, 24 * 40, 7):
         _usage(db, agent, _NOW - timedelta(hours=age_hours), 100 + age_hours, 10 + age_hours % 13)
     _usage(db, agent, _NOW - timedelta(minutes=5), 7, 3)
     yesterday = (_NOW - timedelta(days=1)).date()
@@ -87,9 +80,9 @@ def agent(db: psycopg.Connection) -> int:
         _NOW - timedelta(hours=24),
         _NOW - timedelta(hours=72),
         _NOW - timedelta(days=7),
-        datetime(2026, 6, 27, tzinfo=UTC),  # a window that starts on midnight
-        datetime(2026, 6, 25, 3, 17, tzinfo=UTC),  # starts mid-day
-        None,  # all time
+        datetime(2026, 6, 27, tzinfo=UTC),
+        datetime(2026, 6, 25, 3, 17, tzinfo=UTC),
+        None,
     ],
 )
 def test_every_window_equals_the_sum_of_its_raw_rows(

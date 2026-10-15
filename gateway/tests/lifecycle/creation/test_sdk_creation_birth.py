@@ -1,5 +1,3 @@
-"""The strong SDK recovers an immutable birth across Gateway lifespan restarts."""
-
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import UUID
@@ -41,8 +39,6 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     target: GatewayTestClient
 
     async def accept(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-        # Exercise the runner's real original-attempt/placement fence, rather
-        # than treating matching JSON as execution evidence.
         validate_launch_row(target.app.state.db_pool, body, local_machine=machine_identity.name())
         launches.append(body)
         return SpawnedAgent(id=body.agent_id)
@@ -87,15 +83,12 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
                 )
                 assert retry.status_code == 200, retry.text
                 assert retry.json()["launch_attempt_id"] != str(original)
-        # A new lifespan owns fresh pools and no prior acceptance cache.
         with gateway_test_client(
             headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
         ) as target:
             assert sdk() == agent_id
     assert http.post.call_count == lost_attempts + 1
     assert all(call == http.post.call_args_list[0] for call in http.post.call_args_list)
-    # Each replay before the rotation re-offers the original launch; a replay
-    # after it finds the attempt superseded and offers nothing.
     assert len(launches) == (lost_attempts if rotate else lost_attempts + 1)
     assert all(launch.launch_attempt_id == original for launch in launches)
     _assert_one_birth(db_conn, original)

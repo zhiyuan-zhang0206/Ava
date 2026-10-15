@@ -1,5 +1,3 @@
-"""Deep-history timeline: real-browser DOM bound and reproducible frame sample."""
-
 from __future__ import annotations
 
 import json
@@ -18,7 +16,7 @@ from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fixture_environment import E2EEnv
 
 ITEM_COUNT = 1200
-FRAME_SAMPLE_ROUNDS = 3  # Serial best-of-three sweeps reduce load jitter at the fixed p95 gate.
+FRAME_SAMPLE_ROUNDS = 3
 
 
 class _CDPSession(Protocol):
@@ -66,8 +64,6 @@ def _assert_bounded_sample(sample: _BoundedSample, kind: str) -> None:
         sample["frameMaxMs"]
         == sample["frameMaxRoundsMs"][sample["frameP95RoundsMs"].index(sample["frameP95Ms"])]
     ), sample
-    # The A/B frame gate uses identical primary-row content in every variant.
-    # Expanded turns also assert the DOM and prepend invariants above.
     if kind == "agent_chat":
         assert sample["frameP95Ms"] < 33, (
             f"frame p95 rounds (ms): {sample['frameP95RoundsMs']}",
@@ -117,8 +113,6 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
       if (!row) throw new Error('no visible reading anchor');
       return { id: row.dataset.itemId, viewportOffsetPx: row.getBoundingClientRect().top - viewportTop };
     }""")
-    # The DOM-window contract also supports keyboard paging. Arrival alone
-    # no longer fetches; native pull/release is covered by the anchor scenario.
     history_button = page.get_by_test_id("load-older-keyboard")
     history_button.focus()
     history_button.press("Enter")
@@ -203,7 +197,6 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
         Path(output).write_text(json.dumps(sample, indent=2, sort_keys=True) + "\n")
     _assert_bounded_sample(sample, kind)
 
-    # A bottom command supersedes the parked row, including expanded-turn windows.
     before_click = page.evaluate("""() => {
       const viewport = document.querySelector('[role=log]').closest('[data-slot=scroll-area-viewport]');
       const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');

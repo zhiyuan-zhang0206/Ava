@@ -1,5 +1,3 @@
-"""A retry hint is published only after the original hosted turn's durable cutoff."""
-
 import asyncio
 from functools import partial
 from unittest.mock import AsyncMock, Mock
@@ -159,8 +157,6 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
                                 (agent_id,),
                             ).fetchone()
                             assert row is not None and row[0] == "idling" and row[1] is not None
-                            # Off the event loop: the settlement's consume pass may hold the
-                            # agent's inbound-owner lock while this insert waits for it.
                             await asyncio.to_thread(_insert, db_conn, agent_id, "system:heartbeat")
                             assert not await admit_pending_wake(aops_pool, agent_id)
                             new_chats.append(

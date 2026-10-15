@@ -1,5 +1,3 @@
-"""Resurrecting an agent: row, inbound, hosted force-settle and wake behavior of `ops.lifecycle`."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -45,7 +43,6 @@ class TestResurrectAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Terminated -> unclaimed idling with durable resurrection and optional chat."""
         agent_id = hosted_agent(
             db_conn,
             config_authority=config_authority,
@@ -53,7 +50,6 @@ class TestResurrectAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        # simulate terminate path: UPDATE 'idling' → 'terminated' (retaining the hosted incarnation)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -70,9 +66,7 @@ class TestResurrectAgent:
         assert returned == agent_id
         row = agents_row(db_conn, agent_id)
         assert row is not None
-        assert row[2] == "idling"  # unclaimed, waiting for the host to admit and UPDATE 'running'
-        # resurrect inserts lifecycle inbound — content empty, trigger written to source field;
-        # prompt as chat inbound follows in the same transaction
+        assert row[2] == "idling"
         rows = inbound_rows(db_conn, agent_id)
         assert rows == [("", "resurrect", "user"), ("resume work", "chat", "user")]
 
@@ -88,9 +82,6 @@ class TestResurrectAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """The UI resurrect button is a pure lifecycle event — no prompt. Only
-        the kind='resurrect' marker inbound is written; no chat inbound. The
-        agent still wakes (the marker is the "ok I'm awake" signal)."""
         agent_id = hosted_agent(
             db_conn,
             config_authority=config_authority,
@@ -125,8 +116,6 @@ class TestResurrectAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """resurrected_by is written as-is into the inbound source field (not into content), so that claim
-        can compose it into the lifecycle marker during dispatch. SDK paths pass 'agent:N', gateway passes 'user'."""
         agent_id = hosted_agent(
             db_conn,
             config_authority=config_authority,
@@ -165,9 +154,6 @@ class TestResurrectAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A resurrect with a prompt writes two inbounds (lifecycle + chat); the chat inbound reuses
-        resurrected_by as its source — that value must survive envelope wrap, otherwise
-        the successor turn fails with a ValueError on its first claim (agent-240 incident)."""
         agent_id = hosted_agent(
             db_conn,
             config_authority=config_authority,
@@ -193,13 +179,10 @@ class TestResurrectAgent:
             ("", "resurrect", "user"),
             ("catch up with #341", "chat", "user"),
         ]
-        # The chat inbound's source must be a valid value accepted by the claim-side wrap
         for content, kind, source in rows:
             if kind == "chat":
                 assert source is not None
-                wrap_inbound(
-                    content, source, inputs=_ENVELOPE_INPUTS
-                )  # raises ValueError on illegal source
+                wrap_inbound(content, source, inputs=_ENVELOPE_INPUTS)
 
     def test_resurrect_nonexistent_raises_agent_not_found(
         self,
@@ -237,15 +220,6 @@ class TestResurrectAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Any status other than 'terminated' cannot be resurrected — only 'terminated' is a valid source state.
-
-        Full parametrization locks the contract that "resurrect refuses all states that are still alive or not fully dead".
-        Historically only running/idling were tested. The complete current
-        non-terminal set is covered explicitly — a regression that changed the guard
-        to `if current in [...]` and missed a value would silently let resurrect
-        send a revival notification to an agent that is "still running / still init'ing",
-        with the production consequence of a dual-incarnation race on the same agent_id.
-        """
         agent_id = hosted_agent(
             db_conn,
             config_authority=config_authority,
@@ -253,7 +227,6 @@ class TestResurrectAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        # the helper leaves 'idling'; other statuses are explicitly set via UPDATE for the test
         if alive_status != "idling":
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -270,7 +243,6 @@ class TestResurrectAgent:
                 prompt="test",
                 local_machine=machine_identity.name(),
             )
-        # The failure path must not insert inbound (transaction inner raise prevents commit)
         assert inbound_count(db_conn, agent_id) == 0
 
     def test_resurrect_select_update_race_does_not_insert_inbound(
@@ -285,20 +257,13 @@ class TestResurrectAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """SELECT sees 'terminated' → after SELECT the row is concurrently changed to 'idling' → UPDATE
-        WHERE status='terminated' hits 0 rows — at this point we must **not** proceed to INSERT a fake revival
-        notification for a already-live agent (that would send an hallucination signal to the running process).
-
-        Simulate: make the first fetchone falsely report 'terminated' while the underlying row is actually 'idling'
-        — equivalent to "status was rewritten after SELECT". The code must raise when UPDATE rowcount=0.
-        """
         agent_id = hosted_agent(
             db_conn,
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
-        )  # real status='idling'
+        )
 
         original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
         original_fetchone = psycopg.Cursor.fetchone
@@ -313,7 +278,6 @@ class TestResurrectAgent:
         def lying_fetchone(self: Any) -> Any:
             if id(self) in status_select_cursors:
                 status_select_cursors.remove(id(self))
-                # enter UPDATE while preserving placement
                 row = original_fetchone(self)
                 assert row is not None
                 return ("terminated", *row[1:])
@@ -332,10 +296,8 @@ class TestResurrectAgent:
                 local_machine=machine_identity.name(),
             )
 
-        # key invariant 1: did not deliver a fake notification to a live agent
-        monkeypatch.undo()  # restore fetchone so subsequent queries work
+        monkeypatch.undo()
         assert inbound_count(db_conn, agent_id) == 0
-        # key invariant 2: status unchanged (UPDATE 0 rows + raise rolls back entire transaction)
         row = agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "idling"
 
@@ -348,7 +310,6 @@ class TestResurrectAgent:
         *,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Both subclasses belong to ResurrectError — a coarse catch with ResurrectError can catch them."""
         with pytest.raises(ResurrectError):
             resurrect_agent(
                 database,

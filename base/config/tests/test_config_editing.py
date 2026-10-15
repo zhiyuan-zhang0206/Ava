@@ -1,13 +1,3 @@
-"""Pure unit tests for the shared config write-path policy
-(`base/config/admin/editing.py`) — the editability gate, the merge-patch reducer and
-the ConfigPatchPlan parser that PUT /api/config and the host-side
-config_write_op both consume.
-
-The HTTP behavior-level coverage lives in gateway/tests/routers/test_config_api.py;
-these tests lock the policy itself (gate matrix, scope routing, reducer
-semantics, scalar coercion) with synthetic metadata, no fixtures.
-"""
-
 import pytest
 
 from base.config import CONFIG_UNCHANGED_SENTINEL, ConfigFieldMeta, get_config_metadata
@@ -50,11 +40,7 @@ def _meta(
     )
 
 
-# ── field_editable: gate matrix (4 writable × remote_writable corners × 2 scopes × local/remote) ──
-
-# (scope, writable, remote_writable, is_remote, expected editable)
 GATE_CASES: list[tuple[str, bool, bool, bool, bool]] = [
-    # Cluster / agent scope: editable iff `writable`, regardless of locality.
     ("cluster", True, True, False, True),
     ("cluster", True, True, True, True),
     ("cluster", True, False, False, True),
@@ -64,12 +50,11 @@ GATE_CASES: list[tuple[str, bool, bool, bool, bool]] = [
         False,
         True,
         True,
-    ),  # writable -> passes the gate; routing sends it to remote_cluster_keys
+    ),
     ("cluster", False, True, False, False),
     ("cluster", False, True, True, False),
     ("cluster", False, False, False, False),
     ("cluster", False, False, True, False),
-    # Host scope: local -> `writable`; remote -> `remote_writable`.
     ("host", True, True, False, True),
     ("host", True, True, True, True),
     ("host", True, False, False, True),
@@ -79,9 +64,9 @@ GATE_CASES: list[tuple[str, bool, bool, bool, bool]] = [
         False,
         True,
         False,
-    ),  # tightened: a writable-only host field is not remotely editable
+    ),
     ("host", False, True, False, False),
-    ("host", False, True, True, True),  # heartbeat_enabled shape: remote-only toggle
+    ("host", False, True, True, True),
     ("host", False, False, False, False),
     ("host", False, False, True, False),
 ]
@@ -93,28 +78,17 @@ GATE_CASES: list[tuple[str, bool, bool, bool, bool]] = [
 def test_gate_matrix(
     scope: str, writable: bool, remote_writable: bool, is_remote: bool, editable: bool
 ) -> None:
-    """The editability gate is exactly the table: scope × locality × the two
-    writability flags. Anything else (e.g. a future `or` re-widening the remote
-    host gate) fails here."""
     meta = _meta("f", scope=scope, writable=writable, remote_writable=remote_writable)
     assert field_editable(meta, local=not is_remote) is editable
 
 
 def test_field_editable_consistent_with_metadata(config_authority: ConfigAuthority) -> None:
-    """Every real config field's editability follows the same rule the gate
-    implements — a drift lock: if someone flips writable / remote_writable on a
-    field (or the gate's rule), this test fails and the change is reviewed
-    explicitly. `local` is the Cluster view / own-host edit; `remote` is a
-    machine-addressed edit."""
     for meta in get_config_metadata(authority=config_authority):
         assert field_editable(meta, local=True) is meta.writable, meta.name
         if meta.scope == "host":
             assert field_editable(meta, local=False) is meta.remote_writable, meta.name
         else:
             assert field_editable(meta, local=False) is meta.writable, meta.name
-
-
-# ── split_reducer_patch ──
 
 
 def test_reducer_split_writes_and_removals() -> None:
@@ -133,8 +107,6 @@ def test_reducer_split_writes_and_removals() -> None:
 
 
 def test_reducer_sentinel_preserves_sensitive_field() -> None:
-    """A sensitive field carrying the unchanged-sentinel is neither written nor
-    removed — the round-trip protection behind the masked raw_overrides."""
     metas = {"s": _meta("s", sensitive=True)}
     writes, removals = split_reducer_patch({"s": CONFIG_UNCHANGED_SENTINEL}, metas)
     assert writes == {}
@@ -142,15 +114,10 @@ def test_reducer_sentinel_preserves_sensitive_field() -> None:
 
 
 def test_reducer_nonsensitive_field_can_hold_literal_sentinel() -> None:
-    """The sentinel-skip is gated on `sensitive`, so a non-sensitive field can be
-    set to the literal sentinel string."""
     metas = {"lit": _meta("lit")}
     writes, removals = split_reducer_patch({"lit": CONFIG_UNCHANGED_SENTINEL}, metas)
     assert writes == {"lit": CONFIG_UNCHANGED_SENTINEL}
     assert removals == set()
-
-
-# ── ConfigPatchPlan.parse ──
 
 
 def _metas() -> dict[str, ConfigFieldMeta]:
@@ -163,8 +130,6 @@ def _metas() -> dict[str, ConfigFieldMeta]:
 
 
 def test_parse_routes_by_scope_and_reduces() -> None:
-    """Local PUT: host keys go to host_body, cluster keys reduce into
-    writes/removals (null = explicit removal)."""
     plan = ConfigPatchPlan.parse(
         {"cluster_str": "v", "cluster_int": None, "host_str": "h"}, _metas(), is_remote=False
     )
@@ -183,15 +148,11 @@ def test_parse_reports_unknown_and_readonly_fields() -> None:
         {"nope": 1, "readonly": 1, "cluster_str": "v"}, metas, is_remote=False
     )
     assert plan.violations == ("nope", "readonly")
-    # Violating keys never reach the routed bodies.
     assert plan.host_body == {}
     assert plan.cluster_writes == {"cluster_str": "v"}
 
 
 def test_parse_remote_keeps_cluster_keys_separate() -> None:
-    """Remote PUT: cluster keys are not dropped into writes — they are reported
-    as remote_cluster_keys so the handler 400s with the machine-independent
-    message (the HTTP layer locks that message)."""
     plan = ConfigPatchPlan.parse({"cluster_str": "v", "host_str": "h"}, _metas(), is_remote=True)
     assert plan.violations == ()
     assert plan.host_body == {"host_str": "h"}
@@ -202,23 +163,18 @@ def test_parse_remote_keeps_cluster_keys_separate() -> None:
 
 
 def test_parse_remote_does_not_coerce_host_values() -> None:
-    """Host values are coerced/validated host-side by config_write_op — the
-    remote parse leaves them untouched."""
     plan = ConfigPatchPlan.parse({"host_str": "h"}, _metas(), is_remote=True)
     assert plan.host_body == {"host_str": "h"}
     assert plan.scalar_error is None
 
 
 def test_parse_coerces_cluster_scalars() -> None:
-    """A cluster scalar is normalized to its typed form before any write."""
     plan = ConfigPatchPlan.parse({"cluster_int": "5"}, _metas(), is_remote=False)
     assert plan.cluster_writes == {"cluster_int": 5}
     assert plan.scalar_error is None
 
 
 def test_parse_reports_first_bad_scalar() -> None:
-    """A malformed cluster scalar is reported atomically — nothing is coerced or
-    written, and the error detail names the field."""
     plan = ConfigPatchPlan.parse(
         {"cluster_int": True, "cluster_str": "v"}, _metas(), is_remote=False
     )
@@ -234,8 +190,6 @@ def test_parse_rejects_enum_outside_choices() -> None:
 
 
 def test_parse_local_rejects_readonly_host_toggle() -> None:
-    """The heartbeat_enabled shape: writable=False + remote_writable=True is
-    editable only through a machine-addressed PUT."""
     metas = _metas()
     metas["toggle"] = _meta("toggle", scope="host", writable=False, remote_writable=True)
     local = ConfigPatchPlan.parse({"toggle": False}, metas, is_remote=False)
@@ -247,20 +201,11 @@ def test_parse_local_rejects_readonly_host_toggle() -> None:
 
 
 def test_parse_remote_rejects_writable_only_host_field() -> None:
-    """The tightened corner: a writable-but-not-remote_writable host field
-    (cross_machine_transfer_backend / require_github_pr / pgbouncer_enabled /
-    memory_keep_local shape) is rejected at the gate on a machine-addressed PUT —
-    the host-side op would reject it anyway, so the gate now fails before the
-    dispatch. Locked at HTTP level by
-    test_put_remote_rejects_writable_non_remote_host_field."""
     metas = _metas()
     metas["wonly"] = _meta("wonly", scope="host", writable=True, remote_writable=False)
     plan = ConfigPatchPlan.parse({"wonly": 1}, metas, is_remote=True)
     assert plan.violations == ("wonly",)
     assert plan.host_body == {}
-
-
-# ── coerce_config_scalar ──
 
 
 def test_coerce_scalar_forms() -> None:
@@ -282,22 +227,11 @@ def test_coerce_scalar_forms() -> None:
         coerce_config_scalar("enum", "z", ["x", "y"])
 
 
-# ── real-field provisioning surface pins ──
-
-
-# Keys that decide who authenticates to this cluster. An authenticated caller (any machine token included)
-# must never choose them through a config write: the human bearer rotates only
-# through scripts/data_plane_ops/rotate_cluster_secret.py, the others by editing the gateway
-# `.env` on its host.
 _AUTHORITY_KEYS = {
     "cluster_secret": "AVA_CLUSTER_SECRET",
     "webhook_token": "AVA_ALERTS_WEBHOOK_TOKEN",
-    # Opens the /mcp authentication surface, where MCP client tokens (bound to
-    # no write generation) authenticate.
     "mcp_endpoint_enabled": "AVA_MCP_ENDPOINT_ENABLED",
 }
-# Credentials this cluster presents OUTWARD (to model providers, search and
-# chat APIs, backup stores): writable, they confer no authority over the cluster.
 _OUTBOUND_CREDENTIALS = {
     "ANTHROPIC_API_KEY",
     "BRAVE_API_KEY",
@@ -319,8 +253,6 @@ _OUTBOUND_CREDENTIALS = {
 def test_every_config_write_refuses_an_authority_key(
     field: str, config_authority: ConfigAuthority
 ) -> None:
-    """Setting or unsetting an authority key is a violation on the local and the
-    machine-addressed path alike, so nothing is written."""
     metas = {meta.name: meta for meta in get_config_metadata(authority=config_authority)}
     assert metas[field].env_var == _AUTHORITY_KEYS[field]
     for value in ("chosen-by-the-caller-" + "x" * 32, None):
@@ -331,9 +263,6 @@ def test_every_config_write_refuses_an_authority_key(
 
 
 def test_every_writable_secret_is_an_outbound_credential(config_authority: ConfigAuthority) -> None:
-    """A newly added sensitive field a config write may set must be classified
-    here: an outbound credential stays writable, anything that authenticates
-    callers to this cluster is read-only."""
     writable_secrets = {
         meta.env_var
         for meta in get_config_metadata(authority=config_authority)

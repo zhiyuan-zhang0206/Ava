@@ -1,5 +1,3 @@
-"""The per-start serving marker gates recovery actions until readiness succeeds."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,11 +20,6 @@ def state_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 def test_new_start_attempt_invalidates_a_previous_serving_generation(
     serving_root: RootBirth, state_path: Path
 ) -> None:
-    """A stale success marker cannot admit revival during a new failed boot.
-
-    Replacing the matching-generation check with an unconditional serving write
-    would let an earlier start mark the later attempt serving and fail this test.
-    """
     from base.deploy.lifecycle import start_serving
 
     previous = start_serving.begin_start()
@@ -42,7 +35,6 @@ def test_new_start_attempt_invalidates_a_previous_serving_generation(
 
 
 def test_clear_serving_keeps_revival_blocked(serving_root: RootBirth, state_path: Path) -> None:
-    """Stopping a host removes its authority to revive work."""
     from base.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start()
@@ -56,12 +48,6 @@ def test_clear_serving_keeps_revival_blocked(serving_root: RootBirth, state_path
 def test_start_waits_for_an_authorized_recovery_action(
     serving_root: RootBirth, state_path: Path
 ) -> None:
-    """A new start cannot close the gate between authorization and revival.
-
-    Removing the lock held by ``recovery_permitted`` would let the second
-    thread finish ``begin_start`` before the action completes, reproducing the
-    pre-readiness check-then-act race.
-    """
     from base.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start()
@@ -182,8 +168,6 @@ def test_direct_process_e2e_injects_only_its_explicit_fixture_gate(
     from base.deploy.lifecycle.tests.serving_entrypoint import inject_fixture_gate
 
     gate = tmp_path / "e2e-serving"
-    # Track the deliberate test-only injection so this pytest process restores
-    # both product functions even though the injection assigns them.
     monkeypatch.setattr(start_serving, "is_serving", start_serving.is_serving)
     monkeypatch.setattr(start_serving, "recovery_permitted", start_serving.recovery_permitted)
 

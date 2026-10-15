@@ -1,12 +1,3 @@
-"""The Grafana rules that replaced the in-code alert paths, gates and grace windows.
-
-Every rule here reads one declared event off the Loki stream; the table pins its event, its
-`for:` (the debounce the old code carried as "N consecutive rounds", a grace window or a
-transition clock), its severity and its threshold, and the checks below hold the contract that
-cannot drift silently: the event is declared, the labels a rule groups by are fields the event
-carries, and the notification text only names labels the query keeps.
-"""
-
 from __future__ import annotations
 
 import re
@@ -23,7 +14,6 @@ _RULES = (
     / "deploy/lgtm/config/grafana/provisioning/alerting/rules.yml"
 )
 
-# Labels every event line carries as stream labels / envelope fields, beside its payload.
 _ENVELOPE = frozenset({"agent_id", "machine", "cluster", "category", "level", "process", "source"})
 
 
@@ -36,7 +26,6 @@ class Signal(NamedTuple):
 
 
 SIGNALS: dict[str, Signal] = {
-    # health probe: warning at 3 minutes unhealthy, error at 10 (was transition_severity 180s / 600s)
     "ava-ops-health-probe-warning": Signal("health_probe_failing", "ava-ops", "3m", "warning"),
     "ava-ops-health-probe-error": Signal("health_probe_failing", "ava-ops", "10m", "error"),
     "ava-ops-health-probe-silent": Signal("health_probe_ran", "ava-ops", "0m", "error"),
@@ -51,10 +40,8 @@ SIGNALS: dict[str, Signal] = {
         "maintenance_hold_overdue", "ava-ops-slow", "0m", "warning"
     ),
     "ava-ops-agent-continuation-lost": Signal("agent_continuation_lost", "ava-ops", "0m", "error"),
-    # machine liveness (was the 180s / 600s transition clock on machine_probe)
     "ava-ops-machine-offline-warning": Signal("machine_probe_failed", "ava-ops", "3m", "warning"),
     "ava-ops-machine-offline-error": Signal("machine_probe_failed", "ava-ops", "10m", "error"),
-    # application producers that posted to /api/alerts or wrote the table themselves
     "ava-ops-exec-child-boot-failed": Signal("exec_child_boot_failed", "ava-ops", "0s", "warning"),
     "ava-ops-inspect-metrics-gap": Signal(
         "inspect_metrics_coverage_gap", "ava-ops", "0s", "warning"
@@ -72,12 +59,10 @@ SIGNALS: dict[str, Signal] = {
     "ava-ops-im-feishu-owner-seed-failed": Signal(
         "im_feishu_owner_seed_failed", "ava-ops", "0s", "warning"
     ),
-    # leg-level outbound stall: pending pushes with no delivered push for > 15m (task #4935)
     "ava-ops-im-push-stall": Signal("im_push_health", "ava-ops", "2m", "warning"),
     "ava-ops-lifecycle-pointer-stuck": Signal(
         "lifecycle_pointer_stuck", "ava-ops-slow", "0s", "warning", 0
     ),
-    # the #4217 gates (delivery grace, per-host cooldown, consecutive-round escalation)
     "ava-ops-delivery-stalled": Signal("delivery_stalled", "ava-ops", "1m", "warning"),
     "ava-ops-db-pool-acquire-slow": Signal("db_pool_acquire_slow", "ava-ops", "2m", "warning"),
     "ava-ops-root-unit-restart-failed": Signal("root_unit_failure_state", "ava-ops", "0m", "error"),
@@ -124,7 +109,6 @@ def test_the_rule_carries_the_pinned_debounce_severity_and_threshold(uid: str) -
     assert rule["labels"]["severity"] == signal.severity
     assert _threshold(rule) == signal.threshold
     assert rule["labels"]["ruleUID"] == uid
-    # A condition that goes quiet must read as healthy, not as an incident or a broken rule.
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
 
@@ -165,8 +149,6 @@ def test_the_notification_text_names_only_labels_the_query_keeps(uid: str) -> No
 
 
 def test_the_health_rules_label_their_check_for_routing_and_the_window_silence() -> None:
-    """The window silence spares `attributes_check="disk_usage"` and Telegram routes
-    `attributes_check="gateway_liveness"`: both depend on the rules keeping that label."""
     for uid in ("ava-ops-health-probe-warning", "ava-ops-health-probe-error"):
         assert "sum by (attributes_check)" in _query(_rules()[uid][1])
 
@@ -174,26 +156,23 @@ def test_the_health_rules_label_their_check_for_routing_and_the_window_silence()
 def test_the_probe_dead_man_fires_on_an_absent_heartbeat_and_routes_to_telegram() -> None:
     rule = _rules()["ava-ops-health-probe-silent"][1]
     assert "absent_over_time(" in _query(rule)
-    assert rule["labels"]["metric"] == "health_probe_silent"  # the policy's Telegram route key
+    assert rule["labels"]["metric"] == "health_probe_silent"
 
 
 def test_the_warning_and_error_tiers_of_one_outage_share_a_query() -> None:
-    """Two coexisting rules replace the old in-place escalation (inhibition has no file form)."""
     for warning, error in (("ava-ops-health-probe-warning", "ava-ops-health-probe-error"),):
         assert _query(_rules()[warning][1]) == _query(_rules()[error][1])
 
 
 def test_grafana_owns_five_minute_recovery_and_missing_series_grace() -> None:
-    """Quiet transitions must not mint new episodes or evict a peer's series early."""
     for group, rule in _rules().values():
         assert rule["keepFiringFor"] == "5m"
         assert rule["missing_series_evals_to_resolve"] == (6 if group == "ava-ops" else 2)
-        assert "keep_firing_for" not in rule  # API spelling is ignored by file provisioning
+        assert "keep_firing_for" not in rule
 
 
 @pytest.mark.parametrize("diagnostic", ["venv", "brew-pin", "browser-reach"])
 def test_root_diagnostics_keep_the_machine_identity(diagnostic: str) -> None:
-    """One failing sample on each of two hosts must not meet a two-sample threshold."""
     rule = _rules()["ava-ops-root-diagnostic-" + diagnostic][1]
     assert "sum by (machine)" in _query(rule)
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]

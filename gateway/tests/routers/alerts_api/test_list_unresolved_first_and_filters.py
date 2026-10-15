@@ -1,5 +1,3 @@
-"""Alerts api cases: list unresolved first and filters."""
-
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -30,7 +28,6 @@ from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_list_unresolved_first_and_filters(db_conn: psycopg.Connection, client: TestClient) -> None:
-    """List unresolved rows first, then recency; filters and counts ride meta."""
     now = datetime.now(UTC)
     seed_alert_rows(
         db_conn,
@@ -79,21 +76,20 @@ def test_list_unresolved_first_and_filters(db_conn: psycopg.Connection, client: 
     resp = client.get("/api/alerts?status=resolved")
     body = resp.json()
     assert [a["fingerprint"] for a in body["alerts"]] == ["f2"]
-    assert body["meta"]["unresolved_count"] == 0  # scoped to resolved -> badge count 0
+    assert body["meta"]["unresolved_count"] == 0
 
     resp = client.get("/api/alerts?window=1h")
     assert [a["fingerprint"] for a in resp.json()["alerts"]] == ["f3", "f1"]
 
     resp = client.get("/api/alerts?limit=1")
     assert [a["fingerprint"] for a in resp.json()["alerts"]] == ["f3"]
-    assert resp.json()["meta"]["total"] == 3  # limit does not shrink total
+    assert resp.json()["meta"]["total"] == 3
 
 
 @pytest.mark.parametrize("window", ["1h", "6h", "24h", "7d"])
 def test_live_alerts_never_age_out_and_history_uses_recovery_time(
     db_conn: psycopg.Connection, client: TestClient, window: str
 ) -> None:
-    """A ten-day outage remains visible; its recent recovery belongs to history."""
     now = datetime.now(UTC)
     seed_alert_rows(
         db_conn,
@@ -134,9 +130,6 @@ def test_live_alerts_never_age_out_and_history_uses_recovery_time(
 def test_list_default_limit_comes_from_display_config(
     db_conn: psycopg.Connection, client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The implicit window is ``settings.display.alerts_default_limit``
-    (``AVA_ALERTS_DEFAULT_LIMIT``); the literal 100 is only that field's
-    default, not a hard-coded page size."""
     now = datetime.now(UTC)
     seed_alert_rows(
         db_conn,
@@ -159,7 +152,6 @@ def test_list_default_limit_comes_from_display_config(
 
 
 def test_list_unresolved_before_resolved(db_conn: psycopg.Connection, client: TestClient) -> None:
-    """A resolved alert must not bury an unresolved one (2026-08-05 ruling)."""
     now = datetime.now(UTC)
     seed_alert_rows(
         db_conn,
@@ -186,12 +178,10 @@ def test_list_unresolved_before_resolved(db_conn: psycopg.Connection, client: Te
     resp = client.get("/api/alerts")
     assert resp.status_code == 200
     body = resp.json()
-    # unresolved (older) sorts above resolved (newer)
     assert [a["fingerprint"] for a in body["alerts"]] == ["f2", "f1"]
 
 
 def test_ingest_rows_are_grafana_sourced(db_conn: psycopg.Connection) -> None:
-    """The webhook is the only writer: its rows carry source="grafana", and a re-send keeps it."""
     with gateway_test_client() as client:
         ingest(client, webhook(alerts=[alert(fingerprint="s1")]))
         ingest(client, webhook(alerts=[alert(fingerprint="s1")]))
@@ -201,7 +191,6 @@ def test_ingest_rows_are_grafana_sourced(db_conn: psycopg.Connection) -> None:
 
 
 def test_ingest_resolved_notifies_recovery(db_conn: psycopg.Connection) -> None:
-    """A firing + resolved pair lands as one row + two IMs."""
     with gateway_test_client() as client:
         r1 = ingest(client, webhook(alerts=[alert(fingerprint="hp2")]))
         r2 = ingest(
@@ -223,7 +212,6 @@ def test_ingest_resolved_notifies_recovery(db_conn: psycopg.Connection) -> None:
 
 
 def test_list_returns_source(db_conn: psycopg.Connection, client: TestClient) -> None:
-    """The list exposes source (provenance) per row."""
     now = datetime.now(UTC)
     seed_alert_rows(
         db_conn,
@@ -244,8 +232,6 @@ def test_list_returns_source(db_conn: psycopg.Connection, client: TestClient) ->
 
 
 def test_stream_endpoint_is_sse(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GET /api/alerts/stream answers text/event-stream with the SSE headers
-    and subscribes the ava:alerts channel in broadcast mode."""
 
     seen: dict[str, Any] = {}
 
@@ -269,8 +255,6 @@ def test_stream_endpoint_is_sse(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_group_of_instances_is_one_im_and_one_row_each(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Grafana posts the instances of one rule together: the store keeps a row per instance,
-    the user hears one message with the count."""
     sent = capture_im(monkeypatch)
     alerts = [
         alert(alertname="machine offline", fingerprint=f"g{n}", summary=f"machine m{n} down")

@@ -1,22 +1,3 @@
-"""Regression: a daemon session must run with the checkout venv activated.
-
-Daemons launch as `.venv/bin/python -m X` (an absolute-ish path that does not
-consult PATH), but several shell out to a bare binary that DOES:
-daemons that run `ava` / `python` rely on PATH. `base.sessions.env_forwarding.venv_activation_prefix` prepends the
-venv bin onto PATH *inside* the session command, because the two things that
-otherwise carry it do not survive:
-
-- the launch path (`session_backend.new_session`) forwards VIRTUAL_ENV + venv
-  PATH via the env dict, but the session runs under a login shell (`bash -lc`)
-  whose profile / macOS `path_helper` rebuilds PATH and drops the prefix;
-- the respawn path (`service_respawn.respawn_service`) forwards
-  `forward_env_prefix`, which carries neither VIRTUAL_ENV nor PATH at all.
-
-These spawn a REAL session on the platform backend (the login-shell PATH
-rebuild is the whole point — a string-shape assertion would not catch it) and
-read back the env the command actually sees.
-"""
-
 from __future__ import annotations
 
 import shlex
@@ -33,9 +14,6 @@ pytestmark = [
         shutil.which("bash") is None,
         reason="needs a host with bash (the login-shell PATH rebuild is under test)",
     ),
-    # A real session IS the subject here: nothing stubs respawn_service, or these
-    # assertions would pass without spawning anything. The session lands on this
-    # unit's own session home and each test kills its own.
 ]
 
 _EXPECTED_BIN = str(repo_root() / ".venv" / "bin")
@@ -44,12 +22,6 @@ _EXPECTED_TOOLCHAIN = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"
 
 
 def _probe_cmd(out: Path) -> str:
-    # Runs after `cd <repo> && <activation> && exec ` — captures the env the
-    # daemon sees. Dumps the whole PATH; the first entry is split off in Python
-    # to avoid shell parameter-expansion surviving the layers of shlex quoting.
-    # A single command (`sh -c ...`), because a service session execs into its
-    # command: the probe has to have the shape a real daemon command has, and
-    # the inner sh inherits the exported PATH/VIRTUAL_ENV being measured.
     script = f'{{ printf "PATH=%s\\n" "$PATH"; printf "VE=%s\\n" "$VIRTUAL_ENV"; }} > {out}'
     return f"/bin/sh -c {shlex.quote(script)}"
 
@@ -68,8 +40,6 @@ def _path0(env: dict[str, str]) -> str:
 
 
 def test_launch_path_activates_venv(unit_home: Path) -> None:
-    """`session_backend.new_session` (the `ava start` launcher) runs the command
-    with the venv bin first on PATH, surviving the login shell."""
     from base.native_process.os_platform import raise_fd_limit
     from base.sessions.backend import get_backend
     from base.sessions.env_forwarding import forward_env_dict

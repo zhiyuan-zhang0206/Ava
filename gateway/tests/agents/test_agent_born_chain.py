@@ -1,12 +1,3 @@
-"""GET /api/agents/{id}/born-chain integration tests.
-
-The light half of /neighbors, split out for the inherited-memory context note:
-one born_spawner walk (no tie graph, no Loki) plus label / machine / status per
-ancestor. Pins the shape the note's locality gate depends on: `machine` is
-carried per ancestor, terminated ancestors stay in the chain, and a non-agent
-spawner stops it.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -62,15 +53,12 @@ def test_born_chain_walks_nearest_first_with_machine_label_status(
     assert rows[0]["label"] == "Parent"
     assert rows[0]["machine"] == "host-b"
     assert rows[0]["status"] == "running"
-    # Terminated ancestors stay in the immutable chain, machine included.
     assert rows[1]["label"] == "Grandparent"
     assert rows[1]["machine"] == "host-a"
     assert rows[1]["status"] == "terminated"
 
 
 def test_born_chain_stops_at_a_non_agent_spawner(db_conn: psycopg.Connection) -> None:
-    """A user-born agent is a valid PARENT (its child's chain has one row);
-    the walk stops one hop above it, where born_spawner stops being `agent:N`."""
     user_spawned = _seed_agent(db_conn, born_spawner="user", machine="host-a")
     child = _seed_agent(db_conn, born_spawner=f"agent:{user_spawned}", machine="host-a")
 

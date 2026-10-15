@@ -1,5 +1,3 @@
-"""Converge cross-machine-transfer step: probe the configured backend, warn not fail."""
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -48,7 +46,7 @@ def test_passes_when_writable_drive_found(
     monkeypatch.setattr(gd, "find_writable_google_drive", lambda: tmp_path / "My Drive")
     cv.ensure_cross_machine_transfer(
         _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
-    )  # no raise
+    )
 
 
 def test_warns_but_continues_when_drive_missing(
@@ -58,15 +56,13 @@ def test_warns_but_continues_when_drive_missing(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """A missing Drive backend must NOT block start: the probe warns on stderr and
-    the runner keeps going (cross-machine transfer now degrades instead of failing)."""
     import base.host.converge.google_drive as gd
 
     monkeypatch.setattr(gd, "find_writable_google_drive", lambda: None)
     monkeypatch.setattr(gd, "candidate_drive_dirs", lambda: [Path("/some/My Drive")])
     cv.ensure_cross_machine_transfer(
         _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
-    )  # no raise
+    )
     err = capsys.readouterr().err
     assert "no writable Google Drive synced folder" in err
     assert "will not work" in err
@@ -79,9 +75,6 @@ def test_skips_on_single_box(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """A single box (also carries gateway) has no peer to transfer to — the probe
-    must not even run (pinned: a probing implementation would touch the drive
-    detection, and a blocking one would fail the start)."""
     import base.host.converge.google_drive as gd
 
     def _must_not_probe() -> Path:
@@ -102,7 +95,7 @@ def test_skips_on_single_box(
         services=frozenset(),
         timers=ManualTimers(),
     )
-    cv.ensure_cross_machine_transfer(ctx)  # no raise
+    cv.ensure_cross_machine_transfer(ctx)
     assert capsys.readouterr().err == ""
 
 
@@ -113,8 +106,6 @@ def test_skips_when_backend_none(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """AVA_CROSS_MACHINE_TRANSFER_BACKEND=none skips the probe on a split runner
-    (pinned: no probe call, no warning)."""
     import base.host.converge.google_drive as gd
 
     def _must_not_probe() -> Path:
@@ -123,7 +114,7 @@ def test_skips_when_backend_none(
     monkeypatch.setattr(gd, "find_writable_google_drive", _must_not_probe)
     ctx = _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     ctx.config.set_field("cross_machine_transfer_backend", "none")
-    cv.ensure_cross_machine_transfer(ctx)  # no raise
+    cv.ensure_cross_machine_transfer(ctx)
     assert capsys.readouterr().err == ""
 
 

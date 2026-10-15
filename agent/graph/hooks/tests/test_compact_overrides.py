@@ -1,12 +1,3 @@
-"""The compaction gates read the agent's own thresholds.
-
-`auto_compact_will_fire` and the wind-down reminder derive their token thresholds from the
-agent's model and its `overrides` slice (the agent's pins of `auto_compact_fraction`,
-`auto_compact_ceiling_tokens`, `compact_reminder_fraction`). The conversation here is a few
-thousand tokens against a window of hundreds of thousands, so the model's own thresholds sit far
-above it and only a pinned one moves a gate.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -23,7 +14,7 @@ from base.packages.plugin_providers import build_model_catalog
 build_model_catalog()
 
 _MODEL = "deepseek-flash"
-_TINY_FRACTION = 1e-6  # about one token of the window
+_TINY_FRACTION = 1e-6
 
 
 def _state() -> AgentState:
@@ -59,7 +50,6 @@ def test_a_raised_force_threshold_is_what_keeps_a_long_conversation_going() -> N
     state = _state()
     tiny = _agent(auto_compact_fraction=_TINY_FRACTION)
     assert auto_compact_will_fire(state, tiny, catalog=build_model_catalog())
-    # The same agent with the force threshold lifted back above the conversation.
     assert not auto_compact_will_fire(
         state, _agent(auto_compact_fraction=0.9), catalog=build_model_catalog()
     )

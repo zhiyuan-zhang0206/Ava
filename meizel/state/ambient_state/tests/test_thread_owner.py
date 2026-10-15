@@ -1,5 +1,3 @@
-"""Owned-thread structural evidence, counterexamples and real lifecycle receipts."""
-
 from __future__ import annotations
 
 import ast
@@ -173,7 +171,6 @@ def test_unknown_late_failure_is_visible_then_raised_by_original_owner() -> None
 def test_structural_pass_does_not_claim_native_work_was_interrupted(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A callback can ignore the signal: finite join must preserve residual truth."""
     assert _sites(SOURCE, tmp_path) == {}
     service_class = _service_class()
     blocked = threading.Event()
@@ -213,8 +210,6 @@ def test_restart_requires_visible_stop_admission_fence(tmp_path: pathlib.Path) -
 
     service = service_class(work, lambda error: pytest.fail(str(error)))
     assert service.stop()
-    # A stop-only fence refuses restart after stop, but cannot fence a second
-    # start while the first is live. This source is intentionally rejected.
     start = service.start
     with pytest.raises(RuntimeError, match="closed"):
         start()
@@ -277,7 +272,6 @@ def test_finally_can_erase_an_actual_failure_so_its_source_is_rejected(
     service = service_class(fail, reported.append)
     assert service.stop()
     assert reported == [failure]
-    # The original error was observed, then erased instead of propagated.
     assert not service._thread.is_alive()
 
 

@@ -1,5 +1,3 @@
-"""Writing to an imported module's attribute is a patch, and the name written must exist."""
-
 from __future__ import annotations
 
 import pytest
@@ -133,7 +131,7 @@ def test_a_name_the_module_does_not_bind_is_an_error_not_debt(
     assert found.debt is None
     assert "lib/mod.py binds no `nope`" in found.message
     run(root, "debt", "record", "app")
-    assert len(diagnostics(root, "missing-patch-target")) == 1  # nothing records it
+    assert len(diagnostics(root, "missing-patch-target")) == 1
 
 
 MODULES = {
@@ -174,7 +172,7 @@ def test_a_builtin_name_is_bound_because_the_module_resolves_it(make_repo: RepoF
     )
     root = make_repo({**LIB, "app/test_x.py": source})
     assert diagnostics(root, "missing-patch-target") == []
-    assert len(diagnostics(root, "first-party-patch")) == 1  # still a patch, and still debt
+    assert len(diagnostics(root, "first-party-patch")) == 1
 
 
 def test_a_submodule_of_a_package_is_bound(make_repo: RepoFactory) -> None:

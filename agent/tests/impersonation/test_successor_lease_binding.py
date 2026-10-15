@@ -1,5 +1,3 @@
-"""Native ownership contract consumers split by their existing behavior."""
-
 from typing import Any
 from uuid import uuid4
 
@@ -34,8 +32,6 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_de
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An active takeover does not follow the native runtime into its successor: the
-    admission closes it, and the close does not restore the dead incarnation."""
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases
     from base.agents.tests.units import spawn_agent
@@ -101,13 +97,11 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_de
         "FROM agent_impersonations WHERE id=%s",
         (lease["id"],),
     ).fetchone() == ("expired", "aborted: native runtime restarted", True)
-    # The end note reaches the replacement's inbox for its return handoff.
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND source='system:impersonation' "
         "AND content LIKE %s",
         (agent_id, "%native runtime restarted%"),
     ).fetchone() == (1,)
-    # The controller's late release finds nothing to release and cannot touch the row.
     with pytest.raises(leases.ImpersonationError):
         leases.release(
             database,

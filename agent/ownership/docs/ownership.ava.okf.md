@@ -71,3 +71,9 @@ cleanup; the first failure is raised after the attempts, with later failures att
 as notes. Ordinary browser-release errors remain best-effort warnings.
 Execution-child resource closure and admission fences remain separate. See
 [the cleanup decision](../../../docs/decisions/runtime/processes/2026-10-10-termination-pty-cleanup-after-commit.md).
+
+## Process fixture cleanup
+
+`test_hosted_dead_owner_admission.py` and `test_hosted_ownership.py` use SIGKILL
+for their owned look-alike host processes. A child can inherit ignored SIGTERM
+from a shell session, so `terminate()` alone cannot guarantee fixture cleanup.

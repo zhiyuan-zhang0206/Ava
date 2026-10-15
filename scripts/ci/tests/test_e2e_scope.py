@@ -1,5 +1,3 @@
-"""The e2e skip rule is fixed in code and wired identically into every e2e job."""
-
 from __future__ import annotations
 
 import ast
@@ -21,15 +19,15 @@ _UNIT_TESTS = [
     "scripts/ci/tests/conftest.py",
 ]
 _NOT_UNIT_TESTS = [
-    "tests/components/base/test_poll.py",  # top-level tests are imported by e2e
+    "tests/components/base/test_poll.py",
     "tests/fixtures/gateway_config.py",
     "tests/e2e/test_browser.py",
-    "base/lm/engine.py",  # product code
-    "base/lm/tests/data.json",  # not Python
+    "base/lm/engine.py",
+    "base/lm/tests/data.json",
     "base/lm/tests/meizel.toml",
     "ui/web/tests/thing.py",
-    "base/lm/testsuite/test_x.py",  # not a `tests` directory
-    "schedules/tests/test_template.py",  # templates are not packages with unit tests
+    "base/lm/testsuite/test_x.py",
+    "schedules/tests/test_template.py",
     "base/tests",
 ]
 
@@ -65,7 +63,7 @@ def test_only_unit_test_changes_with_an_enforced_subset_skip_e2e() -> None:
     [
         {"decision": "FULL"},
         {"decision": "SKIP"},
-        {"decision": ""},  # the selector failed or did not run
+        {"decision": ""},
         {"mode": "shadow"},
         {"mode": ""},
         {"event": "push"},
@@ -94,7 +92,6 @@ def test_the_cli_prints_the_step_output(tmp_path: Path, capsys: pytest.CaptureFi
 
 
 def test_a_package_test_helper_that_e2e_imports_is_never_skipped_past(tmp_path: Path) -> None:
-    """The premise of the rule: a unit-test edit inside a package cannot reach an e2e test."""
     helper = tmp_path / "base" / "sessions" / "tests" / "poll.py"
     helper.parent.mkdir(parents=True)
     helper.write_text("from base.sessions.tests import deeper\n")
@@ -208,12 +205,10 @@ def test_a_known_dynamic_entry_whose_call_is_gone_is_stale(tmp_path: Path) -> No
 
 
 def test_every_known_dynamic_entry_still_has_its_call() -> None:
-    """A stale entry would quietly excuse a new dynamic import of the same name; delete it with the call."""
     assert e2e_scope.stale_known_dynamic(_REPO_ROOT) == []
 
 
 def test_the_real_e2e_walk_understands_every_import() -> None:
-    """A new dynamic import in e2e flips the walk to fail-closed; this keeps the skip alive on purpose."""
     reached = e2e_scope.e2e_reached_unit_tests(_REPO_ROOT)
     assert reached is not None
     assert "base/sessions/tests/poll_until.py" in reached
@@ -233,7 +228,6 @@ def test_the_real_e2e_imports_are_all_in_the_reached_set() -> None:
 
 
 def test_every_package_with_unit_tests_is_covered_or_excluded_on_purpose() -> None:
-    """A new code top that holds `tests` directories must be added to the rule or stay out of it."""
     excluded = {"tests", "ui", "schedules", "demos"}
     tops = {
         path.relative_to(_REPO_ROOT).parts[0]
@@ -253,11 +247,9 @@ def test_every_e2e_job_and_the_aggregator_honor_the_flag() -> None:
         "${{ github.event_name == 'pull_request' && steps.decide.outputs.backend == 'true' }}"
     )
     assert "scripts/ci/e2e_scope.py" in step["run"]
-    # After the selector, whose mode and decision it reads.
     ids = [item.get("id") for item in classify["steps"]]
     assert ids.index("selector") < ids.index("e2e")
     for name in ("e2e-shard", "e2e-hosted", "e2e-env-guard", "e2e"):
         assert "needs.classify.outputs.skip_e2e != 'true'" in jobs[name]["if"], name
-    # Nothing else is gated by it: the backend jobs and every other required check still run.
     gated = {name for name, job in jobs.items() if "skip_e2e" in str(job.get("if", ""))}
     assert gated == {"e2e-shard", "e2e-hosted", "e2e-env-guard", "e2e"}

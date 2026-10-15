@@ -1,5 +1,3 @@
-"""where_used finds every reference to a symbol, module or file and groups it by what it is."""
-
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -105,14 +103,14 @@ def test_symbol_follows_the_package_door_and_attribute_use_but_not_other_names()
         ("pkg", "run", "pkg/__init__.py:1")
     ]
     assert _kinds(report, "imports") == {
-        ("app/main.py", 1): "import",  # `from pkg import run` reaches it through the door
-        ("app/main.py", 7): "attribute",  # `eng.run()` through `import pkg.engine as eng`
+        ("app/main.py", 1): "import",
+        ("app/main.py", 7): "attribute",
         ("app/star.py", 1): "wildcard import",
         ("pkg/__init__.py", 1): "re-export",
-        ("pkg/helpers.py", 7): "attribute",  # `engine.run()` through `from . import engine`
+        ("pkg/helpers.py", 7): "attribute",
         ("pkg/sub/deep.py", 2): "import",
     }
-    assert "app/other.py" not in _paths(report, "imports")  # imports the module, uses `Motor`
+    assert "app/other.py" not in _paths(report, "imports")
 
 
 def test_symbol_forms_name_it_in_every_spelling() -> None:
@@ -176,8 +174,8 @@ def test_a_plain_word_symbol_is_a_mention_only_in_docs_about_its_module() -> Non
     plain = _kinds(_report("pkg.engine:run"), "docs")
     distinctive = _kinds(_report("pkg.engine:Motor"), "docs")
 
-    assert ("docs/unrelated.md", 1) not in plain  # `run` here is an ordinary word
-    assert distinctive == {("docs/unrelated.md", 1): "mention (bare name)"}  # `Motor` is not
+    assert ("docs/unrelated.md", 1) not in plain
+    assert distinctive == {("docs/unrelated.md", 1): "mention (bare name)"}
 
 
 def test_structure_registrations_and_frozen_history_are_their_own_groups() -> None:
@@ -280,7 +278,7 @@ def test_resolution_accepts_modules_packages_files_and_directories() -> None:
     assert scan.resolve("pkg", repo).path == "pkg"
     assert scan.resolve("docs/guide.md", repo).kind == "file"
     assert scan.resolve("docs", repo).kind == "directory"
-    assert scan.resolve("app", repo).kind == "package"  # no __init__.py: a namespace package
+    assert scan.resolve("app", repo).kind == "package"
 
 
 @pytest.mark.parametrize(

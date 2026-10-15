@@ -1,5 +1,3 @@
-"""Repeat start observes a generation before changing any shared launch input."""
-
 from __future__ import annotations
 
 import subprocess
@@ -52,7 +50,6 @@ def test_development_generation_includes_dirty_and_untracked_source(tmp_path: Pa
     assert launch_digest(tmp_path, {"AVA_MACHINE_NAME": "first"}, home=tmp_path) != launch_digest(
         tmp_path, {"AVA_MACHINE_NAME": "second"}, home=tmp_path
     )
-    # An ambient key is no launch input: whoever launches may add its own.
     assert launch_digest(tmp_path, {"USER": "first"}, home=tmp_path) == launch_digest(
         tmp_path, {"USER": "second"}, home=tmp_path
     )
@@ -177,8 +174,6 @@ def test_loaded_verifier_imports_without_settings() -> None:
 def test_generation_binds_the_delivered_write_generation(
     tmp_path: Path, seed_write_generation: Callable[[Path], Any]
 ) -> None:
-    """A changed write generation alone changes the launch digest; only its
-    number and credential digest are bound, never a password."""
     from base.host.db_authority.ledger import ledger_path, load_ledger
 
     repo = tmp_path / "repo"
@@ -209,7 +204,6 @@ def test_generation_binds_the_delivered_write_generation(
     assert born != unborn
     ledger = load_ledger(home.resolve())
     assert ledger is not None and ledger.active is not None
-    # Another credential digest for the same number is another generation.
     record = ledger_path(home.resolve())
     record.write_text(record.read_text().replace(ledger.active.credential_digest, "0" * 64))
     assert launch_digest(repo, {}, home=home) != born

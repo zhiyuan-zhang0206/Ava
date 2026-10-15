@@ -1,11 +1,3 @@
-"""Declaration of plugin inspector widgets (task #2909; taskList family #3216).
-
-Covers what the data registry enforces when it admits an `inspect_widgets` declaration: plugin
-attribution from the registry entry, per-plugin id uniqueness, and the closed kind vocabulary plus
-the widget shape. The per-agent resolution side lives in
-`gateway/inspect/tests/test_agent_inspect_widgets.py`.
-"""
-
 from typing import Any
 
 import pytest
@@ -63,17 +55,12 @@ def test_same_id_across_plugins_allowed() -> None:
     assert len(list(registry.inspect_widgets())) == 2
 
 
-# ── closed vocabularies ───────────────────────────────────────────────────────
-
-
 def test_unknown_kind_refused() -> None:
     with pytest.raises(ValidationError):
         _widget(kind="kv")
 
 
 def test_buttons_field_is_gone() -> None:
-    # The jumpButtons family was replaced by taskList (#3216); the old field
-    # must be refused as unknown rather than accepted and ignored.
     with pytest.raises(ValidationError):
         _widget(buttons=[])
 
@@ -95,7 +82,5 @@ def test_unknown_fields_refused() -> None:
 
 
 def test_any_int_order_is_accepted() -> None:
-    # The scale is documented, not bounded — a plugin may slot anywhere,
-    # including above the notice section (800).
     assert _widget(order=-1).order == -1
     assert _widget(order=10_000).order == 10_000

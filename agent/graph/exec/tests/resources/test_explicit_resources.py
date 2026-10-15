@@ -1,5 +1,3 @@
-"""Cleanup consumes only the exact resources retained by the original execution."""
-
 import asyncio
 import os
 import subprocess
@@ -27,8 +25,6 @@ def _files(directory: Path) -> tuple[Path, Path]:
 def _closed_output_pipe() -> ExecOutputPipe:
     source, writer = os.pipe()
     os.close(writer)
-    # The output owner consumes only Popen's stdout handle. Use an actual pipe
-    # at EOF without launching a process unrelated to the resource-CAS proof.
     proc = cast("subprocess.Popen[bytes]", SimpleNamespace(stdout=os.fdopen(source, "rb")))
     reader = ExecOutputPipe(proc, StreamingTextIO(max_chars=64))
     reader.finish_now(0)

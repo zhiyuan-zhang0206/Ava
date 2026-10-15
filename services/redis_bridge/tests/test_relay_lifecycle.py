@@ -1,5 +1,3 @@
-"""Service-level ownership, finite teardown, and real forwarding regressions."""
-
 from __future__ import annotations
 
 import socket
@@ -42,7 +40,6 @@ def _close(*connections: socket.socket) -> None:
 
 
 def test_serving_exit_reclaims_an_accepted_idle_connection() -> None:
-    """The original relay returned with its accepted socket/handler still alive."""
     client, accepted = socket.socketpair()
     backend: socket.socket | None = None
     existing_threads = set(threading.enumerate())
@@ -534,7 +531,6 @@ def test_connect_failure_cleanup_preserves_primary_and_retains_secondary(
 
 
 def test_listener_that_never_binds_gives_up_after_the_failure_limit() -> None:
-    """A private address that never appears must end the process, not rebind forever."""
     attempts: list[tuple[str, int]] = []
     delays: list[float] = []
 
@@ -551,12 +547,10 @@ def test_listener_that_never_binds_gives_up_after_the_failure_limit() -> None:
         )
 
     assert len(attempts) == relay.MAX_LISTENER_FAILURES
-    # The delay still grows between attempts and no sleep follows the last failure.
     assert delays == [1.0, 2.0, 4.0, 8.0]
 
 
 def test_an_admitted_connection_clears_the_listener_failure_count() -> None:
-    """Failures separated by a working listener never add up to the limit."""
     results: list[object] = []
 
     class OneClient(_AcceptOnce):
@@ -568,7 +562,6 @@ def test_an_admitted_connection_clears_the_listener_failure_count() -> None:
     clients = [socket.socketpair() for _ in range(relay.MAX_LISTENER_FAILURES + 2)]
     plan: list[object] = []
     for client, _peer in clients:
-        # Each round: a bind failure, then a listener that admits one client and fails.
         plan.append(OSError("not yet"))
         plan.append(OneClient(client))
     served = iter(plan)
@@ -591,7 +584,7 @@ def test_an_admitted_connection_clears_the_listener_failure_count() -> None:
         sleep=lambda _delay: None,
     )
     try:
-        service.serve_forever()  # would raise ListenerExhaustedError if the count were not cleared
+        service.serve_forever()
     finally:
         service.request_stop()
         for client, peer in clients:

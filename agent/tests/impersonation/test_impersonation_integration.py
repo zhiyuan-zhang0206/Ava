@@ -1,5 +1,3 @@
-"""Real PostgreSQL + compiled graph + exec child cooperative handoff."""
-
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -55,7 +53,6 @@ async def test_consent_exec_inbox_release_and_resume(
     machine_identity: MachineIdentity,
 ) -> None:
     scope = hosted_resources
-    # The real exec child boots this installed unit, whose identity is file-owned.
     config_authority.env_path.write_text(
         f"AVA_MACHINE_NAME={machine_identity.name()}\n", encoding="utf-8"
     )
@@ -69,9 +66,6 @@ async def test_consent_exec_inbox_release_and_resume(
         machine_identity=machine_identity,
     )
     agent_id = owner.agent_id
-
-    # The relay establishment gate is unit-tested separately; the real graph
-    # handoff must not spawn a relay process in the test environment.
 
     def relay_ready(*_args: object, read_local_machine: Callable[[], str]) -> bool:
         return True
@@ -92,7 +86,6 @@ async def test_consent_exec_inbox_release_and_resume(
         )["status"]
         == "accepted"
     )
-    # Merely returning from exec/graph has NOT issued the external lease.
     await flush_checkpoint(saver, agent_id)
     assert await settle_checkpoint(
         graph,
@@ -113,8 +106,6 @@ async def test_consent_exec_inbox_release_and_resume(
         )["status"]
         == "active"
     )
-    # The stubbed establishment writes no heartbeat; keep it fresh so the
-    # held pass stays a no-op while this flow runs (task #3998).
     db_conn.execute(
         "UPDATE agent_impersonations SET relay_heartbeat_at=clock_timestamp() WHERE id=%s",
         (requested["id"],),
@@ -168,7 +159,6 @@ async def test_consent_exec_inbox_release_and_resume(
     assert resumed["handoff__total"] == 7
     assert len(model_calls) == 2
     assert_resumed_transcript(resumed, finish)
-    # A second resume-boundary pass cannot double an additive reducer.
     assert not await settle_checkpoint(
         graph,
         database,
@@ -219,7 +209,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         config,
         context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
     )
-    assert not model_calls  # No native model acceptance turn.
+    assert not model_calls
     assert (
         leases.get(
             database,
@@ -280,7 +270,6 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (later,)
     ).fetchone() == ("pending",)
-    # Repeated settlement must not duplicate the first resumed input.
     assert not await settle_checkpoint(
         graph,
         database,
@@ -324,7 +313,6 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
         machine_identity=machine_identity,
     )
     monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-    # Emulate a committed acceptance followed by a crash before claim's update.
     leases.accept(
         database,
         event_bus,
@@ -467,7 +455,6 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """With every source sealed at release, the event log is complete before delivery."""
     from agent.impersonation_handoff import deliver_handoff
     from base.agents.impersonation import history as history
 

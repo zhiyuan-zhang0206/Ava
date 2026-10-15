@@ -1,5 +1,3 @@
-"""Exercise forwarding over real sockets, including the real connect timeout."""
-
 from __future__ import annotations
 
 import socket
@@ -29,7 +27,6 @@ def connection() -> Iterator[tuple[socket.socket, socket.socket, relay.Connectio
     client.settimeout(3.0)
     backend.settimeout(3.0)
     try:
-        # Accept precedes backend publication; actual forwarding proves readiness.
         backend.sendall(b"\x00")
         assert client.recv(1) == b"\x00"
         yield client, backend, handler
@@ -57,8 +54,6 @@ def test_idle_connection_survives_the_five_second_connect_deadline(
     backend.sendall(b"ready")
     assert client.recv(5) == b"ready"
 
-    # A real idle wait is intentional: a socketpair mock never inherits the
-    # timeout socket.create_connection installs on the connected backend.
     handler._thread.join(timeout=6.0)
     assert handler._thread.is_alive(), "an established connection must have no idle deadline"
     backend.sendall(b"wake")

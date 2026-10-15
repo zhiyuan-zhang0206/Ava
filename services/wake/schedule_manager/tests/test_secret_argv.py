@@ -1,5 +1,3 @@
-"""Schedule launcher keeps secrets off real PTY process argv and runner environments."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,16 +26,9 @@ def test_schedule_launch(
     unit_home: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A schedule's resident process. The launch is a `new` request to the pty-sessions
-    service: the env (the schedule id included) rides the request body of its unix
-    socket, the command is typed into the session's shell, and no argv of the service
-    or the shell tree carries a secret; the shell's environment holds the schedule
-    id and none of the secrets."""
     from services.wake.schedule_manager import manager as sm
     from services.wake.schedule_manager.manager import ScheduleManager
 
-    # The runner is a stub that records its own environment, then stays up: the real
-    # runner would need a database and exit within the test.
     stub = unit_home / ".venv" / "bin" / "python"
     stub.parent.mkdir(parents=True)
     dump = unit_home / "runner-env.txt"
@@ -52,8 +43,6 @@ def test_schedule_launch(
     assert row is not None
     schedule_id = int(row[0])
     db_conn.commit()
-    # Launch reads the authoritative desired revision before creating a session.
-    # Keep those reads/writes real while the runner stays a PTY stub.
     pool: ConnectionPool[psycopg.Connection] = ConnectionPool(
         db_conn.info.dsn, min_size=1, max_size=2, open=True
     )

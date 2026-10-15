@@ -1,5 +1,3 @@
-"""Tests for ``base.sessions.backend`` session selection."""
-
 from __future__ import annotations
 
 import json
@@ -21,48 +19,27 @@ from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 
-# ---------------------------------------------------------------------------
-# get_backend
-# ---------------------------------------------------------------------------
-
 
 def test_get_backend_returns_platform_appropriate_backend():
-    """get_backend() returns the correct type for this platform.
-
-    S6 step 1: on POSIX the service/daemon backend is the native
-    supervisor; S7 moved the orchestration sessions onto it too.
-    """
     assert isinstance(get_backend(), PosixProcSessionBackend)
 
 
 def test_get_shell_backend_returns_platform_appropriate_backend():
-    """get_shell_backend() names the PTY backend — agent shells / watchers run
-    on the self-hosted PTY supervisor (POSIX, S6 step 2) while service sessions
-    live on the native supervisor.
-
-    A distinct backend from ``get_backend()``: the two answer different
-    questions (where a service runs vs where an agent's interactive shell runs)
-    and must not be collapsed into one.
-    """
     shell = get_shell_backend()
     assert isinstance(shell, PtySessionBackend)
     assert not isinstance(get_backend(), PtySessionBackend)
 
 
 def test_get_backend_is_a_session_backend():
-    """The backend implements the SessionBackend interface."""
     backend = get_backend()
     assert isinstance(backend, SessionBackend)
 
 
 def test_native_proc_dispatches_by_platform():
-    """native_proc() returns the native agent-process supervisor module —
-    posixproc with the surface agent launch / reap / status dispatch to."""
     from base.sessions.backend import native_proc
 
     mod = native_proc()
     assert mod.__name__ == "base.sessions.posixproc"
-    # the surface the consumers rely on
     for fn in ("has_session", "new_session", "kill_session", "list_sessions", "graceful_signal"):
         assert callable(getattr(mod, fn))
 
@@ -86,20 +63,12 @@ def test_pty_child_virtual_env_projection(
     projection: str,
     expected_venv: str | None,
 ) -> None:
-    """Read a real shell's child env from the pty-sessions service, including a
-    service environment that carries a foreign virtualenv.
-
-    The shell's base is the service's environment (its ambient variables reach the
-    shell, its `VIRTUAL_ENV` does not); the virtualenv comes only from the
-    creator's projection or an explicit entry."""
     from base import paths
 
     checkout = unit_home / "checkout"
     cwd = unit_home / relative_cwd
     cwd.mkdir(parents=True)
     monkeypatch.setattr(paths, "repo_root", lambda: checkout)
-    # The service environment is the shell's base: restart the service with an
-    # ambient sentinel and a foreign virtualenv in it.
     pty_service.stop()
     service = PtyServiceProcess(
         unit_home,
@@ -141,8 +110,3 @@ def test_pty_child_virtual_env_projection(
     finally:
         backend.kill_session(name)
         service.stop()
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------

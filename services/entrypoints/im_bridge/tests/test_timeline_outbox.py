@@ -1,5 +1,3 @@
-"""Real transactions protect acceptance, replay receipts and stream ownership."""
-
 import asyncio
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -181,7 +179,6 @@ def test_failed_insert_rolls_back_cursor_and_earlier_intent(
 def test_changed_manifest_does_not_replace_original(pool: ConnectionPool) -> None:
     store = IMOutboxStore(pool)
     store.accept("telegram", "bot", "chat", 7, [candidate(replay="event")], replay_id="event")
-    # A different cursor/renumbered coordinate cannot overwrite the same source request.
     with write_transaction(pool) as conn:
         conn.execute("UPDATE im_bridge_cursors SET push_item_id='0.0'")
     store.accept("telegram", "bot", "chat", 7, [candidate()])
@@ -274,7 +271,6 @@ async def test_blocked_send_releases_single_pool_lease_and_other_worker_claims_l
         worker = asyncio.create_task(IMOutboxWorker(store, {"telegram": live}).run_once())
         try:
             await asyncio.wait_for(live.started.wait(), timeout=5)
-            # A real max_size=1 lease is available while the provider is blocked.
             with small.connection(timeout=0.5) as conn:
                 assert conn.execute("SELECT 1").fetchone() == (1,)
             original_attempt = statuses(pool)[0][1]
@@ -323,7 +319,6 @@ async def test_claim_without_send_is_unconfirmed_and_does_not_block_later(pool: 
     await IMOutboxWorker(store, {"telegram": adapter}).run_once()
     assert adapter.sent == ["later"]
     assert [row[0] for row in statuses(pool)] == ["sending", "sent"]
-    # A still-live original owner may finish; no recovery rewrites its authority.
     assert store.finish(claimed[0], claimed[1], OutboundStatus.SENT, None)
 
 
@@ -425,7 +420,6 @@ async def test_partial_prefix_is_never_replayed_as_a_whole_manifest(pool: Connec
     store = IMOutboxStore(pool)
     first = candidate()
     assert first.intent is not None
-    # Preserve the real immutable, multi-part request through acceptance.
     first = TimelineCandidate(
         first.item,
         first.intent.model_copy(

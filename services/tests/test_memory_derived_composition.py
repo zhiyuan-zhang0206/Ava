@@ -1,5 +1,3 @@
-"""Memory service entries own one captured gate and a bounded pipeline lifetime."""
-
 from __future__ import annotations
 
 import asyncio
@@ -105,7 +103,7 @@ def test_entry_shares_gate_and_closes_pipeline_before_hard_exit(
     if "database" in work_inputs[0]:
         assert work_inputs[0]["database"] is factory
     else:
-        assert len(gates) == 2  # The search server itself never constructed a database.
+        assert len(gates) == 2
     build.return_value.stop.assert_called_once_with(timeout=2)
     assert events == ["pipeline_stopped", "hard_exit"]
     exit_process.assert_called_once_with(0)

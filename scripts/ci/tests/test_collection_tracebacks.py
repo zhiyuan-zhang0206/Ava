@@ -1,5 +1,3 @@
-"""Collection diagnostics own their worker and preserve the command's verdict."""
-
 import faulthandler
 import sys
 import threading
@@ -79,7 +77,6 @@ def test_diagnostic_failure_reaches_owner(tmp_path: Path) -> None:
 
 
 def run_isolated(pytester: pytest.Pytester, code: str) -> pytest.RunResult:
-    # Pytester's owner supplies the cwd, output capture and hard timeout kill/wait.
     assert Path.cwd() == pytester.path
     return pytester.run(
         sys.executable,

@@ -1,12 +1,3 @@
-"""services/backup/artifact/offsite.py: the OSS publish of a finished daily dump.
-
-The bucket is an in-memory fake at the `OssBucket` seam (`oss_fake.py`). The
-publisher's contract: iff-absent through forbid-overwrite on Complete only,
-adopt-after-crash when the occupied name provably holds the same content,
-refusal of any identity mismatch, a silent skip when nothing is configured,
-and a visible ACK line (success judged by destination state, #2620).
-"""
-
 from __future__ import annotations
 
 import logging
@@ -37,9 +28,6 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(config, "backup_offsite_credentials_file", tmp_path / "oss.json")
 
 
-# ── the upload itself ──
-
-
 def test_publish_streams_a_multipart_object_and_verifies_it(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -68,7 +56,6 @@ def test_publish_streams_a_multipart_object_and_verifies_it(
 
 
 def test_forbid_overwrite_rides_only_on_complete(tmp_path: Path) -> None:
-    """On init it would fail an occupied name at once and kill adopt-after-crash."""
     bucket = FakeOssBucket()
 
     offsite.publish(
@@ -90,7 +77,7 @@ def test_a_large_artifact_is_split_into_chained_parts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(offsite, "PART_SIZE", 5)
-    payload = b"0123456789abcdefg"  # 5 + 5 + 5 + 2
+    payload = b"0123456789abcdefg"
     bucket = FakeOssBucket()
 
     ack = offsite.put_if_absent(bucket, _artifact(tmp_path, payload), "x/object", _METADATA)
@@ -102,14 +89,9 @@ def test_a_large_artifact_is_split_into_chained_parts(
     assert bucket.files["x/object"]["data"] == payload
 
 
-# ── adopt-after-crash and identity refusal ──
-
-
 def test_adopt_after_crash_returns_the_existing_object(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A crashed or concurrent run left the canonical name complete; the retry's
-    parts hash to the same chain, so it adopts the object and aborts its upload."""
     artifact, bucket = _artifact(tmp_path), FakeOssBucket()
     first = offsite.put_if_absent(bucket, artifact, f"{REMOTE_ROOT}/{_NAME}", _METADATA)
     caplog.set_level(logging.INFO, logger=offsite.__name__)
@@ -136,7 +118,6 @@ def test_an_occupied_name_with_a_different_etag_chain_is_not_adopted(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     bucket = FakeOssBucket()
-    # Same size and metadata as the artifact, so only the ETag chain can tell them apart.
     bucket.seed(f"{REMOTE_ROOT}/{_NAME}", [b"eNcrypted artifact"], _METADATA)
     artifact = _artifact(tmp_path)
 
@@ -221,7 +202,6 @@ def test_a_rejected_init_keeps_the_local_artifact_and_does_not_raise(
 
 
 def test_the_root_is_a_parameter(tmp_path: Path) -> None:
-    """A smoke run publishes under a scratch prefix and never touches `ava-logical/`."""
     bucket = FakeOssBucket()
 
     published = offsite.publish(
@@ -237,13 +217,9 @@ def test_the_root_is_a_parameter(tmp_path: Path) -> None:
     assert list(bucket.files) == [published]
 
 
-# ── configuration ──
-
-
 def test_unconfigured_publish_skips_with_one_info_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Not configured is a supported state: no ERROR, no traceback, no store opened."""
     monkeypatch.setattr(settings.services, "backup_offsite_endpoint", "")
     monkeypatch.setattr(settings.services, "backup_offsite_bucket", "")
     monkeypatch.setattr(settings.services, "backup_offsite_credentials_file", None)

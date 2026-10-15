@@ -1,5 +1,3 @@
-"""Trusted provider recovery and propagation to the labeler's service owner."""
-
 from __future__ import annotations
 
 import asyncio
@@ -305,7 +303,6 @@ async def test_dispatch_failure_stops_the_batch_without_rewriting_inbounds(
     def select(_cur: object, _cooling: list[int]) -> list[tuple[int, str]]:
         nonlocal polls
         polls += 1
-        # A restored swallowing loop exits on its second poll rather than hanging.
         if polls > 1:
             raise asyncio.CancelledError
         return [(first, "prompt"), (second, "later prompt")]

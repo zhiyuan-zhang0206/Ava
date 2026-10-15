@@ -1,5 +1,3 @@
-"""Fast receipts survive the pinned Responses SDK's stream and nonstream paths."""
-
 import pytest
 from langchain_core.messages import AIMessage
 from langchain_openai.chat_models.base import (
@@ -19,8 +17,6 @@ from base.lm.usage import usage_model
 def test_response_receipt_and_token_details(
     tier: str, stream: bool, *, model_catalog: ModelCatalog
 ) -> None:
-    # SDK network parsing constructs responses without strict enum validation;
-    # model_construct reproduces that boundary for the newer 'fast' receipt.
     response = Response.model_construct(
         id="resp_test",
         object="response",

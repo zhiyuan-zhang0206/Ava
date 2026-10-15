@@ -65,3 +65,11 @@ initialization or an execution tally. Call-time agent/source attribution snapsho
 explicit SDK provenance, including borrowed identities, without validating a lease
 or doing database I/O. Sampling is an explicit
 loss of detail: sampled events cannot reconstruct a complete call history.
+
+## Metrics test windows
+
+`tests/telemetry_stream.py` writes append-only telemetry and passes a chosen
+`now` into the read under test. Random slots are 40 days apart, wider than the
+30-day read window, so different slots separate their fixture windows. The
+sampling is with replacement; two streams can choose the same slot. This setup
+reduces interference but does not guarantee unique windows or absolute isolation.

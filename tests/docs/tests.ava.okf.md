@@ -67,3 +67,11 @@ Validation ownership across hooks and CI: [[test-ci.ava.okf.md]].
 - **Isolation**: each test gets isolated DB/Redis, avoiding parallel conflicts
 - **Do not** run the full suite locally — Mac mini resources are limited (the `provisioning` and `env_bootstrap` plugins are designed for concurrency isolation: per-session database names + random free ports + Redis channel suffixes, **concurrent sessions will not conflict**, just resource-intensive)
 - `gateway/http/middleware/tests/test_agent_error_wire_equivalence.py` parametrized verification of agent ↔ gateway error wire protocol consistency
+
+### Browser frame sample scope
+
+`tests/e2e/state/test_timeline_virtualization.py` takes the best p95 from three
+serial sweeps to reduce load jitter. Its 33 ms gate compares uniform
+`agent_chat` primary-row content. Expanded reasoning rows still check bounded
+DOM and prepend behavior; this sample does not establish a frame-time bound
+for every content shape or every run.

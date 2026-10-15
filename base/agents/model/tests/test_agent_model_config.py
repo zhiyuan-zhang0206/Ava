@@ -1,5 +1,3 @@
-"""Effective model validation preserves birth pins and rejects incompatible edits."""
-
 from pathlib import Path
 
 import psycopg
@@ -63,7 +61,6 @@ def test_restart_validates_birth_effort_when_only_the_model_changes(
                 llm_override=settings.lm.llm_override,
                 default_model=settings.lm.llm_model,
             )
-        # An explicit replacement fixes the inherited mismatch.
         validate_restart_model_config(
             cur,
             agent_id,

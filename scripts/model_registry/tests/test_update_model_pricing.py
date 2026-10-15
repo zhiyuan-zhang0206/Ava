@@ -151,7 +151,6 @@ def test_deepseek_parser_preserves_models_meters_and_decimal_units() -> None:
     prices = catalog.models
 
     assert catalog.peak_windows == (("01:00:00", "04:00:00"), ("06:00:00", "10:00:00"))
-    # Column labels carry footnote markers; parsing yields the official model ids.
     assert list(prices) == ["deepseek-flash", "deepseek-v4-pro"]
 
     assert prices["deepseek-flash"].peak == pricing_updater.Rates(
@@ -177,8 +176,6 @@ def test_deepseek_parser_preserves_models_meters_and_decimal_units() -> None:
 
 
 def test_deepseek_parser_strips_column_footnote_markers() -> None:
-    """The 2026-09-10 page labels its columns `deepseek-flash (1)`; the marker
-    must never leak into a model id (that mismatch failed the daily workflow)."""
     marked = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
     unmarked = pricing_updater.parse_deepseek_pricing(
         _DEEPSEEK_TABLE.replace("deepseek-flash (1)", "deepseek-flash")

@@ -1,5 +1,3 @@
-"""The emitter's telemetry_events sink: what lands, how it fails, how it recovers."""
-
 from __future__ import annotations
 
 import json
@@ -66,7 +64,7 @@ def test_telemetry_and_log_events_land_and_audit_events_do_not(
         _event("spawn", marker),
     ]
     event_store.store_events(database, batch)
-    event_store.store_events(database, batch)  # a redelivered batch adds nothing
+    event_store.store_events(database, batch)
 
     assert [(r[0], r[1], r[2]) for r in _rows(db_conn, marker)] == [
         ("llm_usage", "telemetry", "store-cluster"),
@@ -81,12 +79,12 @@ def test_only_events_somebody_reads_land(
     event_store.store_events(
         database,
         [
-            _event("llm_usage", marker),  # persist=True
-            _event("exec_envelope", marker),  # registered, no reader by name
-            _event("log", marker),  # info log
-            _event("never_registered_name", marker),  # unregistered: kept
-            replace(_event("log", marker), level="error"),  # level reads
-            replace(_event("exec_envelope", marker), level="warning"),  # the level reads it
+            _event("llm_usage", marker),
+            _event("exec_envelope", marker),
+            _event("log", marker),
+            _event("never_registered_name", marker),
+            replace(_event("log", marker), level="error"),
+            replace(_event("exec_envelope", marker), level="warning"),
         ],
     )
 
@@ -94,7 +92,7 @@ def test_only_events_somebody_reads_land(
         ("exec_envelope", "telemetry"),
         ("llm_usage", "telemetry"),
         ("log", "log"),
-        ("never_registered_name", "log"),  # the loguru fallback category
+        ("never_registered_name", "log"),
     ]
     assert [r[0] for r in _rows(db_conn, marker)].count("exec_envelope") == 1
 
@@ -180,7 +178,7 @@ def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
 
     monkeypatch.setattr(event_store, "emit", capture_emit)
     event_store.store_events(database, [_event("llm_usage", marker)])
-    event_store.store_events(database, [_event("llm_usage", marker)])  # inside the backoff window
+    event_store.store_events(database, [_event("llm_usage", marker)])
 
     assert attempts == [1]
     assert [(e["rows"], e["consecutive_failures"], e["error_class"]) for e in emitted] == [

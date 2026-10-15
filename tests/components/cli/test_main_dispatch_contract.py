@@ -1,5 +1,3 @@
-"""Only the CLI database composition owner declares exempt admission."""
-
 from __future__ import annotations
 
 import ast
@@ -26,8 +24,6 @@ def _declares_exempt_gate(node: ast.AST) -> bool:
 
 
 def test_only_the_cli_database_owner_declares_exempt_admission() -> None:
-    """A service that declared it would be the writer the gate exists to stop,
-    running unchecked. Services start with `python -m <module>`, never through here."""
     root = Path(__file__).resolve().parents[3]
     skipped = {"tests", "ui", "docs", "node_modules", "assets", "demos"}
     callers: set[str] = set()
@@ -36,7 +32,7 @@ def test_only_the_cli_database_owner_declares_exempt_admission() -> None:
             continue
         for path in sorted(top.rglob("*.py")):
             if "tests" in path.relative_to(root).parts:
-                continue  # a package's own `tests/` is not production code
+                continue
             text = path.read_text()
             if "ProcessDbGate" not in text:
                 continue

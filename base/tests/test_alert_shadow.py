@@ -1,5 +1,3 @@
-"""Real transaction regressions for inactive alert notification facts."""
-
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from threading import Barrier
@@ -68,7 +66,7 @@ def test_repeat_lost_response_and_changed_members_preserve_frozen_group(
     db_conn: psycopg.Connection,
 ) -> None:
     a, b, c = alert("a"), alert("b"), alert("c")
-    ingest(db_conn, [a, b])  # Commit succeeds; caller may lose its response.
+    ingest(db_conn, [a, b])
     original = facts(db_conn)
     db_conn.commit()
     changed = deepcopy(a)
@@ -189,7 +187,6 @@ def test_existing_start_fallback_and_unknown_start_keep_current_policy(
 def test_missing_start_lookup_waits_for_concurrent_latest_instance(
     db_conn: psycopg.Connection,
 ) -> None:
-    """Lookup happens after the fingerprint gate, seeing the committed latest instance."""
     import time
     from threading import Event
 
@@ -228,7 +225,7 @@ def test_missing_start_lookup_waits_for_concurrent_latest_instance(
                     "SELECT wait_event_type FROM pg_stat_activity WHERE pid=%s",
                     (second_pid[0],),
                 ).fetchone()
-                db_conn.commit()  # Refresh pg_stat_activity rather than reusing its snapshot.
+                db_conn.commit()
                 if waiting == ("Lock",):
                     break
                 time.sleep(0.01)

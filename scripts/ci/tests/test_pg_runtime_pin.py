@@ -1,11 +1,3 @@
-"""CI tests against the Postgres production runs: the vendored zonky tree, not an apt build.
-
-PGDG keeps only its newest 17.x, so no apt pin can match `runtime_binaries.PG_VERSION`; the
-backend jobs instead build that tree (`scripts/ci/vendor_pg_runtime.py`) and every pytest
-session links it (`tests/fixtures/env_bootstrap.py`). These tests fail when a job installs the
-data plane without wiring the vendored tree, or when the wiring drifts from the pin.
-"""
-
 from __future__ import annotations
 
 import re
@@ -53,7 +45,5 @@ def test_the_session_home_links_the_vendored_runtime_the_job_exports() -> None:
 
 
 def test_ci_no_longer_installs_an_apt_pgvector() -> None:
-    # pgvector rides the vendored tree (the pinned injection); an apt copy would only
-    # be a second, unpinned one.
     text = (_REPO_ROOT / ".github/actions/install-pg-redis/action.yml").read_text(encoding="utf-8")
     assert "postgresql-17-pgvector" not in text

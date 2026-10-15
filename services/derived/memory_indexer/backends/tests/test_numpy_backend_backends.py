@@ -1,5 +1,3 @@
-"""The backend preflight probes: an unreachable service is transient and names the fix, an unknown backend is fatal."""
-
 from __future__ import annotations
 
 import socket
@@ -23,8 +21,6 @@ def _free_port() -> int:
 def test_probe_numpy_unreachable_is_actionable(
     monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
-    """A down service is transient (may be booting) but the message must name
-    the fix and the switch action."""
 
     monkeypatch.setattr(settings.services, "memory_search_uri", f"http://127.0.0.1:{_free_port()}")
     result = probe.probe_backend(
@@ -32,7 +28,7 @@ def test_probe_numpy_unreachable_is_actionable(
         Database.from_settings(gate=database_gate),
         uri_reader=lambda: settings.services.memory_search_uri,
     )
-    assert not result.fatal  # booting is transient — the retry loop owns the wait
+    assert not result.fatal
     assert "memory_search service is not reachable" in (result.message or "")
     assert "AVA_MEMORY_SEARCH_BACKEND=numpy" in (result.message or "")
 

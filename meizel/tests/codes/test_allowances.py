@@ -1,5 +1,3 @@
-"""`meizel.allowances`: the one reader of the policy file, and rule code that holds no exemption."""
-
 from __future__ import annotations
 
 import ast
@@ -71,14 +69,8 @@ def test_the_repository_policy_is_well_formed() -> None:
 
 
 def test_no_rule_code_holds_an_exemption_of_its_own() -> None:
-    """Every file or site the policy exempts is a string in the policy and in no rule module."""
     policy = allowances.load(ROOT)
-    exempt = {
-        name
-        for entries in policy.listed.values()
-        for name in entries
-        if "/" in name  # a path or a `path::site`; the callee vocabularies are not repo paths
-    }
+    exempt = {name for entries in policy.listed.values() for name in entries if "/" in name}
     assert len(exempt) > 50
     literals = {
         node.value: path.relative_to(ROOT).as_posix()

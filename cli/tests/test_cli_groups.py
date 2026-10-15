@@ -1,10 +1,3 @@
-"""Top-level CLI surface after the start-path convergence.
-
-The bring-up verbs collapsed into a single `ava start` (which births the cluster
-on first run); the standalone `infra`/`gateway`/`host` groups are gone, and
-cluster-level verbs live under `ava cluster`.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -29,8 +22,6 @@ def _top_choices() -> set[str]:
 
 
 def _cluster_choices() -> set[str]:
-    # argparse types `.choices` as `Iterable[str] | None`, but a subparsers action
-    # holds a name -> parser dict at runtime; cast so the subscript type-checks.
     p = build_parser()
     cmd = next(a for a in p._actions if a.dest == "cmd")
     cluster_p = cast("dict[str, argparse.ArgumentParser]", cmd.choices)["cluster"]
@@ -62,15 +53,8 @@ def test_cluster_destroy_has_no_flag_that_skips_its_confirmation() -> None:
 
 
 def test_help_builds_parser_config_free(tmp_path: Path) -> None:
-    """`ava --help` must build the parser WITHOUT loading Settings — no
-    `_add_*_parser` may eager-import a `cli.commands.*` module at build time
-    (some of which load Settings), or a fresh host with no .env can't even
-    read --help.
-
-    Run in a subprocess with AVA_HOME at an empty dir + every AVA_* stripped, so a
-    stray Settings load fails with a missing-required-field ValidationError."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
-    env["AVA_HOME"] = str(tmp_path)  # empty dir -> no .env
+    env["AVA_HOME"] = str(tmp_path)
     proc = subprocess.run(
         [sys.executable, "-m", "cli.main", "--help"],
         cwd=Path(__file__).resolve().parents[2],

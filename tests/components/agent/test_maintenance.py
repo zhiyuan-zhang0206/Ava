@@ -1,5 +1,3 @@
-"""Real PostgreSQL ownership/claim and compiled graph drain boundaries."""
-
 import asyncio
 from typing import Any
 from uuid import uuid4
@@ -57,7 +55,6 @@ async def test_admission_waiting_on_real_row_lock_cannot_escape_published_hold(
     machine_identity: MachineIdentity,
 ) -> None:
     agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
-    # This is a real PostgreSQL lock wait, not a mocked held() return.
     async with aops_pool.connection() as blocker, blocker.transaction():
         await blocker.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent,))
         attempt = asyncio.create_task(

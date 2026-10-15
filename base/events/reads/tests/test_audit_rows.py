@@ -1,5 +1,3 @@
-"""`base.events.reads.audit_rows` — reads of the audit record in the event stream's row shape."""
-
 from __future__ import annotations
 
 import uuid
@@ -39,7 +37,7 @@ def test_rows_carry_the_stream_shape_and_the_unsigned_stream_id(
     [row], more = audit_rows.query_events(db_conn)
 
     assert more is False
-    assert row["id"] == (1 << 64) - 1  # the signed column value -1, as the stream carries it
+    assert row["id"] == (1 << 64) - 1
     assert row["category"] == "audit"
     assert len(row["line_sha256"]) == 64
     assert row["ts"].tzinfo is not None
@@ -109,7 +107,7 @@ def test_edge_counts_group_per_agent_target_and_name_and_skip_incomplete_edges(
     _record(db_conn, "send_message", agent_id=1, target=2)
     _record(db_conn, "send_message", agent_id=1, target=2, hours_ago=5)
     _record(db_conn, "send_message", agent_id=None, target=2)
-    _record(db_conn, "terminate", agent_id=1, target=2)  # not an edge event
+    _record(db_conn, "terminate", agent_id=1, target=2)
 
     counts = {(a, t, name): count for a, t, name, count, _last in audit_rows.edge_counts(db_conn)}
 

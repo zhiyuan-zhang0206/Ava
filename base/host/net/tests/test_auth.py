@@ -1,5 +1,3 @@
-"""Unit tests for base/host/net/auth.py — bearer and cookie primitives."""
-
 from base64 import urlsafe_b64decode
 
 from base.host.net.auth import (
@@ -27,14 +25,13 @@ def test_verify_rejects_missing_header() -> None:
 
 
 def test_verify_rejects_malformed_scheme() -> None:
-    assert verify_bearer("s3cret", "s3cret") is False  # no "Bearer " prefix
+    assert verify_bearer("s3cret", "s3cret") is False
     assert verify_bearer("Basic s3cret", "s3cret") is False
 
 
 def test_verify_fails_closed_on_empty_secret() -> None:
-    # an unset cluster secret never verifies — fail closed, not open.
     assert verify_bearer("Bearer ", "") is False
-    assert verify_bearer("Bearer ", "") is False  # bearer_header("") would produce this
+    assert verify_bearer("Bearer ", "") is False
 
 
 def test_header_then_verify_roundtrip() -> None:

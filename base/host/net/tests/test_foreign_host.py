@@ -1,5 +1,3 @@
-"""`names_foreign_host`: the one answer to "is this data plane hosted off-box"."""
-
 from __future__ import annotations
 
 import pytest
@@ -14,7 +12,6 @@ from base.host.net.url_secret import names_foreign_host
         (("postgresql://ava@localhost/ava", "redis://[::1]:6380/0"), False),
         (("postgresql://ava@10.0.0.7:5432/ava", "redis://127.0.0.1:6380/0"), True),
         (("postgresql://ava@127.0.0.1:5432/ava", "rediss://ava@cache.example:6380/0"), True),
-        # a host-less URL reads as loopback, so a unix-socket or placeholder form is local
         (("postgresql:///ava", "redis:///0"), False),
         ((), False),
     ],

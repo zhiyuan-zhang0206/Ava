@@ -1,5 +1,3 @@
-"""Idempotent dispatch stores, replays and protects its owning receipt."""
-
 from __future__ import annotations
 
 import asyncio
@@ -40,9 +38,6 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The first dispatch with a key executes the op and stores its outcome in
-    the shared api_idempotency table (method='ops' rows: path=kind,
-    op_status + result)."""
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
 
@@ -87,9 +82,6 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A second dispatch with the same key replays the stored outcome — the op
-    is NOT re-executed. This is what makes the gateway's retry of a non-
-    idempotent op (spawn) safe: a lost response cannot create a twin agent."""
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
 
@@ -126,7 +118,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
 
     assert first == ("completed", {"id": 777})
     assert second == ("completed", {"id": 777})
-    assert calls["n"] == 1  # executed exactly once across both dispatches
+    assert calls["n"] == 1
 
 
 @pytest.mark.asyncio
@@ -141,7 +133,6 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A duplicate lifecycle request waits within its bounded budget and replays its owner."""
     monkeypatch.setattr(daemon, "DEDUP_WAIT_STEP_S", 0.01)
     monkeypatch.setattr(daemon, "DEDUP_WAIT_ATTEMPTS", 60)
     calls: dict[str, int] = {}
@@ -220,7 +211,6 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A duplicate wait expires without executing again or claiming completion."""
     monkeypatch.setattr(daemon, "DEDUP_WAIT_STEP_S", 0.01)
     monkeypatch.setattr(daemon, "DEDUP_WAIT_ATTEMPTS", 2)
     calls: dict[str, int] = {}
@@ -301,7 +291,6 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Different keys are different logical ops — each executes."""
     calls: dict[str, int] = {}
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
 
@@ -351,8 +340,6 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A business-failed outcome is stored like a success and replayed on a
-    same-key retry — a deterministic business failure must not re-run the op."""
 
     async def _fake_lifecycle(
         _db: object,
@@ -403,4 +390,4 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
     )
 
     assert first[0] == "failed"
-    assert second == first  # replayed, not re-executed
+    assert second == first

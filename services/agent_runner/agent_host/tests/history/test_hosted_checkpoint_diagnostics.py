@@ -1,5 +1,3 @@
-"""Shared saver failures keep their actual checkpoint identity and propagate."""
-
 import asyncio
 from typing import Any
 
@@ -48,7 +46,6 @@ async def test_shared_saver_reports_each_failed_write_owner_without_swallowing(
                 await saver.aput(
                     saved, empty_checkpoint(), {"source": "loop", "step": 1, "parents": {}}, {}
                 )
-        # A real pool/storage boundary fails, without replacing the saver methods.
         await pool.close()
 
         async def fail(config: RunnableConfig) -> None:

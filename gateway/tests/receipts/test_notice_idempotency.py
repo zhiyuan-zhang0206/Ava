@@ -1,5 +1,3 @@
-"""Notice receipts keep resolution, replies and superseding creation atomic."""
-
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
@@ -146,8 +144,6 @@ def test_create_receipt_survives_expiration(
         body = {"title": "expiring", "expire_at": deadline.isoformat()}
         first = client.post(path, json=body, headers=keyed_headers("expires"))
 
-        # If mutable preconditions run on receipt replay, the expired timestamp
-        # would invalidate an already committed operation.
         def reject_fresh(*args: object) -> None:
             raise RuntimeError("fresh operation validation should not run")
 

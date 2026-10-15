@@ -1,6 +1,3 @@
-"""The stop window: both maintenance loops skip their passes while the unit is quiesced, so
-neither borrows a connection from a pool the stop is about to close."""
-
 from __future__ import annotations
 
 import asyncio
@@ -83,8 +80,6 @@ async def test_a_quiesced_unit_runs_no_pass(
         entered.set()
         await suspended.wait()
 
-    # Cancel inside an admitted pass or the first quiesced sleep, rather than
-    # racing a fixed delay against worker-thread completion.
     monkeypatch.setattr(daemon, "maintenance_with_liveness", held_pass)
     monkeypatch.setattr(daemon, "sleep_with_liveness", short_sleep)
     async with asyncio.TaskGroup() as tasks:

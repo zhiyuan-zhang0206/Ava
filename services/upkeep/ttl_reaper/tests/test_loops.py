@@ -1,7 +1,3 @@
-"""The reaper's loop structure: the TaskGroup that owns the two loops, a crash
-that ends the process, the durable cadence clocks, the sweep's slow phases, and
-the remote round."""
-
 from __future__ import annotations
 
 import asyncio
@@ -45,9 +41,6 @@ def _backdate(db: psycopg.Connection, kind: str, seconds: float) -> None:
         (seconds, kind),
     )
     db.commit()
-
-
-# --- loops end the process ---------------------------------------------------
 
 
 def _park_or_crash(monkeypatch: pytest.MonkeyPatch, *, crashing: str, cancelled: list[str]) -> None:
@@ -112,8 +105,6 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     process_config: ConfigBoot,
     tmp_path: Path,
 ) -> None:
-    """The exception reaches `main` (exit code 1, supervisor restarts the unit),
-    and the pool, the health server and the pidfile are released on the way."""
     released: list[str] = []
 
     class _Pool:
@@ -156,15 +147,11 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     assert sorted(released) == ["health", "pidfile", "pool"]
 
 
-# --- durable cadence clocks --------------------------------------------------
-
-
 def test_a_phase_is_claimed_once_per_interval(
     db_conn: psycopg.Connection, pool: ConnectionPool
 ) -> None:
     assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is True
     assert cadence.claim_due(pool, cadence.STUCK_POINTER_SCAN, 3600.0) is False
-    # Each phase keeps its own clock.
     assert cadence.claim_due(pool, cadence.FIRE_LOG_PRUNE, 3600.0) is True
 
     _backdate(db_conn, cadence.STUCK_POINTER_SCAN, 3601.0)
@@ -175,8 +162,6 @@ def test_a_phase_is_claimed_once_per_interval(
 def test_a_claim_survives_a_restart(
     db_conn: psycopg.Connection, pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    """The clock is a row, not process state: a fresh pool (a restarted service)
-    reads the stamp the previous one wrote."""
     assert cadence.claim_due(pool, cadence.FIRE_LOG_PRUNE, 86400.0) is True
     restarted = base.db.pool(max_size=2, gate=database_gate)
     try:
@@ -185,9 +170,6 @@ def test_a_claim_survives_a_restart(
         restarted.close()
     row = db_conn.execute("SELECT count(*) FROM maintenance_state").fetchone()
     assert row is not None and row[0] == 1
-
-
-# --- the sweep's slow phases -------------------------------------------------
 
 
 def _count_slow_phases(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
@@ -219,7 +201,6 @@ async def test_slow_phases_run_once_per_cadence_not_once_per_round(
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "stuck": 1}
 
-    # Two hours on: the hourly phase is due again, the daily prune is not.
     _backdate(db_conn, cadence.STUCK_POINTER_SCAN, 7200.0)
     _backdate(db_conn, cadence.FIRE_LOG_PRUNE, 7200.0)
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
@@ -233,12 +214,8 @@ async def test_a_restarted_sweep_does_not_rerun_phases_it_already_ran(
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "stuck": 1}
 
-    # A new process: nothing in memory, the clocks are the table's.
     await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "stuck": 1}
-
-
-# --- the remote round --------------------------------------------------------
 
 
 async def test_the_remote_round_reaps_shells(
@@ -261,9 +238,6 @@ async def test_the_remote_round_reaps_shells(
     assert calls == ["shells"]
 
 
-# --- shell reclaim is concurrent across machines, serial within one ----------
-
-
 def _rows(*placements: tuple[str, int]) -> list[dict[str, object]]:
     return [
         {
@@ -280,8 +254,6 @@ def _rows(*placements: tuple[str, int]) -> list[dict[str, object]]:
 async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_order(
     monkeypatch: pytest.MonkeyPatch, event_bus: EventBus, *, database_gate: ProcessDbGate
 ) -> None:
-    """A slow machine holds up only its own rows: while machine `slow` is wedged
-    in a dispatch, machine `fast` finishes both of its rows."""
     release = asyncio.Event()
     started: list[tuple[str, int]] = []
     finished: list[tuple[str, int]] = []
@@ -301,7 +273,7 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
     monkeypatch.setattr(shells, "expired_shell_rows_blocking", expired)
     monkeypatch.setattr(shells, "reclaim_row", reclaim)
 
-    faked_pool = cast(ConnectionPool, None)  # every pool consumer above is faked
+    faked_pool = cast(ConnectionPool, None)
     task = asyncio.create_task(
         shells.reap_expired_shells(
             faked_pool, Database.from_settings(gate=database_gate), event_bus, _progress()
@@ -312,7 +284,7 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
             break
         await asyncio.sleep(0.01)
     assert finished == [("fast", 2), ("fast", 4)]
-    assert started == [("slow", 1), ("fast", 2), ("fast", 4)]  # slow's 2nd row waits its turn
+    assert started == [("slow", 1), ("fast", 2), ("fast", 4)]
 
     release.set()
     reaped = await task
@@ -323,8 +295,6 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
 async def test_a_dispatch_past_its_deadline_defers_the_row(
     monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
-    """A dispatch that outlives the deadline the RPC client's own budget sizes is
-    cut and the row left for the next round, never wedging the loop."""
 
     async def hang(*_a: object, **_kw: object) -> dict[str, object]:
         await asyncio.Event().wait()
@@ -347,12 +317,8 @@ def test_the_dispatch_deadline_covers_the_clients_full_retry_budget(
     monkeypatch.setattr(settings.gateway, "cluster_rpc_max_retries", 3)
     monkeypatch.setattr(settings.gateway, "cluster_rpc_timeout_seconds", 30.0)
 
-    # Four attempts at the reaper's own 5 s attempt budget, plus the client's backoff.
     assert shells.dispatch_deadline_s() >= 4 * 5.0
     assert shells.dispatch_deadline_s() < 4 * 30.0
-
-
-# --- the stop window ---------------------------------------------------------
 
 
 def _sweep_loop(

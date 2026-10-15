@@ -1,5 +1,3 @@
-"""Stale-incarnation ownership fences preserve claimed rows during the consume pass."""
-
 from typing import Any
 from uuid import uuid4
 
@@ -40,8 +38,6 @@ async def test_replaced_incarnation_writes_nothing(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A replacement runtime owns the row now: the stale incarnation's pass is
-    refused by the lease fence before any write."""
     incarnation = await admit(
         aops_pool,
         model_catalog=model_catalog,
@@ -70,8 +66,6 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """At the settlement boundary the same refusal is a logged no-op — the
-    abort's settlement must not fail because its pass was fenced out."""
     incarnation = await admit(
         aops_pool,
         model_catalog=model_catalog,
@@ -83,7 +77,6 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
     claimed = claimed_row(db_conn, agent, "claimed")
     _replace_owner(db_conn, agent)
 
-    # must not raise: the settlement is not failed by a fenced-out pass
     await settlement_mod.reconcile_inbounds_after_abort(aops_pool, incarnation, resources=None)
 
     assert row_statuses(db_conn, [claimed]) == {claimed: "claimed"}

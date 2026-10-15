@@ -1,5 +1,3 @@
-"""`base.agents.history.hierarchy.store` — the understanding-tree reads, against real Postgres."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -8,8 +6,8 @@ from base.agents.history.hierarchy.store import load_generation_costs, load_node
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 
-AGENT_A = 990_128_901  # node reads
-AGENT_B = 990_128_902  # call records
+AGENT_A = 990_128_901
+AGENT_B = 990_128_902
 
 T0 = datetime(2026, 9, 12, 4, 0, tzinfo=UTC)
 T1 = datetime(2026, 9, 12, 4, 5, tzinfo=UTC)
@@ -40,7 +38,7 @@ def test_load_nodes_returns_every_node_ordered_by_depth_then_position(
         (2, 0, "parent"),
     ]
     assert rows[0].parent_id == rows[2].id and rows[2].parent_id is None
-    assert rows[0].end_ts is None and rows[0].start_ts == T0  # an untimed end is kept as stored
+    assert rows[0].end_ts is None and rows[0].start_ts == T0
     assert (rows[0].engine_version, rows[0].prompt_version) == ("chunk-0.2", "chunk-0.12")
 
 
@@ -58,7 +56,7 @@ def test_generation_costs_are_summed_per_chunk_job_and_per_grouping_check(
             (AGENT_B,),
         ).fetchone()
         assert job is not None
-        for rnd in (0, 1):  # the answer and one correction
+        for rnd in (0, 1):
             conn.execute(
                 "INSERT INTO understanding_chunk_calls (job_id, agent_id, attempt, round, model,"
                 " instruction, prefix_len, start_offset, usage_metadata, duration_ms)"

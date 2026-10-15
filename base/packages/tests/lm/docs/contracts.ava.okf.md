@@ -70,3 +70,11 @@ statement = """An explicit empty effort masks a model default. A profile without
 code = ["base/packages/tests/lm/registry/test_settings.py:test_explicit_empty_string_beats_per_model_effort", "base/packages/tests/lm/registry/test_settings.py:test_resolve_setting_degrades_when_owning_domain_not_in_profile"]
 tests = ["base/packages/tests/lm/registry/test_settings.py::test_explicit_empty_string_beats_per_model_effort", "base/packages/tests/lm/registry/test_settings.py::test_resolve_setting_degrades_when_owning_domain_not_in_profile"]
 ```
+
+## Response receipt fixtures
+
+`providers/test_openai_fast.py` uses `Response.model_construct` to reproduce
+the locked OpenAI SDK's non-strict network-response construction. Strict model
+validation could reject a newer service-tier receipt before Ava consumes it.
+This fixture exercises receipt handling; it does not claim that strict parsing
+accepts the same values or that a live provider returned them.
