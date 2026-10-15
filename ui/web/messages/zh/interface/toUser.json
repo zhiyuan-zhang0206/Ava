@@ -24,5 +24,7 @@
   "pages": "页面",
   "extensions": "扩展",
   "category": "Inspector 分类",
-  "openContext": "To user"
+  "openContext": "To user",
+  "back": "返回",
+  "legacyHtml": "此文档正在等待转换为 Markdown。"
 }

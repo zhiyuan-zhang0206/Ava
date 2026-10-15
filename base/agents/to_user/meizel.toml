@@ -1,0 +1,6 @@
+exports = ["document.py", "models.py", "resources.py"]
+
+[uses]
+"__init__.py" = ["document.py", "models.py", "resources.py"]
+"document.py" = ["models.py", "resources.py"]
+"resources.py" = ["models.py"]

@@ -1,17 +1,16 @@
-"""Actual filesystem changes reach Redis, including newly created workspaces."""
-
 import asyncio
 import json
+import multiprocessing
 import os
 import shutil
-import subprocess
-import sys
 import time
+from multiprocessing.connection import Connection
 from pathlib import Path
 
 import pytest
 from redis.asyncio.client import PubSub
 
+from base.deploy.maintenance import pause_owner
 from base.events.live.bus import EventBus
 from base.events.live.projection import ToUserChanged
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
@@ -35,7 +34,7 @@ async def test_changes_atomic_replacement_and_new_workspace(
     workspace.mkdir()
     async with (
         event_bus.open_async_redis() as client,
-        client.pubsub() as subscriber,  # pyright: ignore[reportUnknownMemberType] — Redis kwargs
+        PubSub(client.connection_pool) as subscriber,
     ):
         await subscriber.subscribe(event_bus.channel)
         await subscriber.get_message(timeout=1)
@@ -43,11 +42,11 @@ async def test_changes_atomic_replacement_and_new_workspace(
             watcher = group.create_task(watch_to_user(tmp_path, event_bus))
             try:
                 await asyncio.sleep(0.2)
-                (workspace / "to_user.html").write_text("first")
+                (workspace / "to_user.md").write_text("first")
                 assert (await next_event(subscriber)).agent_id == 7
                 staged = workspace / ".next"
                 staged.write_text("second")
-                staged.replace(workspace / "to_user.html")
+                staged.replace(workspace / "to_user.md")
                 assert (await next_event(subscriber)).agent_id == 7
                 (tmp_path / "8").mkdir()
                 (tmp_path / "8" / "to_user.md").write_text("new agent")
@@ -60,8 +59,6 @@ async def test_changes_atomic_replacement_and_new_workspace(
 
 
 class RecordingBus(EventBus):
-    """Capture the watcher's public events without replacing its filesystem work."""
-
     def __init__(self) -> None:
         self.events: asyncio.Queue[int] = asyncio.Queue()
 
@@ -90,30 +87,28 @@ async def test_shallow_snapshots_coalesce_and_detect_preserved_mtime(tmp_path: P
         watcher = group.create_task(watch_to_user(tmp_path, bus))
         try:
             await asyncio.sleep(0.7)
-            assert bus.events.empty()  # No initial invalidation.
+            assert bus.events.empty()
             (workspace / "repository").mkdir()
             (workspace / "repository" / "to_user.md").write_text("nested")
             (workspace / "unrelated").write_text("other")
             (external / "to_user.md").write_text("symlink workspace")
             await asyncio.sleep(0.7)
             assert bus.events.empty()
-            html = workspace / "to_user.html"
             markdown = workspace / "to_user.md"
-            html.write_text("first")
             markdown.write_text("first")
             assert await recorded_event(bus) == 7
             await asyncio.sleep(0.7)
-            assert bus.events.empty()  # Both target files coalesce.
-            before = html.stat()
-            html.write_text("other")  # Same size; restoring mtime must not hide the edit.
-            os.utime(html, ns=(before.st_atime_ns, before.st_mtime_ns))
+            assert bus.events.empty()
+            before = markdown.stat()
+            markdown.write_text("other")
+            os.utime(markdown, ns=(before.st_atime_ns, before.st_mtime_ns))
             assert await recorded_event(bus) == 7
             staged = workspace / ".next"
             staged.write_text("third")
             os.utime(staged, ns=(before.st_atime_ns, before.st_mtime_ns))
-            staged.replace(html)
+            staged.replace(markdown)
             assert await recorded_event(bus) == 7
-            html.unlink()
+            markdown.unlink()
             assert await recorded_event(bus) == 7
             shutil.rmtree(workspace)
             assert await recorded_event(bus) == 7
@@ -179,8 +174,7 @@ async def test_unreadable_workspace_propagates_permission_error(tmp_path: Path) 
 async def test_workspace_replaced_by_file_during_scan_is_a_removal(tmp_path: Path) -> None:
     class ReplacedWorkspaceRoot(Path):
         def __truediv__(self, key: str | os.PathLike[str]) -> Path:
-            # The scanner has already statted the real directory when it forms
-            # its target paths. Perform the concurrent replacement at this boundary.
+
             path = Path(super().__truediv__(key))
             path.rmdir()
             path.write_text("workspace replaced")
@@ -198,11 +192,10 @@ async def test_workspace_replaced_by_file_during_scan_is_a_removal(tmp_path: Pat
 
 
 async def scale_probe(root: Path) -> dict[str, float | int]:
-    """Exercise initialization and additions at the observed production root count."""
+
     for index in range(3688):
         workspace = root / str(index)
         workspace.mkdir()
-        (workspace / "to_user.html").write_text("existing html")
         (workspace / "to_user.md").write_text("existing markdown")
     bus = RecordingBus()
     loop = asyncio.get_running_loop()
@@ -234,20 +227,50 @@ async def scale_probe(root: Path) -> dict[str, float | int]:
     }
 
 
+def run_scale_probe(root: Path, result: Connection) -> None:
+    result.send(asyncio.run(scale_probe(root)))
+    result.close()
+
+
 def test_production_scale_keeps_loop_responsive_and_stops(tmp_path: Path) -> None:
-    # A parent deadline can stop even a native constructor that holds the GIL.
-    result = subprocess.run(  # noqa: S603 — execute this repository-owned probe with literal argv
-        [sys.executable, str(Path(__file__)), str(tmp_path)],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=20,
-    )
-    sample = json.loads(result.stdout)
+    context = multiprocessing.get_context("spawn")
+    receiver, sender = context.Pipe(duplex=False)
+    worker = context.Process(target=run_scale_probe, args=(tmp_path, sender))
+    worker.start()
+    sender.close()
+    try:
+        assert receiver.poll(20), "The isolated watcher probe did not finish within its deadline"
+        sample = receiver.recv()
+        worker.join(2)
+        assert worker.exitcode == 0
+    finally:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(2)
+        receiver.close()
+        worker.close()
     assert sample["roots"] == 3688
     assert sample["max_loop_gap"] < 0.5, sample
     assert sample["elapsed"] < 5, sample
 
 
-if __name__ == "__main__":
-    sys.stdout.write(json.dumps(asyncio.run(scale_probe(Path(sys.argv[1])))))
+@pytest.mark.asyncio
+async def test_unreadable_maintenance_hold_defers_changes_until_release(tmp_path: Path) -> None:
+    workspace = tmp_path / "7"
+    workspace.mkdir()
+    bus = RecordingBus()
+    hold = pause_owner.state_path()
+    hold.parent.mkdir(parents=True, exist_ok=True)
+    hold.write_text("invalid hold")
+    async with asyncio.TaskGroup() as group:
+        watcher = group.create_task(watch_to_user(tmp_path, bus))
+        try:
+            await asyncio.sleep(0.2)
+            (workspace / "to_user.md").write_text("Waiting for release")
+            await asyncio.sleep(0.6)
+            assert bus.events.empty()
+            hold.unlink()
+            assert await recorded_event(bus) == 7
+        finally:
+            watcher.cancel()
+            hold.unlink(missing_ok=True)

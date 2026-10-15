@@ -40,7 +40,7 @@ def main(argv: list[str]) -> None:
     async def run() -> None:
         workspaces = home / "workspaces"
         (workspaces / "7").mkdir(parents=True)
-        (workspaces / "7" / "to_user.html").write_text("x")
+        (workspaces / "7" / "to_user.md").write_text("x")
         bus = EventBus(EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="test"))
         server = await start_health_server(
             "ops", port, image=LoadedCommit(source_root=home, sha=None)

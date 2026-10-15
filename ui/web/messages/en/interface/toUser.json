@@ -24,5 +24,7 @@
   "pages": "Pages",
   "extensions": "Extensions",
   "category": "Inspector category",
-  "openContext": "To user"
+  "openContext": "To user",
+  "back": "Back",
+  "legacyHtml": "This document is awaiting conversion to Markdown."
 }

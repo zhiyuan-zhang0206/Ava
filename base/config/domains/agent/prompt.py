@@ -1,12 +1,4 @@
-"""Agent system-prompt composition — AgentPromptSettings.
-
-What goes INTO the system prompt: SDK/skills injection lists, the workspace
-section, the /<name> command module, the communication style, and every
-prompt-section toggle (SDK overview, knowledge cutoff, guided-workflow
-sections, ...). Unset toggles resolve the per-model default via
-base/lm/registry.py. Split out of the former flat AgentSettings schema;
-each field keeps its exact env alias so the .env surface is unchanged."""
-
+# ava:ref base/config/docs/prompt-composition.ava.okf.md#sdk-defaults
 from __future__ import annotations
 
 from typing import Annotated, Literal
@@ -15,24 +7,9 @@ from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
 from base.config.base import EnvSettings
-from base.host.env.agent_slices import ToUserFormat
 
 
 class AgentPromptSettings(EnvSettings):
-    to_user_format: ToUserFormat = Field(
-        default="html",
-        alias="AVA_TO_USER_FORMAT",
-        description="Workspace document displayed beside messages: to_user.html or to_user.md.",
-        json_schema_extra={
-            "per_agent": True,
-            "lifecycle": "frozen",
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-        },
-    )
-
     sdk_disable: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
         alias="AVA_SDK_DISABLE",
@@ -54,9 +31,6 @@ class AgentPromptSettings(EnvSettings):
     )
 
     sdk_expand_in_system_prompt: Annotated[list[str], NoDecode] = Field(
-        # Stable P95 module set from recorded production SDK calls. Rare APIs
-        # remain discoverable through ava.help; explicit `*` still expands all.
-        # Plugin-declared expansions (such as ava_code's cwd) are merged first.
         default_factory=lambda: ["shell", "files", "agents", "tasks"],
         alias="AVA_SDK_EXPAND",
         description=(
@@ -83,8 +57,6 @@ class AgentPromptSettings(EnvSettings):
     )
 
     skills_to_inject_into_system_prompt: Annotated[list[str], NoDecode] = Field(
-        # `*` selects the whole catalog. The renderer folds descendants under
-        # real entry skills; an explicit list keeps every selected line visible.
         default_factory=lambda: ["*"],
         alias="AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
         description=(
@@ -102,8 +74,6 @@ class AgentPromptSettings(EnvSettings):
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
-            # cluster-default + per_agent: a spawner narrows one worker's index
-            # below the catalog (base/packages/plugins/config_registration.py reads the gate).
             "scope": "cluster-default",
             "per_agent": True,
             "lifecycle": "frozen",
@@ -127,8 +97,6 @@ class AgentPromptSettings(EnvSettings):
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
-            # cluster-default + per_agent: mirrors skills_to_inject_into_system_prompt
-            # so a spawner can arm one worker with a preloaded discipline skill.
             "scope": "cluster-default",
             "per_agent": True,
             "lifecycle": "frozen",

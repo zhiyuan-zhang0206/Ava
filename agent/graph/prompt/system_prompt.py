@@ -1,10 +1,4 @@
-"""System-prompt extension point for framework and plugin behavior sections.
-
-`build_system_prompt()` combines the base prompt, SDK overview, the framework's own sections
-(`FRAMEWORK_SECTIONS`, in reading order) and the sections plugins declare in `contribute()`
-(`base.packages.plugins.extensions`), which arrive through the `ExtensionRegistry` the caller holds.
-"""
-
+# ava:ref agent/graph/prompt/docs/composition.ava.okf.md#sdk-expansion
 import contextlib
 import hashlib
 import inspect
@@ -15,7 +9,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
-from base.agents.to_user import document_filename
+from base.agents.to_user import DOCUMENT_FILENAME
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import activation
@@ -34,12 +28,7 @@ from .conversation import COMMUNICATION_STYLE_SECTIONS, user_reply_section
 
 
 def _resolved(setting: str, slices: AgentSlices, catalog: ModelCatalog) -> Any:
-    """The per-model-resolved value of a prompt-behavior settings field for the
-    agent's model: an explicit env/.env/overlay value wins, else the model's
-    registry default, else the shared floor — see
-    base/lm/registry.py:resolve_setting. The behavioral sections below read
-    their toggles through this so a model family can default to a different
-    guidance profile without any per-cluster config."""
+
     from base.lm.registry import resolve_setting
 
     return resolve_setting(
@@ -50,29 +39,14 @@ def _resolved(setting: str, slices: AgentSlices, catalog: ModelCatalog) -> Any:
     )
 
 
-# Framework sections render by bucket: SDK detail -> Conversation -> Conduct -> Capabilities.
-
-
-# --- SDK detail: expanded contracts for the highest-frequency namespaces ---
 def discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
-    """Public ava namespaces the `"*"` expand entry stands for: every name in `help(ava)` that is
-    itself a namespace (a module / namespace object), plus public nested submodules reachable
-    through parent `__all_for_ava__` lists. Top-level functions (`help`, `understand`) are
-    intentionally NOT discovered: the SDK overview already prints their full signature + docstring,
-    so re-expanding them would only duplicate — the expanded reference earns its place only for
-    namespaces, which the overview shows as a bare `from . import X` line. The capability surfaces
-    (`CAPABILITY_SURFACES`) are skipped for the same anti-duplication reason: `# Capabilities` is
-    their index. Private names (leading underscore, e.g. a stray `_settings`) and any name removed
-    via AVA_SDK_DISABLE are excluded too — a disabled namespace must never be expanded back into the
-    prompt. Returned sorted so the rendered order is deterministic. Discovery is recursive: any
-    module with a public `__all_for_ava__` is descended into, so `shell.sessions` (listed in
-    `shell.__all_for_ava__`) is discovered without being listed explicitly alongside `"*"`."""
+
     import ava
 
     discovered: list[str] = []
 
     def _collect(parent: ModuleType, prefix: str) -> None:
-        # agent_visible_names already drops underscore-prefixed names.
+
         for name in ava.agent_visible_names(parent):
             full = f"{prefix}.{name}" if prefix else name
             if full in CAPABILITY_SURFACES or disabled_by_sdk_config(full, sdk_disable):
@@ -80,7 +54,7 @@ def discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
             attr = getattr(parent, name, None)
             if inspect.ismodule(attr) or isinstance(attr, SimpleNamespace):
                 discovered.append(full)
-                # Recurse into public nested namespaces
+
                 if inspect.ismodule(attr) and hasattr(attr, "__all_for_ava__"):
                     _collect(attr, full)
 
@@ -91,26 +65,7 @@ def discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
 def effective_sdk_expand(
     sdk_disable: Sequence[str], *, configured_expansions: Sequence[str]
 ) -> list[str]:
-    """The merged expand list: plugin-declared paths (`sdk_namespaces(expand=True)` / `sdk_expansions`)
-    first, then the configured framework list, deduped keep-first. Plugins lead
-    because a plugin promotes its own highest-frequency surface (ava_code's cwd
-    heads the coding namespaces); the framework default cannot name plugin
-    namespaces, so the hook is their only way in. The ava_code prompt section
-    consults this same view for its promote-vs-skip dedup.
 
-    A `"*"` entry in the configured list is replaced in place by every public
-    namespace discovered recursively through `discover_all_namespaces`
-    (sorted, minus the `CAPABILITY_SURFACES` the Capabilities section indexes);
-    explicit entries on either side of it survive and are deduped
-    keep-first, so `["*", "shell.sessions"]` naturally dedupes — the wildcard
-    already discovers `shell.sessions` and the explicit entry is dropped.
-    An explicit `["*", "skills"]` is how an operator opts a capability surface
-    back in — the wildcard skips it, the explicit entry does not. A member
-    *inside* a surface (`skills.gmail`) is refused here with a warning, so the
-    refusal holds for every consumer of this view and not only for the section
-    that renders it.
-    The literal `"*"` never reaches the returned list — it is resolved here,
-    so every downstream consumer sees concrete paths only."""
     from ava.sdk_surface import install
 
     configured: list[str] = []
@@ -142,24 +97,7 @@ def effective_sdk_expand(
 
 
 def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Render the effective expand list (plugin registrations + env
-    AVA_SDK_EXPAND, see `effective_sdk_expand`) as full `ava.help(ava.<path>)`
-    stubs, directly after the SDK overview. Selection is frequency-driven
-    (Huffman): always-on detail is paid only for the namespaces agents reach
-    for most days — live error data showed guessed signatures cluster exactly
-    there — while everything else keeps progressive disclosure via `ava.help`.
-    The AVA_SDK_DISABLE config is consulted BEFORE attempting resolution: a
-    disabled entry is skipped unconditionally — even if the name happened to
-    still resolve, expanding a namespace the operator explicitly removed would
-    leak it back into the prompt. A resolution failure after that filter has
-    exactly one meaning (typo, or a plugin namespace whose plugin is not
-    loaded): warn and skip.
 
-    Each resolved namespace renders at most once. `effective_sdk_expand` already
-    dedupes by path string, so two paths resolving to the SAME object (an alias,
-    or a polluted expand list) is an anomaly — render it once (a repeated
-    contract is pure prompt bloat) but WARN, so the upstream cause stays visible
-    instead of being silently absorbed."""
     wanted = effective_sdk_expand(
         slices.prompt.sdk_disable,
         configured_expansions=slices.read("agent", "sdk_expand_in_system_prompt"),
@@ -171,12 +109,7 @@ def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
 
     pieces: list[str] = []
     seen_targets: set[int] = set()
-    # Text-only models drop media-gated members (`ava.self.attach`; ruling
-    # 2026-08-28). Render parameters are arguments, passed per call — never set
-    # process-wide. Render classes compactly in the system prompt: name +
-    # docstring + field annotations + enum values, methods and nested classes
-    # skipped — fields stay so the agent sees attribute names, and the full
-    # contract (methods) is one `ava.help(ava.X.ClassName)` away.
+
     hidden: frozenset[str] = ava.sdk_surface.attachment_transport.media_gated_members(
         slices.brain.llm_model, catalog=catalog
     )
@@ -218,9 +151,7 @@ def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
 
 
 def _prefer_sdk_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_prefer_sdk_enabled (env AVA_SYSTEM_PROMPT_PREFER_SDK,
-    default on). One line steering the agent to the SDK over plain-Python /
-    raw-shell equivalents; deliberately example-free."""
+
     if not _resolved("prompt_prefer_sdk_enabled", slices, catalog):
         return ""
     return (
@@ -230,16 +161,8 @@ def _prefer_sdk_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     )
 
 
-# CodeAct batching lives in `_codeact.py` (this module is at its line ceiling);
-# listed in `FRAMEWORK_SECTIONS` so the section order stays the reading order this module
-# lays out — right after prefer-SDK, before keep-it-simple.
-
-
 def keep_it_simple_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_keep_it_simple_enabled (env
-    AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE, default on). Prefer mechanically correct,
-    conceptually simple solutions over clever shortcuts, relentlessly even when
-    the principled path is tedious."""
+
     if not _resolved("prompt_keep_it_simple_enabled", slices, catalog):
         return ""
     return (
@@ -254,17 +177,8 @@ def keep_it_simple_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str
     )
 
 
-# --- Conversation: how you talk to the user ---
-
-
 def communication_style_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Selected by agent_communication_style (env
-    AVA_AGENT_COMMUNICATION_STYLE, default 'off'). Three styles carry the
-    narration guidance and differ in how much the agent says while it
-    works: 'oriented' interleaves brief updates, 'concise' speaks at milestones
-    only, 'silent' stays quiet and reports once at the end. 'off' is the one
-    gate in this set: the optional narration section is omitted. Reply routing
-    and the initial human-response rule remain in conversation.user_reply_section."""
+
     style = _resolved("agent_communication_style", slices, catalog)
     if style == "off":
         return ""
@@ -278,7 +192,7 @@ _USER_TONE_SECTIONS = {"gemini": _STRONG_USER_TONE, "claude": _VERY_LIGHT_USER_T
 
 
 def user_tone_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Independent from ``agent_communication_style`` (narration volume vs tone), with a per-family strength gradient; every Claude model defaults off unless explicitly enabled."""
+
     if not _resolved("prompt_user_tone_enabled", slices, catalog):
         return ""
     spec = catalog.models.get(slices.brain.llm_model)
@@ -286,9 +200,7 @@ def user_tone_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
 
 
 def _output_conciseness_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_output_conciseness_enabled (env
-    AVA_SYSTEM_PROMPT_CONCISENESS, default on). Shape the text content: answer-first,
-    matched to the task, reference rather than dump."""
+
     if not _resolved("prompt_output_conciseness_enabled", slices, catalog):
         return ""
     return (
@@ -305,14 +217,7 @@ def _output_conciseness_section(slices: AgentSlices, *, catalog: ModelCatalog) -
 
 
 def ui_delivery_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_ui_delivery_enabled (env
-    AVA_SYSTEM_PROMPT_UI_DELIVERY, default on). Content for the user goes through
-    the UI — never as a bare path to a Markdown file the user would have to open
-    themselves. Deliberately example-free: the section states the semantic rule;
-    the concrete UI entry points (and their signatures, which change far more
-    often than the rule) live in the SDK overview / expanded reference. Files
-    remain fine as persistence and as handoff artifacts for other agents; the
-    user-facing presentation is the UI's job."""
+
     if not _resolved("prompt_ui_delivery_enabled", slices, catalog):
         return ""
     return (
@@ -327,11 +232,8 @@ def ui_delivery_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     )
 
 
-# --- Conduct: how you behave and what judgment to apply ---
 def _outcome_reporting_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_outcome_reporting_enabled (env
-    AVA_SYSTEM_PROMPT_REPORTING, default on). Report results honestly — no rounding a
-    partial result up to success."""
+
     if not _resolved("prompt_outcome_reporting_enabled", slices, catalog):
         return ""
     return (
@@ -344,9 +246,7 @@ def _outcome_reporting_section(slices: AgentSlices, *, catalog: ModelCatalog) ->
 
 
 def _action_caution_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_action_caution_enabled (env AVA_SYSTEM_PROMPT_CAUTION,
-    default on). Confirm before hard-to-reverse or outward-facing actions; treat
-    sending to an outside service as publishing."""
+
     if not _resolved("prompt_action_caution_enabled", slices, catalog):
         return ""
     return (
@@ -361,9 +261,7 @@ def _action_caution_section(slices: AgentSlices, *, catalog: ModelCatalog) -> st
 
 
 def align_before_action_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_align_before_action_enabled (env AVA_SYSTEM_PROMPT_ALIGN,
-    default on). Resolve material intent or authority choices without reopening
-    settled instructions merely because exploration or planning finished."""
+
     if not _resolved("prompt_align_before_action_enabled", slices, catalog):
         return ""
     return (
@@ -377,8 +275,6 @@ def align_before_action_section(slices: AgentSlices, *, catalog: ModelCatalog) -
     )
 
 
-# The capability-index step is omitted when there is no index; number the
-# remaining steps from their actual rendered order.
 _STEP_SKILL_INDEX = (
     "Does a skill already cover this? Read the `# Capabilities` index "
     "and match the task against descriptions and expected outputs before "
@@ -413,10 +309,7 @@ _STEP_PARALLEL = (
 
 
 def delegation_check_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_delegation_check_enabled (env
-    AVA_SYSTEM_PROMPT_DELEGATION_CHECK, default on). Consult capabilities and
-    existing responsibilities, then parallelize independent work. The index
-    step is omitted and the rest renumbered when the index is empty."""
+
     if not _resolved("prompt_delegation_check_enabled", slices, catalog):
         return ""
     steps: list[str] = []
@@ -442,22 +335,14 @@ _CROSS_MACHINE_DELEGATION_HINT = (
 
 
 def cross_machine_delegation_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_cross_machine_delegation_enabled (env
-    AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION, default on). One sentence,
-    user-finalized wording verbatim: when work spans machines, let an agent on
-    the target machine do it rather than reaching across. Semantic steer only —
-    no API detail (no spawn parameters, no SSH), so it cannot go stale."""
+
     if not _resolved("prompt_cross_machine_delegation_enabled", slices, catalog):
         return ""
     return _CROSS_MACHINE_DELEGATION_HINT
 
 
 def _file_driven_work_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_file_driven_work_enabled (env
-    AVA_SYSTEM_PROMPT_FILE_DRIVEN_WORK, default on). When working on complex multi-step
-    tasks, use files as working memory: write intermediate results to files,
-    use worktrees for isolation, and hand off work to peer agents via handoff
-    files rather than trying to fit everything into a message."""
+
     if not _resolved("prompt_file_driven_work_enabled", slices, catalog):
         return ""
     return (
@@ -482,11 +367,7 @@ def _file_driven_work_section(slices: AgentSlices, *, catalog: ModelCatalog) -> 
 
 
 def temporal_awareness_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_temporal_awareness_enabled (env
-    AVA_SYSTEM_PROMPT_TEMPORAL, default on). For events and releases after the training
-    cutoff, assume you don't know — search before answering; don't guess from
-    stale training data. At AI-capability scheduling, estimation, and feasibility
-    moments, invoke the ava-workflow.capability-timescale skill for current cognition."""
+
     if not _resolved("prompt_temporal_awareness_enabled", slices, catalog):
         return ""
     return (
@@ -504,12 +385,6 @@ def temporal_awareness_section(slices: AgentSlices, *, catalog: ModelCatalog) ->
         "memory pool and current primary sources for task-relevant evidence. "
         "State verified capability and uncertainty instead of assuming a fixed improvement."
     )
-
-
-# --- Capabilities: resources you can reach for ---
-# The memory discipline section lives in the ava_memory plugin, which owns both
-# memory stores: disabling the plugin removes the stores and the section that
-# describes them together (ava_builtins/plugins/ava_memory/plugin.py).
 
 
 INVEST_IN_THE_FUTURE_SECTION = (
@@ -533,37 +408,18 @@ INVEST_IN_THE_FUTURE_SECTION = (
 
 
 def invest_in_the_future_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Toggle via settings.agent.prompt_invest_future_enabled (env
-    AVA_SYSTEM_PROMPT_INVEST_FUTURE, default on through the per-model floor).
-    The framework's ONE cross-domain future-signal rule, merged from the former
-    # Beyond the task at hand; its closing-presentation duty now lives in the
-    final paragraph."""
+
     if not _resolved("prompt_invest_future_enabled", slices, catalog):
         return ""
     return INVEST_IN_THE_FUTURE_SECTION
 
 
 def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str:
-    """One-paragraph pointer to the per-agent workspace dir. Empty before a
-    process identity is established (snapshot test / dev REPL renders) — the
-    note that carries the concrete path is injected beside this prompt, so
-    without an identity there is nothing to point at. Also empty when
-    settings.agent.workspace_in_system_prompt is off (bench runners): only the
-    section is gated — the folder still exists and relative-path resolution
-    still targets it.
 
-    The concrete path is deliberately NOT interpolated here: a fork copies the
-    source agent's conversation (including the SystemMessage) into a new agent
-    with a different id, so a baked-in id or path would name the source's
-    folder. The section stays cluster-identical text; the per-agent path rides
-    the ``agent_id_note`` context note instead — injected after each compact
-    and at cold start, and regrafted by a fork, so it is always the reader's
-    own path."""
     if agent_id is None or not slices.read("agent", "workspace_in_system_prompt"):
         return ""
-    # Ensure the workspace directory exists (mkdir side effect).
+
     workspace_dir(agent_id)
-    filename = document_filename(slices.prompt.to_user_format)
     return (
         "# Workspace\n\n"
         "Your workspace is your per-agent folder — it is named with your agent "
@@ -576,20 +432,23 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         "workspace. Other agents have their own; share a file by sending its "
         "absolute path."
         + workspace_section_hint(slices.history_dump)
-        + f"\n\nYour workspace file `{filename}` is displayed next to your messages in Ava. "
+        + f"\n\nYour workspace file `{DOCUMENT_FILENAME}` is displayed next to your messages in Ava. "
         "Use it to maintain shared context with the user. The user may return hours later "
         "and may not read every message; keep this document current, especially while "
         "waiting for a reply. File edits appear automatically; there is no publish step. "
         "Its current contents are included again after compaction. Choose the document's "
-        "structure freely. The user may be on a phone: links must be reachable from their "
-        "browser, not local filesystem paths or a localhost on your machine. HTML is "
-        "displayed in an isolated frame without Ava credentials; use notifications when "
-        "you need a reply. This document does not itself send a notification."
+        "structure freely using Markdown; raw HTML, CSS and scripts are not rendered. "
+        "Link local files and images directly: relative paths resolve from this document's "
+        "directory, absolute paths and ~/ paths refer to files on your machine. Ava "
+        "serves referenced files to the user; no copying, registration or server is needed. "
+        "Keep linked files available. Use notifications when you need a reply; this "
+        "document does not itself send a notification. If you previously maintained "
+        "to_user.html, preserve it and rewrite its current shared context in to_user.md."
     )
 
 
 def _long_running_operation_section(_slices: AgentSlices) -> str:
-    """Core lifecycle and cost discipline, independent of collaboration plugins."""
+
     return (
         "# Efficient long-running operation\n\n"
         "End each turn working, waiting on a known event, or done. Keep going "
@@ -619,11 +478,6 @@ def _long_running_operation_section(_slices: AgentSlices) -> str:
     )
 
 
-# Capabilities lives in `capabilities.py` (line budget) and is listed here so
-# the section order stays the reading order this module lays out.
-
-
-# The framework-owned sections, in reading order. Plugin sections follow them.
 FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
     sdk_expand_section,
     _prefer_sdk_section,
@@ -653,17 +507,6 @@ def build_system_prompt(
     agent_id: int | None,
     catalog: ModelCatalog,
 ) -> str:
-    """Build the full system prompt: base + SDK overview + plugin contributions.
-
-    `_claim` node calls once when `state.messages` is empty; afterward
-    SystemMessage is persisted into state[0] and reused across turn / restart
-    — this function runs only once in an agent's lifetime. So the SDK
-    overview is captured on-site via `get_ava_overview()`, not cached.
-
-    Call timing guarantees `load_extensions()` has run (per `build_graph()`
-    flow order), so plugin namespaces (`ava.cwd` etc.) make it into the
-    `help(ava)` output.
-    """
 
     from ._base_prompt import (
         BASE_SYSTEM_PROMPT,
@@ -682,7 +525,6 @@ def build_system_prompt(
             )
         ]
     else:
-        # Bare identity — no SDK overview, just the preamble
         parts = [CODE_ACTION_PREAMBLE.format(_SEQUENTIAL_TOOL_CALLS=sequential)]
 
     def workspace_section(agent: AgentSlices) -> str:
@@ -736,19 +578,14 @@ def build_system_prompt(
                     f"sha={hashlib.sha256(contribution.encode()).hexdigest()[:12]}"
                 ),
             )
-    # Model identity — per-model note telling the model what it runs on.
+
     identity = catalog.identities.get(slices.brain.llm_model)
     if identity:
         parts.append(identity)
-    # Knowledge cutoff — tail line so the agent knows its training-data
-    # temporal boundary. Looked up from the current model; a model not in the
-    # table produces no line (future models drop in by adding one entry).
-    # Suppressible because temporal metadata is noise in a benchmark run, where
-    # the task is dated by its repo state rather than by wall-clock time.
+
     if slices.read("agent", "prompt_knowledge_cutoff_enabled"):
         cutoff = catalog.knowledge_cutoffs.get(slices.brain.llm_model)
         if cutoff:
             parts.append(f"Knowledge cutoff: {cutoff}")
-    # Exactly one trailing newline regardless of which section lands last, so
-    # the snapshot fixture is stable under the end-of-file-fixer pre-commit hook.
+
     return "\n\n".join(parts).rstrip("\n") + "\n"

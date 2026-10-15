@@ -563,6 +563,25 @@
               "type": "integer",
               "title": "Agent Id"
             }
+          },
+          {
+            "name": "reference",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reference"
+            }
           }
         ],
         "responses": {
@@ -589,10 +608,10 @@
         }
       }
     },
-    "/api/agents/{agent_id}/to-user/document": {
+    "/api/agents/{agent_id}/to-user/resource": {
       "get": {
-        "summary": "To User Document",
-        "operationId": "to_user_document_api_agents__agent_id__to_user_document_get",
+        "summary": "Get Resource",
+        "operationId": "get_resource_api_agents__agent_id__to_user_resource_get",
         "parameters": [
           {
             "name": "agent_id",
@@ -602,16 +621,28 @@
               "type": "integer",
               "title": "Agent Id"
             }
+          },
+          {
+            "name": "reference",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 8,
+              "title": "Reference"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -19111,14 +19142,6 @@
       },
       "ToUserDocument": {
         "properties": {
-          "format": {
-            "type": "string",
-            "enum": [
-              "html",
-              "markdown"
-            ],
-            "title": "Format"
-          },
           "content": {
             "anyOf": [
               {
@@ -19152,18 +19175,65 @@
               }
             ],
             "title": "Modified At"
+          },
+          "resources": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ToUserResource"
+            },
+            "type": "object",
+            "title": "Resources"
+          },
+          "legacy_html": {
+            "type": "boolean",
+            "title": "Legacy Html",
+            "default": false
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "format",
           "content",
           "version",
           "modified_at"
         ],
-        "title": "ToUserDocument",
-        "description": "An authoritative file snapshot; missing or empty files have no content."
+        "title": "ToUserDocument"
+      },
+      "ToUserResource": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "markdown": {
+            "type": "boolean",
+            "title": "Markdown"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "markdown",
+          "version"
+        ],
+        "title": "ToUserResource"
       },
       "TokenUsageResponse": {
         "properties": {

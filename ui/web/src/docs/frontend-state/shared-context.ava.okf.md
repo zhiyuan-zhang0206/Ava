@@ -17,34 +17,59 @@ The To user body stays mounted while hidden so switching tabs preserves reply
 drafts and the document reading position. Below the desktop breakpoint the shared
 context opens as a full-screen reading view with a return-to-messages control.
 
-`["to-user", agentId]` owns the document snapshot. The home-machine ops server
-reads `to_user.html` (default) or `to_user.md` (`to_user_format=markdown`) directly;
-there is no publication registry or database content copy. The runner profile
-includes the agent config domain because ops resolves `to_user_format`, with
-stored agent pins taking precedence over the cluster default. One shallow
-user-context snapshot scanner in each ops process polls numeric workspace roots
-and their immediate `to_user.html` / `to_user.md` targets on a worker thread and
-broadcasts `to_user_changed`, avoiding per-workspace native watch registration
-(task #5129). The global fold repairs
-that agent's query and includes the family in reconnect repair. Atomic replacement,
-creation and deletion all invalidate. A missing or empty document does not open
-a desktop panel; notices and an explicit Inspector selection still can.
+`["to-user", agentId]` owns the root document snapshot. Linked Markdown uses
+that query-key prefix followed by its reference chain. The home-machine ops
+server reads `to_user.md`; there is no format setting, HTML frame, publication
+registry or database content copy. `ChatMarkdown` owns typography, GFM, CJK
+behavior and safe links for both conversation and document surfaces. The document
+explicitly skips raw HTML. External links open in a new tab; linked Markdown
+opens in the panel with back/home controls. Other files open or download through
+the authenticated gateway resource endpoint.
 
-HTML runs in an opaque-origin sandbox. It can render, run inline scripts and
-navigate links, but receives no Ava token and cannot POST to the gateway. Actual
-replies use the authenticated notification or conversation controls outside the
-frame. The HTML response has its own sandbox CSP, including when opened directly.
-Normal links navigate inside the reading frame; modifier clicks use the browser's
-new-tab behavior. A source-checked postMessage bridge lets the authenticated shell
-initiate HTTP(S) frame navigation, preserving SameSite cookies on private links
-without giving the isolated document credentials or general API access. Third-party sites may refuse embedding; the browser's open-link
-in-new-tab action remains available. Relative workspace assets are not served.
-The document read accepts only a regular UTF-8 file up to 256 KiB.
+The document response maps Markdown link/image destinations to resource IDs.
+The backend parses Markdown with markdown-it-py, including reference-style links;
+code fences and raw HTML do not expose resources. Relative paths resolve from
+the containing Markdown file, absolute paths and `~/` paths resolve on the
+agent's home machine. `file:` URIs with an empty or localhost authority work too.
+Root-relative paths denote local files; use a full HTTP(S) URL for a web route.
+There is no required assets directory, file copy or agent-owned HTTP server.
 
-An explicit refresh, focus, or SSE reconnect rechecks availability. A failed read
-retains an already-cached snapshot and marks it stale; it never turns a machine
-failure into an empty file. This is not an offline document store.
+The browser submits only a chain of reference IDs. Every read traverses that
+chain again from `to_user.md`, checking each link in the current parent document.
+Deleted references stop resolving. Symlinked resources resolve to regular files;
+the root document and workspace reject symlinks. Filesystem access runs under
+the runner's OS identity. External URLs are never fetched by this resolver.
 
-The format vocabulary is `ToUserFormat` in `base.host.env.agent_slices`; the
-config schema and document response use the same type. Each turn freezes the format with its prompt
-slice so prompt guidance and compacted context read the same filename.
+`POST /to-user/resource` on the existing authenticated ops listener transports
+bounded binary bytes, using the ops worker pool, admission and shutdown accounting.
+The gateway authenticates the user and isolates evaluation readers before resolving
+the owner machine. Both ends enforce a 20 MiB per-resource bound. The current
+transport buffers a bounded resource; it does not support ranges or large media
+streaming. Markdown stays capped at 256 KiB, 256 local references per document
+and eight linked-document hops. HTML and other active documents download; inline
+previews carry a sandbox CSP and nosniff. No resource response is publicly cached.
+
+One shallow scanner per ops process polls numeric workspace roots and only their
+immediate `to_user.md` targets, on a worker thread. Creation, atomic replacement
+and deletion broadcast `to_user_changed`; the global fold repairs that agent's
+query prefix and includes it in reconnect repair. It does not recursively watch
+linked directories. Refresh/focus rechecks referenced file stamps, so same-name
+attachment replacements receive new versioned URLs even without a body edit.
+
+A missing or empty document does not open a desktop panel; notices and an explicit
+Inspector selection still can. An existing legacy `to_user.html` is preserved and
+reported as awaiting conversion, never rendered. Agent workspace guidance tells
+agents to rewrite their current shared context into Markdown. Removed stored
+format pins are ignored by the existing config-pin resolver.
+
+A failed read retains an already-cached snapshot and marks it stale; it never
+turns a machine failure into an empty file. Files must remain available on their
+source machine. This is not an offline document store or an archival snapshot.
+
+```ava-contract
+id = "refresh-ownership"
+kind = "invariant"
+statement = "The global SSE fold invalidates document queries on root file changes and reconnect. Explicit refresh, mount and window focus re-read the document and attachment stamps; attachments are not recursively watched. A changed attachment version refreshes its resource URL even when the Markdown text is unchanged."
+code = ["ui/web/src/lib/context/use-to-user.ts:<module>"]
+tests = ["ui/web/src/lib/fold/fold.test.ts::repairs only the changed agent's shared context and repairs it after reconnect", "base/agents/tests/test_to_user.py::test_linked_file_revision_changes_without_document_edit"]
+```
