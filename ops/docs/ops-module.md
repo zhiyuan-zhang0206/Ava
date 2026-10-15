@@ -72,6 +72,8 @@ constraint for prompts and replies, separate from transport and model budgets.
 The client and daemon reject unknown kinds before machine lookup, maintenance
 admission, dedupe, or dispatch. Callers import live pause, status and recovery
 definitions directly. The maintenance fences enforce admission.
+[Termination test evidence](../lifecycle/docs/termination-tests.ava.okf.md) describes
+the transaction, row-lock and native shell-session checks.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
 

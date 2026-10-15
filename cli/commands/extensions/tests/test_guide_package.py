@@ -1,5 +1,3 @@
-"""The reorganized guide loads and publishes as one complete capability package."""
-
 from __future__ import annotations
 
 import json
@@ -76,7 +74,6 @@ def test_converged_namespaces_load_real_task_instructions(
 
 
 def _assert_portable_reading_links(target: Path) -> None:
-    """Installed reading links must resolve within their complete skill package."""
     for document in target.rglob("*.md"):
         prose = re.sub(r"```.*?```|`[^`]*`", "", document.read_text(), flags=re.DOTALL)
         for link in re.findall(r"\]\(([^)]+)\)", prose):
@@ -158,7 +155,6 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         assert (client_home / "skills" / name / "SKILL.md").read_text() == "user customization\n"
         assert (ledger_root / f"{ledger}.json").read_bytes() == legacy_bytes
 
-    # A source update reaches a nested file; later local edits remain protected.
     source = repo / "ava_builtins" / "skills" / "platform" / "ava-guide"
     (source / "schedules" / "SKILL.md").write_text("schedule instructions v2\n")
     external_skills.converge_external_agent_skill(context, host_home=host_home)

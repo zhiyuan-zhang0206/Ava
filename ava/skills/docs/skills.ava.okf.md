@@ -73,14 +73,25 @@ plugin carries are dash-named like any other.
 
 ## Core API
 
-- `ava.skills.<path>` — Access a skill or namespace (module `__getattr__` lazy resolution). Resolution is exposure, not use — it records nothing. The `skill_invoked` event at depth `loaded` (the only depth ava_self_evolution scores as real use) fires on SKILL.md body consumption: `ava.help(ava.skills.<path>)` or a direct `__doc__` read loads the body lazily and attributes it there. Each consumption writes its event on the spot through `_record_skill_invoked` (an `audit_events` row, then the unified stream); the SDK keeps no in-process buffer or dedup set, and a failed write is reported loudly (error log with traceback plus an `audit_write_failed` event) without failing the read. The same point notes the skill's identifier in the exec turn's state update (`ava.state_update["skill_reads"]`, plain strings, once per skill per exec) so skill recall knows the body is already in the window; outside an exec turn nothing is noted.
+- `ava.skills.<path>` — Access a skill or namespace (module `__getattr__` lazy resolution). Resolution is exposure, not use — it records nothing. The `skill_invoked` event at depth `loaded` (the only depth ava_self_evolution scores as real use) fires on SKILL.md body consumption: `ava.help(ava.skills.<path>)` or a direct `__doc__` read loads the body lazily and attributes it there. Each body load writes its event on the spot through `_record_skill_invoked` (an `audit_events` row, then the unified stream); the SDK keeps no in-process buffer or dedup set, and a failed write is reported loudly (error log with traceback plus an `audit_write_failed` event) without failing the read. The same point notes the skill's identifier in the exec turn's state update (`ava.state_update["skill_reads"]`, plain strings, once per skill per exec) so skill recall knows the body is already in the window; outside an exec turn nothing is noted.
 - `ava.help(ava.skills.<path>)` — Load full text (path line + SKILL.md body).
 - `ava.help(ava.skills)` / `dir(ava.skills)` — **Index only**: one `ava.skills.<path>` heading + one-line description per entry, never a body. The child walk reads frontmatter `_description`s and never touches `__doc__`, and node resolution records no `loaded` attribution — listing the catalog is silent. The agent-visible surface is the `__all_for_ava__` property on `_SkillsModule` (the module's own class) — `agent_visible_names` reads it with `getattr_static`, which a PEP 562 module `__getattr__` cannot serve.
 - Plugin skill sources: a plugin declares `skill_sources` (`provider() -> list[Path]`) in `contribute()`; the SDK install adds them and the scan reads them (project-local, scanned last, can override same-named built-ins).
 
 ## Loading Sources
 
-`~/.ava/skills/` is the sole load directory, synced by the converge step (`ava start` / `ava update` / `ava converge`) from repo skills (`<repo>/ava_builtins/skills/*`) and plugin skills (`<repo>/ava_builtins/plugins/<p>/skills/*`) (plugin skills land in `~/.ava/skills/<p>/…`, namespace layer is the folder layer). Top-level directories must be enabled in the install-registry to be loaded (`ava skill register <name>`), otherwise silently ignored. Duplicate SKILL.md content across paths is de-duplicated by SHA256.
+`~/.ava/skills/` is the sole load directory, synced by the converge step (`ava start` / `ava update` / `ava converge`) from repo skills (`<repo>/ava_builtins/skills/*`) and plugin skills (`<repo>/ava_builtins/plugins/<p>/skills/*`) (plugin skills land in `~/.ava/skills/<p>/…`, namespace layer is the folder layer). Top-level directories must be enabled in the install-registry to be loaded (`ava skill register <name>`), otherwise silently ignored. Duplicate SKILL.md content across paths is de-duplicated by SHA256 of the whole raw file, including frontmatter.
+
+A mount root's `INDEX.md` is ignored; its `SKILL.md` is retained. Auto-promotion
+of a same-named child preserves the old child access path but omits its duplicate
+flat-list entry. An existing root skill is not replaced.
+
+Body caching belongs to each proxy: rereading a saved proxy's `__doc__` does not
+load or attribute again. A fresh `ava.skills.<path>` resolution creates a fresh
+proxy. Direct skill-file reads, including partial reads, attribute each read.
+`ava/tests/skills/test_skills_attribution.py` checks these boundaries; its failed
+audit-write case checks the returned body and logged traceback, not live telemetry
+delivery. Mount fixtures in `test_skills_mount.py` compare raw file content.
 
 ## Key Dependencies
 - [[system-prompt.ava.okf.md]] — the skill index is injected into the system prompt by the **agent process itself** (`agent/graph/prompt/capabilities.py:_skill_index_lines` scans local `~/.ava/skills`; `system_prompt.py` imports the rendered sections from `capabilities`), once, into `# Capabilities` (wildcard catalogs fold descendants under real entry skills; explicit lists stay verbatim) — `AVA_SDK_EXPAND`'s `*` skips `ava.skills` so the expanded SDK reference does not render a second index; gateway only reuses `base.packages.composer_commands.CommandCatalog` (over `ava.skills.names`) for `/`-autocomplete, does not inject prompt

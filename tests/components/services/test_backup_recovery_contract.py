@@ -1,11 +1,3 @@
-"""Recovery-source facts shared by backup, checkpoint, and schema layers.
-
-This is intentionally a source contract: these are durable ownership facts,
-not a runtime workflow. A future edit that excludes checkpoint tables or calls
-the frozen events archive a conversation-recovery source must stop here before
-that false claim reaches an operator playbook.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -19,8 +11,6 @@ def _module_docstring(path: Path) -> str:
 
 
 def test_conversation_recovery_sources_are_checkpoint_tables_not_events_archive() -> None:
-    """Checkpoint tables are the backed-up write and recovery source; the PG
-    events archive was dropped (task #1823) and Loki owns the live stream."""
     backup_path = _ROOT / "services" / "backup" / "dump.py"
     checkpoint_path = _ROOT / "base" / "agents" / "history" / "checkpoint.py"
     schema_path = _ROOT / "db" / "schema.sql"
@@ -38,7 +28,5 @@ def test_conversation_recovery_sources_are_checkpoint_tables_not_events_archive(
     assert "rebuildable from events" not in backup_source.lower()
     assert "full message history" in checkpoint_docstring
     assert "lives in the stored checkpoint" in checkpoint_docstring
-    # The PG events archive was dropped with the #1823 cleanup — the baseline
-    # documents the drop and the Loki archive stream as the archive's home.
     assert "events archive (dropped" in schema
     assert "loki archive stream" in schema

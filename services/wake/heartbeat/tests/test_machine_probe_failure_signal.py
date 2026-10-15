@@ -1,5 +1,3 @@
-"""Machine probe failures emit the durable running failure count."""
-
 from __future__ import annotations
 
 import asyncio
@@ -26,9 +24,6 @@ from services.wake.heartbeat.tests.machine_probe_setup import (
 
 
 class TestMachineProbeFailedSignal:
-    """Every pass in which an unpaused machine's probe fails emits one
-    `machine_probe_failed` event; a reachable or paused machine emits nothing."""
-
     async def _run(
         self, pool: ConnectionPool, probe: FakeProbe, *, database_gate: ProcessDbGate
     ) -> None:
@@ -60,7 +55,6 @@ class TestMachineProbeFailedSignal:
                 {"machine": MACHINE, "consecutive_failures": 3},
             )
         ]
-        # The emitted attributes are exactly the declared payload.
         assert set(next(iter(emitted_events)).attributes) == set(
             payload_keys("machine_probe_failed")
         )
@@ -90,13 +84,8 @@ class TestMachineProbeFailedSignal:
         *,
         database_gate: ProcessDbGate,
     ) -> None:
-        """A PAUSED machine is dropped from `list_agent_runners()`, so the
-        liveness pass neither dials it (expected absence is not an incident)
-        nor writes a machine_probe row — no offline signal exists for it.
-        The paused machine's dial URL is deliberately dead (port 1); had the
-        pass probed it, it would have gone offline after 2 failures."""
-        register_machine(db_conn, "away")  # dial URL 127.0.0.1:1 = dead
-        register_machine(db_conn, "still-here")  # a live member so the pass runs
+        register_machine(db_conn, "away")
+        register_machine(db_conn, "still-here")
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE machines SET paused_at = now(), pause_reason = 'travel' WHERE name = 'away'"
@@ -105,7 +94,6 @@ class TestMachineProbeFailedSignal:
         probe = FakeProbe({"still-here": True})
 
         asyncio.run(self._run(pool, probe, database_gate=database_gate))
-        # the live member is probed, the paused one is not
         assert probe.calls == ["still-here"]
         with db_conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM machine_probe WHERE machine_name = 'away'")
