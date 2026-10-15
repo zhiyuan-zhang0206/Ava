@@ -14,6 +14,50 @@ def test_reference_resolves_to_its_exact_owner_and_real_test(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(
+    "shebang",
+    [
+        "#!/usr/bin/env python",
+        "#!/usr/bin/env python3",
+        "#!/usr/bin/env python3.12",
+        "#!/usr/bin/python3",
+        "#!/usr/bin/python3.12",
+    ],
+)
+def test_python_entry_shebang_is_syntax(tmp_path: Path, shebang: str) -> None:
+    source = files()
+    source["pkg/core.py"] = shebang + "\n" + source["pkg/core.py"]
+    repo = repository(tmp_path, source)
+    assert not check(repo, strict_paths=repo.files).findings
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "#!/usr/bin/env python because it is needed\n",
+        "#!/usr/bin/env python # a reason\n",
+        "#!/usr/bin/env python -u\n",
+        "#!/usr/bin/env -S python\n",
+        "#!/usr/bin/env python2\n",
+        "#!/usr/bin/env python3.13\n",
+        "#!/usr/bin/python\n",
+        "#!/usr/local/bin/python\n",
+        "#!/usr/bin/env pythons\n",
+        "# !/usr/bin/env python\n",
+        " #!/usr/bin/env python\n",
+        "\n#!/usr/bin/env python\n",
+    ],
+)
+def test_python_shebang_does_not_hide_comments(tmp_path: Path, prefix: str) -> None:
+    source = files()
+    source["pkg/core.py"] = prefix + source["pkg/core.py"]
+    repo = repository(tmp_path, source)
+    findings = check(repo, strict_paths=repo.files).findings
+    assert len(findings) == 1
+    assert findings[0].code == "free-comment"
+    assert findings[0].path == "pkg/core.py"
+
+
+@pytest.mark.parametrize(
     "comment",
     [
         "# WHY: necessary",
