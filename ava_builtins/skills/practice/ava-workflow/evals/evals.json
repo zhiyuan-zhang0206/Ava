@@ -1,0 +1,67 @@
+{
+  "skill_name": "ava-workflow",
+  "provenance": "Constructed cases informed by the workflow design discussion; no production traces or private data.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "learn-before-trusting-a-score",
+      "split": "development",
+      "prompt": "I don't know much about evaluation. I think our assistant is getting worse, but the new instructions have a higher completion score. Read review-data.md. I have five minutes to look at evidence with you. Tell me what we can conclude now and choose the first thing to show me, with a concrete next experiment. This is discussion only; do not run agents, change files, or contact services.",
+      "files": ["fixtures/review-data.md"],
+      "expected_output": "An evidence-grounded explanation of the score's limits and a small review that improves understanding before a controlled comparison.",
+      "assertions": [
+        "Does not report the complaint-enriched sample's failure fraction as the production failure rate.",
+        "Recognizes that the judge accepts the only human-labeled failure despite high overall agreement.",
+        "Does not treat completion-score improvement as demonstrated task-correctness improvement.",
+        "Selects a concrete informative case or contrast, explains its decision relevance, and preserves access to raw evidence.",
+        "Proposes a bounded next experiment and an observable change in understanding or system behavior, without requiring the user to define a complete rubric upfront.",
+        "Respects discussion-only scope."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "three-way-alignment-outside-engineering",
+      "split": "development",
+      "prompt": "Help me plan a neighborhood oral-history newsletter. I assumed interviews need to be an hour long, so we should automate as much of the interviewing as possible. I have not done this before. My priority is that residents feel accurately represented, and I can spend ten minutes reviewing the first attempt. Read pilot-notes.md and recommend what we should do next. Do not contact anyone or build anything.",
+      "files": ["fixtures/pilot-notes.md"],
+      "expected_output": "A small evidence-based alignment step that preserves the representation goal, corrects unsupported duration assumptions, and proposes an end-to-end pilot through resident review.",
+      "assertions": [
+        "Separates the person's representation preference from the unverified interview-duration assumption.",
+        "Uses the supplied observations to qualify both the user's premise and the agent's own inference; does not promise general success from two anecdotes.",
+        "Offers a small reusable path from an authorized interview through a draft and resident feedback, not only an interview script or automation implementation.",
+        "Uses the review budget for an informative example or contrast and lets the person correct the agent's interpretation.",
+        "Does not require a full interview questionnaire, rigid stage sequence, or renewed approval for already authorized discussion.",
+        "Does not contact residents or implement a prototype."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "proportional-direct-check",
+      "split": "development",
+      "prompt": "Use the supplied costs.csv to report the total for each department and the grand total. I only need the numbers and a brief check. Do not change the input.",
+      "files": ["fixtures/costs.csv"],
+      "expected_output": "Design 30.00, Operations 27.50, Research 42.50; grand total 100.00, with a direct arithmetic check.",
+      "assertions": [
+        "Computes all department totals and the grand total correctly.",
+        "Uses a direct check without an alignment interview, LLM judge, agent team, or review application.",
+        "Leaves the input unchanged and keeps the response proportional to the request."
+      ]
+    },
+    {
+      "id": 4,
+      "name": "changed-rubric-and-unconfirmed-effect",
+      "split": "reserved",
+      "prompt": "Review this evaluation result and tell me whether the new refund assistant is ready. Old version: 16 of 20 cases passed. New version: 19 of the same 20 passed. During the new run we changed the rubric to allow store credit, while the old run required cash refunds. These cases have been used to tune five versions. One new run's trace says refund complete, but its payment-service response is missing. I can review a few cases today. Recommend the next action; do not execute refunds or change anything.",
+      "files": [],
+      "expected_output": "A qualified comparison requiring a consistent rubric, observed refund effects, independent confirmation cases, and targeted human review.",
+      "assertions": [
+        "Does not treat the reported pass-rate difference as evidence of improvement under a common standard.",
+        "Checks whether store credit satisfies the user's intended outcome and proposes applying the agreed rubric to both versions.",
+        "Treats the missing payment-service evidence as unknown rather than a confirmed successful refund.",
+        "Recognizes that repeatedly tuned cases are not an untouched final test and proposes fresh confirmation evidence.",
+        "Chooses review cases that can change the decision without claiming that their frequency estimates production prevalence.",
+        "Respects the prohibition on external actions and edits."
+      ]
+    }
+  ]
+}

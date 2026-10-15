@@ -91,6 +91,14 @@ matches.
 
 ## Working with a Human
 
+Use Workflow's [Align](../ava-workflow/align/SKILL.md) when intent or either
+participant's assumptions need calibration, and
+[Evaluate](../ava-workflow/evaluate/SKILL.md) for failure discovery, human trace
+review, or LLM judge calibration. Its general
+[tracer bullet principle](../ava-workflow/references/working-principles.md#tracer-bullets)
+also applies to an initial observation-to-claim path. This family retains
+research-specific experimental design, measurement, and evidence auditing.
+
 This skill family assumes a human collaborator: the output of research here is a
 project done well **and a process the human can verify and steer**. That means:
 
@@ -99,5 +107,6 @@ project done well **and a process the human can verify and steer**. That means:
   that failed), and the reasoning at each decision point.
 - **Verify before you claim.** Every claim you hand over should carry its
   verification level and its qualifiers. When you have not verified, say so.
-- **The human is the final judge.** Your job is to render the frame; the human
-  decides when it is done. Never collapse those two roles.
+- **Keep human authority and factual evidence distinct.** The human chooses
+  goals, preferences, and consequential decisions. Human and agent beliefs about
+  results both need evidence and can be corrected through review.

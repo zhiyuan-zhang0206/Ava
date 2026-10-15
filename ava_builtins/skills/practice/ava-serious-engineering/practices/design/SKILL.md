@@ -15,7 +15,7 @@ description: "Designs software components and significant features. Use when cla
   2. **Prior art**: named tools or patterns, and what each does.
   3. **Simplest sufficient design**: the design, and the specific failure it cannot handle.
 
-  Justify each added mechanism by a failure that has happened, or a credible one that cannot be handled by hand when it happens. Build the simplest path end to end on the real topology before any breadth.
+  Justify each added mechanism by a failure that has happened, or a credible one that cannot be handled by hand when it happens. Build the simplest path end to end on the real topology before any breadth. This is the engineering application of Workflow's [tracer bullet principle](../../../ava-workflow/references/working-principles.md#tracer-bullets).
 
 - **Design It Twice**: for every non-trivial design, conceive at least two substantially different alternatives before choosing one — **Why**: the brain's first instinct is usually the most familiar solution, not the best; comparing alternatives surfaces hidden trade-offs and prevents anchoring on a single path (Ousterhout, §4.4). — **How**: before writing implementation code, sketch two distinct approaches on a whiteboard or in a design doc; they must differ in at least one structural dimension (e.g. data model, module boundary, sync vs. async); if you cannot produce a second alternative, you do not understand the problem well enough.
 
