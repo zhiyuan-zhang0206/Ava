@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 import httpx
 import psycopg
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ava.gateway_client import use_client
@@ -19,8 +18,6 @@ from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
-from gateway.agents import router as agent_router
-from gateway.app import app
 from gateway.tests.lifecycle.test_task_assignments import HEADERS, PATH, SECRET
 from gateway.tests.lifecycle.test_task_assignments import body as body
 from gateway.tests.lifecycle.test_task_assignments import client as client
@@ -91,13 +88,13 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
 def test_unavailable_atomic_route_refuses_without_separate_spawn(
     body: dict[str, Any], *, machine_identity: MachineIdentity
 ) -> None:
-    unavailable = FastAPI(lifespan=app.router.lifespan_context, middleware=app.user_middleware)
-    unavailable.exception_handlers = app.exception_handlers.copy()
-    unavailable.include_router(agent_router.router)
     http = MagicMock()
     with gateway_test_client(
-        unavailable, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
     ) as endpoint:
+        endpoint.app.router.routes[:] = [
+            route for route in endpoint.app.router.routes if getattr(route, "path", None) != PATH
+        ]
 
         def submit(path: str, **kwargs: Any) -> httpx.Response:
             return _response(endpoint.post(path, json=kwargs["json"], headers=kwargs["headers"]))

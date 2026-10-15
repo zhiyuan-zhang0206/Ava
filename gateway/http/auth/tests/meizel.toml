@@ -1,7 +1,0 @@
-[debt.first-party-patch]
-"test_browser_origin.py#monkeypatch.setattr base.config.settings.gateway.browser_origin" = 4
-"test_browser_origin.py#monkeypatch.setattr base.config.settings.gateway.cors_allowed_origins" = 3
-"test_browser_origin.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 3
-"test_browser_origin.py#monkeypatch.setattr base.config.settings.gateway.session_cookie_secure" = 1
-"test_browser_origin.py#monkeypatch.setattr base.config.settings.services.app_port" = 2
-"test_browser_origin.py#monkeypatch.setattr base.config.settings.services.frontend_healthcheck_url" = 1

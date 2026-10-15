@@ -3,8 +3,7 @@
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager, nullcontext
-from typing import Any
-from unittest.mock import patch
+from typing import Any, Literal, Self
 
 import httpx
 import httpx2
@@ -13,13 +12,19 @@ from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.boot import machine_from_boot
+from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
+from gateway.app import create_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
+from gateway.http.config import GatewayConfig, gateway_config_from_boot
 
 __all__ = [
     "SPAWN_PATH",
+    "GatewayTestClient",
     "create_mcp_client",
+    "gateway_test_app",
     "gateway_test_client",
     "gateway_test_process",
     "post_spawn",
@@ -32,53 +37,101 @@ SPAWN_PATH = "/api/keyed/v1/agents"
 
 @contextmanager
 def gateway_test_process(
-    application: FastAPI, *, machine: MachineIdentity, process: GatewayProcess | None = None
+    *,
+    machine: MachineIdentity | None = None,
+    config: ConfigBoot | None = None,
+    process: GatewayProcess | None = None,
 ) -> Generator[GatewayProcess]:
     """Own one explicit entry, or borrow it across overlapping app lifespans.
 
     Each lifespan still owns its original pools and tasks. A compatible routing
     app can borrow the same entry without replacing or closing its writer.
     """
-    if process is None:
-        process = getattr(application.state, "gateway_process_input", None)
     owned = process is None
     if owned:
+        resolved_config = snapshot_process_config() if config is None else config
+        resolved_machine = machine_from_boot(resolved_config) if machine is None else machine
         process = GatewayProcess(
-            config=snapshot_process_config(), image=LOADED_IMAGE, machine=machine, host=fake_host()
+            config=resolved_config,
+            image=LOADED_IMAGE,
+            machine=resolved_machine,
+            host=fake_host(),
         )
     assert process is not None
-    with (
-        process.lifetime() if owned else nullcontext(process),
-        patch.object(
-            application.state,
-            "gateway_process_input",
-            process,
-            create=not hasattr(application.state, "gateway_process_input"),
-        ),
-    ):
+    with process.lifetime() if owned else nullcontext(process):
         yield process
+
+
+def gateway_test_app(
+    *,
+    process: GatewayProcess | None = None,
+    config: GatewayConfig | None = None,
+    boot: ConfigBoot | None = None,
+    machine: MachineIdentity | None = None,
+    process_ownership: Literal["borrowed", "owned"] | None = None,
+) -> FastAPI:
+    """Build one assembled Gateway app for an explicit test process or fresh owned entry."""
+    if process is None:
+        resolved_boot = snapshot_process_config() if boot is None else boot
+        resolved_machine = machine_from_boot(resolved_boot) if machine is None else machine
+        process = GatewayProcess(
+            config=resolved_boot,
+            image=LOADED_IMAGE,
+            machine=resolved_machine,
+            host=fake_host(),
+        )
+        ownership: Literal["borrowed", "owned"] = (
+            "owned" if process_ownership is None else process_ownership
+        )
+    else:
+        ownership = "borrowed" if process_ownership is None else process_ownership
+    resolved_config = gateway_config_from_boot(process.config) if config is None else config
+    return create_app(
+        resolved_config,
+        process=process,
+        process_ownership=ownership,
+    )
+
+
+class GatewayTestClient(TestClient):
+    """TestClient whose `.app` attribute is narrowed to the assembled `FastAPI` instance."""
+
+    app: FastAPI
+
+    def __enter__(self) -> Self:
+        super().__enter__()
+        return self
 
 
 @contextmanager
 def gateway_test_client(
-    application: FastAPI,
+    application: FastAPI | None = None,
     *,
-    machine: MachineIdentity,
+    machine: MachineIdentity | None = None,
+    config: GatewayConfig | None = None,
+    boot: ConfigBoot | None = None,
     process: GatewayProcess | None = None,
     **kwargs: Any,
-) -> Generator[TestClient]:
+) -> Generator[GatewayTestClient]:
     """Run an assembled Gateway with this test's current explicit entry inputs.
 
-    Startup-delivery tests and local FastAPI stand-ins keep their own roots.
-    Borrowed entries retain their configuration and writer; only the outer
-    context closes resources it constructed. The client is authenticated by
-    default (`gateway.tests.agents.gateway_auth`).
+    When `application` is provided, borrows that already-assembled app without
+    constructing a second process owner. Otherwise constructs an explicit
+    process owner and assembled app for this client's lifetime.
     """
-    with (
-        gateway_test_process(application, machine=machine, process=process),
-        TestClient(application, **kwargs) as client,
-    ):
-        yield client
+    if application is not None:
+        if any(arg is not None for arg in (machine, config, boot, process)):
+            raise ValueError(
+                "gateway_test_client(application, ...) borrows an already assembled FastAPI app; "
+                "pass machine/config/boot/process to gateway_test_process or gateway_test_app instead."
+            )
+        with GatewayTestClient(application, **kwargs) as client:
+            yield client
+        return
+    with gateway_test_process(machine=machine, config=boot, process=process) as active_process:
+        assembled = gateway_test_app(process=active_process, config=config)
+        with GatewayTestClient(assembled, **kwargs) as client:
+            yield client
 
 
 def spawn_headers(key: str | None = None, extra: Mapping[str, str] | None = None) -> dict[str, str]:

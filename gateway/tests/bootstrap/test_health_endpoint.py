@@ -18,19 +18,18 @@ from __future__ import annotations
 from typing import Never
 
 import pytest
-from fastapi.testclient import TestClient
 from psycopg_pool import PoolTimeout
 
 import gateway.app as gateway_app
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths import ava_home
-from gateway.app import app
 from gateway.cluster.process_boot import LOADED_IMAGE
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _health() -> dict[str, object]:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/health")
     assert resp.status_code == 200
     return resp.json()
@@ -69,7 +68,7 @@ def test_health_payload_carries_the_full_identity_set(*, machine_identity: Machi
 
 
 def test_health_process_birth_is_stable_between_requests() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = client.get("/api/health").json()["started_at"]
         second = client.get("/api/health").json()["started_at"]
     assert isinstance(first, float)
@@ -77,7 +76,7 @@ def test_health_process_birth_is_stable_between_requests() -> None:
 
 
 def test_health_control_pool_timeout_returns_degraded_with_identity(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentity
 ) -> None:
     """A saturated control pool is a bounded DB degradation, not a hung probe."""
 
@@ -88,8 +87,8 @@ def test_health_control_pool_timeout_returns_degraded_with_identity(
         def close(self) -> None:
             pass
 
-    with TestClient(app) as client:
-        monkeypatch.setattr(app.state, "control_db_pool", _TimedOutPool())
+    with gateway_test_client() as client:
+        client.app.state.control_db_pool = _TimedOutPool()
         resp = client.get("/api/health")
 
     assert resp.status_code == 503
@@ -123,5 +122,5 @@ def test_control_plane_bypasses_an_unreadable_admission_journal(
         raise AssertionError("control-plane request read the business admission journal")
 
     monkeypatch.setattr(gateway_app, "cluster_is_paused", unexpected_read)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert client.get("/api/health").status_code == 200

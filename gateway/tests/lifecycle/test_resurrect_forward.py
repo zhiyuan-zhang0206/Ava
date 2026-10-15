@@ -20,20 +20,19 @@ from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
 from base.api_contracts.agent_contract import CrossMachineGatewayUnavailable, MachineNotRegistered
+from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.agents import forward as forward_module
 from gateway.agents import lifecycle as lifecycle_module
-from gateway.app import app
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture
-def _force_local_machine(set_machine_identity) -> str:
+def _force_local_machine(set_machine_identity) -> MachineIdentity:
     """Sets this unit's identity at the source via set_machine_identity so every
     machine_name() / machine_role() call site sees role=agent-runner, name='local-test'."""
-    set_machine_identity(role="agent-runner", name="local-test")
-    return "local-test"
+    return set_machine_identity(role="agent-runner", name="local-test")
 
 
 def _set_agent_machine(db_conn: psycopg.Connection, agent_id: int, machine: str) -> None:
@@ -48,7 +47,7 @@ def _set_agent_machine(db_conn: psycopg.Connection, agent_id: int, machine: str)
 class TestResurrectRouting:
     def test_remote_machine_forwards(
         self,
-        _force_local_machine: str,
+        _force_local_machine: MachineIdentity,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -56,17 +55,18 @@ class TestResurrectRouting:
         local does not touch DB / does not spawn a session."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(
-            agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
-        ) -> dict:
-            assert db is app.state.db
-            assert pool is app.state.db_pool
-            captured["agent_id"] = agent_id
-            captured["path"] = path
-            captured["json_body"] = json_body
-            return {"status": "spawned"}
+        with gateway_test_client(machine=_force_local_machine) as client:
 
-        with TestClient(app) as client:
+            async def _capture_forward(
+                agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
+            ) -> dict:
+                assert db is client.app.state.db
+                assert pool is client.app.state.db_pool
+                captured["agent_id"] = agent_id
+                captured["path"] = path
+                captured["json_body"] = json_body
+                return {"status": "spawned"}
+
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
@@ -83,7 +83,7 @@ class TestResurrectRouting:
 
     def test_bare_resurrect_forwards_with_defaults(
         self,
-        _force_local_machine: str,
+        _force_local_machine: MachineIdentity,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -92,15 +92,16 @@ class TestResurrectRouting:
         auto-resurrect cannot cover."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(
-            agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
-        ) -> dict:
-            assert db is app.state.db
-            assert pool is app.state.db_pool
-            captured["json_body"] = json_body
-            return {"status": "spawned"}
+        with gateway_test_client(machine=_force_local_machine) as client:
 
-        with TestClient(app) as client:
+            async def _capture_forward(
+                agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
+            ) -> dict:
+                assert db is client.app.state.db
+                assert pool is client.app.state.db_pool
+                captured["json_body"] = json_body
+                return {"status": "spawned"}
+
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
@@ -112,7 +113,7 @@ class TestResurrectRouting:
 
     def test_machine_not_registered_propagates_404(
         self,
-        _force_local_machine: str,
+        _force_local_machine: MachineIdentity,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -121,7 +122,7 @@ class TestResurrectRouting:
         async def _forward_raises(*args: Any, **kw: Any) -> None:
             raise MachineNotRegistered("machine 'remote-mac' not found in machines table")
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
@@ -131,7 +132,7 @@ class TestResurrectRouting:
 
     def test_cross_machine_gateway_unavailable_propagates_502(
         self,
-        _force_local_machine: str,
+        _force_local_machine: MachineIdentity,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -140,7 +141,7 @@ class TestResurrectRouting:
         async def _forward_raises(*args: Any, **kw: Any) -> None:
             raise CrossMachineGatewayUnavailable("target unreachable after 3 retries")
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
@@ -148,15 +149,15 @@ class TestResurrectRouting:
         assert resp.status_code == 502
         assert resp.json()["reason"] == "cross_machine_gateway_unavailable"
 
-    def test_nonexistent_agent_404(self, _force_local_machine: str) -> None:
+    def test_nonexistent_agent_404(self, _force_local_machine: MachineIdentity) -> None:
         """Nonexistent → helper's own SELECT hits AgentNotFound (404), does not query machines table."""
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             resp = client.post("/api/agents/9999/resurrect")
         assert resp.status_code == 404
 
 
 def test_local_home_machine_is_forwarded(
-    _force_local_machine: str,
+    _force_local_machine: MachineIdentity,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -170,7 +171,7 @@ def test_local_home_machine_is_forwarded(
         captured["path"] = path
         return {"status": "spawned"}
 
-    with TestClient(app) as client:
+    with gateway_test_client(machine=_force_local_machine) as client:
         agent_id = spawn_via_http(client, {}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "local-test")
         monkeypatch.setattr(forward_module, "enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]

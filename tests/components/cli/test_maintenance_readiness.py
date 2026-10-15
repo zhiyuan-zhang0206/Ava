@@ -4,7 +4,6 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
@@ -20,11 +19,8 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import roster
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from gateway.app import app
-from tests.components.services.test_maintenance_readiness import (
-    gateway_configuration as gateway_configuration,
-)
 from tests.components.services.test_maintenance_readiness import held as held
+from tests.fixtures.gateway_config import gateway_test_client
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -44,7 +40,7 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
 
     roster(monkeypatch, (("gateway", None),))
     measurements: list[int] = []
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
 
         def probe(_spec: object) -> _probe_commands.ServiceProbe:
             assert admission.held()

@@ -10,7 +10,6 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import UploadDeliveryConflictError
@@ -19,18 +18,17 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import capturing_events
-from gateway.app import app
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import post, proof_for, request_for
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     uploaded_agent as uploaded_agent,
 )
 from gateway.upload_delivery import worker
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 
 @pytest.mark.parametrize("stage", ["before-link", "after-link"])
 def test_hard_death_native_temp_not_double_charged_or_cleaned(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     stage: str,
@@ -62,7 +60,7 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
     assert result.returncode == 73
     temps = list(final.parent.glob(".*.tmp"))
     assert len(temps) == 1
-    with app.state.db_pool.connection() as conn:
+    with client.app.state.db_pool.connection() as conn:
         storage.check_quota(
             conn,
             agent,
@@ -80,23 +78,26 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
 
 
 def test_hold_is_not_automatically_unsealed_by_late_copy_proof(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
     machine_identity: MachineIdentity,
 ):
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
     source.record_failure(
-        app.state.db_pool, request.manifest.batch_id, "unsupported-receiver", hold=True
+        client.app.state.db_pool,
+        request.manifest.batch_id,
+        "unsupported-receiver",
+        hold=True,
     )
     with pytest.raises(UploadDeliveryConflictError, match="held"):
-        source.complete(app.state.db_pool, request, proof_for(request))
-    assert source.status(app.state.db_pool, agent, request.manifest.batch_id).state == "hold"
+        source.complete(client.app.state.db_pool, request, proof_for(request))
+    assert source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state == "hold"
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (0,)
@@ -106,7 +107,7 @@ def test_hold_is_not_automatically_unsealed_by_late_copy_proof(
     "directory", ["relative", "/elsewhere", "/Downloads/AvaAgent-1/.delivered-v1/wrong"]
 )
 def test_unusable_native_directory_never_accepts_inbound(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     directory: str,
     *,
@@ -116,14 +117,14 @@ def test_unusable_native_directory_never_accepts_inbound(
 
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
     proof = proof_for(request).model_dump()
     proof["directory"] = directory
     with pytest.raises((ValidationError, UploadDeliveryConflictError)):
-        source.complete(app.state.db_pool, request, source.CopyProof.model_validate(proof))
+        source.complete(client.app.state.db_pool, request, source.CopyProof.model_validate(proof))
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (0,)
@@ -131,17 +132,21 @@ def test_unusable_native_directory_never_accepts_inbound(
 
 @pytest.mark.asyncio
 async def test_shutdown_drains_native_future_after_cancelled_http_wait(
-    uploaded_agent: tuple[TestClient, int], *, machine_identity: MachineIdentity
+    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
 ):
+    client, _agent = uploaded_agent
     recovery = worker.UploadRecovery(
-        app.state.db_pool, app.state.db, app.state.bus, machine=machine_identity
+        client.app.state.db_pool,
+        client.app.state.db,
+        client.app.state.bus,
+        machine=machine_identity,
     )
     entered, finish = threading.Event(), threading.Event()
 
     def native_writer():
         entered.set()
         assert finish.wait(5)
-        with app.state.db_pool.connection() as conn:
+        with client.app.state.db_pool.connection() as conn:
             return conn.execute("SELECT 42").fetchone()[0]
 
     task = asyncio.create_task(recovery.native(native_writer))
@@ -163,7 +168,7 @@ async def test_shutdown_drains_native_future_after_cancelled_http_wait(
 
 @pytest.mark.asyncio
 async def test_accepted_upload_wakes_once_and_a_lost_wake_is_not_repeated(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
@@ -182,12 +187,15 @@ async def test_accepted_upload_wakes_once_and_a_lost_wake_is_not_repeated(
     monkeypatch.setattr(worker, "publish_inbound_wake", lost_wake)
     monkeypatch.setattr(worker.UploadRecovery, "copy_proof", copied)
     recovery = worker.UploadRecovery(
-        app.state.db_pool, app.state.db, app.state.bus, machine=machine_identity
+        client.app.state.db_pool,
+        client.app.state.db,
+        client.app.state.bus,
+        machine=machine_identity,
     )
     await recovery.round()
     await recovery.round()
     await recovery.round()
-    status = source.status(app.state.db_pool, agent, batch_id)
+    status = source.status(client.app.state.db_pool, agent, batch_id)
     assert status.state == "accepted" and status.inbound_id is not None
     # One wake at acceptance; the still-pending chat is never re-announced by a scan.
     assert woken == [status.inbound_id]
@@ -196,7 +204,7 @@ async def test_accepted_upload_wakes_once_and_a_lost_wake_is_not_repeated(
 
 @pytest.mark.asyncio
 async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
@@ -211,15 +219,18 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
 
     monkeypatch.setattr(worker.UploadRecovery, "copy_proof", unreachable)
     recovery = worker.UploadRecovery(
-        app.state.db_pool, app.state.db, app.state.bus, machine=machine_identity
+        client.app.state.db_pool,
+        client.app.state.db,
+        client.app.state.bus,
+        machine=machine_identity,
     )
     # Bound here, not as a fixture: the gateway of `uploaded_agent` binds its own pipeline first.
     with capturing_events() as emitted_events:
         for attempt in range(1, source.MAX_COPY_ATTEMPTS + 1):
-            with app.state.db_pool.connection() as conn:
+            with client.app.state.db_pool.connection() as conn:
                 conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
             await recovery.round()
-            status = source.status(app.state.db_pool, agent, batch_id)
+            status = source.status(client.app.state.db_pool, agent, batch_id)
             assert status.attempts == attempt
             assert status.state == ("hold" if attempt == source.MAX_COPY_ATTEMPTS else "pending")
         assert [(event.event_name, event.attributes) for event in emitted_events] == [
@@ -229,7 +240,7 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
             )
         ]
     # Held means held: no later round copies it again.
-    with app.state.db_pool.connection() as conn:
+    with client.app.state.db_pool.connection() as conn:
         conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
     await recovery.round()
     assert len(calls) == source.MAX_COPY_ATTEMPTS
@@ -238,14 +249,14 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
 
 @pytest.mark.asyncio
 async def test_business_pause_skips_new_copy_and_db_round(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ):
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
@@ -256,26 +267,35 @@ async def test_business_pause_skips_new_copy_and_db_round(
 
     monkeypatch.setattr(source, "validate_pending", forbidden)
     recovery = worker.UploadRecovery(
-        app.state.db_pool, app.state.db, app.state.bus, machine=machine_identity
+        client.app.state.db_pool,
+        client.app.state.db,
+        client.app.state.bus,
+        machine=machine_identity,
     )
     await recovery.copy(request)
-    assert source.status(app.state.db_pool, agent, request.manifest.batch_id).state == "pending"
+    assert (
+        source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state == "pending"
+    )
     await recovery.close()
 
 
 @pytest.mark.asyncio
 async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(
-    uploaded_agent: tuple[TestClient, int], *, machine_identity: MachineIdentity
+    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
 ):
+    client, _agent = uploaded_agent
     recovery = worker.UploadRecovery(
-        app.state.db_pool, app.state.db, app.state.bus, machine=machine_identity
+        client.app.state.db_pool,
+        client.app.state.db,
+        client.app.state.bus,
+        machine=machine_identity,
     )
     entered, finish = threading.Event(), threading.Event()
 
     def native_writer():
         entered.set()
         assert finish.wait(5)
-        with app.state.db_pool.connection() as conn:
+        with client.app.state.db_pool.connection() as conn:
             assert conn.execute("SELECT 1").fetchone() == (1,)
 
     call = asyncio.create_task(recovery.native(native_writer))
@@ -325,7 +345,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (unit.machine, agent))
     db_conn.commit()
     with gateway_test_client(
-        app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
     ) as client:
         response = post(client, agent)
         assert response.status_code == 202
@@ -333,30 +353,30 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
         while client.get(response.json()["status_url"]).json()["state"] != "accepted":
             assert time.monotonic() < deadline
             time.sleep(0.02)
-        recovery = app.state.upload_recovery
+        recovery = client.app.state.upload_recovery
         assert recovery.task is not None and not recovery.task.done()
         assert db_conn.execute(
             "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
         ).fetchone() == (1,)
     assert recovery.task.done() and not recovery.calls
-    assert app.state.db_pool.closed
+    assert client.app.state.db_pool.closed
 
 
 def test_overlapping_gateway_lifespans_stop_their_original_upload_workers(
     db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
 ) -> None:
-    # Both existing HTTP fixture consumers nest TestClient(app). Shared state
-    # exposes the newer worker, but each lifespan must drain its own TaskGroup.
-    with gateway_test_client(app, machine=machine_identity):
-        process = app.state.gateway_process
+    # Both existing HTTP fixture consumers run overlapping gateway lifespans.
+    # Each lifespan must drain its own TaskGroup while sharing a borrowed process.
+    with gateway_test_client(machine=machine_identity) as first_client:
+        process = first_client.app.state.gateway_process
         pipeline = process.event_pipeline()
-        original = app.state.upload_recovery
+        original = first_client.app.state.upload_recovery
         assert original.task is not None and not original.stopped.is_set()
-        with gateway_test_client(app, machine=machine_identity):
-            assert app.state.gateway_process is process
-            assert app.state.process_image is process.image
+        with gateway_test_client(process=process) as second_client:
+            assert second_client.app.state.gateway_process is process
+            assert second_client.app.state.process_image is process.image
             assert process.event_pipeline() is pipeline
-            replacement = app.state.upload_recovery
+            replacement = second_client.app.state.upload_recovery
             assert replacement is not original
             assert replacement.task is not None and not replacement.stopped.is_set()
         assert not pipeline.stopped

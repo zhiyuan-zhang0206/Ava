@@ -12,30 +12,33 @@ from base.api_contracts.idempotency import keyed_headers
 from gateway.tests.test_idempotency import agent_id as agent_id
 from gateway.tests.test_idempotency import client as client
 from gateway.tests.test_idempotency import count_inbounds
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_authenticated_admin_retry_and_scoped_reconcile(
-    client: TestClient,
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     agent_id: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from base.config import settings
 
+    del gateway_data_plane
     secret = "principal-scope-test-secret"  # noqa: S105 — isolated test credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     url = f"/api/agents/{agent_id}/messages"
     body = {"content": "admin principal retry", "source": "user"}
     headers = {"Authorization": f"Bearer {secret}"} | keyed_headers("new-logical-message")
-    first = client.post(url, json=body, headers=headers)
-    repeated = client.post(url, json=body, headers=headers)
-    assert first.status_code == repeated.status_code == 201, first.text
-    assert first.json()["inbound_id"] == repeated.json()["inbound_id"]
-    reconciled = client.post(f"{url}/reconcile", json=body, headers=headers)
-    assert reconciled.status_code == 200, reconciled.text
-    assert reconciled.json()["inbound_id"] == first.json()["inbound_id"]
-    conflict = client.post(url, json=body | {"content": "changed"}, headers=headers)
-    assert conflict.status_code == 409
+    with gateway_test_client() as client:
+        first = client.post(url, json=body, headers=headers)
+        repeated = client.post(url, json=body, headers=headers)
+        assert first.status_code == repeated.status_code == 201, first.text
+        assert first.json()["inbound_id"] == repeated.json()["inbound_id"]
+        reconciled = client.post(f"{url}/reconcile", json=body, headers=headers)
+        assert reconciled.status_code == 200, reconciled.text
+        assert reconciled.json()["inbound_id"] == first.json()["inbound_id"]
+        conflict = client.post(url, json=body | {"content": "changed"}, headers=headers)
+        assert conflict.status_code == 409
     assert count_inbounds(db_conn, agent_id, "admin principal retry") == 1
 
 
@@ -58,7 +61,7 @@ def test_key_without_principal_scope_is_rejected_before_any_write(
 
 
 def test_browser_rotation_and_bearer_share_admin_retry_namespace(
-    client: TestClient,
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     agent_id: int,
     monkeypatch: pytest.MonkeyPatch,
@@ -66,31 +69,36 @@ def test_browser_rotation_and_bearer_share_admin_retry_namespace(
     from base.config import settings
     from base.host.net.auth import cookie_name
 
+    del gateway_data_plane
     secret = "principal-rotation-test-secret"  # noqa: S105 — isolated test credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr(settings.gateway, "session_cookie_secure", False)
     url = f"/api/agents/{agent_id}/messages"
     body = {"content": "same administrator across sessions", "source": "user"}
     headers = {"Idempotency-Key": "session-rotation", "Idempotency-Scope": "principal-v1"}
-    login = client.post("/api/auth/login", json={"password": secret})
-    assert login.status_code == 200, login.text
-    old_cookie = login.cookies[cookie_name()]
-    first = client.post(url, json=body, headers=headers)
-    assert first.status_code == 201, first.text
-    assert client.post("/api/auth/logout").status_code == 200
-    client.cookies.clear()
-    revoked = client.post(
-        url, json=body, headers=headers | {"Cookie": f"{cookie_name()}={old_cookie}"}
-    )
-    assert revoked.status_code == 401
-    rotated = client.post("/api/auth/login", json={"password": secret})
-    assert rotated.status_code == 200, rotated.text
-    assert rotated.cookies[cookie_name()] != old_cookie
-    repeated = client.post(url, json=body, headers=headers)
-    assert repeated.status_code == 201, repeated.text
-    client.cookies.clear()
-    bearer = client.post(url, json=body, headers=headers | {"Authorization": f"Bearer {secret}"})
-    assert bearer.status_code == 201, bearer.text
+    with gateway_test_client() as client:
+        client.headers.pop("Authorization", None)
+        login = client.post("/api/auth/login", json={"password": secret})
+        assert login.status_code == 200, login.text
+        old_cookie = login.cookies[cookie_name()]
+        first = client.post(url, json=body, headers=headers)
+        assert first.status_code == 201, first.text
+        assert client.post("/api/auth/logout").status_code == 200
+        client.cookies.clear()
+        revoked = client.post(
+            url, json=body, headers=headers | {"Cookie": f"{cookie_name()}={old_cookie}"}
+        )
+        assert revoked.status_code == 401
+        rotated = client.post("/api/auth/login", json={"password": secret})
+        assert rotated.status_code == 200, rotated.text
+        assert rotated.cookies[cookie_name()] != old_cookie
+        repeated = client.post(url, json=body, headers=headers)
+        assert repeated.status_code == 201, repeated.text
+        client.cookies.clear()
+        bearer = client.post(
+            url, json=body, headers=headers | {"Authorization": f"Bearer {secret}"}
+        )
+        assert bearer.status_code == 201, bearer.text
     assert (
         first.json()["inbound_id"] == repeated.json()["inbound_id"] == bearer.json()["inbound_id"]
     )

@@ -9,10 +9,8 @@ from functools import partial
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineRoles
-from gateway.app import app
 from gateway.tests.routers.test_memory_search import (
     SEARCH_PERMITS,
     _search,
@@ -29,6 +27,7 @@ from gateway.tests.routers.test_memory_search import (
     memory_search_app_db as memory_search_app_db,
 )
 from services.derived.memory_indexer.backends.base import ChunkHit
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 class TestEventLoopIsolation:
@@ -76,7 +75,7 @@ class TestEventLoopIsolation:
 
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             outcome: dict[str, object] = {}
 
             def _search() -> None:
@@ -372,7 +371,7 @@ Body **with** markdown.
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/note", params={"path": "alpha.md"})
 
         assert resp.status_code == 200
@@ -407,7 +406,7 @@ tags: [health]
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/note", params={"path": "health/overview.md"})
 
         assert resp.status_code == 200
@@ -420,7 +419,7 @@ tags: [health]
         import gateway.routers.memory as _gw_memory
 
         monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/note", params={"path": "missing.md"})
         assert resp.status_code == 404
 
@@ -446,7 +445,7 @@ title: Secret
         # against any implementation (empty pin). "..%2Fsecret.md" on the wire
         # (from "../secret.md") exercises the real encoded-traversal case.
         for bad in ("../secret.md", "/etc/passwd", "alpha"):
-            with TestClient(app) as client:
+            with gateway_test_client() as client:
                 resp = client.get("/api/memory/note", params={"path": bad})
             assert resp.status_code == 404, bad
 
@@ -458,7 +457,7 @@ title: Secret
 
         monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "plain.md").write_text("# Just a heading\n", encoding="utf-8")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/note", params={"path": "plain.md"})
         assert resp.status_code == 404
 
@@ -474,7 +473,7 @@ title: Secret
         import gateway.routers.memory as _gw_memory
 
         monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/note", params={"path": "ok\x00.md"})
         assert resp.status_code == 404
 
@@ -497,7 +496,7 @@ tags: [tech-ops]
 """,
             encoding="utf-8",
         )
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/note", params={"path": "bar.md/../bar.md"})
         assert resp.status_code == 200
         assert resp.json()["title"] == "Bar"

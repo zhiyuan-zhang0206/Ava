@@ -12,7 +12,6 @@ from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
-from gateway.app import app
 from gateway.schedules import router
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -28,7 +27,7 @@ def test_concurrent_restart_uses_one_desired_revision(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
     with (
         base.db.pool(max_size=4, gate=database_gate) as pool,
@@ -49,7 +48,7 @@ def test_concurrent_restart_uses_one_desired_revision(
 def test_delayed_restart_replay_cannot_undo_newer_stop(
     gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
         path = f"/api/schedules/{sid}/restart"
         headers = keyed_headers("restart-one")
@@ -66,7 +65,7 @@ def test_delayed_restart_replay_cannot_undo_newer_stop(
 def test_edit_receipt_replays_original_result_and_conflicts_on_changed_payload(
     gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
         path = f"/api/schedules/{sid}"
         headers = keyed_headers("edit-one")
@@ -99,7 +98,7 @@ def test_malformed_operation_identity_does_not_change_schedule(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
         assert client.post(f"/api/schedules/{sid}/restart", headers=headers).status_code == 400
     assert db_conn.execute(
@@ -110,7 +109,7 @@ def test_malformed_operation_identity_does_not_change_schedule(
 def test_new_restart_identity_is_a_new_deliberate_rerun(
     gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
         for key in ("one", "two"):
             assert (

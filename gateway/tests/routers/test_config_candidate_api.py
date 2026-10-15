@@ -5,13 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base.config import runtime_config
 from base.config.admin.candidate import EnvPatchValidation
 from base.host.env import dotenv_file
-from gateway.app import app
 from gateway.routers.configuration import runtime as config_router
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
@@ -29,7 +28,7 @@ def test_put_rejects_invalid_candidate_without_writing(configured_home: Path) ->
     env_path = configured_home / ".env"
     before = env_path.read_bytes()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.put("/api/config", json={"exec_node_timeout_seconds": 200})
 
     assert response.status_code == 400, response.text
@@ -53,7 +52,7 @@ def test_put_sets_the_offsite_backup_destination_beside_retired_keys(
         + "AVA_PITR_SPOOL_HARD_BYTES=2362232013\n"
     )
     credentials = configured_home / "oss-credentials.json"
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.put(
             "/api/config",
             json={
@@ -79,7 +78,7 @@ def test_put_unsets_the_offsite_backup_destination(configured_home: Path) -> Non
         {"backup_offsite_endpoint": "https://oss-cn-shanghai.aliyuncs.com"}, set()
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.put("/api/config", json={"backup_offsite_endpoint": None})
 
     assert response.status_code == 200, response.text
@@ -98,7 +97,7 @@ def test_host_only_put_skips_cluster_candidate_validation(
         config_router, "validate_env_patch_for_write", unexpected_cluster_validation
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.put("/api/config", json={"ops_concurrency": 4})
 
     assert response.status_code == 200, response.text
@@ -125,7 +124,7 @@ def test_put_returns_conflict_when_cluster_candidate_goes_stale(
 
     monkeypatch.setattr(config_router, "validate_env_patch_for_write", validate_then_change_file)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.put("/api/config", json={"llm_model": "requested-update"})
 
     assert validation_calls == 2

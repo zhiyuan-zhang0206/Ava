@@ -9,13 +9,12 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 import gateway.app as gateway_app
 from base import paths
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.enable_config import write_local
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +50,7 @@ def test_serves_the_mount_root_index() -> None:
     _write_plugin("board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board/")
     assert r.status_code == 200, r.text
     assert r.text == _BOARD
@@ -64,7 +63,7 @@ def test_bare_mount_redirects_to_the_trailing_slash() -> None:
     _write_plugin("board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board", follow_redirects=False)
     assert r.status_code == 307
     assert r.headers["location"] == "/api/plugin-ui/board/"
@@ -79,7 +78,7 @@ def test_serves_a_subdirectory_index_and_a_nested_asset() -> None:
     )
     write_local({"plugins": {"board": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         page = client.get("/api/plugin-ui/board/board/")
         asset = client.get("/api/plugin-ui/board/board/app.js")
     assert page.status_code == 200, page.text
@@ -95,7 +94,7 @@ def test_directory_without_a_trailing_slash_redirects() -> None:
     _write_plugin("board", files={"board/index.html": _BOARD, "board/app.js": "1\n"})
     write_local({"plugins": {"board": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board/board", follow_redirects=False)
     assert r.status_code == 307
     assert r.headers["location"] == "/api/plugin-ui/board/board/"
@@ -106,7 +105,7 @@ def test_dash_spelled_plugin_name_reaches_the_underscore_directory() -> None:
     _write_plugin("ava_board", files={"index.html": _BOARD})
     write_local({"plugins": {"ava_board": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/ava-board/")
     assert r.status_code == 200, r.text
 
@@ -116,7 +115,7 @@ def test_disabled_plugin_has_no_mount(path: str) -> None:
     _write_plugin("board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": False}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get(f"/api/plugin-ui/board/{path}")
     assert r.status_code == 404, r.text
 
@@ -127,7 +126,7 @@ def test_unknown_plugin_and_a_plugin_without_pages_answer_alike() -> None:
     _write_plugin("plain")
     write_local({"plugins": {"plain": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         missing = client.get("/api/plugin-ui/nope/")
         no_pages = client.get("/api/plugin-ui/plain/")
     assert missing.status_code == 404
@@ -143,7 +142,7 @@ def test_traversal_segments_are_refused(rest: str) -> None:
     _write_plugin("board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get(f"/api/plugin-ui/board/{rest}")
     assert r.status_code == 400, r.text
     assert "invalid page path segment" in r.text
@@ -157,7 +156,7 @@ def test_a_symlink_out_of_the_ui_dir_is_refused() -> None:
     (directory / "ui" / "escape.txt").symlink_to(secret)
     write_local({"plugins": {"board": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board/escape.txt")
     assert r.status_code == 404, r.text
     assert "cluster secret" not in r.text
@@ -167,7 +166,7 @@ def test_missing_file_is_404() -> None:
     _write_plugin("board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board/nope.html")
     assert r.status_code == 404, r.text
 
@@ -201,7 +200,7 @@ def test_nav_declarations_reach_the_console_attributed() -> None:
     )
     write_local({"plugins": {"board": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/ui/contributions")
     assert r.status_code == 200, r.text
     assert r.json()["nav"] == [

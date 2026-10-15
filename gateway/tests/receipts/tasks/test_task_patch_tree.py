@@ -4,16 +4,15 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
-from gateway.app import app
 from gateway.tests.routers.test_tasks_router import (
     make_agent,
     make_root_task,
     make_task,
     task_status,
 )
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 class TestParentClose:
@@ -29,7 +28,7 @@ class TestParentClose:
             status="in_progress",
             parent_id=parent,
         )
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{parent}",
                 json={"status": "done"},
@@ -53,7 +52,7 @@ class TestParentClose:
             status="in_progress",
             parent_id=parent,
         )
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{parent}",
                 json={"status": "cancelled"},
@@ -80,7 +79,7 @@ class TestParentClose:
             status="cancelled",
             parent_id=parent,
         )
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{parent}",
                 json={"status": "done"},
@@ -103,7 +102,7 @@ class TestParent:
         owner = make_agent(db_conn)
         parent = make_task(db_conn, owner=owner, title="parent")
         tid = make_task(db_conn, owner=owner, title="child")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": parent},
@@ -117,7 +116,7 @@ class TestParent:
         root = make_root_task(db_conn)
         parent = make_task(db_conn, owner=owner, title="parent2")
         tid = make_task(db_conn, owner=owner, title="child2")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": parent},
@@ -125,7 +124,7 @@ class TestParent:
             )
         assert resp.status_code == 200
         assert _parent(db_conn, tid) == parent
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": None},
@@ -149,7 +148,7 @@ class TestParent:
             status=closed_status,
         )
         tid = make_task(db_conn, owner=owner, title=f"child-{closed_status}")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": parent},
@@ -163,7 +162,7 @@ class TestParent:
     def test_patch_missing_parent_rejected(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": 999_999},
@@ -175,7 +174,7 @@ class TestParent:
     def test_patch_self_parent_rejected(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"parent_id": tid},
@@ -189,7 +188,7 @@ class TestParent:
         a = make_task(db_conn, owner=owner, title="cycle-a")
         b = make_task(db_conn, owner=owner, title="cycle-b")
         c = make_task(db_conn, owner=owner, title="cycle-c")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             assert (
                 client.patch(
                     f"/api/tasks/{b}",

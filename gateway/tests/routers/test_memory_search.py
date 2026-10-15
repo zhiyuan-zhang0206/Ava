@@ -12,20 +12,27 @@ from typing import Any
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import FastAPI
 
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.host.db_authority.api import AcceptanceCache
 from base.lm import usage
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
 from gateway.routers.memory import MemorySearchInputs
 from gateway.tests.agents.gateway_auth import gateway_credentials
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
 from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
+from tests.fixtures.gateway_config import gateway_test_app, gateway_test_client
+
+_active_app: list[FastAPI] = []
+
+
+def memory_search_app() -> FastAPI:
+    assert _active_app, "memory_search_app_db fixture must be active"
+    return _active_app[-1]
 
 
 def _memory_inputs() -> MemorySearchInputs:
@@ -81,22 +88,25 @@ def judge(monkeypatch: pytest.MonkeyPatch) -> Judge:
 
 @pytest.fixture(autouse=True)
 def memory_search_app_db(
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     machine_identity: MachineIdentity,
-) -> None:
+) -> Any:
     # ASGITransport tests skip the lifespan; supply their existing root's inputs. The
     # machine-token acceptance cache is one of them: the bearer check reads it on every
     # request, and without it these tests only pass in a worker where an earlier test's
     # lifespan happened to leave one on the shared app.
+    app = gateway_test_app(machine=machine_identity)
     machine_token_acceptance: AcceptanceCache = {}
-    monkeypatch.setattr(
-        app.state, "machine_token_acceptance", machine_token_acceptance, raising=False
-    )
-    monkeypatch.setattr(app.state, "db", object(), raising=False)
-    monkeypatch.setattr(app.state, "catalog", model_catalog, raising=False)
-    monkeypatch.setattr(app.state, "machine", machine_identity, raising=False)
-    monkeypatch.setattr(app.state, "memory_search_inputs", _memory_inputs(), raising=False)
+    app.state.machine_token_acceptance = machine_token_acceptance
+    app.state.db = object()
+    app.state.catalog = model_catalog
+    app.state.machine = machine_identity
+    app.state.memory_search_inputs = _memory_inputs()
+    _active_app.append(app)
+    try:
+        yield app
+    finally:
+        _active_app.clear()
 
 
 def patch_provider(monkeypatch: pytest.MonkeyPatch, provider: object) -> None:
@@ -168,7 +178,7 @@ class TestPrimaryPath:
 
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "test", "k": 5, "purpose": "search"}
             )
@@ -237,7 +247,7 @@ title: No Description
 
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "test", "k": 3, "purpose": "search"}
             )
@@ -268,7 +278,7 @@ title: No Description
 
         patch_provider(monkeypatch, _BoomProvider)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"}
             )
@@ -288,7 +298,7 @@ title: No Description
                 raise failure
 
         patch_provider(monkeypatch, BrokenProvider)
-        with TestClient(app) as client, pytest.raises(FileNotFoundError) as caught:
+        with gateway_test_client() as client, pytest.raises(FileNotFoundError) as caught:
             client.post("/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"})
         assert caught.value is failure
 
@@ -311,7 +321,7 @@ title: No Description
 
         monkeypatch.setattr(_factory, "get_backend", _BoomBackend)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "x", "k": 5, "purpose": "search"}
             )
@@ -360,7 +370,7 @@ class TestRerank:
         self._backend(monkeypatch, [_hit(tmp_path / n) for n in ("a.md", "b.md", "c.md")])
         judge.rules = {"passage a": 0.1, "passage b": 0.6, "passage c": 0.95}
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "what about c", "k": 2, "purpose": "search"}
             )
@@ -384,7 +394,7 @@ class TestRerank:
         questions: dict[str, Any] = {}
         for purpose in ("recall", "search", "dedup"):
             judge.calls.clear()
-            with TestClient(app) as client:
+            with gateway_test_client() as client:
                 resp = client.post(
                     "/api/memory/search", json={"query": "q", "k": 1, "purpose": purpose}
                 )
@@ -399,7 +409,7 @@ class TestRerank:
         asked = self._backend(monkeypatch, [])
         monkeypatch.setattr(settings.services, "memory_rerank_candidates", 40)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             assert client.post(
                 "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
             ).json() == {"results": []}
@@ -415,7 +425,7 @@ class TestRerank:
         monkeypatch.setattr(settings.services, "memory_rerank_candidates", 40)
         monkeypatch.setattr(settings.services, "memory_dedup_candidates", 7)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             for purpose, k in (("dedup", 5), ("dedup", 9), ("recall", 5), ("search", 5)):
                 client.post("/api/memory/search", json={"query": "q", "k": k, "purpose": purpose})
         # dedup ranks its own count whatever `k` is; recall and search keep the shared one
@@ -432,7 +442,7 @@ class TestRerank:
             monkeypatch,
             [_hit(tmp_path / "gone.md"), _hit(tmp_path / "a.md", idx=9), _hit(tmp_path / "b.md")],
         )
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
             )
@@ -448,7 +458,7 @@ class TestRerank:
         self._backend(monkeypatch, [_hit(tmp_path / "a.md")])
         judge.failure = IndexerUnavailable("memory rerank failed (jev): upstream 503")
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
             )
@@ -464,7 +474,7 @@ class TestRequestValidation:
     """Schema validation — query must not be empty, k range."""
 
     def test_empty_query_rejected(self) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "", "k": 5, "purpose": "search"}
             )
@@ -474,24 +484,24 @@ class TestRequestValidation:
         "body", [{"query": "x", "k": 5}, {"query": "x", "k": 5, "purpose": "audit"}]
     )
     def test_missing_or_unknown_purpose_rejected(self, body: dict[str, Any]) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post("/api/memory/search", json=body)
         assert resp.status_code == 422
 
     def test_blank_query_rejected(self) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "  \n ", "k": 5, "purpose": "search"}
             )
         assert resp.status_code == 422
 
     def test_k_out_of_range_rejected(self) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "x", "k": 0, "purpose": "search"}
             )
         assert resp.status_code == 422
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "x", "k": 101, "purpose": "search"}
             )
@@ -538,7 +548,7 @@ def stub_search_backend(
     # across two contended tests would fail on the second. The handler reads it
     # from `app.state.memory_search_gate`, so the stub installs a fresh instance there.
     fresh = asyncio.Semaphore(permits)
-    monkeypatch.setattr(app.state, "memory_search_gate", fresh, raising=False)
+    memory_search_app().state.memory_search_gate = fresh
     monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", _TEST_DEADLINE_S)
 
     class _StubBackend:
@@ -557,10 +567,11 @@ def asgi_client() -> httpx.AsyncClient:
     """Drive the app on the *test's* own event loop, so concurrent requests
     contend for the handler's semaphore the way they do in the gateway.
     `TestClient` would run them on its own portal loop instead."""
+    app = memory_search_app()
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
-        headers=gateway_credentials(),
+        headers=gateway_credentials(app.state.gateway_config),
     )
 
 

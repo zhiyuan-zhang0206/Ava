@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from urllib.parse import urlsplit
 
-from base.config import settings
 
-
-def _frontend_port() -> int:
-    parsed = urlsplit(settings.services.frontend_healthcheck_url)
+def _frontend_port(frontend_healthcheck_url: str) -> int:
+    parsed = urlsplit(frontend_healthcheck_url)
     if parsed.port is not None:
         return parsed.port
     if parsed.scheme == "http":
@@ -37,7 +36,7 @@ def _origin_forms(scheme: str, hostname: str, port: int) -> list[str]:
     return [explicit]
 
 
-def _app_origins() -> list[str]:
+def _app_origins(port: int | None) -> list[str]:
     """Loopback origins of this cluster's own reserved Next.js app port.
 
     `AVA_APP_PORT` is the `app` slot start reserved in this home's registry
@@ -50,13 +49,19 @@ def _app_origins() -> list[str]:
     Gate is not in the service selection. No reserved port derives nothing —
     never a guessed `entry + 1`.
     """
-    port = settings.services.app_port
     if port is None:
         return []
     return [f"http://localhost:{port}", f"http://127.0.0.1:{port}"]
 
 
-def cors_allowed_origins() -> list[str]:
+def cors_allowed_origins(
+    *,
+    explicit: Sequence[str],
+    frontend_healthcheck_url: str,
+    app_port: int | None,
+    browser_origin: str,
+    gateway_url: str,
+) -> list[str]:
     """Return the exact browser origins allowed to call the gateway.
 
     An explicit allowlist is authoritative. Otherwise derive the local
@@ -67,19 +72,18 @@ def cors_allowed_origins() -> list[str]:
     port — which is the Origin header a browser sends for same-origin
     requests to the gateway itself (e.g. the Grafana proxy under /grafana).
     """
-    explicit = settings.gateway.cors_allowed_origins
     if explicit:
-        return explicit
+        return list(explicit)
 
-    frontend_port = _frontend_port()
+    frontend_port = _frontend_port(frontend_healthcheck_url)
     origins = [
         f"http://localhost:{frontend_port}",
         f"http://127.0.0.1:{frontend_port}",
-        *_app_origins(),
+        *_app_origins(app_port),
     ]
-    if settings.gateway.browser_origin:
-        origins.append(settings.gateway.browser_origin)
-    gateway_url = settings.gateway.gateway_url.strip()
+    if browser_origin:
+        origins.append(browser_origin)
+    gateway_url = gateway_url.strip()
     if not gateway_url:
         return origins
 
@@ -104,22 +108,21 @@ def cors_allowed_origins() -> list[str]:
     return origins
 
 
-def session_cookie_secure(request_url: str = "") -> bool:
+def session_cookie_secure(
+    request_url: str = "", *, browser_origin: str, default_secure: bool
+) -> bool:
     """Secure cookies on the configured HTTPS entry, preserving direct HTTP login.
 
     Uvicorn accepts forwarded scheme only from its trusted proxy peers. Merely
     sending an Origin header must not change a direct listener's cookie policy.
     """
-    if settings.gateway.browser_origin and request_url:
+    if browser_origin and request_url:
         request = urlsplit(request_url)
-        browser = urlsplit(settings.gateway.browser_origin)
+        browser = urlsplit(browser_origin)
         if (
             request.scheme == browser.scheme
             and request.hostname == browser.hostname
             and (request.port or 443) == (browser.port or 443)
         ):
             return True
-    explicit = settings.gateway.session_cookie_secure
-    if explicit is not None:
-        return explicit
-    return urlsplit(settings.gateway.gateway_url).scheme == "https"
+    return default_secure

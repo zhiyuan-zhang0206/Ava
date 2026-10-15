@@ -2,13 +2,12 @@
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from gateway.app import app
 from gateway.schemas.models import ModelsResponse
 from tests.fixtures.gateway_config import gateway_test_client
 
 
 def get_models(*, local_machine: MachineIdentity) -> ModelsResponse:
-    with gateway_test_client(app, machine=local_machine) as client:
+    with gateway_test_client(machine=local_machine) as client:
         response = client.get("/api/models")
     assert response.status_code == 200, response.text
     return ModelsResponse.model_validate(response.json())

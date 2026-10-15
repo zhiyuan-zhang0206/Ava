@@ -22,7 +22,6 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 import ava
 from ava import ui
@@ -36,7 +35,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
 
@@ -45,7 +44,10 @@ _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (au
 def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity):
 
     machine_identity.set(host=_HOST)
-    with TestClient(app, base_url="http://test-gateway") as tc, use_client(tc):
+    with (
+        gateway_test_client(base_url="http://test-gateway", machine=machine_identity) as tc,
+        use_client(tc),
+    ):
         yield
 
 

@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
@@ -14,9 +15,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from gateway.agents import creation, launch_retry
-from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def client(
     db_conn: psycopg.Connection[Any],
     *,
     machine_identity: MachineIdentity,
-) -> Iterator[TestClient]:
+) -> Iterator[GatewayTestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     db_conn.execute("INSERT INTO machines(name) VALUES ('local-test') ON CONFLICT DO NOTHING")
     db_conn.commit()
@@ -42,7 +42,7 @@ def client(
     monkeypatch.setattr(creation, "forward_spawn_to_remote", born)
     monkeypatch.setattr(launch_retry.rpc, "dispatch_to_machine", reconcile)
     with gateway_test_client(
-        app, headers={"Authorization": "Bearer retry-test-secret"}, machine=machine_identity
+        headers={"Authorization": "Bearer retry-test-secret"}, machine=machine_identity
     ) as value:
         yield value
 
@@ -58,7 +58,9 @@ def birth(client: TestClient) -> tuple[int, str]:
     return agent_id, prior
 
 
-def submit(client: TestClient, agent_id: int, prior: str, key: str = "operation") -> httpx.Response:
+def submit(
+    client: GatewayTestClient, agent_id: int, prior: str, key: str = "operation"
+) -> httpx.Response:
     return client.post(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
         json={"expected_prior_attempt_id": prior},
@@ -67,7 +69,7 @@ def submit(client: TestClient, agent_id: int, prior: str, key: str = "operation"
 
 
 def test_lost_response_concurrency_and_deliberate_new_attempt(
-    client: TestClient, db_conn: psycopg.Connection[Any]
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any]
 ) -> None:
     agent_id, prior = birth(client)
 
@@ -94,7 +96,7 @@ def test_lost_response_concurrency_and_deliberate_new_attempt(
 
 
 def test_replay_survives_mutable_config_admission_and_target_deletion(
-    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
@@ -131,7 +133,7 @@ def test_replay_survives_mutable_config_admission_and_target_deletion(
     ],
 )
 def test_invalid_guard_has_no_receipt_or_pointer_effect(
-    client: TestClient, db_conn: psycopg.Connection[Any], headers: dict[str, str]
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any], headers: dict[str, str]
 ) -> None:
     agent_id, prior = birth(client)
     response = client.post(
@@ -147,7 +149,7 @@ def test_invalid_guard_has_no_receipt_or_pointer_effect(
 
 
 def test_bad_body_and_revoked_auth_do_not_execute(
-    client: TestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any]
 ) -> None:
     agent_id, prior = birth(client)
     response = client.post(
@@ -157,15 +159,19 @@ def test_bad_body_and_revoked_auth_do_not_execute(
     )
     assert response.status_code == 422
     accepted = submit(client, agent_id, prior).json()
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated")
-    assert submit(client, agent_id, prior).status_code == 401
+    with gateway_test_client(
+        process=client.app.state.gateway_process,
+        config=replace(client.app.state.gateway_config, cluster_secret="rotated"),  # noqa: S106 -- isolated test credential
+        headers={"Authorization": "Bearer retry-test-secret"},
+    ) as rotated:
+        assert submit(rotated, agent_id, prior).status_code == 401
     assert db_conn.execute(
         "SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (UUID(accepted["launch_attempt_id"]),)
 
 
 def test_unsupported_old_runner_has_no_fallback_and_keeps_acceptance(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[dict[str, Any]] = []
 
@@ -183,7 +189,7 @@ def test_unsupported_old_runner_has_no_fallback_and_keeps_acceptance(
 
 @pytest.mark.parametrize("changed", ["admitted", "terminated", "new-attempt", "machine", "deleted"])
 def test_native_repeat_rejects_superseded_target(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     changed: str,
@@ -204,17 +210,17 @@ def test_native_repeat_rejects_superseded_target(
     monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", wake)
     payload = LaunchReconcileRequest(launch_attempt_id=accepted["launch_attempt_id"])
     assert launch_reconcile.reconcile(
-        app.state.db,
-        app.state.bus,
+        client.app.state.db,
+        client.app.state.bus,
         payload,
-        app.state.db_pool,
+        client.app.state.db_pool,
         local_machine=machine_identity.name(),
     ).wake_published
     assert launch_reconcile.reconcile(
-        app.state.db,
-        app.state.bus,
+        client.app.state.db,
+        client.app.state.bus,
         payload,
-        app.state.db_pool,
+        client.app.state.db_pool,
         local_machine=machine_identity.name(),
     ).wake_published
     if changed == "admitted":
@@ -232,10 +238,10 @@ def test_native_repeat_rejects_superseded_target(
         db_conn.execute("DELETE FROM agents_meta WHERE id=%s", (agent_id,))
     db_conn.commit()
     assert not launch_reconcile.reconcile(
-        app.state.db,
-        app.state.bus,
+        client.app.state.db,
+        client.app.state.bus,
         payload,
-        app.state.db_pool,
+        client.app.state.db_pool,
         local_machine=machine_identity.name(),
     ).wake_published
     assert len(wakes) == 2
@@ -244,7 +250,7 @@ def test_native_repeat_rejects_superseded_target(
 
 
 def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -263,10 +269,10 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
     monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", crash)
     with pytest.raises(RuntimeError, match="native crash"):
         launch_reconcile.reconcile(
-            app.state.db,
-            app.state.bus,
+            client.app.state.db,
+            client.app.state.bus,
             payload,
-            app.state.db_pool,
+            client.app.state.db_pool,
             local_machine=machine_identity.name(),
         )
     wakes: list[tuple[object, ...]] = []
@@ -279,17 +285,17 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
     # Discard the successful result just as a lost RPC ACK; repeat the same
     # natural wake without introducing a second queue item or rotating identity.
     launch_reconcile.reconcile(
-        app.state.db,
-        app.state.bus,
+        client.app.state.db,
+        client.app.state.bus,
         payload,
-        app.state.db_pool,
+        client.app.state.db_pool,
         local_machine=machine_identity.name(),
     )
     launch_reconcile.reconcile(
-        app.state.db,
-        app.state.bus,
+        client.app.state.db,
+        client.app.state.bus,
         payload,
-        app.state.db_pool,
+        client.app.state.db_pool,
         local_machine=machine_identity.name(),
     )
     assert len(wakes) == 2
@@ -305,7 +311,7 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
 
 
 def test_reconcile_holds_row_fence_until_publication(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -330,10 +336,10 @@ def test_reconcile_holds_row_fence_until_publication(
     with ThreadPoolExecutor(max_workers=1) as executor:
         pending = executor.submit(
             launch_reconcile.reconcile,
-            app.state.db,
-            app.state.bus,
+            client.app.state.db,
+            client.app.state.bus,
             payload,
-            app.state.db_pool,
+            client.app.state.db_pool,
             local_machine=machine_identity.name(),
         )
         try:
@@ -350,7 +356,7 @@ def test_reconcile_holds_row_fence_until_publication(
 
 
 def test_receipt_insert_and_pointer_rotation_roll_back_together(
-    client: TestClient, db_conn: psycopg.Connection[Any]
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any]
 ) -> None:
     agent_id, prior = birth(client)
     db_conn.execute("""
@@ -380,7 +386,7 @@ def test_receipt_insert_and_pointer_rotation_roll_back_together(
 
 
 def test_distinct_concurrent_intents_cannot_reuse_the_same_observation(
-    client: TestClient, db_conn: psycopg.Connection[Any]
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any]
 ) -> None:
     agent_id, prior = birth(client)
 

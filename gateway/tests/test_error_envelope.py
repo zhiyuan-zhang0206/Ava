@@ -13,22 +13,21 @@ import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from base import config
 from base.api_contracts.agent_contract import AgentNotFound, AvaAgentError, ErrorReason
+from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.app import (
-    app,
     cluster_auth_middleware,
     cluster_pause_middleware,
 )
 from gateway.http.auth import rejection_log
-from gateway.http.middleware.cors import cors_allowed_origins
+from gateway.http.config import gateway_config_from_boot
 from gateway.http.middleware.error_envelope import request_trace_middleware
 from gateway.http.middleware.error_handlers import (
     ava_agent_error_handler,
@@ -38,6 +37,9 @@ from gateway.http.middleware.error_handlers import (
 )
 from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.schemas.errors import ErrorEnvelope
+from tests.fixtures.gateway_config import GatewayTestClient
+
+_middleware_app = FastAPI()
 
 
 def _assert_envelope(
@@ -75,9 +77,10 @@ def _assert_envelope(
 
 
 @pytest.fixture
-def handler_client() -> Iterator[TestClient]:
+def handler_client() -> Iterator[GatewayTestClient]:
     """An isolated app that dispatches every shared gateway error handler."""
     app = FastAPI()
+    app.state.gateway_config = gateway_config_from_boot(snapshot_process_config())
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=".*",
@@ -111,7 +114,7 @@ def handler_client() -> Iterator[TestClient]:
     def unhandled_error() -> None:
         raise RuntimeError("boom")
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with GatewayTestClient(app, raise_server_exceptions=False) as client:
         yield client
 
 
@@ -126,7 +129,7 @@ def handler_client() -> Iterator[TestClient]:
     ],
 )
 def test_global_handlers_emit_typed_envelopes(
-    handler_client: TestClient,
+    handler_client: GatewayTestClient,
     path: str,
     status: int,
     code: str,
@@ -135,7 +138,7 @@ def test_global_handlers_emit_typed_envelopes(
     extensions: set[str],
 ) -> None:
     """Every handler keeps its status while exposing one typed response shape."""
-    origin = cors_allowed_origins()[0]
+    origin = handler_client.app.state.gateway_config.allowed_origins[0]
     response = handler_client.get(path, headers={"Origin": origin})
     _assert_envelope(
         response,
@@ -154,7 +157,7 @@ def test_global_handlers_emit_typed_envelopes(
 
 
 def test_active_otel_trace_id_wins_over_request_fallback(
-    handler_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    handler_client: GatewayTestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Envelope correlation uses the active OTel trace when one exists."""
     from gateway.http.middleware import error_envelope
@@ -177,6 +180,7 @@ def _request(
     store. A request without a session cookie must never reach `db_pool`, so
     bearer and anonymous requests pay no session lookup.
     """
+    _middleware_app.state.gateway_config = gateway_config_from_boot(snapshot_process_config())
     return Request(
         {
             "type": "http",
@@ -190,19 +194,17 @@ def _request(
             "client": client,
             "server": ("testserver", 80),
             "state": {},
-            "app": app,
+            "app": _middleware_app,
         }
     )
 
 
 @pytest.fixture(autouse=True)
-def _auth401_state(monkeypatch: pytest.MonkeyPatch) -> None:
+def _auth401_state() -> None:
     """Each middleware test gets its own gateway-lifetime counters."""
-    monkeypatch.setattr(app.state, "auth401_log", rejection_log.AuthRejectionLog(), raising=False)
+    _middleware_app.state.auth401_log = rejection_log.AuthRejectionLog()
     machine_token_acceptance: AcceptanceCache = {}
-    monkeypatch.setattr(
-        app.state, "machine_token_acceptance", machine_token_acceptance, raising=False
-    )
+    _middleware_app.state.machine_token_acceptance = machine_token_acceptance
 
 
 def _enable_cluster_auth(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -336,8 +338,8 @@ def test_auth_middleware_logs_browser_ua_401_at_debug(
     assert "path=/api/agents" in records[0].getMessage()
     assert "client=127.0.0.1" in records[0].getMessage()
     assert "Mozilla/5.0" in records[0].getMessage()
-    assert app.state.auth401_log.total == 1  # the aggregate still counts it
-    assert app.state.auth401_log.last_warn == {}  # and it burns no WARNING budget
+    assert _middleware_app.state.auth401_log.total == 1  # the aggregate still counts it
+    assert _middleware_app.state.auth401_log.last_warn == {}  # and it burns no WARNING budget
 
 
 def test_auth_middleware_warns_on_first_non_stream_401(
@@ -372,7 +374,7 @@ def test_auth_middleware_suppresses_immediate_non_stream_401_repeat(
     records = _auth401_records(caplog)
     assert [record.levelno for record in records] == [logging.DEBUG]
     assert "suppressed" in records[0].getMessage()
-    assert app.state.auth401_log.suppressed[("127.0.0.1", "/api/agents")] == 1
+    assert _middleware_app.state.auth401_log.suppressed[("127.0.0.1", "/api/agents")] == 1
 
 
 def test_auth_middleware_warns_after_cooldown_with_suppressed_count(
@@ -412,8 +414,8 @@ def test_auth_middleware_prunes_idle_401_throttle_keys(
     response = _unauthorized_auth_response(_request(path="/api/alerts"))
 
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
-    assert stale_key not in app.state.auth401_log.last_warn
-    assert stale_key not in app.state.auth401_log.suppressed
+    assert stale_key not in _middleware_app.state.auth401_log.last_warn
+    assert stale_key not in _middleware_app.state.auth401_log.suppressed
 
 
 def test_auth_middleware_throttles_non_stream_401s_per_client_and_path(
@@ -449,14 +451,14 @@ def test_auth401_aggregate_counts_every_rejection(monkeypatch: pytest.MonkeyPatc
     SSE flood paths and throttled repeats included (the log severity is
     throttled, the count must not be; task #1712)."""
     _enable_cluster_auth(monkeypatch)
-    assert app.state.auth401_log.total == 0
+    assert _middleware_app.state.auth401_log.total == 0
 
     _unauthorized_auth_response(_request(path="/api/events/stream"))
     _unauthorized_auth_response(_request(path="/api/events/stream"))
     _unauthorized_auth_response(_request(path="/api/agents"))
     _unauthorized_auth_response(_request(path="/api/agents"))
 
-    assert app.state.auth401_log.total == 4
+    assert _middleware_app.state.auth401_log.total == 4
 
 
 def test_auth401_drain_returns_count_once_and_resets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -466,10 +468,10 @@ def test_auth401_drain_returns_count_once_and_resets(monkeypatch: pytest.MonkeyP
     _unauthorized_auth_response(_request())
     _unauthorized_auth_response(_request())
 
-    assert app.state.auth401_log.drain() == 2
-    assert app.state.auth401_log.drain() == 0
+    assert _middleware_app.state.auth401_log.drain() == 2
+    assert _middleware_app.state.auth401_log.drain() == 0
     _unauthorized_auth_response(_request())
-    assert app.state.auth401_log.drain() == 1
+    assert _middleware_app.state.auth401_log.drain() == 1
 
 
 def test_auth401_emit_aggregate_event(emitted_events: EmittedEvents) -> None:

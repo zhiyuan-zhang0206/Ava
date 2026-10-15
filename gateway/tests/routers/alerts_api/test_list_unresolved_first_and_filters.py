@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 
 from base.config import settings
 from gateway.alerts import router as alerts_router
-from gateway.app import app
 from tests.components.gateway.test_alerts_api import (
     alert,
     capture_im,
@@ -27,6 +26,7 @@ from tests.components.gateway.test_alerts_api import (
 from tests.components.gateway.test_alerts_api import (
     client as client,
 )
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_list_unresolved_first_and_filters(db_conn: psycopg.Connection, client: TestClient) -> None:
@@ -192,7 +192,7 @@ def test_list_unresolved_before_resolved(db_conn: psycopg.Connection, client: Te
 
 def test_ingest_rows_are_grafana_sourced(db_conn: psycopg.Connection) -> None:
     """The webhook is the only writer: its rows carry source="grafana", and a re-send keeps it."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         ingest(client, webhook(alerts=[alert(fingerprint="s1")]))
         ingest(client, webhook(alerts=[alert(fingerprint="s1")]))
     with db_conn.cursor() as cur:
@@ -202,7 +202,7 @@ def test_ingest_rows_are_grafana_sourced(db_conn: psycopg.Connection) -> None:
 
 def test_ingest_resolved_notifies_recovery(db_conn: psycopg.Connection) -> None:
     """A firing + resolved pair lands as one row + two IMs."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r1 = ingest(client, webhook(alerts=[alert(fingerprint="hp2")]))
         r2 = ingest(
             client,
@@ -256,7 +256,7 @@ def test_stream_endpoint_is_sse(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(alerts_router, "event_stream", fake_stream)
 
-    with TestClient(app) as client, client.stream("GET", "/api/alerts/stream") as resp:
+    with gateway_test_client() as client, client.stream("GET", "/api/alerts/stream") as resp:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")
         assert resp.headers["cache-control"] == "no-cache"
@@ -276,7 +276,7 @@ def test_a_group_of_instances_is_one_im_and_one_row_each(
         alert(alertname="machine offline", fingerprint=f"g{n}", summary=f"machine m{n} down")
         for n in range(4)
     ]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = ingest(client, webhook(alerts=alerts))
     assert resp.json() == {"processed": 4, "inserted": 4, "updated": 0, "notified": 4}
     assert len(sent) == 1
@@ -296,7 +296,7 @@ def test_instances_of_different_rules_in_one_post_are_separate_messages(
         alert(alertname="rule-a", fingerprint="a2"),
         alert(alertname="rule-b", fingerprint="b1"),
     ]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = ingest(client, webhook(alerts=alerts))
     assert resp.json()["notified"] == 3
     assert len(sent) == 2
@@ -308,7 +308,7 @@ def test_a_failed_group_send_leaves_every_instance_unnotified_for_the_next_resen
 ) -> None:
     sent = capture_im(monkeypatch, ok=False)
     alerts = [alert(fingerprint=f"r{n}") for n in range(2)]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert ingest(client, webhook(alerts=alerts)).json()["notified"] == 0
         sent.clear()
 
@@ -328,7 +328,7 @@ def test_a_resolved_group_is_one_recovery_message(monkeypatch: pytest.MonkeyPatc
         alert(status="resolved", fingerprint=f"x{n}", ends_at="2026-08-04T11:00:00Z")
         for n in range(3)
     ]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         ingest(client, webhook(alerts=firing))
         sent.clear()
         assert ingest(client, webhook(status="resolved", alerts=resolved)).json()["notified"] == 3

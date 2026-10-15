@@ -14,10 +14,9 @@ from __future__ import annotations
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
-from gateway.app import app
 from ops.cluster import rpc as cluster_rpc
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _insert_agent(db: psycopg.Connection, *, machine: str = "unknown") -> int:
@@ -48,7 +47,7 @@ async def _ok_dispatch(
 def test_shell_unknown_agent_404(db_conn: psycopg.Connection) -> None:
     """No agents_meta row → 404 (fail-fast, before any dispatch)."""
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/agents/999999/shell/0")
     assert resp.status_code == 404
 
@@ -71,7 +70,7 @@ def test_shell_no_such_session_404(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{aid}/shell/0")
     assert resp.status_code == 404
     assert "capture failed" in resp.json()["detail"]
@@ -98,7 +97,7 @@ def test_shell_capture_success(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _capture_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{aid}/shell/3")
     assert resp.status_code == 200
     body = resp.json()
@@ -137,7 +136,7 @@ def test_shell_capture_custom_lines_forwarded(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _capture_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{aid}/shell/1?lines=500")
     assert resp.status_code == 200
     assert seen["payload"] == {"agent_id": aid, "session_id": 1, "lines": 500}
@@ -164,7 +163,7 @@ def test_shell_capture_default_lines_follow_display_config(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _capture_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{aid}/shell/1")
     assert resp.status_code == 200
     assert seen["payload"] == {"agent_id": aid, "session_id": 1, "lines": 137}
@@ -200,7 +199,7 @@ def test_shell_capture_carries_created_at_and_ttl_deadline(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _meta_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/shell/3").json()
     # The response model parses the op's ISO string into a datetime and
     # re-serializes it (UTC "Z" suffix) — compare instants, not spellings.
@@ -235,7 +234,7 @@ def test_shell_capture_without_row_has_no_deadline(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _meta_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/shell/7").json()
     assert datetime.fromisoformat(body["created_at"]) == launched
     assert body["expires_at"] is None
@@ -262,7 +261,7 @@ def test_shell_capture_without_row_and_epoch_keeps_no_deadline(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _meta_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/shell/8").json()
     assert body["expires_at"] is None
 
@@ -295,7 +294,7 @@ def test_shell_capture_returns_recorded_deadline(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _meta_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/shell/9").json()
     assert datetime.fromisoformat(body["expires_at"]) == deadline
 
@@ -315,7 +314,7 @@ def test_shell_machine_unreachable_503(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{aid}/shell/1")
     assert resp.status_code == 503
     assert "unreachable" in resp.json()["detail"]
@@ -340,7 +339,7 @@ def test_shell_capture_carries_renewal_facts(
     db_conn.commit()
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _ok_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/shell/4").json()
     assert body["renewals"] == 3
     assert body["last_renewed_at"] == renewed.astimezone(UTC).isoformat().replace("+00:00", "Z")

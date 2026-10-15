@@ -48,6 +48,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from starlette.responses import PlainTextResponse, StreamingResponse
 
+from base.config import ConfigBoot
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
 from gateway.cluster import server as _server
@@ -135,7 +136,12 @@ async def _slow(seconds: float = 1.0) -> PlainTextResponse:
 
 def run_child() -> None:
     """Child entry: a real uvicorn server from the production launch assembly."""
-    kwargs = _server.serve_kwargs(host="127.0.0.1", app=f"{__name__}:app")
+    kwargs = _server.serve_kwargs(
+        host="127.0.0.1",
+        app=f"{__name__}:app",
+        factory=False,
+        config=ConfigBoot(),
+    )
     kwargs["port"] = int(os.environ[_PORT_ENV])
     _server.GatewayServer(uvicorn.Config(**kwargs)).run()
 

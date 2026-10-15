@@ -21,7 +21,6 @@ exports = ["admission.py"]
 "test_complete_chain.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1
 
 [debt.first-party-patch]
-"admission.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "faults.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.apply.acknowledge" = 1
 "faults.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.apply.flush_checkpoint" = 1
 "faults.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.execute.save_result" = 1

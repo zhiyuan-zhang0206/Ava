@@ -18,8 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from gateway.app import app
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 def _upload(
@@ -54,7 +53,7 @@ def _spawn_agent() -> int:
     # leaving the spawn dependent on some earlier test having populated the
     # shared module-level app — which breaks under xdist worker sharding /
     # randomized order (same isolation class as #585).
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = spawn_via_http(client, {})
         assert resp.status_code == 201
         return resp.json()["id"]
@@ -75,7 +74,7 @@ class TestUploadFile:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -101,7 +100,7 @@ class TestUploadFile:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -124,7 +123,7 @@ class TestUploadFile:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(client, agent_id, [("files", ("etc/passwd.txt", b"data", "text/plain"))])
 
         assert resp.status_code == 200, resp.text
@@ -134,7 +133,7 @@ class TestUploadFile:
         assert Path(file["path"]).suffix == ".txt"
 
     def test_upload_agent_not_found_returns_404(self) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(client, 99999, [("files", ("x.txt", b"x", "text/plain"))])
         assert resp.status_code == 404
 
@@ -144,7 +143,7 @@ class TestUploadFile:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(client, agent_id, [("files", ("empty.txt", b"", "text/plain"))])
 
         assert resp.status_code == 200, resp.text
@@ -173,7 +172,7 @@ class TestUploadContract:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -192,7 +191,7 @@ class TestUploadContract:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -211,7 +210,7 @@ class TestUploadContract:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(client, agent_id, [("files", ("shot.png", b"\x89PNG", "image/png"))])
             url = resp.json()["files"][0]["url"]
             served = client.get(url)
@@ -234,7 +233,7 @@ class TestUploadLimits:
         import gateway.routers.upload.router as uploads_router
 
         monkeypatch.setattr(uploads_router, "MAX_UPLOAD_BYTES", 10)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -252,7 +251,7 @@ class TestUploadLimits:
         import gateway.routers.upload.router as uploads_router
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 30)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             ok = _upload(client, agent_id, [("files", ("a.txt", b"a" * 20, "text/plain"))])
             over = _upload(client, agent_id, [("files", ("b.txt", b"b" * 20, "text/plain"))])
         assert ok.status_code == 200
@@ -268,7 +267,7 @@ class TestUploadLimits:
         import gateway.routers.upload.router as uploads_router
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 5)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -290,7 +289,7 @@ class TestUploadLimits:
         import gateway.routers.upload.router as uploads_router
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_FILES", 1)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             ok = _upload(client, agent_id, [("files", ("a.txt", b"a", "text/plain"))])
             over = _upload(client, agent_id, [("files", ("b.txt", b"b", "text/plain"))])
         assert ok.status_code == 200
@@ -305,7 +304,7 @@ class TestUploadLimits:
         import gateway.routers.upload.router as uploads_router
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_FILES", 1)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -328,7 +327,7 @@ class TestUploadLimits:
         import gateway.routers.upload.router as uploads_router
 
         monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 10)
-        with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as executor:
+        with gateway_test_client() as client, ThreadPoolExecutor(max_workers=2) as executor:
             responses = [
                 executor.submit(
                     _upload, client, agent_id, [("files", (name, b"x" * 6, "text/plain"))]
@@ -350,7 +349,7 @@ class TestServeUpload:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         raw = b"\x89PNG\r\n\x1a\npixels"
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             saved = _upload(client, agent_id, [("files", ("shot.png", raw, "image/png"))])
             resp = client.get(saved.json()["files"][0]["url"])
         assert resp.status_code == 200
@@ -363,7 +362,7 @@ class TestServeUpload:
         payload cannot execute in a browser (stored-XSS surface)."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             saved = _upload(
                 client,
                 agent_id,
@@ -379,7 +378,7 @@ class TestServeUpload:
     ) -> None:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             saved = _upload(client, agent_id, [("files", ("shot.png", b"\x89PNG", "image/png"))])
             resp = client.get(saved.json()["files"][0]["url"])
         assert resp.status_code == 200
@@ -391,7 +390,7 @@ class TestServeUpload:
     ) -> None:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get(f"/api/agents/{agent_id}/uploads/nope.png")
         assert resp.status_code == 404
 
@@ -400,13 +399,13 @@ class TestServeUpload:
     ) -> None:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             # %2e%2e%2f = ../ — the router path param decodes it; the resolver
             # must refuse to escape the agent upload dir.
             resp = client.get(f"/api/agents/{agent_id}/uploads/..%2f..%2fsecret")
         assert resp.status_code in (400, 404)
 
     def test_serve_unknown_agent_404(self) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/agents/99999/uploads/x.png")
         assert resp.status_code == 404

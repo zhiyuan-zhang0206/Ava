@@ -23,10 +23,10 @@ from base.agents.upload_delivery.models import (
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
-from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import seed_agent
 from gateway.upload_delivery.worker import UploadRecovery
 from ops import upload_delivery as receiver
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 SECRET = "delivered-upload-test-secret"  # noqa: S105 -- isolated credential
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
@@ -39,7 +39,7 @@ def uploaded_agent(
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
-) -> Iterator[tuple[TestClient, int]]:
+) -> Iterator[tuple[GatewayTestClient, int]]:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
 
@@ -62,8 +62,10 @@ def uploaded_agent(
     )
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (unit.machine, agent))
     db_conn.commit()
-    with TestClient(
-        app, headers={"Authorization": f"Bearer {SECRET}"}, raise_server_exceptions=False
+    with gateway_test_client(
+        headers={"Authorization": f"Bearer {SECRET}"},
+        machine=machine_identity,
+        raise_server_exceptions=False,
     ) as client:
         yield client, agent
 
@@ -102,7 +104,7 @@ def proof_for(request: ReceiveRequest) -> CopyProof:
 
 
 def test_lost_response_replay_retains_original_notification_after_deletion(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
     machine_identity: MachineIdentity,
@@ -111,16 +113,16 @@ def test_lost_response_replay_retains_original_notification_after_deletion(
     response = post(client, agent)
     assert response.status_code == 202, response.text
     batch_id = response.json()["batch_id"]
-    request = request_for(app.state.db_pool, batch_id, local_machine=machine_identity.name())
+    request = request_for(client.app.state.db_pool, batch_id, local_machine=machine_identity.name())
     proof = proof_for(request)
-    iid = source.complete(app.state.db_pool, request, proof)
-    assert source.complete(app.state.db_pool, request, proof) == iid
+    iid = source.complete(client.app.state.db_pool, request, proof)
+    assert source.complete(client.app.state.db_pool, request, proof) == iid
     db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (iid,))
     db_conn.execute("DELETE FROM agents_meta WHERE id=%s", (agent,))
     db_conn.execute("DELETE FROM agent_lifecycle_intervals WHERE agent_id=%s", (agent,))
     db_conn.execute("DELETE FROM agents WHERE id=%s", (agent,))
     db_conn.commit()
-    assert source.complete(app.state.db_pool, request, proof) == iid
+    assert source.complete(client.app.state.db_pool, request, proof) == iid
     assert post(client, agent).json() == response.json()
     assert client.get(response.json()["status_url"]).json()["inbound_id"] == iid
     assert db_conn.execute(
@@ -131,7 +133,7 @@ def test_lost_response_replay_retains_original_notification_after_deletion(
 
 
 def test_changed_manifest_and_invalid_guard_have_no_effect(
-    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
 ):
     client, agent = uploaded_agent
     assert post(client, agent).status_code == 202
@@ -158,7 +160,7 @@ def test_changed_manifest_and_invalid_guard_have_no_effect(
 
 
 def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -178,7 +180,7 @@ def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
 
     def recover(_index: int):
         return source.accept(
-            app.state.db_pool,
+            client.app.state.db_pool,
             "direct",
             agent,
             ["f.png"],
@@ -195,7 +197,7 @@ def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
 
 
 def test_placement_or_bad_proof_rejected_before_inbound(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
     machine_identity: MachineIdentity,
@@ -203,24 +205,28 @@ def test_placement_or_bad_proof_rejected_before_inbound(
     client, agent = uploaded_agent
     first = post(client, agent).json()
     request = request_for(
-        app.state.db_pool, first["batch_id"], local_machine=machine_identity.name()
+        client.app.state.db_pool,
+        first["batch_id"],
+        local_machine=machine_identity.name(),
     )
     proof = proof_for(request)
     with pytest.raises(UploadDeliveryConflictError):
         source.complete(
-            app.state.db_pool, request, proof.model_copy(update={"manifest_hash": "0" * 64})
+            client.app.state.db_pool,
+            request,
+            proof.model_copy(update={"manifest_hash": "0" * 64}),
         )
     db_conn.execute("UPDATE agents_meta SET machine='moved' WHERE id=%s", (agent,))
     db_conn.commit()
     with pytest.raises(UploadDeliveryConflictError):
-        source.complete(app.state.db_pool, request, proof)
+        source.complete(client.app.state.db_pool, request, proof)
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (0,)
 
 
 def test_receiver_same_physical_root_different_home_counts_once_and_verifies_ready(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -229,7 +235,9 @@ def test_receiver_same_physical_root_different_home_counts_once_and_verifies_rea
     client, agent = uploaded_agent
     first = post(client, agent).json()
     request = request_for(
-        app.state.db_pool, first["batch_id"], local_machine=machine_identity.name()
+        client.app.state.db_pool,
+        first["batch_id"],
+        local_machine=machine_identity.name(),
     )
     unit = request.target.model_copy(update={"home": request.target.home + "-other"})
     request = request.model_copy(update={"target": unit})
@@ -240,20 +248,29 @@ def test_receiver_same_physical_root_different_home_counts_once_and_verifies_rea
 
     monkeypatch.setattr(receiver, "current_unit", actual_unit)
     monkeypatch.setattr(receiver, "MAX_AGENT_UPLOAD_BYTES", 5)
-    proof = receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name())
+    proof = receiver.receive(
+        client.app.state.db_pool,
+        request,
+        local_machine=machine_identity.name(),
+    )
     assert proof.target == unit
     assert (
-        receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name()) == proof
+        receiver.receive(
+            client.app.state.db_pool,
+            request,
+            local_machine=machine_identity.name(),
+        )
+        == proof
     )
     path = Path(proof.directory) / request.manifest.objects[0].name
     path.write_bytes(b"wrong")
     with pytest.raises(UploadDeliveryConflictError):
-        receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name())
+        receiver.receive(client.app.state.db_pool, request, local_machine=machine_identity.name())
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_copies").fetchone() == (1,)
 
 
 def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
@@ -261,7 +278,9 @@ def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
     client, agent = uploaded_agent
     first = post(client, agent).json()
     request = request_for(
-        app.state.db_pool, first["batch_id"], local_machine=machine_identity.name()
+        client.app.state.db_pool,
+        first["batch_id"],
+        local_machine=machine_identity.name(),
     )
 
     def wrong_unit(*, local_machine: str) -> UnitIdentity:
@@ -270,13 +289,13 @@ def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
 
     monkeypatch.setattr(receiver, "current_unit", wrong_unit)
     with pytest.raises(UploadDeliveryConflictError):
-        receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name())
+        receiver.receive(client.app.state.db_pool, request, local_machine=machine_identity.name())
     path = Path(proof_for(request).directory) / request.manifest.objects[0].name
     assert path.read_bytes() == b"bytes"
 
 
 def test_silent_admission_counts_hidden_files_and_receiving_reservation(
-    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
+    uploaded_agent: tuple[GatewayTestClient, int], monkeypatch: pytest.MonkeyPatch
 ):
     client, agent = uploaded_agent
     assert post(client, agent).status_code == 202
@@ -292,7 +311,7 @@ def test_silent_admission_counts_hidden_files_and_receiving_reservation(
 
 
 def test_name_byte_budget_includes_atomic_primitive_temporary_name(
-    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
 ):
     client, agent = uploaded_agent
     rejected = post(client, agent, name="x." + "a" * 184)
@@ -306,12 +325,15 @@ def test_name_byte_budget_includes_atomic_primitive_temporary_name(
 
 @pytest.mark.parametrize("changed", ["source", "target", "manifest"])
 def test_completed_receipt_rejects_different_immutable_intent(
-    uploaded_agent: tuple[TestClient, int], changed: str, *, machine_identity: MachineIdentity
+    uploaded_agent: tuple[GatewayTestClient, int],
+    changed: str,
+    *,
+    machine_identity: MachineIdentity,
 ):
     client, agent = uploaded_agent
     batch = post(client, agent).json()["batch_id"]
-    request = request_for(app.state.db_pool, batch, local_machine=machine_identity.name())
-    iid = source.complete(app.state.db_pool, request, proof_for(request))
+    request = request_for(client.app.state.db_pool, batch, local_machine=machine_identity.name())
+    iid = source.complete(client.app.state.db_pool, request, proof_for(request))
     raw = request.model_dump()
     if changed == "manifest":
         raw["manifest"]["objects"][0]["filename"] = "different-display.png"
@@ -319,12 +341,12 @@ def test_completed_receipt_rejects_different_immutable_intent(
         raw[changed]["home"] += "-different"
     changed_request = ReceiveRequest.model_validate(raw)
     with pytest.raises(UploadDeliveryConflictError, match="stored intent"):
-        source.complete(app.state.db_pool, changed_request, proof_for(changed_request))
-    assert source.complete(app.state.db_pool, request, proof_for(request)) == iid
+        source.complete(client.app.state.db_pool, changed_request, proof_for(changed_request))
+    assert source.complete(client.app.state.db_pool, request, proof_for(request)) == iid
 
 
 def test_manifest_serving_preserves_display_filename_and_safe_renderable_headers(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
 ):
     from urllib.parse import quote
 
@@ -347,7 +369,9 @@ def test_manifest_serving_preserves_display_filename_and_safe_renderable_headers
 
 @pytest.mark.parametrize("invalid_agent", [-1, 0, 2**63, 2**70])
 def test_guarded_routes_reject_invalid_agent_paths_before_native_effects(
-    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any], invalid_agent: int
+    uploaded_agent: tuple[GatewayTestClient, int],
+    db_conn: psycopg.Connection[Any],
+    invalid_agent: int,
 ):
     client, _agent = uploaded_agent
     assert post(client, invalid_agent).status_code == 422

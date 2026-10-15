@@ -30,9 +30,9 @@ from starlette.requests import Request
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.idempotency import keyed_headers
-from gateway.app import app
 from gateway.routers.tasks import get_tasks
 from ops import lifecycle as ops_lifecycle
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def make_agent(db: psycopg.Connection) -> int:
@@ -127,7 +127,7 @@ class TestRemindInterval:
     def test_null_is_rejected(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"remind_interval_seconds": None},
@@ -140,7 +140,7 @@ class TestRemindInterval:
     def test_over_24h_is_rejected(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"remind_interval_seconds": 86401},
@@ -152,7 +152,7 @@ class TestRemindInterval:
     def test_non_positive_is_rejected(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"remind_interval_seconds": 0},
@@ -164,7 +164,7 @@ class TestRemindInterval:
     def test_valid_value_is_written(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"remind_interval_seconds": 86400},
@@ -179,7 +179,7 @@ class TestOwner:
     def test_null_is_rejected(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}", json={"owner": None}, headers=keyed_headers(str(uuid4()))
             )
@@ -193,7 +193,7 @@ class TestOwner:
         owner = make_agent(db_conn)
         new_owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": new_owner},
@@ -225,7 +225,7 @@ class TestOwner:
     def test_unchanged_owner_sends_no_notification(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": owner},
@@ -253,7 +253,7 @@ class TestOwner:
             return cast("AgentStatus", "idling")
 
         monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _record_resurrection)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": new_owner},
@@ -270,7 +270,7 @@ class TestOwner:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (owner,))
         db_conn.commit()
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": new_owner},
@@ -285,7 +285,7 @@ class TestPriority:
     def test_get_exposes_priority(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)  # defaults to P2
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/tasks")
         assert resp.status_code == 200
         row = next(t for t in resp.json()["tasks"] if t["id"] == tid)
@@ -294,7 +294,7 @@ class TestPriority:
     def test_patch_sets_priority(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"priority": "P0"},
@@ -307,7 +307,7 @@ class TestPriority:
     def test_patch_rejects_bad_priority(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"priority": "P9"},
@@ -324,7 +324,7 @@ class TestTitle:
     def test_patch_renames(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"title": "renamed"},
@@ -339,7 +339,7 @@ class TestTitle:
         owner = make_agent(db_conn)
         make_task(db_conn, owner=owner)  # holds title 't'
         tid = make_task(db_conn, owner=owner, title="other")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}", json={"title": "t"}, headers=keyed_headers(str(uuid4()))
             )
@@ -350,7 +350,7 @@ class TestTitle:
 class TestRootTaskImmutable:
     def test_status_change_is_rejected(self, db_conn: psycopg.Connection) -> None:
         root_id = make_root_task(db_conn)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{root_id}",
                 json={"status": "done"},
@@ -363,7 +363,7 @@ class TestRootTaskImmutable:
     def test_reassign_is_rejected(self, db_conn: psycopg.Connection) -> None:
         root_id = make_root_task(db_conn)
         new_owner = make_agent(db_conn)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{root_id}",
                 json={"owner": new_owner},
@@ -373,7 +373,7 @@ class TestRootTaskImmutable:
         assert _owner(db_conn, root_id) is None  # still unowned
 
     def test_missing_task_still_404s(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 "/api/tasks/999999",
                 json={"status": "done"},
@@ -390,7 +390,7 @@ class TestRootTaskImmutable:
         untouched."""
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner, title=f"regular-{removed_status}")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"status": removed_status},
@@ -418,7 +418,7 @@ class TestTimestampOffset:
     def test_get_created_at_has_utc_offset(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)
         tid = make_task(db_conn, owner=owner)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/tasks")
         assert resp.status_code == 200
         row = next(t for t in resp.json()["tasks"] if t["id"] == tid)
@@ -504,7 +504,7 @@ class TestGetTaskFields:
         description = "d" * 301
         results = "r" * 301
         tid = make_task(db_conn, owner=owner, description=description, results=results)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             default = _list_tasks_ok(client)
             full = _list_tasks_ok(client, fields="full")
             summary = _list_tasks_ok(client, fields="summary")
@@ -539,7 +539,7 @@ class TestGetTaskFields:
         )
 
     def test_unknown_fields_value_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             response = client.get("/api/tasks", params={"fields": "compact"})
         assert response.status_code == 422
 
@@ -585,7 +585,7 @@ class TestGetTasksWindow:
         old_done = make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-done")
         self._backdate(db_conn, old_ip, 40)
         self._backdate(db_conn, old_done, 40)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/tasks", params={"window": "7d"})
         assert resp.status_code == 200
         rows = {t["id"]: t for t in resp.json()["tasks"]}
@@ -606,7 +606,7 @@ class TestGetTasksWindow:
             db_conn, owner=owner, status="in_progress", parent_id=old_done_parent, title="child"
         )
         self._backdate(db_conn, old_done_parent, 40)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/tasks", params={"window": "7d"})
         assert resp.status_code == 200
         rows = {t["id"]: t for t in resp.json()["tasks"]}
@@ -625,7 +625,7 @@ class TestGetTasksWindow:
         older = make_task(db_conn, owner=owner, status="done", parent_id=root, title="older-40h")
         self._backdate_hours(db_conn, recent, 20)
         self._backdate_hours(db_conn, older, 40)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/tasks", params={"window": "24h"})
         assert resp.status_code == 200
         assert self._ids(resp) == {root, recent}
@@ -646,7 +646,7 @@ class TestGetTasksWindow:
         )
         self._backdate(db_conn, gp, 60)
         self._backdate(db_conn, parent, 50)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/tasks", params={"window": "7d"})
         assert resp.status_code == 200
         rows = {t["id"]: t for t in resp.json()["tasks"]}
@@ -660,7 +660,7 @@ class TestGetTasksWindow:
         root = make_root_task(db_conn)
         mid = make_task(db_conn, owner=owner, status="done", parent_id=root, title="mid-done")
         self._backdate(db_conn, mid, 20)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp7 = client.get("/api/tasks", params={"window": "7d"})
             resp30 = client.get("/api/tasks", params={"window": "30d"})
         assert resp7.status_code == 200 and resp30.status_code == 200
@@ -672,7 +672,7 @@ class TestGetTasksWindow:
         root = make_root_task(db_conn)
         old_done = make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-done")
         self._backdate(db_conn, old_done, 400)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             plain = client.get("/api/tasks")
             allp = client.get("/api/tasks", params={"window": "all"})
         assert plain.status_code == 200 and allp.status_code == 200
@@ -703,7 +703,7 @@ class TestGetTasksWindow:
             description="active child description",
         )
         self._backdate(db_conn, parent, 40)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             response = client.get("/api/tasks", params={"window": window, "fields": "summary"})
 
         assert response.status_code == 200
@@ -716,6 +716,6 @@ class TestGetTasksWindow:
         assert rows[parent]["ghost"] is (window != "all")
 
     def test_unknown_window_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/tasks", params={"window": "99d"})
         assert resp.status_code == 422

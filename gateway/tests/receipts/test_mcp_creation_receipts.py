@@ -3,6 +3,7 @@
 from collections.abc import Generator, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any
 
 import psycopg
@@ -11,8 +12,8 @@ from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
-from gateway.app import app
 from gateway.mcp_server import creation_receipts
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 PATH = "/api/keyed/v1/mcp/clients"
 HEADERS = {"Idempotency-Key": "original", "Idempotency-Scope": "principal-v1"}
@@ -20,10 +21,12 @@ SECRET = "credential-receipt-test-secret"  # noqa: S105 -- isolated fixture
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any) -> Iterator[TestClient]:
+def client(
+    monkeypatch: pytest.MonkeyPatch, set_machine_identity: Any
+) -> Iterator[GatewayTestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
+    with gateway_test_client(headers={"Authorization": f"Bearer {SECRET}"}) as value:
         yield value
 
 
@@ -109,11 +112,16 @@ def test_missing_or_unknown_scope_has_no_effect(
 
 
 def test_revoked_human_credential_cannot_recover_history(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert client.post(PATH, json={"name": "protected"}, headers=HEADERS).status_code == 200
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "replacement-human-secret")
-    assert client.post(PATH, json={"name": "protected"}, headers=HEADERS).status_code == 401
+    with gateway_test_client(
+        process=client.app.state.gateway_process,
+        config=replace(client.app.state.gateway_config, cluster_secret="replacement-human-secret"),  # noqa: S106 -- isolated test credential
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as rotated:
+        assert rotated.post(PATH, json={"name": "protected"}, headers=HEADERS).status_code == 401
 
 
 def test_commit_succeeds_before_response_failure_replay_cannot_reissue_token(

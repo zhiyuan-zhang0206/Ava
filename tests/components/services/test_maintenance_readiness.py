@@ -9,14 +9,12 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from psycopg_pool import PoolTimeout
 
 from base import config
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
@@ -29,15 +27,8 @@ from base.host.env import dotenv_file
 from base.host.net.auth import bearer_header
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
-from gateway.app import app
 from gateway.tests.agents.gateway_auth import without_credentials
-
-
-@pytest.fixture(autouse=True)
-def gateway_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
-    from gateway import app as gateway_app
-
-    monkeypatch.setattr(gateway_app, "ConfigBoot", snapshot_process_config)
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
@@ -61,7 +52,7 @@ def held(
 def test_gateway_health_probes_database_during_hold_and_business_stays_closed(
     gateway_data_plane: None,
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         health = client.get("/api/health")
         assert health.status_code == 200
         assert health.json()["name"] == "gateway"
@@ -73,14 +64,11 @@ def test_gateway_health_probes_database_during_hold_and_business_stays_closed(
 
 @pytest.mark.usefixtures("held")
 def test_held_gateway_health_still_reports_database_failure(
-    monkeypatch: pytest.MonkeyPatch,
     gateway_data_plane: None,
 ) -> None:
-    with TestClient(app) as client:
-        monkeypatch.setattr(
-            app.state.control_db_pool,
-            "connection",
-            MagicMock(side_effect=PoolTimeout("isolated readiness failure")),
+    with gateway_test_client() as client:
+        client.app.state.control_db_pool.connection = MagicMock(
+            side_effect=PoolTimeout("isolated readiness failure")
         )
         response = client.get("/api/health")
         assert response.status_code == 503
@@ -105,7 +93,7 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
 
     machine_identity.set(role="agent-runner")
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
 
         def inspect_before_drain() -> None:
             response = client.get("/api/agents")
@@ -129,7 +117,7 @@ def test_held_health_exemption_preserves_authentication(
     monkeypatch: pytest.MonkeyPatch, gateway_data_plane: None
 ) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", uuid4().hex)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         # Health is already public; control-plane classification must not make
         # the authenticated status surface public too.
         assert client.get("/api/health").status_code == 200
@@ -154,7 +142,7 @@ def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
     the authentication and serves no database login; business stays closed."""
     _authenticated(monkeypatch)
     runner = bearer_header(served_gateway_home.api.runner)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert without_credentials(client).get("/api/bootstrap").status_code == 401
         assert client.get("/api/bootstrap", headers=bearer_header("wrong")).status_code == 401
         served = client.get("/api/bootstrap", headers=runner)
@@ -208,7 +196,7 @@ def test_a_runners_first_join_reaches_a_held_gateway(
         unit, "install_bundle", partial(unit.install_bundle, probe=lambda _dsn: None)
     )
     gateway = "http://127.0.0.1:1"
-    with TestClient(app) as client, patch.dict(os.environ):
+    with gateway_test_client() as client, patch.dict(os.environ):
 
         def dial(url: str, **kwargs: Any) -> Any:
             return client.get(url.removeprefix(gateway), **kwargs)

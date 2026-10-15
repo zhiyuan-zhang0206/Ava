@@ -299,12 +299,13 @@ _PER_TEST_TRUNCATE_TABLES = (
 def _default_gateway_credentials(
     monkeypatch: pytest.MonkeyPatch, pytestconfig: pytest.Config
 ) -> None:
-    """Give in-process clients of the Gateway app the suite's cluster secret as bearer.
+    """Give in-process clients of an assembled Gateway app its configured cluster secret as bearer.
 
     The cluster API always authenticates, so the suite keeps its cluster secret
-    (`env_bootstrap`) and every `TestClient` over the Gateway app carries it as its
-    bearer by default (`gateway.tests.agents.gateway_auth`); authentication tests patch
-    the secret or drop the header (`without_credentials`). The patch touches no store,
+    (`env_bootstrap`) and every `TestClient` over an assembled Gateway app carries its
+    `app.state.gateway_config.cluster_secret` as bearer by default
+    (`gateway.tests.agents.gateway_auth`); authentication tests configure their app or
+    drop the header (`without_credentials`). The patch touches no store,
     so it applies to every test outside the static environment.
     """
     if not static_mode(pytestconfig):

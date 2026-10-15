@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from threading import Event
 from typing import Any, cast
 
@@ -13,8 +14,8 @@ from fastapi.testclient import TestClient
 
 from base.config import settings
 from base.db import create_agent
-from gateway.app import app
 from gateway.routers import page_acceptance, pages
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 SECRET = "page-receipt-test-secret"  # noqa: S105 -- isolated credential fixture
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
@@ -22,9 +23,9 @@ BODY = {"name": "report", "port": 8801, "host": "127.0.0.1", "ttl_seconds": 60}
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[GatewayTestClient]:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    with TestClient(app, headers={"Authorization": f"Bearer {SECRET}"}) as value:
+    with gateway_test_client(headers={"Authorization": f"Bearer {SECRET}"}) as value:
         yield value
 
 
@@ -101,7 +102,7 @@ def test_lost_response_concurrency_replays_original_row(
 
 
 def test_registration_replay_cannot_close_later_page(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent = _agent(db_conn)
     first = client.post(_path(agent), json=BODY, headers=HEADERS)
@@ -113,7 +114,7 @@ def test_registration_replay_cannot_close_later_page(
     async def no_old_events(*args: object, **kwargs: object) -> None:
         raise AssertionError("replaying historical acceptance must not publish obsolete events")
 
-    monkeypatch.setattr(app.state.bus, "publish_best_effort", no_old_events)
+    client.app.state.bus.publish_best_effort = no_old_events
     replay = client.post(_path(agent), json=BODY, headers=HEADERS)
     assert replay.status_code == 201 and replay.json() == first.json()
     assert db_conn.execute("SELECT id FROM agent_pages WHERE closed_at IS NULL").fetchall() == [
@@ -184,7 +185,7 @@ def test_close_receipt_and_stale_observation_preserve_new_page(
 
 
 def test_fresh_already_closed_observation_is_accepted(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = _agent(db_conn)
     first = client.post(_path(agent), json=BODY, headers=HEADERS).json()
@@ -194,7 +195,7 @@ def test_fresh_already_closed_observation_is_accepted(
     async def forbid_old_hint(*args: object, **kwargs: object) -> None:
         raise AssertionError("already-closed acceptance must not publish obsolete name hints")
 
-    monkeypatch.setattr(app.state.bus, "publish_best_effort", forbid_old_hint)
+    client.app.state.bus.publish_best_effort = forbid_old_hint
     no_effect = client.post(_close_path(agent), json=body, headers=_key("already-closed"))
     assert no_effect.status_code == 200 and no_effect.json() == accepted.json()
 
@@ -241,12 +242,17 @@ def test_failure_before_receipt_rolls_back_replacement(
 
 
 def test_revoked_auth_cannot_replay(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent = _agent(db_conn)
     assert client.post(_path(agent), json=BODY, headers=HEADERS).status_code == 201
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "different-secret")
-    assert client.post(_path(agent), json=BODY, headers=HEADERS).status_code == 401
+    with gateway_test_client(
+        process=client.app.state.gateway_process,
+        config=replace(client.app.state.gateway_config, cluster_secret="different-secret"),  # noqa: S106 -- isolated test credential
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as rotated:
+        assert rotated.post(_path(agent), json=BODY, headers=HEADERS).status_code == 401
 
 
 def test_older_routing_has_no_guarded_effect(db_conn: psycopg.Connection) -> None:
@@ -308,21 +314,25 @@ def test_two_fresh_intents_serialize_replacement(
 
 
 def test_commit_survives_response_tail_failure(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = _agent(db_conn)
+    original_publish = client.app.state.bus.publish_best_effort
 
     async def fail_tail(*args: object, **kwargs: object) -> None:
         raise HTTPException(
             status_code=503, detail="acceptance committed; response tail unavailable"
         )
 
-    monkeypatch.setattr(app.state.bus, "publish_best_effort", fail_tail)
-    assert client.post(_path(agent), json=BODY, headers=HEADERS).status_code == 503
-    row = db_conn.execute("SELECT id FROM agent_pages WHERE agent_id=%s", (agent,)).fetchone()
-    replay = client.post(_path(agent), json=BODY, headers=HEADERS)
-    assert row is not None and replay.status_code == 201 and replay.json()["id"] == row[0]
-    assert db_conn.execute("SELECT count(*) FROM agent_pages").fetchone() == (1,)
+    client.app.state.bus.publish_best_effort = fail_tail
+    try:
+        assert client.post(_path(agent), json=BODY, headers=HEADERS).status_code == 503
+        row = db_conn.execute("SELECT id FROM agent_pages WHERE agent_id=%s", (agent,)).fetchone()
+        replay = client.post(_path(agent), json=BODY, headers=HEADERS)
+        assert row is not None and replay.status_code == 201 and replay.json()["id"] == row[0]
+        assert db_conn.execute("SELECT count(*) FROM agent_pages").fetchone() == (1,)
+    finally:
+        client.app.state.bus.publish_best_effort = original_publish
 
 
 def test_raced_unique_conflict_rolls_back_old_close(
@@ -362,7 +372,7 @@ def test_close_replay_survives_target_cleanup(
 
 
 def test_host_validation_reuses_single_borrowed_connection(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from psycopg_pool import ConnectionPool
 
@@ -375,13 +385,13 @@ def test_host_validation_reuses_single_borrowed_connection(
         ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1, timeout=0.5) as pool,
         monkeypatch.context() as patch,
     ):
-        patch.setattr(app.state, "db_pool", pool)
+        patch.setattr(client.app.state, "db_pool", pool)
         result = client.post(_path(agent), json={**BODY, "host": "page-home"}, headers=HEADERS)
     assert result.status_code == 201, result.text
 
 
 def test_placement_is_locked_before_host_validation(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
     from psycopg_pool import ConnectionPool
 
@@ -389,7 +399,7 @@ def test_placement_is_locked_before_host_validation(
     db_conn.execute("UPDATE agents_meta SET machine='page-home' WHERE id=%s", (agent,))
     db_conn.commit()
     entered, proceed = Event(), Event()
-    original = app.state.page_host_cache.dial_hosts
+    original = client.app.state.page_host_cache.dial_hosts
 
     def paused_validation(
         pool: ConnectionPool,
@@ -402,7 +412,7 @@ def test_placement_is_locked_before_host_validation(
         assert proceed.wait(5), "test did not release target validation"
         return original(pool, machine, connection=connection)
 
-    monkeypatch.setattr(app.state.page_host_cache, "dial_hosts", paused_validation)
+    client.app.state.page_host_cache.dial_hosts = paused_validation
     with ThreadPoolExecutor(max_workers=1) as executor:
         accepted = executor.submit(
             client.post, _path(agent), json={**BODY, "host": "page-home"}, headers=HEADERS

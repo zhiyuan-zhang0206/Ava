@@ -10,6 +10,7 @@ from starlette.requests import Request
 from base.config import settings
 from base.host.net.auth import verify_bearer
 from gateway.http.auth.request_principal import cluster_credential
+from gateway.http.config import GatewayConfig
 
 
 class WebhookAuthentication(NamedTuple):
@@ -39,9 +40,10 @@ def authenticate_webhook(request: Request, *, provider: str) -> WebhookAuthentic
                 authorized=True,
                 source_verified_by=f"webhook:{provider}",
             )
+    config: GatewayConfig = request.app.state.gateway_config
     verified_by = cluster_credential(
         request.headers.get("Authorization"),
-        settings.data_plane.cluster_secret,
+        config.cluster_secret,
         cache=request.app.state.machine_token_acceptance,
     )
     if verified_by is not None:

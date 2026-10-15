@@ -21,7 +21,7 @@ tags:
 | Layer | Location | Description |
 |---|---|---|
 | **Unit tests** | `<pkg>/**/tests/test_{file}.py` | one test file per source file, in the `tests/` directory of the package it tests (`tests/components/{module}/` holds only registered contract and integration tests; `scripts/structure/tests_location.py` refuses any other) |
-| **Integration tests** | `tests/integration/` | cross-module tests; `TestClient` mounts `gateway.app` in-process + custom `_TestClientTransport` forwarding httpx, **no separate Gateway process** |
+| **Integration tests** | `tests/integration/` | cross-module tests; `TestClient` mounts `gateway.app:create_app` in-process + custom `_TestClientTransport` forwarding httpx, **no separate Gateway process** |
 | **E2E tests** | `tests/e2e/` | full-stack end-to-end tests |
 | **Data factories** | `tests/factories/` | test data construction tools |
 
@@ -51,7 +51,7 @@ Validation ownership across hooks and CI: [[test-ci.ava.okf.md]].
 
 - [[agent/db/docs/db.ava.okf.md]] — tests use isolated Postgres/Redis
 - [[loop.ava.okf.md]] — system under test
-- [[gateway-cli.ava.okf.md]] — integration tests mount `gateway.app` in-process (TestClient), no separate Gateway process needed
+- [[gateway-cli.ava.okf.md]] — integration tests mount `gateway.app:create_app` in-process (TestClient), no separate Gateway process needed
 
 ## Entry points
 

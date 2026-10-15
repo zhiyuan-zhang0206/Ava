@@ -24,13 +24,11 @@ from unittest.mock import patch
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base import config, telemetry
 from base.api_contracts.mcp_tool_contract import project_message
 from base.host.net.auth import bearer_header
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
 from gateway.tests.mcp_calls import (
     ACCEPT,
     create_token,
@@ -41,7 +39,7 @@ from gateway.tests.mcp_calls import (
     tool_result,
 )
 from gateway.tests.mcp_calls import enable_endpoint as enable_endpoint
-from tests.fixtures.gateway_config import create_mcp_client
+from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -67,7 +65,7 @@ def _audit_hits(tool: str, client_name: str) -> list[dict[str, Any]]:
 
 def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config.settings.gateway, "mcp_endpoint_enabled", False)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             "/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
@@ -82,7 +80,7 @@ def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_initialize_negotiates_and_lists_guarded_creation_tool() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         init = initialize(client, token)
         assert init[0]["result"]["protocolVersion"]
@@ -151,20 +149,23 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
     )
     page = AgentDirectoryPage(agents=[card], next_cursor=1)
 
-    def fake_list_directory(
-        _conn: object,
-        *,
-        catalog: ModelCatalog,
-        default_model_reader: Callable[[], str],
-        **kwargs: Any,
-    ) -> AgentDirectoryPage:
-        assert catalog is app.state.catalog
-        assert default_model_reader() == app.state.config_authority.service_field_value("llm_model")
-        seen.update(kwargs)
-        return page
+    with gateway_test_client() as client:
 
-    monkeypatch.setattr(endpoint.roster, "list_directory", fake_list_directory)
-    with TestClient(app) as client:
+        def fake_list_directory(
+            _conn: object,
+            *,
+            catalog: ModelCatalog,
+            default_model_reader: Callable[[], str],
+            **kwargs: Any,
+        ) -> AgentDirectoryPage:
+            assert catalog is client.app.state.catalog
+            assert default_model_reader() == client.app.state.config_authority.service_field_value(
+                "llm_model"
+            )
+            seen.update(kwargs)
+            return page
+
+        monkeypatch.setattr(endpoint.roster, "list_directory", fake_list_directory)
         token = create_token(client)
         result = tool_call(
             client,
@@ -193,7 +194,7 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
     ],
 )
 def test_list_agents_rejects_invalid_directory_arguments(arguments: dict[str, object]) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         result = tool_call(client, token, "list_agents", arguments)
     assert result["result"].get("isError") is True
@@ -203,7 +204,7 @@ def test_list_agents_rejects_invalid_directory_arguments(arguments: dict[str, ob
 
 
 def test_spawn_get_terminate_round_trip(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         payload = tool_result(
             tool_call(
@@ -249,7 +250,7 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
     monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         response = tool_call(
             client,
@@ -265,7 +266,7 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
 
 
 def test_get_agent_not_found_is_an_error() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         result = tool_call(client, token, "get_agent", {"agent_id": 999999})
     assert result["result"].get("isError") is True
@@ -273,7 +274,7 @@ def test_get_agent_not_found_is_an_error() -> None:
 
 
 def test_send_message_and_get_messages() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         agent_id = int(
             tool_result(
@@ -314,7 +315,7 @@ def test_send_message_and_get_messages() -> None:
 
 
 def test_token_clients_same_key_are_isolated_and_body_reuse_conflicts() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = create_token(client, name="idem-first")
         second = create_token(client, name="idem-second")
         agent_id = int(
@@ -339,7 +340,7 @@ def test_token_clients_same_key_are_isolated_and_body_reuse_conflicts() -> None:
 
 
 def test_revoked_client_cannot_replay_prior_key() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         created = create_mcp_client(client, "idem-revoked", "write").json()
         token = created["token"]
         agent_id = int(
@@ -369,7 +370,7 @@ def test_revoked_client_cannot_replay_prior_key() -> None:
 
 
 def test_read_scope_cannot_call_write_tools() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client, name="read-client", scope="read")
         denied = tool_call(
             client,
@@ -386,7 +387,7 @@ def test_read_scope_cannot_call_write_tools() -> None:
 
 def test_scope_denial_is_audited_as_an_error_without_raw_args() -> None:
     prompt = "blocked sensitive prompt"
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client, name="audit-read-client", scope="read")
         tool_call(
             client,
@@ -405,7 +406,7 @@ def test_scope_denial_is_audited_as_an_error_without_raw_args() -> None:
 
 def test_tool_error_does_not_reintroduce_raw_args_into_audit() -> None:
     scope = "private-invalid-scope"
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client, name="audit-error-client", scope="read")
         result = tool_call(client, token, "list_agents", {"scope": scope})
 
@@ -421,8 +422,8 @@ def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> No
     # Pure-gateway branch: no ops server stand-in exists for status_probe, so
     # the tool takes the local snapshot path (the same branch a gateway-only
     # host serves).
-    with TestClient(app) as client:
-        app.state.machine.set(role="gateway")
+    with gateway_test_client() as client:
+        client.app.state.machine.set(role="gateway")
         token = create_token(client)
         payload = tool_result(tool_call(client, token, "cluster_status", {}))
     assert payload["machine_name"]
@@ -437,7 +438,7 @@ def test_mcp_rejects_missing_or_bad_client_token(authorization: str | None) -> N
     headers = {"Accept": ACCEPT, "Content-Type": "application/json"}
     if authorization is not None:
         headers["Authorization"] = authorization
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             "/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
@@ -451,7 +452,7 @@ def test_cluster_secret_bearer_is_not_an_mcp_client_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             "/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
@@ -468,7 +469,7 @@ def test_client_token_works_when_cluster_auth_is_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         created = create_mcp_client(
             client, "separate-auth-client", "read", headers=bearer_header(_SECRET)
         )
@@ -487,7 +488,7 @@ def test_client_token_works_when_cluster_auth_is_enabled(
 
 
 def test_revoked_client_token_is_rejected() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         created = create_mcp_client(client, "revoked-client", "write")
         assert created.status_code == 200, created.text
         body = created.json()
@@ -513,7 +514,7 @@ def test_revoked_client_token_is_rejected() -> None:
 
 def test_tool_call_audit_identifies_client_and_redacts_args() -> None:
     prompt = "sensitive audit prompt"
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         created = create_mcp_client(client, "audit-write-client", "write")
         assert created.status_code == 200, created.text
         body = created.json()
@@ -570,7 +571,7 @@ def testsse_messages_keeps_unicode_line_separators(ch: str) -> None:
 
 
 def test_creation_key_replays_identity_conflicts_and_scopes_to_client() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = create_token(client, name="creation-first")
         second = create_token(client, name="creation-second")
         args = {"prompt": "same goal", "idempotency_key": "creation-a"}
@@ -596,7 +597,7 @@ def test_creation_key_replays_identity_conflicts_and_scopes_to_client() -> None:
 
 @pytest.mark.parametrize("key", ["", "x" * 129])
 def test_creation_tool_rejects_invalid_key(key: str) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         response = tool_call(
             client, token, "spawn_agent_guarded_v1", {"prompt": "goal", "idempotency_key": key}
@@ -607,7 +608,7 @@ def test_creation_tool_rejects_invalid_key(key: str) -> None:
 def test_concurrent_mcp_creation_retries_share_one_identity() -> None:
     from concurrent.futures import ThreadPoolExecutor
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
 
         def submit(index: int) -> int:
@@ -648,7 +649,7 @@ def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
         return await create(*args, **kwargs)
 
     monkeypatch.setattr(creation, "create_and_launch_agent", simultaneous_create)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         credentials = [
             create_mcp_client(client, name, "write").json()
             for name in ("concurrent-first", "concurrent-second")

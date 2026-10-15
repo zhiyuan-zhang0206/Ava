@@ -7,7 +7,6 @@ from collections.abc import Callable
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from base.agents.inbox.chat_delivery import insert_chat_inbound_once
@@ -17,7 +16,7 @@ from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.inbound_provenance import request_inbound_provenance
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 _SECRET = "inbound-provenance-secret"  # noqa: S105 -- isolated test credential
 
@@ -49,7 +48,7 @@ def test_cluster_bearer_message_records_http_provenance(
     agent_id = _seed_live_agent(db_conn)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.post(
             f"/api/agents/{agent_id}/messages",
             headers={"Authorization": f"Bearer {_SECRET}"},
@@ -72,7 +71,7 @@ def test_browser_message_records_user_session(
     agent_id = _seed_live_agent(db_conn)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         login = client.post("/api/auth/login", json={"password": _SECRET})
         assert login.status_code == 200
         response = client.post(

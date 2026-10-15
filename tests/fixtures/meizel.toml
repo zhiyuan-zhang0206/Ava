@@ -32,7 +32,6 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 "guards.py#monkeypatch.setattr os" = 1
 
 [debt.unresolved-patch]
-"gateway_config.py#patch.object application.state.gateway_process_input" = 1
 "guards.py#monkeypatch.setattr mod" = 1
 "guards.py#monkeypatch.setattr module" = 1
 "guards.py#monkeypatch.setattr module.settings.observability.telemetry_otlp_enabled" = 1

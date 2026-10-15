@@ -36,9 +36,9 @@ from base.packages.docs.pages_copy import (
     PAGE_SERVER_DOWN_BODY,
     PAGE_SERVER_TIMEOUT_BODY,
 )
-from gateway.app import app
 from gateway.routers import pages as pages_router
 from gateway.tests.agents.gateway_auth import without_credentials
+from tests.fixtures.gateway_config import gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -173,13 +173,13 @@ def test_proxy_serves_page_content(db_conn, page_server: int) -> None:
     """GET through the gateway returns the page server's content — root,
     nested path, and query string all work."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = _post_page(client, aid, {"name": "p", "port": page_server, "host": "127.0.0.1"})
     assert resp.status_code == 201
     # The registered URL is the gateway's own — no host:port leak.
     assert resp.json()["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-p/"
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         root = client.get(f"/pages/{aid}-p/")
         assert root.status_code == 200
         assert root.headers["content-type"].startswith("text/html")
@@ -209,7 +209,7 @@ def test_proxy_client_ignores_ambient_proxy_env(
         return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(pages_router.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 200
@@ -221,7 +221,7 @@ def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) 
     """/pages/{name} (no slash) redirects to /pages/{name}/ so relative asset
     links inside the page resolve against the page directory."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         resp = client.get(f"/pages/{aid}-p", follow_redirects=False)
     assert resp.status_code == 307
@@ -231,7 +231,7 @@ def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) 
 def test_proxy_404_unknown_page(db_conn) -> None:
     """A never-registered page name is a 404, not a proxy attempt."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/pages/{aid}-never/")
     assert resp.status_code == 404
 
@@ -239,7 +239,7 @@ def test_proxy_404_unknown_page(db_conn) -> None:
 def test_proxy_404_closed_page(db_conn, page_server: int) -> None:
     """close() removes the reverse-proxy route: a closed page 404s."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         _close_page(client, aid, "p")
         resp = client.get(f"/pages/{aid}-p/")
@@ -258,7 +258,7 @@ def test_proxy_410_expired_page_zh_default(
     """No user_settings row -> the page copy falls back to the zh default
     (page copy follows display.language, user ruling 2026-08-13)."""
     aid = create_agent(db_conn)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         db_conn.rollback()
         with db_conn.cursor() as cur:
@@ -289,7 +289,7 @@ def test_proxy_410_expired_page_en_when_display_language_en(
             (Jsonb("en"),),
         )
     aid = create_agent(db_conn)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         db_conn.rollback()
         with db_conn.cursor() as cur:
@@ -306,7 +306,7 @@ def test_proxy_410_expired_page_en_when_display_language_en(
 
 
 def test_proxy_404_missing_agent(db_conn, page_server: int) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/pages/99999-p/")
     assert resp.status_code == 404
 
@@ -325,7 +325,7 @@ def test_proxy_rejects_traversal(db_conn, page_server: int, bad_path: str) -> No
     """Encoded dot-segments and backslashes are rejected with 400 — the
     gateway never forwards a path that could escape the page directory."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         resp = client.get(f"/pages/{aid}-p/{bad_path}")
     assert resp.status_code == 400
@@ -343,7 +343,7 @@ def test_proxy_502_when_page_server_unreachable(db_conn) -> None:
     probe.bind(("127.0.0.1", 0))
     free_port = probe.getsockname()[1]
     probe.close()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
         assert resp.status_code == 201
         resp = client.get(f"/pages/{aid}-p/")
@@ -367,7 +367,7 @@ def test_proxy_502_friendly_copy_en_when_display_language_en(
     probe.bind(("127.0.0.1", 0))
     free_port = probe.getsockname()[1]
     probe.close()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
         assert resp.status_code == 201
         resp = client.get(f"/pages/{aid}-p/")
@@ -398,7 +398,7 @@ def test_proxy_502_emits_structured_log_line(db_conn) -> None:
     probe.close()
     sink_id = _loguru.add(_capture, level="WARNING")
     try:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
             client.get(f"/pages/{aid}-p/")
     finally:
@@ -445,7 +445,7 @@ def test_proxy_504_timeout_friendly_copy_and_log(
     sink_id = _loguru.add(_capture, level="WARNING")
     monkeypatch.setattr(httpx.AsyncClient, "send", _send_times_out)
     try:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
             resp = client.get(f"/pages/{aid}-p/")
     finally:
@@ -483,7 +483,7 @@ def test_proxy_502_language_lookup_failure_falls_back_to_default(
     probe.bind(("127.0.0.1", 0))
     free_port = probe.getsockname()[1]
     probe.close()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
         resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 502
@@ -503,7 +503,7 @@ def test_proxy_revalidates_nonloopback_registry_target_before_dialing(
         )
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get(f"/pages/{aid}-unsafe/")
 
     assert response.status_code == 403
@@ -519,7 +519,7 @@ def test_proxy_streams_sse_chunked_content(db_conn) -> None:
     try:
         port = sse_server.server_address[1]
         aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             _register(client, aid, "sse", port)
             resp = client.get(f"/pages/{aid}-sse/")
         assert resp.status_code == 200
@@ -537,7 +537,7 @@ def test_proxy_requires_auth(monkeypatch: pytest.MonkeyPatch, db_conn) -> None:
     because the page was never registered, proving it reached the route)."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         no_auth = without_credentials(client).get(f"/pages/{aid}-p/")
         assert no_auth.status_code == 401
 

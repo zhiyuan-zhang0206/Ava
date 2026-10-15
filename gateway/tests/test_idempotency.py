@@ -23,14 +23,15 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.idempotency import keyed_headers
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
 def client(gateway_data_plane: None) -> Iterator[TestClient]:
+    del gateway_data_plane
     # A real lifespan boots its own delivered environment; restore that root's
     # projection as well as closing its HTTP/database resources.
-    with patch.dict(os.environ), TestClient(app) as c:
+    with patch.dict(os.environ), gateway_test_client() as c:
         yield c
 
 
@@ -239,7 +240,7 @@ def test_postcommit_error_response_preserves_receipt_and_same_key_recovery(
         _inject_delivery_failure(patch, step)
         # The fixture already owns the real app lifespan. This client only
         # observes the HTTP error body instead of re-raising server exceptions.
-        observer = TestClient(app, raise_server_exceptions=False)
+        observer = TestClient(client.app, raise_server_exceptions=False)
         try:
             failed = observer.post(path, json=body, headers=keyed_headers(key))
             assert failed.status_code == 500, failed.text

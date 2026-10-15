@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage, HumanMessage
 
 from base.agents.history.timeline import build_timeline_items, tail_window
@@ -15,9 +14,9 @@ from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.history.timeline import window_before
-from gateway.app import app
 from gateway.tests.history.test_timeline import _items
 from gateway.tests.history.test_timeline import test_client as test_client
+from tests.fixtures.gateway_config import GatewayTestClient
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
@@ -25,7 +24,10 @@ _TIMELINE_INPUTS = TimelineReadInputs(
 
 
 def test_timeline_skips_inbound_without_langgraph_state(
-    db_conn: psycopg.Connection, test_client: TestClient, database: Database, event_bus: EventBus
+    db_conn: psycopg.Connection,
+    test_client: GatewayTestClient,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Data in the inbound_messages table does not directly enter the timeline — it only
     appears after the claim node envelope-wraps the HumanMessage into the LangGraph state.
@@ -227,7 +229,7 @@ class TestSystemPromptInColdLoad:
             )
 
     def test_long_conversation_keeps_system_prompt(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:
         """>50 rendered items: 0.0 must still head the default window."""
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -251,7 +253,7 @@ class TestSystemPromptInColdLoad:
         assert data["items"][1]["item_id"] == "11.0"
 
     def test_short_conversation_does_not_duplicate(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:
         """<=50 items: the window already contains 0.0 — no duplicate entry."""
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -272,15 +274,14 @@ class TestSystemPromptInColdLoad:
 
     def test_default_window_comes_from_display_config(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
+        test_client: GatewayTestClient,
     ) -> None:
         """The implicit window is ``settings.display.timeline_default_limit``
         (``AVA_TIMELINE_DEFAULT_LIMIT``); 50 is only that field's default."""
         from langchain_core.messages import HumanMessage
 
-        monkeypatch.setattr(app.state.config_authority.runtime.display, "timeline_default_limit", 5)
+        test_client.app.state.config_authority.runtime.display.timeline_default_limit = 5
 
         tid = create_agent(db_conn)
         self._put_checkpoint(  # pyright: ignore[reportUnknownMemberType]
@@ -294,7 +295,7 @@ class TestSystemPromptInColdLoad:
         assert [it["item_id"] for it in data["items"]] == ["3.0", "4.0", "5.0", "6.0", "7.0"]
 
     def test_long_conversation_rehangs_compact_summary(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:
         """Compact summaries are standing context: in a long conversation the
         earliest inbound_compact_summary falls off the tail window and the
@@ -332,7 +333,7 @@ class TestSystemPromptInColdLoad:
         assert data["has_more"] is True
 
     def test_short_conversation_compact_summary_not_duplicated(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:
         """<=50 items: the window already contains the compact summary —
         no duplicate entry."""
@@ -362,7 +363,7 @@ class TestSystemPromptInColdLoad:
         assert compact[0]["item_id"] == "1.0"
 
     def test_before_paging_does_not_carry_system_prompt(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:
         """Scroll-up paging (`before`) is history-only — 0.0 is not re-sent."""
         from langchain_core.messages import HumanMessage, SystemMessage

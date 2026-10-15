@@ -1,6 +1,8 @@
 """The actual SDK keeps guarded identity across response loss and router downgrade."""
 
 from collections.abc import Iterator
+from dataclasses import replace
+from functools import partial
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -15,15 +17,14 @@ import ava.agents
 from ava.gateway_client import spawn, use_client
 from ava.sdk_surface import agent_identity
 from base.api_contracts.agent_contract import GatewayUnavailable
-from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import router as agent_router
-from gateway.app import app
+from gateway.app import lifespan
+from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.lifecycle.creation.test_guarded_creation import PATH, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
@@ -57,9 +58,16 @@ def httpx_response_of(response: Any) -> httpx.Response:
     )
 
 
-def _older() -> FastAPI:
-    older = FastAPI(lifespan=app.router.lifespan_context, middleware=app.user_middleware)
-    older.exception_handlers = app.exception_handlers.copy()
+def _older(current: FastAPI) -> FastAPI:
+    older = FastAPI(
+        lifespan=partial(
+            lifespan, process=current.state.gateway_process, process_ownership="borrowed"
+        ),
+        middleware=current.user_middleware,
+    )
+    older.state.gateway_config = current.state.gateway_config
+    older.state.gateway_process = current.state.gateway_process
+    older.exception_handlers = current.exception_handlers.copy()
     routes = APIRouter()
     routes.routes = [
         route for route in agent_router.router.routes if getattr(route, "path", None) != PATH
@@ -72,10 +80,7 @@ def _older() -> FastAPI:
 def test_sdk_lost_response_downgrade_and_restore_one_birth(
     client: TestClient,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     sdk_http: MagicMock,
-    *,
-    machine_identity: MachineIdentity,
 ) -> None:
     target = client
     lose = True
@@ -102,10 +107,8 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
     original = row[0]
     assert isinstance(client.app, FastAPI)
     with gateway_test_client(
-        _older(),
-        process=client.app.state.gateway_process_input,
+        _older(client.app),
         headers={"Authorization": f"Bearer {SECRET}"},
-        machine=machine_identity,
     ) as old:
         target = old
         with pytest.raises(httpx.HTTPStatusError) as error:
@@ -133,17 +136,12 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
 def test_old_router_never_accepts_or_falls_back(
     client: TestClient,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     sdk_http: MagicMock,
-    *,
-    machine_identity: MachineIdentity,
 ) -> None:
     assert isinstance(client.app, FastAPI)
     with gateway_test_client(
-        _older(),
-        process=client.app.state.gateway_process_input,
+        _older(client.app),
         headers={"Authorization": f"Bearer {SECRET}"},
-        machine=machine_identity,
     ) as old:
         http = sdk_http
 
@@ -159,15 +157,15 @@ def test_old_router_never_accepts_or_falls_back(
 
 
 def test_bearer_and_cookie_share_principal_but_revocation_blocks_replay(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     sdk_http: MagicMock,
 ) -> None:
     http = sdk_http
+    active = client
 
     def submit(path: str, **kwargs: Any) -> httpx.Response:
-        return httpx_response_of(client.post(path, **kwargs))
+        return httpx_response_of(active.post(path, **kwargs))
 
     http.post.side_effect = submit
     original = sdk()
@@ -175,9 +173,18 @@ def test_bearer_and_cookie_share_principal_but_revocation_blocks_replay(
     assert login.status_code == 200
     client.headers.pop("Authorization")
     assert sdk() == original
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-sdk-strong-secret")
-    with pytest.raises(httpx.HTTPStatusError) as revoked:
-        sdk()
+    with gateway_test_client(
+        process=client.app.state.gateway_process,
+        config=replace(
+            client.app.state.gateway_config,
+            cluster_secret="rotated-sdk-strong-secret",  # noqa: S106 -- isolated test credential
+        ),
+        cookies=dict(client.cookies),
+    ) as rotated:
+        without_credentials(rotated)
+        active = rotated
+        with pytest.raises(httpx.HTTPStatusError) as revoked:
+            sdk()
     assert revoked.value.response.status_code == 401
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
 

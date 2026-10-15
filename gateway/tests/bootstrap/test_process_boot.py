@@ -24,7 +24,7 @@ from base.telemetry import DrainStatus
 from gateway import app as gateway_app
 from gateway.cluster import server
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import gateway_test_app, gateway_test_client
 
 
 def test_both_gateway_entries_use_the_same_first_load_fact() -> None:
@@ -32,14 +32,18 @@ def test_both_gateway_entries_use_the_same_first_load_fact() -> None:
     assert gateway_app.LOADED_IMAGE is LOADED_IMAGE
 
 
+def _forbid_config_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(_boot: ConfigBoot, _name: str) -> object:
+        raise AssertionError("entry owner read configuration during cold construction")
+
+    monkeypatch.setattr(ConfigBoot, "get_field", forbidden)
+
+
 def test_gateway_owner_construction_is_cold(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    def forbidden(_boot: ConfigBoot, _name: str) -> object:
-        raise AssertionError("entry owner read configuration during construction")
-
     config = ConfigBoot()
-    monkeypatch.setattr(ConfigBoot, "get_field", forbidden)
+    _forbid_config_reads(monkeypatch)
     process = GatewayProcess(
         config=config,
         image=LoadedCommit(Path("unknown-source"), None),
@@ -165,14 +169,36 @@ def test_asgi_health_keeps_its_explicit_entry_image(
     process = GatewayProcess(
         config=snapshot_process_config(), image=image, machine=machine_identity, host=fake_host()
     )
-    monkeypatch.setattr(gateway_app.app.state, "gateway_process_input", process, raising=False)
+    app = gateway_test_app(process=process)
     with (
         process.lifetime(),
-        gateway_test_client(gateway_app.app, machine=machine_identity) as client,
+        gateway_test_client(app) as client,
     ):
         first = client.get("/api/health")
         second = client.get("/api/health")
         assert first.status_code == second.status_code == 200
         assert first.json()["sha"] == second.json()["sha"] == sha
-        assert gateway_app.app.state.gateway_process is process
-        assert gateway_app.app.state.process_image is image
+        assert app.state.gateway_process is process
+        assert app.state.process_image is image
+
+
+def test_openapi_schema_is_cold(monkeypatch: pytest.MonkeyPatch) -> None:
+    _forbid_config_reads(monkeypatch)
+    schema = gateway_app.openapi_schema()
+    assert isinstance(schema, dict)
+    assert "/api/health" in schema["paths"]
+
+
+def test_create_app_from_environment_assembles_gateway_config() -> None:
+    saved_env = dict(os.environ)
+    try:
+        first = gateway_app.create_app_from_environment()
+        second = gateway_app.create_app_from_environment()
+        expected = gateway_app.gateway_config_from_boot(ConfigBoot())
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_env)
+    assert first is not second
+    assert first.state.gateway_config == expected
+    assert first.state.machine_token_acceptance == {}
+    assert first.state.machine_token_acceptance is not second.state.machine_token_acceptance

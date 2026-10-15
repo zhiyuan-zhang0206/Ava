@@ -7,22 +7,14 @@ After migrating to integration/, they use FastAPI TestClient for in-process comm
 
 from uuid import uuid4
 
-import httpx
 import psycopg
 import pytest
 
 import ava
 from ava.tests.fixtures.pin_agent import pin_agent
 from base.api_contracts.agent_contract import InvalidModelConfig
-from base.config import settings
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
-
-
-@pytest.fixture(autouse=True)
-def _authenticated_sdk(monkeypatch: pytest.MonkeyPatch, gateway_client: httpx.Client) -> None:
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "sdk-core-secret")
-    gateway_client.headers["Authorization"] = "Bearer sdk-core-secret"
 
 
 def _inbound_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:

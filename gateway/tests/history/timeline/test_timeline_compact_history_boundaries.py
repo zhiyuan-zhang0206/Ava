@@ -4,21 +4,19 @@ from __future__ import annotations
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage
 
 from base.db import create_agent
-from gateway.app import app
 from gateway.tests.history.test_timeline import CompactHistoryCases
 from gateway.tests.history.test_timeline import test_client as test_client
+from tests.fixtures.gateway_config import GatewayTestClient
 
 
 class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     def test_initial_short_window_reports_history_only_when_enabled(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
     ) -> None:
         from langchain_core.messages import AIMessage
 
@@ -30,15 +28,11 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             version="2",
         )
 
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", 0
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 0
         disabled = test_client.get(f"/api/agents/{tid}/timeline", params={"limit": 50}).json()
         assert disabled["has_more"] is False
 
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
         enabled = test_client.get(f"/api/agents/{tid}/timeline", params={"limit": 50}).json()
         assert enabled["has_more"] is True
         assert all(not item["item_id"].startswith("s") for item in enabled["items"])
@@ -46,8 +40,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     def test_pages_within_segment_then_reaches_its_summary(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
     ) -> None:
         from langchain_core.messages import AIMessage
 
@@ -60,9 +53,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="2",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
 
         crossed = test_client.get(
             f"/api/agents/{tid}/timeline", params={"before": "2.0", "limit": 2}
@@ -99,8 +90,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     def test_exact_tail_boundary_delivers_summary_while_crossing_segments(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
     ) -> None:
         from langchain_core.messages import AIMessage
 
@@ -122,9 +112,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -142,8 +130,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     def test_depth_limit_still_delivers_oldest_allowed_segment_summary(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
     ) -> None:
         from langchain_core.messages import AIMessage
 
@@ -160,9 +147,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -177,8 +162,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     def test_summary_only_segment_is_bounded_continuation_or_depth_terminal(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
         depth: int,
     ) -> None:
         from langchain_core.messages import AIMessage
@@ -201,11 +185,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway,
-            "timeline_compact_history",
-            depth,
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = depth
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -232,7 +212,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     def test_positive_depth_bounds_boundary_index_read(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
+        test_client: GatewayTestClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from langchain_core.messages import AIMessage
@@ -252,9 +232,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             return []
 
         monkeypatch.setattr(timeline_router, "list_compact_boundary_checkpoint_ids", boundary_ids)
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", 3
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 3
         response = test_client.get(f"/api/agents/{tid}/timeline")
 
         assert response.status_code == 200
@@ -263,8 +241,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     def test_depth_and_checkpoint_id_control_cross_segment_access(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
     ) -> None:
         from langchain_core.messages import AIMessage
 
@@ -277,9 +254,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             version="3",
         )
 
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
         blocked = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s2.{older_id}.1.0", "limit": 50},
@@ -298,9 +273,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         ).json()
         assert invalid_rank == {"items": [], "msg_count": 3, "has_more": False}
 
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
         stale_rank = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s99.{newer_id}.2.0", "limit": 1},
@@ -332,7 +305,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
     def test_historical_page_does_not_deserialize_the_current_segment(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
+        test_client: GatewayTestClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from langchain_core.messages import AIMessage
@@ -348,9 +321,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="2",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
 
         def fail_current_read(_db: object, _agent_id: int) -> list[BaseMessage]:
             raise AssertionError("historical paging must not deserialize the live segment")

@@ -6,7 +6,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 from base.api_contracts import contracts
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_app
 
 
 def _iter_effective_routes(routes: Iterable[Any]) -> Iterator[Any]:
@@ -27,6 +27,7 @@ def _iter_effective_routes(routes: Iterable[Any]) -> Iterator[Any]:
 
 def _app_route_keys() -> set[tuple[str, str]]:
     """(method, path template) for every HTTP route on the app."""
+    app = gateway_test_app()
     keys: set[tuple[str, str]] = set()
     for route in _iter_effective_routes(app.routes):
         original = getattr(route, "original_route", route)

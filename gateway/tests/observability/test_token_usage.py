@@ -15,19 +15,18 @@ Coverage:
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.db import create_agent
 from base.host.env.agent_slices import ModelOverrides
-from gateway.app import app
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 
 @pytest.fixture
 def test_client(db_conn: psycopg.Connection):
-    """TestClient + lifespan. db_conn's TRUNCATE runs before lifespan — the
+    """GatewayTestClient + lifespan. db_conn's TRUNCATE runs before lifespan — the
     DB pool reuses the same test database (settings.data_plane.db_url is swapped by the
     conftest)."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         yield client
 
 
@@ -54,7 +53,7 @@ def _put_checkpoint(agent_id: int, messages: list) -> None:
 
 
 def test_reverse_scan_finds_most_recent_usage(
-    db_conn: psycopg.Connection, test_client: TestClient
+    db_conn: psycopg.Connection, test_client: GatewayTestClient
 ) -> None:
     """The most recent AIMessage *with* usage_metadata wins, even when a later
     AIMessage carries none — verifies the reverse scan skips the trailing
@@ -73,7 +72,7 @@ def test_reverse_scan_finds_most_recent_usage(
     from base.lm.context_budget import resolve_context_budget
 
     _budget = resolve_context_budget(
-        settings.lm.llm_model, ModelOverrides.from_pins({}), catalog=app.state.catalog
+        settings.lm.llm_model, ModelOverrides.from_pins({}), catalog=test_client.app.state.catalog
     )
     expected_max = _budget.max_context_tokens
     expected_soft = _budget.soft_compact_tokens
@@ -107,7 +106,9 @@ def test_reverse_scan_finds_most_recent_usage(
     }
 
 
-def test_new_agent_returns_zero(db_conn: psycopg.Connection, test_client: TestClient) -> None:
+def test_new_agent_returns_zero(
+    db_conn: psycopg.Connection, test_client: GatewayTestClient
+) -> None:
     """No checkpoint -> 0/0 for token counts. max_input_tokens reflects the
     cluster default model's context window (falls back from config_overlay)."""
     from base.config import settings
@@ -120,7 +121,7 @@ def test_new_agent_returns_zero(db_conn: psycopg.Connection, test_client: TestCl
     from base.lm.context_budget import resolve_context_budget
 
     _budget = resolve_context_budget(
-        settings.lm.llm_model, ModelOverrides.from_pins({}), catalog=app.state.catalog
+        settings.lm.llm_model, ModelOverrides.from_pins({}), catalog=test_client.app.state.catalog
     )
     expected_max = _budget.max_context_tokens
     expected_soft = _budget.soft_compact_tokens
@@ -140,7 +141,7 @@ def test_new_agent_returns_zero(db_conn: psycopg.Connection, test_client: TestCl
 
 
 def test_per_model_thresholds_scale_to_overlay_model(
-    db_conn: psycopg.Connection, test_client: TestClient
+    db_conn: psycopg.Connection, test_client: GatewayTestClient
 ) -> None:
     """soft/hard compact thresholds are a fraction of the agent model's window,
     resolved from the per-agent config_overlay — a 200K-window model reports
@@ -166,7 +167,7 @@ def test_per_model_thresholds_scale_to_overlay_model(
 
 
 def test_the_agents_own_compact_thresholds_are_reported(
-    db_conn: psycopg.Connection, test_client: TestClient
+    db_conn: psycopg.Connection, test_client: GatewayTestClient
 ) -> None:
     """An agent that pins its compaction fractions (in its overlay or its birth config) is
     shown the thresholds it actually compacts at, not the cluster's."""
@@ -193,7 +194,7 @@ def test_the_agents_own_compact_thresholds_are_reported(
 
 def test_checkpoint_read_failure_returns_zero(
     db_conn: psycopg.Connection,
-    test_client: TestClient,
+    test_client: GatewayTestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A checkpoint store read failure is tolerated to 0/0 — the SSE token_usage
@@ -214,7 +215,7 @@ def test_checkpoint_read_failure_returns_zero(
     from base.lm.context_budget import resolve_context_budget
 
     _budget = resolve_context_budget(
-        settings.lm.llm_model, ModelOverrides.from_pins({}), catalog=app.state.catalog
+        settings.lm.llm_model, ModelOverrides.from_pins({}), catalog=test_client.app.state.catalog
     )
     expected_max = _budget.max_context_tokens
     expected_soft = _budget.soft_compact_tokens

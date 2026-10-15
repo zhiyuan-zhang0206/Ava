@@ -1,6 +1,7 @@
 """Guarded raw draft identity freezes the first birth despite later mutable state."""
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from uuid import uuid4
 
 import psycopg
@@ -11,11 +12,11 @@ from base.agents.birth import transaction
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.agents import creation as agent_creation
-from gateway.app import app
-from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS
+from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 CASES = [
@@ -27,7 +28,7 @@ CASES = [
 
 @pytest.mark.parametrize("surface,body", CASES)
 def test_raw_intent_replay_survives_defaults_and_prompt_changes(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     surface: str,
@@ -41,7 +42,7 @@ def test_raw_intent_replay_survives_defaults_and_prompt_changes(
         "SELECT launch_attempt_id, prompt_inbound_id, prompt_content FROM agent_creation_snapshots"
     ).fetchone()
     assert stored is not None
-    app.state.machine.set(name="no-longer-registered")
+    client.app.state.machine.set(name="no-longer-registered")
     replay = client.post(path, json=body, headers=HEADERS)
     assert replay.status_code == 200, replay.text
     assert replay.json() == first.json()
@@ -177,28 +178,31 @@ def test_lost_launch_ack_keeps_first_attempt_and_first_prompt(
 
 
 def test_replay_reauthenticates(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from base.config import settings
-
     path = "/api/keyed/v1/guide/draft"
     assert client.post(path, json={"nl": "one"}, headers=HEADERS).status_code == 200
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-draft-secret")
-    assert client.post(path, json={"nl": "one"}, headers=HEADERS).status_code == 401
+    with gateway_test_client(
+        process=client.app.state.gateway_process,
+        config=replace(
+            client.app.state.gateway_config,
+            cluster_secret="rotated-draft-secret",  # noqa: S106 -- isolated test credential
+        ),
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as rotated:
+        assert rotated.post(path, json={"nl": "one"}, headers=HEADERS).status_code == 401
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
 
 
 def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     from base.agents.birth.creation_identity import find_creation
-    from gateway.app import app
     from ops.lifecycle.launch import validate_launch_row
 
     first = client.post("/api/keyed/v1/guide/draft", json={"nl": "one"}, headers=HEADERS)
@@ -226,7 +230,7 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     assert not original.launch_pending
     with pytest.raises(ValueError, match="launch"):
         validate_launch_row(
-            app.state.db_pool,
+            client.app.state.db_pool,
             LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=attempt),
             local_machine=machine_identity.name(),
         )

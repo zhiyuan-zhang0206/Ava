@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 import pytest
 import yaml
-from fastapi.testclient import TestClient
 
 from base import config, paths
 from base.cluster.machine import MachineIdentity
@@ -20,8 +19,8 @@ from base.host.db_authority.api import telemetry_token
 from base.host.env import dotenv_file
 from cli.commands.observability import otel_collector as collector
 from cli.database.tests.command_inputs import command_machine as command_machine
-from gateway.app import app
 from gateway.tests.agents.gateway_auth import without_credentials
+from tests.fixtures.gateway_config import gateway_test_client
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
@@ -54,10 +53,8 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     owner.set_field("machine_host", "10.0.0.10")
     owner.set_field("db_url", config.settings.data_plane.db_url)
     owner.set_field("telemetry_otlp_port", gateway_port)
-    from gateway import app as gateway_app
-
-    monkeypatch.setattr(gateway_app, "ConfigBoot", lambda: owner)
-    with TestClient(app) as client:
+    owner.set_field("cluster_secret", "relay-test-token")
+    with gateway_test_client(boot=owner) as client:
         assert without_credentials(client).get("/api/bootstrap").status_code == 401
         response = client.get(
             "/api/bootstrap", headers={"Authorization": "Bearer relay-test-token"}
