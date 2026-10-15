@@ -15,7 +15,6 @@ from dataclasses import replace
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -26,8 +25,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
-from gateway.app import app
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture
@@ -73,13 +71,13 @@ class TestGet:
     def test_unset_reports_the_config_chain(self) -> None:
         from base.config import settings
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/config/default-model")
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"model": settings.lm.llm_model, "source": "config"}
 
     def test_reports_the_cluster_row_once_set(self) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.put("/api/config/default-model", json={"model": "claude-sonnet-5"})
             resp = client.get("/api/config/default-model")
         assert resp.json() == {"model": "claude-sonnet-5", "source": "cluster"}
@@ -92,11 +90,9 @@ class TestGet:
         from base.config import settings
 
         model, catalog = withdrawn_model
-        import gateway.app as gateway_app
-
-        monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
         monkeypatch.setattr(settings.lm, "llm_model", model)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
+            client.app.state.catalog = catalog
             resp = client.get("/api/config/default-model")
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"model": "deepseek-flash", "source": "config"}
@@ -105,18 +101,15 @@ class TestGet:
         self,
         db_conn: psycopg.Connection,
         withdrawn_model: tuple[str, ModelCatalog],
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A row written while its model was still spawnable keeps the id; the
         endpoint still answers with the model a new agent actually runs."""
         model, catalog = withdrawn_model
-        import gateway.app as gateway_app
-
-        monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE cluster_defaults SET llm_model = %s WHERE id = 1", (model,))
         db_conn.commit()
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
+            client.app.state.catalog = catalog
             resp = client.get("/api/config/default-model")
             picker = client.get("/api/models")
         assert resp.status_code == 200, resp.text
@@ -133,7 +126,7 @@ class TestPut:
         # MiMo cannot accept max: checking the old config default would reject
         # this valid DeepSeek birth before it could be persisted.
         monkeypatch.setattr(settings.lm, "llm_model", "mimo-v2.6-pro")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             saved = client.put("/api/config/default-model", json={"model": "deepseek-flash"})
             assert saved.status_code == 200, saved.text
             assert client.get("/api/models").json()["default"] == "deepseek-flash"
@@ -148,7 +141,7 @@ class TestPut:
         assert row[1]["llm_model"] == "deepseek-flash"
 
     def test_accepts_a_spawnable_model(self) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.put("/api/config/default-model", json={"model": "deepseek-flash"})
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"model": "deepseek-flash", "source": "cluster"}
@@ -156,13 +149,13 @@ class TestPut:
     def test_rejects_an_unknown_model(self) -> None:
         """Fail fast at the write site: a bad id stored here would only surface at a
         far-away spawn."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.put("/api/config/default-model", json={"model": "gpt-9-imaginary"})
         assert resp.status_code == 400
         assert "gpt-9-imaginary" in resp.json()["detail"]
 
     def test_a_rejected_write_stores_nothing(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.put("/api/config/default-model", json={"model": "gpt-9-imaginary"})
         with db_conn.cursor() as cur:
             cur.execute("SELECT llm_model FROM cluster_defaults WHERE id = 1")
@@ -191,7 +184,7 @@ class TestPut:
         assert row is not None
         born_with = row[0]["llm_model"]
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.put("/api/config/default-model", json={"model": "claude-sonnet-5"})
 
         with db_conn.cursor() as cur:

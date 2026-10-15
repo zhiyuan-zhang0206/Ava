@@ -15,7 +15,6 @@ exports = ["gateway_auth.py"]
 "sdk_support.py#monkeypatch.setattr base.config.settings.lm" = 1
 "sdk_support.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
 "sdk_support.py#monkeypatch.setattr gateway.agents.forward.enqueue_lifecycle" = 1
-"sdk_support.py#monkeypatch.setattr gateway.app.ConfigBoot" = 1
 "test_agent_events_query.py#monkeypatch.setattr base.config.settings.display.events_default_limit" = 1
 "test_agent_events_query.py#monkeypatch.setattr gateway.events.telemetry_rows.query_events" = 2
 "test_agent_messages.py#monkeypatch.setattr base.agents.history.checkpoint_postgres_walks.HistoryPostgresSaver.get_tuple" = 1

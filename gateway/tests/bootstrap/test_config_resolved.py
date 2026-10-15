@@ -16,13 +16,12 @@ covering the model-default layer.
 from dataclasses import fields as dataclass_fields
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base.config import field_names, settings
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import DEFAULT_TUNING, ModelSpec, ModelTuning, tuning_field_names
 from base.packages.tests.model_catalog import AddModels
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 TUNED_MODEL = "test-tuned-model"
 
@@ -47,7 +46,7 @@ def test_resolved_covers_every_tuning_field() -> None:
     """The row set IS ModelTuning — adding a tunable surfaces it with no second
     list to update, and every row keys a real config field so the frontend can
     link the row to that field's existing editor."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/config/resolved")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -64,7 +63,7 @@ def test_resolved_covers_every_tuning_field() -> None:
 def test_resolved_defaults_to_the_cluster_model() -> None:
     """An omitted `model` resolves against the cluster's own llm_model and echoes
     it back, so `curl /api/config/resolved` needs no argument to be useful."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/config/resolved")
     body = resp.json()
     assert body["model"] == settings.lm.llm_model
@@ -80,7 +79,7 @@ def test_shared_default_layer(
     import gateway.app as gateway_app
 
     monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/config/resolved", params={"model": model})
     fields = {f["name"]: f for f in resp.json()["fields"]}
 
@@ -101,7 +100,7 @@ def test_model_default_layer(
     import gateway.app as gateway_app
 
     monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/config/resolved", params={"model": model})
     fields = {f["name"]: f for f in resp.json()["fields"]}
 
@@ -132,7 +131,7 @@ def test_explicit_layer_beats_the_model(
     import gateway.app as gateway_app
 
     monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/config/resolved", params={"model": model})
     row = {f["name"]: f for f in resp.json()["fields"]}["auto_compact_fraction"]
 
@@ -148,7 +147,7 @@ def test_unregistered_model_resolves_without_a_model_layer() -> None:
     """An id absent from the registry still resolves (exactly as at runtime — it
     simply has no per-model layer) and is flagged, so the panel can say that
     rather than present shared defaults as the model's own."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/config/resolved", params={"model": "no-such-model"})
     body = resp.json()
     assert body["registered"] is False
@@ -159,7 +158,7 @@ def test_unregistered_model_resolves_without_a_model_layer() -> None:
 def test_per_agent_flag_marks_the_overlay_reachable_fields() -> None:
     """`per_agent` is the backend's own flag, not a frontend guess — it marks the
     one layer above `explicit` that this cluster-wide view cannot show."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/config/resolved")
     fields = {f["name"]: f for f in resp.json()["fields"]}
     assert fields["auto_compact_fraction"]["per_agent"] is True

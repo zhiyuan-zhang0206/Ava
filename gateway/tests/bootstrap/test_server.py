@@ -44,7 +44,7 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
     monkeypatch.setattr(_server, "serve", _record_serve)
 
     with caplog.at_level(logging.WARNING, logger="gateway.cluster.server"):
-        _server.main(app=_app())
+        _server.main(build_app=lambda _process: _app())
 
     assert captured["workers"] == 1
     assert "rate limit" in caplog.text
@@ -60,7 +60,12 @@ def test_gateway_launch_bounds_the_connection_drain(monkeypatch: pytest.MonkeyPa
     resolves for uvicorn.
     """
     monkeypatch.setattr(settings.gateway, "gateway_graceful_shutdown_timeout_seconds", 7.5)
-    kwargs = _server.serve_kwargs(host="127.0.0.1")
+    kwargs = _server.serve_kwargs(
+        host="127.0.0.1",
+        app=_app(),
+        factory=False,
+        config=snapshot_process_config(),
+    )
     assert kwargs["timeout_graceful_shutdown"] == 7.5
 
 
@@ -98,7 +103,7 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
     monkeypatch.setattr(_server.faulthandler, "register", _ignore)
     monkeypatch.setattr(_server, "serve", _ignore)
 
-    _server.main(app=_app())
+    _server.main(build_app=lambda _process: _app())
 
     assert steps.count("raise") == raised
     if raised:
@@ -106,7 +111,12 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
 
 
 def _stub_process_entry(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, gateway: bool
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    gateway: bool,
+    reload: bool = False,
+    captured: list[dict[str, object]] | None = None,
 ) -> list[str]:
     """Stub everything `main()` does besides choosing its secret check and bind host."""
     steps: list[str] = []
@@ -116,13 +126,20 @@ def _stub_process_entry(
 
     monkeypatch.setattr(settings.services, "gateway_pidfile", tmp_path / "gateway.pid")
 
+    def _config_boot() -> Any:
+        boot = snapshot_process_config()
+        boot.set_field("gateway_reload", reload)
+        return boot
+
     def _schema(_url: str) -> None:
         steps.append("schema")
 
     def _serve(kwargs: dict[str, object]) -> None:
+        if captured is not None:
+            captured.append(dict(kwargs))
         steps.append(f"serve:{kwargs['host']}")
 
-    monkeypatch.setattr(_server, "ConfigBoot", snapshot_process_config)
+    monkeypatch.setattr(_server, "ConfigBoot", _config_boot)
     monkeypatch.setattr(_server, "assert_schema_current", _schema)
     monkeypatch.setattr(_server, "raise_fd_limit", _ignore)
     monkeypatch.setattr(_server, "init_gateway_process", _ignore)
@@ -142,7 +159,7 @@ def test_a_gateway_without_a_cluster_secret_refuses_to_start(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
 
     with pytest.raises(ClusterSecretMissingError, match="AVA_CLUSTER_SECRET"):
-        _server.main(app=_app())
+        _server.main(build_app=lambda _process: _app())
 
     assert steps == []
     assert not (tmp_path / "gateway.pid").exists()
@@ -169,6 +186,55 @@ def test_gateway_bind_follows_the_declared_reachable_address_not_the_secret(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
     monkeypatch.setattr(settings.general, "machine_host", reachable)
 
-    _server.main(app=_app())
+    _server.main(build_app=lambda _process: _app())
 
     assert steps[-1] == f"serve:{bind}"
+
+
+@pytest.mark.parametrize("reload_enabled", [False, True])
+def test_main_and_serve_kwargs_distinguish_reload_factory_from_single_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reload_enabled: bool,
+) -> None:
+    captured_list: list[dict[str, object]] = []
+    built_processes: list[object] = []
+    app_instance = _app()
+
+    def _build_app(process: object) -> Any:
+        built_processes.append(process)
+        return app_instance
+
+    _stub_process_entry(
+        monkeypatch,
+        tmp_path,
+        gateway=False,
+        reload=reload_enabled,
+        captured=captured_list,
+    )
+    _server.main(build_app=_build_app)
+    assert len(captured_list) == 1
+    captured = captured_list[0]
+    subset = {key: captured[key] for key in ("app", "factory", "reload", "reload_dirs", "workers")}
+    if reload_enabled:
+        assert (built_processes, subset) == (
+            [],
+            {
+                "app": "gateway.app:create_app_from_environment",
+                "factory": True,
+                "reload": True,
+                "reload_dirs": ["gateway", "base", "ava", "agent"],
+                "workers": 1,
+            },
+        )
+    else:
+        assert (len(built_processes), subset) == (
+            1,
+            {
+                "app": app_instance,
+                "factory": False,
+                "reload": False,
+                "reload_dirs": None,
+                "workers": 1,
+            },
+        )

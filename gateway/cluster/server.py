@@ -9,16 +9,18 @@ import os
 import signal
 import socket
 import sys
+from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
 
 import uvicorn
+from fastapi import FastAPI
 from uvicorn.config import STARTUP_FAILURE
 
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.port_preflight import serves_off_box
 from base.cluster.transport_encryption import verify_transport_encryption_declaration
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.deploy.schema.migrations import assert_schema_current
 from base.host.net.auth import require_cluster_secret
 from base.host.system.hostport import Host
@@ -66,25 +68,26 @@ def serve(kwargs: dict[str, Any]) -> None:
         sys.exit(STARTUP_FAILURE)
 
 
-def main(*, app: Any) -> None:
+def main(*, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
     """Prepare the gateway process and start its ASGI server.
 
-    `app` is the ASGI app (`gateway.app:app`) served in this process; the dev reload
-    branch has uvicorn import `gateway.app:app` by name instead.
+    The builder borrows this entry's process. Development reload creates its
+    owned app in the new worker through the environment factory.
     """
     # The API always authenticates: a gateway without a human secret refuses to
     # serve, before it touches the database or binds a port.
     config = ConfigBoot()
     config.boot()
+    config.ensure_eager()
     machine = machine_from_boot(config)
     if "gateway" in machine.role():
-        require_cluster_secret(settings.data_plane.cluster_secret, where="this gateway")
-    assert_schema_current(settings.data_plane.db_url)
+        require_cluster_secret(config.view.data_plane.cluster_secret, where="this gateway")
+    assert_schema_current(config.view.data_plane.db_url)
 
     # pidfile — `services/supervision/healthchecks/gateway.py` uses it to probe.
     # SIGKILL does not trigger atexit; the healthcheck uses kill -0 to
     # judge liveness, so a stale pidfile is not fatal (kill -0 fail -> restart).
-    pidfile = settings.services.gateway_pidfile
+    pidfile = config.view.services.gateway_pidfile
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text(str(os.getpid()))
 
@@ -103,10 +106,10 @@ def main(*, app: Any) -> None:
 
     process = GatewayProcess(config=config, image=LOADED_IMAGE, machine=machine, host=Host.system())
     with process.lifetime():
-        _serve_process(process, app)
+        _serve_process(process, build_app)
 
 
-def _serve_process(process: GatewayProcess, app: Any) -> None:
+def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
     """Serve one owned entry; the ASGI lifespan borrows its existing root."""
     init_gateway_process(
         producer=process.event_pipeline,
@@ -170,22 +173,21 @@ def _serve_process(process: GatewayProcess, app: Any) -> None:
             "gateway must run one uvicorn worker because rate limiters are process-local"
         )
     _log.warning("gateway starts with one uvicorn worker because rate limiters are process-local")
-    if settings.gateway.gateway_reload:
-        # Spawned reload workers construct their own root from their first load.
-        serve(serve_kwargs(host=host))
+    if process.config.view.gateway.gateway_reload:
+        # The parent never constructs the ASGI app a reload worker will serve.
+        serve(
+            serve_kwargs(
+                host=host,
+                app="gateway.app:create_app_from_environment",
+                factory=True,
+                config=process.config,
+            )
+        )
     else:
-        previous = getattr(app.state, "gateway_process_input", None)
-        app.state.gateway_process_input = process
-        try:
-            serve(serve_kwargs(host=host, app=app))
-        finally:
-            if previous is None:
-                del app.state.gateway_process_input
-            else:
-                app.state.gateway_process_input = previous
+        serve(serve_kwargs(host=host, app=build_app(process), factory=False, config=process.config))
 
 
-def serve_kwargs(*, host: str, app: Any = "gateway.app:app") -> dict[str, Any]:
+def serve_kwargs(*, host: str, app: Any, factory: bool, config: ConfigBoot) -> dict[str, Any]:
     """Assemble the uvicorn launch parameters for the gateway ASGI server.
 
     The single assembly point of the launch contract: ``main()`` hands the dict
@@ -203,11 +205,12 @@ def serve_kwargs(*, host: str, app: Any = "gateway.app:app") -> dict[str, Any]:
     lifespan shutdown, so a stuck stream costs at most the configured budget,
     never the maintenance-stop deadline.
     """
-    reload = settings.gateway.gateway_reload
+    reload = config.view.gateway.gateway_reload
     return {
         "app": app,
+        "factory": factory,
         "host": host,
-        "port": settings.gateway.gateway_port,
+        "port": config.view.gateway.gateway_port,
         "reload": reload,
         "reload_dirs": ["gateway", "base", "ava", "agent"] if reload else None,
         # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
@@ -222,5 +225,5 @@ def serve_kwargs(*, host: str, app: Any = "gateway.app:app") -> dict[str, Any]:
         # with the session — now it reaches gateway.log and the events pipeline.
         "log_config": None,
         "workers": _GATEWAY_UVICORN_WORKERS,
-        "timeout_graceful_shutdown": settings.gateway.gateway_graceful_shutdown_timeout_seconds,
+        "timeout_graceful_shutdown": config.view.gateway.gateway_graceful_shutdown_timeout_seconds,
     }

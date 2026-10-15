@@ -18,13 +18,12 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.db import Database
 from base.packages.plugins.surface import stats
 from base.telemetry.observability import cluster_label
-from gateway.app import app
 from gateway.schemas.stats import StatsWindowHours, window_delta
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 class _EventRows:
@@ -93,7 +92,7 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
     cache_hit_pct 0, cost_usd 0 (no input → division-by-zero fallback). Without ?hours=
     window_hours echoes default 24."""
     db_conn.commit()  # let truncate take effect before starting client
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/stats/dashboard")
     assert resp.status_code == 200
     body = resp.json()
@@ -118,7 +117,7 @@ def test_dashboard_warn_error_folds_critical(
     event_rows.add(event="turn_end", level="critical")
     event_rows.add(event="turn_end", level="info")
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["warnings"] == 1
     assert body["errors"] == 2  # error + critical folded
@@ -157,7 +156,7 @@ def test_dashboard_counts_alert_classes_not_events(
     event_rows.add(event="dismissed_error", level="error")
     event_rows.add(event="remaining_critical", level="critical")
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["warnings"] == 4
     assert body["errors"] == 2
@@ -172,7 +171,7 @@ def test_dashboard_all_classes_dismissed_reports_zero_active(
     event_rows.add(event="only_warning", level="warning")
     event_rows.add(event="only_warning", level="warning")
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["warnings"] == 2
     assert body["alert_classes_active"] == 0
@@ -193,7 +192,7 @@ def test_dashboard_reopened_dismissal_counts_as_active(
     db_conn.commit()
     event_rows.add(event="burst_warning", level="warning")
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["alert_classes_active"] == 1
     assert body["alert_classes_dismissed"] == 0
@@ -213,7 +212,7 @@ def test_dashboard_per_agent_dismissal_has_no_effect_on_the_class(
     db_conn.commit()
     event_rows.add(event="agent_warning", level="warning")
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["alert_classes_active"] == 1
     assert body["alert_classes_dismissed"] == 0
@@ -226,7 +225,7 @@ def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -
     _insert_agent(db_conn, status="terminated")
     _insert_agent(db_conn, status="idling")
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/stats/dashboard")
     assert resp.json()["live_count"] == 3
 
@@ -240,7 +239,7 @@ def test_dashboard_aggregates_llm_usage_payload(
         payload={"in_total": 1500, "out_total": 300, "cache_read": 1200, "cost_usd": 1.2},
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["tokens"]["input"] == 1500
     assert body["tokens"]["output"] == 300
@@ -259,7 +258,7 @@ def test_dashboard_cache_hit_pct_two_decimals(
         payload={"in_total": 3000, "out_total": 100, "cache_read": 1000, "cost_usd": 1.2},
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["tokens"]["cache_hit_pct"] == 33.33
 
@@ -300,7 +299,7 @@ def test_dashboard_cost_uses_usage_time_snapshots(
         },
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     # The matching log event is excluded: llm_usage is telemetry-only in both
     # the status card and Grafana panels.
@@ -318,7 +317,7 @@ def test_dashboard_aggregates_turn_end_filters_ok(
     # ok=False abnormal turn of 100s must not enter AVG
     event_rows.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 100.0, "ok": False})
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     # AVG(2, 4) = 3.0
     assert body["avg_turn_seconds"] == 3.0
@@ -343,7 +342,7 @@ def test_dashboard_default_24h_window_filters_old_rows(
         ts_offset_hours=1,
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["tokens"]["input"] == 10
     assert body["tokens"]["output"] == 5
@@ -361,7 +360,7 @@ def test_dashboard_warn_err_counts_by_level(
     # exec_failed logs at INFO (agent trial-and-error) — must not count
     event_rows.add(event="exec_failed", level="info", agent_id=aid)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["warnings"] == 2
     assert body["errors"] == 1
@@ -378,7 +377,7 @@ def test_dashboard_audit_warning_not_counted(
     event_rows.add(event="spawn", level="warning", agent_id=aid, category="audit")
     event_rows.add(event="spawn", level="error", agent_id=aid, category="audit")
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["warnings"] == 1
     assert body["errors"] == 0
@@ -415,7 +414,7 @@ def test_dashboard_hours_param_selects_window(
         ts_offset_hours=0.5,
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         narrow = client.get("/api/stats/dashboard", params={"hours": 1}).json()
         wide = client.get("/api/stats/dashboard", params={"hours": 6}).json()
     assert narrow["window_hours"] == 1
@@ -438,7 +437,7 @@ def test_five_minute_window_delta() -> None:
 def test_dashboard_all_whitelisted_hours_accepted(db_conn: psycopg.Connection) -> None:
     """All 6 whitelist values (0/1/6/24/72/168) return 200, window_hours echoed as-is."""
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         for hours in (0, 1, 6, 24, 72, 168):
             resp = client.get("/api/stats/dashboard", params={"hours": hours})
             assert resp.status_code == 200
@@ -449,7 +448,7 @@ def test_dashboard_all_whitelisted_hours_accepted(db_conn: psycopg.Connection) -
 def test_dashboard_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> None:
     """hours outside {0,1,6,24,72,168} → 422 (fail-fast), not silently fallback to 24."""
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/stats/dashboard", params={"hours": bad})
     assert resp.status_code == 422
 
@@ -482,7 +481,7 @@ def test_dashboard_carries_plugin_stat_values_unwindowed(database: Database) -> 
         updated_by="macmini",
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard", params={"hours": 6}).json()
 
     rows = body["plugin_stats"]
@@ -496,7 +495,7 @@ def test_dashboard_carries_plugin_stat_values_unwindowed(database: Database) -> 
 
 
 def test_dashboard_plugin_stats_is_empty_without_writers() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["plugin_stats"] == []
 
@@ -511,7 +510,7 @@ def test_dashboard_week_window_reads_the_whole_week_without_a_retention_clamp(
         event="llm_usage", payload={"in_total": 100, "out_total": 50}, ts_offset_hours=24 * 8
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard", params={"hours": 168}).json()
     assert body["applied_window_hours"] == 168
     assert body["tokens"]["input"] == 10
@@ -526,7 +525,7 @@ def test_dashboard_counts_the_home_cluster_and_unlabelled_rows_only(
     event_rows.add(event="boom", level="error", cluster="some-other-cluster")
     event_rows.add(event="llm_usage", payload={"in_total": 7}, cluster="some-other-cluster")
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["errors"] == 2
     assert body["tokens"]["input"] == 0
@@ -539,7 +538,7 @@ def test_dashboard_leaves_out_values_that_are_not_numbers(
     event_rows.add(event="llm_usage", payload={"in_total": "n/a", "cost_usd": None})
     event_rows.add(event="llm_usage", payload={})
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["tokens"]["input"] == 10
     assert body["cost_usd"] == pytest.approx(0.5)
@@ -559,7 +558,7 @@ def test_dashboard_cache_rate_only_uses_metered_input(
     )
     event_rows.add(event="llm_usage", payload={"in_total": 5000, "cost_usd": 2})
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["tokens"]["input"] == 6000
     assert body["cost_usd"] == 3
