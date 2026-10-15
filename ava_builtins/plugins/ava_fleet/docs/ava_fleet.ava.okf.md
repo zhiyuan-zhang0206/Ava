@@ -57,6 +57,13 @@ tags:
 
 ## Workflow boundary
 
+The runtime face also contributes `fleet_compact_reminder` through
+`compact_reminder_sections`. On the soft compact reminder it asks agents
+already coordinating work to preserve accepted assignments, reporting
+commitments, blockers and artifact locations, and reconcile changed task
+status. It does not require a new task or a notification just because a
+context window is ending. Core owns the basic `to_user` maintenance reminder.
+
 Fleet exposes optional collaboration and tracking capabilities. `ava-workflow`
 owns selection of direct execution, delegation, and orchestration. Enabling Fleet
 or reading its skill does not require spawning peers, creating registry tasks,

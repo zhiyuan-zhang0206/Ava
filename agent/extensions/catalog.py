@@ -1,32 +1,3 @@
-"""What a plugin can extend, and what each installed plugin actually extended —
-the computation behind `ava plugins inspect`.
-
-Two halves, deliberately different in kind:
-
-- **Surfaces** — the framework's extension points. The list of surfaces and the
-  one-line note on each are the only hand-written facts here; every signature is
-  rendered from the live `PluginContributions` object at call time, so a changed
-  field list shows up in the catalog without anyone editing it.
-- **Contributions** — what the plugins on THIS machine declared, read off their
-  `contribute()` results (`PluginContributions.as_records`). Facts, not documentation:
-  a plugin appears here because its face declared it, not because someone wrote it down.
-
-Reading the second half requires the plugins to be loaded, and loading them is
-importing them — the catalog runs `load_extensions()` in the calling process,
-exactly as an agent boot does. A DISABLED plugin is therefore listed with its
-enable-state and nothing else: nothing imported it, so there is no declaration
-fact to report, and inventing one from its source would be the docs-drift this
-catalog exists to replace.
-
-`declared_vs_registered` is the same computation `build_registry()` enforces as a
-load-time gate (`base/packages/plugins/loading/registry.py`). Here it only reports, on every
-surface with a manifest key: `declared-not-registered` is the warning shape (a manifest
-promising a surface the code never declared), `registered-not-declared` the flagged
-one (a surface the manifest failed to mention). Surfaces the manifest grammar cannot express are
-reported as `undeclarable` rather than as drift — flagging them would train a
-reader to ignore the diff.
-"""
-
 from __future__ import annotations
 
 import inspect
@@ -48,25 +19,9 @@ from base.packages.plugins.loading.discovery import enabled_plugin_dirs, pkg_of
 from base.packages.plugins.manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
 from base.packages.skills import names
 
-# ── surfaces ────────────────────────────────────────────────────────────
-
 
 @dataclass(frozen=True)
 class Surface:
-    """One extension point of the framework.
-
-    - id: the ledger surface id; equal to the `ava-plugin.json` contribution key
-      when the manifest grammar has one for it.
-    - entry_points: the declaration types a plugin builds. Held as live objects
-      so the rendered signature cannot drift, and a moved type fails at import
-      rather than leaving a stale line.
-    - manifest_key: the `contributions` key that declares this surface, or None
-      when the spec has no way to declare it.
-    - protocol: a second signature a contributor must satisfy (the `Hook` call
-      contract), when the registered object is more than a plain callable.
-    - note: what registering does, in one line.
-    """
-
     id: str
     entry_points: tuple[type, ...]
     manifest_key: str | None
@@ -153,6 +108,16 @@ SURFACES: tuple[Surface, ...] = (
         ),
     ),
     Surface(
+        id="compactReminderSections",
+        entry_points=(PluginContributions,),
+        manifest_key="compactReminderSections",
+        protocol="section(slices: AgentSlices, *, catalog: ModelCatalog) -> str",
+        note=(
+            "`compact_reminder_sections`: short, side-effect-free instructions appended to "
+            "the soft compact reminder, once per context window; empty text opts out"
+        ),
+    ),
+    Surface(
         id="contextNotes",
         entry_points=(ContextNote,),
         manifest_key=None,
@@ -231,28 +196,12 @@ SURFACES: tuple[Surface, ...] = (
     ),
 )
 
-# Manifest contribution keys with no runtime registry behind them: they declare
-# install-time facts (files on disk, a service roster entry), so a diff can only
-# say "declared" — never "registered". Kept as the complement of the mapped keys
-# so a new CONTRIBUTION_KEYS entry cannot silently fall out of the catalog.
 DECLARATION_ONLY_KEYS: frozenset[str] = frozenset(CONTRIBUTION_KEYS) - {
     s.manifest_key for s in SURFACES if s.manifest_key is not None
 }
 
 
 class _SourceText:
-    """An annotation that renders as itself.
-
-    A module under `from __future__ import annotations` hands `inspect` its
-    annotations as strings, which `Signature.__str__` renders through `repr` —
-    `hook: 'Hook'`. Substituting this makes the rendered signature read the way
-    the source does, uniformly across modules that do and do not defer
-    annotations. `eval_str=True` would unquote them too, but by resolving the
-    real objects: `Callable[[NoteBuilder], NoteBuilder]` comes back fully
-    expanded down to `langchain_core.messages.human.HumanMessage`, which is the
-    same contract spelled unreadably.
-    """
-
     def __init__(self, text: str) -> None:
         self._text = text
 
@@ -264,9 +213,8 @@ def _unquoted(annotation: Any) -> Any:
     return _SourceText(annotation) if isinstance(annotation, str) else annotation
 
 
+# ava:ref agent/extensions/docs/catalog.ava.okf.md#catalog-reports-load-facts
 def entry_point_signature(entry_point: type) -> str:
-    """`base.packages.plugins.extensions.SdkWrap(name, ...)` — rendered from the live
-    object, so the catalog cannot drift from the code it describes."""
     signature = inspect.signature(entry_point)
     signature = signature.replace(
         parameters=[
@@ -277,18 +225,8 @@ def entry_point_signature(entry_point: type) -> str:
     return f"{entry_point.__module__}.{entry_point.__qualname__}{signature}"
 
 
-# ── the per-machine composition ─────────────────────────────────────────
-
-
 @dataclass(frozen=True)
 class DiffEntry:
-    """One line of the declared-vs-registered comparison.
-
-    `status` is one of `ok`, `declared-not-registered` (the manifest promises a
-    surface no registration reached), `registered-not-declared` (a registration
-    the manifest never mentioned).
-    """
-
     surface: str
     identifier: str
     status: str
@@ -296,13 +234,6 @@ class DiffEntry:
 
 @dataclass(frozen=True)
 class PluginView:
-    """One plugin as this machine sees it.
-
-    `contributions` is empty for a disabled plugin — nothing imported it. Read
-    `enabled` before reading a contribution count as "this plugin registers
-    nothing".
-    """
-
     name: str
     enabled: bool
     builtin: bool
@@ -312,7 +243,6 @@ class PluginView:
     manifest: PluginManifest
 
     def surface_counts(self) -> dict[str, int]:
-        """Surface id -> number of contributions, in `SURFACES` order."""
         counts: dict[str, int] = {}
         for surface in SURFACES:
             n = sum(1 for c in self.contributions if c.surface == surface.id)
@@ -323,41 +253,28 @@ class PluginView:
 
 @dataclass(frozen=True)
 class Catalog:
-    """The whole machine: the framework's surfaces plus every installed plugin."""
-
     surfaces: tuple[Surface, ...]
     plugins: tuple[PluginView, ...]
 
     def plugin(self, name: str) -> PluginView:
-        """One plugin by name, dash/underscore folded like `plugins_config.load`.
-
-        Raises:
-            UnknownPlugin: no plugin of that name is installed on this machine.
-        """
+        # ava:ref agent/extensions/docs/catalog.ava.okf.md#catalog-reports-load-facts
         known = {p.name for p in self.plugins}
         resolved = names.find(name, known) or name
         for view in self.plugins:
             if view.name == resolved:
                 return view
-        raise UnknownPlugin(
+        raise UnknownPluginError(
             f"no plugin named {name!r} is installed on this machine "
             f"(installed: {', '.join(sorted(known)) or '<none>'})"
         )
 
 
-class UnknownPlugin(Exception):  # noqa: N818 — named like its siblings in base.packages.plugins.enable_config (DanglingPlugin / DuplicatePlugin), which describe the plugin condition rather than carry an Error suffix
-    """`ava plugins inspect <name>` named a plugin that is not installed here."""
+class UnknownPluginError(Exception):
+    pass
 
 
+# ava:ref agent/extensions/docs/catalog.ava.okf.md#catalog-reports-load-facts
 def build_catalog() -> Catalog:
-    """Load this machine's enabled plugins and read back what they registered.
-
-    Importing the plugins is the point — registration facts exist only once
-    `plugin.py` has run — so this has the side effects of an agent boot's
-    extension load: SDK namespaces appear on `ava`, wraps are installed, plugin
-    config is bound from disk. Call it from a short-lived process (the CLI), not
-    from one that must keep a pristine `ava`.
-    """
     from agent.state import plugin_state_schema
     from ava.sdk_surface.extensions import load_extensions
     from base.packages.plugins.loading.registry import declarations
@@ -375,9 +292,6 @@ def build_catalog() -> Catalog:
         views.append(
             PluginView(
                 name=name,
-                # An undiscovered-at-load-time plugin cannot happen (`load` merges
-                # every known name in), so a missing entry means the config and the
-                # filesystem disagree — report it as disabled rather than guess.
                 enabled=entry is not None and entry.enabled,
                 builtin=directory.is_relative_to(repo_plugins),
                 directory=directory,
@@ -393,11 +307,6 @@ def build_catalog() -> Catalog:
 
 
 def _data_records() -> dict[str, tuple[Contribution, ...]]:
-    """What each enabled plugin's data faces (`metrics.py`, `inspector.py`, `provider.py`) declare, as records.
-
-    Loaded here only to be described — the processes that serve these surfaces (the gateway, the
-    Grafana supply) load them on their own, into their own registries.
-    """
     from base.packages.plugins import data_registry
     from base.packages.plugins.loading.plugin_loader import safe_load_plugin_module
 
@@ -425,13 +334,8 @@ def _repo_plugins_dir() -> Path:
     return paths.repo_plugins_dir()
 
 
+# ava:ref agent/extensions/docs/catalog.ava.okf.md#manifest-diff-scope
 def declared_vs_registered(view: PluginView) -> tuple[DiffEntry, ...]:
-    """Compare a plugin's manifest declarations against what it registered.
-
-    Only surfaces with both a manifest key and a runtime registry take part;
-    `DECLARATION_ONLY_KEYS` and the surfaces with no manifest key are reported
-    separately by the caller.
-    """
     entries: list[DiffEntry] = []
     for surface in SURFACES:
         if surface.manifest_key is None:
@@ -449,26 +353,19 @@ def declared_vs_registered(view: PluginView) -> tuple[DiffEntry, ...]:
     return tuple(entries)
 
 
+# ava:ref agent/extensions/docs/catalog.ava.okf.md#manifest-diff-scope
 def _declared_identifiers(manifest: PluginManifest, key: str) -> set[str]:
-    """The identifiers a manifest declares under one contribution key.
-
-    `contributions.config` is an object rather than a list — a plugin either
-    declares a config or does not — so it folds to the single identifier
-    `"<declared>"`, which the registered side matches by folding its config class
-    name the same way. Comparing class names would make renaming a private class
-    read as drift.
-    """
     declared = manifest.contributions.get(key)
     if declared is None:
         return set()
     if key == "config":
         return {"<declared>"}
-    assert isinstance(declared, list), f"contributions.{key} validates to a list"  # noqa: S101
+    if not isinstance(declared, list):
+        raise TypeError(f"contributions.{key} must be a validated list")
     return {str(item) for item in cast(list[object], declared)}
 
 
 def _registered_identifiers(view: PluginView, surface: Surface) -> set[str]:
-    """One surface's registered side, folded the same way its declared side is."""
     identifiers = {c.identifier for c in view.contributions if c.surface == surface.id}
     if surface.id == "config":
         return {"<declared>"} if identifiers else set()

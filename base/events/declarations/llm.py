@@ -1,35 +1,12 @@
-"""LLM call, turn, stream, compaction and circuit-breaker events."""
-
 from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
 from base.events.vocabulary import LLM_ERROR_FAMILY, EventSpec, telemetry_event
 
-# Typed keys are the SQL-injection surface (`payload_keys`): a reader cannot
-# reference a key no producer declared.
 
-
+# ava:ref base/events/docs/llm-payloads.ava.okf.md#usage-time-price-snapshot
 class LlmUsage(TypedDict):
-    """`llm_usage` payload — agent/llm/usage.py:log_llm_usage.
-
-    ``cost_usd`` / ``price_miss`` / ``price_hit`` / ``price_out`` are the
-    usage-time price snapshot (user principle: cost is billed incrementally
-    with the price in force at the call, never re-priced against the current
-    registry). ``cost_usd`` is the call's USD cost at the snapshot rates;
-    the three rates are USD per 1M tokens (cache miss / cache hit / output).
-    Optional ``price_write_5m`` / ``price_write_1h`` and corresponding
-    ``cache_write_5m`` / ``cache_write_1h`` preserve cache-creation subdivisions
-    of total input and their TTL-specific USD per 1M rates.
-    All four are absent on calls of a model with no known price (a row never
-    carries a null cost — absent means unpriced).
-
-    ``calls`` is the constant 1 — it exists so the OTLP mapping mints
-    ``ava_llm_usage_calls_total`` (per-agent/per-model call counts come from a
-    Counter, not from a histogram's count, which drops the agent_id key).
-    ``unpriced`` is 1 exactly when the price snapshot is absent (so unpriced
-    call volume is countable in Prometheus); it is omitted on priced calls."""
-
     model: str
     calls: int
     in_total: int
@@ -52,15 +29,11 @@ class LlmUsage(TypedDict):
 
 
 class TurnEnd(TypedDict):
-    """`turn_end` payload — agent/graph/llm/node.py."""
-
     ok: bool
     duration_seconds: float
 
 
 class SilentIdle(TypedDict):
-    """`silent_idle` payload — output-token cost-boundary verdict."""
-
     output_tokens: int
     cumulative_output_tokens: int
     estimated_cost_usd: float | None
@@ -68,42 +41,13 @@ class SilentIdle(TypedDict):
 
 
 class LlmRetry(TypedDict):
-    """`llm_retry` payload — final duration of a retry sequence."""
-
     outcome: Literal["succeeded", "attempts_exhausted", "budget_exhausted"]
     duration_seconds: float
 
 
+# ava:ref base/events/docs/llm-payloads.ava.okf.md#provider-error-dimensions
 class LlmProviderError(TypedDict):
-    """`llm_provider_error` payload — base/lm/errors.py.
-
-    One row per classified provider failure — every class, so a postmortem sees
-    the retried transients too; ``fatal`` says whether this one aborted the turn.
-
-    ``billing`` is the discriminator the billing/quota alert keys on: True when
-    the provider said the key is out of credit or its quota is exhausted (HTTP
-    402, or a per-vendor string in the response body's ``error.type`` OR
-    ``error.code`` — the vocabulary lives in ``base/lm/errors.py``, so a new
-    provider plugs in there and this key and the alert follow with no further
-    wiring, wherever the vendor puts the specific reason; that module's comment
-    carries the caveats). It is deliberately independent of ``error_class``: one
-    vendor says it with a permanent 402, another with a transient 429, and a
-    human has to clear it either way.
-
-    ``error_type`` stays the body's ``error.type`` alone. ``error.code`` is read
-    for the ``billing`` predicate and not reported here: on the vendors that
-    send both, ``type`` is the broad class and ``code`` the specific reason, and
-    folding the two into one reported field would change what this key means for
-    every provider that already says everything through ``type``.
-
-    ``vendor`` is the model's provider key (deepseek / claude / …, None for an
-    unregistered prefix) and ``model`` the model in force at the call — the
-    alert names both. ``provider`` is only the SDK package that raised
-    (anthropic / openai), which DeepSeek and Claude share, so it cannot answer
-    "whose key is dead".
-    """
-
-    error_class: str  # transient | permanent | unknown
+    error_class: str
     provider: str
     status: int | None
     error_type: str | None
@@ -114,9 +58,8 @@ class LlmProviderError(TypedDict):
 
 
 class CompactionCompleted(TypedDict):
-    """`compaction_completed` payload — one applied history replacement."""
-
     compact_kind: str
+    reminder_shown: bool
     compactions: int
     history_chars: int
     summary_chars: int
@@ -124,7 +67,6 @@ class CompactionCompleted(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
-    # turn lifecycle
     "llm_usage": telemetry_event("llm_usage", "LLM call metering", payload=LlmUsage, persist=True),
     "turn_end": telemetry_event("turn_end", "one turn finished", payload=TurnEnd, persist=True),
     "llm_turn_aborted": telemetry_event(
@@ -167,12 +109,11 @@ EVENTS: dict[str, EventSpec] = {
         "applied context compaction size reduction and completed count",
         payload=CompactionCompleted,
         tier="noise",
+        persist=True,
     ),
-    # compact / checkpoint / memory housekeeping
     "compact_request": telemetry_event("compact_request", "compact requested", tier="noise"),
     "auto_compact": telemetry_event("auto_compact", "auto-compact", tier="noise", persist=True),
     "compact_reminder": telemetry_event("compact_reminder", "compact reminder", tier="noise"),
-    # heartbeat circuit breaker (task #1928)
     "circuit_breaker_open": telemetry_event(
         "circuit_breaker_open", "heartbeat circuit breaker opened", tier="noise"
     ),
@@ -193,7 +134,6 @@ EVENTS: dict[str, EventSpec] = {
     "llm_retry": telemetry_event(
         "llm_retry", "LLM retry sequence completion", payload=LlmRetry, tier="observation"
     ),
-    # reply suggestion (gateway/agents/reply_suggestion)
     "reply_suggestion_gate": telemetry_event(
         "reply_suggestion_gate", "reply suggestion gate probability", tier="noise"
     ),

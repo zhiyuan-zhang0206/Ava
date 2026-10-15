@@ -1,31 +1,3 @@
-"""`ava-plugin.json` manifest — parse, validate, range algebra, host checks.
-
-The contract layer of plugin spec v2 (S0-S2, task #1244). Normative spec:
-`docs/conventions/extensions/plugin-spec-v2.md`. The parse and range checks are install-time; the
-load-time plugin gate (`base/packages/plugins/gate.py`) reads the same manifest.
-
-Every Ava plugin (a directory with a `plugin.py`) ships `ava-plugin.json` at its package root;
-`load_manifest` refuses one without it. Bare skill and MCP packages, whose formats are foreign to
-Ava, may ship one (`load_optional_manifest`).
-
-A package root's `ava-plugin.json` declares identity
-(name/version/`engines.ava` range, optional `requires_commit`), dependencies
-(`plugins` / `pythonPackages` / `hostCapabilities`), contribution surfaces,
-and lifecycle shape. This module turns that file into a validated
-`PluginManifest` and provides the host-compatibility checks:
-
-- `check_host_engine` — the host's (derived) version must satisfy `engines.ava`.
-- `check_host_commit` — the host must contain the declared `requires_commit`.
-- The pyproject-mirror half of the checks (spec parsing + the
-  `dependencies.pythonPackages` mirror, task #1198) lives in
-  `base/packages/plugins/pyproject_mirror.py`.
-
-Version ranges are conjunctions of clauses (`,` or whitespace separated) over
-`>=`, `>`, `<=`, `<`, `==`, `=`; a bare version means `==`. No OR, no
-wildcards, no `~=`/`!=`. Prereleases compare below their final release and
-require an explicit prerelease clause to satisfy a range.
-"""
-
 from __future__ import annotations
 
 import json
@@ -43,20 +15,12 @@ from base.packages.plugins.surface.ui_contributions import validate_ui_contribut
 MANIFEST_FILENAME = "ava-plugin.json"
 API_VERSION = 2
 
-# ── errors ──────────────────────────────────────────────────────────────
-
 
 class ManifestError(Exception):
-    """Manifest content / validation failure, with all errors joined."""
+    pass
 
-
-# ── ranges ──────────────────────────────────────────────────────────────
 
 _MANIFEST_OPS = ("==", ">=", "<=", ">", "<", "=")
-# Ops a manifest range clause may use. `~=` / `!=` / wildcards are rejected:
-# the manifest grammar is deliberately the narrow, auditable subset the spec
-# defines; pyproject specifiers outside the same subset (plus `~=`, `==X.Y.*`)
-# are refused by `_parse_py_spec` below rather than half-analyzed.
 UPPER_OPS = ("<", "<=", "==")
 LOWER_OPS = (">", ">=", "==")
 
@@ -65,16 +29,12 @@ CLAUSE_SPLIT_RE = re.compile(r"[,\s]+")
 
 @dataclass(frozen=True)
 class Clause:
-    op: str  # normalized: "=" folded to "=="
+    op: str
     version: Version
 
 
+# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#closed-manifest-grammar
 def parse_range(raw: str) -> tuple[Clause, ...]:
-    """Parse a manifest range; raises `ManifestError` on anything unsupported.
-
-    A clause against a version that fails to parse is refused too — a range is
-    a contract, and a typo'd version must not silently read as "any".
-    """
     parts = [p for p in CLAUSE_SPLIT_RE.split(raw.strip()) if p]
     if not parts:
         raise ManifestError(f"empty version range {raw!r}")
@@ -83,8 +43,6 @@ def parse_range(raw: str) -> tuple[Clause, ...]:
         op = next((o for o in _MANIFEST_OPS if part.startswith(o)), None)
         rest = part
         if op is None:
-            # a bare version is a `==` clause (the spec's "a bare version
-            # means ==") — refused only when it is not a version at all
             op = "=="
         else:
             rest = part[len(op) :]
@@ -99,8 +57,8 @@ def _has_upper(clauses: tuple[Clause, ...]) -> bool:
     return any(c.op in UPPER_OPS for c in clauses)
 
 
+# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#closed-manifest-grammar
 def range_allows(raw: str, version: str) -> bool:
-    """True when `version` satisfies every clause of the range."""
     ver = parse_version(version)
     if ver is None:
         raise ManifestError(f"{version!r} is not a version")
@@ -128,11 +86,7 @@ def range_allows(raw: str, version: str) -> bool:
     return True
 
 
-# ── the manifest ────────────────────────────────────────────────────────
-
 _NAME_FORMAT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
-# Leading package name of a PEP 508 requirement (`name[extras] >=1,<2`); shared
-# with `base/packages/plugins/pyproject_mirror.py` (its pyproject-side parser imports this).
 NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)")
 
 HOOK_POINTS = ("after_init", "before_llm", "before_exec", "after_exec")
@@ -141,6 +95,7 @@ CONTRIBUTION_KEYS = {
     "sdkNamespaces",
     "sdkWraps",
     "systemPromptSections",
+    "compactReminderSections",
     "metrics",
     "inspectWidgets",
     "providers",
@@ -164,8 +119,8 @@ HOST_CAPABILITIES = {
 @dataclass(frozen=True)
 class Lifecycle:
     entry: str | None
-    activation: str  # "immediate" — the only value accepted today
-    dispose: str  # "effect-registry" | "none"
+    activation: str
+    dispose: str
 
 
 @dataclass(frozen=True)
@@ -185,10 +140,6 @@ class PluginManifest:
     dependencies: Dependencies
     lifecycle: Lifecycle
     requires_commit: str | None = None
-    """Optional exactness layer beside the date axis (design §5.5): the host
-    must CONTAIN this commit (`git merge-base --is-ancestor`). A content-facing
-    change that needs a fresh kernel capability points at the merge that
-    introduced it — no version bump, exact within a day."""
 
 
 def _str_list(value: object, what: str, errors: list[str]) -> list[str] | None:
@@ -206,7 +157,6 @@ def _str_list(value: object, what: str, errors: list[str]) -> list[str] | None:
 def _validate_identity(
     data: dict[str, Any], errors: list[str]
 ) -> tuple[str | None, str | None, str | None]:
-    """apiVersion / unknown top-level keys / name / version / description."""
     known = {
         "apiVersion",
         "name",
@@ -246,9 +196,6 @@ def _validate_identity(
 
 
 def _validate_engines(data: dict[str, Any], errors: list[str]) -> dict[str, str]:
-    """`engines` — "ava" is the only known host today. Required unless the
-    manifest carries a `requires_commit` (the commit-pinned form core content
-    uses; design §5.5: "engines or requires_commit")."""
     engines = cast(dict[str, Any] | None, data.get("engines"))
     parsed: dict[str, str] = {}
     if engines is None:
@@ -278,8 +225,6 @@ _COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
 def _validate_requires_commit(data: dict[str, Any], errors: list[str]) -> str | None:
-    """`requires_commit` — a lowercase hex commit SHA (7-40 chars); the exact
-    layer of the version gate (`check_host_commit`)."""
     raw = data.get("requires_commit")
     if raw is None:
         return None
@@ -290,7 +235,6 @@ def _validate_requires_commit(data: dict[str, Any], errors: list[str]) -> str | 
 
 
 def _config_contribution(value: object, errors: list[str]) -> dict[str, object] | None:
-    """The validated `contributions.config` object; None when it is not an object."""
     if not isinstance(value, dict):
         errors.append("contributions.config must be an object {schema?, perAgentFields?}")
         return None
@@ -319,8 +263,6 @@ def _check_hook_points(hooks: list[str], errors: list[str]) -> None:
 
 
 def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str, object]:
-    """`contributions` — declared surfaces; the declaration is documentation,
-    the registration-vs-declaration runtime diff lands with S3."""
     contributions = cast(dict[str, Any] | None, data.get("contributions"))
     parsed: dict[str, object] = {}
     if contributions is None:
@@ -451,7 +393,6 @@ def _validate_dependencies(data: dict[str, Any], errors: list[str]) -> Dependenc
 
 
 def _validate_lifecycle(data: dict[str, Any], errors: list[str]) -> Lifecycle:
-    """`lifecycle` — the declared shape; only "immediate" activation exists today."""
     lifecycle = cast(dict[str, Any] | None, data.get("lifecycle"))
     if lifecycle is None:
         return Lifecycle(entry=None, activation="immediate", dispose="effect-registry")
@@ -477,8 +418,6 @@ def _validate_lifecycle(data: dict[str, Any], errors: list[str]) -> Lifecycle:
 
 
 def validate(data: dict[str, Any]) -> PluginManifest:
-    """Validate a parsed manifest dict; raises `ManifestError` listing every
-    problem found (one report instead of first-error iteration)."""
     errors: list[str] = []
     name, version, description = _validate_identity(data, errors)
     parsed_engines = _validate_engines(data, errors)
@@ -501,13 +440,8 @@ def validate(data: dict[str, Any]) -> PluginManifest:
     )
 
 
+# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#closed-manifest-grammar
 def load_manifest(pkg_dir: Path) -> PluginManifest:
-    """Load and validate `pkg_dir`/`ava-plugin.json`.
-
-    Raises `ManifestError` listing every problem — a missing file, invalid JSON,
-    unknown fields, bad ranges, unbounded pythonPackages entries. A manifest is a
-    contract: an Ava plugin either ships one that validates or is refused.
-    """
     path = pkg_dir / MANIFEST_FILENAME
     if not path.is_file():
         raise ManifestError(
@@ -530,23 +464,15 @@ def load_manifest(pkg_dir: Path) -> PluginManifest:
     return validate(data)
 
 
+# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#closed-manifest-grammar
 def load_optional_manifest(pkg_dir: Path) -> PluginManifest | None:
-    """`load_manifest` for a bare skill or MCP package, whose manifest is optional.
-
-    Those formats come from outside Ava (a `SKILL.md` tree, an `.mcp.json` server), so
-    a package that ships no manifest has no host contract to check and returns None.
-    One that ships a manifest is held to it exactly as `load_manifest` does.
-    """
     if not (pkg_dir / MANIFEST_FILENAME).is_file():
         return None
     return load_manifest(pkg_dir)
 
 
-# ── install-time checks ─────────────────────────────────────────────────
-
-
+# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#host-compatibility-fails-closed
 def check_host_engine(manifest: PluginManifest, host_version: str) -> list[str]:
-    """Errors when the host version falls outside any declared engine range."""
     errors: list[str] = []
     for _host, raw_range in manifest.engines.items():
         if not range_allows(raw_range, host_version):
@@ -560,17 +486,8 @@ def check_host_engine(manifest: PluginManifest, host_version: str) -> list[str]:
 _COMMIT_TIMEOUT_S = 10.0
 
 
+# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#host-compatibility-fails-closed
 def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list[str]:
-    """Every host-contract error for the package at `pkg_dir`; [] = loadable.
-
-    One home for "may THIS host load this package" (design §5.5), used by the
-    install gate, the skill scan's runtime filter, and `ava packages status`:
-    reads the package's optional manifest (a skill package's), compares `engines.ava` against the
-    derived host version, and checks `requires_commit` ancestry in `repo`
-    (default: this checkout). A malformed manifest returns its validation error
-    (the caller drops the package; it must not crash the loader), and an
-    unresolvable check is an error — never a pass.
-    """
     try:
         manifest = load_optional_manifest(pkg_dir)
     except ManifestError as exc:
@@ -585,20 +502,8 @@ def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list
     return check_host_engine(manifest, host) + check_host_commit(manifest, target)
 
 
+# ava:ref base/packages/plugins/docs/manifest.ava.okf.md#host-compatibility-fails-closed
 def check_host_commit(manifest: PluginManifest, repo: Path) -> list[str]:
-    """Errors when the host checkout does not CONTAIN `manifest.requires_commit`.
-
-    The exact layer of the version gate (design §5.5): the host passes iff its
-    HEAD contains the declared commit (`git merge-base --is-ancestor`). Two
-    distinct failure reasons so callers can record them separately:
-
-    - "not an ancestor": the commit is present but the host predates it — the
-      canonical block; the host moving forward unblocks it.
-    - "unresolvable": the commit cannot be resolved in `repo` (typo, not
-      fetched, shallow clone) — still a gate failure (never a pass), but the
-      diagnostic differs so the operator knows to fetch/re-check rather than
-      upgrade.
-    """
     sha = manifest.requires_commit
     if sha is None:
         return []
@@ -623,7 +528,6 @@ def check_host_commit(manifest: PluginManifest, repo: Path) -> list[str]:
 
 
 def _git_stdout(repo: Path, *args: str) -> str | None:
-    """stdout of a bounded read-only git call in `repo`, or None on any failure."""
     result = _git_run(repo, *args)
     if result is None or result.returncode != 0:
         return None
@@ -631,8 +535,6 @@ def _git_stdout(repo: Path, *args: str) -> str | None:
 
 
 def _git_rc(repo: Path, *args: str) -> int | None:
-    """returncode of a bounded read-only git call in `repo`, or None when the
-    call itself could not run."""
     result = _git_run(repo, *args)
     return None if result is None else result.returncode
 
@@ -642,7 +544,7 @@ def _git_run(repo: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     from base.host.proc import run_bounded
 
     try:
-        return run_bounded(  # git + fixed args, no user input
+        return run_bounded(
             ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,

@@ -1,13 +1,3 @@
-"""Agent-runtime face of the ava_fleet plugin — the fleet + reduce-context-switch
-prompt sections.
-
-Loaded only in the agent process: the plugin loader (`base.packages.plugins.loading`) imports this module after
-`plugin.py` on the full path (host boot / graph build). The plugin's SDK
-**surface** — `ava.self.set_label`, the `ava.ui` notice members,
-the `ava.tasks` registry namespace, and the `agents.spawn` label wrap — lives
-in `plugin.py` and loads in agent-launched children too (task #3633).
-"""
-
 from __future__ import annotations
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
@@ -46,7 +36,6 @@ def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
 
 
 def reduce_context_switch_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Keep the interruption boundary resident; load the playbook on demand."""
     del catalog
     if not get_plugin_config("ava_fleet", slices, FleetConfig).reduce_context_switch:
         return ""
@@ -61,8 +50,19 @@ def reduce_context_switch_section(slices: AgentSlices, *, catalog: ModelCatalog)
     )
 
 
+def fleet_compact_reminder(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+    del catalog
+    return (
+        "If you are coordinating work, reconcile changed task status and record "
+        "outstanding assignments, promised reports, blockers and artifact locations "
+        "in your durable working notes. Keep any user-facing commitments current "
+        "in the shared to-user document. Update existing records only when something "
+        "changed; compaction alone is not a reason to send peers or the user a message."
+    )
+
+
 def contribute() -> PluginContributions:
-    """What this plugin declares for the agent runtime."""
     return PluginContributions(
-        system_prompt_sections=(fleet_self_section, reduce_context_switch_section)
+        system_prompt_sections=(fleet_self_section, reduce_context_switch_section),
+        compact_reminder_sections=(fleet_compact_reminder,),
     )
