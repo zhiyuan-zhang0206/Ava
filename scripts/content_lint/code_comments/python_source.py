@@ -3,6 +3,7 @@ import inspect
 import io
 import re
 import tokenize
+from collections.abc import Collection
 from itertools import pairwise
 
 from scripts.content_lint.code_comments.directives import (
@@ -42,7 +43,7 @@ def attribute_docs(body: list[ast.stmt]) -> list[tuple[str, ast.Expr]]:
 class SymbolCollector(ast.NodeVisitor):
     def __init__(self, text: str) -> None:
         self.symbols = {"<module>": Symbol("<module>", 1, max(1, len(text.splitlines())))}
-        self.definitions = dict(self.symbols)
+        self.definitions = list(self.symbols.values())
         self.notes: list[Note] = []
         self.scope: list[str] = []
         self.docstrings: set[int] = set()
@@ -96,7 +97,7 @@ class SymbolCollector(ast.NodeVisitor):
             name in self.symbols,
             isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef),
         )
-        self.definitions[name] = self.symbols[name]
+        self.definitions.append(self.symbols[name])
         self.collect_body(node)
         self.scope.pop()
 
@@ -144,17 +145,15 @@ class SymbolCollector(ast.NodeVisitor):
         self.collect_assignment(node)
 
 
-def comment_owner(symbols: dict[str, Symbol], line: int) -> str:
+def comment_owner(symbols: Collection[Symbol], line: int, *, following: bool = True) -> str:
     enclosing = [
-        item
-        for item in symbols.values()
-        if item.name != "<module>" and item.line <= line <= item.end_line
+        item for item in symbols if item.name != "<module>" and item.line <= line <= item.end_line
     ]
     if enclosing:
         return min(enclosing, key=lambda item: item.end_line - item.line).name
-    following = [item for item in symbols.values() if item.line == line + 1]
-    if len(following) == 1:
-        return following[0].name
+    adjacent = [item for item in symbols if item.line == line + 1] if following else []
+    if len(adjacent) == 1:
+        return adjacent[0].name
     return "<module>"
 
 
@@ -172,11 +171,14 @@ def parse_python(path: str, text: str) -> Source:
         ):
             continue
         kind = comment_kind(item.string, item.start[0], ambient_lines)
-        lexical_owner = comment_owner(collector.definitions, item.start[0])
+        machine_reference = kind == NoteKind.LINT_DIRECTIVE or is_quiesce_reference(item.string)
+        lexical_owner = comment_owner(
+            collector.definitions, item.start[0], following=not machine_reference
+        )
         owner = (
             lexical_owner
-            if kind == NoteKind.LINT_DIRECTIVE or is_quiesce_reference(item.string)
-            else comment_owner(collector.symbols, item.start[0])
+            if machine_reference
+            else comment_owner(collector.symbols.values(), item.start[0])
         )
         collector.notes.append(
             Note(kind, item.start[0], item.end[0], item.string, owner, lexical_owner)
