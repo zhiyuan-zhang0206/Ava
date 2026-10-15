@@ -1,5 +1,3 @@
-"""Syntax fix cases: fix invalid escapes."""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -40,21 +38,18 @@ from base.lm import factory
 
 class TestFixInvalidEscapes:
     def test_no_invalid_escape_no_change(self):
-        """Valid Python source — no edits."""
         code = 'print("hello\\n")\n'
         fixed, n = fix_invalid_escapes(code)
         assert fixed == code
         assert n == 0
 
     def test_pipe_alternation_in_grep_call(self):
-        """astropy-8872-style: `\\|` inside subprocess.run arg → escape it."""
         code = (
             'import subprocess\nsubprocess.run(["grep", "-n", "float16\\|dtype.*cast", "/x.py"])\n'
         )
         fixed, n = fix_invalid_escapes(code)
         assert n == 1
         assert "\\\\|" in fixed
-        # `compile()` should produce no SyntaxWarning afterwards
         import warnings
 
         with warnings.catch_warnings(record=True) as caught:
@@ -64,63 +59,53 @@ class TestFixInvalidEscapes:
         assert sw == []
 
     def test_multiple_invalid_escapes_in_one_string(self):
-        """`\\|x\\|y\\.z` — three invalid escapes in one literal."""
         code = 's = "foo\\|bar\\|baz\\."\n'
         fixed, n = fix_invalid_escapes(code)
         assert n == 3
         assert fixed == 's = "foo\\\\|bar\\\\|baz\\\\."\n'
 
     def test_valid_escape_preserved(self):
-        """`\\n` is valid — keep as-is; only `\\|` gets escaped."""
         code = 's = "line1\\nline2 with \\| and \\."\n'
         fixed, n = fix_invalid_escapes(code)
-        assert n == 2  # only the two invalid pairs
-        # `\n` (newline escape) must remain a single `\n`, not become `\\n`
+        assert n == 2
         assert "\\n" in fixed
         assert "\\\\n" not in fixed
         assert "\\\\|" in fixed
         assert "\\\\." in fixed
 
     def test_raw_string_skipped(self):
-        """`r"\\|"` is valid raw — never modify."""
         code = 'pattern = r"foo\\|bar"\n'
         fixed, n = fix_invalid_escapes(code)
         assert fixed == code
         assert n == 0
 
     def test_byte_string_fixed_like_str(self):
-        """`b"..."` uses the same escape rules — `b"\\|"` is also invalid."""
         code = 'data = b"foo\\|bar"\n'
         fixed, n = fix_invalid_escapes(code)
         assert n == 1
         assert 'b"foo\\\\|bar"' in fixed
 
     def test_triple_quoted_string(self):
-        """Triple-quoted strings still scan correctly."""
         code = 'code = """\nimport re\nm = re.match("foo\\|bar", text)\n"""\n'
         fixed, n = fix_invalid_escapes(code)
         assert n == 1
         assert "foo\\\\|bar" in fixed
 
     def test_fstring_fixed(self):
-        """f-strings honor the same escape rules."""
         code = 'log = f"got {x} \\| {y}"\n'
         fixed, n = fix_invalid_escapes(code)
         assert n == 1
         assert 'f"got {x} \\\\| {y}"' in fixed
 
     def test_raw_fstring_skipped(self):
-        """rf"..." (raw f-string) — no escape interpretation."""
         code = 'log = rf"got \\| {x}"\n'
         fixed, n = fix_invalid_escapes(code)
         assert fixed == code
         assert n == 0
 
     def test_tokenize_error_returns_original(self):
-        """Code that can't be tokenized (unterminated string) → no-op."""
-        code = 'broken = "no end'  # unterminated
+        code = 'broken = "no end'
         _, n = fix_invalid_escapes(code)
-        # Either returns unchanged or no edits — must not raise.
         assert n == 0
 
 
@@ -175,10 +160,6 @@ class TestSyntaxFixBeforeExec:
     async def test_chinese_punctuation_fixed(
         self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
     ):
-        """Chinese comma should be fixed."""
-
-        # Pin the flag: the assertion expects ruff_format spacing, which a host
-        # .env (AVA_SYNTAX_FIX_RUFF_FORMAT=false) would otherwise turn off.
         monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", True)
         state = AgentState(
             messages=[
@@ -200,15 +181,12 @@ class TestSyntaxFixBeforeExec:
         assert result is not None
         assert "messages" in result
         fixed = result["messages"][0]
-        code = fixed.tool_calls[0]["args"]["code"]  # pyright: ignore[reportUnknownMemberType]
-        # ruff_format (on by default) also normalizes spacing after the comma.
+        code = fixed.tool_calls[0]["args"]["code"]
         assert "print(1, 2)" in code
 
     async def test_ruff_format_applied_when_enabled(
         self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
     ):
-        """settings.sandbox.syntax_fix_ruff_format=True -> non-canonical style normalized."""
-
         monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", True)
         state = AgentState(
             messages=[
@@ -222,19 +200,11 @@ class TestSyntaxFixBeforeExec:
             state, self._runtime(database_gate=database_gate), self._config()
         )
         assert result is not None
-        assert result["messages"][0].tool_calls[0]["args"]["code"].strip() == "x = 1"  # pyright: ignore[reportUnknownMemberType]
+        assert result["messages"][0].tool_calls[0]["args"]["code"].strip() == "x = 1"
 
     async def test_ruff_format_skipped_when_disabled(
         self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
     ):
-        """settings.sandbox.syntax_fix_ruff_format=False -> style left untouched.
-
-        Uses a duplicate import so _ruff_fix always triggers a change (ruff
-        removes the duplicate) regardless of whether ruff also fixes W292
-        (missing-newline-at-end-of-file).  This keeps the hook returning a
-        non-None result so we can assert that format was not applied — the test
-        no longer depends on a specific ruff lint rule being active."""
-
         monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", False)
         state = AgentState(
             messages=[
@@ -254,13 +224,11 @@ class TestSyntaxFixBeforeExec:
             state, self._runtime(database_gate=database_gate), self._config()
         )
         assert result is not None
-        code = result["messages"][0].tool_calls[0]["args"]["code"]  # pyright: ignore[reportUnknownMemberType]
-        # ruff format disabled: x=1 stays as-is, not reformatted to x = 1.
+        code = result["messages"][0].tool_calls[0]["args"]["code"]
         assert "x = 1" not in code
         assert "x=1" in code
 
     async def test_missing_import_added(self, database_gate: ProcessDbGate):
-        """Missing import should be added."""
         state = AgentState(
             messages=[
                 AIMessage(
@@ -279,15 +247,10 @@ class TestSyntaxFixBeforeExec:
             state, self._runtime(database_gate=database_gate), self._config()
         )
         assert result is not None
-        code = result["messages"][0].tool_calls[0]["args"]["code"]  # pyright: ignore[reportUnknownMemberType]
+        code = result["messages"][0].tool_calls[0]["args"]["code"]
         assert "import json" in code
 
     async def test_syntax_error_injects_tool_message(self, database_gate: ProcessDbGate):
-        """Unfixable syntax error should inject ToolMessage + goto after_exec.
-
-        LLM repair is explicitly patched to be unavailable (returns None), locking the deterministic fallback path,
-        and also avoids hitting the real DeepSeek API.
-        """
         state = AgentState(
             messages=[
                 AIMessage(
@@ -311,12 +274,11 @@ class TestSyntaxFixBeforeExec:
                 state, self._runtime(database_gate=database_gate), self._config()
             )
         assert result is not None
-        assert result.get("goto") == "after_exec"  # pyright: ignore[reportUnknownMemberType]
+        assert result.get("goto") == "after_exec"
         assert "halted" in result
-        # should have fixed_msg + tool_msg
-        assert len(result["messages"]) == 2  # pyright: ignore[reportUnknownArgumentType]
+        assert len(result["messages"]) == 2
         tool_msg = result["messages"][1]
-        assert "SyntaxError" in tool_msg.content  # pyright: ignore[reportUnknownMemberType]
+        assert "SyntaxError" in tool_msg.content
 
     @staticmethod
     def _broken_state(code: str) -> AgentState:
@@ -330,7 +292,6 @@ class TestSyntaxFixBeforeExec:
         )
 
     async def test_llm_repair_success_silent_replacement(self, database_gate: ProcessDbGate):
-        """LLM repair returns compilable code → silently replace with same ID, no ToolMessage, no goto."""
         broken = "x = 'unterminated\nprint(x)"
         repaired = "x = 'fixed'\nprint(x)"
         with patch.object(
@@ -345,11 +306,10 @@ class TestSyntaxFixBeforeExec:
             )
         assert result is not None
         assert "goto" not in result
-        assert len(result["messages"]) == 1  # pyright: ignore[reportUnknownArgumentType]
-        assert result["messages"][0].tool_calls[0]["args"]["code"] == repaired  # pyright: ignore[reportUnknownMemberType]
+        assert len(result["messages"]) == 1
+        assert result["messages"][0].tool_calls[0]["args"]["code"] == repaired
 
     async def test_llm_repair_unavailable_falls_back(self, database_gate: ProcessDbGate):
-        """LLM repair unavailable / retries exhausted (returns None) → fall back to ToolMessage fallback path."""
         broken = "if True print('x')"
         with patch.object(
             agent_runtime,
@@ -362,12 +322,11 @@ class TestSyntaxFixBeforeExec:
                 self._config(),
             )
         assert result is not None
-        assert result.get("goto") == "after_exec"  # pyright: ignore[reportUnknownMemberType]
-        assert len(result["messages"]) == 2  # pyright: ignore[reportUnknownArgumentType]
-        assert "SyntaxError" in result["messages"][1].content  # pyright: ignore[reportUnknownMemberType]
+        assert result.get("goto") == "after_exec"
+        assert len(result["messages"]) == 2
+        assert "SyntaxError" in result["messages"][1].content
 
     async def test_valid_code_no_change_returns_none(self, database_gate: ProcessDbGate):
-        """Perfectly legal code is not modified, returns None."""
         state = AgentState(
             messages=[
                 AIMessage(
@@ -385,8 +344,6 @@ class TestSyntaxFixBeforeExec:
         result = await syntax_fix_before_exec(
             state, self._runtime(database_gate=database_gate), self._config()
         )
-        # ruff may format, so it's not guaranteed to return None.
-        # Just assert no exception.
         if result is not None:
             assert "messages" in result
 
@@ -404,7 +361,6 @@ class TestIsStdlibModule:
         assert not is_stdlib_module("nonexistent")
 
     def test_submodules_not_in_top_level(self):
-        """os.path, urllib.parse are not top-level module names."""
         assert not is_stdlib_module("os.path")
         assert is_stdlib_module("os")
 
@@ -519,7 +475,6 @@ class TestFixUnicodePunctuation:
 
 class TestFixStringNewlines:
     def test_single_quoted_cross_line(self):
-        # Single-quoted string with literal newline
         code = "x = 'hello\nworld'"
         fixed, n = fix_string_newlines(code)
         assert n >= 1
@@ -585,10 +540,9 @@ class TestFixIndentation:
         assert n == 0
 
     def test_tab_in_string_body_preserved(self):
-        # Tab after non-whitespace is not leading whitespace
         code = 'x = "hello\tworld"'
         fixed, _n = fix_indentation(code)
-        assert "\t" in fixed  # preserved in string body
+        assert "\t" in fixed
 
 
 class TestFixBracketMatching:
@@ -636,13 +590,7 @@ class TestFixFstringExpressions:
 
 
 class TestFixUnterminatedToTriple:
-    """Multi-line string/f-string opened with a single quote (the dominant
-    `ava.shell.run("...multi-line shell command...")` pattern from the
-    production dataset). The single quote cannot span newlines, so it is
-    unterminated; the fix re-delimits opener + matching closer to triple."""
-
     def test_multiline_double_quoted_command(self):
-        # A double-quoted shell command whose commit message spans newlines.
         code = 'r = run("git commit -m \'fix\nbody\nmore")'
         assert is_broken(code)
         fixed, n = fix_unterminated_to_triple(code)
@@ -650,7 +598,6 @@ class TestFixUnterminatedToTriple:
         compile(fixed, "<t>", "exec")
 
     def test_multiline_fstring_command(self):
-        # An f-string command spanning newlines; the offset points at the f prefix.
         code = 'r = run(f"cd {d} && commit -m \'msg\nbody")'
         assert is_broken(code)
         fixed, n = fix_unterminated_to_triple(code)
@@ -658,10 +605,6 @@ class TestFixUnterminatedToTriple:
         compile(fixed, "<t>", "exec")
 
     def test_nested_same_char_quote_in_body(self):
-        # The body contains the delimiter char (single quote, around 'quoted')
-        # before the real closer. fix_string_newlines picks the first such quote
-        # as the closer and mis-fires; the offset-driven closer search tries
-        # candidates until one compiles, landing on the real closer.
         code = "r = run('git commit -m msg\nadd a 'quoted' word\nmore')"
         assert is_broken(code)
         fixed, n = fix_unterminated_to_triple(code)
@@ -673,6 +616,5 @@ class TestFixUnterminatedToTriple:
         assert fix_unterminated_to_triple(code) == (code, 0)
 
     def test_unrelated_error_no_change(self):
-        # A non-string syntax error must not trigger this fixer.
         code = "def f(:\n    pass"
         assert fix_unterminated_to_triple(code) == (code, 0)

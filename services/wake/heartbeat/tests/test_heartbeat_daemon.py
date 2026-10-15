@@ -1,15 +1,3 @@
-"""`services.wake.heartbeat.daemon` — idle-agent check-in selection + the pause window.
-
-`select_idle_agents_needing_heartbeat` is the daemon's core predicate. The idle
-clock is `last_active_at` (the last completed LLM turn — real work), NOT
-`status_changed_at` (bumped by every status flip, including ops lifecycle churn).
-`TestIdleClockCountsRealActivityOnly` pins that semantic: an ops restart resets
-status_changed_at without a real turn and must not reset the idle clock. The
-pause window is a floor on the next check-in time. A real turn during the window
-starts the normal idle clock, so after the window expires the agent still waits
-`last_active_at + idle_threshold` (plus its deterministic jitter offset).
-"""
-
 from __future__ import annotations
 
 import psycopg
@@ -33,7 +21,6 @@ from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
-    """agent_id -> idle_minutes for every agent the daemon would check in on."""
     return dict(select_idle_agents_needing_heartbeat(pool, THRESHOLD_S))
 
 
@@ -59,7 +46,7 @@ class TestSelectIdleAgents:
         )
         selected = _selected(pool)
         assert aid in selected
-        assert float(selected[aid]) == pytest.approx(400 / 60.0, abs=0.5)  # pyright: ignore[reportUnknownMemberType]
+        assert float(selected[aid]) == pytest.approx(400 / 60.0, abs=0.5)
 
     def test_idling_without_a_lease_is_selected(
         self,
@@ -72,7 +59,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """An idle hosted agent has no turn lease and can still receive a check-in."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=THRESHOLD_S + 60,
@@ -100,8 +86,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Scenario 1: a recent wake (status_changed_at fresh) leaves the agent
-        under the idle threshold, so it is not yet due."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=120,
@@ -123,7 +107,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Only idling agents get a check-in; a running one is active by definition."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
@@ -146,7 +129,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """An agent about to wake on a real message does not also need a check-in."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
@@ -177,10 +159,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Task #4872: while a lease is preparing, neither executor can
-        receive a check-in, so it could not
-        produce a turn and must not be queued (it would only age into a false
-        delivery poison)."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
@@ -203,8 +181,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A lease with nothing left to apply is history: the native loop is
-        the consumer again and the check-in cadence resumes."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
@@ -227,8 +203,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Unapplied delta state counts as in-flight (the impersonation
-        subsystem's own predicate): stay silent until the native catches up."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
@@ -258,8 +232,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """An automatic lease whose handoff was never applied still counts as
-        in-flight; a check-in waits for the application."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
@@ -311,8 +283,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Scenario 2: while the pause window is in the future, the agent is
-        skipped even though it has been idle far longer than the threshold."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=600,
@@ -335,9 +305,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """R-6: the pause window is a floor, not an absolute check-in time. A
-        real turn during the window starts the normal idle clock, so after expiry
-        the agent must wait the idle threshold instead of taking a wasted wake."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=10,
@@ -361,8 +328,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """The R-6 pause floor wins while it is open, then the real turn's
-        idle clock wins after expiry; both edges are one unified due-time rule."""
         open_window = make_idle(
             db_conn,
             status_changed_s_ago=10,
@@ -398,10 +363,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Once a wake post-dates the expired pause window (status_changed_at >
-        heartbeat_paused_until), the normal wake-resettable clock resumes: an
-        agent idle only 120s is under the threshold and not yet due, NOT stuck
-        firing forever on the stale past window."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=120,
@@ -424,8 +385,6 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """No intervening wake: the agent has been idle 600s and its pause
-        window expired 60s ago. It is overdue under both regimes and selected."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=600,
@@ -439,10 +398,6 @@ class TestSelectIdleAgents:
 
 
 class TestIdleClockCountsRealActivityOnly:
-    """The idle clock is last_active_at (real work), not status_changed_at (bumped
-    by every status flip). These pin the semantic fix: an ops restart resets
-    status_changed_at without a real turn and must NOT reset the idle clock."""
-
     def test_ops_restart_does_not_reset_idle_clock(
         self,
         redis_url: str,
@@ -454,10 +409,6 @@ class TestIdleClockCountsRealActivityOnly:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """An agent idle 400s (past threshold) then hit by an ops restart:
-        status_changed_at is fresh (5s ago, the re-idle after respawn) but
-        last_active_at is still 400s ago (the ops cycle ran no LLM turn). It stays
-        due — the rollout did not zero its idle timer."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=5,
@@ -480,10 +431,6 @@ class TestIdleClockCountsRealActivityOnly:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Contrast with the pre-fix behavior: keyed off status_changed_at the same
-        agent (fresh status_changed_at) would read as only 5s idle and be excluded.
-        Keyed off last_active_at it is correctly overdue. The idle_minutes reported
-        reflects the real 400s, not the 5s since the ops re-idle."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=5,
@@ -495,7 +442,7 @@ class TestIdleClockCountsRealActivityOnly:
         )
         selected = _selected(pool)
         assert aid in selected
-        assert float(selected[aid]) == pytest.approx(400 / 60.0, abs=0.5)  # pyright: ignore[reportUnknownMemberType]
+        assert float(selected[aid]) == pytest.approx(400 / 60.0, abs=0.5)
 
     def test_recent_real_turn_resets_idle_clock(
         self,
@@ -508,9 +455,6 @@ class TestIdleClockCountsRealActivityOnly:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """The mirror case: an agent whose status_changed_at is old (600s) but that
-        just completed a real turn 30s ago (last_active_at fresh) is NOT due — real
-        activity, unlike ops churn, does reset the idle clock."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=600,
@@ -524,14 +468,7 @@ class TestIdleClockCountsRealActivityOnly:
 
 
 class TestWakeupStormFlattening:
-    """Density-hardening controls: per-agent jitter de-phases the unpaused
-    due-time, and `limit` caps the per-step batch (the global wake-rate ceiling),
-    oldest-idle first."""
-
     def _backdate(self, db: psycopg.Connection, aid: int, secs: float) -> None:
-        # The daemon keys the idle clock off last_active_at; backdate it (and
-        # status_changed_at alongside, so the row reads like a genuinely long-idle
-        # agent).
         with db.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET status_changed_at = now() - make_interval(secs => %s), "
@@ -552,10 +489,6 @@ class TestWakeupStormFlattening:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """With jitter, the unpaused due-time is `threshold + (id mod span)`. An
-        agent idle just short of its own jittered due-time is excluded; the same
-        agent idle just past it is selected. Keyed on the real id so the offset is
-        exact, not probabilistic."""
         span, threshold = 100.0, 300.0
         aid = make_idle(
             db_conn,
@@ -586,8 +519,6 @@ class TestWakeupStormFlattening:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """jitter_span_s=0 (the default) collapses the offset to 0 — no
-        divide-by-zero, identical to the un-jittered predicate."""
         aid = make_idle(
             db_conn,
             status_changed_s_ago=350,
@@ -610,8 +541,6 @@ class TestWakeupStormFlattening:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """`limit` bounds the batch; ordering is oldest-idle first so the most
-        overdue agents drain ahead of fresher ones."""
         a_old = make_idle(
             db_conn,
             status_changed_s_ago=900,

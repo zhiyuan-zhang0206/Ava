@@ -135,7 +135,6 @@ def test_underscore_command_spelling_still_expands(tmp_path: Path, monkeypatch: 
     catalog = CommandCatalog(skills=list)
     dash = catalog.expand("/ava-fleet:ship fix the tests")
     legacy = catalog.expand("/ava_fleet.ship fix the tests")
-
     assert "write the release note" in dash
     assert "write the release note" in legacy
     assert "fix the tests" in dash and "fix the tests" in legacy
@@ -320,7 +319,6 @@ def test_chain_expands_every_command_in_the_order_typed():
     commands = [_file_command("recap", "Recap it."), _file_command("review", "Review it.")]
     out = composer_commands.expand_command("/recap /review", commands)
     assert out.index("Command /recap:\nRecap it.") < out.index("Command /review:\nReview it.")
-
     flipped = composer_commands.expand_command("/review /recap", commands)
     assert flipped.index("Command /review:") < flipped.index("Command /recap:")
 
@@ -378,7 +376,6 @@ def test_extra_whitespace_between_commands_still_chains():
 
 def test_text_not_starting_with_a_command_never_chains():
     commands = [_file_command("recap", "Recap it.")]
-
     assert (
         composer_commands.expand_command("check /recap output", commands) == "check /recap output"
     )
@@ -400,7 +397,6 @@ def test_lifecycle_command_chains_like_any_other():
         out = composer_commands.expand_command(raw, commands)
         assert "Command /compact:\nWind down." in out
         assert "Command /recap:\nRecap it." in out
-
     expanded = composer_commands.expand_command("/recap /compact", commands)
     assert expanded.index("Command /recap:") < expanded.index("Command /compact:")
 

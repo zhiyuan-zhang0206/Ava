@@ -1,5 +1,3 @@
-"""Idle restart applies without a model call and preserves the plugin checkpoint."""
-
 from __future__ import annotations
 
 import time
@@ -18,15 +16,13 @@ from tests.e2e._ports import GATEWAY_URL
 
 
 def _checkpoint_values(agent_id: int) -> dict[str, Any]:
-    """Read agent's latest checkpoint channel_values (returns {} if no checkpoint)."""
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
         tup = saver.get_tuple({"configurable": {"thread_id": str(agent_id)}})
         if tup is not None:
-            # Delta write model (#3180): fold delta-written messages on read.
             reconstruct_delta_messages(saver, tup)
     if tup is None:
         return {}
-    return tup.checkpoint.get("channel_values", {})  # pyright: ignore[reportUnknownMemberType]
+    return tup.checkpoint.get("channel_values", {})
 
 
 def _ai_count(values: dict[str, Any]) -> int:
@@ -50,7 +46,6 @@ def _restart_inbound_applied(agent_id: int) -> bool:
 
 
 def _wait_for_pre_restart_turn(agent_id: int) -> dict[str, Any]:
-    """Turn complete = two AIMessages written to checkpoint and status back to idling."""
     deadline = time.monotonic() + 90.0
     while time.monotonic() < deadline:
         values = _checkpoint_values(agent_id)
@@ -62,7 +57,6 @@ def _wait_for_pre_restart_turn(agent_id: int) -> dict[str, Any]:
 
 
 def _wait_for_silent_restart_cycle(agent_id: int) -> dict[str, Any]:
-    """Restart applied and marker committed: applied row / idling / durable marker."""
     deadline = time.monotonic() + 90.0
     last: tuple = ()
     while time.monotonic() < deadline:
@@ -88,12 +82,8 @@ def _wait_for_silent_restart_cycle(agent_id: int) -> dict[str, Any]:
 
 
 def _assert_silent_and_alive_after_restart(values: dict[str, Any]) -> None:
-    # Zero LLM call: AIMessages still the pre-restart two (post-restart script is empty,
-    # any model call would exhaust the script — this count is belt-and-suspenders)
     assert _ai_count(values) == 2, f"extra LLM turn after respawn: {_ai_count(values)} AIMessages"
-    # After marker, agent stopped waiting — halted=True still in checkpoint as is
     assert values["halted"] is True
-    # plugin state survives respawn (empty state update no longer overwrites with default)
     assert str(values["ava_code__cwd"]).endswith("e2e-idle-restart-cwd"), (
         f"plugin state cwd did not survive respawn: {values.get('ava_code__cwd')!r}"
     )
@@ -103,7 +93,6 @@ def _assert_silent_and_alive_after_restart(values: dict[str, Any]) -> None:
 def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
     agent_id = spawned_agent
 
-    # ── pre-restart turn: let agent write non-default cwd into plugin state then back to idle ──
     resp = httpx.post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/messages",
         json={"content": "\u8bf7\u8bbe\u7f6e\u5de5\u4f5c\u76ee\u5f55", "source": "user"},
@@ -117,15 +106,12 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
         f"pre-restart cwd not written to plugin state: {values.get('ava_code__cwd')!r}"
     )
 
-    # ── external restart (default source='user') ──
     httpx.post(f"{GATEWAY_URL}/api/agents/{agent_id}/restart", timeout=10.0).raise_for_status()
 
     values = _wait_for_silent_restart_cycle(agent_id)
 
-    # ── Silent + liveness assertions ──
     _assert_silent_and_alive_after_restart(values)
 
-    # Short observation window: no delayed wakeup (if any, AIMessage increases / empty script fails the invocation)
     time.sleep(2.0)
     values = _checkpoint_values(agent_id)
     row = _agent_status_row(agent_id)

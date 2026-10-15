@@ -1,11 +1,3 @@
-"""Provider plugin mechanism — the provider.py contract end to end.
-
-A fixture plugin directory is written into the session's tmp AVA_HOME
-(tests/fixtures/env_bootstrap.py redirects AVA_HOME), so these tests exercise the real
-discovery path (base/plugins_config.discover_plugins) and the real loader
-(base/packages/plugin_providers). The provider-plugin tests run against an explicit catalog built after writing fixture declarations.
-"""
-
 from __future__ import annotations
 
 import json
@@ -132,9 +124,6 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 
 def test_repo_model_vendor_vocabulary_is_complete(model_catalog: ModelCatalog) -> None:
     assert {*model_catalog.models, *model_catalog.decision_models} == _REPO_MODEL_VENDORS.keys()
-    # Catalog-only entries: a registered chat model pops its archive entry, so
-    # what remains is the catalog-only services plus the DeepSeek names the
-    # page-reconciliation workflow still prices.
     assert set(model_catalog.prices.archive) == {
         "gemini-embedding-2",
         "deepseek-v4-pro",
@@ -165,7 +154,7 @@ def test_repo_plugin_prices_equal_archive_at_frozen_instant(
         plugin_rates = plugin_price.rates_at(frozen_instant, input_tokens=0)
         archive_rates = archive_only.rates_at(model, frozen_instant, input_tokens=0)
         assert plugin_rates is not None and archive_rates is not None
-        assert plugin_rates.as_tuple() == pytest.approx(archive_rates.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+        assert plugin_rates.as_tuple() == pytest.approx(archive_rates.as_tuple())
         assert plugin_price.vendor == archive_models[model]["vendor"]
         assert (plugin_price.source_url, plugin_price.source_checked_at.isoformat()) == (
             archive_models[model]["source_url"],
@@ -180,7 +169,6 @@ def _install(
     pricing: dict[str, PriceRates],
     builder: CatalogBuilder | None = None,
 ) -> CatalogBuilder:
-    """Install a hand-built provider declaration the way the loader does for a plugin."""
     builder = builder or CatalogBuilder()
     builder.install("test", ProviderContribution(binding, models, pricing))
     return builder
@@ -389,9 +377,6 @@ def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None])
         "testp-1", catalog=catalog, llm_override="", overrides=ModelOverrides.from_pins({})
     )
     assert isinstance(llm, FakeListChatModel)
-    # An id under the plugin's prefix that has no registry entry still
-    # dispatches (matching the repo provider plugins): the builder receives
-    # spec=None and decides its own posture.
     llm2 = build_chat_model(
         "testp-2", catalog=catalog, llm_override="", overrides=ModelOverrides.from_pins({})
     )
@@ -513,8 +498,6 @@ def test_registered_plugin_model_vision_overrides_binding(
 
 def test_duplicate_prefix_rejected(provider_plugin: Callable[..., None]) -> None:
     provider_plugin()
-    # Re-registration under the same prefix (a second provider.py) fails the
-    # load: the flat prefix map cannot pick a winner.
     provider_plugin(
         prefix="testp-",
         display="Other",
@@ -525,7 +508,6 @@ def test_duplicate_prefix_rejected(provider_plugin: Callable[..., None]) -> None
     with pytest.raises(provider_api.ProviderRegistrationError, match="already claimed") as excinfo:
         build_model_catalog()
     assert "already claimed" in str(excinfo.value)
-    # A fail-closed load leaves no catalog behind; the next call builds (and fails) afresh.
     with pytest.raises(provider_api.ProviderRegistrationError, match="already claimed"):
         build_model_catalog()
 
@@ -754,7 +736,6 @@ def test_broken_provider_plugin_refuses_catalog_and_recovers(
 
 
 def test_provider_missing_provider_py_is_noop(provider_plugin: Callable[..., None]) -> None:
-    # A plugin dir with only plugin.py (the common case) registers nothing.
     provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
     plugin_dir = paths.plugins_dir() / "no_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -765,8 +746,6 @@ def test_provider_missing_provider_py_is_noop(provider_plugin: Callable[..., Non
 
 
 def test_provider_only_dir_is_not_a_plugin(provider_plugin: Callable[..., None]) -> None:
-    # A dir with provider.py but no plugin.py is not discovered — discovery
-    # identity is plugin.py, documented in provider_api.
     provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
     plugin_dir = paths.plugins_dir() / "orphan_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)

@@ -79,7 +79,7 @@ There is no writer: an agent writes notes with `ava.files.write` (see the write 
   indexing. Agent overlays cannot change it. Read-only roster/status evaluation
   uses defaults for an absent image without writing; invalid existing data reports
   a plugin load failure and skips the service. The image is sealed at service birth.
-- Memory pool path = `$AVA_HOME/memory` (computed by `ava/memory.py` at process load using `ava_home()`; no `AVA_MEMORY_POOL` variable)
+- Pool path: `$AVA_HOME/memory`, resolved per access; no `AVA_MEMORY_POOL` variable.
 - `memory_write_check_deadline_seconds` (5.0) / `memory_write_dedup_threshold` (0.80, uncalibrated): the write check's budget and duplicate threshold
 - `settings.passive_memory_recall_enabled`: passive recall feature toggle (default in [[ava_builtins/plugins/ava_memory/docs/memory-recall.ava.okf.md]])
 - `settings.agent.memory_inherit_depth`: ancestor hops a descendant inherits `inheritable` blocks from (per-agent, default 1; 0 disables). Size guardrails: `memory_inherit_max_block_chars` / `memory_inherit_max_total_chars` (0 disables one)

@@ -1,15 +1,3 @@
-"""ScriptedFakeChatModel -- returns preset AIMessages turn by turn from a SCRIPT list.
-
-The agent process injects it via `AVA_LLM_OVERRIDE=tests.e2e.fakes.scenarios.<name>:build`
-env var on startup. The fake does not actually dispatch tool schemas; it only feeds the
-next preset response according to the turn cursor.
-
-Why not use LangChain's built-in GenericFakeChatModel: it works via `messages: list[str]`
-+ char-by-char emit, with no tool_calls / usage_metadata support, incompatible with the
-production path (`AIMessageChunk += chunk` + `message_chunk_to_message` + trailing
-`assert usage_metadata is not None`).
-"""
-
 from __future__ import annotations
 
 import json
@@ -27,25 +15,10 @@ __all__ = ["ScriptExhaustedError", "ScriptedFakeChatModel"]
 
 
 class ScriptExhaustedError(RuntimeError):
-    """SCRIPT cursor out of bounds -- scenario did not cover the current turn.
-
-    Dedicated subclass (not IndexError) so e2e fixtures / log scrapers can precisely
-    identify this "scenario too short" failure, distinct from other runtime IndexErrors.
-    """
+    pass
 
 
 class ScriptedFakeChatModel(BaseChatModel):
-    """Fake that returns AIMessages turn by turn from a preset script; emits the
-    whole message as a single chunk.
-
-    - script: tuple[AIMessage, ...], each a complete response for one LLM turn;
-      immutable tuple expresses "scenario is a fixed contract"
-    - cursor increments across _astream calls; exceeding len(script) raises
-      ScriptExhaustedError
-    - bind_tools is no-op (fake does not actually dispatch tool schemas)
-    - emits the whole message as a single chunk -- no character-level streaming
-    """
-
     script: tuple[AIMessage, ...]
     _cursor: int = PrivateAttr(default=0)
 
@@ -58,7 +31,6 @@ class ScriptedFakeChatModel(BaseChatModel):
 
     @property
     def cursor(self) -> int:
-        """Number of turns consumed; fixture / unit test verifies the scenario was fully consumed during teardown."""
         return self._cursor
 
     def _next_message(self) -> AIMessage:
@@ -81,18 +53,12 @@ class ScriptedFakeChatModel(BaseChatModel):
             }
             for idx, tc in enumerate(msg.tool_calls)
         ]
-        # Auto-set default response_metadata aligned with real Anthropic protocol
-        # ('tool_use' with non-empty tool_calls, 'end_turn' otherwise). Prevents
-        # _validate_stop_reason from mis-firing on e2e fake — scenarios are module-level
-        # AIMessage(...) without response_metadata; this layer fills it in. Scenarios
-        # that need to explicitly test refusal/max_tokens etc. pass response_metadata=...
-        # directly in the AIMessage; when they do, that metadata must include model_provider.
-        response_metadata = msg.response_metadata or {  # pyright: ignore[reportUnknownMemberType]
+        response_metadata = msg.response_metadata or {
             "model_provider": "anthropic",
             "stop_reason": "tool_use" if msg.tool_calls else "end_turn",
         }
         chunk_msg = AIMessageChunk(
-            content=msg.content,  # pyright: ignore[reportUnknownMemberType]
+            content=msg.content,
             tool_call_chunks=tool_call_chunks,
             usage_metadata=msg.usage_metadata,
             response_metadata=response_metadata,

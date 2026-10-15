@@ -33,6 +33,13 @@ source of it, handed over by the composition root (`ava.skills.names` in the age
 gateway and the ops runner). The agent's claim node receives the catalog through
 `AvaContext.commands`.
 
+Expansion preserves the typed command order and adds no chain policy or actor
+framing. Explicit command files override a same-named skill command. Catalog
+names use dash/colon spelling; matching also accepts legacy underscore/dot
+spelling, while the expansion echoes the spelling supplied by the caller.
+Only a registered command at a command boundary begins another segment; paths,
+mid-sentence names and an unrecognized `/recap/review` token are ordinary text.
+
 ## Documented components
 
 - [[base/packages/docs/composer-commands.ava.okf.md]] — Composer command discovery and expansion.

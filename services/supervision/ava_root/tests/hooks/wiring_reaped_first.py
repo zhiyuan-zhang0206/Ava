@@ -1,5 +1,3 @@
-"""Wiring hook: asyncio's child watcher reaps each unit leader before root reads its birth."""
-
 import asyncio
 from typing import Any
 
@@ -14,5 +12,5 @@ async def reaped_first(*args: Any, **kwargs: Any) -> asyncio.subprocess.Process:
 
 def build(context: Any) -> list[object]:
     del context
-    asyncio.create_subprocess_exec = reaped_first  # pyright: ignore[reportAttributeAccessIssue]
+    asyncio.create_subprocess_exec = reaped_first
     return []

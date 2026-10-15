@@ -1,5 +1,3 @@
-"""``decide()``: pre-flight checks, distribution validation and usage accounting."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -78,7 +76,6 @@ async def test_the_total_request_limit_is_checked_separately() -> None:
     spec = DecisionModelSpec(context_window=60, max_request_tokens=70)
     catalog = catalog_with(binding, models={MODEL: spec})
 
-    # State plus the longest question fits 60, state plus all questions does not fit 70.
     with pytest.raises(DecisionInputTooLargeError, match="request limit"):
         await decide(MODEL, "x" * 160, _QUESTIONS, catalog=catalog, usage_kind="test")
     assert binding.calls == []
@@ -108,7 +105,7 @@ async def test_missing_api_key_fails_through_require_key(monkeypatch: pytest.Mon
         require_key("FAKE_API_KEY")
         return binding
 
-    catalog = catalog_with(binding, build=build)  # pyright: ignore[reportArgumentType]
+    catalog = catalog_with(binding, build=build)
     with pytest.raises(DecisionKeyMissingError, match="FAKE_API_KEY not set") as excinfo:
         await decide(MODEL, "hello", _QUESTIONS, catalog=catalog, usage_kind="test")
     assert isinstance(excinfo.value.__cause__, RuntimeError)
@@ -124,7 +121,7 @@ async def test_a_build_failure_with_the_key_present_propagates_unchanged(
     def build(_ctx: object) -> FakeBinding:
         raise RuntimeError("real bug in build")
 
-    catalog = catalog_with(FakeBinding(_good()), build=build)  # pyright: ignore[reportArgumentType]
+    catalog = catalog_with(FakeBinding(_good()), build=build)
     with pytest.raises(RuntimeError, match="real bug in build") as excinfo:
         await decide(MODEL, "hello", _QUESTIONS, catalog=catalog, usage_kind="test")
     assert not isinstance(excinfo.value, DecisionKeyMissingError)

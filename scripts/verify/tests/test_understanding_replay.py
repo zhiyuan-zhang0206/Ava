@@ -1,7 +1,3 @@
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-"""The replay planner cuts a stored segment exactly where the live trigger would have."""
-
 from __future__ import annotations
 
 from typing import Any, cast
@@ -26,7 +22,6 @@ def _read_agent(field: str):
 
 
 def _segment() -> list[AnyMessage]:
-    """Head, one framework note, then 40 turns (human, ai) whose input tokens grow by 130."""
     msgs: list[AnyMessage] = [
         SystemMessage(content="head", id="h"),
         HumanMessage(content="note", id="n", additional_kwargs={"ava_msg_type": "system_note"}),
@@ -114,8 +109,8 @@ def test_history_is_cut_segment_by_segment_with_boundary_closing_chunks() -> Non
         mine = [p for p in planned if p.segment == k]
         assert mine and all(p.chunk.start_index >= 1 for p in mine)
         closing = [p for p in mine if p.closing]
-        if k < 2:  # a boundary-closed segment ends in a closing chunk naming its checkpoint
+        if k < 2:
             assert [p.boundary_checkpoint_id for p in closing] == [f"b{k}"]
-        else:  # the newest segment's tail is left undescribed
+        else:
             assert closing == []
     assert all(p.boundary_checkpoint_id is None for p in planned if not p.closing)

@@ -12,6 +12,13 @@ tags:
 `/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` + `/inspect/metrics`
 + `/inspect/widgets` — per-agent LLM cost/token/TPS + neighbor graph.
 
+The live inspector reports an active pause, recent pending inbound, or the
+native idle estimate from activity/idle threshold/jitter and last-heartbeat
+cadence. This projection does not reproduce every scheduler backoff or
+impersonation gate; see [[services/docs/gateway_side/heartbeat.ava.okf.md]].
+Its idle fixtures backdate both `status_changed_at` and `last_active_at`:
+updating a timestamp alone does not invoke the status-change trigger.
+
 Statistics read persisted compact metric observations and day summaries from
 Postgres. Cache-hit rates divide reported cache reads by `tokens_cache_input`,
 the input from calls with cache metering. Unmetered decision and embedding

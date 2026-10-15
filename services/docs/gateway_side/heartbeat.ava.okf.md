@@ -14,9 +14,12 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 
 ## Core Responsibilities
 - **Idle detection**: Select eligible `idling` identities whose real `last_active_at` and last heartbeat are old enough. No per-agent PID or live-process lease is required. The insert atomically stamps `last_heartbeat_at`, preventing repeated reminders when a wake performs no model work. Maintenance and circuit-breaker policy remain separate gates; operational status changes do not reset the real activity clock.
-- **Respect heartbeat pause**: if `heartbeat_paused_until` is later than `last_active_at`, the next check-in is precisely set to `heartbeat_paused_until`
+- **Respect heartbeat pause**: the pause is a lower bound. Native idle eligibility
+  takes the latest of pause expiry, real activity plus idle threshold and jitter,
+  and the last heartbeat plus its cadence/backoff interval.
 - **Nudge backoff (B7)**: an agent that repeatedly burns nudges — `AVA_HEARTBEAT_BACKOFF_CONSECUTIVE_NOOP_NUDGES` (default 3) consecutive check-ins with no real inbound and no pause — gets its reminder floor stretched to `heartbeat_interval * 2^level` (`heartbeat_backoff_level` on `agents_meta`, capped at 24h, `power(2.0, level)` in the selection SQL). The consecutive-no-op counter is in-process; the level persists across daemon restarts. A real inbound (`inbound_messages.kind <> 'heartbeat'` after `last_heartbeat_at`) or an agent pause resets the level to 0 (`_sweep_backoff_resets` covers agents the daemon is not tracking). Raises emit `heartbeat_backoff_raised`, resets emit `heartbeat_backoff_reset`. Complementary to `ava.self.pause_heartbeat()` — the agent's own pause always wins; the platform backoff is the fallback for agents that never pause.
-- **Deduplication**: skip agents that already have a `pending` inbound (NOT EXISTS guard), avoiding accumulation
+- **Deduplication**: skip agents with a recent `pending` inbound within
+  `STALE_PENDING_S`; stale rows do not indefinitely suppress reminders.
 - **Wake notification**: after INSERT of `heartbeat` inbound (kind='heartbeat'), sends a Redis best-effort publish (`base.db._publish_inbound_wake`) — the target agent's claim loop subscribes to `<prefix>:inbound:<agent_id>` and receives it immediately; even if the publish is lost it doesn't block, the agent's 30s SELECT recheck guarantees delivery.
 - **Cluster-wide**: not dependent on a local session, cross-machine wake-up (wherever the target agent runs, it is woken in its claim loop on that machine)
 - **Mounted-console liveness**: the one-minute machine/lease pass keeps lifecycle
@@ -40,6 +43,10 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 - The application root supervises the daemon through the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`).
 
 ## Notes
+- Native idle selection requires no PID, orders eligible agents by activity age
+  and caps each batch. Jitter uses a whole-second span so SQL and the inspector's
+  Python modulo agree; zero disables it. Active impersonation leases have their
+  own activity baseline and gates in the selection SQL.
 - Idle-minute observations keep the PostgreSQL clock and cross the SQL boundary as double precision, matching the float slack used by next-cycle check-in reconciliation.
 - heartbeat message tag = `NoteTag.HEARTBEAT`, agents can distinguish heartbeats from other wake-ups by this
 
