@@ -14,6 +14,3 @@
     "test_weixin_ingress_recovery.py",
     "test_weixin_ingress_runtime.py",
 ]
-"tests.fixtures.unit.gateway" = [
-    "test_weixin_chat_identity.py",
-]

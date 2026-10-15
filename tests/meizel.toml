@@ -2,7 +2,7 @@ exports = ["components", "e2e", "factories", "fixtures", "path_scoped", "scripts
 
 [uses]
 "ci" = ["e2e", "fixtures", "path_scoped"]
-"components" = ["factories", "fixtures", "path_scoped"]
+"components" = ["fixtures", "path_scoped"]
 "e2e" = ["fixtures"]
 "fixtures" = ["_os_jobs.py", "_test_env_file.py", "path_scoped"]
 "harness" = ["_asyncio_stall_probe.py", "_os_jobs.py", "components", "e2e", "fixtures"]

@@ -9,7 +9,7 @@ launcher that reaches for `redis-cli -a`, an env-var argv splice, or an
 argv-carried JSON blob fails here rather than in a `ps` listing.
 
 The schedule launcher contract lives with the schedule-manager tests and shares
-the sentinel environment and real PTY argv harness from tests.factories.secret_argv.
+the sentinel environment and real PTY argv harness from base.sessions.pty.tests.secret_argv.
 
 Coverage is per *launcher*, not per caller: the `ava start` session launch,
 schedule processes and agent shells each funnel into one of the functions below
@@ -34,13 +34,13 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import output_until, type_line
-from tests.factories.secret_argv import (
+from base.sessions.pty.tests.secret_argv import (
     SECRET_VALUES,
     assert_clean,
     assert_service_tree_clean,
 )
-from tests.factories.secret_argv import secret_env as secret_env
-from tests.factories.secret_argv import secrets_in_creator_env as secrets_in_creator_env
+from base.sessions.pty.tests.secret_argv import secret_env as secret_env
+from base.sessions.pty.tests.secret_argv import secrets_in_creator_env as secrets_in_creator_env
 
 # The pid the faked reparent helper reports. Every launch below drives the REAL
 # `posixproc.new_session` (only `subprocess.run` is faked), and that function

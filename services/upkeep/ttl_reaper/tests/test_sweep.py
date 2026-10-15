@@ -180,7 +180,10 @@ def test_reap_expired_web_sessions_is_limited_to_one_pass_batch(
 
 
 def test_reap_expired_pages_terminalizes_only_past_deadlines(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, database: Database
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     aid = _running_agent(db_conn)
     _open_page(db_conn, aid, "expired", expires_at=datetime.now(UTC) - timedelta(seconds=5))
@@ -192,7 +195,7 @@ def test_reap_expired_pages_terminalizes_only_past_deadlines(
         cur.execute("UPDATE agent_pages SET closed_at = now() WHERE id = %s", (closed_id,))
     db_conn.commit()
 
-    reaped = reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings())
+    reaped = reap_expired_pages_blocking(reaper_pool, database, event_bus)
 
     assert [(aid, "expired")] == [(a, n) for a, n, _i in reaped]
     expired_closed, expired_marked = _page_state(db_conn, aid, "expired")
@@ -219,7 +222,10 @@ def test_reap_expired_pages_skips_already_terminal(
 
 
 def test_reap_expired_pages_notifies_only_live_agents(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, database: Database
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     live = _running_agent(db_conn)
     dead = create_agent(db_conn)
@@ -232,7 +238,7 @@ def test_reap_expired_pages_notifies_only_live_agents(
     _open_page(db_conn, live, "live-page", expires_at=datetime.now(UTC) - timedelta(seconds=5))
     _open_page(db_conn, dead, "dead-page", expires_at=datetime.now(UTC) - timedelta(seconds=5))
 
-    reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings())
+    reap_expired_pages_blocking(reaper_pool, database, event_bus)
 
     live_msgs = _system_inbounds(db_conn, live)
     assert len(live_msgs) == 1

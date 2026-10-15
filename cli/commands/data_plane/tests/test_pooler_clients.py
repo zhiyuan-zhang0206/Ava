@@ -12,7 +12,7 @@ from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.deploy.tests.containers import postgres
-from tests.components.cli.test_pgbouncer_wire import (
+from base.deploy.tests.pgbouncer import (
     SECRET,
     pgbouncer_available,
     pgbouncer_in_front,

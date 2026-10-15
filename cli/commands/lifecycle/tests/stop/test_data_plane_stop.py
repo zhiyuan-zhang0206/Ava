@@ -347,7 +347,7 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
 
     from base.deploy.tests.containers import free_port, wait_port
 
-    binary = plane.pooler.pgbouncer_bin()
+    binary = base_pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native pgbouncer is not installed")
     directory = home / "pgbouncer"
@@ -404,7 +404,7 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
 
     from base.deploy.tests.containers import free_port, wait_port
 
-    binary = plane.pooler.pgbouncer_bin()
+    binary = base_pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native pgbouncer is not installed")
     directory = home / "pgbouncer"
@@ -524,7 +524,7 @@ def _launch_incident_shape_pooler(
     """
     from base.deploy.tests.containers import free_port, wait_port
 
-    binary = pb.pgbouncer_bin()
+    binary = base_pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
         pytest.skip("native pgbouncer is not installed")
     addr = _nonloopback_addr()

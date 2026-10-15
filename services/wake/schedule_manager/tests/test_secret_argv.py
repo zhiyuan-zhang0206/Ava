@@ -11,12 +11,12 @@ from psycopg_pool import ConnectionPool
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import wait_for
-from tests.factories.secret_argv import (
+from base.sessions.pty.tests.secret_argv import (
     SECRET_VALUES,
     assert_service_tree_clean,
     service_tree_argvs,
 )
-from tests.factories.secret_argv import (
+from base.sessions.pty.tests.secret_argv import (
     secrets_in_creator_env as secrets_in_creator_env,
 )
 

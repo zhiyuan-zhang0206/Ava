@@ -167,10 +167,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "scans the repository root for entry points that declare the database gate exemption",
     ),
-    "tests/components/cli/test_pgbouncer_wire.py": (
-        "integration",
-        "a real PgBouncer in front of a throwaway Postgres, exercised through the cli, the gateway and the ttl reaper: spans base, cli, gateway, services.upkeep.ttl_reaper, no one of which may import all the others",
-    ),
     "tests/components/gateway/test_okf_graph_contract.py": (
         "contract",
         "every .ava.okf.md bundle of the repository parses identically through the adapter and the legacy parser",

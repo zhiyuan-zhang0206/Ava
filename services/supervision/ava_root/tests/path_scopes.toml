@@ -1,9 +1,14 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
-"tests.path_scoped.cli_tests" = [
-    "test_maintenance_late_child.py",
+"base.host.tests.short_tmp" = [
+    "test_ava_root_daemon.py",
+    "test_ava_root_health.py",
+    "test_ava_root_ipc.py",
+    "test_ava_root_selfcheck.py",
+    "test_ava_root_stop_window.py",
+    "test_root_work_ownership.py",
 ]
-"tests.path_scoped.services_tests" = [
+"services.backup.artifact.tests.passphrase" = [
     "test_ava_root_daemon.py",
     "test_ava_root_health.py",
     "test_ava_root_ipc.py",

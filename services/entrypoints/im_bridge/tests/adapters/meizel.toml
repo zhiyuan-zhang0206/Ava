@@ -1,4 +1,4 @@
-exports = ["weixin_native.py"]
+exports = ["test_weixin_adapter.py", "test_weixin_chat_identity.py", "weixin_native.py"]
 
 [uses]
 "conftest.py" = ["weixin_native.py"]

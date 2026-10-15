@@ -53,7 +53,6 @@ from base.cluster import ownership, port_preflight
 from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_tools import is_macos
 from base.cluster.machine import MachineIdentity
-from base.host.brew_pin import brew_prefix
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.host.proc import process_alive
 from base.native_process.child_env import daemon_process_env
@@ -84,21 +83,6 @@ def userlist_path() -> Path:
 
 def _logfile_path() -> Path:
     return pooler.pooler_dir() / "pgbouncer.log"
-
-
-def pgbouncer_bin() -> str:
-    """Resolve the pgbouncer binary. macOS: the brew keg (not symlinked onto PATH,
-    like the redis binaries). Linux: PATH, then apt's `/usr/sbin` / `/usr/bin`
-    (apt installs pgbouncer under /usr/sbin, which is often off a non-root PATH)."""
-    if is_macos():
-        return str(brew_prefix("pgbouncer") / "bin" / "pgbouncer")
-    found = shutil.which("pgbouncer")
-    if found:
-        return found
-    for candidate in ("/usr/sbin/pgbouncer", "/usr/bin/pgbouncer"):
-        if Path(candidate).exists():
-            return candidate
-    return "pgbouncer"  # last resort — subprocess will surface a clear error
 
 
 def render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: MachineIdentity) -> str:
@@ -330,7 +314,7 @@ def ensure_pgbouncer(
 
     Only called when AVA_PGBOUNCER_ENABLED (gated by the caller in
     `complete_gateway_data_plane`)."""
-    binary = pgbouncer_bin()
+    binary = pooler.pgbouncer_bin()
     if not Path(binary).exists() and shutil.which(binary) is None:
         # Enabled but pgbouncer is not installed. Fail fast (do NOT silently fall back
         # to direct — the operator asked for pooling): install it, then retry.
@@ -419,7 +403,7 @@ def _launch_pooler(listen_port: int, admin_password: str, *, machine: MachineIde
         )
         return 1
     result = subprocess.run(
-        [pgbouncer_bin(), "-d", str(pooler.ini_path())],
+        [pooler.pgbouncer_bin(), "-d", str(pooler.ini_path())],
         check=False,
         capture_output=True,
         text=True,
@@ -578,7 +562,7 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
         )
     if not config.pgbouncer_enabled:
         return
-    binary = pgbouncer_bin()
+    binary = pooler.pgbouncer_bin()
     if Path(binary).exists() or shutil.which(binary) is not None:
         return
     how = "brew install pgbouncer" if is_macos() else "sudo apt-get install -y pgbouncer"

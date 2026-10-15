@@ -1,4 +1,4 @@
-exports = ["adapters"]
+exports = ["adapters", "conftest.py", "slices.py"]
 
 [uses]
 "adapters" = ["slices.py", "task_scope.py", "test_notice_outbox.py", "test_timeline_outbox.py"]

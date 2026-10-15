@@ -1,19 +1,37 @@
-"""This home's PgBouncer pooler: where its files live and whether it answers.
+"""This home's PgBouncer pooler: its binary, where its files live, and whether it answers.
 
-The probes are the observation half of the pooler's lifecycle: the cli owns bring-up and
-stop (`cli.commands.data_plane.pgbouncer`), the root diagnostics and the data-plane status
-line only look. Nothing here starts, stops, repairs or rewrites the pooler.
+The probes and binary resolver are the observation half of the pooler's lifecycle: the cli
+owns bring-up and stop (`cli.commands.data_plane.pgbouncer`), the root diagnostics and the
+data-plane status line only look. Nothing here starts, stops, repairs or rewrites the pooler.
 """
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from base.cluster import port_preflight
+from base.cluster.dataplane.pg_tools import is_macos
 from base.cluster.machine import MachineIdentity
+from base.host.brew_pin import brew_prefix
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.paths import ava_home
+
+
+def pgbouncer_bin() -> str:
+    """Resolve the pgbouncer binary. macOS: the brew keg (not symlinked onto PATH,
+    like the redis binaries). Linux: PATH, then apt's `/usr/sbin` / `/usr/bin`
+    (apt installs pgbouncer under /usr/sbin, which is often off a non-root PATH)."""
+    if is_macos():
+        return str(brew_prefix("pgbouncer") / "bin" / "pgbouncer")
+    found = shutil.which("pgbouncer")
+    if found:
+        return found
+    for candidate in ("/usr/sbin/pgbouncer", "/usr/bin/pgbouncer"):
+        if Path(candidate).exists():
+            return candidate
+    return "pgbouncer"  # last resort — subprocess will surface a clear error
 
 
 def pooler_dir() -> Path:

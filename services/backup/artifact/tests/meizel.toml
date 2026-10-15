@@ -1,6 +1,7 @@
-exports = ["oss_fake.py"]
+exports = ["oss_fake.py", "passphrase.py"]
 
 [uses]
+"path_scopes.toml" = ["passphrase.py"]
 "test_offsite.py" = ["oss_fake.py"]
 
 [debt.first-party-patch]

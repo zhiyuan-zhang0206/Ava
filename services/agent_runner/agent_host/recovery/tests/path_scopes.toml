@@ -1,6 +1,3 @@
 "agent.tests.agent_tests" = [
     "test_reconcile_after_abort.py",
 ]
-
-"tests.path_scoped.services_tests" = [
-]

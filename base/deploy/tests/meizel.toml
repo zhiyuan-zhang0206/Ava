@@ -1,7 +1,8 @@
-exports = ["containers.py", "db_authority_tests.py", "maintenance_factory.py"]
+exports = ["containers.py", "db_authority_tests.py", "maintenance_factory.py", "pgbouncer.py"]
 
 [uses]
 "authority" = ["db_authority_tests.py"]
+"pgbouncer.py" = ["containers.py"]
 "test_cluster_redis_acl.py" = ["containers.py"]
 "test_maintenance_cold.py" = ["maintenance_factory.py"]
 
