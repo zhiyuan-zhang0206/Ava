@@ -1,11 +1,3 @@
-"""Child process for test_tests_location.py: run the registered-path checks, then report imports.
-
-Usage: ``child_registered_checks.py REPO_ROOT FIXTURE_REPO REGISTERED_JSON``. It runs
-`tests_location.main` over the fixture repository with the registered tests allowed,
-then exits non-zero when the run loaded the placement rule or the suggestion module:
-a hook run is a path lookup and must not pay for either.
-"""
-
 from __future__ import annotations
 
 import json

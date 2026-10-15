@@ -1,11 +1,3 @@
-"""Host-level state lives in the home.
-
-The host runs one cluster, so there is no separate host state directory: the
-vendored Postgres runtime, the initdb template, the coding-session owner records
-and the PTY allocation freeze sit under `$AVA_HOME`, and a test that points
-`AVA_HOME` at a tmp dir has isolated all of them with nothing else to redirect.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

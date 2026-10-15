@@ -1,5 +1,3 @@
-"""A Python interpreter started as a subprocess may run only a file or module the checker can see."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -104,8 +102,6 @@ def test_dash_m_of_a_package_runs_its_door_and_its_main(make_repo: RepoFactory) 
 
 
 def test_a_dunder_module_is_protocol_not_private(make_repo: RepoFactory) -> None:
-    """`__main__` and `__init__` are the language's own names, so reaching a package by `-m` is no
-    private-module violation."""
     root = make_repo(
         {
             **LIB,

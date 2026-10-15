@@ -1,6 +1,3 @@
-"""The telemetry token a gateway home's start publishes for the services that must not hold the
-human cluster secret (the heartbeat's observability-station probe)."""
-
 from __future__ import annotations
 
 import stat

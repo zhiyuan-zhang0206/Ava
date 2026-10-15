@@ -1,8 +1,3 @@
-"""The signing smoke's checks that need no macOS: the readback verdicts and the command line.
-
-The smoke itself needs swiftc, codesign and launchd; the lane runs it on a hosted macOS runner.
-"""
-
 from __future__ import annotations
 
 import pytest

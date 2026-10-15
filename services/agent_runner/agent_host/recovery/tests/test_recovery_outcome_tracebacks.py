@@ -1,14 +1,3 @@
-"""`_record_permanent_reject_outcome`'s failure branches keep their tracebacks.
-
-Three best-effort steps follow a permanent provider rejection (agent/turn/
-runloop.py): recording the streak, suppressing automatic wakes at the halt
-threshold, and enqueueing the recovery-halt report to an ancestor. Each
-failure branch logged with loguru's `exc_info=True`, which loguru has no
-parameter for — the kwarg rode the record's `extra` and the traceback was
-lost. These lock the `.opt(exception=True)` shape on all three branches
-(task #4979).
-"""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -86,8 +75,6 @@ async def test_streak_write_failure_keeps_its_traceback(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Branch 1: the streak write failed — the warning keeps the cause (task #4979)."""
-
     async def _boom(*_args: object, **_kwargs: object) -> int:
         raise RuntimeError("recovery breaker store down")
 
@@ -121,8 +108,6 @@ async def test_halt_suppression_failure_keeps_its_traceback(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Branch 2: suppressing automatic wakes failed (task #4979)."""
-
     async def _streak(*_args: object, **_kwargs: object) -> int:
         return 99
 
@@ -164,8 +149,6 @@ async def test_ancestor_report_failure_keeps_its_traceback(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Branch 3: enqueueing the recovery-halt report failed (task #4979)."""
-
     async def _streak(*_args: object, **_kwargs: object) -> int:
         return 99
 

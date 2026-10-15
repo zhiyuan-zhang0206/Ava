@@ -1,9 +1,3 @@
-"""Child process for test_test_selector.py: print one duration estimate.
-
-The hash-seed regression needs a fresh interpreter per `PYTHONHASHSEED`, so the
-estimate is computed here and the test compares what each seed printed.
-"""
-
 from __future__ import annotations
 
 import sys

@@ -1,9 +1,3 @@
-"""Typed stand-ins for the gateway helpers a test installs on a module under test.
-
-`monkeypatch.setattr(module, "gateway_api_base", gateway_api_base_stub(url))`: the stub answers `url`
-whatever it is asked, with the signature of the helper it replaces.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable

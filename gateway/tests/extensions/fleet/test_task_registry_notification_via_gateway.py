@@ -1,7 +1,3 @@
-"""A failed gateway enqueue rolls the task assignment back.
-
-Split out of `ava_builtins/plugins/ava_fleet/tests/task_registry/test_notification_recovery.py`: it drives `gateway.routers.tasks` through the gateway app."""
-
 from uuid import uuid4
 
 import psycopg

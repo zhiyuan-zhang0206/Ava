@@ -1,11 +1,3 @@
-"""The allocation freeze at the service: it refuses absent -> live, never touches a live session.
-
-The service holds the home's allocation lock from the check to the registration of
-a new session, so a completed `freeze` is an exact boundary: every earlier
-allocation is visible and every later one is refused
-(`base.sessions.pty.allocation_freeze`).
-"""
-
 from __future__ import annotations
 
 import threading
@@ -48,7 +40,6 @@ def test_a_corrupt_marker_fails_closed(unit_home: Path) -> None:
 def test_the_active_generation_rejects_a_live_name_from_a_prior_generation(
     unit_home: Path,
 ) -> None:
-    """A reconcile cannot idempotently reuse an exact session from the prior flip."""
     name = "ava-agent-1-shell-0-stale"
     new(name, unit_home)
     (before,) = client.list_sessions()
@@ -81,11 +72,6 @@ def test_a_session_carries_the_generation_it_was_admitted_under(unit_home: Path)
 def test_freeze_acknowledgement_has_no_later_session_start_during_concurrent_allocations(
     unit_home: Path,
 ) -> None:
-    """Freeze waits behind an in-flight allocation and fences every later one.
-
-    The started-at assertion is the externally observable boundary: once `freeze`
-    acknowledges, no session may carry a later launch time.
-    """
     outcomes: dict[str, str] = {}
     lock = threading.Lock()
 
@@ -137,7 +123,6 @@ def test_freeze_acknowledgement_has_no_later_session_start_during_concurrent_all
 
 
 def test_a_frozen_session_still_serves_input(unit_home: Path) -> None:
-    """A freeze protects absent -> live allocation, never use of an existing session."""
     name = "ava-test-frozen-use-1"
     new(name, unit_home)
     frozen = allocation_freeze.freeze(holder="operator", reason="inspection")

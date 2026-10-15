@@ -1,8 +1,3 @@
-"""Wiring hook: a tree monitor that fails with an unknown error once its fault file exists.
-
-The fault file is named by `AVA_ROOT_WIRING_FAULT`.
-"""
-
 import os
 from pathlib import Path
 from typing import Any

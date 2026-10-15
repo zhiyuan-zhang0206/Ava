@@ -1,11 +1,3 @@
-"""`meizel/lint_common.py` — the one framework-dir list lints share.
-
-A lint that names a directory that does not exist scans nothing there and still
-passes, which is how three lints drifted onto a missing `plugins/` while the
-real plugin code under `ava_builtins/` went unchecked. The list is pinned to the
-packages pyproject declares, and resolving a missing directory is an error.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

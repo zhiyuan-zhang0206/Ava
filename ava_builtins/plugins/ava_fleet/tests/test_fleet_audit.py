@@ -1,11 +1,3 @@
-"""The fleet task writes record their audit fact in the transaction that makes the change.
-
-(The label change is covered beside the plugin-loading fixture in test_ava_fleet_plugin.py.)
-A task create / update is an agent-facing tool call: the row and its
-`audit_events` fact commit together, so a failed audit write leaves no change behind
-(and the agent's retry cannot repeat a side effect that already happened).
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterator

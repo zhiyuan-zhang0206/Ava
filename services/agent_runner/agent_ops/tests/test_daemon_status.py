@@ -1,5 +1,3 @@
-"""Wire envelopes and degraded status from the real daemon dispatch boundary."""
-
 import asyncio
 import json
 from collections.abc import Callable
@@ -32,7 +30,6 @@ async def test_ops_route_wraps_dispatch_in_envelope(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A valid body returns 200 with {status, result} from _dispatch."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_sem = asyncio.Semaphore(4)
 
@@ -87,16 +84,6 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """status_probe through the real _dispatch must survive ops_route's json.dumps
-    even when ClusterStatus carries datetime values nested inside it.
-
-    Regression: a python-mode model_dump left datetime objects in the result and
-    every status_probe crashed with 'Object of type datetime is not JSON
-    serializable', so the gateway's status page lost all agent-runner info.
-    The live datetime rides in `agent_groups` (typed dict[str, object]) so the
-    test keeps guarding the wire serialization even though the current
-    `_group_agent_sessions` pre-serializes its shells to JSON-mode dicts.
-    """
     from datetime import UTC
 
     from ops.cluster_status import ClusterStatus
@@ -164,7 +151,6 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """DB-down, including an unreachable paused row, remains HTTP 200 completed."""
     from ops.cluster_status import ClusterStatus
 
     pool: ConnectionPool = ConnectionPool(open=False)

@@ -1,9 +1,3 @@
-"""Where this home keeps its native Redis, and how it names its Redis port.
-
-The root diagnostics and the cli bring-up/stop read the same facts here; a drift between
-them makes a diagnostic look at a different directory than the process it observes.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

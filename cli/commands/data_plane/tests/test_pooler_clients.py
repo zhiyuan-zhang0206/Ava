@@ -1,6 +1,3 @@
-"""`pooler.clients` against a real PgBouncer in front of a throwaway Postgres: the admin
-console's `SHOW CLIENTS`, minus the console's own connection."""
-
 from __future__ import annotations
 
 import pytest

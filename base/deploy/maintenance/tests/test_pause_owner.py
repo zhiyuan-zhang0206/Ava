@@ -28,17 +28,12 @@ def test_naive_or_malformed_identity_is_invalid() -> None:
 
 
 def test_begin_maintenance_writes_exactly_the_hold_record() -> None:
-    """The journal carries the capability and the typed hold, nothing else: no
-    process identity is recorded for anything to judge."""
     pause_owner.begin_maintenance("op1", _when())
     raw = json.loads(pause_owner.state_path().read_text())
     assert set(raw) == {"state", "holder", "acquired_at", "maintenance"}
 
 
 def test_a_journal_with_the_retired_driver_key_reads_and_loses_it_on_rewrite() -> None:
-    """A fleet update stops on the old code and starts on the new one, so the new code reads a
-    journal the old code wrote with a `driver` identity. The hold reads whole -- every other
-    field intact, the retired key ignored -- and the next write drops the key."""
     import json
 
     from base.deploy.maintenance.state import MaintenanceHold
@@ -72,7 +67,6 @@ def test_a_journal_with_the_retired_driver_key_reads_and_loses_it_on_rewrite() -
 
 
 def test_a_malformed_retired_driver_key_never_breaks_the_journal() -> None:
-    """The retired key is never parsed, so garbage in it cannot make a hold unreadable."""
     import json
 
     from base.deploy.maintenance.state import MaintenanceHold
@@ -92,9 +86,6 @@ def test_a_malformed_retired_driver_key_never_breaks_the_journal() -> None:
 
 
 def test_a_journal_written_with_the_retired_reaped_map_still_reads() -> None:
-    """A fleet update stops on the old code and starts on the new one, so the new
-    code reads the journal the old code left: its retired `reaped` map is ignored
-    and never written back."""
     import json
 
     from base.deploy.maintenance.state import MaintenanceHold
@@ -117,8 +108,6 @@ def test_a_journal_written_with_the_retired_reaped_map_still_reads() -> None:
 
 
 def test_journal_written_with_the_retired_repair_record_still_decodes() -> None:
-    """`repaired` / `repair_record` left with `ava maintenance repair`; a journal that carries
-    them decodes without them."""
     import json
 
     from base.deploy.maintenance.state import MaintenanceHold

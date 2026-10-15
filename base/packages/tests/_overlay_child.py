@@ -1,9 +1,3 @@
-"""Validates a config overlay in a fresh interpreter; never imported by a production entry.
-
-Run as ``python _overlay_child.py`` from the repository root; prints ``ok`` when a registered model
-is admitted through the explicitly built catalog.
-"""
-
 from __future__ import annotations
 
 import sys

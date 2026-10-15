@@ -1,9 +1,3 @@
-"""AX action requests cross the real client socket without touching a desktop.
-
-The server below substitutes the helper transport endpoint, not macOS AX APIs.
-Native matching and action execution are verified by the helper owner's harness.
-"""
-
 from __future__ import annotations
 
 import json

@@ -1,6 +1,3 @@
-"""unit_home() backs the default for path fields (pidfiles / memory / logs) so they live under THIS unit's home: the process's `$AVA_HOME`, else
-`~/.ava`, through the one resolver (`base.paths.home.resolve_ava_home`)."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,8 +18,6 @@ def test_unit_home_defaults_to_home_ava(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_pidfile_fields_rooted_under_unit_home(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A fresh Settings under AVA_HOME roots pidfiles / memory / logs
-    beneath it, not under ~/.ava."""
     monkeypatch.setenv("AVA_HOME", "/srv/.ava_gateway")
     from base.config import Settings
 

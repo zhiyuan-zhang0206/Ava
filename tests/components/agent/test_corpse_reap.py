@@ -1,9 +1,3 @@
-"""A failed corpse stamp keeps its cause — `agent/ownership/hosted.py:settle_and_stamp_turn`.
-
-The grace-window reaper itself (`agent/ownership/corpse_reap.py`) is locked in
-`agent/ownership/tests/test_hosted_ownership.py`.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -42,8 +36,6 @@ async def test_corpse_stamp_failure_keeps_its_traceback(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """A failed corpse stamp is best-effort — but its log keeps the cause (task #4979)."""
-
     async def _broken(_pool: object, _incarnation: object) -> None:
         raise RuntimeError("stamp store down")
 

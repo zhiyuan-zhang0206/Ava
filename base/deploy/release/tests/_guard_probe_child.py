@@ -1,8 +1,3 @@
-"""Runs the editable-install guard against a venv and checkout; never imported by a production entry.
-
-Run as ``python _guard_probe_child.py <venv-root> <allowed-checkout>``; exits non-zero on a violation.
-"""
-
 from __future__ import annotations
 
 import sys

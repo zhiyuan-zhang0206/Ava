@@ -1,5 +1,3 @@
-"""Browser entry identity never changes runner routing or legacy login."""
-
 import shlex
 
 import pytest
@@ -74,11 +72,6 @@ def test_explicit_cors_remains_authoritative() -> None:
 def test_derived_cors_allows_only_the_reserved_app_port_on_loopback(
     app_port: int | None, app_origins: bool
 ) -> None:
-    """A browser loading Next.js from the reserved app port reaches its gateway.
-
-    The port is the one start reserved (AVA_APP_PORT), only on the loopback
-    hosts Next.js binds — never another host — and nothing is guessed without it.
-    """
     app = ["http://localhost:18069", "http://127.0.0.1:18069"] if app_origins else []
     assert cors_allowed_origins(
         explicit=(),

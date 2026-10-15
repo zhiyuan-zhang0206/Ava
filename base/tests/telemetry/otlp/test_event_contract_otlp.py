@@ -1,10 +1,7 @@
-"""The event contract's payload keys and the OTLP exporter's metric dispositions agree: gauges for absolute state, counters for interval counts."""
-
 from __future__ import annotations
 
 
 def test_gateway_observability_payloads_and_gauge_dispositions() -> None:
-    """Gateway absolute state is gauged; interval counts remain counters."""
     from base.events.contract import payload_keys
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 
@@ -28,9 +25,6 @@ def test_gateway_observability_payloads_and_gauge_dispositions() -> None:
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
-    """The hourly table-size state is emitted as six absolute gauges: three
-    physical sizes plus the three live row counts (live growth vs dead-tuple
-    bloat are separable in the growth curve)."""
     from base.events.contract import payload_keys
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 
@@ -63,10 +57,6 @@ def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
 
 
 def test_pr_flow_payloads_and_metric_dispositions() -> None:
-    """The PR-flow sampler re-emits its whole trailing window every run, so
-    every numeric field is per-day absolute state: an int would default to a
-    Counter and accrue across re-emissions, a float to a Histogram — each
-    must be dispositioned as a gauge (task #2139)."""
     from base.events.contract import payload_keys
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 
@@ -89,10 +79,6 @@ def test_pr_flow_payloads_and_metric_dispositions() -> None:
 
 
 def test_agent_registry_payload_and_metric_disposition() -> None:
-    """The 60s agent-registry max-id sample is absolute state, not a sum:
-    declared as an int payload (the event contract), dispositioned as a
-    gauge (task #2010) — an int would otherwise default to a Counter and
-    accrue value on every sample."""
     from base.events.contract import payload_keys
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 
@@ -101,10 +87,6 @@ def test_agent_registry_payload_and_metric_disposition() -> None:
 
 
 def test_memory_search_stats_payload_and_metric_disposition() -> None:
-    """The 60s memory-search store sample is absolute state, not a sum:
-    rows is an int that would otherwise default to a Counter and accrue on
-    every sample; last_save_seconds a float that would default to a
-    Histogram. Both must be declared gauges (task #2088)."""
     from base.events.contract import payload_keys
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 
@@ -114,8 +96,6 @@ def test_memory_search_stats_payload_and_metric_disposition() -> None:
 
 
 def test_root_health_tick_payload_and_metric_disposition() -> None:
-    """A completed watchdog round publishes its wall-clock timestamp as a
-    gauge, so Prometheus exposes freshness rather than a meaningless sum."""
     from base.events.contract import payload_keys
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 

@@ -1,5 +1,3 @@
-"""Collector preparation retains explicit gateway opt-in and never reconciles a live tree."""
-
 from __future__ import annotations
 
 import os
@@ -75,9 +73,6 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """An explicit AVA_TELEMETRY_OTLP_ENDPOINT override opens the converge
-    step on a non-LGTM gateway: the operator opted into explicit export, so
-    the local sidecar is installed instead of skipped/reaped."""
     machine_config_798 = ConfigBoot()
     machine_config_798.set_field("machine_serve_gateway", True)
     machine_config_798.set_field("machine_serve_agent_runner", False)

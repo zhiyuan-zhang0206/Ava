@@ -1,9 +1,3 @@
-"""`ava presets` CLI: parse-layer gates + `--config` boundary validation (task #4092 B4).
-
-Same thin-client shape as `test_schedules_cmd.py`; the handler-level gate runs
-before any command code, and `--config` is validated by an argparse type.
-"""
-
 from __future__ import annotations
 
 import pytest

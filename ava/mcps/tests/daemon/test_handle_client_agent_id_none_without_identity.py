@@ -1,5 +1,3 @@
-"""Daemon cases: handle client agent id none without identity."""
-
 from __future__ import annotations
 
 import json
@@ -39,8 +37,6 @@ from base.host.system.tests.fake_commands import fake_host
 async def test_handle_client_agent_id_none_without_identity(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
-    """A request without an agent_id stamps None — the service falls back to
-    per-connection affinity for identity-less clients."""
     write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session(
         call_result=call_result([content({"type": "text", "text": "hi"})]),

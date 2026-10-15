@@ -1,9 +1,3 @@
-"""Config lite-vs-eager parity probe in a fresh interpreter; never imported by a production entry.
-
-Run as ``python -B _lite_parity_child.py`` with ``PARITY_CASES`` (a JSON list of
-``[field, env alias, raw value]``) in the environment; the parent test owns the case table.
-"""
-
 from __future__ import annotations
 
 import json

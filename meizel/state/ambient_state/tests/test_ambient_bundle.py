@@ -1,6 +1,3 @@
-"""The bundle-leak rule (meizel/state/ambient_state/bundle.py): a `@root_bundle` class never
-leaves the module that defines it."""
-
 from __future__ import annotations
 
 import ast

@@ -1,22 +1,3 @@
-"""Compact-flow scenario — UI-triggered (force) compact with backend summary.
-
-Script (one shared fake instance; the compaction summary call consumes the
-NEXT turn — agent/graph/claim/_dispatch.py `_handle_compact_request` calls
-`generate_summary(state.messages, ctx.llm)` with the agent's own LLM):
-  turn 1: reply to the user's first message (gives the conversation content)
-  turn 2: the compaction summary text (consumed by the Compaction LLM call)
-  turn 3: the post-compact narration — the compact transition resumes at LLM
-          (resume=LLM), so the model speaks once after the wipe
-  turn 4: reply to the post-compact message (proves the agent still works)
-
-The compact wipes state.messages and replaces them with the summary tail — a
-clean wipe (REMOVE_ALL + ContextReset), so the post-compact timeline is
-[system_prompt, inbound_compact_request] and the pre-compact chat/reply are
-gone. The force path stamps the summary message with ava_msg_type
-=compact_request (Task #1017 fix, PR #1796) — the timeline must render it as
-the inbound_compact_request envelope, never the unrecognized alarm.
-"""
-
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage

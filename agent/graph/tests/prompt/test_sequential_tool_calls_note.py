@@ -1,10 +1,3 @@
-"""The sequential tool-call sentence in the base prompt preamble.
-
-`prompt_sequential_tool_calls_enabled` (AVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS)
-is off by default and adds one sentence to the preamble when on, both with the
-SDK overview and in the bare identity.
-"""
-
 from typing import Any
 
 import pytest

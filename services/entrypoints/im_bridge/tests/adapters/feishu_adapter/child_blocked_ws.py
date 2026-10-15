@@ -1,9 +1,3 @@
-"""Child entry that runs the blocked Feishu websocket scenario in a fresh process.
-
-Configuration comes from `DAEMON_SHUTDOWN_TEST_MARKERS` and
-`FEISHU_TEST_RESPONSIVE_LOOP` in the environment.
-"""
-
 import os
 from pathlib import Path
 

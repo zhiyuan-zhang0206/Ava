@@ -1,7 +1,3 @@
-"""`resolve_agent_config_pins` (base/config/agent_pins.py): the merge of an agent's two stored
-config maps into its flat pin map — `config_overlay > birth_config`, unknown and plugin keys
-dropped, exactly mirroring the process-boot merge."""
-
 from __future__ import annotations
 
 from base.config import resolve_agent_config_pins

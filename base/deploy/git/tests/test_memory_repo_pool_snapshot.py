@@ -1,7 +1,3 @@
-"""`base/deploy/git/memory_repo.py` pool-snapshot download tests: the streamed body
-enforces the cap mid-stream, a declared oversize is rejected before the body, and
-transport errors are wrapped; split from base/deploy/git/tests/test_memory_repo.py (task #4922)."""
-
 from __future__ import annotations
 
 from typing import ClassVar
@@ -14,8 +10,6 @@ from base.deploy.git import memory_repo
 def test_download_pool_snapshot_streams_and_enforces_cap_midstream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """download_pool_snapshot streams the body and aborts the moment the cap is
-    crossed — it does not buffer past POOL_SNAPSHOT_MAX_BYTES."""
     import httpx
 
     monkeypatch.setattr(memory_repo, "POOL_SNAPSHOT_MAX_BYTES", 16)
@@ -56,8 +50,6 @@ def test_download_pool_snapshot_streams_and_enforces_cap_midstream(
 def test_download_pool_snapshot_declared_oversize_rejected_before_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A Content-Length already over the cap is rejected before any body byte is
-    read."""
     import httpx
 
     monkeypatch.setattr(memory_repo, "POOL_SNAPSHOT_MAX_BYTES", 16)
@@ -98,7 +90,6 @@ def test_download_pool_snapshot_declared_oversize_rejected_before_body(
 def test_download_pool_snapshot_transport_error_wrapped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """httpx transport errors are wrapped into the guided exception."""
     import httpx
 
     class _FailingClient:

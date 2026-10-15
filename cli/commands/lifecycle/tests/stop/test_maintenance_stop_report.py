@@ -1,10 +1,3 @@
-"""What a terminal closure leaves: survivors keep their native identity and diagnostics.
-
-A surviving known shell retains the failure inventory. Known job leftovers are
-reported without blocking best-effort terminal closure; stubbed outcomes lock
-the consumer distinction without claiming complete descendant ownership.
-"""
-
 from __future__ import annotations
 
 import json
@@ -109,8 +102,6 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    """The session's shell is gone but a job outlived the SIGKILL: the report names the
-    known job and its session without failing stop."""
     armed = home / "job-armed"
     parent = launch("private-terminal", child_armed=armed)
     deadline = time.monotonic() + 5
