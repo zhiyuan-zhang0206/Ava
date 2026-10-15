@@ -1,4 +1,4 @@
-"""Assemble one host root's live policy inputs from its configuration owner."""
+# ava:ref services/agent_runner/agent_host/lifecycle/docs/configuration.ava.okf.md#host-configuration-owner
 
 from collections.abc import Callable
 from pathlib import Path
@@ -9,7 +9,8 @@ from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
 from base.agents.impersonation.notes import HandoffNotes
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -30,7 +31,6 @@ __all__ = [
 
 
 def boot_process() -> tuple[ConfigBoot, Path]:
-    """Prepare this composition root before capturing its delivered process home."""
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
@@ -39,7 +39,6 @@ def boot_process() -> tuple[ConfigBoot, Path]:
 
 
 def host_policy(config: ConfigBoot) -> HostPolicy:
-    """Keep root-time admission and operation-time readers at their original points."""
     return HostPolicy(
         max_concurrent_turns=config.view.daemon.host_max_concurrent_turns,
         cache=lambda: HostCachePolicy(
@@ -58,7 +57,6 @@ def host_policy(config: ConfigBoot) -> HostPolicy:
 
 
 def understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
-    """Compose the existing hierarchy consumer readers without reading any value."""
     return UnderstandingReadInputs(
         enabled=lambda: config.view.agent.understanding_enabled,
         default_model=lambda: config.view.lm.llm_model,
@@ -75,7 +73,6 @@ def understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
 
 
 def host_machine(config: ConfigBoot) -> MachineIdentity:
-    """Keep machine validation lazy on the same process configuration owner."""
     return machine_from_boot(config)
 
 
@@ -85,11 +82,6 @@ def load_installation(
     producer: Callable[[], Any],
     load_extensions: Callable[..., object],
 ) -> Installation:
-    """Load one installation: its registry feeds the graph and its configs feed each turn.
-
-    The shared graph is built once and cannot take a new registry. The host
-    retains this installation's boot image until its normal process restart.
-    """
     from ava.sdk_surface.installation import installed
     from base.config import Settings
     from base.config.service_read import ConfigAuthority

@@ -1,11 +1,12 @@
-"""Explicit inputs shared by runner-hosted and directly executed schedule entries."""
+# ava:ref schedules/docs/entry-composition.ava.okf.md#entry-admission-owner
 
 from collections.abc import Generator
 from contextlib import contextmanager
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
-from base.clock import Clock, clock_config_from_boot, SYSTEM_TIMERS
+from base.clock import Clock, SYSTEM_TIMERS
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
@@ -22,13 +23,11 @@ __all__ = ["fresh_schedule_entry", "schedule_entry"]
 
 @contextmanager
 def schedule_entry(inputs: ScheduleInputs) -> Generator[ScheduleInputs]:
-    """Borrow explicit runner inputs without touching the shared SDK module."""
     yield inputs
 
 
 @contextmanager
 def fresh_schedule_entry() -> Generator[ScheduleInputs]:
-    """Own this fresh executable's SDK context and release its clients on exit."""
     import ava
 
     image = process_context.loaded_code_image()

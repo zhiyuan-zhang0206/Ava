@@ -1,4 +1,53 @@
-"""Replay chunk-triggered understanding over an agent's EXISTING history (preview dev tool).
+# ava:ref scripts/verify/docs/understanding-replay.ava.okf.md#preview-entry-admission
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from langchain_core.messages import BaseMessage  # noqa: E402
+from psycopg_pool import AsyncConnectionPool  # noqa: E402
+
+from agent.llm import execute_code  # noqa: E402
+from base.agents.history.checkpoint import (  # noqa: E402
+    FullHistory,
+    list_compact_boundary_checkpoint_ids,
+    load_checkpoint_history_full,
+)
+from base.agents.history.hierarchy.chunk_consumer import ModelCache, replay_jobs  # noqa: E402
+from base.agents.history.hierarchy.chunk_plan import (  # noqa: E402
+    PlannedChunk,
+    plan_history,
+    segment_requests,
+)
+from base.agents.history.hierarchy.chunks import (  # noqa: E402
+    chunk_threshold,
+    enqueue_chunk,
+    message_time,
+)
+from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs  # noqa: E402
+from base.agents.history.hierarchy.rebuild import run_rebuild  # noqa: E402
+from base.agents.observation.snapshot import agent_model_target  # noqa: E402
+from base.clock import SYSTEM_TIMERS, Clock  # noqa: E402
+from base.clock.configuration import clock_config_from_boot  # noqa: E402
+from base.config import ConfigBoot  # noqa: E402
+from base.db import Database  # noqa: E402
+from base.db.code_version_gate import ProcessDbGate  # noqa: E402
+from base.deploy.maintenance import admission  # noqa: E402
+from base.lm.catalog import ModelCatalog  # noqa: E402
+from base.lm.context_budget import resolve_context_budget  # noqa: E402
+from base.native_process.code_version import CodeVersion  # noqa: E402
+from base.native_process.loaded_commit import LoadedCommit  # noqa: E402
+from base.packages.plugin_providers import build_model_catalog  # noqa: E402
+from base.telemetry import process_name  # noqa: E402
+
+CLI_DESCRIPTION = """Replay chunk-triggered understanding over an agent's EXISTING history (preview dev tool).
 
 Run inside the preview container (it refuses anywhere else, so a host checkout can
 never enqueue into the host's own cluster):
@@ -57,52 +106,6 @@ the consumer running, every leaf written can trigger the upper-level grouping, s
 grows level by level as it would for a live agent.
 """
 
-from __future__ import annotations
-
-import argparse
-import asyncio
-import sys
-from collections.abc import Sequence
-from pathlib import Path
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(_REPO_ROOT))
-
-from langchain_core.messages import BaseMessage  # noqa: E402
-from psycopg_pool import AsyncConnectionPool  # noqa: E402
-
-from agent.llm import execute_code  # noqa: E402
-from base.agents.history.checkpoint import (  # noqa: E402
-    FullHistory,
-    list_compact_boundary_checkpoint_ids,
-    load_checkpoint_history_full,
-)
-from base.agents.history.hierarchy.chunk_consumer import ModelCache, replay_jobs  # noqa: E402
-from base.agents.history.hierarchy.chunk_plan import (  # noqa: E402
-    PlannedChunk,
-    plan_history,
-    segment_requests,
-)
-from base.agents.history.hierarchy.chunks import (  # noqa: E402
-    chunk_threshold,
-    enqueue_chunk,
-    message_time,
-)
-from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs  # noqa: E402
-from base.agents.history.hierarchy.rebuild import run_rebuild  # noqa: E402
-from base.agents.observation.snapshot import agent_model_target  # noqa: E402
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot  # noqa: E402
-from base.config import ConfigBoot  # noqa: E402
-from base.db import Database  # noqa: E402
-from base.db.code_version_gate import ProcessDbGate  # noqa: E402
-from base.deploy.maintenance import admission  # noqa: E402
-from base.lm.catalog import ModelCatalog  # noqa: E402
-from base.lm.context_budget import resolve_context_budget  # noqa: E402
-from base.native_process.code_version import CodeVersion  # noqa: E402
-from base.native_process.loaded_commit import LoadedCommit  # noqa: E402
-from base.packages.plugin_providers import build_model_catalog  # noqa: E402
-from base.telemetry import process_name  # noqa: E402
-
 DOCKERENV = Path("/.dockerenv")
 
 
@@ -114,7 +117,6 @@ def require_preview() -> None:
 
 
 def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[str]]:
-    """The stitched history and the compaction boundary checkpoint ids, oldest first."""
     history = load_checkpoint_history_full(db, agent_id)
     boundaries = list(reversed(list_compact_boundary_checkpoint_ids(db, agent_id)))
     return history, boundaries
@@ -145,7 +147,6 @@ def _threshold(
     catalog: ModelCatalog,
     config: ConfigBoot,
 ) -> tuple[str, int, int]:
-    """(model, soft threshold, chunk threshold) for the agent."""
     model, overrides = agent_model_target(
         db,
         agent_id,
@@ -338,7 +339,7 @@ def print_replay_report(db: Database, agent_id: int) -> None:
 
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        description=CLI_DESCRIPTION, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("command", choices=("plan", "enqueue", "consume", "report", "regroup"))
     parser.add_argument("agent_id", type=int)

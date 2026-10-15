@@ -1,6 +1,7 @@
 exports = ["fakes.py", "manual_timers.py"]
 
 [uses]
+"test_cold_import.py" = ["child_cold_import.py"]
 "test_timers.py" = ["manual_timers.py"]
 
 [debt.first-party-patch]
