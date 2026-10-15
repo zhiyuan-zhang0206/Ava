@@ -151,6 +151,7 @@ def comment_owner(symbols: dict[str, Symbol], line: int) -> str:
     return "<module>"
 
 
+# ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-entry-shebang
 def parse_python(path: str, text: str) -> Source:
     tree = ast.parse(text, filename=path)
     collector = SymbolCollector(text)
@@ -159,7 +160,7 @@ def parse_python(path: str, text: str) -> Source:
         if item.type != tokenize.COMMENT:
             continue
         if item.start == (1, 0) and re.fullmatch(
-            r"#!/usr/bin/(?:env python3(?:\.12)?|python3(?:\.12)?)", item.string
+            r"#!/usr/bin/(?:env python(?:3(?:\.12)?)?|python3(?:\.12)?)", item.string
         ):
             continue
         owner = comment_owner(collector.symbols, item.start[0])

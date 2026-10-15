@@ -327,6 +327,65 @@ def test_module_property_provenance_does_not_grant_dynamic_children(tmp_path: Pa
         6,
     )
     assert isinstance(query(index, "ava.context.identity"), Unknown)
+    assert proof.documentation_name == "Surface.context"
+
+
+def _property_source(declaration: str, replacement: str = "") -> str:
+    return "\n".join(
+        [
+            "import sys",
+            "from types import ModuleType",
+            "__all_for_ava__ = ['context']",
+            declaration,
+            "class Surface(ModuleType):",
+            "    @property",
+            "    def context(self): return obtain_context()",
+            "    @context.setter",
+            "    def context(self, value): bind_context(value)",
+            "    @context.deleter",
+            "    def context(self): unbind_context()",
+            replacement,
+            "sys.modules[__name__].__class__ = Surface",
+        ]
+    )
+
+
+def test_property_annotation_owns_help_without_replacing_getter_provenance(tmp_path: Path) -> None:
+    index = _sources(
+        tmp_path,
+        {"ava/__init__.py": _property_source('context: object\n"Execution context."')},
+    )
+    proof = query(index, "ava.context")
+    assert isinstance(proof, MemberProof)
+    assert (proof.definition_module, proof.definition_name) == ("ava", "Surface.context")
+    assert (proof.source_path, proof.source_line) == ("ava/__init__.py", 8)
+    assert proof.documentation_name == "context"
+    assert isinstance(query(index, "ava.context.identity"), Unknown)
+
+
+@pytest.mark.parametrize(
+    "declaration,replacement",
+    [
+        ("context: object\ncontext: object", ""),
+        ("context: object\nif condition: context = replacement", ""),
+        ("context: object", "    context = replacement"),
+        ("context: object", "    def context(self): return replacement"),
+        ("context: object", "    property = replacement"),
+    ],
+)
+def test_annotation_does_not_repair_an_unproved_property(
+    tmp_path: Path, declaration: str, replacement: str
+) -> None:
+    index = _sources(tmp_path, {"ava/__init__.py": _property_source(declaration, replacement)})
+    assert isinstance(query(index, "ava.context"), Unknown)
+
+
+def test_current_context_help_is_owned_by_the_module_annotation() -> None:
+    index = ModuleIndex(Path(__file__).resolve().parents[4])
+    proof = query(index, "ava.context")
+    assert isinstance(proof, MemberProof)
+    assert (proof.definition_name, proof.documentation_name) == ("_SdkModule.context", "context")
+    assert proof.source_path == "ava/__init__.py"
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,10 @@ contribution location, and availability. Definition names are those of the
 implementing object: for example, the `ava.memory.search` declaration leads to `search_unwrapped`,
 not to a fictional definition named `search`. A namespace definition has
 an empty `definition_name` and its source begins at line 1.
+`documentation_name` separately identifies the help definition in that source
+file. A proved module property may use its unique annotation-only declaration
+for PEP 224 help while retaining the getter's definition identity; see the
+[documentation-owner contract](docs/provenance.ava.okf.md#property-help-owner).
 
 Availability describes declarations, not the live process:
 
