@@ -5,7 +5,10 @@ description: "Turns agreed work into an executable task graph. Use when dependen
 
 # Plan — Turn Aligned Intent into an Executable Specification
 
-Input: an alignment document (or a clear user requirement). Output: an executable plan. The granularity is "one step can be completed by one agent in one continuous session." If you're working alone, the plan is your task list; if collaboration helps, the plan describes responsibilities, dependencies, and how peers exchange results.
+Input: enough shared understanding to act, from a clear requirement or Align.
+Output: an executable plan. Steps should have meaningful outputs and fit the
+available execution context. If working alone, use a task list; if collaboration
+helps, describe responsibilities, dependencies, and how peers exchange results.
 
 For AI-dependent feasibility, scheduling, or pace assumptions, use
 [capability-timescale](../capability-timescale/SKILL.md) and carry verified
@@ -28,16 +31,18 @@ Everything in this skill (decompose, estimate, mark dependencies, set checkpoint
 2. **Every step has clear output and acceptance criteria.** "Change the code" is not a step — "Modify module X so interface Y returns format Z, verified by unit tests" is a step.
 3. **Mark dependencies and parallelizability.** Which steps can run in parallel? Which must be serial? For parallel work this is the whole point of the plan.
 4. **Surface uncertainty.** Explicitly mark what you don't know — "needs investigation to determine approach" is itself a step.
+   When an untested path controls the plan, schedule a
+   [tracer bullet](../references/working-principles.md#tracer-bullets) before
+   broad execution. Its output includes what we learned, not just what we built.
 5. **Match capabilities to the work.** Follow [Capability Matching](../SKILL.md#capability-matching); name useful skills and tools in substantial plans. Short briefs need only the capabilities their peers require.
 
 ## Process
 
 ### 1. Research existing context
 
-Before decomposing, understand:
-- Where is the relevant code? (Read `AGENTS.md`, scan project structure, search for related files)
-- Are there existing designs or discussions? (Search issues, docs, memory)
-- Are there similar implementations to reference?
+Before decomposing, find the relevant artifacts, evidence, existing decisions,
+and comparable work. For repository tasks, read `AGENTS.md` and locate the
+affected code. Investigate only context that can change the plan.
 
 ### 2. Decompose the task
 
@@ -57,7 +62,10 @@ Use MECE (Mutually Exclusive, Collectively Exhaustive) decomposition:
 
 ### 4. Define checkpoints
 
-Set checkpoints at key milestones — stop at these points to verify the direction is correct, rather than pushing to the end only to discover you've drifted. **Checkpoints are the evaluation schedule**: they decide *when and how* the work gets evaluated, which is one of the three evaluation questions (the other two live in Align and Calibrate — see the connection below).
+Set checkpoints where observations could change the remaining work. Use
+[Evaluate](../evaluate/SKILL.md) to choose the evidence and its interpretation;
+the plan records when it will be collected and what decisions depend on it.
+Evaluation can also reveal unplanned checkpoints.
 
 - Choose verification checkpoints that exercise the acceptance criteria. Include
   independent review when requested or useful; a plan does not make it mandatory.
@@ -116,12 +124,14 @@ for decisions that dependent work actually needs.
 
 ## The Evaluation Connection
 
-Planning is where **the evaluation schedule is designed**: "when and how do we evaluate" is decided here.
+Evaluate can run without a plan. When planning is useful, connect each important
+checkpoint to a claim, observable evidence, and a possible change of direction.
+Allocate attention to consequential uncertainty rather than evenly across steps.
 
-- **Each step's acceptance criteria** are mini-evaluation standards — the Work & Evaluate loop checks against them per step, before checking the whole against Align's success criteria.
-- **Checkpoints are the evaluation gates** — planned moments where you stop and verify direction. A plan without checkpoints is a plan that defers all evaluation to the very end.
-- **Dependencies and risks** tell evaluation *where to look*: the critical path and high-risk steps are the ones to evaluate most carefully, not evenly across all steps.
-- Mid-execution, if evaluation shows the *decomposition* is wrong (steps are too big, wrong order, missing pieces), that's a planning failure — return here, re-split the remaining work, and update the plan. Evaluation doesn't only judge execution; it judges the plan too.
+Evidence may change the decomposition, criteria, or goal. Revise the remaining
+plan and return to Align for material choices; do not force new observations
+into obsolete acceptance criteria. A checkpoint need not stop independent work
+or create a new approval gate.
 
 ## Standalone Use
 

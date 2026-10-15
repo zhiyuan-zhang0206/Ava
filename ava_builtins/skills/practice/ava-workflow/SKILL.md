@@ -1,13 +1,15 @@
 ---
 name: ava-workflow
-description: "Selects a working strategy for complex or unclear tasks. Use when calibration, planning, coordination, or sustained verification would improve execution."
+description: "Selects a working strategy for complex or unclear tasks. Use when shared understanding, evaluation, planning, or coordination needs deliberate attention."
 ---
 
 # Ava Workflow — Choose How to Work
 
-Workflow is the lightweight entry point for choosing a working strategy. The
-human supplies intent and preferences; agents discover facts in the world and
-choose how to pursue and verify the result. Loading this skill does not require
+Workflow is the lightweight entry point for choosing a working strategy. Align
+the agent with human intent, and both human and agent understanding with reality.
+The human supplies preferences and authority; neither participant's factual
+beliefs are automatically correct. Evaluate observations to improve both shared
+understanding and the work itself. Loading this skill does not require
 an interview, a plan document, or goal supervision. Direct execution with a
 suitable check fits short or dependent work; parallelize independent work.
 
@@ -20,12 +22,11 @@ interview. Respect the user's explicit choices and existing authorization.
 
 | Dimension | Available choices | Selection question |
 |---|---|---|
-| Understanding | Existing context, targeted reconnaissance, Calibrate | Which factual uncertainty changes the work? |
-| Intent | Direct execution, brief clarification, deeper Align | Which unresolved choice changes the outcome or authority? |
+| Alignment | Existing context, targeted reconnaissance, brief clarification, deeper Align | Which gap in intent, human understanding, or agent understanding changes the next action? |
 | Goal definition | Use the stated outcome, sharpen it briefly, Define Goal | Is completion clear and verifiable? |
 | Continuation | Finish this turn, sustained goal supervision, event-driven waiting | What should start the next useful action, and what should stop it? |
 | Collaboration | Work alone, reuse or spawn a few peers, Dynamic Workflow | Does delegation or a reusable script improve this task? |
-| Evaluation | Direct observation, deterministic checks, independent peer review, adversarial review | What evidence is sufficient for these consequences? |
+| Evaluation | Direct checks, trace review, controlled comparisons, calibrated judges, independent review | What observation would change our belief or decision, and how trustworthy is it? |
 
 Choose each dimension independently. Goal definition does not enable goal mode;
 goal mode does not require an Align session or a dynamic workflow. A dynamic
@@ -65,8 +66,12 @@ searching the environment for them.
 
 For an initial discussion, clarify the outcome and material choices first.
 Check execution prerequisites when choosing or attempting the relevant action.
-For a clear local task, reproduce the issue and verify the result. Start with a
-small real slice before widening an investigation or generating orchestration.
+For a clear local task, reproduce the issue and verify the result. When an
+untested path or assumption controls the work, use a
+[tracer bullet](references/working-principles.md#tracer-bullets): the smallest
+real path from input through outcome to feedback. This applies to research,
+content, operations, and software. A checked simple answer already closes that
+loop; do not add a separate pilot to every task.
 
 Load [capability-timescale](capability-timescale/SKILL.md) when a feasibility,
 schedule, or AI-dependent estimate rests on an unverified capability. Reuse
@@ -106,7 +111,7 @@ acceptance evidence, boundaries, next action, and necessary coordination state
 when work spans turns or needs recovery. Use durable working notes or existing work records; no collaboration plugin,
 task registry, label convention, or specific SDK is required.
 
-Calibration, alignment, planning, and evaluation can stand alone, interleave,
+Alignment (including calibration), planning, and evaluation can stand alone, interleave,
 and feed back into one another. Execute settled slices while investigating
 others when safe; reassess independent work for parallel execution at useful
 checkpoints. Changes within the agreed scope need no ceremonial reapproval;
@@ -139,19 +144,19 @@ record progress and account for interrupted watchers and external effects.
 
 ## Deeper Working Principles
 
-For substantial implementation, recurring bottlenecks, or work that must survive
-interruptions, read [working-principles](references/working-principles.md).
-It covers investing in future work, causal investigation, early feedback, and
+For an untested end-to-end path, recurring bottlenecks, substantial implementation,
+or work that must survive interruptions, read
+[working-principles](references/working-principles.md).
+It covers tracer bullets, investing in future work, causal investigation, and
 presenting decisions. A simple question or initial requirements discussion does
 not need that full procedure.
 
 ## Detailed Guides
 
-- [Calibrate](calibrate/SKILL.md) — investigate and correct factual understanding.
-- [Align](align/SKILL.md) — resolve material intent, priority, and authority choices.
+- [Align](align/SKILL.md) — align intent and calibrate human and agent understanding against reality.
 - [Define Goal](define-goal/SKILL.md) — sharpen an unclear outcome and its evidence.
 - [Plan](plan/SKILL.md) — record dependencies and checkpoints when useful.
-- [Work & Evaluate](work-eval/SKILL.md) — execute and verify against the chosen criteria.
+- [Evaluate](evaluate/SKILL.md) — discover failures, calibrate judgment, compare alternatives, and improve the work with limited human attention.
 - [Goal pursuit](../../coordination/ava-goal/SKILL.md) — sustain a terminal outcome with freely chosen execution and peer coordination.
 - [Dynamic Workflow](../../coordination/ava-dynamic-workflow/SKILL.md) — generate a Python script to coordinate peers and aggregate results.
 - [Long-running work](../../coordination/ava-being-a-long-running-agent/SKILL.md) — arrange event delivery, bounded waits, and recovery without repeated model turns.
