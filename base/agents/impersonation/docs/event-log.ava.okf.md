@@ -42,6 +42,11 @@ The emitted event still goes to Loki as an observation copy, tagged with
 `impersonation_session`. SDK sampling precedes capture, so a sampled-out call is in
 no record and the SDK sampling policy stays `unknown` in the hand-off.
 
+Central audit capture is independent of local SDK metering. The borrowed-send
+case in `gateway/tests/lifecycle/sdk/test_external_integration_agent.py` verifies
+the central `send_message` entry and lease completion without using local
+`sdk_call` records as evidence.
+
 ## Receipts and the completeness predicate
 
 A controller opens a receipt (`agent_impersonation_event_participants`) when it

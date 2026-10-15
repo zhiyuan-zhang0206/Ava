@@ -1,5 +1,3 @@
-"""A stopped generation can prove readiness without reopening native work."""
-
 import os
 from functools import partial
 from pathlib import Path
@@ -104,11 +102,9 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
             raise ProbeBoundaryError
 
         monkeypatch.setattr(agent_pause, "host_identity", inspect_before_drain)
-        # A continued release drain: its hold is published, still preparing.
         pause_owner.begin_maintenance("fleet", WHEN)
         with pytest.raises(ProbeBoundaryError):
             agent_pause.prepare(database, event_bus, "fleet", WHEN, local_machine=machine_identity)
-    # Only an explicit abort releases the hold, never the drain.
     assert admission.held()
 
 
@@ -118,15 +114,12 @@ def test_held_health_exemption_preserves_authentication(
 ) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", uuid4().hex)
     with gateway_test_client() as client:
-        # Health is already public; control-plane classification must not make
-        # the authenticated status surface public too.
         assert client.get("/api/health").status_code == 200
         assert without_credentials(client).get("/api/cluster/status").status_code == 401
     assert admission.held()
 
 
 def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
-    """The served home's ledger authenticates machine tokens; returns the human secret."""
     secret = uuid4().hex
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr("base.paths.ava_home", dotenv_file.unit_home)
@@ -137,9 +130,6 @@ def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
 def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
     monkeypatch: pytest.MonkeyPatch, served_gateway_home: Any, gateway_data_plane: None
 ) -> None:
-    """Bootstrap is control-plane: a runner started under a hold and its processes'
-    config resolution read it before any hold is released. The exemption keeps
-    the authentication and serves no database login; business stays closed."""
     _authenticated(monkeypatch)
     runner = bearer_header(served_gateway_home.api.runner)
     with gateway_test_client() as client:
@@ -164,9 +154,6 @@ def test_a_runners_first_join_reaches_a_held_gateway(
     served_gateway_home: Any,
     gateway_data_plane: None,
 ) -> None:
-    """A runner's init joins (`join_gateway`) with the bundle the gateway issued
-    while the gateway's own hold still stands, over the gateway's real
-    middleware stack."""
     from base.host.db_authority import unit
     from base.host.env import bootstrap
     from cli.commands.cluster import unit_join
@@ -191,7 +178,6 @@ def test_a_runners_first_join_reaches_a_held_gateway(
     )
     bundle = tmp_path / "mini.bundle"
     bundle.write_bytes(issued.envelope)
-    # The seeded ledger's logins are no PostgreSQL roles: skip the install's login probe.
     monkeypatch.setattr(
         unit, "install_bundle", partial(unit.install_bundle, probe=lambda _dsn: None)
     )

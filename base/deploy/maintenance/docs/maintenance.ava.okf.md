@@ -111,3 +111,13 @@ is retried with `ava stop`, or finished with `ava start`.
 
 See [operator procedure](../../../../docs/conventions/operations/graceful-maintenance.md) for
 resource scopes, recovery and the first-deployment limitation.
+
+## Readiness test boundary
+
+`tests/components/services/test_maintenance_readiness.py` verifies that held
+bootstrap still requires authentication and omits database login credentials,
+while business admission stays closed. Its first-join case runs the real gateway
+middleware through TestClient by replacing `dial_get`; it skips `install_bundle`'s
+PostgreSQL login probe because the fixture's issued login records are synthetic.
+This proves the held bootstrap path, not native network access or a successful
+login with newly installed roles.

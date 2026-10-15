@@ -1,13 +1,3 @@
-"""`services.wake.heartbeat.liveness` — the gateway-owned agent-liveness pass (Task #1174).
-
-The pass merges two signals into `agents_meta.liveness_state`: machine
-reachability (status_probe against the machines-table ops URL, offline only
-after 2 consecutive failed probes) and the process lease (`lease_expires_at`,
-R1 #1021 — expiry with the machine up = dead process). `status` is never
-touched: it stays lifecycle intent. The machine probe path is injected as a
-fake so the full DB merge runs without dialing real ops servers.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -40,7 +30,6 @@ from services.wake.heartbeat.tests.machine_probe_setup import (
 
 
 def _set_machine_probe(db: psycopg.Connection, name: str, *, online: bool, failures: int) -> None:
-    """Directly set a machine_probe row — the state a pass would have written."""
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_probe (machine_name, online, consecutive_failures, last_probe_at) "
@@ -76,9 +65,6 @@ def _make_agent(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
 ) -> int:
-    """Spawn an agent on `machine`. `lease_s_ahead` sets lease_expires_at
-    relative to now() (None = NULL, negative = expired). `claimed=False`
-    models a freshly created idling row whose ownership columns are all NULL."""
     aid = spawn_agent(
         spawner="user",
         catalog=model_catalog,
@@ -221,13 +207,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """The pass's probe budget is `settings.gateway.status_probe_timeout_seconds`
-        — the SAME setting the roster's probe reads, so the two probes stay
-        aligned by construction — not a hardcoded 3s literal (task #1200: a
-        3.0s budget flipped a slow-but-healthy runner offline). A probe
-        that outgrows the budget must be a failure (counted toward offline),
-        never a success."""
-
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 12.0)
         register_machine(db_conn)
         aid = _make_agent(
@@ -271,8 +250,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """R1 lease is the process-liveness authority: an idling row whose
-        lease expired with the machine up is a dead process -> offline."""
         register_machine(db_conn)
         aid = _make_agent(
             db_conn,
@@ -341,8 +318,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A host judged offline (>= 2 consecutive failed probes) takes every
-        non-terminated row on it offline, lease notwithstanding."""
         register_machine(db_conn)
         _set_machine_probe(db_conn, MACHINE, online=False, failures=OFFLINE_AFTER_FAILURES)
         aid = _make_agent(
@@ -363,8 +338,6 @@ class TestLivenessPass:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        # Probe success would reset the failure count — this test exercises
-        # the merge judgement directly on a pre-set probe state.
         merge_liveness(pool)
         assert _state(db_conn, aid)[0] == "offline"
         assert _state(db_conn, aid2)[0] == "offline"
@@ -381,8 +354,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """One failed probe is a blip: consecutive_failures must reach
-        OFFLINE_AFTER_FAILURES before the machine reads offline."""
         register_machine(db_conn)
         _set_machine_probe(db_conn, MACHINE, online=False, failures=1)
         aid = _make_agent(
@@ -409,7 +380,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """Consecutive failures accumulate across passes; one success resets."""
         register_machine(db_conn)
         aid = _make_agent(
             db_conn,
@@ -430,7 +400,7 @@ class TestLivenessPass:
                 probe=fail,
             )
         )
-        assert _state(db_conn, aid)[0] == "online"  # 1 failure: blip
+        assert _state(db_conn, aid)[0] == "online"
         asyncio.run(
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
@@ -439,7 +409,7 @@ class TestLivenessPass:
                 probe=fail,
             )
         )
-        assert _state(db_conn, aid)[0] == "offline"  # 2 failures: offline
+        assert _state(db_conn, aid)[0] == "offline"
         asyncio.run(
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
@@ -448,7 +418,7 @@ class TestLivenessPass:
                 probe=FakeProbe({MACHINE: True}),
             )
         )
-        assert _state(db_conn, aid)[0] == "online"  # success resets
+        assert _state(db_conn, aid)[0] == "online"
 
     @pytest.mark.usefixtures(pool.__name__)
     def test_probe_failures_count_up_and_success_resets(
@@ -491,7 +461,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A mounted frontend receives online/offline truth without a poll storm."""
         register_machine(db_conn)
         aid = _make_agent(
             db_conn,
@@ -520,7 +489,7 @@ class TestLivenessPass:
                 probe=FakeProbe({MACHINE: True}),
             )
         )
-        assert announced == []  # unknown already renders as online
+        assert announced == []
 
         announced.clear()
         asyncio.run(
@@ -531,7 +500,7 @@ class TestLivenessPass:
                 probe=FakeProbe({MACHINE: True}),
             )
         )
-        assert announced == []  # last_probe_at alone never broadcasts the fleet
+        assert announced == []
 
         fail = FakeProbe({MACHINE: False})
         asyncio.run(
@@ -550,7 +519,7 @@ class TestLivenessPass:
                 probe=fail,
             )
         )
-        assert announced == [aid]  # online -> offline
+        assert announced == [aid]
 
         announced.clear()
         asyncio.run(
@@ -561,7 +530,7 @@ class TestLivenessPass:
                 probe=fail,
             )
         )
-        assert announced == []  # offline -> offline is steady state
+        assert announced == []
 
         announced.clear()
         asyncio.run(
@@ -572,7 +541,7 @@ class TestLivenessPass:
                 probe=FakeProbe({MACHINE: True}),
             )
         )
-        assert announced == [aid]  # offline -> online
+        assert announced == [aid]
 
     @pytest.mark.usefixtures(pool.__name__)
     def test_preclaim_idling_stays_unknown(
@@ -586,8 +555,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A freshly born idling row has no process claim, so it must not flash
-        offline while the launcher is still waiting for the child to claim it."""
         register_machine(db_conn)
         aid = _make_agent(
             db_conn,
@@ -622,8 +589,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A terminated row already renders dead; the pass must not touch it
-        (its status is terminal by intent)."""
         register_machine(db_conn)
         aid = _make_agent(
             db_conn,
@@ -663,8 +628,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A row whose machine is not in the machines table is not judged —
-        stays 'unknown' (rendered conservatively as online)."""
         aid = _make_agent(
             db_conn,
             status="idling",
@@ -698,9 +661,6 @@ class TestLivenessPass:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A machine that comes back (probe success resets failures) flips its
-        agents back online on the next pass — the G5 self-heal path, no
-        manual status surgery."""
         register_machine(db_conn)
         aid = _make_agent(
             db_conn,
