@@ -492,8 +492,7 @@ export const api = {
   },
 
   getToUser: (agentId: number, signal?: AbortSignal, references: string[] = []): Promise<ToUserDocument> => {
-    const query = new URLSearchParams();
-    for (const reference of references) query.append("reference", reference);
+    const query = new URLSearchParams(references.map((reference) => ["reference", reference]));
     return f(`/api/agents/${agentId}/to-user${query.size ? `?${query}` : ""}`, { signal }).then(ok<ToUserDocument>);
   },
 
