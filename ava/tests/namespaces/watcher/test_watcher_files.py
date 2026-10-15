@@ -1,5 +1,3 @@
-"""ava.watcher generated-file housekeeping: per-agent script dir, stale pruning, session file lifetimes; split from ava/tests/namespaces/watcher/test_watcher.py (task #4922)."""
-
 from __future__ import annotations
 
 import pathlib
@@ -11,39 +9,28 @@ import ava
 from ava.watcher import files, wiring
 
 pytestmark = [
-    # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); apply it
-    # module-wide here since every watcher session test needs the fake-id +
-    # pty cleanup isolation. `pty_service` first — the isolation fixture's
-    # own kill_all/list calls hit the daemon.
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
 
 
 def _ignore_send(_session_id: int, _line: str) -> None:
-    """Accept the launch command without running it: these tests inspect the generated files."""
+    pass
 
 
 def _watchers_dir() -> pathlib.Path:
-    """Where the bound agent's generated watcher files go."""
     return wiring.spawn_deps().watchers_dir
 
 
 def test_watcher_script_dir_is_tmp_per_agent(_agent_row: int) -> None:
-    # Generated watcher scripts live under the system temp dir, scoped per
-    # cluster + agent — NOT in $AVA_HOME (the old global `watchers/` dir there
-    # accumulated 180+ files and let co-agents overwrite each other's scripts)
-    # and NOT in the workspace. Session ids are per-agent counters, so a
-    # per-agent subdir makes cross-agent collision impossible.
     import tempfile
 
     from base.paths import ava_home
 
     d = _watchers_dir()
     td = pathlib.Path(tempfile.gettempdir())
-    assert d.is_relative_to(td / "ava")  # under $TMPDIR/ava/<cluster>/<agent>/
-    assert str(ava_home()) not in str(d)  # never under $AVA_HOME
+    assert d.is_relative_to(td / "ava")
+    assert str(ava_home()) not in str(d)
     assert d.name == "watchers"
-    # cluster segment: the home basename heads the per-cluster dir
     slug = ava_home().name.lstrip(".") or "cluster"
     assert any(part == slug or part.startswith(f"{slug}-") for part in d.parts)
     assert d.is_dir()
@@ -52,9 +39,6 @@ def test_watcher_script_dir_is_tmp_per_agent(_agent_row: int) -> None:
 def test_spawn_prunes_stale_watcher_files(
     _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
-    # Every launch deletes generated watcher files from earlier watchers: a
-    # hard-killed watcher cannot self-clean, and its pair would otherwise
-    # accumulate forever. Non-generated files are left alone.
     d = _watchers_dir()
     stale_script = d / "watcher_999.py"
     stale_boot = d / "watcher_999_boot.py"
@@ -70,17 +54,14 @@ def test_spawn_prunes_stale_watcher_files(
     assert not stale_script.exists()
     assert not stale_boot.exists()
     assert not stale_launch.exists()
-    assert keep.exists()  # non-generated files survive
-    assert (d / f"watcher_{wid}.py").exists()  # the new pair is there
+    assert keep.exists()
+    assert (d / f"watcher_{wid}.py").exists()
     assert (d / f"watcher_{wid}_boot.py").exists()
 
 
 def test_prune_does_not_touch_other_agents_files(
     _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
-    # Isolation is per-agent: pruning this agent's stale files must never
-    # reach into another agent's subdir (the old global dir let agents
-    # overwrite each other — that is the bug this layout exists to prevent).
     d = _watchers_dir()
     other = d.parent / str(ava.self.AGENT_ID + 1) / "watchers"
     other.mkdir(parents=True, exist_ok=True)
@@ -89,18 +70,12 @@ def test_prune_does_not_touch_other_agents_files(
 
     launch_watcher("import ava\n", "1h", "test-isolation", send=_ignore_send)
 
-    assert foreign.exists()  # untouched
+    assert foreign.exists()
 
 
 def test_spawn_keeps_sibling_files_while_session_alive(
     _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
-    """Bug A (task #1116): a generated pair whose SESSION still exists must
-    not be pruned — launch is asynchronous (the command is sent into a fresh
-    session whose shell takes a moment to come up), so a back-to-back sibling
-    launch deleting it would make that watcher's python start fail with
-    "can't open file ... _boot.py". Only provably-dead pairs (session gone)
-    are pruned."""
     d = _watchers_dir()
     live_script = d / "watcher_4242.py"
     live_boot = d / "watcher_4242_boot.py"
@@ -123,7 +98,6 @@ def test_spawn_keeps_sibling_files_while_session_alive(
         live_session_ids=lambda: {4242},
     )
 
-    # live sibling's pair survives (session 4242 exists); dead pair is pruned
     assert live_script.exists() and live_boot.exists() and live_launch.exists()
     assert not dead_script.exists() and not dead_boot.exists() and not dead_launch.exists()
     assert (d / f"watcher_{wid}.py").exists()
@@ -132,8 +106,6 @@ def test_spawn_keeps_sibling_files_while_session_alive(
 def test_spawn_back_to_back_keeps_all_files(
     _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
-    """Back-to-back launches must keep every live sibling's boot file (task #1116).
-    The fake exposes each session immediately, as the backend does."""
     alive: set[int] = set()
     counter = iter(range(1000, 1003))
 
@@ -158,7 +130,6 @@ def test_spawn_back_to_back_keeps_all_files(
         )
         ids.append(wid)
 
-    # all three pairs on disk — none pruned while its session is live
     for wid in ids:
         assert (d / f"watcher_{wid}.py").exists(), f"watcher_{wid}.py pruned"
         assert (d / f"watcher_{wid}_boot.py").exists(), f"watcher_{wid}_boot.py pruned"

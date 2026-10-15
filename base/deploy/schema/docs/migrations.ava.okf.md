@@ -120,3 +120,7 @@ Contributor steps and validation commands: [database migration guide](../../../.
 
 - [[base/docs/base.ava.okf.md]] — the base-layer overview
 - [[cli/docs/cli.ava.okf.md]] — `ava start` and the fleet update (`cli/fleet_update.py`), which apply and roll back
+
+The daemon-shutdown child in `tests/schema_gate.py` deliberately replaces
+schema admission so the signal test does not dial a live cluster. It exercises
+shutdown wiring, not compatibility admission or successful schema validation.

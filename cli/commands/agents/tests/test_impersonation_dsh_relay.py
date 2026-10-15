@@ -1,5 +1,3 @@
-"""The dsh relay plugin: the adapter emits one JSON string per line and the plugin steers each line into its session."""
-
 import json
 import shutil
 import subprocess
@@ -13,7 +11,6 @@ _SKILL_DIR = Path(__file__).parents[4] / "ava_builtins/skills/platform/ava-guide
 
 
 def test_dsh_relay_emits_one_json_string_per_line(capsys: pytest.CaptureFixture[str]) -> None:
-    """The plugin splits relay stdout by line: a multi-line envelope must stay one line."""
     from cli.commands.agents.impersonation_adapters import resolve_adapter
 
     resolve_adapter("dsh", None).send("Ava message agent=42\n[id=7] kind=chat\nhi")
@@ -83,7 +80,6 @@ def _run_plugin(tmp_path: Path, *args: str) -> dict[str, Any]:
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="the dsh plugin runs on Node.js")
 def test_dsh_plugin_relays_the_session_stub_into_that_session(tmp_path: Path) -> None:
-    """Stub -> relay child with the scoped token -> each JSON line steered, envelopes intact."""
     envelope = "Ava message agent=42 lease=3 ids=7\n[id=7] kind=chat from=user\nhi"
     texts = tmp_path / "texts.json"
     texts.write_text(json.dumps(["Ava control active.", envelope]), encoding="utf-8")
@@ -100,8 +96,16 @@ def test_dsh_plugin_relays_the_session_stub_into_that_session(tmp_path: Path) ->
     relay.chmod(0o755)
     result = _run_plugin(tmp_path, str(relay), "relay")
     assert (tmp_path / "argv.txt").read_text().split() == [
-        "-m", "cli", "impersonate", "relay", "42", "--session", "3", "--provider", "dsh",
-    ]  # fmt: skip
+        "-m",
+        "cli",
+        "impersonate",
+        "relay",
+        "42",
+        "--session",
+        "3",
+        "--provider",
+        "dsh",
+    ]
     assert (tmp_path / "token.txt").read_text() == "tok-3"
     steered: list[dict[str, Any]] = result["steered"]
     assert [m["content"][0]["text"] for m in steered] == ["Ava control active.", envelope]
