@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from base.events.vocabulary import EventSpec, telemetry_event
 
@@ -34,6 +34,21 @@ class HostDispatcherScanFailed(TypedDict):
     """`host_dispatcher_scan_failed` payload — agent-host durable backstop."""
 
     backoff_s: float
+
+
+class HostAdmissionRefused(TypedDict):
+    """`host_admission_refused` payload — agent/ownership/hosted.py::_record_admission_refusal.
+
+    One event per refusal recorded with durable row state: `outcome` is the
+    AdmissionOutcome the channel recorded, `reason` the evidence classification
+    (successor-closure / receipt-less / fences / dead-owner / other) and
+    `detail` the operator-facing evidence text when the refusal produced one.
+    The stream stays complete; the alerting layer picks the pathological shapes.
+    """
+
+    outcome: str
+    reason: str
+    detail: NotRequired[str]
 
 
 class ImpersonationTerminalNoticeFailed(TypedDict):
@@ -309,6 +324,16 @@ EVENTS: dict[str, EventSpec] = {
         "reason. Nothing retries it: the external controller learns the lease ended "
         "only on its next relay call",
         payload=ImpersonationTerminalNoticeFailed,
+        tier="anomaly",
+    ),
+    "host_admission_refused": telemetry_event(
+        "host_admission_refused",
+        "a hosted admission attempt was refused with durable row state — carries the "
+        "outcome, its evidence reason code and the operator-facing detail, so a "
+        "successor-closure wedge like the 2026-10-15 block is visible from the stream "
+        "instead of only from host logs; recorded completely, the alerting layer picks "
+        "the pathological shapes",
+        payload=HostAdmissionRefused,
         tier="anomaly",
     ),
     "host_admission_wait_exceeded": telemetry_event(

@@ -11,9 +11,11 @@ from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.incarnation.lifecycle_acceptance import (
     LIFECYCLE_RELEASE,
+    RELEASE_TARGET,
     UNOWNED_TERMINATION_ID,
     UNOWNED_TERMINATION_RECORDED,
 )
+from base.agents.incarnation.resources import IncarnationResources, decode_resources
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.api_contracts.agent_contract import (
     AgentNotFound,
@@ -52,6 +54,30 @@ RESURRECTION_ROW: LiteralString = (
     + UNOWNED_TERMINATION_ID
     + " FROM agents_meta WHERE id = %s FOR UPDATE"
 )
+
+
+def _closed_release_identity(
+    incarnation: RuntimeIncarnation | None, resources: object
+) -> RuntimeIncarnation | None:
+    """The generation-bound release record for a closed retained life, or None.
+
+    Written with the ownership flip (issue #5049) so the successor admission
+    can close this incarnation while its recorded host process is still alive,
+    instead of refusing until a host restart. A set with attached requests, a
+    force-frozen set, or no recorded host process vouches for nothing; an
+    unknown or retired shape already refused the whole resurrection upstream.
+    """
+    if incarnation is None or resources is None:
+        return None
+    state = decode_resources(resources)
+    if (
+        isinstance(state, IncarnationResources)
+        and not state.requests
+        and state.frozen_by is None
+        and state.host_process is not None
+    ):
+        return incarnation
+    return None
 
 
 def transition_terminated_to_unclaimed_idling(
@@ -206,6 +232,7 @@ def _prepare_resurrect_attempt(
             resources=row[8],
             unowned_termination=unowned_termination,
         )
+        release = _closed_release_identity(incarnation, row[8])
         # The resurrection inbound is inserted before the settlement check so
         # its id can fence the new incarnation's epoch: every earlier unapplied
         # lifecycle command is settled as superseded right here (issue #2158),
@@ -214,10 +241,21 @@ def _prepare_resurrect_attempt(
         # Stamp after the lock: a transaction begun before termination committed
         # must not sort its resurrection ahead of the interruption notices. The
         # row leaves this transaction unowned, a lifecycle release.
+        # The released generation and owner travel on this row's payload when
+        # the flip closed a retained life, so the successor reads one durable
+        # generation-scoped release record instead of guessing closure at
+        # admission (issue #5049; lifecycle targets themselves stay reserved
+        # for restart/terminate commands).
+        release_payload: dict[str, object] = {LIFECYCLE_RELEASE: True}
+        if release is not None:
+            release_payload[RELEASE_TARGET] = {
+                "generation": str(release.generation),
+                "owner": str(release.owner),
+            }
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at, payload) "
             "VALUES (%s, '', 'resurrect', %s, clock_timestamp(), %s) RETURNING id",
-            (agent_id, resurrected_by, Jsonb({LIFECYCLE_RELEASE: True})),
+            (agent_id, resurrected_by, Jsonb(release_payload)),
         )
         resurrect_row = cur.fetchone()
         if resurrect_row is None:

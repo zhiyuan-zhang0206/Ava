@@ -284,6 +284,13 @@ def supersede_lifecycle_for_force(conn: psycopg.Connection, agent_id: int, force
 LIFECYCLE_RELEASE = "lifecycle_release"
 UNOWNED_TERMINATION = "unowned_termination"
 
+# The released generation and owner recorded on the command whose transition
+# left the row unowned (a resurrect whose flip closed a retained hosted life):
+# `{"release_target": {"generation": ..., "owner": ...}}`. The successor
+# admission reads this as the generation-scoped closure record; a release
+# without it vouches for nothing (issue #5049).
+RELEASE_TARGET = "release_target"
+
 # The unaliased agents_meta row's unowned state came from this runtime's lifecycle.
 _LIFECYCLE_ORIGIN: LiteralString = (
     "(agents_meta.last_resurrect_inbound_id = 0 OR EXISTS (SELECT 1 FROM inbound_messages r "

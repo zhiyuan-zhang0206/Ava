@@ -34,6 +34,23 @@ class ResourceEvidenceError(RuntimeError):
     """Missing, stale or incomplete evidence cannot authorize resource work."""
 
 
+class ResourceClosureError(ResourceEvidenceError):
+    """A successor cannot close its predecessor's resource/lifecycle set.
+
+    ``receipt_less`` distinguishes the two shapes: attached allocations whose
+    terminal receipt never landed, versus a closed set whose release record is
+    missing, damaged or not this successor's to consume.
+    """
+
+    def __init__(self, message: str, *, receipt_less: bool) -> None:
+        super().__init__(message)
+        self.receipt_less = receipt_less
+
+
+class ResourceFenceError(ResourceEvidenceError):
+    """A force freeze or a host-identity change refuses same-owner admission."""
+
+
 class ResourceShapeError(ResourceEvidenceError, ValueError):
     """A stored value the current model cannot decode: malformed, or written by
     a retired runtime (process receipts without native boot scope). No runtime
