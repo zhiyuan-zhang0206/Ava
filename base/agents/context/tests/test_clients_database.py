@@ -1,5 +1,3 @@
-"""Native client construction keeps the explicit database independent of process defaults."""
-
 import pytest
 
 from base.agents.context.clients import ClientSet

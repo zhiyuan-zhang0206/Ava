@@ -1,5 +1,3 @@
-"""The `lgtm render` parser flags."""
-
 from __future__ import annotations
 
 from cli.parsers import build_parser

@@ -1,5 +1,3 @@
-"""The recent-conversation query both recall passes key on (`agent/graph/recall/conversation_query.py`)."""
-
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.graph.recall.conversation_query import (

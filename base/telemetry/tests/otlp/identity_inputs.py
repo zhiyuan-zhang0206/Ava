@@ -1,5 +1,3 @@
-"""Concrete telemetry identities supplied by test composition roots."""
-
 from base.cluster.machine import MachineIdentity, MachineRoleMissing, MachineRoles
 
 

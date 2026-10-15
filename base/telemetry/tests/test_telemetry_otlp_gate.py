@@ -1,5 +1,3 @@
-"""OTLP eligibility is supplied by a concrete machine owner, never global identity."""
-
 import os
 from pathlib import Path
 

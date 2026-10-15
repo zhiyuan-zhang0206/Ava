@@ -1,5 +1,3 @@
-"""The AVA_OBSERVABILITY_URL base every station consumer validates the same way."""
-
 from __future__ import annotations
 
 import pytest

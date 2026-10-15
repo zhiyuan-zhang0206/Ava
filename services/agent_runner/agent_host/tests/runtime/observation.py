@@ -1,5 +1,3 @@
-"""The explicit context facts observed inside a hosted graph node task."""
-
 from dataclasses import dataclass
 from typing import Protocol
 

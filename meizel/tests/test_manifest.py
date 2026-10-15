@@ -1,5 +1,3 @@
-"""Manifest validation: every way a `meizel.toml` is malformed or out of date."""
-
 from __future__ import annotations
 
 import pytest

@@ -1,5 +1,3 @@
-"""One real write/flush/ACK fault per original continuation; never fabricate a result."""
-
 from typing import Any
 
 import psycopg

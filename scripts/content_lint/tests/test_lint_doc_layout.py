@@ -1,5 +1,3 @@
-"""Relocated contributor docs keep live checks and frozen-history boundaries."""
-
 from pathlib import Path
 
 import pytest

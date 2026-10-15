@@ -1,5 +1,3 @@
-"""An unreadable process-group member is not an empty execution domain."""
-
 from collections.abc import Iterator
 from unittest.mock import Mock
 

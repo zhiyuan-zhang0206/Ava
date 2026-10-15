@@ -1,5 +1,3 @@
-"""Actual refresh attempts retain their errors across finite shutdown."""
-
 import threading
 import time
 

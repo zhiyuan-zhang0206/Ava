@@ -1,5 +1,3 @@
-"""Inbound attachments survive the timeline and the handoff."""
-
 from typing import Any
 from uuid import uuid4
 

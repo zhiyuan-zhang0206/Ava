@@ -1,5 +1,3 @@
-"""Owned image writes reject mixed owners and stale revisions."""
-
 import json
 from collections.abc import Generator
 from pathlib import Path

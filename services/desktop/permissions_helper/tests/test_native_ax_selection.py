@@ -1,5 +1,3 @@
-"""Verify actual native literal selection logic without accessing Accessibility."""
-
 from __future__ import annotations
 
 import shutil

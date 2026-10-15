@@ -1,5 +1,3 @@
-"""Reader provenance contracts for the profile consumption matrix."""
-
 from pathlib import Path
 
 import pytest

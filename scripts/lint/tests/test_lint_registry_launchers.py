@@ -1,5 +1,3 @@
-"""The launchers bind the real config registry to the meizel rules that read it."""
-
 from __future__ import annotations
 
 from pathlib import Path

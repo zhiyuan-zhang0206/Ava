@@ -1,5 +1,3 @@
-"""The native daemon fixes SDK process posture before any boot dependency read."""
-
 from __future__ import annotations
 
 import os

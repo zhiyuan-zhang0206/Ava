@@ -1,5 +1,3 @@
-"""Permanent provider errors block background wakes until explicit fresh chat."""
-
 from uuid import uuid4
 
 import psycopg

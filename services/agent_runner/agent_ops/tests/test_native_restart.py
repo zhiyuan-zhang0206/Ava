@@ -1,5 +1,3 @@
-"""Only the guarded restart receipt owns replay after an Ops response is lost."""
-
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any

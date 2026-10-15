@@ -1,5 +1,3 @@
-"""Explicit external profiles cannot impersonate an inherited Ava agent."""
-
 import json
 
 import pytest

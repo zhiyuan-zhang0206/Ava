@@ -1,5 +1,3 @@
-"""Host turn metadata never selects the SDK's process-local identity."""
-
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor

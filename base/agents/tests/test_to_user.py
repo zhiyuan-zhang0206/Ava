@@ -1,5 +1,3 @@
-"""File ownership and bounds of the shared context read."""
-
 import os
 from pathlib import Path
 from typing import cast

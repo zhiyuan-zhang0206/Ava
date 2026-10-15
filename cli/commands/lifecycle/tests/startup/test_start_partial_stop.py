@@ -1,5 +1,3 @@
-"""A proven pre-application start can stop without a nonexistent DB drain."""
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any

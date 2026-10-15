@@ -1,5 +1,3 @@
-"""Closure restore: native-owner restoration, guarded rows, and rollback with an open lease; split from base/tests/impersonation/test_impersonation.py (task #4922)."""
-
 from __future__ import annotations
 
 from uuid import uuid4

@@ -1,5 +1,3 @@
-"""`ava.gateway_client.patch_label` — the wire shape of an agent's label change."""
-
 import json
 
 import httpx

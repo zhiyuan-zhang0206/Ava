@@ -1,5 +1,3 @@
-"""Invalid entry configuration fails before publishing memory-indexer health."""
-
 from pathlib import Path
 from unittest.mock import AsyncMock
 

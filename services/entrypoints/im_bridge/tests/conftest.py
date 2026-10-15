@@ -1,5 +1,3 @@
-"""Core router doubles implement the durable adapter seam; stores stay real."""
-
 from collections.abc import Iterator
 from pathlib import Path
 

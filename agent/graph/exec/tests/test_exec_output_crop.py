@@ -1,5 +1,3 @@
-"""Soft output previews keep recoverable files while their context references live."""
-
 from pathlib import Path
 from typing import IO, Any
 

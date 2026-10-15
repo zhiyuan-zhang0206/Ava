@@ -1,5 +1,3 @@
-"""Recording wiring participant for the daemon wiring tests, loaded with `--wiring`."""
-
 import os
 from pathlib import Path
 from typing import Any

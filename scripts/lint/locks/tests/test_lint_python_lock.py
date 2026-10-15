@@ -1,5 +1,3 @@
-"""Regional mirror transport must never become the shared frozen CI lock."""
-
 from __future__ import annotations
 
 from pathlib import Path

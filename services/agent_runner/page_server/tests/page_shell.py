@@ -1,5 +1,3 @@
-"""A deterministic page shell backend used by actual reconcile operations."""
-
 from pathlib import Path
 
 __all__ = ["PageShellBackend"]

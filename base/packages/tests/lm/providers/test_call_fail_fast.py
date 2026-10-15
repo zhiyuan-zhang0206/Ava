@@ -1,5 +1,3 @@
-"""Unexpected runnable failures execute once and keep their original exception."""
-
 from typing import Any
 
 import httpx2

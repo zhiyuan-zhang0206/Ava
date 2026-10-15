@@ -1,5 +1,3 @@
-"""Turn teardown retains its original tasks and resource evidence through cancellation."""
-
 import asyncio
 from pathlib import Path
 

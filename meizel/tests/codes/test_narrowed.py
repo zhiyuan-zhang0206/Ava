@@ -1,5 +1,3 @@
-"""Declared edges whose endpoints name a deeper path than a child of the directory."""
-
 from __future__ import annotations
 
 import tomllib

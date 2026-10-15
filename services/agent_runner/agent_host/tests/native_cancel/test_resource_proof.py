@@ -1,5 +1,3 @@
-"""Historical lifecycle receipts cannot replace current runtime ownership."""
-
 import asyncio
 from uuid import uuid4
 

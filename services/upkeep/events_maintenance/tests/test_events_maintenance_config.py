@@ -1,5 +1,3 @@
-"""The events-maintenance composition root builds its slice from the flat registry fields."""
-
 from __future__ import annotations
 
 import dataclasses

@@ -1,5 +1,3 @@
-"""A compact permit linearizes before late cancel; native closure is never overwritten."""
-
 from dataclasses import replace
 from typing import Any
 

@@ -1,5 +1,3 @@
-"""Actual inbound-history trigger and application permit order concurrent input."""
-
 import asyncio
 from dataclasses import replace
 from typing import Any

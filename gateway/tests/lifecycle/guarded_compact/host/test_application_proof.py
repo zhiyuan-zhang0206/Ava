@@ -1,5 +1,3 @@
-"""A matching marker and successful summary cannot certify an unmaterialized replacement."""
-
 from dataclasses import replace
 from typing import Any
 

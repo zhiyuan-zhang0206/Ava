@@ -1,5 +1,3 @@
-"""Durable system-note acceptance survives ambiguous responses and concurrent retries."""
-
 from concurrent.futures import ThreadPoolExecutor
 
 import psycopg

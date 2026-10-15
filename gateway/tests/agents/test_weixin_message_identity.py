@@ -1,5 +1,3 @@
-"""Gateway chat message idempotency rejects changed body or target selection on the same Weixin event key."""
-
 import asyncio
 import json
 from pathlib import Path

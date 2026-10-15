@@ -1,5 +1,3 @@
-"""The ambient-clock rule (meizel/state/ambient_state/clockrule.py)."""
-
 from __future__ import annotations
 
 import ast

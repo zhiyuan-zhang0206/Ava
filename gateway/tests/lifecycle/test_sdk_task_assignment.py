@@ -1,5 +1,3 @@
-"""Compound SDK acceptance has one keyed route and no separate spawn/create recipe."""
-
 from typing import Any
 from unittest.mock import MagicMock
 

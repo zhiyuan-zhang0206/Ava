@@ -1,5 +1,3 @@
-"""Restricted Python: dynamic forms are errors unless the file declares its loads."""
-
 from __future__ import annotations
 
 import pytest

@@ -1,5 +1,3 @@
-"""AgentStatus dependency guards for the built-in schedule templates."""
-
 from __future__ import annotations
 
 import ast

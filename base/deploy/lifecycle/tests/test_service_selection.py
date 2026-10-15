@@ -1,5 +1,3 @@
-"""Desired roster persists independently of one transient start attempt."""
-
 from pathlib import Path
 
 import pytest

@@ -1,5 +1,3 @@
-"""Browser-vs-host diagnostic evidence, through application protocols."""
-
 from pathlib import Path
 from types import SimpleNamespace
 

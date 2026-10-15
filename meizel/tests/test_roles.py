@@ -1,5 +1,3 @@
-"""`[roles]`: the single declaration of the top-level packages and what each is."""
-
 from __future__ import annotations
 
 import pytest

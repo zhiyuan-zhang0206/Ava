@@ -1,5 +1,3 @@
-"""Agent admission and client connection budgets are independent settings."""
-
 import pytest
 from pydantic import ValidationError
 

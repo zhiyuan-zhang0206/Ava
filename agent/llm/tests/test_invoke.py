@@ -1,5 +1,3 @@
-"""Compaction calls preserve their prefix, deadline and failure authority."""
-
 from __future__ import annotations
 
 import asyncio

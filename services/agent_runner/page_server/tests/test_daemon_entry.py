@@ -1,5 +1,3 @@
-"""The page-server entry shares its captured image gate with logging and work."""
-
 from __future__ import annotations
 
 import asyncio

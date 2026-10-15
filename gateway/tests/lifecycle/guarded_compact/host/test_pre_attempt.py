@@ -1,5 +1,3 @@
-"""Rejected construction without an attempt cannot starve later ordinary input."""
-
 from dataclasses import replace
 
 import psycopg

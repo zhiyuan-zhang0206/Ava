@@ -1,5 +1,3 @@
-"""The placement rule: a test's home comes from its own first-party references."""
-
 from __future__ import annotations
 
 import ast

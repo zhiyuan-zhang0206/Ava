@@ -1,5 +1,3 @@
-"""Gateway startup contract for provider-plugin availability."""
-
 from __future__ import annotations
 
 import pytest

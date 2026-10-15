@@ -1,5 +1,3 @@
-"""Formal converge roots share live configuration without early policy reads."""
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any

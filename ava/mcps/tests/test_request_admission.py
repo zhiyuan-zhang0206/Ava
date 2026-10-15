@@ -1,5 +1,3 @@
-"""Enable admission precedes session reuse, including previously acquired callables."""
-
 import json
 from pathlib import Path
 from unittest.mock import MagicMock

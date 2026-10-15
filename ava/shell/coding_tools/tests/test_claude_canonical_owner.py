@@ -1,5 +1,3 @@
-"""Skill-level contracts for the isolated Claude Code and Antigravity launchers."""
-
 from __future__ import annotations
 
 import datetime as dt

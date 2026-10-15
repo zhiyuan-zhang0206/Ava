@@ -1,5 +1,3 @@
-"""Converge's warning-only assertion for local Git hook installations."""
-
 from __future__ import annotations
 
 import subprocess

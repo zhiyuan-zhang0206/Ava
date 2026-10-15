@@ -1,5 +1,3 @@
-"""Native alert facts, atomic fanout, recovery and SENT fences use real Postgres."""
-
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor

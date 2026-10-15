@@ -1,5 +1,3 @@
-"""Durable acceptance is not completion, and never retargets a successor."""
-
 from uuid import uuid4
 
 import psycopg
@@ -101,7 +99,6 @@ async def test_acceptance_rollback_leaves_no_pointer_or_claim(
 async def test_old_unconditional_writer_still_requires_upgrade_barrier(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    """Schema alone cannot fence an N-1 writer: deployment must stop it first."""
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = insert_lifecycle_command(db_conn, agent_id, "restart")

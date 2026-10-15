@@ -1,5 +1,3 @@
-"""`ops.cluster.operations.cluster_status_op` returns the status snapshot of its pool."""
-
 from __future__ import annotations
 
 from pathlib import Path

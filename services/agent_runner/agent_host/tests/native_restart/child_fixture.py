@@ -1,5 +1,3 @@
-"""Isolated child fixtures for original-owner identity tests."""
-
 import subprocess
 from pathlib import Path
 

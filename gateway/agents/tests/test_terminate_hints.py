@@ -1,5 +1,3 @@
-"""The lifecycle response survives failure of its advisory open-task read."""
-
 from typing import NoReturn
 
 import psycopg

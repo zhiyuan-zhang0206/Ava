@@ -1,5 +1,3 @@
-"""The CLI parser exposes no second Linux boot-unit verb surface."""
-
 from __future__ import annotations
 
 import pytest

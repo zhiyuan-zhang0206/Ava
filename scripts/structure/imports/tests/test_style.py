@@ -1,5 +1,3 @@
-"""Top-level package import style preserves the shared dependency facts."""
-
 from __future__ import annotations
 
 import ast

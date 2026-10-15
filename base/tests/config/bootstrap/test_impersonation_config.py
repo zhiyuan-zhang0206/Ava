@@ -1,5 +1,3 @@
-"""Delivery policy is registered, validated and distributed as cluster config."""
-
 from pathlib import Path
 from typing import cast
 

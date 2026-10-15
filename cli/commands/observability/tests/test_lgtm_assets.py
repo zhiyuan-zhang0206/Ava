@@ -1,5 +1,3 @@
-"""Pinned native LGTM release assets and supported platform selection."""
-
 from pathlib import Path
 
 import pytest

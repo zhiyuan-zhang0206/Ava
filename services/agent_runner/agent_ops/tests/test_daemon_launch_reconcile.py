@@ -1,5 +1,3 @@
-"""Launch reconciliation dispatches to its own repeatable handler, not the creation launch."""
-
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from uuid import UUID, uuid4

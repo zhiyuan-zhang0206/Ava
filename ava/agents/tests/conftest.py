@@ -1,5 +1,3 @@
-"""Opt-in unit fixtures shared by this test directory."""
-
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.config_authority import config_authority as config_authority
 from base.packages.tests.model_catalog import add_bindings as add_bindings

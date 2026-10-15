@@ -1,5 +1,3 @@
-"""`debt sites`: where the source holds each patch of a code, optionally under target prefixes."""
-
 from __future__ import annotations
 
 import json

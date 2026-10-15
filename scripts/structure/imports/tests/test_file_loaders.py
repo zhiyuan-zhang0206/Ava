@@ -1,5 +1,3 @@
-"""File-loader evidence requires a real local execution chain."""
-
 import ast
 from pathlib import Path
 

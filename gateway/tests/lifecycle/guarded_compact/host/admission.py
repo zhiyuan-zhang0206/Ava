@@ -1,5 +1,3 @@
-"""Actual first hosted work and verified guarded HTTP acceptance for fault tests."""
-
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4

@@ -1,5 +1,3 @@
-"""Execute the native drag body against inert CGEvent substitutes, never a desktop."""
-
 from __future__ import annotations
 
 import shutil

@@ -1,5 +1,3 @@
-"""Composition-owned machine fields keep lazy caches and explicit reset boundaries."""
-
 import pytest
 
 from base.cluster.machine import MachineNameMissing

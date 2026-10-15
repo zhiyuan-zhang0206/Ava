@@ -1,5 +1,3 @@
-"""First-takeover context and crash-safe introduction receipts."""
-
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any

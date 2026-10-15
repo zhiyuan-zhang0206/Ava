@@ -1,5 +1,3 @@
-"""Real managed-owner and original-work fixtures for the native cancel chain."""
-
 from uuid import uuid4
 
 import psycopg

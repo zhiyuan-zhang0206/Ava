@@ -1,5 +1,3 @@
-"""Native test builders share one explicit, nonexempt loaded-image admission owner."""
-
 from pathlib import Path
 from typing import Any
 

@@ -1,5 +1,3 @@
-"""One ordinary turn followed by the turn resumed after a takeover ends."""
-
 from langchain_core.messages import AIMessage
 
 from tests.e2e.fakes.scenario_recording import RecordingModel

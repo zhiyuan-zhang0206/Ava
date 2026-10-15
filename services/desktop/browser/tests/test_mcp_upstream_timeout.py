@@ -1,5 +1,3 @@
-"""Connect readers are consumed by the existing stop/initialize race."""
-
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager

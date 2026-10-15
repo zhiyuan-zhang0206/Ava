@@ -1,5 +1,3 @@
-"""Original source acceptance replays independently of mutable work and queue state."""
-
 import asyncio
 from typing import Any
 from uuid import uuid4

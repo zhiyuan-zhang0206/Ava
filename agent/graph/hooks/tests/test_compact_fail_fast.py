@@ -1,5 +1,3 @@
-"""Programming errors cannot retry compaction or enter its history-trim fallback."""
-
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 

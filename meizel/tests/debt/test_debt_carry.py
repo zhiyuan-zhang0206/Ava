@@ -1,5 +1,3 @@
-"""`debt carry`: recorded debt follows a file that git sees as renamed."""
-
 from __future__ import annotations
 
 import tomllib

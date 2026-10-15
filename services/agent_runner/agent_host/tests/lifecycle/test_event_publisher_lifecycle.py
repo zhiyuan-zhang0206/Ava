@@ -1,5 +1,3 @@
-"""The real invocation boundary supervises its live-event worker."""
-
 from __future__ import annotations
 
 import asyncio

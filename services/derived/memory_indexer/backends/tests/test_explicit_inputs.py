@@ -1,5 +1,3 @@
-"""NumPy clients keep each owner's URI live at the original I/O boundary."""
-
 from __future__ import annotations
 
 import httpx

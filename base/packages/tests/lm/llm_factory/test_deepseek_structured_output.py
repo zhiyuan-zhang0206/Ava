@@ -1,5 +1,3 @@
-"""Exercise the real DeepSeek factory and SDKs against captured HTTP requests."""
-
 from __future__ import annotations
 
 import json

@@ -1,5 +1,3 @@
-"""The actual run_turn root preserves children, native barriers and primary errors."""
-
 import asyncio
 from collections.abc import Awaitable
 

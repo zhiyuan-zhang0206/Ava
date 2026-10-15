@@ -1,5 +1,3 @@
-"""Private disposable workers for scheduler operation tests."""
-
 from __future__ import annotations
 
 import asyncio

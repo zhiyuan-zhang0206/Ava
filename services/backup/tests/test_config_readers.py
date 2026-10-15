@@ -1,5 +1,3 @@
-"""Backup operations consume required readers at their existing decision points."""
-
 from datetime import UTC, datetime
 from pathlib import Path
 

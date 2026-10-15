@@ -1,5 +1,3 @@
-"""Observed restart keeps original work, caller attribution and command progress."""
-
 import json
 from uuid import uuid4
 

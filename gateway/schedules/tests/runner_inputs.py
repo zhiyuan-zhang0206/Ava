@@ -1,5 +1,3 @@
-"""Explicit SDK inputs for tests of the schedule execution engine."""
-
 from contextlib import closing
 from functools import partial
 

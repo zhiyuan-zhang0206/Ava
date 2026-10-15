@@ -1,5 +1,3 @@
-"""Actual native owner, ended work and cold persisted source for compact storage tests."""
-
 from typing import Any
 
 import psycopg

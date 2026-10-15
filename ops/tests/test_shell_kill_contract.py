@@ -1,5 +1,3 @@
-"""One home-runner vocabulary; transport absence cannot enter the RPC contract."""
-
 import pytest
 from pydantic import ValidationError
 

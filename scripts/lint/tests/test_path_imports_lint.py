@@ -1,5 +1,3 @@
-"""Path-import sites fail directly; retired baseline fields cannot permit them."""
-
 from __future__ import annotations
 
 import ast

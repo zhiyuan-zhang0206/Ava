@@ -1,5 +1,3 @@
-"""Context-owned ordinary writers stay cold and retain finite-stop evidence."""
-
 from __future__ import annotations
 
 import threading

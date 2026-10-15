@@ -1,5 +1,3 @@
-"""Drag contract through MCP dispatch and the helper's actual JSON client."""
-
 from __future__ import annotations
 
 import json

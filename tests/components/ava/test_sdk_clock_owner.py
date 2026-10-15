@@ -1,5 +1,3 @@
-"""SDK operation clocks retain their real installation or context owner."""
-
 from __future__ import annotations
 
 import os

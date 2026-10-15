@@ -1,5 +1,3 @@
-"""Every detected library-built handle fails without a stored allowance."""
-
 from __future__ import annotations
 
 import ast

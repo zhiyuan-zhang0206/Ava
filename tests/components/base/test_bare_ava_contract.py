@@ -1,5 +1,3 @@
-"""Contract: the host converge step wires the bare ava launcher script, scripts/ava-launcher.sh."""
-
 from __future__ import annotations
 
 from pathlib import Path

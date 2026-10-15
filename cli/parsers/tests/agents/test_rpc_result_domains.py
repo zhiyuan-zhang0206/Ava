@@ -1,5 +1,3 @@
-"""Actual operator commands cannot display success for unknown RPC result vocabulary."""
-
 import httpx
 import pytest
 

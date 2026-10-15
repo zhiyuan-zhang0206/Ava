@@ -1,5 +1,3 @@
-"""The resurrection fake accepts both legitimate watcher notification schedules."""
-
 from pathlib import Path
 
 import pytest

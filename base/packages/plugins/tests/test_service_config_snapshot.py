@@ -1,5 +1,3 @@
-"""A plugin service consumes the exact non-secret config captured at launch."""
-
 from pathlib import Path
 
 import pytest

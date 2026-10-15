@@ -1,5 +1,3 @@
-"""Actual trace workers retain bounded stop receipts and late failures."""
-
 from __future__ import annotations
 
 import threading

@@ -1,5 +1,3 @@
-"""Narrow structural test data for output previews."""
-
 from dataclasses import dataclass
 
 

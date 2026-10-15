@@ -1,5 +1,3 @@
-"""The classify step names the lanes a pull request needs, from the files it changes."""
-
 from pathlib import Path
 
 import pytest

@@ -1,5 +1,3 @@
-"""Fresh processes bind the winning whole image after first-boot contention."""
-
 import asyncio
 import json
 import sys

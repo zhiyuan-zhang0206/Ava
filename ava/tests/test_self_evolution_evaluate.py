@@ -1,5 +1,3 @@
-"""The self-evolution evaluator requests the shared eval-isolation boundary."""
-
 from __future__ import annotations
 
 import importlib.util

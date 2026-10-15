@@ -1,5 +1,3 @@
-"""The unchanged watcher aborts real managed exec and discards model streams."""
-
 import asyncio
 from dataclasses import replace
 from pathlib import Path

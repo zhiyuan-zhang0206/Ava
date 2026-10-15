@@ -1,5 +1,3 @@
-"""Inbound producers own live timestamp readers without changing early-return semantics."""
-
 from datetime import UTC, datetime
 
 import pytest

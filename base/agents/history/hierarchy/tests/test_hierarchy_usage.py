@@ -1,5 +1,3 @@
-"""Deterministic cost: AIMessage usage sums per span, and generation cost per node."""
-
 from __future__ import annotations
 
 import pytest

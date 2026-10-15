@@ -1,5 +1,3 @@
-"""Admin API contracts for gateway MCP client credentials."""
-
 from __future__ import annotations
 
 from typing import Any

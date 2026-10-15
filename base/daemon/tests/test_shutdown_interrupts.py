@@ -1,5 +1,3 @@
-"""One cancellation drain survives only the original stop's TaskGroup replay."""
-
 import asyncio
 from typing import cast
 

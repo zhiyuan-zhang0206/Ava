@@ -1,5 +1,3 @@
-"""Unrelated collectors retain global guards without consumer-local opt-in fixtures."""
-
 import pytest
 
 

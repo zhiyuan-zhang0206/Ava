@@ -1,5 +1,3 @@
-"""Read existing observation clocks without inventing runtime ownership."""
-
 from datetime import UTC, datetime, timedelta
 
 import psycopg

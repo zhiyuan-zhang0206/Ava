@@ -1,5 +1,3 @@
-"""Cancel-race fixtures shared by this test directory."""
-
 from agent.graph.tests.cancel_fixture import fake_cancel_event as fake_cancel_event
 from base.config.tests.config_authority import config_authority as config_authority
 from base.log.tests.log_records import loguru_records as loguru_records

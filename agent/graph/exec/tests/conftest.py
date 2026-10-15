@@ -1,5 +1,3 @@
-"""Explicit formatter inputs independent of application configuration."""
-
 import pytest
 
 from agent.graph.exec.tests.cancel_fixture import fake_cancel_event as fake_cancel_event

@@ -1,5 +1,3 @@
-"""Guarded MCP creation uses the existing immutable birth transaction."""
-
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, LiteralString
 from uuid import uuid4

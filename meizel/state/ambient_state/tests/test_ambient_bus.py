@@ -1,5 +1,3 @@
-"""The ambient-bus rule (meizel/state/ambient_state/busrule.py)."""
-
 from __future__ import annotations
 
 import ast

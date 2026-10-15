@@ -1,5 +1,3 @@
-"""Native intent admission is immutable and does not enter generic inbound."""
-
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4

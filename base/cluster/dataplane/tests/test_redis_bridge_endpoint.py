@@ -1,5 +1,3 @@
-"""Where the macOS Redis bridge listens, and when no relay is needed at all."""
-
 from __future__ import annotations
 
 import json

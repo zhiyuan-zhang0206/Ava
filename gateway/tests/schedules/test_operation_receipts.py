@@ -1,5 +1,3 @@
-"""Concurrent and delayed retries retain one schedule mutation identity."""
-
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 

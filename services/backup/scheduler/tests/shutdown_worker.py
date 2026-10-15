@@ -1,5 +1,3 @@
-"""Disposable scheduled worker entry for real signal and Postgres tests."""
-
 import os
 from pathlib import Path
 

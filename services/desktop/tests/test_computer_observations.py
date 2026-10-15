@@ -1,5 +1,3 @@
-"""Observation and app focus contracts through MCP and a real Unix socket."""
-
 from __future__ import annotations
 
 import json

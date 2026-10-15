@@ -1,5 +1,3 @@
-"""What a completed stop says when Postgres' shutdown had to be escalated."""
-
 from __future__ import annotations
 
 import json

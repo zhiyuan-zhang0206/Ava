@@ -1,5 +1,3 @@
-"""Actual SQL winners, preflight windows and rollback of every compound effect."""
-
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from typing import Any

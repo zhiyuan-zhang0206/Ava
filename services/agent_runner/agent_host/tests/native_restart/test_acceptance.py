@@ -1,5 +1,3 @@
-"""Guarded restart freezes one command and uses the original lifecycle proof."""
-
 from concurrent.futures import ThreadPoolExecutor
 from typing import LiteralString
 
