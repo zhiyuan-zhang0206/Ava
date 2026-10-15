@@ -1,5 +1,3 @@
-"""Composer command discovery + expansion (`base.packages.composer_commands`)."""
-
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -13,8 +11,6 @@ from base.packages.skills.tree import Skill
 def _dirs(
     *dirs: tuple[Path, tuple[str, ...]],
 ) -> Callable[[Sequence[Skill]], list[tuple[Path, tuple[str, ...]]]]:
-    """A `command_dirs` that lists exactly these directories whatever the skills are."""
-
     def command_dirs(_skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
         return list(dirs)
 
@@ -42,7 +38,6 @@ def test_scan_dir_parses_frontmatter(tmp_path: Path):
 
 
 def test_scan_dir_reads_claude_code_argument_hint(tmp_path: Path):
-    # CC plugins ship `argument-hint`; we read it into instruction_hint (interop).
     _write(tmp_path, "deploy.md", "---\nargument-hint: env\n---\nDeploy.\n")
     assert composer_commands.scan_dir(tmp_path, ())["deploy"]["instruction_hint"] == "env"
 
@@ -78,7 +73,7 @@ def test_discover_dedups_later_source_wins(tmp_path: Path, monkeypatch: pytest.M
     early, late = tmp_path / "early", tmp_path / "late"
     _write(early, "dup.md", "early body")
     _write(late, "dup.md", "late body")
-    monkeypatch.setattr(composer_commands, "command_dirs", _dirs((early, ()), (late, ())))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands, "command_dirs", _dirs((early, ()), (late, ())))
     out = {c["name"]: c for c in composer_commands.discover_commands([])}
     assert out["dup"]["body"] == "late body"
 
@@ -91,7 +86,6 @@ def test_discover_sorted_by_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_builtin_commands_discoverable():
-    # End-to-end (no monkeypatch): ava_builtins/commands (recap, compact) stay bare.
     names = {c["name"] for c in composer_commands.discover_commands([])}
     assert {"recap", "compact"} <= names
     assert "plan" not in names
@@ -125,8 +119,6 @@ def test_builtin_source_ignores_legacy_root_and_keeps_user_override(
 
 
 def test_scan_dir_renders_canonical_namespace_spelling(tmp_path: Path):
-    # An underscore plugin / skill folder must present the dash form outward,
-    # `:`-joined like a skill identifier.
     _write(tmp_path, "deploy.md", "ship it")
     out = composer_commands.scan_dir(tmp_path, ("ava_fleet",))
     assert "ava-fleet:deploy" in out
@@ -134,9 +126,6 @@ def test_scan_dir_renders_canonical_namespace_spelling(tmp_path: Path):
 
 
 def test_underscore_command_spelling_still_expands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    # The picker shows the canonical `:`-joined dash name; inbound matching
-    # folds dash/underscore + colon/dot, so a legacy `/ava_fleet.ship` still
-    # expands the same command as `/ava-fleet:ship`.
     _write(tmp_path, "ship.md", "write the release note")
     monkeypatch.setattr(
         composer_commands,
@@ -146,8 +135,7 @@ def test_underscore_command_spelling_still_expands(tmp_path: Path, monkeypatch: 
     catalog = CommandCatalog(skills=list)
     dash = catalog.expand("/ava-fleet:ship fix the tests")
     legacy = catalog.expand("/ava_fleet.ship fix the tests")
-    # Both spellings resolve to the same command (same body); the expansion
-    # echoes the spelling the user typed, so only the echoed name differs.
+
     assert "write the release note" in dash
     assert "write the release note" in legacy
     assert "fix the tests" in dash and "fix the tests" in legacy
@@ -184,15 +172,11 @@ def test_expand_known_command_with_arg():
     )
 
 
-# --- skill-as-command (source 0) ---
-
-
 def _fake_skill(name: str, namespace: tuple[str, ...] = ()) -> Skill:
     return {"name": name, "description": f"{name} skill", "path": "/x", "namespace": namespace}
 
 
 def _skill_catalog(*skills: Skill) -> list[composer_commands.Command]:
-    """The commands the given skills alone provide (no command files)."""
     return list(composer_commands.skill_commands(skills).values())
 
 
@@ -215,8 +199,6 @@ def test_skill_as_command_namespaced():
 
 
 def test_skill_as_command_dotted_input_still_resolves():
-    """Backcompat: the pre-colon dotted spelling of a command name still
-    expands — matching folds dash/underscore/colon."""
     commands = _skill_catalog(_fake_skill("brainstorming", ("demo",)))
     expanded = composer_commands.expand_command("/demo.brainstorming a login form", commands)
     assert "ava.help(ava.skills.demo.brainstorming)" in expanded
@@ -231,7 +213,6 @@ def test_skill_as_command_hyphen_maps_to_underscore_target():
 def test_explicit_command_overrides_skill_as_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # a skill 'foo' AND an explicit foo.md — the file (source 1-5) wins over source 0
     _write(tmp_path, "foo.md", "explicit prompt body")
     monkeypatch.setattr(composer_commands, "command_dirs", _dirs((tmp_path, ())))
     out = {c["name"]: c for c in composer_commands.discover_commands([_fake_skill("foo")])}
@@ -240,15 +221,11 @@ def test_explicit_command_overrides_skill_as_command(
 
 
 def test_skill_carried_commands_walk_the_skills_it_is_given():
-    """Source 5: each skill's own `commands/` dir is read under that skill's namespace path."""
     skills = [_fake_skill("brainstorming", ("demo",)), _fake_skill("goal")]
     assert composer_commands.command_dirs(skills)[-2:] == [
         (Path("/x/commands"), ("demo", "brainstorming")),
         (Path("/x/commands"), ("goal",)),
     ]
-
-
-# --- commands_enabled gate ---
 
 
 def test_discover_empty_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -258,13 +235,72 @@ def test_discover_empty_when_disabled(tmp_path: Path, monkeypatch: pytest.Monkey
     assert composer_commands.discover_commands([_fake_skill("goal")]) == []
 
 
-def test_expand_passthrough_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("operation", ["discover", "expand"])
+def test_expand_passthrough_when_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+):
     _write(tmp_path, "recap.md", "Recap it.")
     monkeypatch.setattr(composer_commands, "command_dirs", _dirs((tmp_path, ())))
-    catalog = CommandCatalog(skills=list)
+    reads: list[None] = []
+    refuse_reads = False
+
+    def skills() -> Sequence[Skill]:
+        reads.append(None)
+        if refuse_reads:
+            raise OSError("Skill registry is unavailable")
+        return []
+
+    catalog = CommandCatalog(skills=skills)
     assert catalog.expand("/recap just the PRs").startswith("Command /recap:")
+    assert reads == [None]
     monkeypatch.setattr(composer_commands.settings.agent, "commands_enabled", False)
-    assert catalog.expand("/recap just the PRs") == "/recap just the PRs"
+    refuse_reads = True
+    reads.clear()
+    if operation == "discover":
+        assert catalog.discover() == []
+    else:
+        assert catalog.expand("/recap just the PRs") == "/recap just the PRs"
+    assert reads == []
+
+
+@pytest.mark.parametrize("content", ["just chatting", "check /recap output", "", " /recap"])
+def test_catalog_plain_text_does_not_read_skills(content: str):
+    def unavailable_skills() -> Sequence[Skill]:
+        raise OSError("Skill registry is unavailable")
+
+    catalog = CommandCatalog(skills=unavailable_skills)
+    assert catalog.expand(content) == content
+
+
+def test_catalog_plain_text_does_not_read_command_files(tmp_path: Path):
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "bad.md").write_bytes(b"\xff")
+    skill: Skill = {
+        "name": "local",
+        "description": "Local skill",
+        "path": str(tmp_path),
+        "namespace": (),
+    }
+    catalog = CommandCatalog(skills=lambda: [skill])
+    assert catalog.expand("just chatting") == "just chatting"
+    with pytest.raises(UnicodeDecodeError):
+        catalog.expand("/local:bad")
+
+
+def test_catalog_reads_command_files_afresh(tmp_path: Path):
+    commands_dir = tmp_path / "commands"
+    _write(commands_dir, "recap.md", "First version.")
+    skill: Skill = {
+        "name": "local",
+        "description": "Local skill",
+        "path": str(tmp_path),
+        "namespace": (),
+    }
+    catalog = CommandCatalog(skills=lambda: [skill])
+    assert catalog.expand("/local:recap") == "Command /local:recap:\nFirst version."
+    _write(commands_dir, "recap.md", "Second version.")
+    assert catalog.expand("/local:recap") == "Command /local:recap:\nSecond version."
 
 
 def test_the_catalog_reads_its_skill_source_on_every_call():
@@ -280,14 +316,11 @@ def test_the_catalog_reads_its_skill_source_on_every_call():
     assert catalog.expand("/goal now").endswith("Additional message: now")
 
 
-# --- multi-command chains (one message, several commands) ---
-
-
 def test_chain_expands_every_command_in_the_order_typed():
     commands = [_file_command("recap", "Recap it."), _file_command("review", "Review it.")]
     out = composer_commands.expand_command("/recap /review", commands)
     assert out.index("Command /recap:\nRecap it.") < out.index("Command /review:\nReview it.")
-    # Reversing the input reverses the expansion — order is the typed order.
+
     flipped = composer_commands.expand_command("/review /recap", commands)
     assert flipped.index("Command /review:") < flipped.index("Command /recap:")
 
@@ -300,9 +333,6 @@ def test_chain_gives_each_command_its_own_argument():
 
 
 def test_chain_is_exactly_the_single_expansions_concatenated():
-    # The mechanism adds nothing of its own around a chain — no preamble, no
-    # framing, no instruction about how to treat the combination. A chain is
-    # what each command expands to alone, joined by a blank line.
     commands = [_file_command("recap", "Recap it."), _file_command("review", "Review it.")]
     alone = [
         composer_commands.expand_command("/recap", commands),
@@ -326,8 +356,6 @@ def test_chain_mixes_file_command_and_skill_as_command():
 
 
 def test_slash_token_that_is_not_a_command_stays_in_the_argument():
-    # A path in the free text is not a command boundary — only a registered
-    # name opens the next segment.
     commands = [_file_command("recap", "Recap it.")]
     assert composer_commands.expand_command("/recap check /path/to/file", commands) == (
         "Command /recap:\nRecap it.\nAdditional message: check /path/to/file"
@@ -335,8 +363,6 @@ def test_slash_token_that_is_not_a_command_stays_in_the_argument():
 
 
 def test_missing_space_between_commands_is_one_unknown_name():
-    # `/recap/review` is a typo, not a chain: the whole token is the name, it
-    # matches nothing, and the message passes through untouched.
     commands = [_file_command("recap", "Recap it."), _file_command("review", "Review it.")]
     assert composer_commands.expand_command("/recap/review", commands) == "/recap/review"
 
@@ -352,7 +378,7 @@ def test_extra_whitespace_between_commands_still_chains():
 
 def test_text_not_starting_with_a_command_never_chains():
     commands = [_file_command("recap", "Recap it.")]
-    # A command name mid-sentence is prose, not an invocation.
+
     assert (
         composer_commands.expand_command("check /recap output", commands) == "check /recap output"
     )
@@ -368,21 +394,13 @@ def test_chain_expansion_is_source_neutral():
     assert "User" not in composer_commands.expand_command("/recap /review", commands)
 
 
-# --- every command expands alike (no special cases) ---
-
-
 def test_lifecycle_command_chains_like_any_other():
-    """`/compact` tells the agent to replace its own context, which is the most
-    disruptive thing a shipped command body says — and the expansion still
-    treats it as an ordinary prompt template. No classification, no refusal, no
-    warning: whether the instruction after it still applies is the agent's
-    reading of the prompts, not a question the mechanism answers."""
     commands = [_file_command("compact", "Wind down."), _file_command("recap", "Recap it.")]
     for raw in ("/compact /recap", "/recap /compact"):
         out = composer_commands.expand_command(raw, commands)
         assert "Command /compact:\nWind down." in out
         assert "Command /recap:\nRecap it." in out
-    # Order is still just the typed order — nothing gets hoisted or dropped.
+
     expanded = composer_commands.expand_command("/recap /compact", commands)
     assert expanded.index("Command /recap:") < expanded.index("Command /compact:")
 
@@ -395,22 +413,11 @@ def test_repeating_one_command_expands_it_twice():
 
 
 def test_command_record_carries_no_chaining_policy():
-    """The Command record has nowhere to put a per-command chaining rule, so the
-    uniformity is structural rather than a convention the shipped files happen
-    to follow. `skill_target` does branch the expansion, but it says what the
-    command *is* (a skill rather than a template) and applies the same way to
-    every skill-as-command — it is not a policy about which commands may share a
-    message. A new field here means asking whether it is reintroducing one."""
     fields = set(composer_commands.Command.__annotations__)
     assert fields == {"name", "description", "instruction_hint", "body", "skill_target"}
 
 
-# --- source-neutral expansion (agent-to-agent commands) ---
-
-
 def test_expand_is_source_neutral():
-    # Expansion must not name an actor — the envelope (wrap_inbound) frames the
-    # message, so a /command sent by a peer agent reads correctly.
     commands = [_file_command("recap", "Recap it."), *_skill_catalog(_fake_skill("goal"))]
     for raw in ("/recap context", "/goal context"):
         assert "User" not in composer_commands.expand_command(raw, commands)
