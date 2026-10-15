@@ -59,6 +59,8 @@ import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager, nullcontext
+from functools import partial
+from typing import Any, Literal
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -70,7 +72,7 @@ from base import paths, telemetry
 from base.api_contracts.agent_contract import AvaAgentError
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
-from base.config import ConfigBoot, Settings, settings
+from base.config import ConfigBoot, Settings
 from base.config.service_read import ConfigAuthority
 from base.events.live.bus import EventBus
 from base.host.db_authority.api import AcceptanceCache
@@ -118,8 +120,8 @@ from gateway.http.auth import rejection_log
 from gateway.http.auth import router as auth_router
 from gateway.http.auth.request_principal import SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
+from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.http.middleware import latency, pause_policy, runtime_metrics
-from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
 from gateway.http.middleware.error_handlers import (
     ava_agent_error_handler,
@@ -224,7 +226,12 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+async def lifespan(
+    app: FastAPI,
+    *,
+    process: GatewayProcess,
+    process_ownership: Literal["borrowed", "owned"],
+) -> AsyncGenerator[None]:
     """App-level resources: data-plane and control-plane DB pools.
 
     Redis is not shared at app level — SSE endpoints need independent pubsub
@@ -239,21 +246,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     The agent host handles native lifecycle work. Auto label generation
     runs in the separate services/derived/labeler daemon.
     """
-    process = getattr(app.state, "gateway_process_input", None)
-    owned = process is None
-    if owned:
-        config = ConfigBoot()
-        config.boot()
-        process = GatewayProcess(
-            config=config,
-            image=LOADED_IMAGE,
-            machine=machine_from_boot(config),
-            host=Host.system(),
-        )
+    if process_ownership not in {"borrowed", "owned"}:
+        raise ValueError("gateway process ownership must be borrowed or owned")
     app.state.gateway_process = process
     app.state.machine = process.machine
     app.state.host = process.host
-    with process.lifetime() if owned else nullcontext(process):
+    with process.lifetime() if process_ownership == "owned" else nullcontext(process):
         config = process.config
         app.state.process_image = process.image
         telemetry.init_telemetry(
@@ -336,7 +334,8 @@ async def _background_lifetime(
     # per instance, and the tools close over this pool. Off (the default):
     # /mcp answers 404 through the mcp_gateway wrapper and nothing changes.
     mcp_manager = None
-    if settings.gateway.mcp_endpoint_enabled:
+    config: GatewayConfig = app.state.gateway_config
+    if config.mcp_endpoint_enabled:
         mcp_manager = mcp_server_endpoint.build_manager(
             app.state.db_pool,
             app.state.db,
@@ -384,15 +383,6 @@ async def _background_lifetime(
             app.state.control_db_pool.close()
 
 
-app = FastAPI(
-    title="Ava",
-    lifespan=lifespan,
-    # FastAPI's auto-generated metadata leaks the full route schema; disable it.
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None,
-)
-
 # Pause exemptions are a route-declared attribute: the middleware consumes
 # only the tested decision function `gateway.http.middleware.pause_policy.should_bypass_pause`,
 # which reads the CONTROL_PLANE doorplates from `base/api_contracts/contracts.py`. The
@@ -408,7 +398,6 @@ async def cluster_is_paused(_request: Request) -> bool:
     return await asyncio.to_thread(business_paused)
 
 
-@app.middleware("http")
 async def cluster_pause_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
@@ -496,7 +485,6 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
     return None if fact is None else (cookie_token, fact)
 
 
-@app.middleware("http")
 async def cluster_auth_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
@@ -519,7 +507,8 @@ async def cluster_auth_middleware(
     # This is set only by credential verification, never by caller/source JSON.
     request.state.auth_principal = None
     request.state.source_verified_by = None
-    secret = settings.data_plane.cluster_secret
+    config: GatewayConfig = request.app.state.gateway_config
+    secret = config.cluster_secret
     # CORS preflight (OPTIONS) carries no credentials by spec, so it can never
     # satisfy the cookie/Bearer check below. CORSMiddleware is now OUTERMOST and
     # answers preflights before this middleware runs, so this branch is a
@@ -553,7 +542,7 @@ async def cluster_auth_middleware(
         if (
             request.method in _STATE_CHANGING_METHODS
             and origin is not None
-            and origin not in cors_allowed_origins()
+            and origin not in config.allowed_origins
         ):
             return JSONResponse(
                 status_code=403,
@@ -562,7 +551,7 @@ async def cluster_auth_middleware(
             )
         now = time.monotonic()
         touch: SessionTouchThrottle = request.app.state.session_touch
-        if touch.due(cookie_token, now, stale_after_s=settings.gateway.session_ttl_seconds):
+        if touch.due(cookie_token, now, stale_after_s=config.session_ttl_seconds):
             await asyncio.to_thread(
                 touch_session,
                 request.app.state.db_pool,
@@ -592,108 +581,168 @@ async def cluster_auth_middleware(
     )
 
 
-# Per-endpoint latency metering (Task #1091). Registered near-last so it is
-# near-OUTERMOST — Starlette builds the stack in reverse registration order —
-# and the measurement covers the full pipeline: pause gate and auth.
-# `await call_next` returns at response headers, so SSE / long-poll
-# connections count time-to-first-byte, not lifetime.
-app.middleware("http")(latency.latency_middleware)
+def create_app(
+    config: GatewayConfig,
+    *,
+    process: GatewayProcess,
+    process_ownership: Literal["borrowed", "owned"],
+) -> FastAPI:
+    """Assemble one app's fixed HTTP policy and explicit process lifetime."""
+    if process_ownership not in {"borrowed", "owned"}:
+        raise ValueError("gateway process ownership must be borrowed or owned")
+    app = FastAPI(
+        title="Ava",
+        lifespan=partial(lifespan, process=process, process_ownership=process_ownership),
+        # Disable schema pages while retaining the build-time OpenAPI contract.
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+    app.state.gateway_config = config
+    app.state.gateway_process = process
+    machine_token_acceptance: AcceptanceCache = {}
+    app.state.machine_token_acceptance = machine_token_acceptance
+    app.middleware("http")(cluster_pause_middleware)
+    app.middleware("http")(cluster_auth_middleware)
+
+    # Per-endpoint latency metering (Task #1091). Registered near-last so it is
+    # near-OUTERMOST — Starlette builds the stack in reverse registration order —
+    # and the measurement covers the full pipeline: pause gate and auth.
+    # `await call_next` returns at response headers, so SSE / long-poll
+    # connections count time-to-first-byte, not lifetime.
+    app.middleware("http")(latency.latency_middleware)
+
+    # CORSMiddleware is registered AFTER latency — the OUTERMOST middleware — so
+    # allowlisted responses carry Access-Control-* headers even when inner
+    # middleware short-circuits with 401 or 503. Unhandled route exceptions need
+    # the Exception handler below because ServerErrorMiddleware sits outside user
+    # middleware (#187). Browser origins are exact matches: an explicit setting is
+    # authoritative; otherwise the allowlist derives the local frontend origins and
+    # the gateway URL's own origin (its own scheme, host, and port). A CORS
+    # preflight (OPTIONS) is answered here before auth or pause ever see it.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=config.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Registered last so every response path, including auth and pause short-circuits,
+    # receives a fallback trace id before it reaches an error response builder.
+    app.middleware("http")(request_trace_middleware)
+
+    app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(Exception, unhandled_exception_handler)
+
+    # --- Router registration (feature packages + gateway/routers/<domain>.py) ---
+    for router in (
+        auth_router.router,
+        bootstrap_router.router,
+        agents_router.router,
+        to_user_router.router,
+        agents_launch_retry_router.router,
+        agents_lifecycle_router.router,
+        agents_understanding_router.router,
+        agents_state_router.router,
+        agent_events_router.router,
+        computer_traces_router.router,
+        inspect_router.router,
+        shell_router.router,
+        timeline_router.router,
+        reply_suggestion_router.router,
+        system_router.router,
+        pages_router.router,
+        notices_router.router,
+        guarded_notices_router.router,
+        cluster_router.router,
+        machine_pause_router.router,
+        commands_router.router,
+        config_router.router,
+        conversation_router.router,
+        default_model_router.router,
+        settings_router.router,
+        schedules_router.router,
+        presets_router.router,
+        guide_router.router,
+        inventory_router.router,
+        skills_router.router,
+        packages_router.router,
+        metrics_router.router,
+        events_router.router,
+        insights_router.router,
+        event_resolutions_router.router,
+        ops_monitor_router.router,
+        alerts_router.router,
+        status_router.router,
+        alert_classes_router.router,
+        memory_router.router,
+        mcp_server_router.router,
+        fleet_graph_router.router,
+        frontend_telemetry_router.router,
+        grafana_router.router,
+        okf_graph_router.router,
+        tasks_router.router,
+        task_assignments_router.router,
+        plugin_ui_router.router,
+        ui_contributions_router.router,
+        uploads_router.router,
+        upload_delivery_router.router,
+    ):
+        app.include_router(router)
+
+    # /mcp — MCP control plane (design task #1212 step 1). Mounted always; the
+    # wrapper answers 404 while the app configuration disables MCP, so
+    # the route surface is stable and the flag is a pure on/off switch. Auth is
+    # the mounted wrapper requires its own revocable client token; cluster cookies
+    # and Bearer secrets are not MCP identities.
+    app.mount("/mcp", mcp_server_endpoint.mcp_gateway(app))
+    return app
 
 
-# CORSMiddleware is registered AFTER latency — the OUTERMOST middleware — so
-# allowlisted responses carry Access-Control-* headers even when inner
-# middleware short-circuits with 401 or 503. Unhandled route exceptions need
-# the Exception handler below because ServerErrorMiddleware sits outside user
-# middleware (#187). Browser origins are exact matches: an explicit setting is
-# authoritative; otherwise the allowlist derives the local frontend origins and
-# the gateway URL's own origin (its own scheme, host, and port). A CORS
-# preflight (OPTIONS) is answered here before auth or pause ever see it.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_allowed_origins(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def create_app_from_environment() -> FastAPI:
+    """Build an owned process in the uvicorn worker's environment boundary."""
+    config = ConfigBoot()
+    config.boot()
+    config.ensure_eager()
+    process = GatewayProcess(
+        config=config,
+        image=LOADED_IMAGE,
+        machine=machine_from_boot(config),
+        host=Host.system(),
+    )
+    return create_app(
+        gateway_config_from_boot(process.config), process=process, process_ownership="owned"
+    )
 
 
-# Registered last so every response path, including auth and pause short-circuits,
-# receives a fallback trace id before it reaches an error response builder.
-app.middleware("http")(request_trace_middleware)
+def openapi_schema() -> dict[str, Any]:
+    """Extract the route contract without booting or entering runtime resources."""
+    config = ConfigBoot()
+    process = GatewayProcess(
+        config=config, image=LOADED_IMAGE, machine=machine_from_boot(config), host=Host.system()
+    )
+    schema_config = GatewayConfig(
+        cluster_secret="",
+        session_ttl_seconds=3600,
+        mcp_endpoint_enabled=False,
+        allowed_origins=(),
+        browser_origin="",
+        session_cookie_secure=False,
+    )
+    with process.lifetime():
+        app = create_app(schema_config, process=process, process_ownership="borrowed")
+        return app.openapi()
 
 
-app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignore[arg-type]
-app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
-app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
-app.add_exception_handler(Exception, unhandled_exception_handler)
-
-
-# --- Router registration (feature packages + gateway/routers/<domain>.py) ---
-app.include_router(auth_router.router)
-app.include_router(bootstrap_router.router)
-app.include_router(agents_router.router)
-app.include_router(to_user_router.router)
-app.include_router(agents_launch_retry_router.router)
-app.include_router(agents_lifecycle_router.router)
-app.include_router(agents_understanding_router.router)
-app.include_router(agents_state_router.router)
-app.include_router(agent_events_router.router)
-app.include_router(computer_traces_router.router)
-app.include_router(inspect_router.router)
-app.include_router(shell_router.router)
-app.include_router(timeline_router.router)
-app.include_router(reply_suggestion_router.router)
-app.include_router(system_router.router)
-app.include_router(pages_router.router)
-app.include_router(notices_router.router)
-app.include_router(guarded_notices_router.router)
-app.include_router(cluster_router.router)
-app.include_router(machine_pause_router.router)
-app.include_router(commands_router.router)
-app.include_router(config_router.router)
-app.include_router(conversation_router.router)
-app.include_router(default_model_router.router)
-app.include_router(settings_router.router)
-app.include_router(schedules_router.router)
-app.include_router(presets_router.router)
-app.include_router(guide_router.router)
-app.include_router(inventory_router.router)
-app.include_router(skills_router.router)
-app.include_router(packages_router.router)
-app.include_router(metrics_router.router)
-app.include_router(events_router.router)
-app.include_router(insights_router.router)
-app.include_router(event_resolutions_router.router)
-app.include_router(ops_monitor_router.router)
-app.include_router(alerts_router.router)
-app.include_router(status_router.router)
-app.include_router(alert_classes_router.router)
-app.include_router(memory_router.router)
-app.include_router(mcp_server_router.router)
-app.include_router(fleet_graph_router.router)
-app.include_router(frontend_telemetry_router.router)
-app.include_router(grafana_router.router)
-app.include_router(okf_graph_router.router)
-app.include_router(tasks_router.router)
-app.include_router(task_assignments_router.router)
-app.include_router(plugin_ui_router.router)
-app.include_router(ui_contributions_router.router)
-app.include_router(uploads_router.router)
-app.include_router(upload_delivery_router.router)
-
-# /mcp — MCP control plane (design task #1212 step 1). Mounted always; the
-# wrapper answers 404 while settings.gateway.mcp_endpoint_enabled is off, so
-# the route surface is stable and the flag is a pure on/off switch. Auth is
-# the mounted wrapper requires its own revocable client token; cluster cookies
-# and Bearer secrets are not MCP identities.
-app.mount("/mcp", mcp_server_endpoint.mcp_gateway(app))
+def _borrowed_app(process: GatewayProcess) -> FastAPI:
+    return create_app(
+        gateway_config_from_boot(process.config), process=process, process_ownership="borrowed"
+    )
 
 
 def main() -> None:
     """Run the gateway process through the stable `gateway.app` entry point."""
-    from base.config import ensure_eager
-
-    # Task #3621: the gateway is on the full-validation whitelist — build the
-    # eager config chain at the entry, before serving.
-    ensure_eager()
-    _run_gateway(app=app)
+    _run_gateway(build_app=_borrowed_app)

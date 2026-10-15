@@ -80,5 +80,5 @@ single-module routers. [[agent/db/docs/db.ava.okf.md]]: Postgres pool.
 ## Notes
 
 - **Stateless design**: Gateway does not hold agent process state. Restarting Gateway does not affect running agents (they are detached processes, double fork reparented to init, not hanging off the gateway/ops process tree)
-- **Endpoint contract**: `/docs` / `/redoc` / `/openapi.json` all `None` (`app.py:257-259`, to prevent route schema leakage) — no OpenAPI pages; the code is the sole source of truth for the contract, codegen generates frontend / SDK types from the code
+- **Endpoint contract**: `/docs` / `/redoc` / `/openapi.json` all `None` in `create_app` (to prevent route schema leakage) — no OpenAPI pages; `openapi_schema()` mounts routes onto a bare `FastAPI` for codegen, which generates frontend / SDK types from the code
 - **Concurrency model**: async/await full chain (FastAPI + psycopg_pool + aredis)

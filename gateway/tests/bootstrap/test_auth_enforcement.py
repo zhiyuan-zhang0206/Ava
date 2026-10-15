@@ -10,39 +10,42 @@ import gateway.app as gateway_app
 from base import config
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.host.net.auth import bearer_header
-from gateway.app import app
-from gateway.http.middleware.cors import cors_allowed_origins
+from base.host.net.auth import bearer_header, cookie_name
+from gateway.app import create_app
+from gateway.http.config import GatewayConfig
 from gateway.http.middleware.error_handlers import cors_headers
 from gateway.tests.bootstrap.test_auth import (
     SECRET,
     auth,
     legacy_hmac_cookie,
     login,
-    rebuilt_cors_middleware,
     request_with_origin,
     session_cookie,
 )
 from gateway.tests.bootstrap.test_auth import patch_secret as patch_secret
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import (
+    gateway_test_app,
+    gateway_test_client,
+    gateway_test_process,
+)
 
 # ── Unauthenticated requests get 401 ──────────────────────────────────
 
 
 def test_api_agents_rejects_no_auth(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/agents")
     assert resp.status_code == 401
 
 
 def test_api_status_rejects_no_auth(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/status")
     assert resp.status_code == 401
 
 
 def test_api_bootstrap_rejects_no_auth(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/bootstrap")
     assert resp.status_code == 401
 
@@ -57,8 +60,9 @@ def test_cors_preflight_on_protected_route_not_401(*, machine_identity: MachineI
     Access-Control-* headers, and the real cross-origin POST surfaces in the
     browser as "Failed to fetch". Regression guard for the resurrect /
     terminate / restart lifecycle buttons."""
-    allowed_origin = cors_allowed_origins()[0]
-    with gateway_test_client(app, machine=machine_identity) as client:
+    app = gateway_test_app(machine=machine_identity)
+    allowed_origin = app.state.gateway_config.allowed_origins[0]
+    with gateway_test_client(app) as client:
         resp = client.options(
             "/api/agents/405/resurrect",
             headers={
@@ -91,7 +95,7 @@ def test_cors_preflight_login_from_gateway_frontend_origin_passes(
         "gateway_url",
         "http://10.0.0.72:8000",
     )
-    with rebuilt_cors_middleware(), TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.options(
             "/api/auth/login",
             headers={
@@ -122,7 +126,7 @@ def test_cookie_authenticated_post_allows_gateway_frontend_origin(
         "gateway_url",
         "http://10.0.0.72:8000",
     )
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -141,7 +145,7 @@ def test_cookie_authenticated_post_allows_gateway_frontend_origin(
 def test_cors_preflight_disallowed_origin_has_no_allow_origin_header(
     *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.options(
             "/api/agents/405/resurrect",
             headers={
@@ -158,8 +162,9 @@ def test_unauthorized_response_carries_cors_headers(*, machine_identity: Machine
     """A 401 short-circuited by the auth middleware still carries the CORS
     headers — CORSMiddleware is the OUTERMOST middleware, so a browser caller
     sees the real 401 instead of "Failed to fetch" (#187)."""
-    allowed_origin = cors_allowed_origins()[0]
-    with gateway_test_client(app, machine=machine_identity) as client:
+    app = gateway_test_app(machine=machine_identity)
+    allowed_origin = app.state.gateway_config.allowed_origins[0]
+    with gateway_test_client(app) as client:
         resp = client.get(
             "/api/agents",
             headers={"Origin": allowed_origin},
@@ -169,13 +174,7 @@ def test_unauthorized_response_carries_cors_headers(*, machine_identity: Machine
     assert resp.headers["access-control-allow-credentials"] == "true"
 
 
-def test_cors_headers_reflect_allowed_origin(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "cors_allowed_origins",
-        ["https://allowed.example"],
-    )
-
+def test_cors_headers_reflect_allowed_origin() -> None:
     assert cors_headers(request_with_origin("https://allowed.example")) == {
         "Access-Control-Allow-Origin": "https://allowed.example",
         "Vary": "Origin",
@@ -183,13 +182,7 @@ def test_cors_headers_reflect_allowed_origin(monkeypatch: pytest.MonkeyPatch) ->
     }
 
 
-def test_cors_headers_omit_disallowed_origin(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "cors_allowed_origins",
-        ["https://allowed.example"],
-    )
-
+def test_cors_headers_omit_disallowed_origin() -> None:
     assert cors_headers(request_with_origin("https://disallowed.example")) == {}
 
 
@@ -197,14 +190,14 @@ def test_cors_headers_omit_disallowed_origin(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_api_agents_accepts_bearer(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/agents", headers=auth())
     assert resp.status_code == 200
 
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_api_bootstrap_accepts_bearer(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/bootstrap", headers=auth())
     assert resp.status_code == 200
 
@@ -213,7 +206,7 @@ def test_api_bootstrap_accepts_bearer(*, machine_identity: MachineIdentity) -> N
 
 
 def test_api_agents_rejects_x_cluster_secret(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/agents", headers={"X-Cluster-Secret": SECRET})
     assert resp.status_code == 401
 
@@ -222,14 +215,14 @@ def test_api_agents_rejects_x_cluster_secret(*, machine_identity: MachineIdentit
 
 
 def test_api_agents_accepts_valid_cookie(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         token = login(client)
         resp = client.get("/api/agents", headers=session_cookie(token))
     assert resp.status_code == 200
 
 
 def test_api_agents_rejects_invalid_cookie(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/agents", headers=session_cookie("bad-token"))
     assert resp.status_code == 401
 
@@ -242,7 +235,7 @@ def test_cookie_authenticated_post_rejects_disallowed_origin(
         "cors_allowed_origins",
         ["https://allowed.example"],
     )
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -267,7 +260,7 @@ def test_bearer_authenticated_post_allows_disallowed_origin(
         ["https://allowed.example"],
     )
 
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(
             "/api/frontend-telemetry",
             content=b"{}",
@@ -299,7 +292,7 @@ def test_cookie_authenticated_post_allows_gateway_own_origin(
         "gateway_url",
         "http://10.0.0.72:8000",
     )
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -324,7 +317,7 @@ def test_cookie_authenticated_post_allows_missing_origin(
         "cors_allowed_origins",
         ["https://allowed.example"],
     )
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -338,7 +331,7 @@ def test_cookie_authenticated_post_allows_missing_origin(
 def test_legacy_self_contained_hmac_cookie_is_rejected(
     *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get(
             "/api/agents",
             headers=session_cookie(legacy_hmac_cookie()),
@@ -347,7 +340,7 @@ def test_legacy_self_contained_hmac_cookie_is_rejected(
 
 
 def test_revoke_endpoint_invalidates_another_session(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         first = login(client)
         client.cookies.clear()
         second = login(client)
@@ -366,7 +359,7 @@ def test_revoke_endpoint_invalidates_another_session(*, machine_identity: Machin
 
 
 def test_revoke_endpoint_refuses_current_session(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         current = login(client)
         response = client.post(f"/api/auth/sessions/{current}/revoke")
 
@@ -381,7 +374,7 @@ def test_revoke_endpoint_refuses_current_session(*, machine_identity: MachineIde
 def test_revoke_endpoint_returns_404_for_missing_or_revoked_session(
     *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         current = login(client)
         client.cookies.clear()
         target = login(client)
@@ -400,7 +393,7 @@ def test_revoke_endpoint_returns_404_for_missing_or_revoked_session(
 def test_middleware_touches_session_at_most_once_per_minute(
     db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         token = login(client)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -440,8 +433,9 @@ def test_middleware_bounds_session_touch_bookkeeping(
 ) -> None:
     now = 10_000.0
     monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 3600)
+    app = gateway_test_app(machine=machine_identity)
 
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(app) as client:
         token = login(client)
         last_touch = app.state.session_touch.last_touch
         last_touch["stale"] = now - 3601
@@ -460,7 +454,7 @@ def test_middleware_bounds_session_touch_bookkeeping(
 
 
 def test_api_agents_rejects_wrong_bearer_secret(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/agents", headers=bearer_header("wrong-secret"))
     assert resp.status_code == 401
 
@@ -475,8 +469,173 @@ def test_blank_secret_rejects_every_caller(
     to start in that state, `require_cluster_secret`) still never admits a caller on
     a blank bearer, and a blank secret never verifies as one."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         assert client.get("/api/agents").status_code == 401
         assert client.get("/api/agents", headers={"Authorization": "Bearer "}).status_code == 401
         assert client.get("/api/auth/check").json()["authenticated"] is False
         assert client.post("/api/auth/login", json={"password": ""}).status_code == 401
+
+
+def _assert_preflight_and_bearer_isolation(
+    client_alpha: TestClient, client_beta: TestClient
+) -> None:
+    preflight_alpha = client_alpha.options(
+        "/api/agents",
+        headers={
+            "Origin": "https://alpha.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    preflight_alpha_wrong = client_alpha.options(
+        "/api/agents",
+        headers={
+            "Origin": "http://beta.example:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    preflight_beta = client_beta.options(
+        "/api/agents",
+        headers={
+            "Origin": "http://beta.example:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert (
+        preflight_alpha.headers["access-control-allow-origin"],
+        "access-control-allow-origin" in preflight_alpha_wrong.headers,
+        preflight_beta.headers["access-control-allow-origin"],
+    ) == ("https://alpha.example", False, "http://beta.example:3000")
+
+    assert (
+        client_alpha.get("/api/agents", headers=bearer_header("secret-alpha")).status_code,
+        client_alpha.get("/api/agents", headers=bearer_header("secret-beta")).status_code,
+        client_beta.get("/api/agents", headers=bearer_header("secret-beta")).status_code,
+        client_beta.get("/api/agents", headers=bearer_header("secret-alpha")).status_code,
+    ) == (200, 401, 200, 401)
+
+    webhook_body = {"source": "ext", "content": "hi"}
+    assert (
+        client_alpha.post(
+            "/api/agents/999999/webhook",
+            json=webhook_body,
+            headers=bearer_header("secret-alpha"),
+        ).status_code,
+        client_alpha.post(
+            "/api/agents/999999/webhook",
+            json=webhook_body,
+            headers=bearer_header("secret-beta"),
+        ).status_code,
+        client_beta.post(
+            "/api/agents/999999/webhook",
+            json=webhook_body,
+            headers=bearer_header("secret-beta"),
+        ).status_code,
+        client_beta.post(
+            "/api/agents/999999/webhook",
+            json=webhook_body,
+            headers=bearer_header("secret-alpha"),
+        ).status_code,
+    ) == (404, 401, 404, 401)
+
+    assert (
+        client_alpha.get("/mcp", headers=bearer_header("secret-alpha")).status_code,
+        client_beta.get("/mcp", headers=bearer_header("secret-beta")).status_code,
+    ) == (401, 404)
+
+
+def _assert_session_cookie_isolation(
+    client: TestClient,
+    *,
+    own_secret: str,
+    other_secret: str,
+    own_origin: str,
+    other_origin: str,
+    max_age: int,
+    secure: bool,
+) -> None:
+    wrong_login = client.post("/api/auth/login", json={"password": other_secret})
+    login_resp = client.post("/api/auth/login", json={"password": own_secret})
+    set_cookie = login_resp.headers["Set-Cookie"]
+    cookie = login_resp.cookies[cookie_name()]
+    assert (
+        wrong_login.status_code,
+        login_resp.status_code,
+        f"Max-Age={max_age}" in set_cookie,
+        ("; Secure" in set_cookie) is secure,
+    ) == (401, 200, True, True)
+
+    check_ok = client.get("/api/auth/check", headers=session_cookie(cookie)).json()["authenticated"]
+    sessions_status = client.get("/api/auth/sessions", headers=session_cookie(cookie)).status_code
+    own_post = client.post(
+        "/api/frontend-telemetry",
+        content=b"{}",
+        headers={**session_cookie(cookie), "Origin": own_origin},
+    ).status_code
+    other_post = client.post(
+        "/api/frontend-telemetry",
+        content=b"{}",
+        headers={**session_cookie(cookie), "Origin": other_origin},
+    ).status_code
+    logout_resp = client.post("/api/auth/logout", headers=session_cookie(cookie))
+    assert (
+        check_ok,
+        sessions_status,
+        own_post,
+        other_post,
+        logout_resp.status_code,
+        ("; Secure" in logout_resp.headers["Set-Cookie"]) is secure,
+    ) == (True, 200, 422, 403, 200, True)
+
+
+def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
+    *, machine_identity: MachineIdentity
+) -> None:
+    """Two assembled apps with distinct GatewayConfig snapshots isolate all 6 fields."""
+    config_alpha = GatewayConfig(
+        cluster_secret="secret-alpha",  # noqa: S106
+        session_ttl_seconds=120,
+        mcp_endpoint_enabled=True,
+        allowed_origins=("https://alpha.example",),
+        browser_origin="https://alpha.example",
+        session_cookie_secure=False,
+    )
+    config_beta = GatewayConfig(
+        cluster_secret="secret-beta",  # noqa: S106
+        session_ttl_seconds=300,
+        mcp_endpoint_enabled=False,
+        allowed_origins=("http://beta.example:3000",),
+        browser_origin="",
+        session_cookie_secure=False,
+    )
+
+    with gateway_test_process(machine=machine_identity) as process:
+        app_alpha = create_app(config_alpha, process=process, process_ownership="borrowed")
+        app_beta = create_app(config_beta, process=process, process_ownership="borrowed")
+        assert (app_alpha.state.gateway_config, app_beta.state.gateway_config) == (
+            config_alpha,
+            config_beta,
+        )
+
+        with (
+            TestClient(app_alpha, base_url="https://alpha.example") as client_alpha,
+            TestClient(app_beta, base_url="http://beta.example:8000") as client_beta,
+        ):
+            _assert_preflight_and_bearer_isolation(client_alpha, client_beta)
+            _assert_session_cookie_isolation(
+                client_alpha,
+                own_secret="secret-alpha",  # noqa: S106
+                other_secret="secret-beta",  # noqa: S106
+                own_origin="https://alpha.example",
+                other_origin="http://beta.example:3000",
+                max_age=120,
+                secure=True,
+            )
+            _assert_session_cookie_isolation(
+                client_beta,
+                own_secret="secret-beta",  # noqa: S106
+                other_secret="secret-alpha",  # noqa: S106
+                own_origin="http://beta.example:3000",
+                other_origin="https://alpha.example",
+                max_age=300,
+                secure=False,
+            )

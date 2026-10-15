@@ -12,7 +12,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents.inbox.chat_delivery import ChatInboundCommittedError
 from base.api_contracts.agent_contract import AgentLaunchFailed, AvaAgentError
-from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.http.middleware.error_envelope import error_response
 
 _log = logging.getLogger(__name__)
@@ -53,7 +52,10 @@ def cors_headers(request: Request) -> dict[str, str]:
     for this gateway's exact-origin configuration (#187).
     """
     origin = request.headers.get("origin")
-    if origin is None or origin not in cors_allowed_origins():
+    if origin is None:
+        return {}
+    allowed_origins: tuple[str, ...] = request.app.state.gateway_config.allowed_origins
+    if origin not in allowed_origins:
         return {}
     return {
         "Access-Control-Allow-Origin": origin,

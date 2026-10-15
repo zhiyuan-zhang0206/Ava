@@ -4,14 +4,13 @@ from pathlib import Path
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.config import runtime_config, settings
 from base.config.domains.display import DisplaySettings
 from base.config.domains.tests.test_display_config import DISPLAY_RANGES
 from base.host.env import dotenv_file
-from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import seed_agent
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)
@@ -23,7 +22,7 @@ def test_config_write_rejects_invalid_default_without_changing_file(
     env_path = tmp_path / ".env"
     before = env_path.read_bytes()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         for value in (minimum - 1, maximum + 1):
             response = client.put("/api/config", json={name: value})
             assert response.status_code == 400, response.text
@@ -37,7 +36,7 @@ def test_config_write_accepts_boundary_defaults_without_clamping(
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     alias = DisplaySettings.model_fields[name].alias
     assert isinstance(alias, str)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         for value in (minimum, maximum):
             response = client.put("/api/config", json={name: value})
             assert response.status_code == 200, response.text
@@ -74,7 +73,7 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
         )
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         for path, expected in (
             ("/api/notices/open", open_limit),
             ("/api/notices/live", open_limit),

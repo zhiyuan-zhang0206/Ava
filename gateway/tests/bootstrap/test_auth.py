@@ -16,14 +16,11 @@ import base64
 import hashlib
 import hmac
 import time
-from collections.abc import Generator
-from contextlib import contextmanager
 
 import psycopg
 import pytest
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from starlette.middleware import Middleware
 
 from base import config
 from base.config.domains.gateway import GatewaySettings
@@ -31,9 +28,10 @@ from base.host.net.auth import (
     bearer_header,
     cookie_name,
 )
-from gateway.app import app
+from gateway.http.config import GatewayConfig
 from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
+from tests.fixtures.gateway_config import gateway_test_client
 
 SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -46,49 +44,27 @@ def session_cookie(token: str) -> dict[str, str]:
     return {"Cookie": f"{cookie_name()}={token}"}
 
 
-def request_with_origin(origin: str) -> Request:
+def request_with_origin(
+    origin: str,
+    *,
+    allowed_origins: tuple[str, ...] = ("https://allowed.example",),
+) -> Request:
+    standin = FastAPI()
+    standin.state.gateway_config = GatewayConfig(
+        cluster_secret=SECRET,
+        session_ttl_seconds=3600,
+        mcp_endpoint_enabled=False,
+        allowed_origins=allowed_origins,
+        browser_origin="",
+        session_cookie_secure=False,
+    )
     return Request(
         {
             "type": "http",
+            "app": standin,
             "headers": [(b"origin", origin.encode())],
         }
     )
-
-
-@contextmanager
-def rebuilt_cors_middleware() -> Generator[None, None, None]:
-    """Swap the app's CORS middleware for one built from the CURRENT settings.
-
-    CORSMiddleware captures ``allow_origins`` when the middleware stack is
-    built, and the stack is built once and cached on first request. A preflight
-    test that patches gateway settings must therefore rebuild the CORS entry
-    and reset the stack (restoring both afterwards), or it keeps exercising the
-    import-time allowlist instead of the patched one.
-    """
-    from starlette.middleware.cors import CORSMiddleware
-
-    original_entry = None
-    for i, mw in enumerate(app.user_middleware):
-        if mw.cls is CORSMiddleware:
-            original_entry = app.user_middleware[i]
-            app.user_middleware[i] = Middleware(
-                CORSMiddleware,
-                allow_origins=cors_allowed_origins(),
-                allow_credentials=True,
-                allow_methods=["*"],
-                allow_headers=["*"],
-            )
-            break
-    assert original_entry is not None, "gateway app must register CORSMiddleware"
-    app.middleware_stack = None
-    try:
-        yield
-    finally:
-        for i, mw in enumerate(app.user_middleware):
-            if mw.cls is CORSMiddleware:
-                app.user_middleware[i] = original_entry
-                break
-        app.middleware_stack = None
 
 
 def login(client: TestClient, *, user_agent: str = "test-browser") -> str:
@@ -143,9 +119,7 @@ def test_session_cookie_secure_parses_explicit_bool() -> None:
     assert parsed.session_cookie_secure is True
 
 
-def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host() -> None:
     """The derived allowlist mirrors the frontend origins, the gateway's OWN
     origin — its own port, not the frontend entry port — and the frontend
     entry on the gateway host. Regression guard for the /grafana proxy 403:
@@ -153,19 +127,13 @@ def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host(
     must be allowlisted exactly, and so must the Gate UI's login origin
     (http://<gateway-host>:<frontend-port>).
     """
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    monkeypatch.setattr(
-        config.settings.services,
-        "frontend_healthcheck_url",
-        "http://localhost:3000",
-    )
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "gateway_url",
-        "https://gateway.example:8100",
-    )
-
-    assert cors_allowed_origins() == [
+    assert cors_allowed_origins(
+        explicit=(),
+        frontend_healthcheck_url="http://localhost:3000",
+        app_port=None,
+        browser_origin="",
+        gateway_url="https://gateway.example:8100",
+    ) == [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "https://gateway.example:8100",
@@ -173,25 +141,17 @@ def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host(
     ]
 
 
-def test_cors_allowed_origins_gateway_origin_matches_prod_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cors_allowed_origins_gateway_origin_matches_prod_url() -> None:
     """The prod-shaped gateway URL (explicit non-standard port, so the browser
     Origin carries it) yields exactly that origin in the allowlist — plus the
     frontend entry on the same host, which the Gate login page sends."""
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    monkeypatch.setattr(
-        config.settings.services,
-        "frontend_healthcheck_url",
-        "http://localhost:3100",
-    )
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "gateway_url",
-        "http://10.0.0.72:8000",
-    )
-
-    assert cors_allowed_origins() == [
+    assert cors_allowed_origins(
+        explicit=(),
+        frontend_healthcheck_url="http://localhost:3100",
+        app_port=None,
+        browser_origin="",
+        gateway_url="http://10.0.0.72:8000",
+    ) == [
         "http://localhost:3100",
         "http://127.0.0.1:3100",
         "http://10.0.0.72:8000",
@@ -199,26 +159,18 @@ def test_cors_allowed_origins_gateway_origin_matches_prod_url(
     ]
 
 
-def test_cors_allowed_origins_gateway_default_port_has_bare_and_explicit_forms(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cors_allowed_origins_gateway_default_port_has_bare_and_explicit_forms() -> None:
     """A port-less gateway URL must yield the origin WITHOUT a port (what a
     browser serializes for the scheme's default port) and the explicit
     default-port form, since both can appear in an Origin header — and so
     must the frontend entry on the gateway host."""
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    monkeypatch.setattr(
-        config.settings.services,
-        "frontend_healthcheck_url",
-        "http://localhost:3000",
-    )
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "gateway_url",
-        "https://gateway.example",
-    )
-
-    assert cors_allowed_origins() == [
+    assert cors_allowed_origins(
+        explicit=(),
+        frontend_healthcheck_url="http://localhost:3000",
+        app_port=None,
+        browser_origin="",
+        gateway_url="https://gateway.example",
+    ) == [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "https://gateway.example:443",
@@ -227,24 +179,16 @@ def test_cors_allowed_origins_gateway_default_port_has_bare_and_explicit_forms(
     ]
 
 
-def test_cors_allowed_origins_ipv6_gateway_host_bracketed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cors_allowed_origins_ipv6_gateway_host_bracketed() -> None:
     """An IPv6 gateway host is bracketed in derived origins — the form a
     browser puts in the Origin header."""
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    monkeypatch.setattr(
-        config.settings.services,
-        "frontend_healthcheck_url",
-        "http://localhost:3000",
-    )
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "gateway_url",
-        "http://[2606:4700:4700::1111]:8000",
-    )
-
-    assert cors_allowed_origins() == [
+    assert cors_allowed_origins(
+        explicit=(),
+        frontend_healthcheck_url="http://localhost:3000",
+        app_port=None,
+        browser_origin="",
+        gateway_url="http://[2606:4700:4700::1111]:8000",
+    ) == [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://[2606:4700:4700::1111]:8000",
@@ -252,25 +196,17 @@ def test_cors_allowed_origins_ipv6_gateway_host_bracketed(
     ]
 
 
-def test_cors_allowed_origins_frontend_default_port_has_bare_and_explicit_forms(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cors_allowed_origins_frontend_default_port_has_bare_and_explicit_forms() -> None:
     """A port-less frontend healthcheck URL resolves to the scheme's default
     port; the frontend entries on the gateway host then carry BOTH the bare
     and explicit :80 forms, symmetric with the gateway's own origin handling."""
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    monkeypatch.setattr(
-        config.settings.services,
-        "frontend_healthcheck_url",
-        "http://localhost",
-    )
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "gateway_url",
-        "http://gateway.example:8000",
-    )
-
-    assert cors_allowed_origins() == [
+    assert cors_allowed_origins(
+        explicit=(),
+        frontend_healthcheck_url="http://localhost",
+        app_port=None,
+        browser_origin="",
+        gateway_url="http://gateway.example:8000",
+    ) == [
         "http://localhost:80",
         "http://127.0.0.1:80",
         "http://gateway.example:8000",
@@ -279,30 +215,25 @@ def test_cors_allowed_origins_frontend_default_port_has_bare_and_explicit_forms(
     ]
 
 
-def test_cors_allowed_origins_use_explicit_list_verbatim(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cors_allowed_origins_use_explicit_list_verbatim() -> None:
     explicit = ["https://one.example", "http://two.example:3000"]
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", explicit)
-    monkeypatch.setattr(
-        config.settings.services,
-        "frontend_healthcheck_url",
-        "http://localhost:4100",
+    assert (
+        cors_allowed_origins(
+            explicit=explicit,
+            frontend_healthcheck_url="http://localhost:4100",
+            app_port=None,
+            browser_origin="",
+            gateway_url="https://gateway.example:8100",
+        )
+        == explicit
     )
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "gateway_url",
-        "https://gateway.example:8100",
-    )
-
-    assert cors_allowed_origins() == explicit
 
 
 # ── Bypass paths are exempt ──────────────────────────────────────────
 
 
 def test_health_no_auth_returns_200() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/health")
     assert resp.status_code == 200
 
@@ -310,7 +241,7 @@ def test_health_no_auth_returns_200() -> None:
 def test_auth_login_no_auth_allowed() -> None:
     """Login endpoint must be accessible without auth so the browser can
     obtain a session cookie."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
@@ -318,7 +249,7 @@ def test_auth_login_no_auth_allowed() -> None:
 
 def test_auth_check_no_auth_allowed() -> None:
     """Check endpoint returns false, not 401, when no cookie present."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/auth/check")
     assert resp.status_code == 200
     assert resp.json()["authenticated"] is False
@@ -328,19 +259,19 @@ def test_auth_check_no_auth_allowed() -> None:
 
 
 def test_login_wrong_password_returns_401() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/auth/login", json={"password": "wrong"})
     assert resp.status_code == 401
 
 
 def test_login_empty_password_returns_401() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/auth/login", json={"password": ""})
     assert resp.status_code == 401
 
 
 def test_login_creates_current_server_side_session() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = login(client, user_agent="session-list-test")
         resp = client.get("/api/auth/sessions")
 
@@ -357,7 +288,7 @@ def test_login_creates_current_server_side_session() -> None:
 def test_sessions_list_masks_non_current_ids() -> None:
     """Only the request's current session keeps its full id; other rows show
     the final 8 characters (the suffix the revoke endpoint accepts)."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         current = login(client)
         client.cookies.clear()
         other = login(client, user_agent="other-browser")
@@ -374,7 +305,7 @@ def test_sessions_list_masks_non_current_ids() -> None:
 
 def test_sessions_list_labels_managed_browser_sessions() -> None:
     """The managed-browser daemon's login UA marks its session rows."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         login(client, user_agent="ava-managed-browser")
         client.cookies.clear()
         login(client, user_agent="test-browser")
@@ -389,7 +320,7 @@ def test_sessions_list_labels_managed_browser_sessions() -> None:
 
 def test_revoke_endpoint_accepts_masked_suffix() -> None:
     """The sessions list shows masked ids; revoking one must still work."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         current = login(client)
         client.cookies.clear()
         target = login(client)
@@ -408,7 +339,7 @@ def test_revoke_endpoint_accepts_masked_suffix() -> None:
 def test_revoke_endpoint_refuses_ambiguous_suffix(db_conn: psycopg.Connection) -> None:
     """A suffix shared by more than one active session is refused, not revoked
     wholesale."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         login(client)
         with db_conn.cursor() as cur:
             cur.executemany(
@@ -424,7 +355,7 @@ def test_revoke_endpoint_refuses_ambiguous_suffix(db_conn: psycopg.Connection) -
 
 def test_revoke_endpoint_short_suffix_returns_404() -> None:
     """Shorter-than-masked inputs are neither full ids nor valid suffixes."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         login(client)
         response = client.post("/api/auth/sessions/abcdefg/revoke")
 
@@ -434,7 +365,7 @@ def test_revoke_endpoint_short_suffix_returns_404() -> None:
 def test_revoke_endpoint_refuses_current_session_by_suffix() -> None:
     """The current session's own masked suffix must not bypass the logout-only
     guard: it 404s and the session stays valid (QA nit1 regression)."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         current = login(client)
         response = client.post(f"/api/auth/sessions/{current[-8:]}/revoke")
         check = client.get("/api/auth/check")
@@ -448,7 +379,7 @@ def test_revoke_endpoint_ambiguous_suffix_excludes_current_session(
 ) -> None:
     """The current session is filtered out of suffix matches BEFORE ambiguity
     is judged: current + two others sharing a suffix still 409s on the two."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         current = login(client)
         suffix = current[-8:]
         with db_conn.cursor() as cur:
@@ -470,7 +401,7 @@ def test_revoke_endpoint_rejects_longer_than_masked_suffix(
 ) -> None:
     """Only the exact 8-character masked form falls back to suffix matching; a
     longer non-full-id string must not revoke by suffix (QA nit2 regression)."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         login(client)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -493,7 +424,7 @@ def test_login_sets_cookie_flags_and_configured_ttl(
 ) -> None:
     monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 123)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     set_cookie = resp.headers["Set-Cookie"]
@@ -509,7 +440,7 @@ def test_login_cookie_secure_derives_from_gateway_url(
 ) -> None:
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "https://gateway.example:8000")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
@@ -522,7 +453,7 @@ def test_https_browser_entry_login_preserves_authenticated_cookie(
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://192.0.2.2:20016")
     monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
     monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    with rebuilt_cors_middleware(), TestClient(app, base_url="https://console.example") as client:
+    with gateway_test_client(base_url="https://console.example") as client:
         response = client.post(
             "/api/auth/login",
             json={"password": SECRET},
@@ -539,7 +470,7 @@ def test_login_cookie_not_secure_for_http_gateway(
     monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://gateway.example:8000")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" not in resp.headers["Set-Cookie"]
@@ -551,7 +482,7 @@ def test_login_cookie_secure_when_policy_explicitly_enabled(
     monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", True)
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://gateway.example:8000")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
@@ -563,7 +494,7 @@ def test_login_cookie_secure_for_https_gateway(
     monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "https://gateway.example:8000")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
@@ -571,7 +502,7 @@ def test_login_cookie_secure_for_https_gateway(
 
 def test_login_with_username_succeeds() -> None:
     """Username is accepted for Chrome password-manager compat but not validated."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             "/api/auth/login",
             json={"username": "admin", "password": SECRET},
@@ -582,7 +513,7 @@ def test_login_with_username_succeeds() -> None:
 
 def test_login_with_wrong_password_but_username_fails() -> None:
     """Only password is checked — username is cosmetic."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             "/api/auth/login",
             json={"username": "admin", "password": "wrong"},
@@ -591,7 +522,7 @@ def test_login_with_wrong_password_but_username_fails() -> None:
 
 
 def test_logout_revokes_server_side_and_clears_cookie() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = login(client)
         assert client.get("/api/agents").status_code == 200
         resp = client.post("/api/auth/logout")
@@ -604,7 +535,7 @@ def test_logout_revokes_server_side_and_clears_cookie() -> None:
 
 
 def test_check_returns_true_with_valid_cookie() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = login(client)
         resp = client.get("/api/auth/check", headers=session_cookie(token))
     assert resp.status_code == 200
@@ -612,7 +543,7 @@ def test_check_returns_true_with_valid_cookie() -> None:
 
 
 def test_check_returns_false_with_invalid_cookie() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(
             "/api/auth/check",
             headers=session_cookie("garbage-token"),
@@ -629,7 +560,7 @@ def test_check_returns_false_with_expired_cookie(db_conn: psycopg.Connection) ->
         )
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(
             "/api/auth/check",
             headers=session_cookie("expired-session"),

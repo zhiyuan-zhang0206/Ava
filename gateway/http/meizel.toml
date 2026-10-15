@@ -1,4 +1,5 @@
-exports = ["auth", "disconnect.py", "middleware"]
+exports = ["auth", "config.py", "disconnect.py", "middleware"]
 
 [uses]
-"auth" = ["middleware"]
+"auth" = ["config.py", "middleware"]
+"config.py" = ["middleware"]

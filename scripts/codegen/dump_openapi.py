@@ -18,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 
-# Put project root on sys.path so `from gateway.app import app` finds the module.
+# Put project root on sys.path so the explicit gateway app factory can be imported.
 # Same pattern as scripts/entrypoints/gateway.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.host.env.dotenv_boot import enter_scratch_home
@@ -32,9 +32,9 @@ if __name__ == "__main__":
 
 
 def main() -> int:
-    from gateway.app import app
+    from gateway.app import openapi_schema
 
-    spec = app.openapi()
+    spec = openapi_schema()
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "ui/web/openapi.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     # Trailing newline so the pre-commit `end-of-file-fixer` hook stops

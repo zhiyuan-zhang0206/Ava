@@ -17,7 +17,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from base.cluster.rate_limit import LoginRateLimiter
-from base.config import settings
 from base.host.db_authority.api import AcceptanceCache
 from base.host.net.auth import (
     clear_cookie_header,
@@ -41,6 +40,7 @@ from gateway.http.auth.session_store import (
     session_mint,
     ticket_mint,
 )
+from gateway.http.config import GatewayConfig
 from gateway.http.middleware.cors import session_cookie_secure
 from gateway.http.middleware.error_envelope import error_response
 
@@ -88,7 +88,8 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     lockout exists to stop. A successful login resets the IP's counter.
     """
     ip = request.client.host if request.client else "unknown"
-    secret = settings.data_plane.cluster_secret
+    config: GatewayConfig = request.app.state.gateway_config
+    secret = config.cluster_secret
 
     login_limiter: LoginRateLimiter = request.app.state.login_limiter
     remaining = login_limiter.lockout_remaining(ip)
@@ -139,7 +140,8 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 async def _open_session(request: Request, mint: str, ip: str) -> JSONResponse:
     """Create a session bound to `mint` and answer with its cookie."""
     session_id = minted_session_id(mint)
-    ttl_seconds = settings.gateway.session_ttl_seconds
+    config: GatewayConfig = request.app.state.gateway_config
+    ttl_seconds = config.session_ttl_seconds
     await asyncio.to_thread(
         request.app.state.sessions.create,
         session_id,
@@ -149,7 +151,11 @@ async def _open_session(request: Request, mint: str, ip: str) -> JSONResponse:
     )
     headers = session_cookie_header(
         session_id,
-        secure=session_cookie_secure(str(request.url)),
+        secure=session_cookie_secure(
+            str(request.url),
+            browser_origin=config.browser_origin,
+            default_secure=config.session_cookie_secure,
+        ),
         ttl_seconds=ttl_seconds,
     )
     return JSONResponse(content={"ok": True}, headers=headers)
@@ -168,7 +174,8 @@ async def issue_login_ticket(request: Request) -> JSONResponse:
 
     Returns ``{"ticket": "<opaque>", "expires_in_seconds": <int>}``.
     """
-    secret = settings.data_plane.cluster_secret
+    config: GatewayConfig = request.app.state.gateway_config
+    secret = config.cluster_secret
     mint = await asyncio.to_thread(
         login_mint,
         request.app.state.session_keys,
@@ -203,10 +210,11 @@ async def _consume_login_ticket(request: Request, ticket: str) -> str | None:
     mint = ticket_mint(ticket)
     if mint is None or not await asyncio.to_thread(request.app.state.sessions.revoke, ticket):
         return None
+    config: GatewayConfig = request.app.state.gateway_config
     admitted = await asyncio.to_thread(
         session_mints,
         request.app.state.session_keys,
-        settings.data_plane.cluster_secret,
+        config.cluster_secret,
         cache=request.app.state.machine_token_acceptance,
     )
     return mint if mint in admitted else None
@@ -272,12 +280,13 @@ async def check(request: Request) -> JSONResponse:
     Always 200 — the caller uses the body, not the status code.
     """
     token = request.cookies.get(cookie_name())
+    config: GatewayConfig = request.app.state.gateway_config
     fact = await asyncio.to_thread(
         current_session_fact,
         request.app.state.sessions,
         request.app.state.session_keys,
         token,
-        settings.data_plane.cluster_secret,
+        config.cluster_secret,
         cache=request.app.state.machine_token_acceptance,
     )
     return JSONResponse(content={"authenticated": fact is not None})
@@ -307,11 +316,12 @@ async def sessions(request: Request) -> list[dict[str, Any]]:
     mistaken for the caller's own.
     """
     current_session_id = request.cookies.get(cookie_name())
+    config: GatewayConfig = request.app.state.gateway_config
     rows = await asyncio.to_thread(
         _sessions_that_authenticate,
         request.app.state.db_pool,
         request.app.state.session_keys,
-        settings.data_plane.cluster_secret,
+        config.cluster_secret,
         cache=request.app.state.machine_token_acceptance,
     )
     result: list[dict[str, Any]] = []

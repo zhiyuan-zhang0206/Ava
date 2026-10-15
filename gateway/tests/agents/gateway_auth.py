@@ -23,17 +23,16 @@ Helpers for the tests that need another posture:
 - `disable_default_gateway_credentials(monkeypatch)` restores the stock `TestClient`
   for a module whose subject is authentication itself: every client it builds is
   anonymous until a test gives it a header.
-- `gateway_credentials()` is the header dict, for raw `httpx` / header assertions.
+- `gateway_credentials(config)` is the header dict for an explicit `GatewayConfig`.
 """
 
-import sys
 from typing import Any
 
 import pytest
 from starlette.testclient import TestClient
 
-from base.config import settings
 from base.host.net.auth import bearer_header
+from gateway.http.config import GatewayConfig
 
 __all__ = [
     "disable_default_gateway_credentials",
@@ -45,9 +44,9 @@ __all__ = [
 _STOCK_INIT = TestClient.__init__
 
 
-def gateway_credentials() -> dict[str, str]:
-    """The `Authorization` header of the suite's cluster secret as it stands now."""
-    return bearer_header(settings.data_plane.cluster_secret)
+def gateway_credentials(config: GatewayConfig) -> dict[str, str]:
+    """The `Authorization` header of the given Gateway configuration's cluster secret."""
+    return bearer_header(config.cluster_secret)
 
 
 def without_credentials(client: TestClient) -> TestClient:
@@ -61,20 +60,22 @@ def disable_default_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(TestClient, "__init__", _STOCK_INIT)
 
 
-def _is_gateway_app(app: object) -> bool:
-    module = sys.modules.get("gateway.app")
-    return module is not None and app is getattr(module, "app", None)
+def _gateway_config(app: object) -> GatewayConfig | None:
+    state = getattr(app, "state", None)
+    config = getattr(state, "gateway_config", None)
+    return config if isinstance(config, GatewayConfig) else None
 
 
 def install_default_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give every `TestClient` over the Gateway app the cluster secret as its bearer."""
+    """Give every `TestClient` over an assembled Gateway app its configured cluster secret."""
     original = TestClient.__init__
 
     def init(self: TestClient, app: Any, *args: Any, **kwargs: Any) -> None:
-        if _is_gateway_app(app):
+        config = _gateway_config(app)
+        if config is not None:
             headers = dict(kwargs.get("headers") or {})
             if not any(name.lower() == "authorization" for name in headers):
-                headers.update(gateway_credentials())
+                headers.update(gateway_credentials(config))
             kwargs["headers"] = headers
         original(self, app, *args, **kwargs)
 

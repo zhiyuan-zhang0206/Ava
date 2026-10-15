@@ -9,13 +9,13 @@ from fastapi.testclient import TestClient
 from base.cluster.machine import MachineIdentity
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
+from tests.fixtures.gateway_config import gateway_test_app
 
 
 @pytest.fixture
 def gateway_unit(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> Iterator[TestClient]:
     """The gateway unit (gateway): owns the test DB/config, runs the
@@ -31,7 +31,6 @@ def gateway_unit(
     (`gateway.tests.agents.gateway_auth`), so endpoint tests carry no auth headers.
     Tests that exercise rejection drop it with `without_credentials(client)`.
     """
-    from gateway import app as gateway_app
     from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 
     config = snapshot_process_config()
@@ -40,11 +39,11 @@ def gateway_unit(
     process = GatewayProcess(
         config=config, image=LOADED_IMAGE, machine=machine_identity, host=fake_host()
     )
-    monkeypatch.setattr(gateway_app.app.state, "gateway_process_input", process, raising=False)
+    app = gateway_test_app(process=process)
     _ = db_conn  # per-test truncate side effect
     with (
         process.lifetime(),
-        TestClient(gateway_app.app, base_url="http://test-gateway") as client,
+        TestClient(app, base_url="http://test-gateway") as client,
     ):
         yield client
 

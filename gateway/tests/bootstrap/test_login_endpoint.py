@@ -11,6 +11,8 @@ not evaluate the credential at all.
 
 from __future__ import annotations
 
+from functools import partial
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -20,9 +22,10 @@ from base.cluster import rate_limit
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.rate_limit import LoginRateLimitConfig
-from gateway.app import app, lifespan
+from gateway.app import lifespan
 from gateway.http.auth.router import router
-from tests.fixtures.gateway_config import gateway_test_client
+from gateway.http.config import gateway_config_from_boot
+from tests.fixtures.gateway_config import gateway_test_client, gateway_test_process
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -56,7 +59,7 @@ def _wrong_login(
 
 
 def test_sixth_consecutive_failure_is_locked_out(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(client)
         resp = client.post("/api/auth/login", json={"password": "wrong-password"})
@@ -75,7 +78,7 @@ def test_correct_password_is_not_evaluated_while_locked(
 ) -> None:
     """While locked the credential never reaches the comparison — a correct
     password also gets 429, so the lockout cannot be probed away."""
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(client)
         resp = client.post("/api/auth/login", json={"password": _SECRET})
@@ -83,7 +86,7 @@ def test_correct_password_is_not_evaluated_while_locked(
 
 
 def test_successful_login_resets_failure_counter(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         # A success after 4 failures clears the streak...
         for _ in range(config.settings.gateway.login_max_failures - 1):
             _wrong_login(client)
@@ -100,7 +103,7 @@ def test_lockout_expires_and_recovers(
 ) -> None:
     fake = _FakeClock()
     monkeypatch.setattr(rate_limit, "time", fake)
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(client)
         assert (
@@ -114,16 +117,14 @@ def test_lockout_expires_and_recovers(
 
 
 def test_lockout_is_per_ip(*, machine_identity: MachineIdentity) -> None:
-    with gateway_test_client(
-        app, client=("203.0.113.7", 40000), machine=machine_identity
-    ) as attacker:
+    with gateway_test_client(client=("203.0.113.7", 40000), machine=machine_identity) as attacker:
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(attacker)
         assert (
             attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
         )
         # A different IP in the same lifespan keeps an independent counter.
-        other = TestClient(app, client=("203.0.113.8", 40000))
+        other = TestClient(attacker.app, client=("203.0.113.8", 40000))
         resp = other.post("/api/auth/login", json={"password": _SECRET})
         assert resp.status_code == 200
         assert (
@@ -134,27 +135,33 @@ def test_lockout_is_per_ip(*, machine_identity: MachineIdentity) -> None:
 def test_login_lockout_is_isolated_between_application_lifespans(
     *, machine_identity: MachineIdentity
 ) -> None:
-    first = FastAPI(lifespan=lifespan)
-    second = FastAPI(lifespan=lifespan)
-    first.include_router(router)
-    second.include_router(router)
-    with (
-        gateway_test_client(first, machine=machine_identity) as attacker,
-        gateway_test_client(
-            second, process=first.state.gateway_process_input, machine=machine_identity
-        ) as independent,
-    ):
-        assert first.state.login_limiter is not second.state.login_limiter
-        for _ in range(config.settings.gateway.login_max_failures):
-            _wrong_login(attacker)
-        assert (
-            attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
-        )
-        _wrong_login(independent)
-        assert independent.post("/api/auth/login", json={"password": _SECRET}).status_code == 200
-        assert (
-            attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
-        )
+    with gateway_test_process(machine=machine_identity) as process:
+        app_config = gateway_config_from_boot(process.config)
+        first = FastAPI(lifespan=partial(lifespan, process=process, process_ownership="borrowed"))
+        second = FastAPI(lifespan=partial(lifespan, process=process, process_ownership="borrowed"))
+        first.state.gateway_config = app_config
+        second.state.gateway_config = app_config
+        first.include_router(router)
+        second.include_router(router)
+        with (
+            gateway_test_client(first) as attacker,
+            gateway_test_client(second) as independent,
+        ):
+            assert first.state.login_limiter is not second.state.login_limiter
+            for _ in range(config.settings.gateway.login_max_failures):
+                _wrong_login(attacker)
+            assert (
+                attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code
+                == 429
+            )
+            _wrong_login(independent)
+            assert (
+                independent.post("/api/auth/login", json={"password": _SECRET}).status_code == 200
+            )
+            assert (
+                attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code
+                == 429
+            )
 
 
 def test_lockout_threshold_and_window_follow_config(
@@ -167,7 +174,7 @@ def test_lockout_threshold_and_window_follow_config(
     monkeypatch.setattr(rate_limit, "time", fake)
     monkeypatch.setattr(config.settings.gateway, "login_max_failures", 2)
     monkeypatch.setattr(config.settings.gateway, "login_lockout_seconds", 123)
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         _wrong_login(client)  # failure 1 — below the configured threshold
         _wrong_login(client)  # failure 2 — trips it
         resp = client.post("/api/auth/login", json={"password": "wrong-password"})
