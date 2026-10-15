@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json as _json
 import uuid as _uuid
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import GatewayHandle
 from base.agents.messages.delivery.retry import GatewayResponse, network_errors, retryable_response
@@ -27,7 +25,6 @@ __all__ = [
     "patch",
     "post",
     "raise_from_response",
-    "use_client",
 ]
 
 # httpx stays off the `import ava` path: every function that needs it imports it in its body, and
@@ -73,12 +70,11 @@ class GatewayTransportInputs:
     memory_deadline_reader: Callable[[], float]
 
 
-def _inputs(context: AvaContext | None = None) -> GatewayTransportInputs:
-    owner = context if context is not None else process_context.current_context()
-    return owner.clients.get(GatewayTransportInputs)
+def _inputs(context: AvaContext) -> GatewayTransportInputs:
+    return context.clients.get(GatewayTransportInputs)
 
 
-def gateway_http(context: AvaContext | None = None) -> GatewayHandle:
+def gateway_http(context: AvaContext) -> GatewayHandle:
     """The bound context's gateway client, built on first use so importing the SDK in a no-config
     context does not require the gateway URL to be resolvable until an actual call is made. Its
     timeout is `Settings.gateway_client_http_timeout_seconds` (env override
@@ -87,15 +83,7 @@ def gateway_http(context: AvaContext | None = None) -> GatewayHandle:
     comfortably exceed the server's confirm window, otherwise a read timeout on a spawn that DID
     succeed triggers a retry that re-POSTs the non-idempotent create and yields a phantom-twin
     agent. `use_client` routes the calls through a different one."""
-    return (context if context is not None else process_context.current_context()).gateway
-
-
-@contextmanager
-def use_client(client: Any) -> Generator[Any]:
-    """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an
-    in-process gateway, or any `httpx.Client` — then put back whichever client was there before."""
-    with process_context.current_context().clients.using_gateway(client):
-        yield client
+    return context.gateway
 
 
 # Gateway cold start ~0.6s (measured). Default 3 retries, base interval 1s —
@@ -104,11 +92,11 @@ def use_client(client: Any) -> Generator[Any]:
 # env override: `AVA_GATEWAY_MAX_RETRIES` / `AVA_GATEWAY_RETRY_DELAY_SECONDS`.
 
 
-def request_max_retries(context: AvaContext | None = None) -> int:
+def request_max_retries(context: AvaContext) -> int:
     return _inputs(context).max_retries_reader()
 
 
-def base_retry_delay_s(context: AvaContext | None = None) -> float:
+def base_retry_delay_s(context: AvaContext) -> float:
     return _inputs(context).retry_delay_reader()
 
 
@@ -126,36 +114,8 @@ _RETRY_MAX_DELAY_S = 8.0
 # Span of the per-agent jitter offset, seconds.
 JITTER_SPAN_S = 5.0
 
-# ── memory search: its own timeout and retry budget ──
-# `/api/memory/search` stands apart from the other routes: the gateway gives
-# it a server-side deadline (`memory_search_deadline_seconds`, default 15s)
-# and answers a *modelled* 503 (reason indexer_unavailable) when it expires —
-# or in ~1s when the query-embed gate is congested (task #2003/E). So the
-# default SDK budget (20s x 3 attempts + backoff) spends agent time re-sending
-# a request whose failure the gateway already answered; on the 2026-08-29
-# fleet-wake storm that was the ~27s overhang measured behind search (#2003/A).
-# Two attempts (one retry) still ride out a transient blip (the 2026-08-07
-# indexer-500 class, task #960) without stacking the default 3; on a
-# persistent outage the caller decides how long it is worth.
-MEMORY_SEARCH_MAX_RETRIES = 2
-# Per-attempt HTTP timeout must stay ABOVE the gateway's own search deadline:
-# the server's wire 503 is the informative failure (IndexerUnavailable), and a
-# client ReadTimeout that beats it converts the error into a generic
-# GatewayUnavailable — the exact "caller reads out first" case the deadline
-# setting's description warns about.
-MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
 
-
-def memory_search_timeout(context: AvaContext | None = None) -> TransportTimeout:
-    """Per-attempt HTTP timeout for one memory search: the gateway's own
-    search deadline plus the margin, so the server's deadline fires first."""
-    import httpx
-
-    budget = _inputs(context).memory_deadline_reader() + MEMORY_SEARCH_TIMEOUT_MARGIN_S
-    return httpx.Timeout(budget)
-
-
-def agent_jitter_seconds(context: AvaContext | None = None) -> float:
+def agent_jitter_seconds(context: AvaContext) -> float:
     """Deterministic per-agent offset in [0, JITTER_SPAN_S); 0 when no agent id.
 
     The heartbeat daemon's per-agent due-time jitter pattern
@@ -163,19 +123,20 @@ def agent_jitter_seconds(context: AvaContext | None = None) -> float:
     agent at the same moment, and a fleet-wide identical retry schedule
     (1s, 2s, 4s, ...) would re-synchronize the retry waves as each agent
     retries in lockstep. Offsetting every sleep by a stable per-agent amount
-    keeps the waves de-phased. Deterministic on the supplied host context or local SDK identity, so an agent
+    keeps the waves de-phased. Deterministic on the supplied context identity, so an agent
     keeps its own offset across restarts; no identity
     (tests, non-agent callers) → 0 (no offset).
     """
-    from ava.sdk_surface.agent_identity import agent_id
-
-    ident = agent_id(context)
+    identity = context.identity
+    ident = identity.lease.validate() if identity is not None and identity.lease else None
+    if ident is None and identity is not None:
+        ident = identity.agent_id
     if ident is None:
         return 0.0
     return JITTER_SPAN_S * (ident % 1000) / 1000.0
 
 
-def retry_delay_seconds(attempt: int, context: AvaContext | None = None) -> float:
+def retry_delay_seconds(attempt: int, context: AvaContext) -> float:
     """Sleep before retry `attempt` (0-based): bounded exponential backoff
     plus the deterministic per-agent jitter offset."""
     base = min(base_retry_delay_s(context) * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
@@ -239,7 +200,7 @@ def _wire_reason(resp: TransportResponse) -> tuple[ErrorReason, dict[str, Any]] 
     import httpx
 
     try:
-        body = resp.json()
+        raw_body = resp.json()
     except (_json.JSONDecodeError, httpx.DecodingError):
         # JSONDecodeError: body is not JSON (FastAPI default 500 text, ...).
         # DecodingError: httpx 0.28.1 raises it when body decoding fails on a
@@ -247,8 +208,9 @@ def _wire_reason(resp: TransportResponse) -> tuple[ErrorReason, dict[str, Any]] 
         # protocol-mismatch class; falls through to the clean HTTP error
         # instead of escaping and masking the status code.
         return None
-    if not isinstance(body, dict):
+    if not isinstance(raw_body, dict):
         return None
+    body = cast(dict[str, Any], raw_body)
     try:
         reason = ErrorReason(body["reason"])
     except (KeyError, ValueError):
@@ -274,7 +236,7 @@ def _request_with_retry(
     attempts: int,
     *,
     retryable: bool = True,
-    context: AvaContext | None = None,
+    context: AvaContext,
 ) -> TransportResponse:
     """Execute one route's policy while keeping its final wire response intact."""
     import httpx
@@ -341,7 +303,7 @@ def post(
     idempotent: bool | None = None,
     idempotency_key: str | None = None,
     max_retries: int | None = None,
-    context: AvaContext | None = None,
+    context: AvaContext,
 ) -> TransportResponse:
     """Unified POST wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
@@ -421,7 +383,7 @@ def get(
     params: dict[str, Any] | None = None,
     timeout: TransportTimeout | None = None,
     max_retries: int | None = None,
-    context: AvaContext | None = None,
+    context: AvaContext,
 ) -> TransportResponse:
     """Unified GET wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
@@ -451,6 +413,7 @@ def patch(
     json: dict[str, Any] | None = None,
     *,
     idempotency_key: str | None = None,
+    context: AvaContext,
 ) -> TransportResponse:
     """Unified PATCH wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
@@ -467,7 +430,8 @@ def patch(
         else None
     )
     return _request_with_retry(
-        lambda: gateway_http().patch(path, json=json or {}, headers=headers),
-        request_max_retries(),
+        lambda: gateway_http(context).patch(path, json=json or {}, headers=headers),
+        request_max_retries(context),
         retryable=keyed or semantics is Idempotency.IDEMPOTENT,
+        context=context,
     )

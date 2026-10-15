@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 import ava
-from ava.gateway_client.transport import use_client
+from ava.gateway_client import use_client
 from ava.sdk_surface import metering, process_context
 from ava.sdk_surface.installation import Installation
 from ava.tests.fixtures.pin_agent import pin_agent

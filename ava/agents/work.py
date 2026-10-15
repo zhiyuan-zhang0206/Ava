@@ -1,8 +1,8 @@
 """Controls for one explicitly observed active turn."""
 
-from ava.gateway_client import transport
-from ava.sdk_surface import agent_identity
+from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.validation import coerce_typed
+from base.agents.context.gateway_client import transport
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAcceptance,
     NativeRestartProgress,
@@ -24,7 +24,9 @@ def observe(agent_id: int) -> NativeWorkTarget:
     if type(agent_id) is not int or not 0 < agent_id < 2**63:
         raise ValueError("work observation requires a positive agent ID")
     agent_identity.validate_external_identity()
-    response = transport.get(f"/api/keyed/v1/agents/{agent_id}/native-work")
+    response = transport.get(
+        f"/api/keyed/v1/agents/{agent_id}/native-work", context=process_context.current_context()
+    )
     transport.raise_from_response(response)
     if response.status_code != 200:
         raise ValueError("active work observation is unconfirmed")
@@ -49,6 +51,7 @@ def cancel(target: NativeWorkTarget, *, idempotency_key: str) -> NativeCancelAcc
         f"/api/keyed/v1/agents/{target.agent_id}/cancel-work",
         target.model_dump(mode="json"),
         idempotency_key=key,
+        context=process_context.current_context(),
     )
     transport.raise_from_response(response)
     if response.status_code != 200:
@@ -83,6 +86,7 @@ def restart(
         f"/api/keyed/v1/agents/{target.agent_id}/restart-work",
         body.model_dump(mode="json"),
         idempotency_key=key,
+        context=process_context.current_context(),
     )
     transport.raise_from_response(response)
     if response.status_code != 200:
@@ -103,7 +107,8 @@ def restart_status(accepted: NativeRestartAcceptance) -> NativeRestartProgress:
     accepted = NativeRestartAcceptance.model_validate(accepted.model_dump(mode="python"))
     agent_identity.validate_external_identity()
     response = transport.get(
-        f"/api/keyed/v1/agents/{accepted.target.agent_id}/restart-commands/{accepted.command_id}"
+        f"/api/keyed/v1/agents/{accepted.target.agent_id}/restart-commands/{accepted.command_id}",
+        context=process_context.current_context(),
     )
     transport.raise_from_response(response)
     if response.status_code != 200:

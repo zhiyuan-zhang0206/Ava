@@ -14,7 +14,7 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
-from ava.gateway_client.transport import use_client
+from ava.gateway_client import use_client
 
 
 @pytest.fixture(autouse=True)

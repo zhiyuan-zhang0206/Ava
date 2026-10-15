@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 from uuid import uuid4
 
+import httpx
 import psycopg
 import pytest
 
@@ -157,39 +158,32 @@ class TestGetAncestors:
 
 
 class TestListAgents:
-    def test_gateway_client_reads_exactly_one_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        calls: list[tuple[str, dict[str, object]]] = []
+    def test_gateway_client_reads_exactly_one_page(self) -> None:
+        calls: list[httpx.Request] = []
         page: dict[str, object] = {"agents": [], "next_cursor": 17}
 
-        class _Response:
-            def json(self) -> dict[str, object]:
-                return page
+        def answer(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return httpx.Response(200, json=page)
 
-        def fake_get(path: str, *, params: dict[str, object]) -> _Response:
-            calls.append((path, params))
-            return _Response()
-
-        def fake_raise(_response: object) -> None:
-            return None
-
-        monkeypatch.setattr(gateway_client, "get", fake_get)
-        monkeypatch.setattr(gateway_client, "raise_from_response", fake_raise)
-
-        assert (
-            gateway_client.list_agents(scope="terminated", query="research", before_id=42, limit=5)
-            == page
-        )
-        assert calls == [
-            (
-                "/api/agents",
-                {
-                    "scope": "terminated",
-                    "query": "research",
-                    "before_id": 42,
-                    "limit": 5,
-                },
+        with (
+            httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(answer)) as http,
+            ava.context.clients.using_gateway(http),
+        ):
+            assert (
+                gateway_client.list_agents(
+                    scope="terminated", query="research", before_id=42, limit=5
+                )
+                == page
             )
-        ]
+        [request] = calls
+        assert (request.method, request.url.path) == ("GET", "/api/agents")
+        assert dict(request.url.params) == {
+            "scope": "terminated",
+            "query": "research",
+            "before_id": "42",
+            "limit": "5",
+        }
 
     def test_default_scope_includes_all_nonterminated_states(
         self,
@@ -279,26 +273,20 @@ class TestListAgents:
         with pytest.raises(ValueError):
             ava.agents.list_agents(**kwargs)
 
-    def test_get_status_uses_direct_detail_not_directory(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls: list[str] = []
+    def test_get_status_uses_direct_detail_not_directory(self) -> None:
+        calls: list[httpx.Request] = []
 
-        class _Response:
-            def json(self) -> dict[str, str]:
-                return {"status": "terminated"}
+        def answer(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return httpx.Response(200, json={"status": "terminated"})
 
-        def fake_get(path: str) -> _Response:
-            calls.append(path)
-            return _Response()
-
-        def fake_raise(_response: object) -> None:
-            return None
-
-        monkeypatch.setattr(gateway_client, "get", fake_get)
-        monkeypatch.setattr(gateway_client, "raise_from_response", fake_raise)
-        assert ava.agents.get_status(1) == AgentStatus.TERMINATED
-        assert calls == ["/api/agents/1"]
+        with (
+            httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(answer)) as http,
+            ava.context.clients.using_gateway(http),
+        ):
+            assert ava.agents.get_status(1) == AgentStatus.TERMINATED
+        [request] = calls
+        assert (request.method, request.url.path) == ("GET", "/api/agents/1")
 
     def test_get_status_for_missing_agent_raises(self, db_conn: psycopg.Connection) -> None:
         with pytest.raises(AgentNotFound):

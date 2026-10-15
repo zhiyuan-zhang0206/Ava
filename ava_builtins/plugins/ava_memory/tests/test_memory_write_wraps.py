@@ -14,6 +14,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import pytest
 
 import ava
@@ -54,19 +55,31 @@ def exec_turn(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
-    def no_request(*_args: Any, **_kwargs: Any) -> None:
-        raise AssertionError("the exec subprocess must send no gateway request")
+    requests: list[httpx.Request] = []
 
-    monkeypatch.setattr(gateway_client, "post", no_request)
-    monkeypatch.setattr(gateway_client, "memory_search", no_request)
+    def no_request(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise AssertionError(
+            f"the exec subprocess must send no gateway request: {request.method} {request.url}"
+        )
+
     pin_agent(17)
     registry = _registry()
     install.install(registry)
     ava.state = build_agent_state(registry)(messages=[], halted=False)
     ava.state_update = {}
-    yield unit_home
-    process_context.unbind_exec_turn()
-    install.uninstall()
+    with (
+        httpx.Client(
+            base_url="http://gateway.test", transport=httpx.MockTransport(no_request)
+        ) as client,
+        gateway_client.use_client(client),
+    ):
+        try:
+            yield unit_home
+        finally:
+            process_context.unbind_exec_turn()
+            install.uninstall()
+            assert requests == []
 
 
 def _recorded(key: str) -> set[str]:

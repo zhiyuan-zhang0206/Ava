@@ -14,11 +14,11 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from ava.gateway_client.transport import GatewayTransportInputs
 from ava.mcps import McpClients
 from ava.sdk_surface import ava_module, process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
+from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity

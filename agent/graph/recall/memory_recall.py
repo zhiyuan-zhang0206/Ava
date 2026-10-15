@@ -34,8 +34,8 @@ from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.graph.recall.conversation_query import build_conversation_query
 from agent.messages import NoteTag, system_note_message
-from ava import gateway_client
 from base.agents.context import AvaContext
+from base.agents.context.gateway_client import memory_search as memory_client
 from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
@@ -68,7 +68,7 @@ class PassiveRecall(NamedTuple):
 
 async def _search_or_none(
     query: str, k: int, *, exclude: Collection[str], deadline: float, ctx: AvaContext
-) -> list[gateway_client.MemorySearchResult] | None:
+) -> list[memory_client.MemorySearchResult] | None:
     """The `k` best results outside `exclude`, or None when the search is unavailable or failed.
 
     `deadline` is the pass's whole budget and travels in the request, so the gateway stops
@@ -80,7 +80,7 @@ async def _search_or_none(
 
     try:
         return await asyncio.to_thread(
-            gateway_client.memory_search,
+            memory_client.memory_search,
             query,
             k,
             purpose="recall",
@@ -112,7 +112,7 @@ async def _search_or_none(
         # gateway bug someone has to see.
         #
         # Only the status-code half of `httpx.HTTPError` is caught. Its
-        # transport half never reaches here: `gateway_client.post` retries
+        # transport half never reaches here: `base.agents.context.gateway_client.transport.post` retries
         # those and converts them to `GatewayUnavailable`, which the branch
         # above already takes.
         logger.error(
@@ -128,11 +128,11 @@ async def _search_or_none(
 
 
 def _qualifying(
-    results: list[gateway_client.MemorySearchResult],
+    results: list[memory_client.MemorySearchResult],
     *,
     threshold: float,
     limit: int,
-) -> list[gateway_client.MemorySearchResult]:
+) -> list[memory_client.MemorySearchResult]:
     """The results to inject: best score first, at or above `threshold`, present on this
     machine, at most `limit`.
 
@@ -140,7 +140,7 @@ def _qualifying(
     be recallable once it arrives).
     """
     root = memory_dir()
-    picked: list[gateway_client.MemorySearchResult] = []
+    picked: list[memory_client.MemorySearchResult] = []
     for item in sorted(results, key=lambda r: r.score, reverse=True):
         if item.score < threshold or len(picked) >= limit:
             break
@@ -150,7 +150,7 @@ def _qualifying(
     return picked
 
 
-def _render_entry(item: gateway_client.MemorySearchResult) -> str:
+def _render_entry(item: memory_client.MemorySearchResult) -> str:
     """One injected note: path, description and score, then the passage that matched.
 
     The passage is omitted when it is the description itself. Tags are left out: the

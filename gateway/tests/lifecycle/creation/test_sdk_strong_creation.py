@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 import ava
 import ava.agents
-from ava.gateway_client import spawn, transport
+from ava.gateway_client import spawn, use_client
 from ava.sdk_surface import agent_identity
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
@@ -30,7 +30,7 @@ from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spaw
 @pytest.fixture
 def sdk_http() -> Iterator[MagicMock]:
     http = MagicMock()
-    with transport.use_client(http):
+    with use_client(http):
         yield http
 
 

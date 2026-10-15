@@ -5,12 +5,14 @@ import json
 import httpx
 import pytest
 
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
+from ava.sdk_surface import process_context
 from ava.tests.fixtures.model_owner import model_installation as model_installation
 from ava.tests.fixtures.model_owner import sdk_model_owner as sdk_model_owner
 from ava.tests.fixtures.sdk import sdk_environment as sdk_environment
 from ava.tests.fixtures.sdk import sdk_identity as sdk_identity
 from ava.tests.fixtures.sdk import sdk_metering as sdk_metering
+from base.agents.context.gateway_client import transport
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.machine.tests.identity import set_machine_identity as set_machine_identity
@@ -43,13 +45,13 @@ def test_unprotected_write_is_sent_once(method: str, path: str, failure: str) ->
 
     with (
         httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
-        transport.use_client(client),
+        use_client(client),
     ):
 
         def send() -> transport.TransportResponse:
             if method == "POST":
-                return transport.post(path)
-            return transport.patch(path)
+                return transport.post(path, context=process_context.current_context())
+            return transport.patch(path, context=process_context.current_context())
 
         if failure == "timeout":
             with pytest.raises(GatewayUnavailable, match="result unknown"):
@@ -69,9 +71,11 @@ def test_natural_idempotent_write_retries() -> None:
 
     with (
         httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
-        transport.use_client(client),
+        use_client(client),
     ):
-        response = transport.patch("/api/agents/1", {"label": "new"})
+        response = transport.patch(
+            "/api/agents/1", {"label": "new"}, context=process_context.current_context()
+        )
     assert response.status_code == 200
     assert len(requests) == 2
 
@@ -115,13 +119,20 @@ def test_keyed_route_retries_an_ambiguous_outcome_under_one_key(
             transport=httpx.MockTransport(_lost_response_handler(failure, requests)),
             base_url="http://gateway",
         ) as client,
-        transport.use_client(client),
+        use_client(client),
     ):
         if failure == "timeout":
             with pytest.raises(GatewayUnavailable):
-                transport.post(path, idempotency_key="intent-1")
+                transport.post(
+                    path, idempotency_key="intent-1", context=process_context.current_context()
+                )
         else:
-            assert transport.post(path, idempotency_key="intent-1").status_code == 503
+            assert (
+                transport.post(
+                    path, idempotency_key="intent-1", context=process_context.current_context()
+                ).status_code
+                == 503
+            )
     _assert_one_logical_key(requests, "intent-1")
 
 
@@ -134,14 +145,22 @@ def test_keyed_patch_retries_an_ambiguous_outcome_under_the_caller_key(failure: 
             transport=httpx.MockTransport(_lost_response_handler(failure, requests)),
             base_url="http://gateway",
         ) as client,
-        transport.use_client(client),
+        use_client(client),
     ):
         if failure == "timeout":
             with pytest.raises(GatewayUnavailable):
-                transport.patch("/api/tasks/1", {"priority": "P1"}, idempotency_key="original")
+                transport.patch(
+                    "/api/tasks/1",
+                    {"priority": "P1"},
+                    idempotency_key="original",
+                    context=process_context.current_context(),
+                )
         else:
             response = transport.patch(
-                "/api/tasks/1", {"priority": "P1"}, idempotency_key="original"
+                "/api/tasks/1",
+                {"priority": "P1"},
+                idempotency_key="original",
+                context=process_context.current_context(),
             )
             assert response.status_code == 503
     _assert_one_logical_key(requests, "original")
@@ -156,10 +175,12 @@ def test_keyed_post_and_patch_mint_a_key_when_none_is_pinned() -> None:
 
     with (
         httpx.Client(transport=httpx.MockTransport(accept), base_url="http://gateway") as client,
-        transport.use_client(client),
+        use_client(client),
     ):
-        transport.patch("/api/tasks/1", {"priority": "P1"})
-        transport.post("/api/agents/1/system-note", {})
+        transport.patch(
+            "/api/tasks/1", {"priority": "P1"}, context=process_context.current_context()
+        )
+        transport.post("/api/agents/1/system-note", {}, context=process_context.current_context())
     for request in requests:
         assert request.headers["Idempotency-Key"]
         assert request.headers["Idempotency-Scope"] == "principal-v1"
@@ -175,10 +196,14 @@ def test_task_patch_rejects_invalid_caller_key_before_network(key: object) -> No
 
     with (
         httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gateway") as client,
-        transport.use_client(client),
+        use_client(client),
         pytest.raises((TypeError, ValueError), match="idempotency key"),
     ):
-        transport.patch("/api/tasks/1", idempotency_key=key)  # type: ignore[arg-type]
+        transport.patch(
+            "/api/tasks/1",
+            idempotency_key=key,  # type: ignore[arg-type]
+            context=process_context.current_context(),
+        )
     assert requests == []
 
 
@@ -206,7 +231,7 @@ def test_public_page_call_retries_an_ambiguous_effect_under_one_key(
         httpx.Client(
             transport=httpx.MockTransport(committed_then_response_failed), base_url="http://gateway"
         ) as client,
-        transport.use_client(client),
+        use_client(client),
     ):
         expected_error = GatewayUnavailable if failure == "timeout" else httpx.HTTPStatusError
         with pytest.raises(expected_error):
@@ -238,7 +263,7 @@ def test_close_page_without_an_open_page_sends_no_write() -> None:
         httpx.Client(
             transport=httpx.MockTransport(only_reads), base_url="http://gateway"
         ) as client,
-        transport.use_client(client),
+        use_client(client),
     ):
         assert close_page(7, "report") is False
     assert [request.method for request in requests] == ["GET"]
@@ -268,7 +293,7 @@ def test_fleet_current_notice_call_retries_its_observed_intent_under_one_key(
         httpx.Client(
             transport=httpx.MockTransport(response_lost), base_url="http://gateway"
         ) as client,
-        transport.use_client(client),
+        use_client(client),
     ):
         error = GatewayUnavailable if failure == "timeout" else httpx.HTTPStatusError
         with pytest.raises(error):
@@ -301,7 +326,7 @@ def test_fleet_current_notice_call_without_an_open_notice_sends_no_write(operati
         httpx.Client(
             transport=httpx.MockTransport(only_reads), base_url="http://gateway"
         ) as client,
-        transport.use_client(client),
+        use_client(client),
     ):
         if operation == "edit":
             edit_notice(title="Nothing open")
@@ -320,12 +345,13 @@ def test_keyed_patch_sends_the_principal_scope_with_the_caller_key() -> None:
 
     with (
         httpx.Client(transport=httpx.MockTransport(accept), base_url="http://gateway") as client,
-        transport.use_client(client),
+        use_client(client),
     ):
         transport.patch(
             "/api/agents/7/notices/current/guarded-v1",
             {"observed_notice_id": 3, "title": "x"},
             idempotency_key="intent-1",
+            context=process_context.current_context(),
         )
     assert requests[0].headers["Idempotency-Key"] == "intent-1"
     assert requests[0].headers["Idempotency-Scope"] == "principal-v1"

@@ -8,8 +8,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from ava.gateway_client import send_message
-from ava.gateway_client.transport import use_client
+from ava.gateway_client import send_message, use_client
 from base.api_contracts.agent_contract import GatewayUnavailable
 
 

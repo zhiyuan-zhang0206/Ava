@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
@@ -54,7 +54,7 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
         return httpx_response_of(response)
 
     http.post.side_effect = submit
-    with transport.use_client(http):
+    with use_client(http):
         with pytest.raises(GatewayUnavailable):
             sdk(fork_from=parent_id, idempotency_key="fork-intent")
         lost_attempts = http.post.call_count

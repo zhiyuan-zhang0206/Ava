@@ -1,9 +1,9 @@
 """Explicit manual compaction of one retained, closed source history."""
 
-from ava.gateway_client import transport
-from ava.sdk_surface import agent_identity
+from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.validation import coerce_typed
 from base.agents.compaction.models import CompactAcceptance, CompactStatus, CompactTarget
+from base.agents.context.gateway_client import transport
 from base.api_contracts.idempotency import validate_idempotency_key
 
 __all_for_ava__ = ["observe", "status", "submit"]
@@ -19,7 +19,9 @@ def observe(agent_id: int) -> CompactTarget:
     if type(agent_id) is not int or not 0 < agent_id < 2**63:
         raise ValueError("compaction observation requires a positive agent ID")
     agent_identity.validate_external_identity()
-    response = transport.get(f"/api/keyed/v1/agents/{agent_id}/compact-target")
+    response = transport.get(
+        f"/api/keyed/v1/agents/{agent_id}/compact-target", context=process_context.current_context()
+    )
     transport.raise_from_response(response)
     if response.status_code != 200:
         raise ValueError("compaction source observation is unconfirmed")
@@ -43,6 +45,7 @@ def submit(target: CompactTarget, *, idempotency_key: str) -> CompactAcceptance:
         f"/api/keyed/v1/agents/{target.source.agent_id}/compact-history",
         target.model_dump(mode="json"),
         idempotency_key=key,
+        context=process_context.current_context(),
     )
     transport.raise_from_response(response)
     if response.status_code != 202:
@@ -63,7 +66,8 @@ def status(accepted: CompactAcceptance) -> CompactStatus:
     accepted = CompactAcceptance.model_validate(accepted.model_dump(mode="python"))
     agent_identity.validate_external_identity()
     response = transport.get(
-        f"/api/keyed/v1/agents/{accepted.target.source.agent_id}/compact-commands/{accepted.command_id}"
+        f"/api/keyed/v1/agents/{accepted.target.source.agent_id}/compact-commands/{accepted.command_id}",
+        context=process_context.current_context(),
     )
     transport.raise_from_response(response)
     if response.status_code != 200:

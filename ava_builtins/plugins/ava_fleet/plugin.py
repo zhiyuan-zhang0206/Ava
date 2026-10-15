@@ -118,10 +118,10 @@ def _raise_as_value_error(resp: Any) -> None:
     """Raise gateway 422 validation errors as ValueError — the SDK's
     validation contract (fail fast with a clear message). Any other error
     propagates through the normal wire contract."""
-    from ava import gateway_client
+    from base.agents.context.gateway_client import transport
 
     try:
-        gateway_client.raise_from_response(resp)
+        transport.raise_from_response(resp)
     except Exception as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
         if status != 422:
@@ -212,9 +212,9 @@ def notify(
     # One unified write path (R3 door ④): the gateway performs the whole
     # lifecycle atomically — supersede the previous open notice + insert the
     # new one in one transaction, then publish the events.
-    from ava import gateway_client
+    from base.agents.context.gateway_client import transport
 
-    resp = gateway_client.post(
+    resp = transport.post(
         f"/api/agents/{aid}/notices",
         {
             "title": title,
@@ -231,6 +231,7 @@ def notify(
             ),
         },
         idempotency_key=idempotency_key,
+        context=ava.context,
     )
     _raise_as_value_error(resp)
     data = resp.json()
@@ -297,12 +298,13 @@ def edit_notice(
 
     # One unified write path (R3 door ④): the gateway edits exactly the observed
     # notice row and re-publishes the posted event.
-    from ava import gateway_client
+    from base.agents.context.gateway_client import transport
 
-    resp = gateway_client.patch(
+    resp = transport.patch(
         f"/api/agents/{aid}/notices/current/guarded-v1",
         {"observed_notice_id": observed, **body},
         idempotency_key=uuid.uuid4().hex,
+        context=ava.context,
     )
     _raise_as_value_error(resp)
 
@@ -316,12 +318,13 @@ def dismiss_notice() -> None:
         return
     # One unified write path (R3 door ④): the gateway withdraws exactly the
     # observed notice row and publishes the resolve + agent-updated events.
-    from ava import gateway_client
+    from base.agents.context.gateway_client import transport
 
-    resp = gateway_client.post(
+    resp = transport.post(
         f"/api/agents/{aid}/notices/current/dismiss/guarded-v1",
         {"observed_notice_id": observed},
         idempotency_key=uuid.uuid4().hex,
+        context=ava.context,
     )
     _raise_as_value_error(resp)
 
@@ -332,12 +335,14 @@ def _observe_open_notice_id(agent_id: int) -> int | None:
     The guarded edit/withdraw routes target an observed global row, so a retry
     of an ambiguous call can never touch a notice posted later.
     """
-    from ava import gateway_client
+    from base.agents.context.gateway_client import transport
 
-    resp = gateway_client.get(
-        "/api/notices/open", params={"agent_id": agent_id, "include_awaiting": True}
+    resp = transport.get(
+        "/api/notices/open",
+        params={"agent_id": agent_id, "include_awaiting": True},
+        context=ava.context,
     )
-    gateway_client.raise_from_response(resp)
+    transport.raise_from_response(resp)
     rows = resp.json()
     return int(rows[0]["id"]) if rows else None
 

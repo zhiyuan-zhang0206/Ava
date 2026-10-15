@@ -15,7 +15,7 @@ one reminder note. Two checks, and neither changes, blocks or rejects a write:
 
 A search that cannot be answered (index or ranking model down, gateway erroring) leaves that note
 without duplicate findings, like passive recall skipping a turn. This module sends the search
-through `ava.gateway_client`; it imports no decision-model code.
+through `base.agents.context.gateway_client.memory_search`; it imports no decision-model code.
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
-from ava import gateway_client
 from base.agents.context import AvaContext
+from base.agents.context.gateway_client import memory_search as memory_client
 from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
@@ -85,13 +85,13 @@ def _query_of(path: Path) -> str | None:
 
 async def _search(
     query: str, *, deadline: float, context: AvaContext
-) -> list[gateway_client.MemorySearchResult] | None:
+) -> list[memory_client.MemorySearchResult] | None:
     """The `dedup` search results, or None when the search is unavailable or failed."""
     import httpx  # deferred: stays off the child boot path
 
     try:
         return await asyncio.to_thread(
-            gateway_client.memory_search,
+            memory_client.memory_search,
             query,
             _SEARCH_K,
             purpose="dedup",

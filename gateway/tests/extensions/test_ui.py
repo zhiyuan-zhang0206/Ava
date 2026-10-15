@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 
 import ava
 from ava import ui
-from ava.gateway_client.transport import use_client
+from ava.gateway_client import use_client
 from ava.sdk_surface import agent_identity
 from ava.tests.fixtures.pin_agent import pin_agent
 from ava.ui import InvalidPageName, PageClosed

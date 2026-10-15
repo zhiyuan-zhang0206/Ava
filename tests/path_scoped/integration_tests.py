@@ -7,7 +7,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from ava.gateway_client.transport import use_client
+from ava.gateway_client import use_client
 from base.cluster.machine import MachineIdentity
 
 # The provider-key mock and the in-process spawn stand-in are defined once (the ava and

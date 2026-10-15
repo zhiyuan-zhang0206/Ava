@@ -5,10 +5,11 @@ import json
 import httpx
 
 from ava import gateway_client
-from ava.gateway_client.transport import GatewayTransportInputs, use_client
+from ava.gateway_client import use_client
 from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
+from base.agents.context.gateway_client.transport import GatewayTransportInputs
 
 
 def test_patch_label_sends_the_label_and_who_set_it() -> None:

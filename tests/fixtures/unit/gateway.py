@@ -53,7 +53,7 @@ def gateway_unit(
 def sdk_via_gateway(gateway_unit: TestClient) -> Iterator[TestClient]:
     """The gateway unit with the SDK's gateway client pointed at it: `ava.agents.*` calls land
     in the in-process app. Undone at teardown."""
-    from ava.gateway_client.transport import use_client
+    from ava.gateway_client import use_client
 
     with use_client(gateway_unit):
         yield gateway_unit

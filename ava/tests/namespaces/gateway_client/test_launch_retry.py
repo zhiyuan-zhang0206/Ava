@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from ava import agents, gateway_client
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 
 PRIOR = uuid4()
 ATTEMPT = uuid4()
@@ -37,7 +37,7 @@ def requests() -> Iterator[list[httpx.Request]]:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         yield calls
 
@@ -111,7 +111,7 @@ def test_http_failure_never_downgrades_or_retries(status: int) -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(httpx.HTTPStatusError),
     ):
         submit()
@@ -131,7 +131,7 @@ def test_response_loss_is_retried_with_the_same_identity() -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         assert submit() == 42
     assert len(calls) == 2
@@ -163,7 +163,7 @@ def test_malformed_acceptance_cannot_report_success(bad: dict[str, Any]) -> None
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(ValueError),
     ):
         submit()
@@ -201,7 +201,7 @@ def test_missing_or_invalid_observation_cannot_authorize_a_retry(observed: dict[
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises((TypeError, ValueError)),
     ):
         agents.get_launch_attempt(42)

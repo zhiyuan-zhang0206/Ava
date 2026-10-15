@@ -3,7 +3,7 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 [uses]
 "__init__.py" = ["agents", "boot.py", "files.py", "impersonation", "mcps", "sdk_surface", "self", "shell", "skills", "ui.py", "understand", "watcher", "web"]
 "agents" = ["gateway_client", "sdk_surface", "security.py", "skills"]
-"boot.py" = ["gateway_client", "mcps", "sdk_surface"]
+"boot.py" = ["mcps", "sdk_surface"]
 "files.py" = ["sdk_surface", "security.py", "skills"]
 "gateway_client" = ["sdk_surface"]
 "impersonation" = ["boot.py", "sdk_surface"]
