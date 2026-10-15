@@ -34,7 +34,6 @@ from pathlib import Path
 from ava.shell import sessions
 from base.sessions import coding_session_owner
 
-from . import impersonator_guide
 from ._common import cancel as _cancel_generation
 from ._common import (
     init_file,
@@ -233,7 +232,7 @@ def launch_supervisor(
     )
 
 
-def _app_server_endpoint(key: coding_session_owner.CodingSessionKey, generation: str) -> str:
+def app_server_endpoint(key: coding_session_owner.CodingSessionKey, generation: str) -> str:
     """The single endpoint both the TUI and the codex relay connect to.
 
     The socket lives in a short per-user directory that
@@ -368,15 +367,6 @@ def codex_command(
     )
 
 
-def _takeover_bootstrap_message(
-    agent_id: int, name: str, brief: str, codex_remote: str, guide: Path
-) -> str:
-    """Inline the briefing and the shared app-server endpoint; no task/work file."""
-    from ava.impersonation.launch import bootstrap_message
-
-    return bootstrap_message(agent_id, name, "codex", brief, guide, codex_remote=codex_remote)
-
-
 def _print_owner(owner: coding_session_owner.CodingSessionOwner) -> None:
     print(f"status={owner.status}")
     if owner.generation is not None:
@@ -416,33 +406,32 @@ def cancel(workspace: Path, generation: str) -> int:
 
 @dataclass(frozen=True)
 class LaunchRequest:
-    """One launch's inputs, checked: a takeover carries a name and briefing and
-    no files; a supervised worker carries both files."""
+    """One launch's inputs, checked: a supervised worker carries both files; a
+    prompt launch carries an initial prompt and no files."""
 
     workspace: Path
     tasks_file: Path | None
     work_file: Path | None
     ttl_seconds: float
     caller_instance: str | None
-    takeover_name: str | None
-    takeover_brief: str
+    prompt: str | None
     skill_dir: Path
     resume: str | None
 
 
-def _checked_brief(
-    takeover_name: str | None, brief: str | None, tasks_file: Path | None, work_file: Path | None
-) -> str:
-    """The takeover briefing, or "" for a supervised launch; mismatched inputs raise."""
-    if takeover_name is not None:
-        if not brief or not brief.strip():
-            raise ValueError("a takeover launch needs a non-empty briefing")
+def _checked_prompt(
+    prompt: str | None, tasks_file: Path | None, work_file: Path | None
+) -> str | None:
+    """The initial prompt, or None for a supervised launch; mismatched inputs raise."""
+    if prompt is not None:
+        if not prompt.strip():
+            raise ValueError("a prompt launch needs a non-empty prompt")
         if tasks_file is not None or work_file is not None:
-            raise ValueError("a takeover launch reads no task or work file")
-        return brief
+            raise ValueError("a prompt launch does not use task or work files")
+        return prompt
     if tasks_file is None or work_file is None:
         raise ValueError("a supervised launch needs its task and work files")
-    return ""
+    return None
 
 
 def start_codex(
@@ -450,21 +439,18 @@ def start_codex(
     key: coding_session_owner.CodingSessionKey,
     owner: coding_session_owner.CodingSessionOwner,
     generation: str,
-    owner_agent_id: int,
     request: LaunchRequest,
-) -> tuple[str | None, str]:
-    """Start Codex in the published PTY and deliver its launch message.
+) -> tuple[str, str]:
+    """Start the shared app-server and Codex TUI in the published PTY and deliver its launch message.
 
-    Returns the shared app-server endpoint of a takeover (else None) and the
-    Codex session id, which ``codex resume`` takes after an interruption.
+    Returns the shared app-server endpoint and the Codex session id, which
+    ``codex resume`` and ``ava impersonate request --provider codex`` take.
     """
-    remote: str | None = None
-    if request.takeover_name is not None:
-        remote = _app_server_endpoint(key, generation)
-        sessions.send(
-            sid, app_server_command(owner, request.workspace, remote, request.caller_instance)
-        )
-        wait_for_app_server(remote, log_path=_app_server_log_path(owner))
+    remote = app_server_endpoint(key, generation)
+    sessions.send(
+        sid, app_server_command(owner, request.workspace, remote, request.caller_instance)
+    )
+    wait_for_app_server(remote, log_path=_app_server_log_path(owner))
     sessions.send(
         sid,
         codex_command(
@@ -477,15 +463,8 @@ def start_codex(
         raise RuntimeError(
             f"codex reopened session {codex_session}, not the requested {request.resume}"
         )
-    if request.takeover_name is not None:
-        assert remote is not None  # noqa: S101 — set above for takeovers
-        message = _takeover_bootstrap_message(
-            owner_agent_id,
-            request.takeover_name,
-            request.takeover_brief,
-            remote,
-            impersonator_guide(),
-        )
+    if request.prompt is not None:
+        message = request.prompt
     else:
         assert request.tasks_file is not None and request.work_file is not None  # noqa: S101
         message = worker_bootstrap(
@@ -504,11 +483,8 @@ def _start_generation(
     key: coding_session_owner.CodingSessionKey,
     owner: coding_session_owner.CodingSessionOwner,
     request: LaunchRequest,
-) -> tuple[coding_session_owner.CodingSessionOwner, str | None, str]:
-    """Supervise, publish and start one fresh generation; roll back on failure.
-
-    A takeover's generation state directory holds its app-server log.
-    """
+) -> tuple[coding_session_owner.CodingSessionOwner, str, str]:
+    """Supervise, publish and start one fresh generation; roll back on failure."""
     if (
         owner.generation is None
         or owner.expected_suffix is None
@@ -521,9 +497,8 @@ def _start_generation(
     owner_agent_id = owner.owner_agent_id
     sid: int | None = None
     try:
-        if request.takeover_name is not None:
-            owner.state_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
-        else:
+        owner.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if request.prompt is None:
             watcher_id, watcher_name = launch_supervisor(
                 owner, request.ttl_seconds, request.skill_dir / "scripts" / "watch_work.py"
             )
@@ -541,11 +516,8 @@ def _start_generation(
             session_id=sid,
             session_name=full_name,
         )
-        remote, codex_session = start_codex(sid, key, owner, generation, owner_agent_id, request)
+        remote, codex_session = start_codex(sid, key, owner, generation, request)
     except BaseException:
-        # Another launch's sweep may have reclaimed this generation's record by
-        # now, so its CAS cannot reclaim this PTY. The launcher still owns the
-        # numeric id and must reclaim it directly before rolling back its record.
         if sid is not None:
             kill_session_after_failed_launch(sid)
         terminate_generation_after_failed_launch(key, generation)
@@ -559,20 +531,19 @@ def launch(
     work_file: Path | None,
     ttl_seconds: float,
     caller_instance: str | None = None,
-    impersonation_name: str | None = None,
-    brief: str | None = None,
     *,
     skill_dir: Path,
     resume: str | None = None,
+    prompt: str | None = None,
 ) -> int:
-    """Launch a supervised worker, or a takeover when ``impersonation_name`` is set.
+    """Launch a Codex session in a persistent shell with a shared app server.
 
-    ``skill_dir`` is the calling skill's own directory: its ``references/``
-    holds the collaboration contract and locates the impersonator guide, and
-    its ``scripts/`` holds the supervisor script. ``resume`` reopens a
-    recorded Codex session (the ``codex_session`` an earlier launch printed)
-    instead of starting a new one. Prints one ``key=value`` per line and
-    returns the exit code.
+    When ``prompt`` is given, sends that initial prompt without creating
+    task/work files or a supervisor. Otherwise launches a supervised worker with
+    ``tasks_file``, ``work_file``, and ``watch_work.py``. Every launch starts a
+    shared ``codex app-server --listen`` endpoint and prints both
+    ``codex_app_server`` and ``codex_session`` so the session can also accept
+    an impersonation handover when instructed via a message.
     """
     from base.agents.messages.external_caller import launch_caller_assignment
 
@@ -582,12 +553,10 @@ def launch(
         work_file,
         ttl_seconds,
         caller_instance,
-        impersonation_name,
-        _checked_brief(impersonation_name, brief, tasks_file, work_file),
+        _checked_prompt(prompt, tasks_file, work_file),
         skill_dir,
         resume,
     )
-    # Validate before creating files, owner records, or sessions.
     launch_caller_assignment("codex", caller_instance)
     if tasks_file is not None and work_file is not None:
         init_file(tasks_file, "")
@@ -596,8 +565,7 @@ def launch(
     owner = new_generation(key, tasks_file=tasks_file, work_file=work_file, ttl_seconds=ttl_seconds)
     active, remote, codex_session = _start_generation(key, owner, request)
     print(f"ready. name={active.expected_suffix} workspace={workspace}")
-    if remote is not None:
-        print(f"codex_app_server={remote}")
+    print(f"codex_app_server={remote}")
     _print_owner(active)
     print(f"codex_session={codex_session}")
     return 0

@@ -28,16 +28,14 @@ with the full content, the message ids, and the exact ACK command.
 
 ## Authority
 
-Control commands are attested against the `node` process running dsh (its
-script is the `dsh` launcher). Your shell tool's commands are its direct
-children, so run every control command from there. A command from another
-terminal or a detached helper is refused.
+Control commands are authorized by the `(agent_id, session_id)` lease handle on
+the hosting machine. Run them from your shell tool, preserving `AVA_HOME`.
 
 ## Traps
 
 - **The relay job is load-bearing.** It shows up in `job_list`; never
   `job_kill` it. Killing it visibly degrades delivery; the existing lease
-  remains bounded by its original TTL and confirmed executor liveness.
+  remains bounded by its original TTL.
 - **Keep credentials out of the conversation.** dsh uploads session logs with
   its model requests by default. The request keeps the relay credential in the
   stub for this reason — never print the stub or paste a credential into a

@@ -8,7 +8,6 @@ from psycopg_pool import ConnectionPool
 
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
-from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -134,15 +133,12 @@ def test_pause_then_normal_cadence(
     db_conn.commit()
     assert aid in selected(pool)
     send_heartbeat_checkin(pool, database, event_bus, aid, 400 / 60)
-    messages = leases.inbox(
-        database, lease["id"], attested_caller(lease), local_machine=machine_identity.name()
-    )
+    messages = leases.inbox(database, lease["id"], local_machine=machine_identity.name())
     assert [m["kind"] for m in messages] == ["heartbeat"]
     leases.ack(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [messages[0]["id"]],
         local_machine=machine_identity.name(),
     )
@@ -223,7 +219,6 @@ def test_sdk_attachment_can_pause_heartbeat(
     from agent.extensions import plugin_state_codec
     from agent.state import BaseAgentState
     from ava import impersonation
-    from ava.impersonation import attachment as attachment_module
     from ava.tests.fixtures.pin_agent import pin_agent
     from base.agents.sdk import call_policy
 
@@ -240,7 +235,6 @@ def test_sdk_attachment_can_pause_heartbeat(
         local_machine=machine_identity.name(),
     )
     pin_agent(None)
-    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
 
     def snapshot(
         _agent_id: int, *, database: Database
@@ -276,9 +270,7 @@ def test_heartbeat_history_survives_ack_including_activation_backlog(
         local_machine=machine_identity.name(),
     )
     send_heartbeat_checkin(pool, database, event_bus, owner.agent_id, 8)
-    messages = leases.inbox(
-        database, lease["id"], attested_caller(lease), local_machine=machine_identity.name()
-    )
+    messages = leases.inbox(database, lease["id"], local_machine=machine_identity.name())
     ids = [m["id"] for m in messages]
     assert len(ids) == 2
     assert all(m["kind"] == "heartbeat" for m in messages)
@@ -286,16 +278,10 @@ def test_heartbeat_history_survives_ack_including_activation_backlog(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         ids,
         local_machine=machine_identity.name(),
     )
-    assert (
-        leases.inbox(
-            database, lease["id"], attested_caller(lease), local_machine=machine_identity.name()
-        )
-        == []
-    )
+    assert leases.inbox(database, lease["id"], local_machine=machine_identity.name()) == []
     records = db_conn.execute(
         "SELECT (payload->>'inbound_id')::bigint FROM agent_impersonation_entries "
         "WHERE lease_id=%s AND kind='message' AND payload->>'kind'='heartbeat' ORDER BY seq",

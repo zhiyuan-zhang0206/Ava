@@ -344,7 +344,7 @@ def establish_relay(
     provider = session["relay_provider"]
     if provider in SESSION_RELAY_PROVIDERS:
         return _await_session_relay(db, bus, session, incarnation)
-    if provider != "codex":
+    if provider not in ("codex", "antigravity"):
         # Defensive: accept() already rejects leases without a relay binding.
         return _roll_back_relay_failure(
             db, bus, session, incarnation, fail_acceptance, "request has no relay binding"
@@ -395,7 +395,7 @@ def _establish_codex_relay(
     *,
     read_local_machine: Callable[[], str],
 ) -> bool:
-    """codex: provision the scoped credential, spawn the relay here, wait for its first heartbeat."""
+    """codex / antigravity: provision the scoped credential, spawn the relay here, wait for its first heartbeat."""
     from base.agents.impersonation import (
         ImpersonationError,
         fail_acceptance,
@@ -419,6 +419,7 @@ def _establish_codex_relay(
             session["relay_thread_id"],
             session["relay_codex_remote"],
             session["process_metadata"].get("codex_home"),
+            provider=session["relay_provider"],
         ),
         relay_token,
         time.monotonic(),
@@ -478,48 +479,6 @@ def _roll_back_relay_failure(
     return False
 
 
-def provider_anchor_states(process_metadata: object) -> list[str]:
-    """The lease's recorded provider anchors classified against the live table."""
-    from base.agents.impersonation import provider_anchor_states
-
-    return provider_anchor_states(process_metadata)
-
-
-async def _abort_for_death(
-    db: Database,
-    bus: EventBus,
-    session: dict[str, Any],
-    agent_id: int,
-    component: str,
-    detail: str,
-    *,
-    incarnation: RuntimeIncarnation | None,
-) -> bool:
-    """Stop the lease after a core-component death; emits impersonation_aborted."""
-    from base.agents.impersonation import ImpersonationError, abort_lease
-
-    if incarnation is None:
-        return False
-    try:
-        ended = await asyncio.to_thread(abort_lease, db, bus, session["id"], incarnation, detail)
-    except (ImpersonationError, RuntimeError):
-        return False
-    if ended is None:
-        return False
-    from base.log import logger
-
-    logger.warning(
-        "impersonation stopped after a core-component death: {detail}",
-        event="impersonation_aborted",
-        agent_id=agent_id,
-        lease_id=str(session["id"]),
-        session_id=session.get("session_id"),
-        component=component,
-        detail=detail,
-    )
-    return True
-
-
 async def supervise_relay(
     db: Database,
     bus: EventBus,
@@ -529,14 +488,13 @@ async def supervise_relay(
     *,
     incarnation: RuntimeIncarnation | None,
 ) -> None:
-    """Supervise executor authority and observe relay delivery.
+    """Observe relay delivery and retire exited relay children.
 
-    Only confirmed executor death ends a valid lease. Uncertain evidence keeps
-    the original TTL unchanged. A stale or exited relay is recorded as degraded
-    and never replaced: the lease runs to its TTL or the executor's death. When
-    the host first sees its relay's lease ended, it submits the ended-lease
-    notice once.
+    A stale or exited relay is recorded as degraded and never replaced: the
+    lease runs to its TTL or explicit release. When the host first sees its
+    relay's lease ended, it submits the ended-lease notice once.
     """
+    del bus
     child = relays.children.get(agent_id)
     if (
         child is not None
@@ -558,51 +516,12 @@ async def supervise_relay(
         return
     if session["status"] != ImpersonationStatus.ACTIVE:
         return
-    if await _executor_verdict_stops(db, bus, session, agent_id, relays, incarnation=incarnation):
-        return
     exited = relay_exited(child)
     if not exited and _heartbeat_fresh(session["relay_heartbeat_at"]):
         return
     await _record_stale_relay(
         db, session, agent_id, child, confirmed_exit=exited, incarnation=incarnation
     )
-
-
-async def _executor_verdict_stops(
-    db: Database,
-    bus: EventBus,
-    session: dict[str, Any],
-    agent_id: int,
-    _relays: RelaySupervision,
-    *,
-    incarnation: RuntimeIncarnation | None,
-) -> bool:
-    """Component A: the executor's recorded process chain. True when supervision ends here."""
-    states = provider_anchor_states(session.get("process_metadata")) or ["unknown"]
-    if "alive" in states:
-        return False
-    if set(states) <= {"dead", "reused"}:
-        await _abort_for_death(
-            db,
-            bus,
-            session,
-            agent_id,
-            "executor",
-            "the executor process is gone",
-            incarnation=incarnation,
-        )
-        return True
-    from base.agents.impersonation.relay import record_degradation
-
-    if incarnation is not None:
-        await asyncio.to_thread(
-            record_degradation,
-            db,
-            session["id"],
-            incarnation,
-            "executor liveness unknown; original lease TTL remains authoritative",
-        )
-    return True
 
 
 async def _record_stale_relay(

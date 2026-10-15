@@ -63,7 +63,7 @@ The tool **replaces you**: it talks to the human through your normal Ava chat
 and calls Ava capabilities under your identity while your execution is paused.
 A takeover is **file-less and supervisor-less** — nothing from Mode A applies:
 
-- **The briefing is inline** (`--brief`, verbatim in the launch message): no
+- **The briefing is inline** (`--prompt`, verbatim in the launch message): no
   task file, no work file, nothing watches a file.
 - **Run it from your own workspace** by default: pass that directory as the
   spawn workspace argument (other locations are allowed, not recommended).
@@ -76,16 +76,16 @@ A takeover is **file-less and supervisor-less** — nothing from Mode A applies:
   acknowledged, and an ACK means received, never finished: read it before acting
   on pending human input, and check acknowledged messages for unfinished work.
 
-Launch it from your own execution context, briefing inline:
+Launch it from your own execution context, passing the takeover prompt inline:
 
 ```bash
-.venv/bin/python scripts/spawn_codex.py <workspace-dir> --impersonate-self \
-  --impersonation-name 'Fix login' --brief '<the full briefing text>'
+.venv/bin/python scripts/spawn_codex.py <workspace-dir> \
+  --prompt '<the full takeover briefing + ava impersonate request instructions>'
 ```
 
-`--brief` is required; `--tasks-file`/`--work-file` are refused, and no file
-watcher runs for a takeover. The same command works with
-`spawn_claude.py` and `spawn_dsh.py` ([DeepSeek Harness](references/deepseek_harness.md),
+With `--prompt`, no task or work files are created and no file watcher runs.
+The same `--prompt` pattern works with `spawn_claude.py`, `spawn_antigravity.py`,
+and `spawn_dsh.py` ([DeepSeek Harness](references/deepseek_harness.md),
 takeover-only). The full procedure is [Let the coding agent take over your
 identity](references/impersonate_self.md); the executor's own manual is the
 `impersonator-guide` skill.
@@ -94,7 +94,7 @@ identity](references/impersonate_self.md); the executor's own manual is the
 
 A full stop, a reboot, a crash or a TTL expiry closes the shell a coding
 session runs in, but the tool keeps its conversation. Every launch prints the
-tool's session id (`claude_session=` / `codex_session=`), and
+tool's session id (`claude_session=` / `codex_session=` / `antigravity_session=`), and
 `--resume <id>` on the same spawn command reopens it. Whether to resume or
 start fresh is your call from the task's context: [Resume after an
 interruption](references/resume_after_interruption.md).
@@ -106,4 +106,5 @@ references carry the launch variants, auth traps and headless notes:
 
 - [Claude Code (`claude`)](references/claude_code.md)
 - [OpenAI Codex (`codex`)](references/codex.md)
+- [Google Antigravity (`agy`)](references/antigravity.md)
 - [DeepSeek Harness (`dsh`)](references/deepseek_harness.md)

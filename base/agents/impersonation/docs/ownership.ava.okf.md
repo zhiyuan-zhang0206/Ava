@@ -32,8 +32,8 @@ note followed by a completed-termination note, including when native execution
 is drained. Both precede the next resurrection marker; the graph's acceptance
 acknowledgement describes the earlier intent separately. Termination dismisses
 renewal reminders and records `terminated: agent was terminated` on the session.
-When the host sees its Codex relay's lease ended, it submits one lease-scoped
-notice to the immutable recorded Codex endpoint/thread, even if a new lease has
+When the host sees its Codex or Antigravity relay's lease ended, it submits one lease-scoped
+notice to the immutable recorded endpoint/thread, even if a new lease has
 replaced it. No inbox authority is reopened. Native restoration never waits for
 notice delivery. The submission is not retried and nothing records its outcome; a
 failure raises `impersonation_terminal_notice_failed`, and a lease that ended while
@@ -58,17 +58,10 @@ current requested or renewed TTL. Delivery follows the reaper scan (default
 does not cause another reminder; a new renewal deadline can. This is
 coordination among processes already holding local cluster authority, not a
 security boundary against arbitrary shell execution. Capability, machine,
-incarnation and caller-attestation checks still prevent accidental
-cross-session control.
+and incarnation checks prevent accidental cross-machine or cross-incarnation control.
 
-Caller metadata records each process and ancestor's PID, native birth, start
-ticks and boot identity. POSIX evidence requires an explicit native boot ID;
-Linux identity compares positive kernel start ticks within that boot, so a
-wall-clock correction does not orphan a live controller. Other platforms use
-exact native birth timestamps. Missing or invalid evidence stays unknown and
-cannot attest a caller; it is never filled from the current process or converted
-to a wall-time fallback. Caller errors distinguish unavailable evidence from
-confirmed exit, reuse, and a live controller outside the caller's ancestor chain.
+Request metadata records the caller's process and ancestor observations (PID,
+executable, birth timestamps and boot identity) for audit and history.
 
 `ava.impersonation.attach(session_id, agent_id=...)` loads saved state and
 binds SDK identity in the external process. Plugin changes append ordered deltas;

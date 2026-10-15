@@ -11,7 +11,7 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.impersonation.notes import HandoffNotes
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -147,9 +147,6 @@ def test_inbound_attachments_survive_timeline_and_handoff(
         str(
             lease["id"],
         ),
-        attested_caller(
-            lease,
-        ),
         local_machine=machine_identity.name(),
     )
     leases.ack(
@@ -157,9 +154,6 @@ def test_inbound_attachments_survive_timeline_and_handoff(
         event_bus,
         str(
             lease["id"],
-        ),
-        attested_caller(
-            lease,
         ),
         [inserted[0]],
         local_machine=machine_identity.name(),

@@ -29,9 +29,9 @@ def notice_text(snapshot: dict[str, Any]) -> str:
 
 
 def send_ended_notice(db: Database, lease_id: str) -> str | None:
-    """Submit the ended lease's notice to its recorded Codex thread, exactly once.
+    """Submit the ended lease's notice to its recorded Codex or Antigravity thread, once.
 
-    Returns None when the notice was accepted or the lease has no Codex
+    Returns None when the notice was accepted or the lease has no host IPC
     destination (controller-session transports print their own notices), else a
     short failure reason. The submission has its own five-second deadline.
     """
@@ -40,7 +40,14 @@ def send_ended_notice(db: Database, lease_id: str) -> str | None:
             "SELECT terminal_notice_snapshot FROM agent_impersonations WHERE id=%s", (lease_id,)
         ).fetchone()
     snapshot = None if row is None else row[0]
-    if not snapshot or snapshot["provider"] != "codex":
+    if not snapshot:
+        return None
+    if snapshot["provider"] == "antigravity":
+        thread_id = snapshot["thread_id"]
+        if not thread_id:
+            return "the recorded Antigravity destination is not deliverable"
+        return host_transport.antigravity_live_submit(thread_id, notice_text(snapshot))
+    if snapshot["provider"] != "codex":
         return None
     endpoint, thread_id = snapshot["endpoint"], snapshot["thread_id"]
     if (

@@ -13,7 +13,6 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.impersonation.tests.impersonation_support import (
-    attested_caller,
     recorded_tree,
     request_legacy_leases,
 )
@@ -113,7 +112,6 @@ def test_numbers_are_agent_scoped_and_permanent(
         database,
         event_bus,
         str(first["id"]),
-        attested_caller(first),
         "First result",
         local_machine=local_machine,
     )
@@ -220,15 +218,12 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     assert inbound_row is not None
     inbound = inbound_row[0]
     db_conn.commit()
-    read = leases.inbox(
-        database, str(lease["id"]), attested_caller(lease), local_machine=local_machine
-    )
+    read = leases.inbox(database, str(lease["id"]), local_machine=local_machine)
     assert [row["id"] for row in read] == [inbound]
     leases.ack(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         [inbound],
         local_machine=local_machine,
     )
@@ -236,7 +231,6 @@ def test_say_ack_and_file_preserve_all_message_bodies(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         "I found the cause",
         message_key="progress-1",
         local_machine=local_machine,
@@ -246,7 +240,6 @@ def test_say_ack_and_file_preserve_all_message_bodies(
             database,
             event_bus,
             str(lease["id"]),
-            attested_caller(lease),
             "I found the cause",
             message_key="progress-1",
             local_machine=local_machine,
@@ -258,7 +251,6 @@ def test_say_ack_and_file_preserve_all_message_bodies(
             database,
             event_bus,
             str(lease["id"]),
-            attested_caller(lease),
             "Different reply",
             message_key="progress-1",
             local_machine=local_machine,
@@ -267,7 +259,6 @@ def test_say_ack_and_file_preserve_all_message_bodies(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         "Login fixed; tests passed",
         local_machine=local_machine,
     )
@@ -318,7 +309,6 @@ def test_legacy_empty_events_never_certify_a_zero_call_claim(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         "SDK sampling was enabled",
         local_machine=local_machine,
     )
@@ -368,7 +358,6 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         "Done",
         local_machine=local_machine,
     )
@@ -404,7 +393,6 @@ def test_message_retry_does_not_replace_newer_preview(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         "First",
         message_key="first",
         local_machine=local_machine,
@@ -413,7 +401,6 @@ def test_message_retry_does_not_replace_newer_preview(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         "Second",
         message_key="second",
         local_machine=local_machine,
@@ -422,7 +409,6 @@ def test_message_retry_does_not_replace_newer_preview(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         "First",
         message_key="first",
         local_machine=local_machine,
@@ -457,7 +443,6 @@ def test_public_session_exposes_handoff_applied_at(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         "Done",
         local_machine=local_machine,
     )

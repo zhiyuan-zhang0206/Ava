@@ -9,7 +9,7 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.impersonation import wake
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
@@ -55,6 +55,16 @@ def test_request_requires_a_relay_binding(
             owner.agent_id,
             caller=CallerIdentity(kind="external_agent", subject="codex"),
             relay_provider="codex",
+            authority=config_authority,
+            local_machine=local_machine,
+        )
+    with pytest.raises(ValueError, match="thread id"):
+        leases.request(
+            database,
+            event_bus,
+            owner.agent_id,
+            caller=CallerIdentity(kind="external_agent", subject="antigravity"),
+            relay_provider="antigravity",
             authority=config_authority,
             local_machine=local_machine,
         )
@@ -175,10 +185,12 @@ def test_request_validates_and_records_the_batch_window(
     assert window_off["relay_batch_window_seconds"] == 0
 
 
+@pytest.mark.parametrize("provider", ["codex", "antigravity"])
 def test_codex_request_defers_relay_credential_to_activation(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
+    provider: str,
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
@@ -187,11 +199,12 @@ def test_codex_request_defers_relay_credential_to_activation(
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     lease = request_controller(
         owner,
+        provider=provider,
         authority=config_authority,
         database_gate=database_gate,
         local_machine=machine_identity.name(),
     )
-    assert lease["relay_provider"] == "codex"
+    assert lease["relay_provider"] == provider
     assert lease["relay_thread_id"]
     assert "relay_token" not in lease
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
@@ -355,10 +368,6 @@ def test_relay_inbox_uses_the_scoped_credential_only(
         database, lease["id"], lease["relay_token"], local_machine=machine_identity.name()
     )
     assert [row["content"] for row in rows] == ["hello"]
-    # The relay credential is not a caller attestation: the controller inbox
-    # refuses anything that is not the session's recorded process tree.
-    with pytest.raises(leases.ImpersonationError, match="caller check failed"):
-        leases.inbox(database, lease["id"], lease["relay_token"], local_machine=local_machine)
 
 
 def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
@@ -408,7 +417,6 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         "Done",
         local_machine=local_machine,
     )

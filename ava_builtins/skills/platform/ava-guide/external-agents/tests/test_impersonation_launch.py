@@ -1,23 +1,19 @@
-"""Self-takeover bootstrap names the launching agent, validates before launch, and pins the shared app-server topology."""
+"""Launcher and impersonator-guide contracts for external coding agents."""
 
 import importlib.util
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from ava.impersonation.launch import bootstrap_message
-from ava.sdk_surface import agent_identity
 from ava.shell.coding_tools import codex
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 
 _REPO = Path(__file__).parents[6]
 _SKILL_DIR = Path(__file__).parents[1]
-_ENDPOINT = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
 
 
 def _owner(state_dir: Path) -> coding_session_owner.CodingSessionOwner:
@@ -29,84 +25,9 @@ def _owner(state_dir: Path) -> coding_session_owner.CodingSessionOwner:
     )
 
 
-def _assert_takeover_request_inlines_brief_and_guide(message: str, brief: str, guide: Path) -> None:
-    assert "take over Ava agent 42" in message
-    assert "--agent 42" in message
-    assert "--name 'Fix login'" in message
-    # The request command spells out its former defaults (task #4102: the CLI
-    # defaults are gone).
-    assert "--ttl 1800" in message
-    assert "--batch-window 0" in message
-    assert str(guide) in message
-    assert brief in message
-
-
-def _assert_takeover_protocol_uses_say_and_own_summary_release(message: str) -> None:
-    assert "work.md" not in message
-    assert "tasks.md" not in message
-    assert "work file" not in message
-    assert "ava impersonate say" in message
-    assert "ava.impersonation.say" not in message
-    _assert_reply_follows_request_entry(message)
-    assert "release with your own summary" in message
-    assert "transport acceptance is not host receipt" in message
-    assert "as soon as you receive it" in message
-    assert "never substitute new-agent assumptions" in message
-    assert "scripts/read_instructions.py" in message
-    assert "system prompt and configured preloaded skills" in message
-    assert "process and ACK inbound messages" not in message
-
-
-def _assert_reply_follows_request_entry(message: str) -> None:
-    assert "plain text for direct human requests in your host" in message
-    assert "delivered through Ava" in message
-    assert "even when requests interleave" in message
-    assert "substantive reply at that entry point" in message
-    assert "say for all" not in message
-
-
-def _assert_provider_specific_relay_instructions(message: str, provider: str) -> None:
-    if provider == "codex":
-        assert "CODEX_THREAD_ID" in message
-        assert "CODEX_HOME" in message
-        assert "--codex-remote" in message
-    else:
-        assert "Monitor relay with --session" in message
-        assert "as the request output instructs" in message
-        assert "--codex-remote" not in message
-
-
-@pytest.mark.parametrize("provider", ["codex", "claude"])
-def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
-    provider: str, tmp_path: Path
-) -> None:
-    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
-    assert guide.is_file()
-    brief = "Goal: fix the login flow.\nDecision: keep the session table as-is."
-    message = bootstrap_message(42, "Fix login", provider, brief, guide)
-    _assert_takeover_request_inlines_brief_and_guide(message, brief, guide)
-    _assert_takeover_protocol_uses_say_and_own_summary_release(message)
-    _assert_provider_specific_relay_instructions(message, provider)
-
-
-@pytest.mark.parametrize(
-    ("provider", "host_guide"),
-    [("codex", "codex.md"), ("claude", "claude_code.md"), ("dsh", "deepseek_harness.md")],
-)
-def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide: str) -> None:
-    """The general guide covers every host; relay startup and traps are per host."""
-    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
-    path = guide.parent / "reference" / host_guide
-    assert path.is_file()
-    message = bootstrap_message(42, "Fix login", provider, "brief", guide)
-    assert f"host guide at {path}." in message
-    others = {"codex.md", "claude_code.md", "deepseek_harness.md"} - {host_guide}
-    assert not any(f"reference/{other}" in message for other in others)
-
-
 def test_impersonator_guide_carries_receipt_semantics_and_the_borrowed_context() -> None:
     """Task #5010: an ACK is receipt and the takeover inherits the borrowed identity's
-    standing context — both must be present in the guide the bootstrap points at."""
+    standing context — both must be present in the guide."""
     guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
     text = guide.read_text(encoding="utf-8")
     assert "## Before acting: inherit the borrowed context" in text
@@ -131,32 +52,7 @@ def _assert_message_receipt_contract(entry: str, receipt: str) -> None:
     assert "ACK the cancel once stopped" not in package_text
 
 
-def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
-    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
-    message = bootstrap_message(42, "Fix login", "codex", "brief", guide, codex_remote=_ENDPOINT)
-    assert f"--codex-remote {_ENDPOINT}" in message
-    assert "delivers into that same server" in message
-    assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
-
-
-def test_installed_dsh_launcher_uses_the_runtime_executor_guide(tmp_path: Path) -> None:
-    """Moving or copying the launcher must not derive a repo from its directory depth."""
-    installed = tmp_path / "installed" / "ava-guide" / "external-agents" / "scripts"
-    installed.mkdir(parents=True)
-    source = _SKILL_DIR / "scripts" / "spawn_dsh.py"
-    script = installed / source.name
-    shutil.copyfile(source, script)
-    spec = importlib.util.spec_from_file_location("installed_dsh_guide_test", script)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    message = module._takeover_bootstrap_message(42, "Fix login", "brief")
-    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
-    assert guide.is_file()
-    assert str(guide) in message
-
-
-def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) -> None:
+def test_codex_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) -> None:
     state = tmp_path / "home"
     state.mkdir()
     owner = _owner(state)
@@ -177,25 +73,12 @@ def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) 
     assert tui.startswith("clear && ")
 
 
-def test_supervised_launch_command_has_no_remote(tmp_path: Path) -> None:
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    command = codex.codex_command(workspace)
-    assert command.startswith(
-        f"cd {workspace} && exec codex --dangerously-bypass-approvals-and-sandbox -c "
-    )
-    assert "--remote" not in command and "clear" not in command
-
-
 def test_app_server_wait_accepts_a_bound_socket() -> None:
     import shutil
     import socket as socket_module
     import tempfile
     import threading
 
-    # A bound AF_UNIX path must stay under the kernel's ~104-byte limit, and
-    # macOS pytest tmp dirs (/private/var/folders/...) exceed it (review C2) —
-    # build a short private dir under the system temp root instead.
     short_dir = Path(tempfile.mkdtemp(prefix="ava-f1-", dir=tempfile.gettempdir()))
     path = short_dir / "probe.sock"
     listener = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
@@ -213,10 +96,6 @@ def test_app_server_wait_accepts_a_bound_socket() -> None:
     try:
         codex.wait_for_app_server(f"unix://{path}", timeout=5.0)
     finally:
-        # Join before closing the listener: under CI load the accept thread can
-        # be scheduled only after the waiter returns; closing first makes the
-        # pending accept() raise EBADF on a dead fd and the observation this
-        # test asserts is lost (backend shard 6/16 red, 2026-09-17).
         thread.join(timeout=5)
         listener.close()
         shutil.rmtree(short_dir, ignore_errors=True)
@@ -271,20 +150,6 @@ def _start_pane(env: dict[str, str], cwd: Path) -> tuple[int, subprocess.Popen[b
 
 
 def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> None:
-    """Feed the real launcher line through the production pane shape.
-
-    The pane is a pty running ``bash -l -i`` (PtySessionBackend), whose history
-    expansion can abort a whole line containing ``!`` (review C1). Whether
-    ``$!`` itself is expanded is a bash-version fact — 3.2 (macOS) aborts the
-    whole line, 5.x (this host, CI) exempts it — so this is a discriminating
-    guard on biting shells and an execution-level smoke everywhere: the line
-    must reach the server command and leave the pane usable. A login shell
-    rebuilds PATH (macOS path_helper prepends /etc/paths), so the shim is
-    exported inside the pane rather than inherited (macmini red, 2026-09-17).
-    The other tests here monkeypatch ``sessions.send`` and assert the command's
-    shape only;
-    this one covers the real execution face (task #3778).
-    """
     import contextlib
     import os
     import signal
@@ -314,10 +179,6 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
     output = bytearray()
     try:
         _pump_pane(master, 1.0, output)
-        # A login pane rebuilds PATH once /etc/profile runs — macOS path_helper
-        # prepends /etc/paths (homebrew) and masks an inherited shim, pointing
-        # the launch at the real codex (macmini red, 2026-09-17). Export the
-        # shim first, inside the pane, so the launcher line runs the shim.
         os.write(master, f'export PATH="{shim_dir}:$PATH"\n'.encode())
         _pump_pane(master, 0.5, output)
         os.write(master, (command + "\n").encode())
@@ -332,9 +193,6 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(pane.pid, signal.SIGKILL)
-        # Job control gives the shim its own process group; target it by its
-        # unique tmp path (no other process carries it), and the janitor
-        # self-exits once the pane shell is gone.
         subprocess.run(["pkill", "-f", str(tmp_path)], check=False)  # noqa: S603
         os.close(master)
 
@@ -345,8 +203,8 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
     assert "SENTINEL_4" in text, text[-2000:]
 
 
-@pytest.mark.parametrize("provider", ["codex", "claude", "dsh"])
-def test_launch_requires_native_identity_before_creating_workspace(
+@pytest.mark.parametrize("provider", ["codex", "claude", "dsh", "antigravity"])
+def test_launch_rejects_missing_workspace_without_creating_it(
     provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     spec = importlib.util.spec_from_file_location(
@@ -356,39 +214,10 @@ def test_launch_requires_native_identity_before_creating_workspace(
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     target = tmp_path / "must-not-be-created"
-    monkeypatch.setattr(sys, "argv", [f"spawn_{provider}.py", str(target), "--impersonate-self"])
-
-    def no_identity() -> None:
-        raise RuntimeError("No launching Ava identity")
-
-    monkeypatch.setattr(agent_identity, "require_agent_id", no_identity)
-    with pytest.raises(RuntimeError, match="No launching Ava identity"):
+    monkeypatch.setattr(sys, "argv", [f"spawn_{provider}.py", str(target), "--prompt", "hi"])
+    with pytest.raises(SystemExit):
         module.main()
     assert not target.exists()
-
-
-def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
-    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
-    message = bootstrap_message(42, "Fix login", "claude", "brief", guide, relay_resident=True)
-    assert "Ava relay plugin" in message
-    assert "do not arm a Monitor watch" in message
-    assert "fall back to the manual flow" in message
-    assert "Immediately start the Claude Monitor relay" not in message
-
-
-def test_codex_bootstrap_ignores_the_resident_flag() -> None:
-    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
-    message = bootstrap_message(42, "Fix login", "codex", "brief", guide, relay_resident=True)
-    assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
-    assert "Ava relay plugin" not in message
-
-
-def test_dsh_bootstrap_names_the_session_plugin_relay() -> None:
-    guide = _REPO / "ava_builtins/skills/platform/impersonator-guide/SKILL.md"
-    message = bootstrap_message(42, "Fix login", "dsh", "brief", guide)
-    assert "--provider dsh" in message and "--as 'DeepSeek Harness: Fix login'" in message
-    assert "Ava relay plugin loaded into this DeepSeek Harness session" in message
-    assert "Monitor" not in message and "--codex-remote" not in message
 
 
 def test_dsh_launcher_boots_headless_with_the_relay_plugin_as_its_runner(tmp_path: Path) -> None:

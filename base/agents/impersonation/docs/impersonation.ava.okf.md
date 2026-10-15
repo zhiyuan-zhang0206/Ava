@@ -23,8 +23,8 @@ selects transport; no name or process observation proves a provider's identity.
 The former UUID remains a private compatibility reference for existing leases,
 checkpoint receipts and plugin journals. Public commands and file paths
 use the scoped integer. The controller holds no credential: its authority is
-the session id plus caller presence, attested against the recorded process
-tree. Relay credentials are returned once and stored as hashes.
+the `(agent_id, session_id)` lease handle on the hosting machine.
+Relay credentials are returned once and stored as hashes.
 
 ## Ownership and return
 
@@ -34,10 +34,10 @@ native return, renewal, and operator closure.
 ## Relay binding
 
 `base/agents/impersonation/relay.py` owns fenced relay credential provisioning,
-child birth receipts, relay reads, heartbeats, failure stamps, and executor-death aborts
-only when the executor is confirmed dead. The package door exposes this surface to callers through
-`base.agents.impersonation`. Providers: `codex` relays are spawned by the
-accepting runtime into the owning app server; `claude` and `dsh` relays run
+child birth receipts, relay reads, heartbeats, and failure stamps.
+The package door exposes this surface to callers through
+`base.agents.impersonation`. Providers: `codex` and `antigravity` relays are spawned by the
+accepting runtime into the owning app server or local language server; `claude` and `dsh` relays run
 inside the controller session (`SESSION_RELAY_PROVIDERS`), so the request mints
 their credential and the activation gate only waits for a heartbeat.
 

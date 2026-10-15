@@ -144,7 +144,6 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
     machine_identity: MachineIdentity,
 ) -> None:
     from base.agents import impersonation as leases
-    from base.agents.impersonation.tests.impersonation_support import attested_caller
     from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
 
     session, owner = active_codex_lease
@@ -158,7 +157,6 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
     db_conn.commit()
     current = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert current is not None
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     spawn = Mock()
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     relays = RelaySupervision()
@@ -173,7 +171,6 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
         database,
         event_bus,
         session["id"],
-        attested_caller(session),
         local_machine=machine_identity.name(),
     )
     assert after["status"] == "active"

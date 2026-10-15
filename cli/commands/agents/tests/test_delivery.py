@@ -10,7 +10,7 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.impersonation import delivery as delivery
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
@@ -217,7 +217,6 @@ def test_two_attempts_keep_lease_active_and_late_receipt_possible(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [mid],
         local_machine=machine_identity.name(),
     )
@@ -280,7 +279,6 @@ def test_ack_in_final_window_prevents_expiry(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [mid],
         local_machine=machine_identity.name(),
     )
@@ -373,7 +371,6 @@ def test_ack_after_read_before_reservation_cannot_be_pushed(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [mid],
         local_machine=machine_identity.name(),
     )
@@ -399,7 +396,6 @@ def test_release_wins_timeout_race_without_being_overwritten(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         "Returning control",
         local_machine=machine_identity.name(),
     )
@@ -455,7 +451,6 @@ def test_exhausted_message_outside_page_remains_visible_without_ending_lease(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [first],
         local_machine=machine_identity.name(),
     )
@@ -518,7 +513,6 @@ class ClockListener:
                 self._database,
                 self._event_bus,
                 lease["id"],
-                attested_caller(lease),
                 "Explicit test end after delivery exhaustion",
                 local_machine=self._machine.name(),
             )

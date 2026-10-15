@@ -1,14 +1,12 @@
-"""Claude Code launch checks: panel readiness, the signed-out marker, the
-generation-scoped resident relay stub, and takeover start receipt."""
+"""Claude Code launch checks: panel readiness, the signed-out marker, and paste wrapping."""
 
 from __future__ import annotations
 
-import contextlib
 import json
 import re
 import time
-from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from ava.shell import sessions
 
@@ -40,13 +38,13 @@ def bracketed_paste(text: str) -> str:
 OWN_WORDS = " Follow the launch message pasted above: it is from the Ava agent that launched you."
 """Typed after a pasted bootstrap. Claude Code marks a bracketed paste as pasted
 content, and the model will not act on instructions that arrive only inside a
-paste; it asks for confirmation instead, stalling an unattended takeover
+paste; it asks for confirmation instead, stalling an unattended session
 (observed on Claude Code 2.1.283, 2026-09-27). One line of the operator's own
 words, outside the paste, is the request to act on it."""
 
 
 def send_bootstrap(sid: int, message: str) -> None:
-    """Send the takeover bootstrap through the composer's paste path (#4364).
+    """Send a bootstrap message through the composer's paste path (#4364).
 
     A pasted bootstrap is followed by ``OWN_WORDS`` before the Enter; a
     bootstrap within one composer chunk is typed as-is and needs none.
@@ -60,12 +58,13 @@ def send_bootstrap(sid: int, message: str) -> None:
 def pretrust(workspace: Path) -> None:
     config_path = Path.home() / ".claude.json"
     ws_key = workspace.as_posix()
+    data: dict[str, Any]
     try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
+        data = cast(dict[str, Any], json.loads(config_path.read_text(encoding="utf-8")))
     except (FileNotFoundError, json.JSONDecodeError):
         data = {}
-    projects = data.setdefault("projects", {})
-    proj = projects.setdefault(ws_key, {})
+    projects = cast(dict[str, Any], data.setdefault("projects", {}))
+    proj = cast(dict[str, Any], projects.setdefault(ws_key, {}))
     if proj.get("hasTrustDialogAccepted"):
         print(f"(already trusted: {ws_key})")
         return
@@ -96,17 +95,6 @@ def claude_ui_ready(output: str, *, resumed: bool = False) -> bool:
     return composer and (resumed or bool(re.search(r"\bClaude\s+Code\b", normalized)))
 
 
-def _relay_stub_path(state_dir: Path) -> Path:
-    """The resident relay credential stub of exactly one launch generation.
-
-    `impersonate request` writes it 0600 and the plugin wrapper consumes it once.
-    It lives in the generation's private state dir, never the shared workspace:
-    a wrapper orphaned by an earlier session in the same workspace keeps
-    polling its own (removed) generation dir and cannot steal this credential.
-    """
-    return state_dir / "relay.env"
-
-
 def login_marker(failure_marker: Path) -> Path:
     """Written by the launch command when `claude auth status` reports signed out."""
     return failure_marker.with_name("not-logged-in")
@@ -118,14 +106,6 @@ def _check_login_marker(failure_marker: Path | None) -> None:
             "Claude Code is not logged in on this host; run `claude auth login` as the host "
             "user, then launch again. No text was delivered"
         )
-
-
-def generation_relay_stub(state_dir: Path | None) -> Path:
-    """Create the new generation's private dir and name its stub inside it."""
-    if state_dir is None:
-        raise RuntimeError("new owner generation is missing its state dir")
-    state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return _relay_stub_path(state_dir)
 
 
 def _check_missing_claude(failure_marker: Path | None, output: str = "") -> None:
@@ -188,72 +168,4 @@ def wait_for_ready(
     raise RuntimeError(
         f"Claude Code UI did not appear in session {sid} within {timeout:.0f} s; "
         "no text was delivered"
-    )
-
-
-_BOOTSTRAP_MARKER = "take over Ava agent"
-
-
-def bootstrap_count(claude_session: str) -> int:
-    """How often this session's own transcript records the takeover bootstrap.
-
-    Claude Code appends ``~/.claude/projects/<slug>/<session id>.jsonl`` as the
-    executor works, so a count above the one taken before the send is
-    submission evidence. Visibility alone is not: a message parked in the
-    composer shows the same text (F1 class). A resumed session's transcript
-    already holds its earlier bootstrap, which is why this counts, not finds.
-    """
-    count = 0
-    for path in (Path.home() / ".claude" / "projects").glob(f"*/{claude_session}.jsonl"):
-        with contextlib.suppress(OSError):
-            count += path.read_text(encoding="utf-8", errors="ignore").count(_BOOTSTRAP_MARKER)
-    return count
-
-
-def verify_start_receipt(
-    sid: int,
-    submitted: Callable[[], bool],
-    timeout: float = 45.0,
-) -> None:
-    """The takeover bootstrap must actually submit, not vanish into the composer.
-
-    A live session is not receipt: a message parked in the composer leaves an
-    executor that never learned it replaced the agent (F1 class — do not infer
-    receipt from a zero exit code). Submission evidence is ``submitted()``:
-    the session's own transcript records one more bootstrap than it did before
-    the send (``bootstrap_count``). When it stays absent, press Enter once (a
-    stale composer entry submits there) and re-check. If that still lacks
-    evidence the bootstrap is NOT sent again: a second send could deliver the
-    takeover twice, so the launcher warns and the operator checks the session.
-    Evidence is counted in this session's own transcript, so another launch in
-    the same workspace cannot pass for it. Loud but not fatal: the session may
-    still be rendering. A dead session's send_keys() refusal is reported the
-    same way.
-    """
-    print("verifying the takeover bootstrap was submitted...")
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if submitted():
-            print("  -> start-receipt=submitted (transcript)")
-            return
-        time.sleep(2)
-    print("  -> no submission evidence yet; sending Enter once")
-    try:
-        sessions.send_keys(sid, "Enter")
-    except ValueError as exc:
-        print(
-            "  -> WARNING: start-receipt=not-submitted "
-            f"(Enter retry failed: {exc}); the session may have ended. "
-            "Check the session before relying on it."
-        )
-        return
-    time.sleep(5)
-    if submitted():
-        print("  -> start-receipt=submitted after Enter retry")
-        return
-    print(
-        "  -> WARNING: start-receipt=not-submitted "
-        "(no submission evidence after one Enter; the bootstrap is not resent); "
-        "the takeover bootstrap may be parked or missing. Check the session before "
-        "relying on it."
     )

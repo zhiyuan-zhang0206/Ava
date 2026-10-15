@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 from functools import partial
 
@@ -42,7 +43,11 @@ def _nonempty(value: str) -> str:
 
 
 def _relay_spec_problem(
-    provider: str, thread_id: str | None, codex_remote: str | None
+    provider: str,
+    thread_id: str | None,
+    codex_remote: str | None,
+    *,
+    allow_env_thread_id: bool = False,
 ) -> str | None:
     """CLI-boundary mirror of `base.agents.impersonation._store.validate_relay_spec`.
 
@@ -57,6 +62,19 @@ def _relay_spec_problem(
             )
         if codex_remote is not None and not codex_remote.startswith(("unix://", "ws://")):
             return "codex remote must be a unix:// or ws:// endpoint"
+    elif provider == "antigravity":
+        if codex_remote is not None:
+            return "the antigravity relay does not use --codex-remote"
+        env_thread = (
+            (os.environ.get("ANTIGRAVITY_CONVERSATION_ID") or "").strip()
+            if allow_env_thread_id
+            else ""
+        )
+        if not thread_id and not env_thread:
+            return (
+                "the antigravity relay needs --thread-id (or ANTIGRAVITY_CONVERSATION_ID "
+                "in the environment) — the existing Antigravity conversation UUID it delivers into"
+            )
     elif thread_id is not None or codex_remote is not None:
         return f"the {provider} relay routes to its owner; drop --thread-id/--codex-remote"
     return None
@@ -68,7 +86,10 @@ def _h_impersonate(args: argparse.Namespace) -> int:
     problem: str | None = None
     if args.impersonation_cmd == "request":
         problem = _relay_spec_problem(
-            args.relay_provider, args.relay_thread_id, args.relay_codex_remote
+            args.relay_provider,
+            args.relay_thread_id,
+            args.relay_codex_remote,
+            allow_env_thread_id=True,
         )
     if problem is not None:
         print(f"ava: {problem}", file=sys.stderr)
@@ -145,13 +166,13 @@ def add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentPa
         "--provider",
         dest="relay_provider",
         required=True,
-        choices=("codex", "claude", "dsh"),
-        help="relay host for automatic inbox wake-up: codex, claude or dsh (DeepSeek Harness)",
+        choices=("codex", "claude", "dsh", "antigravity"),
+        help="relay host for automatic inbox wake-up: codex, claude, dsh or antigravity",
     )
     request.add_argument(
         "--thread-id",
         dest="relay_thread_id",
-        help="existing Codex session UUID the relay delivers into (codex only)",
+        help="existing Codex or Antigravity session UUID the relay delivers into",
     )
     request.add_argument(
         "--codex-remote",
@@ -183,7 +204,7 @@ def add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentPa
         parser.add_argument(
             "session_id",
             type=partial(_integer_range, minimum=0, maximum=2**63 - 1),
-            help="per-agent session number; run from the session's controller process tree",
+            help="per-agent session number",
         )
         parser.add_argument("--agent", dest="agent_id", required=True, type=int)
         parser.set_defaults(func=_h_impersonate)
@@ -233,7 +254,9 @@ def add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentPa
     handle = relay.add_mutually_exclusive_group(required=True)
     handle.add_argument("--lease-id", help=argparse.SUPPRESS)
     handle.add_argument("--session", dest="session_id", type=int)
-    relay.add_argument("--provider", choices=("codex", "claude", "dsh"), required=True)
+    relay.add_argument(
+        "--provider", choices=("codex", "claude", "dsh", "antigravity"), required=True
+    )
     relay.add_argument("--thread-id")
     relay.add_argument(
         "--codex-remote",
