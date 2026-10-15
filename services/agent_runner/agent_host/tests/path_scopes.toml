@@ -6,7 +6,7 @@
 ]
 "ava.tests.fixtures.ava_tests" = [
 ]
-"tests.path_scoped.services_tests" = [
+"services.backup.artifact.tests.passphrase" = [
     "test_turn_dispatcher.py",
 ]
 "base.paths.tests.homes" = ["."]

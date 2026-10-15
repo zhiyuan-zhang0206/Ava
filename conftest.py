@@ -78,6 +78,7 @@ from tests.fixtures.provisioning import (  # noqa: E402
     insert_inbound,
     publish_wake,
     redis_url,
+    throwaway_config,
 )
 
 __all__ = [
@@ -101,6 +102,7 @@ __all__ = [
     "redis_access",
     "redis_url",
     "session_ports",
+    "throwaway_config",
 ]
 
 pytest_plugins = [

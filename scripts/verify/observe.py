@@ -91,8 +91,8 @@ def _toolchain_linux() -> Detail:
 def _toolchain_macos() -> Detail:
     """The Homebrew kegs, resolved the way the start resolves them."""
     from base.cluster.dataplane.pg_tools import pg_tool
+    from base.cluster.dataplane.pooler import pgbouncer_bin
     from base.host.brew_pin import brew_prefix
-    from cli.commands.data_plane.pgbouncer import pgbouncer_bin
 
     postgres = pg_tool("postgres")
     versions = {

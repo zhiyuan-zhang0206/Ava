@@ -1,10 +1,12 @@
-exports = ["job_wait.py", "process_groups.py", "pty_jobs.py", "pty_reaper.py", "pty_service.py", "pty_shells.py"]
+exports = ["job_wait.py", "process_groups.py", "pty_jobs.py", "pty_reaper.py", "pty_service.py", "pty_shells.py", "secret_argv.py"]
 
 [uses]
 "pty_jobs.py" = ["pty_shells.py"]
+"secret_argv.py" = ["pty_service.py"]
 "test_pty_job_wait.py" = ["job_wait.py"]
 
 [debt.env-patch]
+"secret_argv.py#monkeypatch.setenv os.environ" = 1
 "test_pty_allocation_freeze.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
@@ -14,4 +16,5 @@ exports = ["job_wait.py", "process_groups.py", "pty_jobs.py", "pty_reaper.py", "
 "test_closure.py#python -c" = 1
 
 [debt.stdlib-patch]
+"secret_argv.py#monkeypatch.setattr os.environ" = 1
 "test_closure.py#monkeypatch.setattr os.killpg" = 1

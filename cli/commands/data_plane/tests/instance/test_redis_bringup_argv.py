@@ -17,10 +17,10 @@ import pytest
 from base.cluster import ownership, port_preflight
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.sessions.pty.tests.secret_argv import SECRET, assert_clean
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import with_redis_admin
-from tests.factories.secret_argv import SECRET, assert_clean
 
 
 def test_redis_bringup(

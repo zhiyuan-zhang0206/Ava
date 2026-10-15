@@ -3,6 +3,6 @@
 "ava.tests.fixtures.ava_tests" = [
     "test_hosted_dispatcher_cancellation.py",
 ]
-"tests.path_scoped.services_tests" = [
+"services.backup.artifact.tests.passphrase" = [
     "test_hosted_idle_recovery.py",
 ]

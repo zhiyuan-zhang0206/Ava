@@ -19,6 +19,13 @@
 "ava.tests.fixtures.sdk" = [
     ".",
 ]
+"services.backup.artifact.tests.passphrase" = [
+    "agents/test_weixin_message_identity.py",
+]
+"services.entrypoints.im_bridge.tests.conftest" = [
+    "agents/test_weixin_message_identity.py",
+]
 "tests.fixtures.unit.gateway" = [
+    "agents/test_weixin_message_identity.py",
     "events/test_weixin_ingress_command_http.py",
 ]

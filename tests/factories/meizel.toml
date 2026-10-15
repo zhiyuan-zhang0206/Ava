@@ -1,7 +1,1 @@
-exports = ["external_skills.py", "secret_argv.py"]
-
-[debt.env-patch]
-"secret_argv.py#monkeypatch.setenv os.environ" = 1
-
-[debt.stdlib-patch]
-"secret_argv.py#monkeypatch.setattr os.environ" = 1
+exports = ["external_skills.py"]
