@@ -1,5 +1,3 @@
-"""The labeler composition root passes explicit inputs and owns terminal failures."""
-
 from __future__ import annotations
 
 import asyncio
@@ -176,7 +174,7 @@ def _run_main(monkeypatch: pytest.MonkeyPatch, *, machine_name: str) -> None:
 
 
 def _ignore_entry_resource(config: ConfigBoot, *, runtime: Path) -> None:
-    """Keep the entry composition test independent of real pidfile cleanup."""
+    pass
 
 
 @pytest.mark.parametrize("sha", ["captured-labeler", None])

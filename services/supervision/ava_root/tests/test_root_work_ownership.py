@@ -1,5 +1,3 @@
-"""Real native observations and generation Tasks stay with their original root owner."""
-
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +26,7 @@ from services.supervision.ava_root.unit_records import Generation, UnitRuntime
 
 
 class WorkerFailure(BaseException):
-    """An unknown worker failure outside the ordinary inspection Exception contract."""
+    pass
 
 
 def _leaves(error: BaseException) -> list[BaseException]:
