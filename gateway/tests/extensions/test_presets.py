@@ -1,12 +1,3 @@
-"""Tests for gateway/routers/presets.py (the /api/presets CRUD surface) and the
-spawn-with-preset config merge in gateway/agents/router.py.
-
-Driven through gateway_test_client() against the real test DB. Spawn tests rely on the
-autouse `local_spawn_in_process` fixture (tests/path_scoped/gateway_tests.py) to run the
-spawn op in-process, so a preset-seeded spawn actually persists its merged
-`config_overlay`, which the test reads back through `db_conn`.
-"""
-
 from __future__ import annotations
 
 import psycopg
@@ -49,8 +40,6 @@ class TestPresetCrud:
             assert _create(client, name="dup").status_code == 409
 
     def test_create_config_not_object_422(self, db_conn: psycopg.Connection) -> None:
-        # `config` is a JSON object; a bare string / array is rejected by the
-        # schema (this is the "must be valid JSON object" guard).
         with gateway_test_client() as client:
             r = client.post(
                 "/api/presets", json={"name": "x", "label": "X", "config": "notanobject"}
@@ -70,7 +59,6 @@ class TestPresetCrud:
     ) -> None:
         with gateway_test_client() as client:
             per_agent = _create(client, config={"llm_model": "claude-sonnet-5"})
-            # Unknown keys may be plugin fields, so the gateway keeps them opaque.
             opaque = _create(
                 client,
                 name="plugin-config",
@@ -114,7 +102,7 @@ class TestPresetCrud:
         b = r.json()
         assert b["label"] == "New"
         assert b["config"] == {"llm_model": "deepseek-v4-pro"}
-        assert b["name"] == "coder"  # untouched field survives the partial update
+        assert b["name"] == "coder"
 
     def test_update_no_fields_400(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
@@ -188,9 +176,6 @@ class TestSpawnWithPreset:
     def test_preset_inside_config_seeds_and_records_preset_name(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """The new input surface (task #2694): config_overlay.preset resolves at
-        the spawn boundary; the row stores the RESOLVED overlay + the preset
-        name for display."""
         with gateway_test_client() as client:
             _create(
                 client,
@@ -201,9 +186,6 @@ class TestSpawnWithPreset:
                     "skills_to_inject_into_system_prompt": ["a"],
                 },
             )
-            # An available id on purpose — a withdrawn override would settle to
-            # its registered fallback at the write side (task #4306, its own
-            # coverage); this test pins the preset merge.
             r = spawn_via_http(
                 client,
                 {
@@ -215,7 +197,7 @@ class TestSpawnWithPreset:
             agent_id = r.json()["id"]
         overlay, preset_name = self._row(db_conn, agent_id)
         assert preset_name == "coder"
-        assert overlay == {  # pyright: ignore[reportUnknownMemberType]
+        assert overlay == {
             "llm_model": "deepseek-flash",
             "skills_to_inject_into_system_prompt": ["a"],
         }
@@ -230,7 +212,7 @@ class TestSpawnWithPreset:
             agent_id = r.json()["id"]
         overlay, preset_name = self._row(db_conn, agent_id)
         assert preset_name == "coder"
-        assert overlay == {"llm_model": "claude-sonnet-5"}  # pyright: ignore[reportUnknownMemberType]
+        assert overlay == {"llm_model": "claude-sonnet-5"}
 
     def test_preset_key_must_be_nonempty_string(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:

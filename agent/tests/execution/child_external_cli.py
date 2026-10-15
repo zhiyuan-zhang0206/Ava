@@ -1,9 +1,3 @@
-"""An external CLI attached to a lease: reads one file through the public SDK, then exits.
-
-`python -I -X utf8 child_external_cli.py <sample file>`; run by test_telemetry_otlp_exit_delivery_agent,
-which watches the OTLP receiver for the SDK-call events this process leaves behind.
-"""
-
 import os
 import sys
 from pathlib import Path
@@ -42,9 +36,9 @@ def load_snapshot(_agent_id: Any, **_kwargs: Any) -> tuple[Any, dict[str, Any], 
     return state, {}, None
 
 
-attachment_module.control.require_active = require_active  # pyright: ignore[reportAttributeAccessIssue]
+attachment_module.control.require_active = require_active
 os.environ["AVA_MACHINE_NAME"] = "external-cli-probe"
-plugin_state_codec.load_snapshot = load_snapshot  # pyright: ignore[reportAttributeAccessIssue]
+plugin_state_codec.load_snapshot = load_snapshot
 
 with impersonation.attach("lease"):
     assert ava.files.read(SAMPLE) == "tail event"

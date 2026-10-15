@@ -90,6 +90,19 @@ parse stays an error.
 streaming. If future tests need scenarios like "streaming cancellation mid-way", extend the fake to support
 multi-chunk.
 
+Streaming chunks JSON-encode `ToolCallChunk.args` so LangChain's
+`message_chunk_to_message` reconstructs real tool calls. Empty response metadata
+gets Anthropic `tool_use` or `end_turn` according to whether tool calls exist;
+nonempty metadata is preserved and must supply its own provider identity.
+`bind_tools` returns the same fake and shares its cursor without schema dispatch.
+
+`_db.chat_and_wait` requires exactly one matching chat inbound in `done` state
+and an idling agent; idling alone can precede claim. `checkpoint_values`
+reconstructs delta-backed messages. The compact-history helper calls the native
+inserter for a fixture and does not exercise public admission. Sequence setup
+uses `os.getpid() * 1000` as a starting offset, not a guarantee of disjoint ranges
+for arbitrarily long or concurrent runs.
+
 ## Key constraints
 
 - **CI runs e2e serially (`-n 1`, dedicated `ava-ci-e2e` box)** — only one full stack runs per machine at a time,
@@ -124,7 +137,7 @@ multi-chunk.
 | `lifecycle/test_self_terminate.py` | `lifecycle_terminate` | `ava.self.terminate` → status='terminated' + inbound source='self' |
 | `lifecycle/test_self_restart.py` | `lifecycle_restart` | `ava.self.restart` → restarter respawn → new PID + status back to idling |
 | `lifecycle/test_self_resurrect.py` | `lifecycle_resurrect` | after `terminate`, `POST /resurrect` → fresh process + 'resurrect' inbound |
-| `lifecycle/test_fork_identity.py` | `fork_identity` | `POST /api/keyed/v1/agents` fork_from=source+prompt → forked agent (new id) first claim batch contains [fork marker, prompt], reply `FORK_OK` proves context contains both |
+| `lifecycle/test_fork_identity.py` | `fork_identity` | `POST /api/keyed/v1/agents` fork_from=source+prompt → forked agent (new id) replies `FORK_OK` after a model call sees both the fork marker and prompt; does not prove this was the first call |
 | `flow/test_message_flow.py` | `message_flow` | **Panoramic Case 1 (#1018)** — one user message → reasoning + code tool call + real exec + reply; REST timeline fan-out (reasoning/code/output/chat), reply rendered in browser via SSE, zero unrecognized-marker alarms + zero `[timeline] unrecognized` console warnings |
 | `flow/test_compact_flow.py` | `compact_flow` | **Panoramic Case 2 (#1018)** — native compact history fixture (not public manual admission) → Compaction LLM (script turn) → clean wipe → `inbound_compact_request` envelope renders, NO unrecognized-marker alarm (#1017 regression), agent replies post-compact |
 | `flow/test_error_recovery.py` | `error_recovery` | **Panoramic Case 3 (#1018)** — LLM raises FatalProviderError (no retry) → SSE `error` event → `[error]` marker in browser (NOT the unrecognized alarm), aborted turn commits no agent_chat, next message recovers normally |
@@ -152,13 +165,17 @@ The fixture `-m tests.e2e.process_support` entry supplies only the explicit test
 serving gate; it does not establish production root custody.
 
 **Differences between fork scenario and lifecycle**: fork creates a **new agent_id** (not reused).
-`build()` distinguishes source / forked process by whether there is a `kind='fork'` inbound for
-`ava.self.AGENT_ID` (fork inbound is committed before launch, only present for forked agent). The
-forked branch's fake does not follow a fixed script, but inspects the first round of real `messages`
-received — containing the identity marker (`"forked from agent:"`) + prompt before replying
-`FORK_OK`, turning "whether the forked agent truly sees both" into an assertable reply. The source
-agent must run one round to build a checkpoint first, so the fork has something to copy from
-(an idle empty agent has no checkpoint → `ForkSourceEmpty`).
+`build()` uses its explicit `agent_id` and that identity's `kind='fork'` inbound
+to distinguish source and forked agents in the shared host. The forked model
+checks actual `messages` on each call for the identity marker
+(`"forked from agent:"`) and prompt before replying `FORK_OK`. The test accepts
+that reply without excluding an earlier failed verdict, so it proves visibility
+on a call, not strictly the first call. The source must first build a checkpoint;
+an empty source raises `ForkSourceEmpty`.
+
+The idle-restart scenario uses an empty script after restart, so an unexpected
+model call fails. It also checks the unchanged AI-message count across a bounded
+post-restart observation window; it does not prove indefinite quiescence.
 
 **Two-segment SCRIPT pattern for lifecycle scenarios**: for `lifecycle_restart` / `lifecycle_resurrect`,
 the fake `build()` checks `inbound_messages` for rows with `kind='restart_completed'` /

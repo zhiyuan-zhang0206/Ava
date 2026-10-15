@@ -1,5 +1,3 @@
-"""Current-state Inspector HTTP contracts; persisted statistics have their own tests."""
-
 from __future__ import annotations
 
 import json
@@ -31,12 +29,6 @@ def _insert_agent(
     status_changed_s_ago: float | None = None,
     paused_until_s_ahead: float | None = None,
 ) -> int:
-    """INSERT an agents_meta row. `status_changed_s_ago` backdates BOTH
-    status_changed_at and last_active_at (the BEFORE-UPDATE-OF-status trigger does
-    not fire on a timestamp-only update) — it models "the agent last did anything
-    N seconds ago", and the heartbeat projection reads the real-activity clock
-    (last_active_at). `paused_until_s_ahead` sets heartbeat_paused_until relative
-    to now() — negative = an already-expired pause."""
     tid = _insert_agent_row(db)
     with db.cursor() as cur:
         cur.execute(
@@ -61,7 +53,6 @@ def _insert_agent(
 
 
 def _seconds_from_now(iso: str) -> float:
-    """Signed seconds between an ISO-8601 instant and now (future = positive)."""
     return (datetime.fromisoformat(iso) - datetime.now(UTC)).total_seconds()
 
 
@@ -72,12 +63,6 @@ def _insert_pending_inbound(
     kind: str = "heartbeat",
     created_s_ago: float | None = None,
 ) -> None:
-    """INSERT a pending inbound_messages row — models a check-in (or any wake) the
-    daemon has queued but the agent has not yet claimed. `status` defaults to
-    'pending', so this is what the daemon's `NOT EXISTS (pending inbound)` guard
-    (and now the inspector's `heartbeat_pending`) keys off. `created_s_ago`
-    backdates created_at — a row older than `STALE_PENDING_S` is stale: the
-    daemon re-checks-in past it (and the panel projects next_at instead)."""
     with db.cursor() as cur:
         if created_s_ago is None:
             cur.execute(
@@ -93,7 +78,6 @@ def _insert_pending_inbound(
 
 
 def test_inspect_unknown_agent_404(db_conn: psycopg.Connection) -> None:
-    """No agents_meta row → 404 (fail-fast, no empty shell)."""
     db_conn.commit()
     with gateway_test_client() as client:
         resp = client.get("/api/agents/999999/inspect/statistics")
@@ -104,7 +88,6 @@ def test_inspect_live_returns_only_window_independent_fields(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The live route is the cheap inspector skeleton, not the aggregate payload."""
     aid = _insert_agent(
         db_conn,
         status="idling",
@@ -216,7 +199,6 @@ def test_inspect_live_distinguishes_valid_empty_from_missing_shell_data(
 
 
 def test_inspect_config_overlay_roundtrips(db_conn: psycopg.Connection) -> None:
-    """config_overlay JSONB pass-through as-is; shells is a list, machine echoed."""
     aid = _insert_agent(
         db_conn,
         config_overlay={"llm_model": "claude-opus-4-8", "auto_compact_fraction": 0.7},
@@ -233,7 +215,6 @@ def test_inspect_config_overlay_roundtrips(db_conn: psycopg.Connection) -> None:
 
 
 def test_inspect_null_config_overlay_is_empty_dict(db_conn: psycopg.Connection) -> None:
-    """config_overlay NULL (cluster defaults) → {} not null."""
     aid = _insert_agent(db_conn, config_overlay=None)
     db_conn.commit()
     with gateway_test_client() as client:
@@ -241,15 +222,9 @@ def test_inspect_null_config_overlay_is_empty_dict(db_conn: psycopg.Connection) 
     assert body["config_overlay"] == {}
 
 
-# ── Shells section (shell_probe op, uniform machine path) ─────────────────────
-
-
 def test_inspect_shells_probed_on_agents_machine(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """shells come from a `shell_probe` op dispatched to the agent's machine —
-    a remote runner's live shells appear exactly like a local one's (no local
-    session probing in the gateway)."""
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
@@ -293,8 +268,6 @@ def test_inspect_shells_probed_on_agents_machine(
 def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    """Only recorded TTLs enrich the probe. Row-less page/schedule sessions
-    render no TTL even with a launch epoch (task #4086, DP1)."""
     launched = datetime.now(UTC) - timedelta(minutes=30)
     deadline = datetime.now(UTC) + timedelta(hours=2)
 
@@ -323,14 +296,12 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     by_id = {s["id"]: s for s in body["shells"]}
     assert datetime.fromisoformat(by_id[5]["expires_at"]) == deadline
-    assert by_id[6]["expires_at"] is None  # no row -> no TTL
+    assert by_id[6]["expires_at"] is None
 
 
 def test_inspect_shells_degrade_to_empty_on_unreachable(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An unreachable machine (or unregistered name) degrades to an empty shell
-    list — the inspector shows 'None open' instead of 503ing the whole panel."""
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
@@ -352,8 +323,6 @@ def test_inspect_shells_degrade_to_empty_on_unreachable(
 def test_inspect_shells_degrade_to_empty_on_failed_op(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A version-skewed runner that does not know the op reports 'failed' —
-    same graceful degradation to an empty shell list."""
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
@@ -374,7 +343,6 @@ def test_inspect_shells_degrade_to_empty_on_failed_op(
 
 @pytest.mark.parametrize("bad", ["5", "-1", "169", "abc", "24.5"])
 def test_inspect_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> None:
-    """hours outside {0,1,6,24,72,168} → 422 (fail-fast, reusing StatsWindowHours)."""
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with gateway_test_client() as client:
@@ -382,12 +350,7 @@ def test_inspect_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> Non
     assert resp.status_code == 422
 
 
-# ── Heartbeat section ──────────────────────────────────────────────────────
-
-
 def test_inspect_heartbeat_running_agent_dashes(db_conn: psycopg.Connection) -> None:
-    """running agent does not receive check-ins → next_at/paused_until both None; never paused →
-    last_pause None. interval_s echoes the configuration value."""
     aid = _insert_agent(db_conn, status="running")
     db_conn.commit()
     with gateway_test_client() as client:
@@ -399,9 +362,6 @@ def test_inspect_heartbeat_running_agent_dashes(db_conn: psycopg.Connection) -> 
 
 
 def test_inspect_heartbeat_idle_projects_next_at(db_conn: psycopg.Connection) -> None:
-    """idle + no pause → next_at = effective_last_active + idle_threshold_s +
-    per-agent jitter (id mod JITTER_SPAN_S), exactly the daemon's due-time;
-    paused_until None. Parked 120s ago, so next_at ≈ now + (idle_threshold - 120)s."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     db_conn.commit()
     with gateway_test_client() as client:
@@ -409,19 +369,14 @@ def test_inspect_heartbeat_idle_projects_next_at(db_conn: psycopg.Connection) ->
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
     expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
-    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)
 
 
 def test_jitter_span_s_stays_whole_seconds() -> None:
-    """The jitter span must remain a whole-second count: the daemon SQL casts it
-    with Postgres' `::int` (rounds half away from zero) while the inspector
-    computes the offset in Python (`int` truncates) — a non-integral span would
-    split the two interpretations again into a 1s drift (QA #952 b)."""
     assert int(JITTER_SPAN_S) == JITTER_SPAN_S
 
 
 def test_inspect_heartbeat_paused_shows_window(db_conn: psycopg.Connection) -> None:
-    """idle + future heartbeat_paused_until → paused_until pass-through, next_at None."""
     aid = _insert_agent(
         db_conn, status="idling", status_changed_s_ago=600, paused_until_s_ahead=1800
     )
@@ -430,12 +385,10 @@ def test_inspect_heartbeat_paused_shows_window(db_conn: psycopg.Connection) -> N
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["next_at"] is None
     assert hb["paused_until"] is not None
-    assert _seconds_from_now(hb["paused_until"]) == pytest.approx(1800, abs=5)  # pyright: ignore[reportUnknownMemberType]
+    assert _seconds_from_now(hb["paused_until"]) == pytest.approx(1800, abs=5)
 
 
 def test_inspect_heartbeat_expired_pause_is_not_paused(db_conn: psycopg.Connection) -> None:
-    """Expired pause (heartbeat_paused_until in the past) treated as no pause → next_at projected normally,
-    paused_until None. Consistent with daemon's `<= now()` check."""
     aid = _insert_agent(
         db_conn, status="idling", status_changed_s_ago=60, paused_until_s_ahead=-120
     )
@@ -449,12 +402,6 @@ def test_inspect_heartbeat_expired_pause_is_not_paused(db_conn: psycopg.Connecti
 def test_inspect_heartbeat_pending_inbound_marks_heartbeat_pending(
     db_conn: psycopg.Connection,
 ) -> None:
-    """idle + no pause + has pending inbound (daemon just sent check-in but agent hasn't processed) →
-    heartbeat_pending=True, next_at None. Mirrors daemon's `NOT EXISTS (pending inbound)`
-    guard: since a wake is already queued, daemon will not enqueue another check-in, so no future
-    time can be projected. last_active_at stopped 500s ago (long expired), if projected normally
-    would yield a 'past' next_at — exactly the root cause of the stuck agent showing 'one hour ago'
-    in the original bug."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=500)
     _insert_pending_inbound(db_conn, agent_id=aid)
     db_conn.commit()
@@ -468,10 +415,6 @@ def test_inspect_heartbeat_pending_inbound_marks_heartbeat_pending(
 def test_inspect_heartbeat_no_pending_projects_from_last_active(
     db_conn: psycopg.Connection,
 ) -> None:
-    """No pending inbound → next_at is based on last_active_at, unaffected by historic
-    heartbeat_nudged events: once a check-in is processed and consumed, inbound is no longer pending,
-    and that turn pushed last_active_at past the check-in time, so last_active_at alone is the correct
-    baseline (the old event-floor was therefore redundant). heartbeat_pending False."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     db_conn.commit()
     with gateway_test_client() as client:
@@ -479,15 +422,13 @@ def test_inspect_heartbeat_no_pending_projects_from_last_active(
     assert hb["heartbeat_pending"] is False
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
-    # next_at is based on last_active_at (120s ago) + per-agent jitter.
     expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
-    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)
 
 
 def test_inspect_heartbeat_consumed_checkin_uses_durable_reminder_floor(
     db_conn: psycopg.Connection,
 ) -> None:
-    """A consumed no-turn heartbeat must defer the inspector's next check-in too."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=600)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -504,30 +445,23 @@ def test_inspect_heartbeat_consumed_checkin_uses_durable_reminder_floor(
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
     expected = settings.daemon.heartbeat_interval_seconds - 120
-    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)
 
 
 def test_inspect_heartbeat_stuck_after_expired_pause_no_past_next_at(
     db_conn: psycopg.Connection,
 ) -> None:
-    """Regression (original bug): agent paused 5 minutes two hours ago, then stuck and not processing
-    check-ins. The panel should show heartbeat_pending (a check-in is already queued), not project
-    next_at as 'one hour ago' (a past time). Reproduction condition: last_active_at stopped 2h ago,
-    pause expired, one pending heartbeat inbound (daemon because of pending guard does not re-send)."""
     aid = _insert_agent(
         db_conn,
         status="idling",
-        status_changed_s_ago=7200,  # last_active_at 2h ago
-        paused_until_s_ahead=-6900,  # paused_until 1h55m ago (expired)
+        status_changed_s_ago=7200,
+        paused_until_s_ahead=-6900,
     )
-    # daemon sent a check-in after pause expired, but agent stuck and never processed → inbound still pending.
     _insert_pending_inbound(db_conn, agent_id=aid)
     db_conn.commit()
     with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
-    # expired pause treated as no pause.
     assert hb["paused_until"] is None
-    # key assertion: does not project a past next_at (original bug would show "one hour ago").
     assert hb["next_at"] is None
     assert hb["heartbeat_pending"] is True
 
@@ -535,34 +469,23 @@ def test_inspect_heartbeat_stuck_after_expired_pause_no_past_next_at(
 def test_inspect_heartbeat_overdue_still_projects_raw_next_at(
     db_conn: psycopg.Connection,
 ) -> None:
-    """An idle clock can run past its due time (the daemon dispatches at its next
-    poll tick): the projection stays raw `last_active_at + idle_threshold +
-    jitter` (a past instant), and the frontend renders a past next_at as "due" —
-    never "4m ago" for a *next* heartbeat."""
     aid = _insert_agent(
         db_conn,
         status="idling",
-        status_changed_s_ago=7200,  # last_active_at 2h ago — far past due
+        status_changed_s_ago=7200,
     )
     db_conn.commit()
     with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
-    # Raw projection: 2h ago + idle_threshold + jitter — clearly in the past.
     expected = settings.daemon.heartbeat_idle_threshold_seconds - 7200 + aid % JITTER_SPAN_S
-    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)
 
 
 def test_inspect_heartbeat_stale_pending_does_not_suppress(
     db_conn: psycopg.Connection,
 ) -> None:
-    """A pending inbound older than the daemon's freshness window
-    (STALE_PENDING_S=900s) no longer counts as "about to wake": the daemon
-    re-checks-in on the agent, so the panel projects next_at instead of showing
-    heartbeat_pending forever. Mirrors the daemon's windowed `NOT EXISTS` guard
-    exactly (QA #877 N2) — the display never claims a stale wake is still
-    suppressing check-ins."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     _insert_pending_inbound(db_conn, agent_id=aid, created_s_ago=STALE_PENDING_S + 300)
     db_conn.commit()
@@ -571,30 +494,24 @@ def test_inspect_heartbeat_stale_pending_does_not_suppress(
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
     expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
-    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)
 
 
 def test_inspect_heartbeat_last_pause_newest_wins(db_conn: psycopg.Connection) -> None:
-    """last_pause takes the newest committed pause from this agent's trail;
-    another agent's pause does not leak."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=60)
     other = _insert_agent(db_conn, status="idling", status_changed_s_ago=60)
-    # 5h old pause + 1h new pause — new one wins
     _pause_row(db_conn, agent_id=aid, duration_s=3600, hours_ago=5)
     _pause_row(db_conn, agent_id=aid, duration_s=1800, hours_ago=1)
-    # another agent's pause — must not appear in this agent's last_pause
     _pause_row(db_conn, agent_id=other, duration_s=999, hours_ago=0)
     db_conn.commit()
     with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["last_pause"] is not None
     assert hb["last_pause"]["duration_s"] == 1800
-    # at ≈ now - 1h
-    assert _seconds_from_now(hb["last_pause"]["at"]) == pytest.approx(-3600, abs=60)  # pyright: ignore[reportUnknownMemberType]
+    assert _seconds_from_now(hb["last_pause"]["at"]) == pytest.approx(-3600, abs=60)
 
 
 def test_inspect_heartbeat_last_pause_beyond_lookback_is_none(db_conn: psycopg.Connection) -> None:
-    """A pause older than the recent-history lookback is omitted."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=60)
     _pause_row(db_conn, agent_id=aid, duration_s=3600, hours_ago=30)
     db_conn.commit()
@@ -603,11 +520,7 @@ def test_inspect_heartbeat_last_pause_beyond_lookback_is_none(db_conn: psycopg.C
     assert hb["last_pause"] is None
 
 
-# ── Notice section ──────────────────────────────────────────────────────────
-
-
 def test_inspect_notice_when_agent_has_open_require_response(db_conn: psycopg.Connection) -> None:
-    """An agent with a require_response notice → notice field present with all keys."""
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -634,7 +547,6 @@ def test_inspect_notice_when_agent_has_open_require_response(db_conn: psycopg.Co
 
 
 def test_inspect_notice_when_agent_has_open_fyi(db_conn: psycopg.Connection) -> None:
-    """An agent with an FYI notice → notice field present with require_response=False."""
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -659,7 +571,6 @@ def test_inspect_notice_when_agent_has_open_fyi(db_conn: psycopg.Connection) -> 
 
 
 def test_inspect_notice_when_agent_has_none(db_conn: psycopg.Connection) -> None:
-    """An agent with no open notices → notice is None (not missing, not empty dict)."""
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with gateway_test_client() as client:
@@ -668,7 +579,6 @@ def test_inspect_notice_when_agent_has_none(db_conn: psycopg.Connection) -> None
 
 
 def test_inspect_notice_resolved_not_returned(db_conn: psycopg.Connection) -> None:
-    """A resolved notice is not returned; only open (resolved_at IS NULL) counts."""
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -677,7 +587,6 @@ def test_inspect_notice_resolved_not_returned(db_conn: psycopg.Connection) -> No
             "WHERE agent_id = %s), -1) + 1, 'Old', 'P3', true, false, now(), 'answered', 'done', now() + interval '1 day')",
             (aid, aid),
         )
-        # And a newer open one — the newer wins since we ORDER BY created_at DESC LIMIT 1
         cur.execute(
             "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
             "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
@@ -692,7 +601,6 @@ def test_inspect_notice_resolved_not_returned(db_conn: psycopg.Connection) -> No
 
 
 def test_inspect_notice_other_agent_not_visible(db_conn: psycopg.Connection) -> None:
-    """Another agent's notice does not leak into this agent's inspect."""
     aid = _insert_agent(db_conn)
     other = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -708,16 +616,9 @@ def test_inspect_notice_other_agent_not_visible(db_conn: psycopg.Connection) -> 
     assert body["notice"] is None
 
 
-# ── Activity (active-rate) section ────────────────────────────────────────────
-
-
-# ── Response-cache discipline (the panel refetches in bursts) ─────────────────
-
-
 def test_inspect_live_reads_committed_pause(
     db_conn: psycopg.Connection,
 ) -> None:
-    """Current state and its pause hint come from the committed rows."""
     aid = _insert_agent(db_conn, status="idling")
     _pause_row(db_conn, agent_id=aid, duration_s=900, hours_ago=1)
     db_conn.commit()
@@ -740,7 +641,6 @@ def _pause_row(
 
 
 def test_inspect_last_pause_same_timestamp_uses_newest_id(db_conn: psycopg.Connection) -> None:
-    """Two pauses in one transaction share now(); the later insert wins."""
     aid = _insert_agent(db_conn)
     _pause_row(db_conn, agent_id=aid, duration_s=3600, hours_ago=1)
     _pause_row(db_conn, agent_id=aid, duration_s=600, hours_ago=1)

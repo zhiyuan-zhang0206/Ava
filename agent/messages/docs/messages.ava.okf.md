@@ -39,6 +39,9 @@ Ava-style message constructors — builds standard LangChain `HumanMessage` / `T
 
 ## Notes
 
+- `has_conversation` cannot use message-list nonemptiness: `init_context` installs
+  the standing head before claim. System/context notes alone remain idle, while
+  a compact summary represents a continuing conversation.
 - Design chooses **not to subclass** LangChain Message — distinguishes via metadata instead of `isinstance`, serialization path is simpler
 - `NoteTag` is a closed set: adding a new kind requires updating UI mapping branches; unmapped tags render as a prominent "unrecognized" marker rather than silently falling back
 - Writer/reader division: writer (`agent/messages/__init__.py` + `agent/graph/claim/node.py` + `agent/graph/llm/node.py`) saves `<AvaMsgType member>.value`; reader (`base/agents/history/timeline.py`, `base/agents/history/context_breakdown.py`, `agent/graph/recall/memory_recall.py`) always gets typed view via `read_ava_kwargs()`, no longer `.get()` raw dict directly

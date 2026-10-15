@@ -91,6 +91,10 @@ both literal rate tables without executing plugin code.
 
 ## Explicit single-attempt construction
 
+A bound prefix in the low-level factory can dispatch an unregistered model id
+with `BuildContext.spec = None`; the builder decides whether to accept it.
+Admission and model selection separately enforce catalog membership.
+
 `BuildContext.max_retries` is additive and defaults to `None`; ordinary builders
 retain their existing retry policy. `ProviderBinding.build_single_attempt` is
 an optional explicit provider-owned construction contract. A binding that does

@@ -51,7 +51,7 @@ the source unchanged; there is no process-wide warning cache.
 
 ### 3. Illegal escape sequence repair (manual, tokenize)
 
-- Python 3.12 turned illegal escape sequences from warning to error; `_fix_invalid_escapes` does tokenize-level repair, e.g., `\s` → `\\s` (inside string literals)
+- Invalid escapes emit `SyntaxWarning` in Python 3.12; `_fix_invalid_escapes` does tokenize-level repair, e.g., `\s` → `\\s` (inside string literals)
 
 ### 4. `ruff check --fix`
 
@@ -93,3 +93,14 @@ if that still fails, a single-call turn returns a compile-error ToolMessage dire
   ruff format, deterministic batteries, finally compile + LLM fallback
 - "Silent fix" strategy: the agent usually does not know its code was fixed (if it compiles, it executes directly)
 - compile-guard is a key lesson: verify that a fixer not only leaves good input unchanged but also fixes bad input with correct semantics (AST not collapsed / arguments not lost)
+
+## Repair test premises
+
+`tests/syntax_fix/test_fix_invalid_escapes.py` keeps source snippets as literal
+inputs, including malformed Python. The format-disabled case uses a duplicate
+import to guarantee a lint fix, then checks that formatting stays disabled;
+it must not depend on whether the current Ruff configuration repairs a missing
+final newline. Deterministic compile-error cases disable LLM repair explicitly,
+so their fallback assertions do not call a provider.
+Spacing assertions pin the format setting. Triple-quote closer candidates are
+compile-checked so an earlier embedded delimiter cannot end the repaired string.

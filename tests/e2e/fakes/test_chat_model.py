@@ -1,10 +1,3 @@
-"""ScriptedFakeChatModel self unit test — cursor / chunk encoding / exhaustion.
-
-A silently broken fake = silently green e2e, so the fake's own non-trivial logic
-(cursor advancement / tool_call_chunks JSON encoding / script exhaustion)
-must have unit coverage.
-"""
-
 from __future__ import annotations
 
 import json
@@ -31,12 +24,11 @@ async def test_cursor_advances_per_astream_call() -> None:
     chunks_a = [c async for c in fake.astream([])]
     assert fake.cursor == 1
     assert [c.content for c in chunks_a if c.content] == ["hi"]
-    # langchain stub — message.content has Unknown slots.
-    assert chunks_a[0].content == "hi"  # pyright: ignore[reportUnknownMemberType]
+    assert chunks_a[0].content == "hi"
 
     chunks_b = [c async for c in fake.astream([])]
     assert fake.cursor == 2
-    assert chunks_b[0].content == "bye"  # pyright: ignore[reportUnknownMemberType]
+    assert chunks_b[0].content == "bye"
 
 
 async def test_script_exhausted_raises_distinct_error() -> None:
@@ -48,8 +40,6 @@ async def test_script_exhausted_raises_distinct_error() -> None:
 
 
 async def test_tool_call_chunk_args_serialized_to_json() -> None:
-    """LangChain ToolCallChunk `args` must be a JSON string — the upper layer
-    `message_chunk_to_message` will parse it back to a dict. Verify encoding + roundtrip."""
     tool_call: ToolCall = {
         "id": "call_1",
         "name": "execute_code",
@@ -65,7 +55,6 @@ async def test_tool_call_chunk_args_serialized_to_json() -> None:
     assert args_str is not None
     assert json.loads(args_str) == {"code": "print('\u4e2d\u6587 + quotes')"}
 
-    # simulate upper-layer accumulation + finalize: chunk → AIMessage parses args back
     final_msg = message_chunk_to_message(chunk_msg)
     assert isinstance(final_msg, AIMessage)
     assert final_msg.tool_calls[0]["args"] == {"code": "print('\u4e2d\u6587 + quotes')"}
@@ -78,15 +67,11 @@ def test_bind_tools_returns_self_unchanged() -> None:
 
 
 async def test_bind_tools_shares_cursor_with_unbound() -> None:
-    """bind_tools returns self, not a new instance — bound shares cursor with
-    original fake; calling either advances the same counter. In production the caller
-    uses bound_llm, and cursor advancement hits fake.cursor.
-    """
     fake = ScriptedFakeChatModel(script=(_msg("a"), _msg("b")))
     bound = fake.bind_tools(tools=[])
 
     [_ async for _ in bound.astream([])]
-    assert fake.cursor == 1  # bound call advanced the original fake's cursor
+    assert fake.cursor == 1
 
     [_ async for _ in fake.astream([])]
     assert fake.cursor == 2

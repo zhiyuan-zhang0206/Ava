@@ -1,5 +1,3 @@
-"""Consent identifies the external caller without reappearing after compaction."""
-
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -39,7 +37,7 @@ async def test_consent_carries_actual_source_and_survives_compaction(
     assert first.goto == "before_llm"
     message = cast(HumanMessage, cast(dict[str, Any], first.update)["messages"][0])
     assert message.id == "impersonation-request:lease-1:1"
-    content = cast(str, message.content)  # pyright: ignore[reportUnknownMemberType]
+    content = cast(str, message.content)
     assert "External agent" in content and "codex" in content
     assert (" [" in content.split("\n\n", 1)[0]) is timestamps_enabled
     assert "ava.impersonation.accept('lease-1', start_message=" in content
@@ -62,7 +60,7 @@ async def test_consent_request_is_stamped_and_claims_no_queue_row(
     assert message.text[kwargs.get("ava_inbound_body_start", -1) :].startswith(
         "External agent requests"
     )
-    assert "ava_inbound_id" not in kwargs  # no inbound_messages row exists to point at
+    assert "ava_inbound_id" not in kwargs
     created = kwargs.get("ava_created_at")
     picked_up = kwargs.get("ava_picked_up_at")
     assert created is not None and picked_up is not None

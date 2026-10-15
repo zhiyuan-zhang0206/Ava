@@ -1,5 +1,3 @@
-"""The HTTP route and the disconnect race around the service call."""
-
 from __future__ import annotations
 
 import asyncio
@@ -93,9 +91,6 @@ async def test_the_work_exception_reaches_a_connected_client() -> None:
 
 
 async def test_work_that_fails_while_the_disconnect_check_absorbs_cancellation_still_ends() -> None:
-    """Starlette's `is_disconnected` polls inside an anyio cancel scope that can absorb a
-    cancellation; the failed work must still end the request."""
-
     async def absorbing() -> bool:
         try:
             await asyncio.sleep(0.05)
@@ -145,7 +140,7 @@ async def test_a_disconnect_stops_a_draft_that_is_in_flight(model_catalog: Model
             cancelled.set()
             raise
 
-    harness.chat.ainvoke = slow_ainvoke  # pyright: ignore[reportAttributeAccessIssue]
+    harness.chat.ainvoke = slow_ainvoke
 
     async def disconnects_once_drafting() -> bool:
         await started.wait()

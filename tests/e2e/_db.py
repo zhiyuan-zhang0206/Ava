@@ -1,20 +1,3 @@
-"""Shared e2e DB helpers — pollers that wait for an agent row to reach a target lifecycle state,
-and the per-run agent-id offset.
-
-One generous default timeout in one place. A genuine hang still fails, just at
-a higher ceiling. Previously each lifecycle test carried its own copy-pasted
-`_wait_for_status` and the defaults had drifted (20s / 20s / 30s); this is the
-single source of truth.
-
-Why 90s: generous headroom, not a tight bound. CI runs e2e serially on a
-dedicated box (one full stack at a time, `-n 1`), so a turn normally completes
-in single-digit seconds; the ceiling only has to clear a transient slow
-boot/turn under incidental host load without racing a tight deadline. A real
-hang (agent dead, status never flips) still fails, just at a higher ceiling —
-and the agent-side stall probe (AVA_NODE_STALL_DUMP_SECONDS) names the blocked frame
-in the `agent-*.log` artifact either way.
-"""
-
 from __future__ import annotations
 
 import os
@@ -34,7 +17,6 @@ from tests.e2e._ports import GATEWAY_URL
 
 
 def wait_for_status(agent_id: int, target: str, timeout: float = 90.0) -> None:
-    """Poll agents_meta.status until it equals target, else raise after timeout."""
     deadline = time.monotonic() + timeout
     last: str | None = None
     while time.monotonic() < deadline:
@@ -51,23 +33,16 @@ def wait_for_status(agent_id: int, target: str, timeout: float = 90.0) -> None:
 
 
 def checkpoint_values(agent_id: int) -> dict[str, Any]:
-    """The agent's latest checkpoint channel values ({} before its first checkpoint)."""
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
         tup = saver.get_tuple({"configurable": {"thread_id": str(agent_id)}})
         if tup is not None:
-            # Delta write model (#3180): fold delta-written messages on read.
             reconstruct_delta_messages(saver, tup)
     if tup is None:
         return {}
-    return tup.checkpoint.get("channel_values", {})  # pyright: ignore[reportUnknownMemberType]
+    return tup.checkpoint.get("channel_values", {})
 
 
 def chat_and_wait(agent_id: int, text: str, *, timeout: float = 90.0) -> None:
-    """POST one user message and wait until its inbound row is finalized and the agent idles.
-
-    Inbound `done` (not just status idling): idling flips at claim entry, before the
-    turn's work has happened.
-    """
     httpx.post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/messages",
         json={"content": text, "source": "user"},
@@ -91,11 +66,6 @@ def chat_and_wait(agent_id: int, text: str, *, timeout: float = 90.0) -> None:
 
 
 def enqueue_compact_history_fixture(agent_id: int, *, database: Database) -> int:
-    """Produce the native compact envelope used by history-rendering scenarios.
-
-    This is a test fixture for the existing graph/history contract, not public
-    manual-compaction admission. Product callers use observed compact-history.
-    """
     from base.agents.inbox.compact import insert_compact_request_inbound
     from base.events.live.bus import EventBus
 
@@ -106,12 +76,6 @@ def enqueue_compact_history_fixture(agent_id: int, *, database: Database) -> int
 
 
 def apply_e2e_seq_offset() -> None:
-    """Offset agents_id_seq by PID so concurrent e2e workers spawn non-colliding
-    session names (`ava-agent-<id>` shares a global namespace). PID <
-    65536, ×1000 leaves ample room. Applied once per e2e package — there is exactly
-    one, so once per run: `truncated_db` truncates without RESTART IDENTITY, so the
-    sequence is never reset and this base persists (ids stay monotonic +
-    per-worker-disjoint for the whole run)."""
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             sql.SQL("ALTER SEQUENCE agents_id_seq RESTART {}").format(

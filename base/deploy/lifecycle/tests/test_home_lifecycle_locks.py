@@ -1,6 +1,3 @@
-# pyright: reportUnknownArgumentType=warning, reportUnknownLambdaType=warning
-"""Home lifecycle mutex: a bounded wait that names the last holder."""
-
 from __future__ import annotations
 
 import json
