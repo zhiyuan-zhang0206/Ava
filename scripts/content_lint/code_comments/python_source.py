@@ -3,7 +3,9 @@ import inspect
 import io
 import re
 import tokenize
+from collections import Counter
 from collections.abc import Collection
+from dataclasses import replace
 from itertools import pairwise
 
 from scripts.content_lint.code_comments.directives import (
@@ -49,6 +51,7 @@ class SymbolCollector(ast.NodeVisitor):
         self.scope: list[str] = []
         self.docstrings: set[int] = set()
         self.fixtures = fixtures
+        self.text = text
 
     def collect_body(
         self, node: ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
@@ -65,6 +68,7 @@ class SymbolCollector(ast.NodeVisitor):
                     first.end_lineno or first.lineno,
                     value,
                     name,
+                    raw_text=ast.get_source_segment(self.text, first) or "",
                 )
             )
         for attribute, expression in attribute_docs(node.body):
@@ -78,6 +82,7 @@ class SymbolCollector(ast.NodeVisitor):
                     expression.end_lineno or expression.lineno,
                     inspect.cleandoc(text),
                     owner,
+                    raw_text=ast.get_source_segment(self.text, expression) or "",
                 )
             )
         self.generic_visit(node)
@@ -130,6 +135,7 @@ class SymbolCollector(ast.NodeVisitor):
                     node.end_lineno or node.lineno,
                     node.value.value,
                     owner,
+                    raw_text=ast.get_source_segment(self.text, node) or "",
                 )
             )
         self.generic_visit(node)
@@ -151,16 +157,41 @@ class SymbolCollector(ast.NodeVisitor):
         self.collect_assignment(node)
 
 
-def comment_owner(symbols: Collection[Symbol], line: int, *, following: bool = True) -> str:
+def enclosing_definition(symbols: Collection[Symbol], line: int, *, following: bool) -> Symbol:
     enclosing = [
         item for item in symbols if item.name != "<module>" and item.line <= line <= item.end_line
     ]
     if enclosing:
-        return min(enclosing, key=lambda item: item.end_line - item.line).name
+        return min(enclosing, key=lambda item: item.end_line - item.line)
     adjacent = [item for item in symbols if item.line == line + 1] if following else []
     if len(adjacent) == 1:
-        return adjacent[0].name
-    return "<module>"
+        return adjacent[0]
+    return next(item for item in symbols if item.name == "<module>")
+
+
+def comment_owner(symbols: Collection[Symbol], line: int, *, following: bool = True) -> str:
+    return enclosing_definition(symbols, line, following=following).name
+
+
+def definition_identities(definitions: list[Symbol]) -> list[Symbol]:
+    parents: list[int] = [0]
+    groups: list[tuple[int, str, str]] = [(0, "module", "<module>")]
+    for index, definition in enumerate(definitions[1:], 1):
+        parent = enclosing_definition(definitions[:index], definition.line, following=False)
+        parent_index = definitions.index(parent)
+        parents.append(parent_index)
+        groups.append(
+            (parent_index, "function" if definition.callable else "class", definition.name)
+        )
+    totals = Counter(groups)
+    ordinal: Counter[tuple[int, str, str]] = Counter()
+    result = [replace(definitions[0], lexical_key="<module>")]
+    for index, definition in enumerate(definitions[1:], 1):
+        group = groups[index]
+        ordinal[group] += 1
+        key = f"{result[parents[index]].lexical_key}/{group[1]}:{definition.name}[{ordinal[group]}/{totals[group]}]"
+        result.append(replace(definition, lexical_key=key))
+    return result
 
 
 # ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-entry-shebang
@@ -168,6 +199,16 @@ def parse_python(path: str, text: str) -> Source:
     tree = ast.parse(text, filename=path)
     collector = SymbolCollector(text, fixture_owners(tree))
     collector.visit(tree)
+    collector.definitions = definition_identities(collector.definitions)
+    collector.notes = [
+        replace(
+            note,
+            lexical_owner=enclosing_definition(
+                collector.definitions, note.line, following=False
+            ).lexical_key,
+        )
+        for note in collector.notes
+    ]
     ambient_lines = ambient_call_lines(path, tree)
     for item in tokenize.generate_tokens(io.StringIO(text).readline):
         if item.type != tokenize.COMMENT:
@@ -186,8 +227,13 @@ def parse_python(path: str, text: str) -> Source:
             if machine_reference
             else comment_owner(collector.symbols.values(), item.start[0])
         )
+        scope = enclosing_definition(
+            collector.definitions,
+            item.start[0],
+            following=not machine_reference and not item.line[: item.start[1]].strip(),
+        ).lexical_key
         collector.notes.append(
-            Note(kind, item.start[0], item.end[0], item.string, owner, lexical_owner)
+            Note(kind, item.start[0], item.end[0], item.string, owner, scope, item.string)
         )
     return Source(
         path,

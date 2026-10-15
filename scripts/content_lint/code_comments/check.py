@@ -49,7 +49,7 @@ class Repository:
             or target.resolve() != self.root.resolve() / path
         ):
             raise ValueError(f"not a regular in-repository file: {path}")
-        return target.read_text(encoding="utf-8")
+        return target.read_bytes().decode("utf-8")
 
     def source(self, path: str) -> Source:
         if path not in self.sources:
@@ -172,7 +172,11 @@ def unreferenced_note(
 
 # ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-machine-directives
 def check_notes(
-    source: Source, contracts: dict[str, Contract], *, strict: bool
+    source: Source,
+    contracts: dict[str, Contract],
+    *,
+    strict: bool,
+    strict_notes: frozenset[int] | None = None,
 ) -> tuple[list[Finding], set[str]]:
     findings: list[Finding] = []
     used: set[str] = set()
@@ -183,7 +187,7 @@ def check_notes(
         for anchor in contract.code
     }
     rationales = rationale_owners(source, contracts)
-    for note in source.notes:
+    for index, note in enumerate(source.notes):
         if note.kind == NoteKind.DOCSTRING:
             contract = api_by_symbol.get(f"{source.path}:{note.owner}")
             if contract is not None and note.text == contract.statement:
@@ -201,7 +205,12 @@ def check_notes(
             else:
                 used.add(key)
         elif (
-            problem := unreferenced_note(source.path, note, rationales, strict=strict)
+            problem := unreferenced_note(
+                source.path,
+                note,
+                rationales,
+                strict=strict and (strict_notes is None or index in strict_notes),
+            )
         ) is not None:
             findings.append(problem)
     return findings, used
@@ -232,7 +241,12 @@ def validated_contracts(repo: Repository) -> tuple[dict[str, Contract], list[Fin
     return contracts, findings
 
 
-def check(repo: Repository, *, strict_paths: frozenset[str] | None = None) -> Result:
+def check(
+    repo: Repository,
+    *,
+    strict_paths: frozenset[str] | None = None,
+    strict_notes: dict[str, frozenset[int]] | None = None,
+) -> Result:
     contracts, findings = validated_contracts(repo)
     used: set[str] = set()
     for path in sorted(repo.files):
@@ -243,7 +257,12 @@ def check(repo: Repository, *, strict_paths: frozenset[str] | None = None) -> Re
             if not strict and path not in repo.sources and "ava:ref" not in repo.text(path):
                 continue
             source = repo.source(path)
-            problems, references = check_notes(source, contracts, strict=strict)
+            problems, references = check_notes(
+                source,
+                contracts,
+                strict=strict,
+                strict_notes=None if strict_notes is None else strict_notes.get(path),
+            )
             findings.extend(problems)
             used.update(references)
         except (ValueError, SyntaxError, OSError, tokenize.TokenError) as error:

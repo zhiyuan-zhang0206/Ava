@@ -88,22 +88,37 @@ for complete records.
 
 ## Migration and enforcement
 
-The initial gate validates all typed contracts and references, and applies the
-strict rule to every added, copied, renamed or modified supported source file
-in the change, including Git type changes, tests and generated source. Touching one line migrates
-the whole file. Fix a generator when its output violates the rule. A deleted
-target invalidates remaining references. Existing untouched free comments remain
-migration work; a passing changed-file gate does not mean the whole tree is clean.
+The changed gate validates all typed contracts and references, and applies strict
+source rules only to new or rewritten notes. An unrelated code edit does not
+require migrating existing prose in the file or definition. Compare exact raw
+note text within the same path and lexical function/class, matching each old
+occurrence once. Copying a note, moving it across owners or paths, and rewriting
+its literal makes it new. Unchanged directives do not acquire new rationale
+requirements solely because nearby code changes; their actual tool checks remain.
+
+Use the actual PR base, or HEAD versus the staged index for a commit. Both source
+sides come from Git blobs. The tracked checkout must match the target snapshot
+used by global document/API checks; a mismatch fails explicitly. There is no
+stored legacy baseline, per-file allowance or whole-definition cleanup trigger.
+Generated sources follow the same rule; fix a generator when its new output
+violates it. A deleted target still invalidates remaining references.
+
+Same-owner exact-text reordering is retained, not proof of semantic correctness.
+Repeated declarations use their kind, ordinal and sibling-group size to keep
+separate matching credit; adding/removing a repeated declaration invalidates only
+that group's old identity. Local assignments are not lexical boundaries. The
+checker does not reconstruct historical identities from delete-and-rewrite edits.
+See the [incremental checker](../../../scripts/content_lint/code_comments/docs/incremental.ava.okf.md)
+for the parser and snapshot boundary.
 
 Python and JavaScript/TypeScript are the implemented language boundary. Shell,
 YAML, Rust and other languages do not yet have strict comment parsing. Do not
 claim that this change bans all comments in all languages. Merged migrations
 remain immutable; this policy does not authorize rewriting their history.
 
-The full `inventory`/`check` commands report outstanding source migration and
-fail while it remains. Complete migration in reviewable batches before switching
-the default gate to whole-tree strict mode. There is no per-file grandfathering
-entry to renew or forget.
+The full `inventory`/`check` commands still report existing source prose and fail
+while findings remain. They are explicit audits, not the changed gate's scope.
+A passing incremental check does not certify complete migration or semantic truth.
 
 ## Independent semantic review
 

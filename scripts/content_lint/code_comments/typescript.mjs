@@ -14,6 +14,7 @@ export function scanSource(file, text) {
     throw new Error(`${file}: ${tree.parseDiagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, ' ')).join('; ')}`);
   }
   const symbols = { '<module>': { name: '<module>', line: 1, end_line: text.split('\n').length, parameters: [], ambiguous: false, callable: false } };
+  const definitions = [{ ...symbols['<module>'], key: '<module>', parent: 0, kind: 'module' }];
   const spans = new Map();
   const machineComments = new Set();
   const options = { noLib: true, noResolve: true, allowJs: true };
@@ -49,13 +50,29 @@ export function scanSource(file, text) {
   const addSymbol = (name, node, callable) => {
     symbols[name] = { name, line: lineAt(node.getStart(tree)), end_line: lineAt(node.end), parameters: [], ambiguous: Object.hasOwn(symbols, name), callable };
   };
-  const walk = (node, scope = [], describes = [], active = true) => {
+  const addDefinition = (name, node, kind, parent) => {
+    definitions.push({ name, line: lineAt(node.getStart(tree)), end_line: lineAt(node.end), start: node.getStart(tree), end: node.end, kind, parent });
+    return definitions.length - 1;
+  };
+  const declarationKind = node => {
+    if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) return 'class';
+    return ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node) || ts.isGetAccessor(node) || ts.isSetAccessor(node) || ts.isConstructorDeclaration(node) ? 'function' : null;
+  };
+  const declarationName = node => {
+    if (node.name) return node.name.getText(tree);
+    if (ts.isConstructorDeclaration(node)) return '<constructor>';
+    const parent = node.parent;
+    if ((ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent) || ts.isPropertyDeclaration(parent)) && parent.name) return parent.name.getText(tree);
+    return '<anonymous>';
+  };
+  const walk = (node, scope = [], describes = [], active = true, lexicalParent = 0) => {
     for (const range of [...(ts.getLeadingCommentRanges(text, node.pos) ?? []), ...(ts.getTrailingCommentRanges(text, node.end) ?? [])]) spans.set(range.pos, range);
     const deprecated = node.name && binding(node.name)?.declarations?.includes(node) ? ts.getJSDocDeprecatedTag(node) : undefined;
     if (deprecated && ts.isJSDoc(deprecated.parent) && text.slice(deprecated.parent.pos, deprecated.parent.end) === '/** @deprecated */') {
       machineComments.add(deprecated.parent.pos);
     }
     let nestedScope = scope;
+    let nestedParent = lexicalParent;
     let nestedDescribes = describes;
     let nestedActive = active;
     if (ts.isExpressionStatement(node) && (ts.isStringLiteral(node.expression) || ts.isNoSubstitutionTemplateLiteral(node.expression))) {
@@ -77,17 +94,40 @@ export function scanSource(file, text) {
       addSymbol([...scope, node.name.text].join('.'), node, Boolean(callable));
       if (callable) nestedScope = [...scope, node.name.text];
     }
+    const lexicalKind = declarationKind(node);
+    if (lexicalKind) nestedParent = addDefinition(declarationName(node), node, lexicalKind, lexicalParent);
     if (ts.isCallExpression(node) && (ts.isIdentifier(node.expression) || directSuite(node.expression)) && node.arguments.length >= 2 && ts.isStringLiteral(node.arguments[0])) {
       const label = node.arguments[0].text;
       const body = node.arguments[1];
       if (ts.isArrowFunction(body) || ts.isFunctionExpression(body)) {
         if (directSuite(node.expression)) { nestedDescribes = [...describes, label]; nestedActive = active; }
-        if (active && ts.isIdentifier(node.expression) && testNames.has(binding(node.expression))) addSymbol(`test:${[...describes, label].join('::')}`, node, true);
+        if (active && ts.isIdentifier(node.expression) && testNames.has(binding(node.expression))) {
+          const name = `test:${[...describes, label].join('::')}`;
+          addSymbol(name, node, true);
+          nestedParent = addDefinition(name, node, 'test', lexicalParent);
+        }
       }
     }
-    for (const child of node.getChildren(tree)) walk(child, nestedScope, nestedDescribes, nestedActive);
+    for (const child of node.getChildren(tree)) walk(child, nestedScope, nestedDescribes, nestedActive, nestedParent);
   };
   walk(tree);
+  const groups = definitions.map(d => JSON.stringify([d.parent, d.kind, d.name]));
+  const totals = new Map();
+  for (const group of groups) totals.set(group, (totals.get(group) ?? 0) + 1);
+  const ordinals = new Map();
+  for (let i = 1; i < definitions.length; i++) {
+    const d = definitions[i];
+    const ordinal = (ordinals.get(groups[i]) ?? 0) + 1;
+    ordinals.set(groups[i], ordinal);
+    d.key = JSON.stringify([definitions[d.parent].key, d.kind, d.name, ordinal, totals.get(groups[i])]);
+  }
+  const lexicalOwner = (position, standalone) => {
+    const line = lineAt(position);
+    const enclosing = definitions.slice(1).filter(d => d.start <= position && position < d.end);
+    if (enclosing.length) return enclosing.sort((a, b) => (a.end - a.start) - (b.end - b.start))[0].key;
+    const following = standalone ? definitions.slice(1).filter(d => d.line === line + 1) : [];
+    return following.length === 1 ? following[0].key : '<module>';
+  };
   const owner = line => {
     const enclosing = Object.values(symbols).filter(s => s.name !== '<module>' && s.line <= line && line <= s.end_line);
     if (enclosing.length) return enclosing.sort((a, b) => (a.end_line - a.line) - (b.end_line - b.line))[0].name;
@@ -97,25 +137,27 @@ export function scanSource(file, text) {
   const notes = [...spans.values()].filter(span => !machineComments.has(span.pos)).sort((a, b) => a.pos - b.pos).map(span => {
     const value = text.slice(span.pos, span.end);
     const line = lineAt(span.pos);
-    return { kind: value.startsWith('/**') ? 'docstring' : 'comment', line, end_line: lineAt(span.end - 1), text: value, owner: owner(line) };
+    return { kind: value.startsWith('/**') ? 'docstring' : 'comment', line, end_line: lineAt(span.end - 1), text: value, raw_text: value, owner: owner(line), lexical_owner: lexicalOwner(span.pos, !text.slice(text.lastIndexOf('\n', span.pos - 1) + 1, span.pos).trim()) };
   });
   for (const node of unused) {
     const line = lineAt(node.getStart(tree));
-    notes.push({ kind: 'unused-string', line, end_line: lineAt(node.end - 1), text: node.getText(tree), owner: owner(line) });
+    notes.push({ kind: 'unused-string', line, end_line: lineAt(node.end - 1), text: node.getText(tree), raw_text: node.getText(tree), owner: owner(line), lexical_owner: lexicalOwner(node.getStart(tree), false) });
   }
   const shebang = ts.getShebang(text);
-  if (shebang && !/^#!\/usr\/bin\/(?:env node|node)$/.test(shebang)) notes.push({ kind: 'comment', line: 1, end_line: 1, text: shebang, owner: '<module>' });
+  if (shebang && !/^#!\/usr\/bin\/(?:env node|node)$/.test(shebang)) notes.push({ kind: 'comment', line: 1, end_line: 1, text: shebang, raw_text: shebang, owner: '<module>', lexical_owner: '<module>' });
   notes.sort((a, b) => a.line - b.line);
   return { path: file, sha256: createHash('sha256').update(text).digest('hex'), symbols, notes };
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const root = process.cwd();
-  const files = fs.readFileSync(0, 'utf8').split('\0').filter(file => /\.(?:[cm]?[jt]s|[jt]sx)$/.test(file));
-  const result = files.map(file => {
-    const full = path.resolve(root, file);
-    if (!full.startsWith(`${root}${path.sep}`) || fs.lstatSync(full).isSymbolicLink()) throw new Error(`invalid source path: ${file}`);
-    return scanSource(file, fs.readFileSync(full, 'utf8'));
-  });
-  process.stdout.write(JSON.stringify({ version: 1, sources: result }));
+  const input = fs.readFileSync(0, 'utf8');
+  const result = process.argv.includes('--sources-json')
+    ? Object.entries(JSON.parse(input)).map(([file, text]) => scanSource(file, text))
+    : input.split('\0').filter(file => /\.(?:[cm]?[jt]s|[jt]sx)$/.test(file)).map(file => {
+        const full = path.resolve(root, file);
+        if (!full.startsWith(`${root}${path.sep}`) || fs.lstatSync(full).isSymbolicLink()) throw new Error(`invalid source path: ${file}`);
+        return scanSource(file, fs.readFileSync(full, 'utf8'));
+      });
+  process.stdout.write(JSON.stringify({ version: 2, sources: result }));
 }
