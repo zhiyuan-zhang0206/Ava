@@ -66,8 +66,10 @@ The correct angle is "the system transparently does X" — e.g. `read()` describ
 its utf-8 text", **not** "calls `Path.read_text(encoding='utf-8')` and
 intercepts via wrapper". The agent calls read, gets a string, on failure gets an exception — that's enough.
 
-The dev-perspective "why it's implemented this way" stays in **a `#` comment at the top of the module** or a standalone history doc,
-not in the docstring.
+Implementation rationale belongs in the component's current documentation or a
+historical decision, linked through the closed forms in
+[structured code comments](engineering/structured-code-comments.md). Migrated SDK
+help is generated from typed `api` records; edit that owner and regenerate.
 
 ## Enforcement (mechanism backstop, don't rely on memory)
 

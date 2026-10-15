@@ -4,6 +4,6 @@ exports = ["audit", "ci", "codegen", "data_plane_ops", "lint", "model_registry",
 "audit" = ["ci"]
 "ci" = ["structure"]
 "codegen" = ["structure"]
-"content_lint" = ["audit", "codegen"]
+"content_lint" = ["audit", "codegen", "structure"]
 "lint" = ["content_lint", "structure"]
 "tests" = ["ci", "codegen", "host_ops", "lint", "verify"]
