@@ -84,6 +84,45 @@ def test_unchanged_unbound_directive_is_not_a_global_migration(tmp_path: Path) -
     assert not check(repository(tmp_path, source)).findings
 
 
+@pytest.mark.parametrize("enclosing", ["module", "class"])
+def test_duplicate_definition_cannot_borrow_enclosing_rationale(
+    tmp_path: Path, enclosing: str
+) -> None:
+    if enclosing == "module":
+        source = files(code=["pkg/core.py:<module>"])
+        source["pkg/core.py"] = (
+            f"{REF}\n\n"
+            "def budget():\n    return call()  # noqa: S603\n\n"
+            "def budget():\n    return 1\n"
+        )
+    else:
+        source = files(code=["pkg/core.py:Worker"])
+        source["pkg/core.py"] = (
+            f"{REF}\nclass Worker:\n"
+            "    def budget(self):\n        return call()  # noqa: S603\n"
+            "    def budget(self):\n        return 1\n"
+        )
+    repo = repository(tmp_path, source)
+    assert any(f.code == "directive-owner" for f in check(repo, strict_paths=repo.files).findings)
+
+
+@pytest.mark.parametrize("module_rationale", [False, True])
+def test_module_directive_cannot_borrow_the_next_function(
+    tmp_path: Path, module_rationale: bool
+) -> None:
+    source = files(code=["pkg/core.py:<module>" if module_rationale else "pkg/core.py:budget"])
+    source["pkg/core.py"] = (
+        (f"{REF}\n\n" if module_rationale else "")
+        + "import external  # noqa: F401\ndef budget():\n"
+        + ("" if module_rationale else f"    {REF}\n")
+        + "    return 1\n"
+    )
+    repo = repository(tmp_path, source)
+    findings = check(repo, strict_paths=repo.files).findings
+    assert bool(findings) is not module_rationale
+    assert all(f.code == "directive-owner" for f in findings)
+
+
 def test_quiesce_marker_is_an_exact_bound_reference(tmp_path: Path) -> None:
     source = files()
     source["pkg/core.py"] = (
