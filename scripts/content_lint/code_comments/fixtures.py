@@ -47,6 +47,7 @@ class ScopeBindings(ast.NodeVisitor):
         ]:
             self.visit(expression)
         nested = scope_bindings(node.body)
+        self.globals.update(nested.globals)
         self.names.update({name: nested.names[name] for name in nested.globals})
         self.attribute_writes.update(nested.attribute_writes)
         imports = {

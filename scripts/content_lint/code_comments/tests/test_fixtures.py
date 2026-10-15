@@ -145,3 +145,10 @@ def test_class_local_name_does_not_shadow_the_module_import(tmp_path: Path) -> N
     source += "@pytest.fixture\ndef client():\n" + HELP + "    yield 1\n"
     repo = repository(tmp_path, {"pkg/tests/test_client.py": source})
     assert not check(repo, strict_paths=repo.files).findings
+
+
+def test_nested_class_global_write_invalidates_fixture_proof(tmp_path: Path) -> None:
+    source = "import pytest\nclass Configure:\n    class Inner:\n        global pytest\n        pytest = replacement\n"
+    source += "@pytest.fixture\ndef client():\n" + HELP + "    yield 1\n"
+    repo = repository(tmp_path, {"pkg/tests/test_client.py": source})
+    assert any(f.code == "free-comment" for f in check(repo, strict_paths=repo.files).findings)
