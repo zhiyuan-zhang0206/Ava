@@ -144,7 +144,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         "pages/widgets/markdown/md.html",
         "pages/widgets/markdown/vendor/katex.min.js",
         "external-agents/references/collaboration_protocol.md",
-        "external-agents/scripts/ava-relay/.claude-plugin/plugin.json",
+        "external-agents/scripts/spawn_antigravity.py",
     ):
         assert (target / relative).read_bytes() == (GUIDE / relative).read_bytes()
     _assert_portable_reading_links(target)

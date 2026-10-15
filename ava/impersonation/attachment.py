@@ -326,7 +326,7 @@ class Attachment:
 
     def _lease(self) -> dict[str, Any]:
         lease = control.require_active(
-            self._database(), self.lease_id, process_metadata(), local_machine=self._machine.name()
+            self._database(), self.lease_id, local_machine=self._machine.name()
         )
         if lease["machine"] != self._machine.name():
             raise RuntimeError(f"external SDK must run on agent machine {lease['machine']!r}")
@@ -360,7 +360,6 @@ class Attachment:
             control.merge_plugin_delta(
                 self._database(),
                 self.lease_id,
-                process_metadata(),
                 encoded,
                 expected_version=self._version,
                 local_machine=self._machine.name(),

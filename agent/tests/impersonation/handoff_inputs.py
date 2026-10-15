@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import psycopg
@@ -36,7 +36,7 @@ from base.agents.history.checkpoint_postgres_walks import (
 )
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.impersonation.notes import HandoffNotes
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
@@ -273,9 +273,6 @@ def deliver_peers_and_ack_first(
     inbox = leases.inbox(
         database,
         requested["id"],
-        attested_caller(
-            requested,
-        ),
         local_machine=machine_identity.name(),
     )
     assert {row["id"] for row in inbox} == {first_peer, second_peer}
@@ -283,9 +280,6 @@ def deliver_peers_and_ack_first(
         database,
         event_bus,
         requested["id"],
-        attested_caller(
-            requested,
-        ),
         [first_peer],
         local_machine=machine_identity.name(),
     )
@@ -307,7 +301,6 @@ def end_external_session(
             database,
             event_bus,
             requested["id"],
-            attested_caller(requested),
             "External work complete",
             local_machine=machine_identity.name(),
         )
@@ -321,9 +314,6 @@ def end_external_session(
         leases.require_active(
             database,
             requested["id"],
-            attested_caller(
-                requested,
-            ),
             local_machine=machine_identity.name(),
         )
 
@@ -349,18 +339,12 @@ def executor_acks_says_and_releases(
     leases.inbox(
         database,
         requested["id"],
-        attested_caller(
-            requested,
-        ),
         local_machine=machine_identity.name(),
     )
     leases.ack(
         database,
         event_bus,
         requested["id"],
-        attested_caller(
-            requested,
-        ),
         [inbound_id],
         local_machine=machine_identity.name(),
     )
@@ -368,7 +352,6 @@ def executor_acks_says_and_releases(
         database,
         event_bus,
         requested["id"],
-        attested_caller(requested),
         "Work completed",
         message_key="result",
         local_machine=machine_identity.name(),
@@ -377,7 +360,6 @@ def executor_acks_says_and_releases(
         database,
         event_bus,
         requested["id"],
-        attested_caller(requested),
         "Fixed login and verified the result.",
         local_machine=machine_identity.name(),
     )
@@ -422,7 +404,6 @@ async def stop_takeover_with_lost_relay(
     relays: RelaySupervision,
 ) -> str:
     """Observe unknown legacy relay custody without revoking the executor lease."""
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     session = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert session is not None
     await impersonation.supervise_relay(

@@ -390,8 +390,8 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     monkeypatch.setattr(codex.coding_session_owner, "publish_active", _publish)
 
     workspace = Path(launching.key.workspace)
-    brief = "Goal: replace the agent. The briefing is inline; read no files."
-    rc = codex.launch(workspace, None, None, 3600, None, "Fix login", brief, skill_dir=_SKILL_DIR)
+    prompt = "Goal: replace the agent. The briefing is inline; read no files."
+    rc = codex.launch(workspace, None, None, 3600, None, skill_dir=_SKILL_DIR, prompt=prompt)
 
     assert rc == 0
     assert events == [
@@ -408,21 +408,19 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     ]
     assert "codex app-server --listen" in sent[0]
     assert sent[1].startswith("clear && ") and "exec codex --remote unix://" in sent[1]
-    assert "take over Ava agent 41" in sent[2]
-    assert brief in sent[2]
+    assert sent[2] == prompt
     assert "tasks.md" not in sent[2] and "work.md" not in sent[2]
 
 
 @pytest.mark.parametrize(
     "extra",
     [
-        ["--brief", "briefing", "--tasks-file", "tasks.md"],
-        ["--brief", "briefing", "--work-file", "work.md"],
-        [],
-        ["--brief", "   "],
+        ["--prompt", "briefing", "--tasks-file", "tasks.md"],
+        ["--prompt", "briefing", "--work-file", "work.md"],
+        ["--prompt", "   "],
     ],
 )
-def test_codex_takeover_cli_rejects_files_and_requires_a_brief(
+def test_codex_prompt_cli_rejects_files_and_requires_non_empty_prompt(
     extra: list[str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -431,18 +429,29 @@ def test_codex_takeover_cli_rejects_files_and_requires_a_brief(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["spawn_codex.py", str(tmp_path), "--impersonate-self", *extra],
+        ["spawn_codex.py", str(tmp_path), *extra],
     )
 
     with pytest.raises(SystemExit):
         spawn_codex.main()
 
 
-def test_codex_brief_requires_takeover_mode(
+def test_codex_prompt_rejects_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sys, "argv", ["spawn_codex.py", str(tmp_path), "--brief", "briefing"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "spawn_codex.py",
+            str(tmp_path),
+            "--prompt",
+            "briefing",
+            "--resume",
+            "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5",
+        ],
+    )
 
     with pytest.raises(SystemExit):
         spawn_codex.main()

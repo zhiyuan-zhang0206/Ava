@@ -78,13 +78,13 @@ interrupted.
 
 **Takeover (Mode B).**
 - Read the handoff JSON first.
-- Relaunch with `--impersonate-self --resume <uuid> --brief '...'`. Write the
-  brief for a session that already knows the task:
+- Relaunch with `--resume <uuid> --prompt '...'`. Write the
+  prompt for a session that already knows the task:
   - which takeover session ended, and why (the system note says);
   - the handoff JSON path;
   - what is pending.
 - The resumed executor keeps its context, but its old impersonation session is
-  over. It starts a new one with the request command in its launch message,
+  over. It starts a new one with `ava impersonate request`,
   and catches up on missed messages from the handoff JSON.
 
 **DeepSeek Harness takeovers** cannot be resumed through `spawn_dsh.py` yet.

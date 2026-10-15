@@ -4,21 +4,11 @@
 
 [debt.first-party-patch]
 "test_claude_canonical_owner.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_agent_id" = 1
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools._claude_checks.time.sleep" = 3
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.claude_command" = 1
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.coding_session_owner.launch_generation" = 1
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.coding_session_owner.publish_active" = 4
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.coding_session_owner.terminate_generation" = 2
 "test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.init_file" = 1
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.new_generation" = 4
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.pretrust" = 4
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.capture" = 1
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.kill" = 2
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.new" = 4
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.send" = 7
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.send_keys" = 4
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.verify_start_receipt" = 3
-"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.wait_for_ready" = 3
+"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.pretrust" = 1
+"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.new" = 1
+"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.send" = 1
+"test_claude_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.claude.wait_for_ready" = 1
 "test_codex_canonical_owner.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_agent_id" = 1
 "test_codex_canonical_owner.py#monkeypatch.setattr ava.sdk_surface.settings.database" = 1
 "test_codex_canonical_owner.py#monkeypatch.setattr ava.shell.coding_tools.codex.coding_session_owner.attach_supervisor" = 2

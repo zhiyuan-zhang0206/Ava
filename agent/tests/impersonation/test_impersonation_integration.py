@@ -4,7 +4,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
 
 import psycopg
 import pytest
@@ -30,7 +29,6 @@ from agent.tests.impersonation.handoff_inputs import handoff_clients as handoff_
 from ava.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from base.agents import impersonation as leases
 from base.agents.context.clients import ClientSet
-from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -73,15 +71,12 @@ async def test_consent_exec_inbox_release_and_resume(
     agent_id = owner.agent_id
 
     # The relay establishment gate is unit-tested separately; the real graph
-    # handoff must not spawn a relay process in the test environment. The
-    # recorded controller tree is synthetic (its pids are not live processes),
-    # so pin the supervisor's liveness view (task #3998).
+    # handoff must not spawn a relay process in the test environment.
 
     def relay_ready(*_args: object, read_local_machine: Callable[[], str]) -> bool:
         return True
 
     monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     first = await graph.ainvoke(
         reset,
         config,
@@ -93,9 +88,6 @@ async def test_consent_exec_inbox_release_and_resume(
             database,
             event_bus,
             requested["id"],
-            attested_caller(
-                requested,
-            ),
             local_machine=machine_identity.name(),
         )["status"]
         == "accepted"
@@ -117,9 +109,6 @@ async def test_consent_exec_inbox_release_and_resume(
         leases.require_active(
             database,
             requested["id"],
-            attested_caller(
-                requested,
-            ),
             local_machine=machine_identity.name(),
         )["status"]
         == "active"
@@ -151,7 +140,6 @@ async def test_consent_exec_inbox_release_and_resume(
     leases.merge_plugin_delta(
         database,
         requested["id"],
-        attested_caller(requested),
         encode_plugin_delta({"handoff__total": 7}, graph.builder.state_schema),
         expected_version=0,
         local_machine=machine_identity.name(),
@@ -237,9 +225,6 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
             database,
             event_bus,
             requested["id"],
-            attested_caller(
-                requested,
-            ),
             local_machine=machine_identity.name(),
         )["status"]
         == "accepted"
@@ -374,9 +359,6 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
             database,
             event_bus,
             requested["id"],
-            attested_caller(
-                requested,
-            ),
             local_machine=machine_identity.name(),
         )["status"]
         == "active"
@@ -436,7 +418,6 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         database,
         event_bus,
         requested["id"],
-        attested_caller(requested),
         "Done; please continue",
         local_machine=machine_identity.name(),
     )
@@ -527,7 +508,6 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
         database,
         event_bus,
         requested["id"],
-        attested_caller(requested),
         "Done; please continue",
         local_machine=machine_identity.name(),
     )

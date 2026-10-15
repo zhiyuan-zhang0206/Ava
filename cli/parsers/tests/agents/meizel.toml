@@ -4,8 +4,8 @@
 [debt.env-patch]
 "test_external_caller_cli.py#monkeypatch.delenv os.environ.AVA_CALLER_IDENTITY" = 4
 "test_external_caller_cli.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+"test_impersonation.py#monkeypatch.delenv os.environ.ANTIGRAVITY_CONVERSATION_ID" = 1
 "test_impersonation.py#monkeypatch.delenv os.environ.DSH_AVA_RELAY_STUB" = 1
-"test_impersonation.py#monkeypatch.setenv os.environ.AVA_IMPERSONATION_RELAY_STUB" = 2
 "test_impersonation.py#monkeypatch.setenv os.environ.DSH_AVA_RELAY_STUB" = 1
 
 [debt.first-party-patch]
@@ -24,7 +24,7 @@
 "test_impersonation.py#monkeypatch.setattr base.agents.impersonation.release" = 1
 "test_impersonation.py#monkeypatch.setattr base.agents.impersonation.require_active" = 1
 "test_impersonation.py#monkeypatch.setattr base.agents.impersonation.sessions.private_id" = 4
-"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.sessions.request" = 7
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.sessions.request" = 5
 "test_impersonation.py#monkeypatch.setattr cli.commands.agents.control.send_agent_message" = 1
 "test_impersonation.py#monkeypatch.setattr cli.commands.agents.timeline.cmd_agents_timeline" = 1
 "test_impersonation_bridge_parsers.py#monkeypatch.setattr base.agents.impersonation.relay_get" = 1

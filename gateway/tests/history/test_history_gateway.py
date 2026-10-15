@@ -11,7 +11,7 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.impersonation.notes import HandoffNotes
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -129,7 +129,6 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
             database,
             event_bus,
             str(lease["id"]),
-            attested_caller(lease),
             f"Message {number}",
             message_key=str(number),
             local_machine=machine_identity.name(),

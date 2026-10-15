@@ -25,11 +25,11 @@ dsh --profile headless "Reply with exactly: OK"
 
 ## Take over yourself
 
-Run from your own execution context, briefing inline:
+Run from your own execution context, prompt inline:
 
 ```bash
-.venv/bin/python scripts/spawn_dsh.py <workspace-dir> --impersonate-self \
-  --impersonation-name 'Fix login' --brief '<the full briefing text>'
+.venv/bin/python scripts/spawn_dsh.py <workspace-dir> \
+  --prompt '<the full takeover prompt>'
 ```
 
 The launcher boots dsh's shipped `headless` profile in a persistent shell

@@ -19,13 +19,12 @@ from agent import state as state_module
 from agent.extensions.plugin_state_codec import decode_plugin_delta, load_snapshot
 from agent.messages import NoteTag, system_note_message
 from ava import impersonation
-from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.installation import Installation
 from ava.tests.fixtures.pin_agent import pin_agent
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -109,7 +108,6 @@ def native_checkpoint(
 
 def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
@@ -140,7 +138,6 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
     script = (
         Path(__file__).parents[4]
         / "ava_builtins/skills/platform/impersonator-guide/scripts/read_instructions.py"
@@ -161,9 +158,6 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         database,
         event_bus,
         lease["id"],
-        attested_caller(
-            lease,
-        ),
         local_machine=machine_identity.name(),
     )
     assert updated["delta_version"] == 1
@@ -180,9 +174,6 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
             database,
             event_bus,
             lease["id"],
-            attested_caller(
-                lease,
-            ),
             local_machine=machine_identity.name(),
         )["delta_version"]
         == 1
@@ -233,7 +224,6 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
 
     with impersonation.attach(lease["id"]):
         ava.agents.send_message(peer_id, "Implementation ready for review")
@@ -249,7 +239,6 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         "Delivered the implementation to the peer",
         local_machine=machine_identity.name(),
     )
@@ -270,7 +259,6 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
 def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
     native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
@@ -310,16 +298,12 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
     with impersonation.attach(lease["id"]):
         ava.agents.send_message(peer_id, "Log-backed attachment send")
     leases.release(
         database,
         event_bus,
         lease["id"],
-        attested_caller(
-            lease,
-        ),
         "Sent the peer update",
         local_machine=machine_identity.name(),
     )

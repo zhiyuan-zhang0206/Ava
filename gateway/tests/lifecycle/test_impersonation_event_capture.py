@@ -25,7 +25,7 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
 from base.agents.tests.capture_inputs import (
@@ -293,7 +293,6 @@ def test_a_direct_audit_event_after_close_refuses_and_fails_the_source(
             database,
             event_bus,
             participant.lease_id,
-            attested_caller(lease),
             "Direct audit refused",
             local_machine=local_machine,
         )
@@ -455,7 +454,6 @@ def test_a_runner_failure_is_recorded_once_the_narrow_lock_is_available(
 def test_a_runner_completes_a_log_whose_source_seals_after_the_lease_ended(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
-    lease: dict[str, Any],
     restricted_source: LocalParticipant,
     database: Database,
     event_bus: EventBus,
@@ -477,7 +475,6 @@ def test_a_runner_completes_a_log_whose_source_seals_after_the_lease_ended(
             database,
             event_bus,
             participant.lease_id,
-            attested_caller(lease),
             local_machine=local_machine,
         )["status"]
         == "expired"

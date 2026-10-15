@@ -31,7 +31,7 @@ LEASE: dict[str, Any] = {
 }
 
 
-def require_active(_db: Any, _lease_id: Any, _caller: Any, *, local_machine: str) -> dict[str, Any]:
+def require_active(_db: Any, _lease_id: Any, *, local_machine: str) -> dict[str, Any]:
     assert local_machine == "external-cli-probe"
     return dict(LEASE)
 
@@ -44,7 +44,6 @@ def load_snapshot(_agent_id: Any, **_kwargs: Any) -> tuple[Any, dict[str, Any], 
 
 attachment_module.control.require_active = require_active  # pyright: ignore[reportAttributeAccessIssue]
 os.environ["AVA_MACHINE_NAME"] = "external-cli-probe"
-attachment_module.process_metadata = lambda: {"pid": 1}  # pyright: ignore[reportAttributeAccessIssue]
 plugin_state_codec.load_snapshot = load_snapshot  # pyright: ignore[reportAttributeAccessIssue]
 
 with impersonation.attach("lease"):

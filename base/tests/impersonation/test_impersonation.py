@@ -12,7 +12,6 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
-from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -60,16 +59,12 @@ def test_controller_read_that_expires_lease_refreshes_roster(
 
     monkeypatch.setattr(leases, "wake_agent", record_wake)
     assert (
-        leases.get(
-            database, event_bus, lease["id"], attested_caller(lease), local_machine=local_machine
-        )["status"]
+        leases.get(database, event_bus, lease["id"], local_machine=local_machine)["status"]
         == "expired"
     )
     assert notices == [(owner.agent_id, True)]
     assert (
-        leases.get(
-            database, event_bus, lease["id"], attested_caller(lease), local_machine=local_machine
-        )["status"]
+        leases.get(database, event_bus, lease["id"], local_machine=local_machine)["status"]
         == "expired"
     )
     assert notices == [(owner.agent_id, True)]
@@ -128,9 +123,7 @@ def test_external_identity_read_does_not_contend_with_lease_writes(
     )
     db_conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (owner.agent_id,))
     db_conn.execute("SELECT id FROM agent_impersonations WHERE id=%s FOR UPDATE", (lease["id"],))
-    result = leases.require_active(
-        short_lock_timeout, lease["id"], attested_caller(lease), local_machine=local_machine
-    )
+    result = leases.require_active(short_lock_timeout, lease["id"], local_machine=local_machine)
     assert result["status"] == "active"
     assert set(result) == set(lease)
 
@@ -252,9 +245,7 @@ def test_request_needs_consent_then_native_checkpoint_ack(
     db_conn.commit()
     assert native_status(owner, database_gate=database_gate)["reason"] == "Handle the next message"
     with pytest.raises(leases.ImpersonationError, match="not active"):
-        leases.require_active(
-            database, lease["id"], attested_caller(lease), local_machine=local_machine
-        )
+        leases.require_active(database, lease["id"], local_machine=local_machine)
     leases.accept(
         database,
         event_bus,
@@ -266,12 +257,10 @@ def test_request_needs_consent_then_native_checkpoint_ack(
     )
     assert native_status(owner, database_gate=database_gate)["status"] == "accepted"
     with pytest.raises(leases.ImpersonationError, match="not active"):
-        leases.inbox(database, lease["id"], attested_caller(lease), local_machine=local_machine)
+        leases.inbox(database, lease["id"], local_machine=local_machine)
     leases.activate(database, event_bus, lease["id"], owner)
     assert (
-        leases.require_active(
-            database, lease["id"], attested_caller(lease), local_machine=local_machine
-        )["status"]
+        leases.require_active(database, lease["id"], local_machine=local_machine)["status"]
         == "active"
     )
 
@@ -344,16 +333,10 @@ def test_inbox_ack_and_atomic_real_sender_handoff(
             database,
             event_bus,
             lease["id"],
-            attested_caller(lease),
             [first],
             local_machine=local_machine,
         )
-    assert [
-        m["id"]
-        for m in leases.inbox(
-            database, lease["id"], attested_caller(lease), local_machine=local_machine
-        )
-    ] == [
+    assert [m["id"] for m in leases.inbox(database, lease["id"], local_machine=local_machine)] == [
         first,
         second,
     ]
@@ -361,21 +344,16 @@ def test_inbox_ack_and_atomic_real_sender_handoff(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [first],
         local_machine=local_machine,
     )
-    assert [
-        m["id"]
-        for m in leases.inbox(
-            database, lease["id"], attested_caller(lease), local_machine=local_machine
-        )
-    ] == [second]
+    assert [m["id"] for m in leases.inbox(database, lease["id"], local_machine=local_machine)] == [
+        second
+    ]
     result = leases.release(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         "Finished first; second still needs work.",
         local_machine=local_machine,
     )
@@ -394,7 +372,6 @@ def test_inbox_ack_and_atomic_real_sender_handoff(
             database,
             event_bus,
             lease["id"],
-            attested_caller(lease),
             "Retry",
             local_machine=local_machine,
         )
@@ -428,9 +405,7 @@ def test_external_inbox_preserves_cancel_until_explicit_processing_ack(
     )
     assert [
         (m["id"], m["kind"])
-        for m in leases.inbox(
-            database, lease["id"], attested_caller(lease), local_machine=local_machine
-        )
+        for m in leases.inbox(database, lease["id"], local_machine=local_machine)
     ] == [(cancel, "cancel")]
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (cancel,)
@@ -440,7 +415,6 @@ def test_external_inbox_preserves_cancel_until_explicit_processing_ack(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [cancel],
         local_machine=local_machine,
     )
@@ -470,7 +444,7 @@ def test_cancel_ack_publishes_committed_completion_once(
     peer = insert_inbound_message(
         db_conn, owner.agent_id, "Peer work", "agent:99", bus=event_bus, database=database
     )
-    leases.inbox(database, lease["id"], attested_caller(lease), local_machine=local_machine)
+    leases.inbox(database, lease["id"], local_machine=local_machine)
     unread = insert_inbound_message(
         db_conn, owner.agent_id, "Unread", "user", kind="cancel", bus=event_bus, database=database
     )
@@ -503,7 +477,6 @@ def test_cancel_ack_publishes_committed_completion_once(
             database,
             event_bus,
             lease["id"],
-            attested_caller(lease),
             [cancel, unread],
             local_machine=local_machine,
         )
@@ -513,7 +486,6 @@ def test_cancel_ack_publishes_committed_completion_once(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [peer],
         local_machine=local_machine,
     )
@@ -523,7 +495,6 @@ def test_cancel_ack_publishes_committed_completion_once(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [cancel],
         local_machine=local_machine,
     )
@@ -533,7 +504,6 @@ def test_cancel_ack_publishes_committed_completion_once(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [cancel, peer],
         local_machine=local_machine,
     )
@@ -558,7 +528,7 @@ def test_ttl_revokes_all_borrower_operations_and_preserves_pending(
     pending = insert_inbound_message(
         db_conn, owner.agent_id, "durable", "agent:99", bus=event_bus, database=database
     )
-    leases.inbox(database, lease["id"], attested_caller(lease), local_machine=local_machine)
+    leases.inbox(database, lease["id"], local_machine=local_machine)
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
         "WHERE id=%s",
@@ -566,20 +536,13 @@ def test_ttl_revokes_all_borrower_operations_and_preserves_pending(
     )
     db_conn.commit()
     operations = [
-        lambda: leases.require_active(
-            database, lease["id"], attested_caller(lease), local_machine=local_machine
-        ),
-        lambda: leases.renew(
-            database, event_bus, lease["id"], attested_caller(lease), local_machine=local_machine
-        ),
-        lambda: leases.inbox(
-            database, lease["id"], attested_caller(lease), local_machine=local_machine
-        ),
+        lambda: leases.require_active(database, lease["id"], local_machine=local_machine),
+        lambda: leases.renew(database, event_bus, lease["id"], local_machine=local_machine),
+        lambda: leases.inbox(database, lease["id"], local_machine=local_machine),
         lambda: leases.ack(
             database,
             event_bus,
             lease["id"],
-            attested_caller(lease),
             [pending],
             local_machine=local_machine,
         ),
@@ -587,14 +550,12 @@ def test_ttl_revokes_all_borrower_operations_and_preserves_pending(
             database,
             event_bus,
             lease["id"],
-            attested_caller(lease),
             "Late summary",
             local_machine=local_machine,
         ),
         lambda: leases.merge_plugin_delta(
             database,
             lease["id"],
-            attested_caller(lease),
             {},
             expected_version=0,
             local_machine=local_machine,
@@ -627,7 +588,6 @@ def test_plugin_journal_blocks_new_lease_until_checkpoint_receipt(
     leases.merge_plugin_delta(
         database,
         lease["id"],
-        attested_caller(lease),
         {"encoded": "first"},
         expected_version=0,
         local_machine=local_machine,
@@ -636,7 +596,6 @@ def test_plugin_journal_blocks_new_lease_until_checkpoint_receipt(
         leases.merge_plugin_delta(
             database,
             lease["id"],
-            attested_caller(lease),
             {"encoded": "lost"},
             expected_version=0,
             local_machine=local_machine,
@@ -647,7 +606,6 @@ def test_plugin_journal_blocks_new_lease_until_checkpoint_receipt(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         "State updated",
         local_machine=local_machine,
     )
@@ -713,14 +671,10 @@ def test_attestation_and_same_machine_checks(
     lease = accept_controller(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
     )
-    with pytest.raises(leases.ImpersonationError, match="caller check failed"):
-        leases.require_active(database, lease["id"], "incorrect", local_machine=local_machine)
     db_conn.execute("UPDATE agents_meta SET machine='another-host' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="placement"):
-        leases.require_active(
-            database, lease["id"], attested_caller(lease), local_machine=local_machine
-        )
+        leases.require_active(database, lease["id"], local_machine=local_machine)
     with pytest.raises(leases.ImpersonationError, match="own machine"):
         request_controller(
             owner,

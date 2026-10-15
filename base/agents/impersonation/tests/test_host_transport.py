@@ -298,3 +298,46 @@ def test_ended_lease_reaches_actual_codex_host_without_a_relay(
     assert payload["threadId"] == str(THREAD_ID)
     assert str(lease_id) in payload["input"][0]["text"]
     assert "confirmed executor death" in payload["input"][0]["text"]
+
+
+def test_antigravity_live_submit_posts_send_agent_message_with_csrf_token() -> None:
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    received: list[tuple[str, str | None, dict[str, Any]]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            received.append((self.path, self.headers.get("x-codeium-csrf-token"), body))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    httpd = HTTPServer(("127.0.0.1", 0), Handler)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    expected_csrf = "test-csrf-header"
+    try:
+        server = codex_app_server.AntigravityServer(
+            address=f"127.0.0.1:{port}", csrf_token=expected_csrf
+        )
+        reason = codex_app_server.antigravity_live_submit(
+            str(THREAD_ID), "hello antigravity", server=server, timeout=3.0
+        )
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=5)
+        httpd.server_close()
+
+    assert reason is None
+    assert len(received) == 1
+    path, header_value, body = received[0]
+    assert path == "/exa.language_server_pb.LanguageServerService/SendAgentMessage"
+    assert header_value == expected_csrf
+    assert body == {"recipient": str(THREAD_ID), "content": "hello antigravity"}

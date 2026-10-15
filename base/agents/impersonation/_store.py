@@ -2,15 +2,10 @@
 
 import hashlib
 import hmac
-import math
-import re
-import subprocess
-import sys
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
-import psutil
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -24,8 +19,6 @@ from base.agents.impersonation.status import (
 )
 from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.caller_identity import caller_payload
-from base.native_process import native_boot_id
-from base.native_process.ownership import OwnedProcess
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -81,246 +74,12 @@ def local(
         raise ImpersonationError("Impersonation is limited to the agent's own machine")
 
 
-_PROVIDER_ANCHOR_BASENAMES = frozenset({"codex", "claude"})
-
-# claude's native installer runs a version-stamped binary from
-# ``<install>/claude/versions/<version>`` (the process carries the version as
-# its name), so its controller node never matches the basename allowlist.
-_CLAUDE_NATIVE_VERSION = re.compile(r"\d+(?:\.\d+)+")
-
-# DeepSeek Harness is a Node program: its controller process is ``node`` with
-# the ``dsh`` launcher as its script (``node /opt/homebrew/bin/dsh web``), so
-# only the recorded script identifies it. ``process_metadata`` records that
-# script for Node processes.
-_DSH_SCRIPT_TAIL = ("@deepseek-ai", "dsh", "lib", "bin.js")
-
-
-def _basename(value: object) -> str:
-    if not isinstance(value, str) or not value:
-        return ""
-    return value.rstrip("/").rsplit("/", 1)[-1].lower()
-
-
-def _metadata_nodes(metadata: object) -> list[dict[str, Any]]:
-    """One recorded/observed chain as head plus ancestors, skipping junk."""
-    if not isinstance(metadata, dict):
-        return []
-    meta = cast("dict[str, Any]", metadata)
-    nodes: list[dict[str, Any]] = []
-    if meta.get("pid") is not None:
-        nodes.append(
-            {
-                key: meta[key]
-                for key in (
-                    "pid",
-                    "name",
-                    "executable",
-                    "created_at",
-                    "starttime",
-                    "boot_id",
-                    "script",
-                )
-                if key in meta
-            }
-        )
-    ancestors = meta.get("ancestors")
-    if isinstance(ancestors, list):
-        nodes.extend(
-            cast("dict[str, Any]", node)
-            for node in cast("list[object]", ancestors)
-            if isinstance(node, dict)
-        )
-    return nodes
-
-
-def _is_claude_native_executable(executable: object) -> bool:
-    """Whether a recorded executable is a claude native-install artifact.
-
-    Recognition is the install shape — a ``claude`` directory holding a
-    ``versions`` directory whose entry is version-stamped (e.g.
-    ``~/.local/share/claude/versions/2.1.274``). Exactly like the basename
-    allowlist, this is a shape gate on what gets recorded; the attestation
-    itself requires the recorded native process birth and boot identity.
-    """
-    if not isinstance(executable, str) or not executable:
-        return False
-    parts = executable.rstrip("/").split("/")
-    if len(parts) < 3 or parts[-2].lower() != "versions" or parts[-3].lower() != "claude":
-        return False
-    return _CLAUDE_NATIVE_VERSION.fullmatch(parts[-1]) is not None
-
-
-def _is_dsh_node(node: dict[str, Any]) -> bool:
-    """Whether a recorded node is a Node process running the DeepSeek Harness CLI.
-
-    The script is the ``dsh`` launcher (npm's bin link, npx's cache link) or the
-    package entry it links to. Like the other recognizers this is a shape gate
-    on recorded nodes; attestation stays pid + stable start time.
-    """
-    script = node.get("script")
-    if _basename(node.get("name")) != "node" or not isinstance(script, str):
-        return False
-    parts = tuple(part.lower() for part in script.rstrip("/").split("/"))
-    return parts[-1] == "dsh" or parts[-len(_DSH_SCRIPT_TAIL) :] == _DSH_SCRIPT_TAIL
-
-
-def _is_provider_node(node: dict[str, Any]) -> bool:
-    executable = node.get("executable")
-    return (
-        _basename(node.get("name")) in _PROVIDER_ANCHOR_BASENAMES
-        or _basename(executable) in _PROVIDER_ANCHOR_BASENAMES
-        or _is_claude_native_executable(executable)
-        or _is_dsh_node(node)
-    )
-
-
-def _process_identity(node: dict[str, Any]) -> tuple[OwnedProcess, str | None] | None:
-    """Read complete native evidence; incomplete historical nodes stay unknown."""
-    if not {"pid", "created_at", "starttime", "boot_id"} <= node.keys():
-        return None
-    pid, birth, ticks, boot = (node[key] for key in ("pid", "created_at", "starttime", "boot_id"))
-    if type(pid) is not int or pid <= 0:
-        return None
-    if not _valid_birth(birth):
-        return None
-    if not _valid_ticks(ticks):
-        return None
-    if not _valid_boot_id(boot):
-        return None
-    return OwnedProcess(pid, birth, ticks), boot
-
-
-def _valid_birth(birth: object) -> bool:
-    if isinstance(birth, bool) or not isinstance(birth, (int, float)):
-        return False
-    try:
-        return math.isfinite(birth) and birth > 0
-    except OverflowError:
-        return False
-
-
-def _valid_ticks(ticks: object) -> bool:
-    if sys.platform == "linux":
-        return type(ticks) is int and ticks > 0
-    return ticks is None
-
-
-def _valid_boot_id(boot: object) -> bool:
-    if not isinstance(boot, str):
-        return False
-    try:
-        return str(UUID(boot)) == boot
-    except ValueError:
-        return False
-
-
-def same_process(anchor: dict[str, Any], node: dict[str, Any]) -> bool:
-    recorded, observed = _process_identity(anchor), _process_identity(node)
-    if recorded is None or observed is None:
-        return False
-    try:
-        return recorded[1] == observed[1] == native_boot_id() and recorded[0].same_birth(
-            observed[0]
-        )
-    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-        return False
-
-
-def classify_anchor(anchor: dict[str, Any]) -> str:
-    """Strict liveness for one recorded anchor: alive | dead | reused | denied | unknown.
-
-    Unreadable evidence is not exit or PID reuse. Both caller attestation and
-    the supervisor use this classification; neither substitutes Linux wall time.
-    """
-    recorded = _process_identity(anchor)
-    if recorded is None:
-        return "unknown"
-    identity, boot = recorded
-    try:
-        current_boot = native_boot_id()
-        if not _valid_boot_id(current_boot):
-            return "unknown"
-        if boot != current_boot:
-            return "dead"
-        observed = OwnedProcess.capture(psutil.Process(identity.pid))
-        if not identity.same_birth(observed):
-            return "reused"
-        return "alive" if observed.live() else "dead"
-    except psutil.NoSuchProcess:
-        return "dead"
-    except psutil.AccessDenied:
-        return "denied"
-    except (psutil.Error, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-        return "unknown"
-
-
-def provider_anchor_states(process_metadata: object) -> list[str]:
-    """Classify each recorded provider anchor — the supervisor's liveness view."""
-    return [
-        classify_anchor(node)
-        for node in _metadata_nodes(process_metadata)
-        if _is_provider_node(node)
-    ]
-
-
-def verify_caller(lease: Mapping[str, Any], caller: object) -> None:
-    """Require the caller to descend from the lease's recorded controller process.
-
-    The session id is the only control credential (user ruling 2026-09-16);
-    this presence check replaces the deliverable token: a recorded provider
-    anchor (codex / claude — claude's native ``claude/versions/<version>``
-    layout included — / a Node process running dsh) must appear among the
-    caller's live ancestors with the same native birth and boot identity. Linux requires kernel start ticks;
-    other platforms compare exact native timestamps. Every failure is fail-closed
-    and classified as no-anchor, anchor-dead, anchor-unavailable, or chain-mismatch.
-    The operator gets a next step instead of a dead end. An orphaned session ends on the
-    native side or by TTL; it is never re-anchored here.
-    """
-    recorded = _metadata_nodes(lease.get("process_metadata"))
-    anchors = [node for node in recorded if _is_provider_node(node)]
-    if not anchors:
-        raise ImpersonationError(
-            "Controller caller check failed (no-anchor): this session records no "
-            "provider controller process to attest against. End it from the native "
-            "side (restart/stop) or let its TTL expire."
-        )
-    live = _metadata_nodes(caller)
-    if any(same_process(anchor, node) for anchor in anchors for node in live):
-        return
-    states = {classify_anchor(anchor) for anchor in anchors}
-    if states & {"alive"}:
-        raise ImpersonationError(
-            "Controller caller check failed (chain-mismatch): the recorded "
-            "controller process is alive but this caller does not descend from it. "
-            "Run impersonation commands from the controller session."
-        )
-    if states & {"unknown", "denied"}:
-        raise ImpersonationError(
-            "Controller caller check failed (anchor-unavailable): the recorded "
-            "controller's native identity cannot be verified. End the session "
-            "from the native side (restart/stop) or let its TTL expire."
-        )
-    if "reused" in states:
-        raise ImpersonationError(
-            "Controller caller check failed (anchor-dead): the recorded controller "
-            "process is gone (its pid now belongs to a different process). End the "
-            "session from the native side (restart/stop) or let its TTL expire."
-        )
-    raise ImpersonationError(
-        "Controller caller check failed (anchor-dead): the recorded controller "
-        "process is gone. End the session from the native side (restart/stop) or "
-        "let its TTL expire."
-    )
-
-
 def authenticate(
     lease: Mapping[str, Any],
-    caller: object,
     *,
     local_machine: str,
 ) -> None:
-    """Attested controller authority: caller presence plus same-machine placement."""
-    verify_caller(lease, caller)
+    """Controller authority requires same-machine placement."""
     local(
         lease,
         local_machine=local_machine,
@@ -442,7 +201,6 @@ def expire(conn: psycopg.Connection, lease: LeaseRecord) -> LeaseRecord:
 
 def validate_active(
     lease: LeaseRecord,
-    caller: object,
     *,
     fresh: bool,
     machine: str,
@@ -459,7 +217,6 @@ def validate_active(
         raise ImpersonationError("Agent placement or lifecycle changed")
     authenticate(
         lease,
-        caller,
         local_machine=local_machine,
     )
 
@@ -467,7 +224,6 @@ def validate_active(
 def require_active_locked(
     conn: psycopg.Connection,
     lease: LeaseRecord,
-    caller: object,
     *,
     local_machine: str,
 ) -> None:
@@ -477,7 +233,6 @@ def require_active_locked(
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
     validate_active(
         lease,
-        caller,
         fresh=fresh == (True,),
         machine=meta["machine"],
         status=AgentStatus(meta["status"]),
@@ -485,11 +240,11 @@ def require_active_locked(
     )
 
 
-RELAY_PROVIDERS = ("codex", "claude", "dsh")
+RELAY_PROVIDERS = ("codex", "claude", "dsh", "antigravity")
 # Relays that run inside the controller's own session: the request mints their
 # scoped credential, the activation gate waits for their heartbeat, and the
-# native side never spawns or re-provisions them. codex's relay is spawned by
-# the accepting runtime instead.
+# native side never spawns or re-provisions them. codex and antigravity relays
+# are spawned by the accepting runtime instead.
 SESSION_RELAY_PROVIDERS = ("claude", "dsh")
 
 
@@ -501,12 +256,17 @@ def validate_relay_spec(
     rejected here so a malformed endpoint fails the request instead of the
     relay (review N4)."""
     if provider not in RELAY_PROVIDERS:
-        raise ValueError("Relay provider must be 'codex', 'claude' or 'dsh'")
+        raise ValueError("Relay provider must be 'codex', 'claude', 'dsh' or 'antigravity'")
     if provider == "codex":
         if not thread_id:
             raise ValueError("Codex relay requires the existing session's thread id")
         if codex_remote is not None and not codex_remote.startswith(("unix://", "ws://")):
             raise ValueError("Codex remote must be a unix:// or ws:// endpoint")
+    elif provider == "antigravity":
+        if not thread_id or not thread_id.strip():
+            raise ValueError("Antigravity relay requires the conversation's thread id")
+        if codex_remote is not None:
+            raise ValueError("The antigravity relay does not use --codex-remote")
     elif thread_id is not None or codex_remote is not None:
         raise ValueError(
             f"The {provider} relay routes to its owner; thread id and remote are rejected"

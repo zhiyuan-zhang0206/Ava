@@ -8,5 +8,4 @@
 "test_core.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_external_integration_agent.py#monkeypatch.setattr ava.__plugin_installation__" = 1
 "test_external_integration_agent.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
-"test_external_integration_agent.py#monkeypatch.setattr ava.impersonation.attachment.process_metadata" = 3
 "test_external_integration_agent.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1

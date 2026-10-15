@@ -1,4 +1,4 @@
-exports = ["attachment.py", "launch.py"]
+exports = ["attachment.py"]
 
 [uses]
 "__init__.py" = ["attachment.py"]

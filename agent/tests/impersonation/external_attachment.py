@@ -110,12 +110,9 @@ def attached_runtime(
 
     monkeypatch.setattr(plugin_state_codec, "load_snapshot", load)
 
-    def require(
-        _db: Database, lease_id: str, attesting: dict[str, Any], *, local_machine: str
-    ) -> dict[str, Any]:
+    def require(_db: Database, lease_id: str, *, local_machine: str) -> dict[str, Any]:
         assert local_machine == lease["machine"]
         assert lease_id == "lease"
-        assert attesting == {"pid": 777}
         if lease["status"] != "active":
             raise RuntimeError("lease expired")
         return dict(lease)
@@ -123,13 +120,12 @@ def attached_runtime(
     def stage(
         db: Database,
         lease_id: str,
-        attesting: dict[str, Any],
         delta: dict[str, Any],
         *,
         expected_version: int,
         local_machine: str,
     ) -> None:
-        require(db, lease_id, attesting, local_machine=local_machine)
+        require(db, lease_id, local_machine=local_machine)
         if expected_version != lease["delta_version"]:
             raise RuntimeError("stale version")
         staged.append(delta)
@@ -138,7 +134,6 @@ def attached_runtime(
 
     monkeypatch.setattr(attachment_module.control, "require_active", require)
     monkeypatch.setattr(attachment_module.control, "merge_plugin_delta", stage)
-    monkeypatch.setattr(attachment_module, "process_metadata", lambda: {"pid": 777})
 
     # This suite models the pre-event-log lease boundary with a symbolic lease
     # id. The receipt seam is integration-tested against real UUID leases;

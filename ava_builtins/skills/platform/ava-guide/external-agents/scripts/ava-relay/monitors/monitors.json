@@ -1,7 +1,0 @@
-[
-  {
-    "name": "ava-relay",
-    "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/relay-wrapper.sh",
-    "description": "Ava relay (session-lifetime)"
-  }
-]
