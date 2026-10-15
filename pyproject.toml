@@ -1060,6 +1060,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/content_lint/code_comments/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/content_lint/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

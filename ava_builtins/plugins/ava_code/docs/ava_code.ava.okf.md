@@ -51,7 +51,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
 - Oversized context files (over `settings.sandbox.exec_output_max_chars`) are injected truncated head+tail with the full text archived to the workspace `.exec_output/` ring — the same overflow logic as exec output (`truncate_both_ends`); the archive path is reported in the note
 - Deduplication: `injected_paths` + `injected_hashes` (content hash, prevents same content different path from being re-injected); after compact, reset lazily by `compact.version` (built-in `CompactState` sub-state) to resurface
 - Primary path priority: system prompt directs agent to first `ava.files.read("AGENTS.md")`; when going via that primary path, content is already in the return value, just marked, not re-injected
-- The after_exec hook keeps only the cwd-change note and the project-skills note (summaries of plugin state, not content discovered during exec). It runs in the agent host, so it reads the graph `state` it is handed through `state_handle.view(state)` and returns `state_handle.delta({...})`; it consumes `cwd_note` (clears it) and injects the project-skills listing once per compaction
+- Host-side cwd and project-skills note delivery: [[ava_builtins/plugins/ava_code/docs/runtime-notes.ava.okf.md]].
 
 ### Plugin state declaration
 
@@ -76,7 +76,7 @@ PluginContributions(sdk_namespaces=(SdkNamespace("cwd", _code_namespace, expand=
 
 - `ava.cwd.get()` → returns the current logical working directory
 - `ava.cwd.set(path)` → changes the logical working directory (relative path resolved against the current logical value, `~/...` expanded). AvaCode's `files` / `shell` / `understand` wrappers read it explicitly; bare `open`, `Path.cwd`, imports, and user subprocesses retain their Python process cwd. After set, writes `cwd_note` (and when git repo has `.claude/skills` / `.agents/skills` / `.ava/skills` project-local skills, writes `project_skills_note`), which are injected as system notes by the above after_exec hook
-- `_ValidateCwdAfterInitHook` (declared as `after_init`) initializes an absent cwd channel from the invocation's explicit `Runtime.context` identity and persists it as a state delta. It uses `model_fields_set` to distinguish an absent channel from a saved value. After checkpoint restore it preserves valid directories, including an explicitly saved `$HOME`, and repairs a stat failure or non-directory value to the agent workspace. An eval context without an agent uses `$HOME`; the hook never calls `os.chdir`
+- Cwd initialization and repair: [[ava_builtins/plugins/ava_code/docs/runtime-notes.ava.okf.md]].
 
 ## Key dependencies
 

@@ -1,5 +1,3 @@
-"""Keep structure/codegen coverage and conservative CI selection in sync."""
-
 import ast
 import io
 import json
@@ -17,6 +15,7 @@ from unittest.mock import patch
 import yaml
 
 from base.events.tests.codegen_sources import SourceGraph
+from base.host.proc import run_bounded
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
@@ -36,9 +35,10 @@ OTHER_CI = {
     "lint-clock-lattice",
     "lint-core-content-manifests",
 }
-# Hooks CI's structure gate skips because another job runs the same tool directly. The
-# changed-files `frontend-eslint` is a commit-stage hook; its whole-project twin is pre-push.
+
+
 CI_OWNED = {
+    "check-code-comments",
     "pyright",
     "frontend-tsc",
     "frontend-eslint",
@@ -52,30 +52,35 @@ PREPUSH = {
     "frontend-vitest",
     "meizel-check-full",
 }
-# Pre-push-stage-only hooks with no direct 1:1 CI job duplicate: local
-# safety nets that re-run the pre-commit stage over the real branch diff, an
-# unconditional rerun of the generated-artifact family, the full scan of the
-# per-file patch-target lint (a production import change moves the home of tests
-# it never passes) and the full tests-location check (a deleted test is never passed
-# to a commit hook). Unlike PREPUSH, CI does not run these by name -- it already
-# covers the same ground via backend-structure's unconditional scan and the
-# merged-tree preview when main contributes code, using `--all-files` on (filtered)
-# hooks, so no CI job needs a matching direct invocation the way `uv run
-# pyright` mirrors the pyright hook.
+
+
 PREPUSH_LOCAL_ONLY = {
     "lint-prepush-branch-diff",
     "lint-prepush-artifact-freshness",
     "lint-tests-location-full",
 }
 LOCAL_ONLY = {"check-git-hooks-install"}
-# These identities come from fastapi._compat.v2 / fastapi.openapi.utils, not
-# repository class definitions. Keep exact names: new unknowns require review.
+
+
 GENERATED_COMPONENTS = {
     "HTTPValidationError",
     "ValidationError",
     "Body_upload_files_api_agents__agent_id__uploads_post",
     "Body_upload_api_keyed_v1_agents__agent_id__uploads_post",
 }
+
+
+def run_fixture(
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    result = run_bounded(argv, timeout=30, cwd=cwd, env=env, capture_output=True, text=True)
+    if check:
+        result.check_returncode()
+    return result
 
 
 def assert_sources_covered(sources, pattern):
@@ -114,7 +119,6 @@ def test_closure_follows_new_and_moved_definitions_without_name_collisions(tmp_p
         "gateway/schemas/probe.py"
     }
 
-    # A new annotation must be followed even before openapi.json is regenerated.
     (tmp_path / "gateway/schemas/probe.py").write_text(
         "from base.new_model import NewModel\nclass WireModel:\n    child: NewModel\n"
     )
@@ -203,7 +207,7 @@ def test_closure_rejects_reachable_conditional_imports(tmp_path: Path) -> None:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
-    # An unrelated TYPE_CHECKING/optional import must not reject the whole module.
+
     assert_sources_covered(SourceGraph(tmp_path).schema_sources({"WireModel"}, set()), r"^gateway/")
     schema = tmp_path / "gateway/schemas/probe.py"
     schema.write_text(
@@ -216,7 +220,7 @@ def test_closure_rejects_reachable_conditional_imports(tmp_path: Path) -> None:
 def select(
     event: str, paths: tuple[str, ...] = (), error: Exception | None = None, selector_patch=None
 ):
-    """Execute the actual workflow selector with a controlled Git response."""
+
     with TemporaryDirectory() as directory:
         output = Path(directory) / "output"
         env = {
@@ -238,8 +242,7 @@ def select(
             except SystemExit as exit_error:
                 assert exit_error.code == 1
                 failed = True
-        # GitHub uses the last value for a repeated output key. No output also
-        # selects B, so an unavailable output file cannot silently skip it.
+
         decision = output.read_text().splitlines()[-1] if output.exists() else "run=true"
         if failed:
             decision = "run=true"
@@ -273,7 +276,7 @@ def test_codegen_invokes_exactly_the_four_configured_hooks() -> None:
     assert all(command[6] == "run" and command[8:] == ["--all-files"] for command in commands)
     invoked = [command[7] for command in commands]
     assert set(invoked) == CODEGEN
-    # A's SKIP must not leak into any of the explicit B invocations.
+
     assert "SKIP" not in JOB["env"]
     assert "SKIP" not in FRESHNESS.get("env", {})
     assert "continue-on-error" not in FRESHNESS
@@ -305,18 +308,27 @@ def test_selector_ids_and_regexes_follow_hook_config() -> None:
         assert path in SCRIPT
 
 
-def test_node_npm_and_codegen_share_one_condition() -> None:
+def test_parser_is_unconditional_and_codegen_retains_conservative_selection() -> None:
     assert SELECT["id"] == "codegen"
     assert SELECT["env"]["EVENT_NAME"] == "${{ github.event_name }}"
     assert SELECT["continue-on-error"] is True
-    for step in (
-        STEPS["Install Node"],
-        STEPS["Install frontend deps (codegen freshness)"],
-        FRESHNESS,
+    for name in (
+        "Install Node",
+        "Install frontend deps (source parser and codegen)",
+        "Check typed code comments and changed-file migration",
     ):
-        assert step["if"] == (
-            "steps.codegen.outcome != 'success' || steps.codegen.outputs.run != 'false'"
-        )
+        assert "if" not in STEPS[name]
+        assert "continue-on-error" not in STEPS[name]
+    assert (
+        FRESHNESS["if"]
+        == "steps.codegen.outcome != 'success' || steps.codegen.outputs.run != 'false'"
+    )
+    assert (
+        STEPS["Check typed code comments and changed-file migration"]["run"]
+        == 'bash scripts/content_lint/code_comments/check.sh changed "${LINT_STRUCTURE_BASELINE_BASE:?missing comparison base}"'
+    )
+    assert HOOKS["check-code-comments"]["always_run"] is True
+    assert HOOKS["check-code-comments"]["pass_filenames"] is False
     order = list(STEPS)
     assert order.index("Fetch base revision for structure guard") < order.index(
         "Run pre-commit structural gates (--all-files)"
@@ -324,17 +336,15 @@ def test_node_npm_and_codegen_share_one_condition() -> None:
     assert order.index("Run pre-commit structural gates (--all-files)") < order.index(
         "Select codegen freshness from changed files"
     )
-    assert order.index("Select codegen freshness from changed files") < order.index("Install Node")
+    assert (
+        order.index("Install Node")
+        < order.index("Check typed code comments and changed-file migration")
+        < order.index(LINT["name"])
+    )
 
 
 def test_structure_guard_pins_the_merge_refs_base_not_the_event_field() -> None:
-    """#4903: base.sha can lag the merge ref's actual base (a stale branch's
-    sync point), which hard-fails the guard once a baseline section retires.
-    The depth-1 checkout carries no parent objects, so the step deepens the
-    merge commit before resolving; resolution uses --verify because plain
-    rev-parse echoes its own argument on failure (the literal string reached
-    the fetch as an invalid refspec in run 37081265642). base.sha stays only
-    as the fallback for a checkout that is not a merge ref."""
+
     script = STEPS["Fetch base revision for structure guard"]["run"]
     deepen = 'git fetch --depth=2 origin "$(git rev-parse HEAD)"'
     resolve = "git rev-parse --verify --quiet 'HEAD^1^{commit}'"
@@ -355,22 +365,17 @@ def test_structure_guard_pins_the_merge_refs_base_not_the_event_field() -> None:
 def test_shallow_checkout_needs_the_deepen_before_resolving_head_parent(
     tmp_path: Path,
 ) -> None:
-    """The mechanism the guard step relies on (run 37081265642): with the
-    parent objects absent, plain rev-parse exits non-zero yet echoes the
-    literal "HEAD^1" — --verify stays silent instead — and one depth-2
-    re-fetch of the merge commit makes HEAD^1 the true base again."""
+
     source = tmp_path / "source"
     source.mkdir()
 
     def git(*args: str, cwd: Path = source) -> str:
-        return subprocess.run(  # noqa: S603 — fixed git argv over the test's own fixture
-            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-        ).stdout.strip()
+        return run_fixture(["git", *args], cwd=cwd, check=True).stdout.strip()
 
     git("init", "-q", "-b", "main")
     git("config", "user.email", "structure-guard@example.invalid")
     git("config", "user.name", "structure-guard")
-    # The fixture server models GitHub, which serves fetch-by-SHA requests.
+
     git("config", "uploadpack.allowAnySHA1InWant", "true")
     (source / "a").write_text("a\n")
     git("add", "a")
@@ -387,43 +392,35 @@ def test_shallow_checkout_needs_the_deepen_before_resolving_head_parent(
     base = git("rev-parse", "HEAD^1")
 
     checkout = tmp_path / "checkout"
-    subprocess.run(  # noqa: S603 — fixed git argv over the test's own fixture
+    run_fixture(
         ["git", "clone", "-q", "--depth=1", source.as_uri(), str(checkout)],
         check=True,
-        capture_output=True,
-        text=True,
     )
-    literal = subprocess.run(
+    literal = run_fixture(
         ["git", "rev-parse", "HEAD^1"],
         cwd=checkout,
         check=False,
-        capture_output=True,
-        text=True,
     )
     assert literal.returncode != 0
     assert literal.stdout.strip() == "HEAD^1"
-    silent = subprocess.run(
+    silent = run_fixture(
         ["git", "rev-parse", "--verify", "--quiet", "HEAD^1^{commit}"],
         cwd=checkout,
         check=False,
-        capture_output=True,
-        text=True,
     )
     assert silent.returncode != 0
     assert silent.stdout.strip() == ""
     merge = git("rev-parse", "HEAD", cwd=checkout)
-    subprocess.run(  # noqa: S603 — fixed git argv over the test's own fixture
+    run_fixture(
         ["git", "fetch", "-q", "--depth=2", "origin", merge],
         cwd=checkout,
         check=True,
-        capture_output=True,
-        text=True,
     )
     assert git("rev-parse", "HEAD^1", cwd=checkout) == base
 
 
 def test_manual_structure_guard_resolves_shallow_source_ancestry(tmp_path: Path) -> None:
-    """Dispatch checks a branch head, whose common base can predate current main."""
+
     step = STEPS["Fetch comparison ancestry for manual structure guard"]
     assert step["if"] == "github.event_name == 'workflow_dispatch'"
     names = list(STEPS)
@@ -432,9 +429,7 @@ def test_manual_structure_guard_resolves_shallow_source_ancestry(tmp_path: Path)
     source.mkdir()
 
     def git(*args: str, cwd: Path = source) -> str:
-        return subprocess.run(  # noqa: S603 — fixed git argv over the test's own fixture
-            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-        ).stdout.strip()
+        return run_fixture(["git", *args], cwd=cwd, check=True).stdout.strip()
 
     git("init", "-q", "-b", "main")
     git("config", "user.email", "structure-guard@example.invalid")
@@ -449,13 +444,11 @@ def test_manual_structure_guard_resolves_shallow_source_ancestry(tmp_path: Path)
     git("clone", "-q", "--depth=1", "--branch", "snapshot", source.as_uri(), str(checkout))
     assert git("rev-parse", "--is-shallow-repository", cwd=checkout) == "true"
     output = tmp_path / "env"
-    subprocess.run(  # noqa: S603 — execute the repository workflow over the test's fixture
+    run_fixture(
         ["bash", "-e", "-c", step["run"]],
         cwd=checkout,
         env={**os.environ, "GITHUB_ENV": str(output)},
         check=True,
-        capture_output=True,
-        text=True,
     )
     assert output.read_text().strip() == f"LINT_STRUCTURE_BASELINE_BASE={common}"
     assert git("rev-parse", "--is-shallow-repository", cwd=checkout) == "false"
@@ -505,8 +498,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
     for path in paths:
         assert (ROOT / path).is_file(), f"Freshness matrix path no longer exists: {path}"
         assert any(re.search(HOOKS[hook_id]["files"], path) for hook_id in CODEGEN), path
-        # Reuse the real parsed config across the path matrix; parser failures
-        # are covered separately without repeating YAML parsing for every path.
+
         output, log, calls = select(
             "pull_request", (path,), selector_patch=patch("yaml.safe_load", return_value=CONFIG)
         )
@@ -620,11 +612,9 @@ def test_prepush_migration_keeps_direct_ci_owners(tmp_path: Path) -> None:
     uv = tmp_path / "uv"
     uv.write_text("#!/bin/sh\nexit 19\n")
     uv.chmod(0o755)
-    failed = subprocess.run(  # noqa: S603 - exact asserted CI command with a fixture executable
+    failed = run_fixture(
         ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", command],
         env=os.environ | {"PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"},
-        capture_output=True,
-        text=True,
         check=False,
     )
     assert failed.returncode == 19

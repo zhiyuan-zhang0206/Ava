@@ -8,12 +8,13 @@ project docs.
 Keep implementation explanations close to the code and system explanations at
 their documentation owner:
 
-- Comments explain a non-obvious local constraint, ordering requirement or reason
-  an apparently simpler implementation would be wrong. Do not narrate statements,
-  repeat type annotations or copy a component's documentation into source files.
-- Docstrings describe the callable or module contract: purpose, inputs, results,
-  relevant exceptions and side effects. Agent-visible SDK docstrings also serve
-  as help content; follow [SDK docstring discipline](sdk-docstring-discipline.md).
+- Source comments use exact references to typed contracts in the component's
+  documentation. Delete narration and duplicate prose. The supported languages,
+  whole-file migration gate and closed forms are defined in
+  [structured code comments](engineering/structured-code-comments.md).
+- Agent-visible SDK docstrings remain help content, generated from `api` records.
+  Follow [SDK docstring discipline](sdk-docstring-discipline.md) for their content.
+  Internal prose belongs at its documentation owner.
 - Component-local `docs/` explain responsibilities, cross-file relationships and
   usage. Cross-cutting rules belong in `docs/conventions/`; design alternatives
   and trade-offs belong in `docs/decisions/`.

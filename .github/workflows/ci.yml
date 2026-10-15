@@ -632,9 +632,9 @@ jobs:
           fi
 
   backend-structure:
-    # One structure job, two segments: A always runs structure lint via
-    # pre-commit --all-files; B installs Node/npm and explicitly runs the four
-    # freshness hooks only when the PR diff matches their configured files:
+    # Structure and typed code-comment checks run on every change. Node/npm
+    # supplies the source parser; the four codegen freshness hooks run only
+    # when the PR diff matches their configured files:
     # regexes. Manual dispatch and selector errors run B; a no-match PR logs STEP SKIPPED.
     # Other CI jobs own ruff/pyright/migrations/clock, frontend gates and core
     # manifests. Pre-push-only pyright/tsc/eslint/vitest remain redundant SKIP entries.
@@ -702,6 +702,23 @@ jobs:
           base="$(git merge-base -- HEAD refs/remotes/origin/main)"
           echo "LINT_STRUCTURE_BASELINE_BASE=$base" >> "$GITHUB_ENV"
 
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps (source parser and codegen)
+        working-directory: ui/web
+        run: npm ci
+
+      - name: Check typed code comments and changed-file migration
+        run: bash scripts/content_lint/code_comments/check.sh changed "${LINT_STRUCTURE_BASELINE_BASE:?missing comparison base}"
+
+      - name: Test TypeScript comment parser
+        run: node --test scripts/content_lint/code_comments/tests/typescript.test.mjs
+
       - name: Restore pre-commit environments
         id: precommit-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -712,7 +729,7 @@ jobs:
       - name: Run pre-commit structural gates (--all-files)
         # Segment A: keep the existing exclusions and move only codegen to B.
         env:
-          SKIP: ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install,types-codegen-fresh,constants-codegen-fresh,events-registry-fresh,config-lite-table-fresh
+          SKIP: check-code-comments,ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install,types-codegen-fresh,constants-codegen-fresh,events-registry-fresh,config-lite-table-fresh
         run: env -u VIRTUAL_ENV uv run pre-commit run --all-files
 
       - name: Locality gate (meizel check, whole repository)
@@ -809,21 +826,6 @@ jobs:
                     "running all freshness hooks")
               raise SystemExit(1)
           PY
-
-      # Segment B: only types-codegen-fresh needs npx, but the four hooks share
-      # one condition. Explicit invocations keep new lint hooks in segment A.
-      - name: Install Node
-        if: steps.codegen.outcome != 'success' || steps.codegen.outputs.run != 'false'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ui/web/package-lock.json
-
-      - name: Install frontend deps (codegen freshness)
-        if: steps.codegen.outcome != 'success' || steps.codegen.outputs.run != 'false'
-        working-directory: ui/web
-        run: npm ci
 
       - name: Run codegen freshness hooks (--all-files)
         if: steps.codegen.outcome != 'success' || steps.codegen.outputs.run != 'false'

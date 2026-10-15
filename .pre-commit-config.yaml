@@ -48,6 +48,13 @@ repos:
         pass_filenames: false
         verbose: true
 
+      - id: check-code-comments
+        name: check typed code comments and changed-file migration
+        entry: bash scripts/content_lint/code_comments/check.sh changed
+        language: system
+        always_run: true
+        pass_filenames: false
+
       - id: lint-python-lock
         name: lint Python lock (canonical PyPI sources)
         entry: .venv/bin/python scripts/lint/locks/python_lock.py
