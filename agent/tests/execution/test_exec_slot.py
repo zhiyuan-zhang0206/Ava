@@ -1,10 +1,3 @@
-"""The exec turn's state slot: `ava.state` / `ava.state_update` exist only inside an exec turn.
-
-Outside one — the agent host, a bare script — reading either raises an explicit AttributeError
-instead of returning None, `process_context.in_exec_turn()` is the one explicit predicate, and a plugin's
-`PluginStateHandle` has a pure host side (`view` / `delta`) beside the exec-side `read` / `update`.
-"""
-
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -43,8 +36,6 @@ def test_in_exec_turn_follows_the_bound_slot():
 
 
 def test_state_slots_do_not_exist_outside_an_exec_turn():
-    """Reading either slot anywhere but a bound exec turn raises an explicit AttributeError —
-    never a None — so a host-side read fails where it is written."""
     for name in ("state", "state_update"):
         with pytest.raises(
             process_context.PluginStateOutsideTurnError, match="only inside execute_code"
@@ -92,8 +83,6 @@ def test_handle_read_and_update_outside_a_turn_raise_the_slot_error():
 
 
 def test_handle_view_and_delta_are_pure_over_the_graph_state():
-    """The host-side path: `view` builds the typed snapshot from a graph state, `delta` the
-    prefixed update dict a hook returns — neither needs (or has) an exec slot."""
     state_cls = build_agent_state(
         ExtensionRegistry((("demo", PluginContributions(state=(_SeenState,))),))
     )
@@ -110,8 +99,6 @@ def test_handle_view_and_delta_are_pure_over_the_graph_state():
 
 
 def test_child_clients_are_lazy_and_released_when_the_process_ends(tmp_path: Path) -> None:
-    """A connection the child's code never touches is never built; one it touches is closed by the
-    child itself before it exits."""
     from agent.graph.exec.protocol import read_result
     from agent.tests.execution.test_exec_child import spawn_real_child
 

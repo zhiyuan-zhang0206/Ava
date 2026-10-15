@@ -1,9 +1,3 @@
-"""Opt-in unit fixtures shared by the namespace tests: one binding for every directory below.
-
-The four directory conftests held the same fixtures (a union of what any of them requested);
-they are requested by name, so one wider scope changes nothing for a test that does not ask.
-"""
-
 from ava.tests.fixtures.model_owner import model_installation as model_installation
 from ava.tests.fixtures.model_owner import sdk_model_owner as sdk_model_owner
 from ava.tests.fixtures.sdk import sdk_environment as sdk_environment

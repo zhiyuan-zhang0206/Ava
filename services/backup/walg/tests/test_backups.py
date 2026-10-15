@@ -1,9 +1,3 @@
-"""Reading `backup-list --detail --json`: ordering, increments and the chain behind one.
-
-`fixtures/backup-list.json` is the list a real WAL-G v3.0.9 printed after three full
-backups and one increment of the first (the host name and data directory replaced).
-"""
-
 from __future__ import annotations
 
 import json

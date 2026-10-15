@@ -1,10 +1,3 @@
-"""An MCP tool call is recorded in `audit_events` after it ran.
-
-The tool has already executed when the audit fact is written, so a failed write must not turn
-a successful call into a tool error (the client would retry and repeat the side effect): it is
-reported instead.
-"""
-
 from __future__ import annotations
 
 import uuid

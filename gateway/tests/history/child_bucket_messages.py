@@ -1,9 +1,3 @@
-"""Fresh-interpreter check that the context breakdown works without `agent.graph`.
-
-A gateway process never imports `agent.graph`; running the call here reproduces
-that import state (an in-process test would have `agent.graph` pre-imported).
-"""
-
 import sys
 
 from langchain_core.messages import HumanMessage

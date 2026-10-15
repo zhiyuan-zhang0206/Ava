@@ -1,8 +1,3 @@
-"""Fresh-interpreter probe: the declaration projection needs no runtime settings image.
-
-Run as ``python -I _env_audit_projection_child.py`` with the environment prepared by the test.
-"""
-
 from __future__ import annotations
 
 import sys

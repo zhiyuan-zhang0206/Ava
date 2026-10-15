@@ -1,6 +1,3 @@
-"""`ServiceEndpoints`: the table is the settings-and-home facts of every daemon's port and pidfile,
-read once at construction."""
-
 from __future__ import annotations
 
 from pathlib import Path

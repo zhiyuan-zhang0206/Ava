@@ -1,5 +1,3 @@
-"""Native controller sessions enforce terminal-state admission and relay specs."""
-
 from typing import Any
 from uuid import uuid4
 
@@ -83,7 +81,6 @@ def test_terminal_sessions_report_stale(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A terminal lease is classified as stale-session."""
     local_machine = machine_identity.name()
     owner = _agent(db_conn, local_machine=local_machine)
     lease = _active(
@@ -112,8 +109,6 @@ def test_dsh_request_mints_a_session_relay_credential(
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentity,
 ) -> None:
-    """dsh runs its relay in the controller session, like claude: the request
-    mints the scoped credential, and a thread id or codex remote is refused."""
     local_machine = machine_identity.name()
     owner = _agent(db_conn, local_machine=local_machine)
     caller = CallerIdentity(kind="external_agent", subject="dsh")
@@ -153,7 +148,6 @@ def test_antigravity_request_records_host_relay_spec(
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentity,
 ) -> None:
-    """antigravity records its conversation thread id and provisions its relay at activation."""
     local_machine = machine_identity.name()
     owner = _agent(db_conn, local_machine=local_machine)
     caller = CallerIdentity(kind="external_agent", subject="antigravity")

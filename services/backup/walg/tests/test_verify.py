@@ -1,9 +1,3 @@
-"""Reading `wal-verify integrity timeline --json`: only the status counts, never the exit code.
-
-`fixtures/wal-verify-warning.json` is real v3.0.9 output taken while two segments were
-still uploading: overall WARNING with exit code 0. The FAILURE cases edit its statuses.
-"""
-
 from __future__ import annotations
 
 import json
@@ -52,7 +46,6 @@ def test_a_failure_in_either_check_fails_the_chain(integrity: str, timeline: str
 
 
 def test_an_exit_code_of_zero_with_a_failure_status_is_a_failed_chain(sandbox: Sandbox) -> None:
-    """The measured behavior: WAL-G v3.0.9 exits 0 while reporting a gap."""
     sandbox.put("wal-verify.json", _report(integrity="FAILURE"))
     sandbox.put("wal-verify.rc", "0")
 
@@ -86,8 +79,6 @@ def test_output_without_both_checks_is_an_error(text: str) -> None:
 
 
 def test_wal_verify_is_handed_the_owner_only_socket(sandbox: Sandbox) -> None:
-    """It asks Postgres for the current segment: without PGHOST/PGPORT WAL-G dials libpq's
-    default socket, which is not where this home's Postgres listens."""
     sandbox.put("wal-verify.json", _report(integrity="OK"))
 
     verify.verify_chain(ADMIN_URL, path_reader=lambda: settings.walg.walg_config_file)

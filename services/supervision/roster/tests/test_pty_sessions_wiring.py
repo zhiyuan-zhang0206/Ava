@@ -1,12 +1,3 @@
-"""The pty-sessions roster entry: what makes shell persistence a service's job.
-
-Every agent shell lives in one ordinary roster process per machine. The behavior
-(a session outliving its clients, the closure, the sweep) is covered by
-services/agent_runner/pty_sessions/tests; this file pins the declaration: its capabilities, that
-it needs no database, its ownership probe, its gate, and the SIGTERM budget root
-derives its stop window from.
-"""
-
 from __future__ import annotations
 
 from base.cluster.machine import MachineIdentity
@@ -37,8 +28,6 @@ def test_both_a_gateway_host_and_a_runner_host_run_the_service(
 
 
 def test_the_service_needs_no_database_and_no_profile_marker() -> None:
-    """A Unix socket and a ledger file are its whole data plane: a database outage must
-    not hold it, and it carries no write generation."""
     declared = _spec()
     assert declared.requires_db is False
     assert service_spec.db_access(declared) is None

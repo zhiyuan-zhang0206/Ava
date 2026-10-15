@@ -1,5 +1,3 @@
-"""Contract: the migration restores the column the baseline schema, db/schema.sql, gives a fresh database."""
-
 from __future__ import annotations
 
 from typing import LiteralString, cast
@@ -10,9 +8,6 @@ from base.config import settings
 
 
 def test_the_migration_restores_the_column_where_the_baseline_has_it(db_conn: None) -> None:
-    """With the column dropped, the migration restores it (twice over: it is
-    idempotent) with the shape and comment `db/schema.sql` gives a fresh database.
-    Run inside one transaction, so the suite database is untouched."""
     from base.paths import repo_root
 
     (up_file,) = (repo_root() / "migrations").rglob("*_min-code-version.sql")

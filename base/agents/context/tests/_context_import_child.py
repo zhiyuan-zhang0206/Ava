@@ -1,8 +1,3 @@
-"""Builds an AvaContext in a fresh interpreter; never imported by a production entry.
-
-Run as ``python -I _context_import_child.py``; prints the connection-stack modules it loaded.
-"""
-
 from __future__ import annotations
 
 import sys

@@ -1,10 +1,3 @@
-"""The two python checks of `fleet_update._PRE_VERIFY`, without the shell around them.
-
-Usage: `child_schedules_verify.py read_table <out file>` dumps the schedule rows as
-JSON; `child_schedules_verify.py check_rows <rows file>` sweeps a rows file and exits
-with the verify command's code.
-"""
-
 import json
 import sys
 from pathlib import Path

@@ -1,6 +1,3 @@
-"""The service's structure: the TaskGroup that owns the two loops, a crash that ends
-the process, the checkout guard, and the gateway no longer owning a manager."""
-
 from __future__ import annotations
 
 import asyncio
@@ -33,8 +30,6 @@ def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPoo
 
 
 def test_the_gateway_owns_no_schedule_manager() -> None:
-    """The manager is its own service: the gateway module is gone and its lifespan
-    neither builds nor starts one, so a gateway restart cannot touch schedules."""
     assert importlib.util.find_spec("gateway.schedules.manager") is None
     assert not hasattr(gateway.app, "ScheduleManager")
 
@@ -69,8 +64,6 @@ async def test_both_loops_run_their_rounds(
 async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, crashing: str
 ) -> None:
-    """A backend or database failure that is not a lost connection ends the
-    process; the supervisor restarts it."""
     cancelled: list[str] = []
 
     def stand_in(name: str):
@@ -162,10 +155,6 @@ async def test_a_foreign_checkout_refuses_to_supervise_schedules(
     process_config: ConfigBoot,
     tmp_path: Path,
 ) -> None:
-    """issue #194: a service running from a worktree against the prod home must not
-    supervise schedules — it would run un-reviewed code and die with the worktree.
-    It fails at boot instead of carrying on."""
-
     def foreign(_repo: object) -> str:
         return "prod home but foreign checkout"
 
@@ -184,8 +173,6 @@ async def test_a_foreign_checkout_refuses_to_supervise_schedules(
 async def test_a_quiesced_unit_polls_the_request_table_through_no_connection(
     monkeypatch: pytest.MonkeyPatch, quiesced: bool
 ) -> None:
-    """The request consumer reads the table every second even while holds are up
-    (so a request stays queued); inside the stop window it must not borrow."""
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
 
     def no_reconcile(_self: object) -> None:

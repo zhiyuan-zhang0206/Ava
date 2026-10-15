@@ -1,8 +1,3 @@
-"""Disposable scheduler daemon entry for the real signal tests.
-
-Usage: `shutdown_daemon.py <root> <mode> <postgres base>`.
-"""
-
 import sys
 from pathlib import Path
 

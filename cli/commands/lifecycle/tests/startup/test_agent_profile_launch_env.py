@@ -1,11 +1,3 @@
-"""Agent-profile root manifests bind the runner credential to that child only.
-
-This is the remote-managed gateway plane's provider projection: no write
-generation exists there, so only the agent-profile child receives the
-provider runner login. A pure agent-runner delivers its installed unit
-capability instead (base/cluster/authority/tests/test_unit_capability.py).
-"""
-
 from pathlib import Path
 
 import pytest

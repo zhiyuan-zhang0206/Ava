@@ -1,10 +1,3 @@
-"""Tests for agent.startup.notify_desktop_permissions_at_startup.
-
-Screen Recording and Accessibility keep separate status files from converge to
-startup. This test module pins their shared one-notice delivery and per-file
-atomic claim behavior.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

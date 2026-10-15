@@ -1,8 +1,3 @@
-"""Applies an explicit process timezone in a fresh interpreter; never imported by a production entry.
-
-Run as ``python _process_timezone_child.py <json-encoded name>``.
-"""
-
 from __future__ import annotations
 
 import json

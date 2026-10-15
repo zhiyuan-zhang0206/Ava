@@ -1,17 +1,3 @@
-"""ava.self.terminate cross-process e2e — agent self-terminates.
-
-Agent SDK calls ava.self.terminate() → exec raises AgentTermination + INSERT
-'terminate' inbound (source='self') → claim dispatch writes lifecycle marker + goto
-END → ainvoke returns → loop _notify_exit (gateway /exited finalize) → process exits.
-
-External trigger (POST /api/agents/{id}/terminate) uses same kind but source='user'/
-'agent:N' etc.; here we only test the SDK path's source='self' branch.
-
-Verifies:
-- agents.status='terminated' (marked at loop end)
-- inbound_messages has kind='terminate' source='self' row (inbound injected by SDK)
-"""
-
 from __future__ import annotations
 
 import psycopg

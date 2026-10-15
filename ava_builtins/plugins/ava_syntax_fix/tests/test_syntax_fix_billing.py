@@ -1,5 +1,3 @@
-"""Billing emission coverage for the syntax-repair provider call."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -14,11 +12,6 @@ from base.lm.catalog import ModelCatalog
 async def test_successful_syntax_repair_call_emits_chat_billing(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
-    """A successful repair response reaches the shared billing emitter.
-
-    The regression this catches is a rare provider call in the syntax repair
-    fallback being omitted from the per-call ledger.
-    """
     from ava_builtins.plugins.ava_syntax_fix._llm_repair import repair_once
 
     emitted: list[tuple[AIMessage, dict[str, Any]]] = []

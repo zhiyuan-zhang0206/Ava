@@ -1,5 +1,3 @@
-"""An external attachment whose lease has expired cannot call MCP tools through `ava.mcps`."""
-
 from __future__ import annotations
 
 import json
@@ -18,8 +16,6 @@ from agent.tests.impersonation.external_attachment import attached_runtime as at
 def test_expired_lease_cannot_dispatch_through_ava_mcps(
     attached_mcp_runtime: tuple[dict[str, Any], Any], unit_home: Path
 ) -> None:
-    """The lease is checked before the daemon is reached: with no daemon in this home, a call
-    that got past admission would fail with a connect error, not with the lease's expiry."""
     lease, attachment = attached_mcp_runtime
     (unit_home / "mcp.json").write_text(
         json.dumps({"mcpServers": {"example": {"command": "true"}}}), encoding="utf-8"

@@ -1,6 +1,3 @@
-"""The stop window: the indexer's drain loop leaves the dirty queue alone while the unit is
-quiesced — the pgvector backend borrows the pool for every batch."""
-
 from __future__ import annotations
 
 import asyncio

@@ -1,5 +1,3 @@
-"""Daemon cases: an unrelated op still dispatches while a."""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +37,6 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A readiness probe stays reachable while an unrelated worker is blocked."""
     dispatch_pool: ConnectionPool = stub_pool()
     started = threading.Event()
     release = threading.Event()
@@ -116,15 +113,6 @@ async def test_two_config_writes_cannot_interleave(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """`config_write` is a read-modify-write: `write_fields` walks the requested
-    keys through dotenv's `set_key`, rewriting the whole `.env` once per key. The
-    event loop used to serialize that for free; in a worker thread with
-    `ops_concurrency`=8 two of them can interleave, and the later writer lands
-    carrying the earlier one's snapshot — the earlier one's fields gone, silently,
-    in the only on-disk copy of a cluster's secrets.
-
-    Asserted as non-overlap rather than on a file, so it pins the guarantee (these
-    two never run at once) instead of one writer's implementation."""
     dispatch_pool: ConnectionPool = stub_pool()
     inside = 0
     overlapped = False
@@ -205,7 +193,6 @@ async def test_config_write_op_receives_actor_and_trace(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The gateway-stamped actor/trace ride the payload into config_write_op."""
     captured: dict[str, object] = {}
 
     class _Result:
@@ -254,7 +241,6 @@ async def test_config_audit_read_op_receives_last(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The config_audit_read arm forwards `last` into config_audit_read_op."""
     captured: dict[str, object] = {}
 
     class _Result:
@@ -296,7 +282,6 @@ async def test_config_audit_read_rejects_out_of_range_last(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """`last` outside 1..200 fails payload validation before any read."""
     dispatch_pool: ConnectionPool = stub_pool()
     status, result = await daemon._dispatch(
         "config_audit_read",
@@ -327,15 +312,6 @@ async def test_op_arms_do_not_run_on_the_default_executor(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """`asyncio.run` closes by JOINING every default-executor thread, so an arm
-    wedged there holds the interpreter's exit after everything else has cleaned up —
-    bounded at `THREAD_JOIN_TIMEOUT` (300 s) on 3.12, which is still twenty times the
-    supervisor's graceful window. Owning the pool is what decouples the two.
-
-    Asserted on the thread's name rather than on a shutdown timing, because the
-    name is the property that both keeps the arm off the default executor AND makes
-    the stuck thread findable in a dump — which is what the refusal runbook says to
-    go looking for."""
     dispatch_pool: ConnectionPool = stub_pool()
     seen: list[str] = []
 
@@ -372,7 +348,6 @@ async def test_op_arms_do_not_run_on_the_default_executor(
 def test_shutting_the_pool_down_does_not_wait_for_it(
     monkeypatch: pytest.MonkeyPatch, op_executor: ThreadPoolExecutor
 ) -> None:
-    """The invocation closes the executor without waiting for running arms."""
     calls: list[bool] = []
 
     def shutdown(wait: bool = True) -> None:

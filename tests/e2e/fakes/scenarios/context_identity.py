@@ -1,16 +1,3 @@
-"""ava.context in a real exec child — identity from the host, a DB call and a gateway call.
-
-Script:
-  turn 1: execute_code reads `ava.context.identity` (the identity the agent host put in the
-          exec request envelope), then uses it for one SQL read over `ava.context.sql` and
-          two gateway reads (`ava.agents.get_status`, `ava.context.gateway`), and prints what it saw
-  turn 2: final reply text
-
-The e2e agent runs its real graph and a real exec child, so the printed line proves the child
-rebuilt the host's context and that the identity it carries addresses the same agent in the
-database and at the gateway.
-"""
-
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage

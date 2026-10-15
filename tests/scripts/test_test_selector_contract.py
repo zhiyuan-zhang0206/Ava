@@ -1,5 +1,3 @@
-"""Contract: every lint-family test file on disk is pinned in the selector, and no pin is stale."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,8 +8,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_tree_scan_pins_cover_the_real_repo_lint_family_and_are_never_stale() -> None:
-    """Guard: every lint-family file on disk is pinned, and every explicit pin
-    exists — a new scan test cannot silently miss the subset."""
     pinned = test_selector.tree_scan_tests(_REPO_ROOT)
     lint_files = {
         path.relative_to(_REPO_ROOT).as_posix()

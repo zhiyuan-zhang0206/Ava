@@ -1,5 +1,3 @@
-"""Browser mcp daemon cases: handle client renew page wire roundtrip."""
-
 from __future__ import annotations
 
 import asyncio
@@ -14,8 +12,6 @@ from services.desktop.browser.tests.test_browser_mcp_daemon import FakeUpstream,
 
 
 async def test_handle_client_renew_page_wire_roundtrip() -> None:
-    """Wire-level: renew_page flows through the agent-keyed call path and its
-    result serializes like any other CallToolResult."""
     import contextlib
 
     up = FakeUpstream()

@@ -1,11 +1,3 @@
-"""Every loaded `ava` submodule is still an attribute of its parent package.
-
-A second execution of a package (pytest's importlib mode did it for `ava.sdk_surface` when a
-conftest below it loaded before `ava` was imported; `ava/conftest.py` prevents it) leaves the
-submodules in `sys.modules` but off the new package object, so `ava.sdk_surface.agent_identity`
-fails. Only a session that loads this directory's conftest can show it, hence the test lives here.
-"""
-
 import sys
 from types import ModuleType
 

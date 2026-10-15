@@ -1,8 +1,3 @@
-"""The marker contract of the home's generation-owned PTY allocation freeze.
-
-The service's enforcement of the marker is covered by `services/agent_runner/pty_sessions/tests/test_freeze.py`.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

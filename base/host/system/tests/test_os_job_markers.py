@@ -1,7 +1,3 @@
-"""The five crontab jobs carry fixed markers: registering leaves exactly one line
-per job, registering again changes nothing, and unregistering removes only the
-Ava lines."""
-
 from __future__ import annotations
 
 from pathlib import Path

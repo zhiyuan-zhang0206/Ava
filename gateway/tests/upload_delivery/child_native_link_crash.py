@@ -1,9 +1,3 @@
-"""Child process that dies inside `private_storage`'s link step.
-
-Usage: `child_native_link_crash.py <final path> <before-link|after-link>`. It exits 73
-at the chosen point, leaving the temp file exactly as a hard death would.
-"""
-
 import os
 import sys
 from pathlib import Path

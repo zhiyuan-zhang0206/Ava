@@ -1,23 +1,3 @@
-"""Parked-compact scenario — multi-message history compressed while parked.
-
-Like compact_flow, but with THREE pre-compact exchanges so the pre-compact
-history outlives the post-compact timeline by several item_ids. The task #1959
-regression needs that: with a single exchange the post-compact items
-(system_prompt / head / compact envelope / narration) reuse the SAME item_ids
-as the wiped ones, the keep-all switch-back merge dedupes them by id, and the
-resurrection the reset window exists to prevent never becomes visible.
-
-Script (one shared fake instance):
-  turn 1-3: replies to the three user messages (the history to compress)
-  turn 4:   the compaction summary text (consumed by the Compaction LLM call)
-  turn 5:   the post-compact narration (the compact transition resumes at LLM)
-
-Post-compact, state.messages is [system_prompt, head, summary envelope,
-narration]; the pre-compact exchanges at higher item_ids are gone from the
-REST snapshot — a keep-all merge of the stale parked bucket would resurrect
-them (exactly the bug).
-"""
-
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage

@@ -1,7 +1,3 @@
-"""A plugin service's own gate flows through the annotated roster view.
-
-Split out of `services/supervision/ava_root_glue/tests/test_plugin_services.py`: it writes the fleet plugin's real `FleetConfig` disk image, so it lives with the fleet plugin."""
-
 from __future__ import annotations
 
 import pytest
@@ -15,9 +11,6 @@ from services.supervision.roster import spec
 def test_plugin_gate_flows_through_annotation(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    """The plugin service's own gate is honored by ops: disabling task-maintenance
-    drops it from the start roster but keeps it (with a reason) in the annotated
-    view — same contract as the core config-gated services."""
     from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
     from base.packages.plugins.config_registration import disk_image_path
 

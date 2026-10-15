@@ -1,5 +1,3 @@
-"""Contract: scans the git-driving modules of the whole tree for subprocess.run timeouts."""
-
 from __future__ import annotations
 
 import ast
@@ -18,8 +16,6 @@ _GIT_DRIVING_MODULES = (
 
 @pytest.mark.parametrize("rel", _GIT_DRIVING_MODULES)
 def test_git_driving_modules_do_not_bound_with_subprocess_run(rel: str) -> None:
-    """No `subprocess.run(..., timeout=...)` in the modules that drive git: a
-    timeout there must come from `run_bounded`, which bounds the tree."""
     tree = ast.parse((_REPO_ROOT / rel).read_text())
     offenders = [
         node.lineno

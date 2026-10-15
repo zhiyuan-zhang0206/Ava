@@ -1,5 +1,3 @@
-"""Backup cases: run with progress without a sink defers."""
-
 from __future__ import annotations
 
 import subprocess
@@ -31,7 +29,6 @@ from services.backup.tests.test_backup import (
 def test_run_with_progress_without_a_sink_defers_to_subprocess_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`progress=None` is the untouched subprocess.run path the scheduler uses."""
     calls: list[list[str]] = []
 
     def _fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
@@ -52,9 +49,6 @@ def test_run_with_progress_without_a_sink_defers_to_subprocess_run(
 def test_run_with_progress_heartbeats_while_a_slow_child_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A stage allowed to run for minutes narrates itself: one start line, then a
-    line per interval carrying the bytes written. This is what keeps a slow
-    dump from reading as a stalled rollout (2026-09-14 incident)."""
     monkeypatch.setattr(backup, "PROGRESS_INTERVAL_S", 0.2)
     out = tmp_path / "slow.dump.partial"
     out.write_bytes(b"")
@@ -91,8 +85,6 @@ def test_run_with_progress_heartbeats_while_a_slow_child_runs(
 def test_run_with_progress_timeout_still_kills_the_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The progress path keeps subprocess.run's bound: expiry kills the child and
-    raises TimeoutExpired, so the scheduler's retry discipline is unchanged."""
     monkeypatch.setattr(backup, "PROGRESS_INTERVAL_S", 0.2)
     marker = tmp_path / "finished"
     stage = tmp_path / "hung_stage.py"
@@ -124,9 +116,6 @@ def test_run_with_progress_timeout_still_kills_the_child(
 def test_run_backup_narrates_both_silent_stages_through_progress(
     bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
-    """`run_backup(progress=...)` reports both stages allowed to run for minutes
-    without output — pg_dump and the encryption pass — each with its label, its
-    bound, and the file it writes."""
     stages: list[tuple[str, Path | None]] = []
 
     def _fake_stage(
@@ -175,7 +164,6 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
 
 
 def test_backup_lock_reentrant_same_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A snapshot may take the lock before `run_backup` takes it again."""
     ava_home = tmp_path / "ava-home"
     monkeypatch.setenv("AVA_HOME", str(ava_home))
 
@@ -189,7 +177,6 @@ def test_backup_lock_reentrant_same_thread(tmp_path: Path, monkeypatch: pytest.M
 def test_backup_lock_cross_process_excludes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A scheduler dump waits for a rollout snapshot already holding the lock."""
     ava_home = tmp_path / "ava-home"
     monkeypatch.setenv("AVA_HOME", str(ava_home))
     ready = tmp_path / "ready"
@@ -210,7 +197,6 @@ def test_backup_lock_cross_process_excludes(
 
 
 def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A wedged snapshot produces a bounded failure rather than an unbounded wait."""
     ava_home = tmp_path / "ava-home"
     monkeypatch.setenv("AVA_HOME", str(ava_home))
     ready = tmp_path / "ready"
@@ -232,7 +218,6 @@ def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyP
 def test_run_backup_serializes_dump_creation(
     bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
-    """The public entry point holds the cross-process lock around its body."""
     events: list[str] = []
     artifact = bdir / "verified.dump.enc"
 

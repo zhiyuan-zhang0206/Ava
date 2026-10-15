@@ -1,11 +1,3 @@
-"""Initialize a home's identity without starting it.
-
-`prepare_init_identity` runs the identity half of `cli.init_intent.run_init` for a
-source checkout: resolve the home, then publish its identity under the start-intent
-lock. It starts nothing and raises instead of printing. Every step is looked up on
-`cli.start_intent` at call time, so a test's monkeypatch of `_checkout` applies.
-"""
-
 from __future__ import annotations
 
 import argparse
