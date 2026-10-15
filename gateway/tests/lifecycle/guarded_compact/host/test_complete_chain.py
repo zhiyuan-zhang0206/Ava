@@ -17,9 +17,9 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddBindings
 from gateway.tests.lifecycle.guarded_compact.host.faults import install
-from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel, make_host
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.mark.parametrize("interval", [1, 100])
@@ -27,9 +27,9 @@ from services.agent_runner.agent_host.tests.guarded_compact_support import Summa
     "fault", ["none", "before_result", "after_result", "after_apply_checkpoint", "after_ack"]
 )
 async def test_real_host_http_once_summary_cold_ack_and_next_chat(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     interval: int,
@@ -38,6 +38,7 @@ async def test_real_host_http_once_summary_cold_ack_and_next_chat(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
+    del gateway_data_plane
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     agent = agent_row(db_conn)
     db_conn.execute(
@@ -84,45 +85,46 @@ async def test_real_host_http_once_summary_cold_ack_and_next_chat(
         "Idempotency-Key": str(uuid4()),
     }
     path = f"/api/keyed/v1/agents/{agent}"
-    observed = client.get(path + "/compact-target", headers=headers)
-    assert observed.status_code == 200, observed.text
-    accepted = client.post(path + "/compact-history", json=observed.json(), headers=headers)
-    assert accepted.status_code == 202, accepted.text
-    injected = install(monkeypatch, fault)
-    if fault != "none":
-        await assert_interrupted(
-            host,
-            client,
-            path,
-            headers,
-            accepted,
-            generated_models,
-            ordinary,
-            injected,
-            fault,
-            db_conn,
-            agent,
+    with gateway_test_client() as client:
+        observed = client.get(path + "/compact-target", headers=headers)
+        assert observed.status_code == 200, observed.text
+        accepted = client.post(path + "/compact-history", json=observed.json(), headers=headers)
+        assert accepted.status_code == 202, accepted.text
+        injected = install(monkeypatch, fault)
+        if fault != "none":
+            await assert_interrupted(
+                host,
+                client,
+                path,
+                headers,
+                accepted,
+                generated_models,
+                ordinary,
+                injected,
+                fault,
+                db_conn,
+                agent,
+            )
+            return
+        await host.run_turn(agent)
+        status = client.get(
+            path + "/compact-commands/" + accepted.json()["command_id"], headers=headers
         )
-        return
-    await host.run_turn(agent)
-    status = client.get(
-        path + "/compact-commands/" + accepted.json()["command_id"], headers=headers
-    )
-    assert_original_completion(status, summaries, generated_models, ordinary, injected, fault)
-    persisted = await cold_reader(saver).aget_tuple(config)
-    assert persisted is not None
-    values = persisted.checkpoint["channel_values"]
-    assert_original_replaced(values)
-    assert (
-        client.post(path + "/compact-history", json=observed.json(), headers=headers).json()
-        == accepted.json()
-    )
-    insert(db_conn, agent)
-    await host.run_turn(agent)
-    assert len(ordinary) == 2
-    assert str(ordinary[-1]) != status.json()["execution"]["work_id"]
-    assert summaries == ["gpt-6.1-sol"]
-    assert generated_models[0].calls == 1
+        assert_original_completion(status, summaries, generated_models, ordinary, injected, fault)
+        persisted = await cold_reader(saver).aget_tuple(config)
+        assert persisted is not None
+        values = persisted.checkpoint["channel_values"]
+        assert_original_replaced(values)
+        assert (
+            client.post(path + "/compact-history", json=observed.json(), headers=headers).json()
+            == accepted.json()
+        )
+        insert(db_conn, agent)
+        await host.run_turn(agent)
+        assert len(ordinary) == 2
+        assert str(ordinary[-1]) != status.json()["execution"]["work_id"]
+        assert summaries == ["gpt-6.1-sol"]
+        assert generated_models[0].calls == 1
 
 
 def assert_original_replaced(values: dict[str, Any]) -> None:

@@ -8,21 +8,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster import machines
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import MachineIdentitySetter
 from gateway.agents import creation as agent_creation
-from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity):
-    set_machine_identity(role="agent-runner", name="local-test")
+def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity: MachineIdentitySetter):
+    machine: MachineIdentity = set_machine_identity(role="agent-runner", name="local-test")
 
     async def accept(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return SpawnedAgent(id=body.agent_id)
 
     monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
-    with TestClient(app) as value:
+    with gateway_test_client(machine=machine) as value:
         yield value
 
 

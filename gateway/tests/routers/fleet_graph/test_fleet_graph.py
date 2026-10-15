@@ -24,9 +24,9 @@ from psycopg import errors as pg_errors
 
 from base.events.live.tests.fakes import patch_sync_redis
 from base.events.reads import audit_rows
-from gateway.app import app
 from gateway.tests.routers.fleet_graph.staleness_support import use_heartbeat_age
 from services.upkeep.events_maintenance import rollup
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _seed_agent(
@@ -130,7 +130,7 @@ def test_decay_lambda_comes_from_display_config(
     )
 
     monkeypatch.setattr(settings.display, "fleet_graph_decay_lambda", 0.0)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200, resp.text
@@ -153,7 +153,7 @@ def test_nodes_use_immutable_birth_parent(db_conn: psycopg.Connection) -> None:
         born_spawner=f"agent:{birth_parent}",
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
 
     assert nodes[child]["spawner"] == f"agent:{birth_parent}"
@@ -163,7 +163,7 @@ def test_total_tokens_sums_in_plus_out(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     _usage(db_conn, a, in_total=300, out_total=80)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
 
     assert nodes[a]["total_tokens"] == 380  # in 300 + out 80
@@ -178,7 +178,7 @@ def test_total_tokens_reads_the_retained_seven_day_window(db_conn: psycopg.Conne
 
     _roll_ledger(db_conn)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
 
     assert nodes[a]["total_tokens"] == 110
@@ -196,7 +196,7 @@ def test_node_exposes_canonical_status_and_independent_liveness(
         )
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
 
     assert nodes[a]["status"] == "idling"
@@ -206,7 +206,7 @@ def test_node_exposes_canonical_status_and_independent_liveness(
 def test_total_tokens_zero_without_usage(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
     assert nodes[a]["total_tokens"] == 0
 
@@ -218,7 +218,7 @@ def test_total_tokens_comes_from_llm_usage_rows_only(db_conn: psycopg.Connection
     _usage(db_conn, a, in_total=100, out_total=50)
     _usage(db_conn, a, in_total=7777, out_total=7777, event="turn_end")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
 
     assert nodes[a]["total_tokens"] == 150
@@ -230,7 +230,7 @@ def test_total_tokens_scoped_per_agent(db_conn: psycopg.Connection) -> None:
     _usage(db_conn, a, in_total=100, out_total=50)
     _usage(db_conn, b, in_total=1, out_total=1)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
 
     assert nodes[a]["total_tokens"] == 150
@@ -244,7 +244,7 @@ def test_node_score_weights_output_ten_times_input(db_conn: psycopg.Connection) 
     a = _seed_agent(db_conn)
     _usage(db_conn, a, in_total=300, out_total=80)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
 
     # SUM(in)*0.1 + SUM(out)*1.0 = 300*0.1 + 80*1.0 = 30 + 80 = 110
@@ -254,7 +254,7 @@ def test_node_score_weights_output_ten_times_input(db_conn: psycopg.Connection) 
 def test_node_score_zero_without_usage(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
     assert nodes[a]["node_score"] == 0.0
 
@@ -267,7 +267,7 @@ def test_node_score_windowed_excludes_old_events(db_conn: psycopg.Connection) ->
 
     _roll_ledger(db_conn)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client, "?hours=24")
 
     # Only the recent event scores: 100*0.1 + 100*1.0 = 110. total_tokens keeps
@@ -278,7 +278,7 @@ def test_node_score_windowed_excludes_old_events(db_conn: psycopg.Connection) ->
 
 def test_node_drops_degree_fields(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
     assert "degree_in" not in nodes[a]
     assert "degree_out" not in nodes[a]
@@ -300,7 +300,7 @@ def test_edge_weight_type_multiplier_fresh(db_conn: psycopg.Connection) -> None:
     _event(db_conn, source_agent=s, target_agent=c, event_type="spawn")
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         edges = _edges_by_type(client)
 
     # Fresh single events: lineage weight = COUNT(*) * 2.0 = 2.0 (permanent);
@@ -318,7 +318,7 @@ def test_lineage_edge_permanent_no_decay_always_shown(db_conn: psycopg.Connectio
     # weight = COUNT(*) * 2.0, no time decay, and never filtered by the HAVING.
     _event(db_conn, source_agent=s, target_agent=c, event_type="spawn", age_hours=2000)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         edges = _edges_by_type(client)
 
     assert edges["spawn"]["weight"] == 2.0
@@ -332,7 +332,7 @@ def test_resurrect_edge_included_as_permanent_lineage(db_conn: psycopg.Connectio
     _event(db_conn, source_agent=s, target_agent=c, event_type="resurrect")
     _event(db_conn, source_agent=s, target_agent=c, event_type="resurrect")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         edges = _edges_by_type(client)
 
     # Permanent weight = COUNT(*) * 2.0 = 2 * 2.0 = 4.0.
@@ -352,7 +352,7 @@ def test_lineage_edge_not_excluded_by_time_window(db_conn: psycopg.Connection) -
     # at the same age is filtered, but the lineage edge must still appear.
     _event(db_conn, source_agent=s, target_agent=c, event_type="spawn", age_hours=100)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         edges = _edges_by_type(client, "?hours=24")
 
     # Lineage edge survives the time window.
@@ -368,7 +368,7 @@ def test_message_edge_below_threshold_filtered(db_conn: psycopg.Connection) -> N
     # the same age still shows; only messages are thresholded.)
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=2000)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         edges = _edges_by_type(client)
 
     assert "send_message" not in edges
@@ -381,7 +381,7 @@ def test_edge_weight_sums_per_event_with_decay(db_conn: psycopg.Connection) -> N
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message")
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         edges = _edges_by_type(client)
 
     expected = 1.0 + math.exp(-0.5 * 2.0)
@@ -423,7 +423,7 @@ def test_edge_window_excludes_old_events(db_conn: psycopg.Connection) -> None:
     # A 100h-old LIVE message (the live stream carries any post-freeze age).
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=100)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         # 24h window excludes the 100h-old event -> no edges.
         assert _edges_by_type(client, "?hours=24") == {}
         # All-time still sees it.
@@ -435,7 +435,7 @@ def test_decay_lambda_param_steepens_decay(db_conn: psycopg.Connection) -> None:
     c = _seed_agent(db_conn)
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         gentle = _edges_by_type(client, "?decay_lambda=0.1")["send_message"]["weight"]
         steep = _edges_by_type(client, "?decay_lambda=2.0")["send_message"]["weight"]
 
@@ -450,7 +450,7 @@ def test_decay_lambda_is_quantized_for_edge_computation(
     c = _seed_agent(db_conn)
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         weight = _edges_by_type(client, "?decay_lambda=0.551")["send_message"]["weight"]
 
     assert weight == pytest.approx(math.exp(-0.55 * 2.0), abs=1e-4)  # pyright: ignore[reportUnknownMemberType]
@@ -460,7 +460,7 @@ def test_decay_lambda_quantization_aliases_cache_key(db_conn: psycopg.Connection
     a = _seed_agent(db_conn)
     _usage(db_conn, a, in_total=100)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = client.get("/api/fleet/graph", params={"decay_lambda": 0.55})
         assert first.status_code == 200
 
@@ -473,7 +473,7 @@ def test_decay_lambda_quantization_aliases_cache_key(db_conn: psycopg.Connection
 
 
 def test_decay_lambda_above_maximum_is_rejected() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get("/api/fleet/graph", params={"decay_lambda": 10.01})
 
     assert response.status_code == 422
@@ -491,7 +491,7 @@ def test_edges_touching_terminated_agent_excluded_by_default(db_conn: psycopg.Co
     _event(db_conn, source_agent=live, target_agent=dead, event_type="spawn")
     _event(db_conn, source_agent=dead, target_agent=live, event_type="send_message")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/fleet/graph")
     assert resp.status_code == 200
     body = resp.json()
@@ -509,7 +509,7 @@ def test_live_node_with_terminated_spawner_shows_isolated(db_conn: psycopg.Conne
     dead = _seed_agent(db_conn, status="terminated")
     _event(db_conn, source_agent=dead, target_agent=live, event_type="spawn")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/fleet/graph")
     assert resp.status_code == 200
     body = resp.json()
@@ -524,7 +524,7 @@ def test_edge_between_two_terminated_agents_excluded_by_default(
     d2 = _seed_agent(db_conn, status="terminated")
     _event(db_conn, source_agent=d1, target_agent=d2, event_type="spawn")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/fleet/graph")
     assert resp.status_code == 200
     assert resp.json()["edges"] == []
@@ -537,7 +537,7 @@ def test_include_terminated_returns_terminated_endpoint_edges(db_conn: psycopg.C
     dead = _seed_agent(db_conn, status="terminated")
     _event(db_conn, source_agent=live, target_agent=dead, event_type="spawn")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/fleet/graph?include_terminated=true")
     assert resp.status_code == 200
     body = resp.json()
@@ -554,7 +554,7 @@ def test_live_live_edge_still_returned_after_filter(db_conn: psycopg.Connection)
     _event(db_conn, source_agent=s, target_agent=c, event_type="spawn")
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         edges = _edges_by_type(client)
 
     assert edges["spawn"]["weight"] == 2.0
@@ -574,7 +574,7 @@ def test_null_agent_id_audit_row_does_not_500_and_makes_no_edge(
     t = _seed_agent(db_conn)  # target side is a real agent
     _event(db_conn, source_agent=None, target_agent=t, event_type="send_message")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/fleet/graph")
     assert resp.status_code == 200
     assert resp.json()["edges"] == []
@@ -590,13 +590,13 @@ def test_cache_serves_stale_graph_within_ttl(db_conn: psycopg.Connection) -> Non
     a = _seed_agent(db_conn)
     _usage(db_conn, a, in_total=100, out_total=50)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = _nodes_by_id(client)
 
     # Usage added after the first request — must NOT be visible.
     _usage(db_conn, a, in_total=9999, out_total=9999)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         second = _nodes_by_id(client)
 
     assert first[a]["total_tokens"] == 150
@@ -612,7 +612,7 @@ def test_cache_key_separates_params(db_conn: psycopg.Connection) -> None:
 
     _roll_ledger(db_conn)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         all_time = _nodes_by_id(client)
         windowed = _nodes_by_id(client, "?hours=24")
 
@@ -643,7 +643,7 @@ def test_cache_fail_open_when_redis_down(
         raise ConnectionError("redis down")
 
     patch_sync_redis(monkeypatch, boom)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get("/api/fleet/graph")
 
     assert response.status_code == 200
@@ -656,7 +656,7 @@ def test_cache_fail_open_when_redis_down(
 
 
 def test_query_canceled_is_a_500_not_an_empty_graph(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     """A statement-timeout cancellation surfaces as the gateway's typed 500; the
     route never answers a failed read with an empty or cached graph."""
@@ -668,10 +668,10 @@ def test_query_canceled_is_a_500_not_an_empty_graph(
         def close(self) -> None:
             pass
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with gateway_test_client(raise_server_exceptions=False) as client:
         # The lifespan startup assigns the real pool; override it inside the
         # client context so the teardown close() still runs against our stub.
-        monkeypatch.setattr(app.state, "db_pool", _CanceledPool())
+        client.app.state.db_pool = _CanceledPool()
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 500
@@ -683,7 +683,7 @@ def test_query_canceled_is_a_500_not_an_empty_graph(
 
 
 def test_query_canceled_mid_read_is_a_500(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     """A cancellation raised from inside the cursor (the statement-timeout path)
     fails the request rather than degrading to an indistinguishable empty fleet."""
@@ -715,10 +715,10 @@ def test_query_canceled_mid_read_is_a_500(
         def close(self) -> None:
             pass
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with gateway_test_client(raise_server_exceptions=False) as client:
         # The lifespan startup assigns the real pool; override it inside the
         # client context so the teardown close() still runs against our stub.
-        monkeypatch.setattr(app.state, "db_pool", _BoomPool())
+        client.app.state.db_pool = _BoomPool()
         resp = client.get("/api/fleet/graph", params={"decay_lambda": 0.77})
     assert resp.status_code == 500
     assert resp.json()["code"] == "internal_error"

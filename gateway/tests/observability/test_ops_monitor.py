@@ -15,11 +15,10 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
-from gateway.app import app
 from gateway.cluster import ops_monitor
 from gateway.cluster.ops_series import GRID_ORIGIN, bucket_start_times
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _add(
@@ -86,7 +85,7 @@ def test_ops_monitor_empty_envelope_and_zero_fill(db_conn: psycopg.Connection) -
     """Empty backends -> all groups present, series fully zero-filled at the
     window's fixed point count (24h -> 48 buckets), totals zero."""
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/ops/monitor")
     assert resp.status_code == 200
     body = resp.json()
@@ -97,7 +96,7 @@ def test_ops_monitor_empty_envelope_and_zero_fill(db_conn: psycopg.Connection) -
 def test_ops_monitor_window_param_sets_bucket_count(db_conn: psycopg.Connection) -> None:
     """1h -> 60 buckets of 60s; 7d -> 168 buckets of 1h."""
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         for window, n, bucket_s in (("1h", 60, 60), ("7d", 168, 3600)):
             resp = client.get(f"/api/ops/monitor?window={window}")
             assert resp.status_code == 200, window
@@ -119,7 +118,7 @@ def test_ops_monitor_sse_wires_kind_and_event_log_drop(db_conn: psycopg.Connecti
     _add(db_conn, event="sse_drop", payload={"n": 1}, ts_offset_hours=3)  # no kind
     _add(db_conn, event="event_log_drop", payload={"n": 3}, ts_offset_hours=1)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/ops/monitor").json()
     sse = body["sse"]
     assert sse["totals"] == {"queue_full": 1, "publish_error": 2, "event_log_drop": 1}
@@ -155,7 +154,7 @@ def _seed_llm_bucket(db: psycopg.Connection) -> int:
 
 def _llm_report(db: psycopg.Connection) -> tuple[dict[str, Any], int]:
     i = _seed_llm_bucket(db)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         return client.get("/api/ops/monitor").json()["llm"], i
 
 
@@ -198,7 +197,7 @@ def test_ops_monitor_restarts_wires_service_breakdown(db_conn: psycopg.Connectio
     _add(db_conn, event="service_started", payload={"name": "gateway"}, ts_offset_hours=1)
     _add(db_conn, event="service_started", payload={"name": "restarter"}, ts_offset_hours=2)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/ops/monitor").json()
     restarts = body["restarts"]
     assert restarts["totals"] == {"service_starts": 3}
@@ -218,7 +217,7 @@ def test_ops_monitor_grid_alignment(db_conn: psycopg.Connection) -> None:
     now = _now_ts()
     _add(db_conn, event="sse_drop", payload={"kind": "queue_full"}, ts_offset_hours=0.5)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get("/api/ops/monitor").json()
     meta = body["meta"]
     i = _grid_index(now - timedelta(hours=0.5), now, 86400, 1800)
@@ -235,7 +234,7 @@ def test_ops_monitor_read_that_exceeds_its_statement_timeout_is_a_retriable_503(
         raise psycopg.errors.QueryCanceled("statement timeout")
 
     monkeypatch.setattr(ops_monitor, "fetch_ops_series", cancelled)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get("/api/ops/monitor")
     assert response.status_code == 503
     assert "retry" in response.json()["detail"]

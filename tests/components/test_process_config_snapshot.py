@@ -5,8 +5,8 @@ import pytest
 from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
 from base.config import field_names, get_field, settings
 from base.config.tests.configuration import snapshot_process_config
-from gateway import app as gateway_app
-from tests.path_scoped.gateway_tests import gateway_config_owner as gateway_config_owner
+from gateway.http.config import gateway_config_from_boot
+from tests.fixtures.gateway_config import gateway_test_app
 
 
 @pytest.mark.parametrize("explicit", [False, True], ids=["default", "explicit"])
@@ -45,7 +45,9 @@ def test_gateway_snapshot_preserves_all_values_and_timezone_origin(explicit: boo
         if not explicit:
             settings.general.model_fields_set.discard("timezone")
         values = {name: get_field(name) for name in field_names()}
-        owner = gateway_app.ConfigBoot()
+        app = gateway_test_app()
+        owner = app.state.gateway_process.config
+        assert app.state.gateway_config == gateway_config_from_boot(owner)
         assert {name: owner.get_field(name) for name in values} == values
         assert owner.field_explicitly_set("timezone") is explicit
         clock = Clock(clock_config_from_boot(owner), timers=SYSTEM_TIMERS)

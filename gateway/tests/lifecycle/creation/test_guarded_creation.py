@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from typing import Any
 
 import psycopg
@@ -14,11 +15,14 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import settings
 from gateway.agents import creation as agent_creation
 from gateway.agents.creation import scoped_creation_key
-from gateway.app import app
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.mcp_calls import tool_call, tool_result
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
+from tests.fixtures.gateway_config import (
+    GatewayTestClient,
+    create_mcp_client,
+    gateway_test_client,
+)
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 PATH = "/api/keyed/v1/agents"
@@ -33,7 +37,7 @@ def client(
     set_machine_identity: Any,
     *,
     machine_identity: MachineIdentity,
-) -> Iterator[TestClient]:
+) -> Iterator[GatewayTestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
 
@@ -42,7 +46,7 @@ def client(
 
     monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
     with gateway_test_client(
-        app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
     ) as value:
         yield value
 
@@ -104,28 +108,32 @@ def test_lost_response_and_concurrency_replay_one_birth(
 
 
 def test_revoked_credential_cannot_replay_guarded_receipt(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert client.post(PATH, json={"machine": "local-test"}, headers=HEADERS).status_code == 201
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-guarded-secret")
-    assert client.post(PATH, json={}, headers=HEADERS).status_code == 401
+    with gateway_test_client(
+        process=client.app.state.gateway_process,
+        config=replace(
+            client.app.state.gateway_config,
+            cluster_secret="rotated-guarded-secret",  # noqa: S106 -- isolated test credential
+        ),
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as rotated:
+        assert rotated.post(PATH, json={}, headers=HEADERS).status_code == 401
     assert _count(db_conn) == 1
 
 
 def test_preexisting_mcp_canonical_hash_replays_original_agent(
     gateway_data_plane: None,
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr(settings.gateway, "mcp_endpoint_enabled", True)
     # The MCP manager is built by lifespan, so re-enter with the flag enabled.
     with gateway_test_client(
-        app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        process=client.app.state.gateway_process,
+        config=replace(client.app.state.gateway_config, mcp_endpoint_enabled=True),
+        headers={"Authorization": f"Bearer {SECRET}"},
     ) as mcp:
         credentials = create_mcp_client(mcp, "prior", "write").json()
         token = credentials["token"]

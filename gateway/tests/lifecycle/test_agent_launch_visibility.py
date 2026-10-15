@@ -17,9 +17,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
-from gateway.app import app
 from gateway.tests.test_agents_endpoints import inbound_rows
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent_id: int) -> None:
@@ -53,7 +52,7 @@ def test_failed_plain_launch_persists_prompt_and_advertises_guarded_recovery(
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
     monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         failed = spawn_via_http(client, {"prompt": "Do the task", "prompt_source": "user"})
         assert failed.status_code == 502
         body = failed.json()
@@ -79,7 +78,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
     monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         failed = spawn_via_http(client, {"prompt": "Keep me", "prompt_source": "user"})
         assert failed.status_code == 502
         body = failed.json()
@@ -96,7 +95,7 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         source = spawn_via_http(client, {}).json()["id"]
         with db_conn.cursor() as cur:
             cur.execute(
@@ -140,7 +139,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "response lost")
 
     monkeypatch.setattr(creation, "forward_spawn_to_remote", _admit_then_fail)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = spawn_via_http(client, {"prompt": "Stay", "prompt_source": "user"})
     assert response.status_code == 201
     agent_id = response.json()["id"]

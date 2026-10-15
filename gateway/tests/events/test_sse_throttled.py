@@ -8,13 +8,11 @@ from collections.abc import AsyncIterator
 import psycopg
 import pytest
 import redis as sync_redis
-from fastapi.testclient import TestClient
 
 from base.config import settings
 from base.db import create_agent
 from base.events.live.bus import EventBus
 from base.events.live.projection import ChatDelta, CodeDelta, LabelUpdated
-from gateway.app import app
 from gateway.events.sse import (
     decode_frames_for_test,
     sse_batch_frame,
@@ -23,6 +21,7 @@ from gateway.events.sse import (
 )
 from gateway.tests.events.test_sse import FakeRequest
 from gateway.tests.events.test_sse import redis_client as redis_client
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 async def _collect_throttled_frames(
@@ -284,7 +283,7 @@ def test_throttled_agent_filter_endpoint_query(
 
     monkeypatch.setattr(system_router, "throttled_event_stream", fake_stream)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         with client.stream("GET", f"/api/system/all?agents={tid}") as resp:
             assert resp.status_code == 200
         assert captured_kwargs["agent_filter"] == {tid}

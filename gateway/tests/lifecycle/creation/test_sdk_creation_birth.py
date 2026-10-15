@@ -7,7 +7,6 @@ from uuid import UUID
 import httpx
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from ava.gateway_client import use_client
 from base.api_contracts.agent_contract import GatewayUnavailable
@@ -16,13 +15,12 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import settings
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
-from gateway.app import app
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.tests.lifecycle.creation.test_sdk_strong_creation import httpx_response_of, sdk
 from ops.cluster import rpc
 from ops.lifecycle.launch import validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
@@ -40,11 +38,12 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
     launches: list[LaunchAgentRequest] = []
+    target: GatewayTestClient
 
     async def accept(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         # Exercise the runner's real original-attempt/placement fence, rather
         # than treating matching JSON as execution evidence.
-        validate_launch_row(app.state.db_pool, body, local_machine=machine_identity.name())
+        validate_launch_row(target.app.state.db_pool, body, local_machine=machine_identity.name())
         launches.append(body)
         return SpawnedAgent(id=body.agent_id)
 
@@ -55,7 +54,6 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     monkeypatch.setattr(rpc, "dispatch_to_machine", reconcile)
     http = MagicMock()
     lose = True
-    target: TestClient
 
     def submit(path: str, **kwargs: Any) -> httpx.Response:
         nonlocal lose
@@ -68,7 +66,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     http.post.side_effect = submit
     with use_client(http):
         with gateway_test_client(
-            app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+            headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
         ) as target:
             with pytest.raises(GatewayUnavailable):
                 sdk()
@@ -91,7 +89,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
                 assert retry.json()["launch_attempt_id"] != str(original)
         # A new lifespan owns fresh pools and no prior acceptance cache.
         with gateway_test_client(
-            app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+            headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
         ) as target:
             assert sdk() == agent_id
     assert http.post.call_count == lost_attempts + 1

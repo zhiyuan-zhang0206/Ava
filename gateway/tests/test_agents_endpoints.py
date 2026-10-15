@@ -21,9 +21,7 @@ from fastapi.testclient import TestClient
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
-from gateway.app import app
-from gateway.http.middleware.cors import cors_allowed_origins
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture
@@ -90,7 +88,7 @@ def _assert_retired_models_absent(body: dict[str, Any], flat: list[str]) -> None
 
 
 def test_get_models_returns_grouped_supported_models() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/models")
     assert resp.status_code == 200
     body = resp.json()
@@ -127,7 +125,7 @@ def test_get_models_surfaces_superseded_by(
     import gateway.app as gateway_app
 
     monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/models")
     body = resp.json()
     assert body["models"]["glm-5.2"]["superseded_by"] == "kimi-k3"
@@ -141,7 +139,7 @@ def test_get_models_every_model_has_reasoning_effort_control() -> None:
     claude-haiku-4-5-20251001), a two-value control mapped onto that switch. Locks in
     the 2026-07-24 audit that closed the mimo/haiku gap (both used to return
     `reasoning_effort_options: null`, hiding the dropdown entirely)."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/models")
     body = resp.json()
     missing = [
@@ -181,7 +179,7 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     would silently offer the spawn UI a value build_chat_model then clamps
     away, or hide a value the provider actually accepts."""
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/models")
     models = resp.json()["models"]
 
@@ -223,7 +221,7 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     per-model view)."""
     from base.config import settings
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/models")
     assert resp.status_code == 200
     models = resp.json()["models"]
@@ -249,7 +247,7 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
 
     # The published default is the MODEL's default, not the cluster pin.
     monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/models")
     models = resp.json()["models"]
     assert models["deepseek-flash"]["reasoning_effort_default"] == "max"
@@ -257,7 +255,7 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
 
 class TestSpawn:
     def test_spawn_minimal_no_prompt_no_spawner(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(client, {})
         assert resp.status_code == 201
         new_id = resp.json()["id"]
@@ -268,7 +266,7 @@ class TestSpawn:
         assert inbound_rows(db_conn, new_id) == []
 
     def test_spawn_with_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(client, {"prompt": "\u67e5 X", "prompt_source": "user"})
         new_id = resp.json()["id"]
         assert inbound_rows(db_conn, new_id) == [("\u67e5 X", "chat", "user")]
@@ -276,7 +274,7 @@ class TestSpawn:
     def test_spawn_with_long_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
         """Long reports are delivered through the shared user-content schema."""
         prompt = "a" * 100_000
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(client, {"prompt": prompt, "prompt_source": "user"})
         assert resp.status_code == 201
         new_id = resp.json()["id"]
@@ -284,7 +282,7 @@ class TestSpawn:
 
     def test_spawn_with_explicit_spawner(self, db_conn: psycopg.Connection) -> None:
         """spawner can be passed explicitly — e.g., when claude-code starts an ava agent, pass 'claude-code'."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(client, {"spawner": "claude-code"})
         new_id = resp.json()["id"]
         row = _agent_row(db_conn, new_id)
@@ -304,7 +302,7 @@ class TestSpawn:
         import gateway.app as gateway_app
 
         monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(client, {"config": {"llm_model": model}})
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -318,7 +316,7 @@ class TestSpawn:
 
     def test_spawn_available_model_carries_no_receipt(self, db_conn: psycopg.Connection) -> None:
         """An available id is stored as sent — no rewrite, no receipt."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}})
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -332,7 +330,7 @@ class TestSpawn:
     ) -> None:
         """fork_from given → gateway internally SELECT max(checkpoint_id) → spawn_agent
         with explicit fork_checkpoint. New agent gets full checkpoint chain."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             source = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 for ckpt, parent in [("cka", None), ("ckb", "cka"), ("ckc", "ckb")]:
@@ -364,7 +362,7 @@ class TestSpawn:
     ) -> None:
         """fork_from's source has no checkpoint → 409 + reason='fork_source_empty'
         (follows ForkSourceEmpty wire-encoded path, handler maps uniformly, SDK reconstructs from code)."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             source = spawn_via_http(client, {}).json()["id"]
             resp = spawn_via_http(client, {"fork_from": source})
         assert resp.status_code == 409
@@ -377,7 +375,7 @@ class TestSpawn:
         db_conn: psycopg.Connection,
     ) -> None:
         """Empty prompt → 422 (pydantic StringConstraints strip + min_length)."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(client, {"prompt": "   "})
         assert resp.status_code == 422
 
@@ -387,7 +385,7 @@ class TestSpawn:
     ) -> None:
         """prompt given but prompt_source missing → 422 (model_validator blocks).
         Prevents the anti-pattern of "caller forgot field silently attributed to user"."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(client, {"prompt": "\u67e5 X"})
         assert resp.status_code == 422
         # detail contains validator's Chinese-language prompt
@@ -407,8 +405,8 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(_agents_creation, "forward_spawn_to_remote", _explode)
-    allowed_origin = cors_allowed_origins()[0]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
+        allowed_origin = client.app.state.gateway_config.allowed_origins[0]  # type: ignore[union-attr]
         resp = spawn_via_http(client, {}, headers={"Origin": allowed_origin})
     assert resp.status_code == 502
     assert resp.json()["reason"] == "agent_launch_failed"
@@ -422,7 +420,7 @@ class TestTerminate:
     def test_terminate_inserts_inbound_and_returns_enqueued(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
@@ -430,7 +428,7 @@ class TestTerminate:
         assert inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -450,7 +448,7 @@ class TestTerminate:
         self,
         db_conn: psycopg.Connection,
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post("/api/agents/9999/terminate")
         assert resp.status_code == 404
         assert "does not exist" in resp.json()["detail"]
@@ -460,7 +458,7 @@ class TestTerminate:
     ) -> None:
         """A force request durably fences the identity before reporting acceptance."""
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
         assert resp.status_code == 200
@@ -478,7 +476,7 @@ class TestTerminate:
     ) -> None:
         """force=true passes source parameter through to audit inbound."""
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
@@ -494,7 +492,7 @@ class TestTerminate:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Repeated force records a fresh inbound fence without another status transition."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -527,7 +525,7 @@ class TestTerminate:
     ) -> None:
         """force=true for nonexistent agent still 404."""
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post("/api/agents/9999/terminate", json={"force": True})
         assert resp.status_code == 404
         assert "does not exist" in resp.json()["detail"]
@@ -539,7 +537,7 @@ class TestAutoResurrect:
     ) -> None:
         """Sending chat message to a terminated agent → auto-resurrect triggers automatically,
         INSERT 'resurrect' lifecycle inbound."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             terminate_hosted(db_conn, agent_id)
             resp = client.post(
@@ -554,7 +552,7 @@ class TestAutoResurrect:
 
     def test_chat_to_alive_agent_no_resurrect(self, db_conn: psycopg.Connection) -> None:
         """Sending chat to an alive agent → no resurrect inbound inserted."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
@@ -570,7 +568,7 @@ class TestAutoResurrect:
 
     def test_chat_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
         """source not in envelope allowlist → 422."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
@@ -665,7 +663,7 @@ def test_eval_isolated_callers_cannot_read_result_surfaces(
         )
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = _result_read(
             client,
             method,
@@ -706,7 +704,7 @@ def test_result_surfaces_allow_non_isolated_and_unmarked_callers(
     db_conn.commit()
     path = path_template.format(agent_id=target_id)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         ordinary = _result_read(client, method, path, caller=f"agent:{caller_id}")
         unmarked = _result_read(client, method, path)
 
@@ -715,7 +713,7 @@ def test_result_surfaces_allow_non_isolated_and_unmarked_callers(
 
 
 def test_get_models_haiku_55_picker_contract() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get("/api/models")
     assert response.status_code == 200
     models = response.json()["models"]

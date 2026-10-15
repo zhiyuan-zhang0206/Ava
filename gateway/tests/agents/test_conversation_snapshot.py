@@ -15,13 +15,13 @@ from fastapi.testclient import TestClient
 from base.agents.inbox.insert import insert_inbound_message
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
 def test_client(db_conn: psycopg.Connection):
     """TestClient + lifespan, same harness as the standalone endpoint tests."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         yield client
 
 

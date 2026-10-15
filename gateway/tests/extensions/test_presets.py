@@ -1,7 +1,7 @@
 """Tests for gateway/routers/presets.py (the /api/presets CRUD surface) and the
 spawn-with-preset config merge in gateway/agents/router.py.
 
-Driven through TestClient(app) against the real test DB. Spawn tests rely on the
+Driven through gateway_test_client() against the real test DB. Spawn tests rely on the
 autouse `local_spawn_in_process` fixture (tests/path_scoped/gateway_tests.py) to run the
 spawn op in-process, so a preset-seeded spawn actually persists its merged
 `config_overlay`, which the test reads back through `db_conn`.
@@ -13,8 +13,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.app import app
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 def _create(client: TestClient, **kw: object):
@@ -24,7 +23,7 @@ def _create(client: TestClient, **kw: object):
 
 class TestPresetCrud:
     def test_create_returns_view(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = _create(client, description="writes code", config={"llm_model": "claude-sonnet-5"})
         assert r.status_code == 201
         b = r.json()
@@ -37,7 +36,7 @@ class TestPresetCrud:
     def test_create_defaults_empty_config_and_null_description(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = _create(client, name="bare", label="Bare")
         assert r.status_code == 201
         b = r.json()
@@ -45,14 +44,14 @@ class TestPresetCrud:
         assert b["description"] is None
 
     def test_create_duplicate_name_409(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             assert _create(client, name="dup").status_code == 201
             assert _create(client, name="dup").status_code == 409
 
     def test_create_config_not_object_422(self, db_conn: psycopg.Connection) -> None:
         # `config` is a JSON object; a bare string / array is rejected by the
         # schema (this is the "must be valid JSON object" guard).
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post(
                 "/api/presets", json={"name": "x", "label": "X", "config": "notanobject"}
             )
@@ -61,7 +60,7 @@ class TestPresetCrud:
     def test_create_rejects_cluster_consistent_framework_config(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = _create(client, config={"db_url": "postgresql://not-per-agent"})
         assert r.status_code == 422
         assert "not per_agent=True" in r.json()["detail"]
@@ -69,7 +68,7 @@ class TestPresetCrud:
     def test_create_accepts_per_agent_and_opaque_config_keys(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             per_agent = _create(client, config={"llm_model": "claude-sonnet-5"})
             # Unknown keys may be plugin fields, so the gateway keeps them opaque.
             opaque = _create(
@@ -82,30 +81,30 @@ class TestPresetCrud:
         assert opaque.status_code == 201
 
     def test_create_blank_name_422(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post("/api/presets", json={"name": "", "label": "X"})
         assert r.status_code == 422
 
     def test_get_missing_404(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             assert client.get("/api/presets/9999").status_code == 404
 
     def test_get_returns_view(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             pid = _create(client, config={"a": 1}).json()["id"]
             b = client.get(f"/api/presets/{pid}").json()
         assert b["id"] == pid
         assert b["config"] == {"a": 1}
 
     def test_list_ordered_by_name(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             _create(client, name="bbb", label="B")
             _create(client, name="aaa", label="A")
             rows = client.get("/api/presets").json()
         assert [r["name"] for r in rows] == ["aaa", "bbb"]
 
     def test_update_partial_leaves_other_fields(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             pid = _create(client, config={"llm_model": "claude-sonnet-5"}).json()["id"]
             r = client.patch(
                 f"/api/presets/{pid}",
@@ -118,14 +117,14 @@ class TestPresetCrud:
         assert b["name"] == "coder"  # untouched field survives the partial update
 
     def test_update_no_fields_400(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             pid = _create(client).json()["id"]
             assert client.patch(f"/api/presets/{pid}", json={}).status_code == 400
 
     def test_update_rejects_cluster_consistent_config_and_accepts_opaque_key(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             pid = _create(client).json()["id"]
             rejected = client.patch(
                 f"/api/presets/{pid}", json={"config": {"db_url": "postgresql://not-per-agent"}}
@@ -135,18 +134,18 @@ class TestPresetCrud:
         assert opaque.status_code == 200
 
     def test_update_missing_404(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             assert client.patch("/api/presets/9999", json={"label": "x"}).status_code == 404
 
     def test_update_duplicate_name_409(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             _create(client, name="a", label="A")
             pid = _create(client, name="b", label="B").json()["id"]
             r = client.patch(f"/api/presets/{pid}", json={"name": "a"})
         assert r.status_code == 409
 
     def test_delete_then_404(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             pid = _create(client).json()["id"]
             assert client.delete(f"/api/presets/{pid}").status_code == 200
             assert client.get(f"/api/presets/{pid}").status_code == 404
@@ -173,7 +172,7 @@ class TestSpawnWithPreset:
     def test_top_level_preset_is_rejected_before_birth(
         self, db_conn: psycopg.Connection, preset: str | None
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
             result = spawn_via_http(client, {"spawner": "user", "preset": preset})
         assert result.status_code == 422
@@ -181,7 +180,7 @@ class TestSpawnWithPreset:
         assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == before
 
     def test_unknown_preset_in_config_400(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = spawn_via_http(client, {"spawner": "user", "config": {"preset": "ghost"}})
         assert r.status_code == 400
         assert "ghost" in r.json()["detail"]
@@ -192,7 +191,7 @@ class TestSpawnWithPreset:
         """The new input surface (task #2694): config_overlay.preset resolves at
         the spawn boundary; the row stores the RESOLVED overlay + the preset
         name for display."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             _create(
                 client,
                 name="coder",
@@ -224,7 +223,7 @@ class TestSpawnWithPreset:
     def test_preset_in_config_preserves_explicit_preset_overridden_values(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             _create(client, name="coder", label="Coder", config={"llm_model": "claude-sonnet-5"})
             r = spawn_via_http(client, {"spawner": "user", "config": {"preset": "coder"}})
             assert r.status_code == 201, r.text
@@ -234,7 +233,7 @@ class TestSpawnWithPreset:
         assert overlay == {"llm_model": "claude-sonnet-5"}  # pyright: ignore[reportUnknownMemberType]
 
     def test_preset_key_must_be_nonempty_string(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = spawn_via_http(client, {"spawner": "user", "config": {"preset": ""}})
         assert r.status_code == 400
         assert "non-empty string" in r.json()["detail"]

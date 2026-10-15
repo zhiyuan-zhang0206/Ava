@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -14,7 +15,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import agent_row
 from base.agents.incarnation.resources import ResourceBirth
-from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
@@ -68,8 +68,9 @@ async def admit(
     )
     await host.run_turn(agent)
     assert len(ordinary) == 1
-    secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
+    client.headers.pop("Authorization", None)
+    assert isinstance(client.app, FastAPI)
+    secret: str = client.app.state.gateway_config.cluster_secret
     headers = {
         "Authorization": f"Bearer {secret}",
         "Idempotency-Scope": "principal-v1",

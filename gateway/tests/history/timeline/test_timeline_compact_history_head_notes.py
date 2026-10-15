@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage, HumanMessage
 
 from base.db import create_agent
-from gateway.app import app
 from gateway.tests.history.test_timeline import CompactHistoryCases
 from gateway.tests.history.test_timeline import test_client as test_client
+from tests.fixtures.gateway_config import GatewayTestClient
 
 
 class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
@@ -24,8 +23,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     def test_oversized_numeric_cursor_is_terminal_not_500(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
         before: str,
     ) -> None:
         from langchain_core.messages import AIMessage
@@ -36,9 +34,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="1",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
 
         response = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -51,7 +47,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     def test_missing_cross_segment_target_is_terminal_even_if_an_older_boundary_exists(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
+        test_client: GatewayTestClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from langchain_core.messages import AIMessage
@@ -64,9 +60,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="1",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
 
         def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
             del limit
@@ -91,8 +85,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     def test_standing_note_cursor_crosses_from_current_segment(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
     ) -> None:
         from langchain_core.messages import AIMessage, HumanMessage
 
@@ -113,9 +106,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             self._current(standing_note, AIMessage(content="current item")),
             version="2",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline", params={"before": "2.0", "limit": 50}
@@ -133,7 +124,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     def test_failed_read_is_unavailable_but_disappeared_segment_is_terminal(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
+        test_client: GatewayTestClient,
         monkeypatch: pytest.MonkeyPatch,
         damage: str,
     ) -> None:
@@ -149,9 +140,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             version="1",
         )
         checkpoint_id = "1f0b9b12-0000-6000-8000-000000000000"
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
 
         def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
             del limit
@@ -213,7 +202,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             assert response.json() == {"items": [], "msg_count": 3, "has_more": False}
 
     def test_long_conversation_keeps_standing_head_notes(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:
         """Head context notes (exec timeout / timezone / cluster memory / agent
         id / agent memory — agent/graph/prompt/context_notes.py) fall off the tail
@@ -277,7 +266,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         assert data["has_more"] is True
 
     def test_short_conversation_head_notes_not_duplicated(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:
         """Head notes inside the tail window are not re-attached a second time."""
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -329,8 +318,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     def test_cursor_past_head_notes_crosses_to_older_segment(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
     ) -> None:
         """A paging cursor on the first real item past the re-attached head
         notes crosses to the older segment instead of looping on the head."""
@@ -361,9 +349,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             ],
             version="2",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", 1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline", params={"before": "7.0", "limit": 50}
@@ -389,8 +375,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     def test_historical_head_note_cursor_crosses_to_next_older_segment(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
     ) -> None:
         """A cursor on a historical segment's own standing head note crosses
         to the next older segment. The frontend never guards historical head
@@ -435,9 +420,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             ],
             version="3",
         )
-        monkeypatch.setattr(
-            app.state.config_authority.runtime.gateway, "timeline_compact_history", -1
-        )
+        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
 
         # Cursor on s1's third standing head note (0.0 = exec_timeout,
         # 1.0 = timezone, 2.0 = memory — the segment's SystemMessage is

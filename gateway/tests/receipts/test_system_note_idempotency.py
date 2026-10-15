@@ -5,19 +5,17 @@ from concurrent.futures import ThreadPoolExecutor
 import psycopg
 import pytest
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
 from base.db import Database, fetch_one, pool
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from gateway.agents.system_note import system_note_blocking
-from gateway.app import app
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 def test_system_note_replay_and_immutable_policy(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         agent = spawn_via_http(client, {}).json()["id"]
         path = f"/api/agents/{agent}/system-note"
         headers = keyed_headers("note-receipt")
@@ -34,7 +32,7 @@ def test_system_note_replay_and_immutable_policy(db_conn: psycopg.Connection) ->
 
 
 def test_system_note_key_requires_the_principal_scope(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         agent = spawn_via_http(client, {}).json()["id"]
         response = client.post(
             f"/api/agents/{agent}/system-note",
@@ -127,7 +125,7 @@ def test_replay_survives_reassignment_and_checks_content(
 
 
 def test_missing_key_cannot_insert_system_note(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         agent = spawn_via_http(client, {}).json()["id"]
         response = client.post(f"/api/agents/{agent}/system-note", json={"content": "once"})
     assert response.status_code == 422

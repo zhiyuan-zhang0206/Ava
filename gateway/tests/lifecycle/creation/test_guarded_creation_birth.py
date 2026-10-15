@@ -7,7 +7,6 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
@@ -16,12 +15,12 @@ from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.agents import creation as agent_creation
-from gateway.app import app
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, PATH
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
+from tests.fixtures.gateway_config import GatewayTestClient
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 BODY = {"machine": "local-test", "prompt": "one goal", "prompt_source": "user"}
@@ -41,7 +40,7 @@ def _no_revalidation(*args: object, **kwargs: object) -> None:
 
 @pytest.mark.parametrize("mutation", ["admitted", "terminated", "deleted", "placed"])
 def test_historical_birth_never_wakes_later_work(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     mutation: str,
@@ -73,7 +72,7 @@ def test_historical_birth_never_wakes_later_work(
 
 
 def test_original_manifest_precedes_mutable_config_and_defaults(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -93,7 +92,7 @@ def test_original_manifest_precedes_mutable_config_and_defaults(
         "UPDATE agents_meta SET config_overlay=%s WHERE id=%s", (Jsonb(changed), agent_id)
     )
     db_conn.commit()
-    app.state.machine.set(name="new-default")
+    client.app.state.machine.set(name="new-default")
     monkeypatch.setattr(machines, "lookup_role", _no_revalidation)
     calls: list[tuple[str, LaunchAgentRequest]] = []
 
@@ -117,13 +116,12 @@ def test_original_manifest_precedes_mutable_config_and_defaults(
 
 
 def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    from gateway.app import app
     from ops.lifecycle.launch import validate_launch_row
 
     first = client.post(PATH, json=BODY, headers=HEADERS)
@@ -144,13 +142,13 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
     replacement = UUID(retry.json()["launch_attempt_id"])
     assert replacement != original
     validate_launch_row(
-        app.state.db_pool,
+        client.app.state.db_pool,
         LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=replacement),
         local_machine=machine_identity.name(),
     )
     with pytest.raises(ValueError, match="stale"):
         validate_launch_row(
-            app.state.db_pool,
+            client.app.state.db_pool,
             LaunchAgentRequest(agent_id=agent_id, launch_attempt_id=original),
             local_machine=machine_identity.name(),
         )
@@ -172,7 +170,7 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
 
 
 def test_snapshot_fault_rolls_back_then_same_key_accepts_fresh_birth(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -201,7 +199,7 @@ def test_snapshot_fault_rolls_back_then_same_key_accepts_fresh_birth(
 
 @pytest.mark.parametrize("different", [False, True])
 def test_same_key_birth_transaction_freezes_concurrent_winner(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     different: bool,
@@ -241,19 +239,18 @@ def test_same_key_birth_transaction_freezes_concurrent_winner(
 
 
 def test_native_launch_ack_loss_recovers_same_attempt(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    from gateway.app import app
     from ops.lifecycle.launch import validate_launch_row
 
     calls: list[LaunchAgentRequest] = []
 
     async def lost_once(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-        validate_launch_row(app.state.db_pool, body, local_machine=machine_identity.name())
+        validate_launch_row(client.app.state.db_pool, body, local_machine=machine_identity.name())
         calls.append(body)
         if len(calls) == 1:
             raise TimeoutError("native launch acknowledgement lost")

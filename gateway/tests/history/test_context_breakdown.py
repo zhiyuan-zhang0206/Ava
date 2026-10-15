@@ -38,7 +38,7 @@ from base.agents.history.context_breakdown import (
 from base.agents.history.message_tokens import MessageTokens
 from base.agents.messages.token_estimate import estimate_message_tokens
 from base.db import create_agent
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _assert_conserved(node: SectionNode) -> None:
@@ -346,7 +346,7 @@ def test_bucket_messages_works_without_agent_graph() -> None:
 
 @pytest.fixture
 def test_client(db_conn: psycopg.Connection):
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         yield client
 
 

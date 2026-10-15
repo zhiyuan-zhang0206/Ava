@@ -16,8 +16,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.telemetry.observability import cluster_label
-from gateway.app import app
 from gateway.cluster import alert_classes
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def client(db_conn: psycopg.Connection) -> Any:
     with db_conn.cursor() as cur:
         cur.execute("TRUNCATE event_dismissals RESTART IDENTITY")
     db_conn.commit()
-    with TestClient(app) as test_client:
+    with gateway_test_client() as test_client:
         yield test_client
 
 

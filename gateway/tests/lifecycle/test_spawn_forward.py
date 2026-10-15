@@ -16,33 +16,32 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.agents.observation.evidence import AvailabilityReason
 from base.cluster import machines
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.agents import creation, forward
-from gateway.app import app
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 @pytest.fixture
-def _force_local_machine(set_machine_identity) -> str:
+def _force_local_machine(set_machine_identity: MachineIdentitySetter) -> MachineIdentity:
     """Sets this unit's identity at the source via set_machine_identity so every
     machine_name() / machine_role() call site sees role=agent-runner, name='local-test'."""
-    set_machine_identity(role="agent-runner", name="local-test")
-    return "local-test"
+    return set_machine_identity(role="agent-runner", name="local-test")
 
 
 class TestRouting:
     @pytest.mark.parametrize("failure", ["exception", "missing"])
     def test_receipt_read_failure_keeps_accepted_creation(
         self,
-        _force_local_machine: str,
+        _force_local_machine: MachineIdentity,
         monkeypatch: pytest.MonkeyPatch,
         db_conn: psycopg.Connection,
         failure: str,
@@ -64,7 +63,7 @@ class TestRouting:
 
         monkeypatch.setattr(creation, "forward_spawn_to_remote", _capture_forward)
         monkeypatch.setattr(creation.snapshot_module, "select_one", _unreadable)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             resp = spawn_via_http(client, {"machine": "local-test"})
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -76,7 +75,7 @@ class TestRouting:
 
     def test_machine_eq_local_forwards_to_local_target(
         self,
-        _force_local_machine: str,
+        _force_local_machine: MachineIdentity,
         monkeypatch: pytest.MonkeyPatch,
         db_conn: psycopg.Connection,
     ) -> None:
@@ -97,7 +96,7 @@ class TestRouting:
             "VALUES ('local-test',TRUE,FALSE)"
         )
         db_conn.commit()
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             resp = spawn_via_http(client, {"machine": "local-test"})
         assert resp.status_code == 201
         assert resp.json()["id"] == captured["body"].agent_id
@@ -108,7 +107,7 @@ class TestRouting:
         assert captured["target"] == "local-test"
 
     def test_machine_none_forwards_to_local_target(
-        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+        self, _force_local_machine: MachineIdentity, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """body.machine absent → equivalent to local; still forwarded, target == local."""
         captured: dict[str, Any] = {}
@@ -121,14 +120,14 @@ class TestRouting:
             return SpawnedAgent(id=body.agent_id)
 
         monkeypatch.setattr(creation, "forward_spawn_to_remote", _capture_forward)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             resp = spawn_via_http(client, {})
         assert resp.status_code == 201
         assert captured["target"] == "local-test"
 
     def test_local_gateway_only_target_400(
         self,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A target the registry resolves to gateway-only (no agent-runner
@@ -136,7 +135,7 @@ class TestRouting:
         wire contract (a bare HTTPException would carry no reason and trip the SDK
         into a confusing KeyError), and never forwards. The check reads the
         registry for the local target too — no self-introspection."""
-        set_machine_identity(role="gateway", name="gw-only")
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
         # The registry says the (local) target is gateway-only — overrides the
         # conftest autouse stub that defaults the local machine to agent-runner.
         monkeypatch.setattr(machines, "lookup_role", lambda _db, _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
@@ -149,7 +148,7 @@ class TestRouting:
             return SpawnedAgent(id=0)
 
         monkeypatch.setattr(creation, "forward_spawn_to_remote", _should_not_forward)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             resp = spawn_via_http(client, {})
         assert resp.status_code == 400
         body = resp.json()
@@ -159,7 +158,7 @@ class TestRouting:
 
     def test_paused_target_409_no_forward(
         self,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A spawn targeting a PAUSED machine (operator `ava cluster pause`) is
@@ -167,7 +166,7 @@ class TestRouting:
         paused machine is deliberately out of the cluster (agents terminated,
         ops server may be unreachable), so a spawn would fail at dial time
         anyway; the precise wire error is what schedules / peers see."""
-        set_machine_identity(role="agent-runner", name="local-test")
+        machine: MachineIdentity = set_machine_identity(role="agent-runner", name="local-test")
         monkeypatch.setattr(
             machines,
             "lookup_role",
@@ -183,7 +182,7 @@ class TestRouting:
             return SpawnedAgent(id=0)
 
         monkeypatch.setattr(creation, "forward_spawn_to_remote", _should_not_forward)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             resp = spawn_via_http(client, {"machine": "paused-box"})
         assert resp.status_code == 409
         body = resp.json()
@@ -192,7 +191,7 @@ class TestRouting:
         assert forwarded == []  # guard fires before any forward
 
     def test_machine_neq_local_forwards(
-        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+        self, _force_local_machine: MachineIdentity, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """body.machine != local → forward_spawn_to_remote is called, body passthrough."""
         captured: dict[str, Any] = {}
@@ -214,7 +213,7 @@ class TestRouting:
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(machines, "is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             resp = spawn_via_http(client, {"machine": "remote-mac", "spawner": "user"})
         assert resp.status_code == 201
         assert resp.json()["id"] == captured["body"].agent_id
@@ -232,7 +231,7 @@ class TestRouting:
         assert launch_body.launch_attempt_id is not None
 
     def test_registered_remote_runner_is_forwarded(
-        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+        self, _force_local_machine: MachineIdentity, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A registered remote runner is always forwarded to — there is no
         deployment gate on spawn routing. Single box is just the special case
@@ -252,13 +251,13 @@ class TestRouting:
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(machines, "is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             resp = spawn_via_http(client, {"machine": "remote-mac"})
         assert resp.status_code == 201
         assert captured["target"] == "remote-mac"
 
     def test_machine_not_registered_propagates_404(
-        self, _force_local_machine: str, db_conn: psycopg.Connection
+        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
         """A target not in the machines table → the pre-dispatch lookup_role raises
         MachineNotRegistered → the app's AvaAgentError handler emits 404 + reason
@@ -267,7 +266,7 @@ class TestRouting:
         Wire protocol: AvaAgentError subclass → JSONResponse status=cls.http_status,
         body={detail, reason}. MachineNotRegistered.http_status=404.
         """
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             resp = spawn_via_http(client, {"machine": "ghost-mac"})
         assert resp.status_code == 404
         body = resp.json()
@@ -275,7 +274,7 @@ class TestRouting:
         assert "ghost-mac" in body["detail"]
 
     def test_cross_machine_gateway_unavailable_names_committed_agent(
-        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+        self, _force_local_machine: MachineIdentity, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A post-commit forward error returns 502 with the committed identity."""
 
@@ -291,7 +290,7 @@ class TestRouting:
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(machines, "is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             resp = spawn_via_http(client, {"machine": "remote-mac"})
         assert resp.status_code == 502
         assert resp.json()["reason"] == "agent_launch_failed"
@@ -299,13 +298,13 @@ class TestRouting:
         assert resp.json()["state"]["availability"]["reason"] == "launch_unreachable"
 
     def test_mismatched_runner_receipt_cannot_replace_committed_id(
-        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+        self, _force_local_machine: MachineIdentity, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         async def _wrong_id(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
             return SpawnedAgent(id=body.agent_id + 1)
 
         monkeypatch.setattr(creation, "forward_spawn_to_remote", _wrong_id)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=_force_local_machine) as client:
             response = spawn_via_http(client, {})
         assert response.status_code == 502
         body = response.json()

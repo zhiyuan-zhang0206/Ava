@@ -6,7 +6,6 @@ from uuid import uuid4
 import httpx
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
@@ -19,21 +18,22 @@ from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from base.lm.catalog import ModelCatalog
-from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact_support import make_host
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.mark.usefixtures("retry_waits")
 async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
+    gateway_data_plane: None,
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
 ) -> None:
+    del gateway_data_plane, redis_url
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     agent = agent_row(db_conn)
     db_conn.execute(
@@ -62,57 +62,61 @@ async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
     posts: list[httpx.Request] = []
     lose = True
 
-    def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET":
-            result = client.get(request.url.path, headers=dict(request.headers))
-        else:
-            posts.append(request)
-            result = client.post(
-                request.url.path, json=json.loads(request.content), headers=dict(request.headers)
-            )
-            if lose:
-                assert result.status_code == 202, result.text
-                raise httpx.ReadTimeout("accepted response lost", request=request)
-        return httpx.Response(
-            result.status_code, content=result.content, headers=dict(result.headers)
-        )
+    with gateway_test_client() as client:
 
-    with (
-        httpx.Client(
-            base_url="http://gateway",
-            headers={"Authorization": f"Bearer {secret}"},
-            transport=httpx.MockTransport(handle),
-        ) as http,
-        use_client(http),
-    ):
-        target = compaction.observe(agent)
-        with pytest.raises(GatewayUnavailable):
-            compaction.submit(target, idempotency_key="intent")
-        lost_attempts = len(posts)
-        assert lost_attempts > 1
-        lose = False
-        db_conn.execute(
-            "UPDATE agents_meta SET status='terminated',runtime_owner=%s WHERE id=%s",
-            (uuid4(), agent),
-        )
-        db_conn.execute("DELETE FROM native_compact_observations WHERE agent_id=%s", (agent,))
-        db_conn.commit()
-        accepted = compaction.submit(target, idempotency_key="intent")
-        assert compaction.submit(target, idempotency_key="intent") == accepted
-        current = compaction.status(accepted)
-        assert current.acceptance == accepted
-        assert (
-            current.outcome == "accepted"
-            and not current.result_available
-            and not current.continuation_released
-        )
-        with pytest.raises(httpx.HTTPStatusError) as conflict:
-            compaction.submit(
-                target.model_copy(update={"observation_id": uuid4()}), idempotency_key="intent"
+        def handle(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                result = client.get(request.url.path, headers=dict(request.headers))
+            else:
+                posts.append(request)
+                result = client.post(
+                    request.url.path,
+                    json=json.loads(request.content),
+                    headers=dict(request.headers),
+                )
+                if lose:
+                    assert result.status_code == 202, result.text
+                    raise httpx.ReadTimeout("accepted response lost", request=request)
+            return httpx.Response(
+                result.status_code, content=result.content, headers=dict(result.headers)
             )
-        assert conflict.value.response.status_code == 409
-        with pytest.raises(httpx.HTTPStatusError):
-            compaction.observe(agent)
+
+        with (
+            httpx.Client(
+                base_url="http://gateway",
+                headers={"Authorization": f"Bearer {secret}"},
+                transport=httpx.MockTransport(handle),
+            ) as http,
+            use_client(http),
+        ):
+            target = compaction.observe(agent)
+            with pytest.raises(GatewayUnavailable):
+                compaction.submit(target, idempotency_key="intent")
+            lost_attempts = len(posts)
+            assert lost_attempts > 1
+            lose = False
+            db_conn.execute(
+                "UPDATE agents_meta SET status='terminated',runtime_owner=%s WHERE id=%s",
+                (uuid4(), agent),
+            )
+            db_conn.execute("DELETE FROM native_compact_observations WHERE agent_id=%s", (agent,))
+            db_conn.commit()
+            accepted = compaction.submit(target, idempotency_key="intent")
+            assert compaction.submit(target, idempotency_key="intent") == accepted
+            current = compaction.status(accepted)
+            assert current.acceptance == accepted
+            assert (
+                current.outcome == "accepted"
+                and not current.result_available
+                and not current.continuation_released
+            )
+            with pytest.raises(httpx.HTTPStatusError) as conflict:
+                compaction.submit(
+                    target.model_copy(update={"observation_id": uuid4()}), idempotency_key="intent"
+                )
+            assert conflict.value.response.status_code == 409
+            with pytest.raises(httpx.HTTPStatusError):
+                compaction.observe(agent)
     assert db_conn.execute(
         "SELECT count(*) FROM native_compact_commands WHERE agent_id=%s", (agent,)
     ).fetchone() == (1,)

@@ -15,7 +15,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _seed_agent(
@@ -74,7 +74,7 @@ def test_direct_ties_both_directions_self_and_root_excluded(db_conn: psycopg.Con
     _event(db_conn, event_type="send_message", agent_id=b, target=a)
     _event(db_conn, event_type="spawn", agent_id=c, target=a)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1)
 
     ids = {r["agent_id"] for r in rows}
@@ -91,7 +91,7 @@ def test_lineage_and_message_equal_at_zero_age(db_conn: psycopg.Connection) -> N
     _event(db_conn, event_type="spawn", agent_id=b, target=a, days_ago=0.0)
     _event(db_conn, event_type="send_message", agent_id=c, target=a, days_ago=0.0)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1)
 
     by_id = {r["agent_id"]: r for r in rows}
@@ -107,7 +107,7 @@ def test_lineage_permanent_message_decays_over_time(db_conn: psycopg.Connection)
     _event(db_conn, event_type="spawn", agent_id=lineage, target=a, days_ago=5.0)
     _event(db_conn, event_type="send_message", agent_id=msg, target=a, days_ago=5.0)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1)
 
     by_id = {r["agent_id"]: r for r in rows}
@@ -120,7 +120,7 @@ def test_resurrect_counts_as_a_tie(db_conn: psycopg.Connection) -> None:
     b = _seed_agent(db_conn)
     _event(db_conn, event_type="resurrect", agent_id=b, target=a)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1)
 
     assert {r["agent_id"] for r in rows} == {b}
@@ -133,7 +133,7 @@ def test_recency_decay_ranks_recent_first(db_conn: psycopg.Connection) -> None:
     _event(db_conn, event_type="send_message", agent_id=recent, target=a, days_ago=0.0)
     _event(db_conn, event_type="send_message", agent_id=stale, target=a, days_ago=10.0)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1)
 
     assert [r["agent_id"] for r in rows] == [recent, stale]
@@ -148,7 +148,7 @@ def test_depth_limits_reach_and_gamma_decays_deeper_hops(db_conn: psycopg.Connec
     _event(db_conn, event_type="send_message", agent_id=b, target=a, days_ago=0.0)
     _event(db_conn, event_type="send_message", agent_id=c, target=b, days_ago=0.0)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         depth1 = _neighbors(client, a, depth=1)
         depth2 = _neighbors(client, a, depth=2)
 
@@ -167,7 +167,7 @@ def test_terminated_neighbor_included_with_status(db_conn: psycopg.Connection) -
     dead = _seed_agent(db_conn, status="terminated")
     _event(db_conn, event_type="send_message", agent_id=dead, target=a)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1)
 
     assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -181,7 +181,7 @@ def test_limit_caps_result_count(db_conn: psycopg.Connection) -> None:
         peer = _seed_agent(db_conn)
         _event(db_conn, event_type="send_message", agent_id=peer, target=a)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1, limit=2)
 
     assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
@@ -202,7 +202,7 @@ def test_defaults_come_from_display_config(
         _event(db_conn, event_type="send_message", agent_id=peer, target=a)
 
     monkeypatch.setattr(settings.display, "neighbors_default_limit", 2)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _neighbors(client, a)
 
     assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
@@ -210,20 +210,20 @@ def test_defaults_come_from_display_config(
 
 def test_no_ties_returns_empty(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1)
     assert rows == []
 
 
 def test_unknown_agent_404(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/agents/999999/neighbors")
     assert resp.status_code == 404
 
 
 def test_depth_out_of_range_422(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert client.get(f"/api/agents/{a}/neighbors", params={"depth": 0}).status_code == 422
         assert client.get(f"/api/agents/{a}/neighbors", params={"depth": 6}).status_code == 422
 
@@ -243,7 +243,7 @@ def test_ancestors_spawn_chain_nearest_first_walks_to_top(db_conn: psycopg.Conne
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
     c = _seed_agent(db_conn, born_spawner=f"agent:{b}")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _ancestors(client, c)
         # the parent is not an ancestor of itself — the chain is read correctly
         rows_b = _ancestors(client, b)
@@ -263,7 +263,7 @@ def test_ancestors_ignore_neighbor_depth_param(db_conn: psycopg.Connection) -> N
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
     c = _seed_agent(db_conn, born_spawner=f"agent:{b}")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _ancestors(client, c, depth=1)
 
     assert [r["agent_id"] for r in rows] == [b, a]
@@ -273,7 +273,7 @@ def test_ancestors_fork_forms_a_parent(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _ancestors(client, b)
 
     assert [r["agent_id"] for r in rows] == [a]
@@ -286,13 +286,13 @@ def test_ancestors_message_ties_and_resurrect_never_parent(db_conn: psycopg.Conn
     _event(db_conn, event_type="send_message", agent_id=b, target=a)
     _event(db_conn, event_type="resurrect", agent_id=b, target=a)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert _ancestors(client, a) == []
 
 
 def test_ancestors_no_spawner_returns_empty(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert _ancestors(client, a) == []
 
 
@@ -302,7 +302,7 @@ def test_ancestors_terminated_ancestor_included_with_status(db_conn: psycopg.Con
     a = _seed_agent(db_conn, status="terminated")
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _ancestors(client, b)
 
     assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -317,7 +317,7 @@ def test_ancestors_read_born_spawner_not_the_recorded_events(db_conn: psycopg.Co
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
     _event(db_conn, event_type="spawn", agent_id=b, target=stale_event_parent)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _ancestors(client, b)
 
     assert [r["agent_id"] for r in rows] == [a]
@@ -329,7 +329,7 @@ def test_ancestors_use_one_constant_weight_per_birth_edge(db_conn: psycopg.Conne
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _ancestors(client, b)
 
     assert [r["agent_id"] for r in rows] == [a]

@@ -47,11 +47,10 @@ def sdk_via_inprocess_gateway(
     The assembled Gateway reads both data stores, so the fixture declares
     `gateway_data_plane`."""
     from ava.gateway_client import use_client
-    from gateway.app import app
     from tests.fixtures.gateway_config import gateway_test_client
 
     with (
-        gateway_test_client(app, base_url="http://test-gateway", machine=machine_identity) as tc,
+        gateway_test_client(base_url="http://test-gateway", machine=machine_identity) as tc,
         use_client(tc),
     ):
         yield

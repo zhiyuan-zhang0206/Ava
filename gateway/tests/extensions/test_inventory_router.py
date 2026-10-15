@@ -25,12 +25,12 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from gateway.app import app
 from gateway.cluster import snapshots
 from gateway.cluster.snapshots import Snapshot
 from gateway.extensions import inventory as inventory_router
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _read(
@@ -134,7 +134,7 @@ def test_aggregate_collapse_across_two_machines(monkeypatch: pytest.MonkeyPatch)
 
     _stub_reads(monkeypatch, fake_read)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -161,7 +161,7 @@ def test_aggregate_buckets_unreachable_machine(monkeypatch: pytest.MonkeyPatch) 
 
     _stub_reads(monkeypatch, fake_read)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -210,7 +210,7 @@ def test_aggregate_skips_stopped_and_known_down_hosts(monkeypatch: pytest.Monkey
 
     _stub_reads(monkeypatch, fake_read)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -236,7 +236,7 @@ def test_aggregate_dials_run_under_the_aggregate_budget(monkeypatch: pytest.Monk
 
     _stub_reads(monkeypatch, fake_read)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     assert resp.json()["unreachable"] == ["B"]
@@ -262,7 +262,7 @@ def test_get_single_machine_view(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _stub_reads(monkeypatch, fake_read)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/inventory?machine={REMOTE}")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -275,7 +275,7 @@ def test_get_single_machine_view(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_get_unknown_machine_404() -> None:
     """GET ?machine=<unknown> (no row in machines) -> 404 before any dispatch."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/inventory?machine=ghost-host")
     assert resp.status_code == 404, resp.text
     assert "unknown agent-runner" in resp.json()["detail"]
@@ -286,7 +286,7 @@ def test_get_gateway_machine_404() -> None:
     inventory target -> 404, never reaching dispatch. Guards the leak where the
     gateway's own host showed plugins/MCP."""
     _seed_machine("gw-host", role="gateway")
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/inventory?machine=gw-host")
     assert resp.status_code == 404, resp.text
     assert "unknown agent-runner" in resp.json()["detail"]
@@ -306,7 +306,7 @@ def test_aggregate_excludes_gateway_column(monkeypatch: pytest.MonkeyPatch) -> N
 
     _stub_reads(monkeypatch, fake_read)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     assert resp.json()["machines"] == [REMOTE]
@@ -323,7 +323,7 @@ def test_get_single_machine_offline_503(monkeypatch: pytest.MonkeyPatch) -> None
 
     _stub_reads(monkeypatch, fake_read)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/inventory?machine={REMOTE}")
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
@@ -351,7 +351,7 @@ def test_put_capability_rejection_surfaced(monkeypatch: pytest.MonkeyPatch) -> N
 
     _stub_writes(monkeypatch, fake_write)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put(
             f"/api/inventory?machine={REMOTE}",
             json={"plugins": {"no_such": True}, "mcp_servers": {}},
@@ -365,7 +365,7 @@ def test_put_capability_rejection_surfaced(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_put_unknown_machine_404() -> None:
     """PUT ?machine=<unknown> -> 404 before any dispatch."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put("/api/inventory?machine=ghost-host", json={"plugins": {"x": True}})
     assert resp.status_code == 404, resp.text
     assert "unknown agent-runner" in resp.json()["detail"]
@@ -375,7 +375,7 @@ def test_put_gateway_machine_404() -> None:
     """PUT ?machine=<gateway> -> 404: the gateway has no inventory to
     write to."""
     _seed_machine("gw-host", role="gateway")
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put("/api/inventory?machine=gw-host", json={"plugins": {"x": True}})
     assert resp.status_code == 404, resp.text
     assert "unknown agent-runner" in resp.json()["detail"]
@@ -384,7 +384,7 @@ def test_put_gateway_machine_404() -> None:
 def test_put_missing_machine_400() -> None:
     """PUT with no ?machine= -> 400: inventory writes have no gateway
     default target."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put("/api/inventory", json={"plugins": {"x": True}})
     assert resp.status_code == 400, resp.text
     assert "require ?machine=" in resp.json()["detail"]
@@ -394,7 +394,7 @@ def test_put_non_dict_half_422() -> None:
     """PUT with a non-dict 'plugins' half -> 422: the InventoryWriteRequest body
     model rejects the malformed shape at FastAPI validation, before the handler."""
     _seed_machine(REMOTE)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put(
             f"/api/inventory?machine={REMOTE}", json={"plugins": ["not", "a", "dict"]}
         )

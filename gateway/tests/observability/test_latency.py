@@ -15,8 +15,8 @@ from fastapi.testclient import TestClient
 
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from gateway.app import app
 from gateway.http.middleware import latency
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,7 @@ def _clean_accumulator() -> Iterator[None]:
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    with TestClient(app) as c:
+    with gateway_test_client() as c:
         yield c
 
 

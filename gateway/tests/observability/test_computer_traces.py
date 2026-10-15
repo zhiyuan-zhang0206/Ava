@@ -10,9 +10,8 @@ import uuid
 from typing import Any
 
 import psycopg
-from fastapi.testclient import TestClient
 
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _insert_event(
@@ -33,7 +32,7 @@ def _insert_event(
 
 
 def _get(task_id: int) -> tuple[int, dict[str, Any]]:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get(f"/api/computer/traces?task_id={task_id}")
     return response.status_code, response.json()
 

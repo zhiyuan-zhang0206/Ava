@@ -10,7 +10,6 @@ import base.db
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
-from gateway.app import app
 from gateway.schedules import router, session_control
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -36,7 +35,7 @@ def test_same_value_edit_preserves_version_timestamp_and_queue(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
         before = db_conn.execute(
             "SELECT updated_at FROM schedules WHERE id = %s", (sid,)
@@ -60,7 +59,7 @@ def test_concurrent_identical_edits_append_one_version(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
     with (
         base.db.pool(max_size=4, gate=database_gate) as pool,
@@ -86,7 +85,7 @@ def test_enqueue_failure_rolls_back_config_and_version(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
 
     def fail(conn: object, schedule_id: int) -> None:
@@ -117,7 +116,7 @@ def test_response_failure_leaves_committed_convergence_work(
         raise RuntimeError("response lost")
 
     monkeypatch.setattr(session_control, "wait_consumed", fail)
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
         with pytest.raises(RuntimeError, match="response lost"):
             client.put(f"/api/schedules/{sid}", json={"script": "print(2)\n"})
@@ -138,7 +137,7 @@ def test_repeated_enabled_choice_does_not_enqueue(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = client.post(
             "/api/schedules", json={"name": "choice", "script": "pass", "enabled": enabled}
         ).json()["id"]
@@ -155,7 +154,7 @@ def test_explicit_start_preserves_terminal_rerun(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
         db_conn.execute("UPDATE schedules SET status = %s WHERE id = %s", (status, sid))
         db_conn.commit()

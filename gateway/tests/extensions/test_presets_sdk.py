@@ -1,6 +1,6 @@
 """Tests for ava.agents.presets — the SDK surface for config presets.
 
-Driven through TestClient(app) against the real test DB. The presets router
+Driven through gateway_test_client() against the real test DB. The presets router
 is a plain CRUD surface with no spawn/lifecycle dependency, so the test setup
 is simpler than the agents-SDK tests: just wire the TestClient as the SDK's
 httpx client inside the lifespan context.
@@ -12,9 +12,9 @@ from datetime import datetime
 from typing import Any, cast
 
 import pytest
-from fastapi.testclient import TestClient
 
 from ava.gateway_client import use_client
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture(autouse=True)
@@ -24,9 +24,7 @@ def _sdk_via_testclient(monkeypatch: pytest.MonkeyPatch):
     The ``with`` block triggers the app lifespan (db_pool init), so the
     presets router can reach the test database.
     """
-    from gateway.app import app
-
-    with TestClient(app, base_url="http://test-gateway") as tc, use_client(tc):
+    with gateway_test_client(base_url="http://test-gateway") as tc, use_client(tc):
         yield
 
 

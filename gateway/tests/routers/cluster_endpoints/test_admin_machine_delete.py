@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg.rows import TupleRow
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
 from tests.components.gateway.test_cluster_endpoints import (
     fake_admin_events as fake_admin_events,
 )
@@ -33,6 +32,7 @@ from tests.components.gateway.test_cluster_endpoints import (
     seed_drain_owner,
     seed_in_progress_task,
 )
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _existing_row(cur: psycopg.Cursor) -> TupleRow:
@@ -42,8 +42,10 @@ def _existing_row(cur: psycopg.Cursor) -> TupleRow:
 
 
 class TestAdminMachineDelete:
-    def test_deletes_existing_row(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
-        set_machine_identity(role="gateway", name="cloud")
+    def test_deletes_existing_row(
+        self, db_conn, set_machine_identity: MachineIdentitySetter
+    ) -> None:  # type: ignore[no-untyped-def]
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="cloud")
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("DELETE FROM machines WHERE name = 'laminar-stale'")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
@@ -51,7 +53,7 @@ class TestAdminMachineDelete:
                 "VALUES ('laminar-stale', ARRAY['gateway'], 'https://example.com')"
             )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             r = client.delete("/api/cluster/machines/laminar-stale")
         assert r.status_code == 200
         assert r.json() == {"deleted": True}
@@ -60,19 +62,23 @@ class TestAdminMachineDelete:
             (n,) = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
         assert n == 0
 
-    def test_missing_row_returns_deleted_false(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
-        set_machine_identity(role="gateway", name="cloud")
+    def test_missing_row_returns_deleted_false(
+        self, db_conn, set_machine_identity: MachineIdentitySetter
+    ) -> None:  # type: ignore[no-untyped-def]
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="cloud")
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("DELETE FROM machines WHERE name = 'never-existed'")  # pyright: ignore[reportUnknownMemberType]
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             r = client.delete("/api/cluster/machines/never-existed")
         assert r.status_code == 200
         assert r.json() == {"deleted": False}
 
-    def test_refuses_to_delete_self(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
-        set_machine_identity(role="gateway", name="cloud")
-        with TestClient(app) as client:
+    def test_refuses_to_delete_self(
+        self, db_conn, set_machine_identity: MachineIdentitySetter
+    ) -> None:  # type: ignore[no-untyped-def]
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="cloud")
+        with gateway_test_client(machine=machine) as client:
             r = client.delete("/api/cluster/machines/cloud")
         assert r.status_code == 400
         assert "refusing" in r.json()["detail"]
@@ -82,7 +88,7 @@ class TestAgentMachineList:
     def test_get_cluster_machines_returns_name_description_live(
         self,
         db_conn: psycopg.Connection,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         # Seed one LOCAL agent-runner row. The local machine is probed through
@@ -91,7 +97,7 @@ class TestAgentMachineList:
         # machines run agents).
         from ops.cluster import rpc as cluster_rpc
 
-        set_machine_identity(role="agent-runner", name="runner-test")
+        machine: MachineIdentity = set_machine_identity(role="agent-runner", name="runner-test")
 
         async def _fake_dispatch(
             *,
@@ -123,7 +129,7 @@ class TestAgentMachineList:
                 "'http://runner-test:18121', 'voice IO + browser')"
             )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             r = client.get("/api/cluster/machines")
         assert r.status_code == 200
         body = r.json()
@@ -139,7 +145,7 @@ class TestAgentMachineList:
     def test_get_cluster_machines_reachable_unknown_is_not_live(
         self,
         db_conn: psycopg.Connection,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """The agent/config projection must not target a runner whose ops
@@ -149,7 +155,7 @@ class TestAgentMachineList:
         from base.api_contracts.status import MachineStatus
         from gateway.cluster import router as cluster_router
 
-        set_machine_identity(role="gateway", name="cloud-test")
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="cloud-test")
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
@@ -173,7 +179,7 @@ class TestAgentMachineList:
             ]
 
         monkeypatch.setattr(cluster_router, "gather_cluster_status", _fake_gather)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             response = client.get("/api/cluster/machines")
 
         assert response.status_code == 200
@@ -241,7 +247,7 @@ class TestAgentMachineList:
             ]
 
         monkeypatch.setattr(cluster_router, "gather_cluster_status", _fake_gather)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/cluster/machines")
         assert r.status_code == 200
         body = r.json()
@@ -256,12 +262,12 @@ class TestAgentMachineList:
         assert all(m["name"] != "control-test" for m in body)
 
     def test_set_machine_staging_flips_flag_and_excludes_from_roster_targets(
-        self, db_conn, set_machine_identity
+        self, db_conn, set_machine_identity: MachineIdentitySetter
     ) -> None:  # type: ignore[no-untyped-def]
         """POST /api/cluster/machines/{name}/staging flips the operator staging
         flag; a flagged row is still served on the roster (visible) but
         `list_agent_runners`-backed endpoints exclude it. Unknown name → 404."""
-        set_machine_identity(role="gateway", name="test-host")
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="test-host")
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
@@ -270,7 +276,7 @@ class TestAgentMachineList:
             )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             r = client.post("/api/cluster/machines/stage/staging", json={"is_staging": True})
             assert r.status_code == 200
             assert r.json() == {"deleted": True}
@@ -292,10 +298,12 @@ class TestAgentMachineList:
             stage_row = next(m for m in r.json() if m["name"] == "stage")
             assert stage_row["is_staging"] is False
 
-    def test_get_cluster_roster_returns_full_status(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
+    def test_get_cluster_roster_returns_full_status(
+        self, db_conn, set_machine_identity: MachineIdentitySetter
+    ) -> None:  # type: ignore[no-untyped-def]
         """`/api/cluster/roster` returns the full MachineStatus rows (name/role/
         online/paused), backing the thin `ava cluster status`."""
-        set_machine_identity(role="gateway", name="test-host")
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="test-host")
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
@@ -303,7 +311,7 @@ class TestAgentMachineList:
                 "VALUES ('test-host', ARRAY['gateway'], 'https://example.com')"
             )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             r = client.get("/api/cluster/roster")
         assert r.status_code == 200
         body = r.json()
@@ -319,7 +327,7 @@ class TestMachinePauseResume:
     def test_pause_drains_terminates_and_hides_from_roster(
         self,
         db_conn: psycopg.Connection,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -332,7 +340,7 @@ class TestMachinePauseResume:
         roster + agent machine list. The row keeps its registration info."""
         # identity carries agent-runner so spawn_agent works; the DB row for
         # the local host stays gateway-only (roster's local lightweight path)
-        set_machine_identity(role="agent-runner", name="test-host")
+        machine: MachineIdentity = set_machine_identity(role="agent-runner", name="test-host")
         seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         seed_drain_owner(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         aid = seed_agent_on_machine(
@@ -353,7 +361,7 @@ class TestMachinePauseResume:
         )  # pyright: ignore[reportUnknownArgumentType]
         seed_in_progress_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             r = client.post(
                 "/api/cluster/machines/away/pause", json={"reason": "\u4f11\u5047\u4e00\u5468"}
             )
@@ -389,18 +397,20 @@ class TestMachinePauseResume:
 
         # roster + agent machine list hide the paused machine — the cluster
         # shows only its active members (the gateway host itself)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             roster = client.get("/api/cluster/roster").json()
             machines_list = client.get("/api/cluster/machines").json()
         assert [m["name"] for m in roster] == ["test-host"]
         assert machines_list == []
 
-    def test_pause_already_paused_is_idempotent(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
+    def test_pause_already_paused_is_idempotent(
+        self, db_conn, set_machine_identity: MachineIdentitySetter
+    ) -> None:  # type: ignore[no-untyped-def]
         """Re-pausing an already-paused machine is a safe no-op: nothing left
         to drain/terminate, the original latch values are returned."""
-        set_machine_identity(role="gateway", name="test-host")
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="test-host")
         seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             first = client.post("/api/cluster/machines/away/pause", json={"reason": "once"})
             second = client.post("/api/cluster/machines/away/pause", json={"reason": "twice"})
         assert first.status_code == 200 and second.status_code == 200
@@ -411,7 +421,7 @@ class TestMachinePauseResume:
     def test_pause_force_marks_when_ops_unreachable(
         self,
         db_conn: psycopg.Connection,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
@@ -426,7 +436,7 @@ class TestMachinePauseResume:
         DB — pause must not leave agents 'running' on a machine that is leaving."""
         from gateway.agents import forward as _fwd
 
-        set_machine_identity(role="agent-runner", name="test-host")
+        machine: MachineIdentity = set_machine_identity(role="agent-runner", name="test-host")
         seed_away_machine(db_conn)
         aid = seed_agent_on_machine(
             db_conn,
@@ -446,7 +456,7 @@ class TestMachinePauseResume:
             raise RuntimeError("ops server unreachable")
 
         monkeypatch.setattr(_fwd, "enqueue_lifecycle", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             r = client.post("/api/cluster/machines/away/pause", json={})
         assert r.status_code == 200
         body = r.json()
@@ -472,29 +482,35 @@ class TestMachinePauseResume:
         assert source == "user"
         assert old_chat_id < fence_id == terminate_id
 
-    def test_pause_unknown_machine_404(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
-        set_machine_identity(role="gateway", name="test-host")
-        with TestClient(app) as client:
+    def test_pause_unknown_machine_404(
+        self, db_conn, set_machine_identity: MachineIdentitySetter
+    ) -> None:  # type: ignore[no-untyped-def]
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="test-host")
+        with gateway_test_client(machine=machine) as client:
             r = client.post("/api/cluster/machines/ghost/pause", json={})
         assert r.status_code == 404
 
-    def test_pause_refuses_gateway_own_machine(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
+    def test_pause_refuses_gateway_own_machine(
+        self, db_conn, set_machine_identity: MachineIdentitySetter
+    ) -> None:  # type: ignore[no-untyped-def]
         """Pausing the gateway host itself is refused — the cluster needs its
         gateway member online to answer anything."""
-        set_machine_identity(role="gateway", name="test-host")
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="test-host")
         seed_away_machine(db_conn, name="test-host", local_row=False)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             r = client.post("/api/cluster/machines/test-host/pause", json={})
         assert r.status_code == 400
         assert "refusing" in r.json()["detail"]
 
-    def test_resume_restores_roster_and_is_idempotent(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
+    def test_resume_restores_roster_and_is_idempotent(
+        self, db_conn, set_machine_identity: MachineIdentitySetter
+    ) -> None:  # type: ignore[no-untyped-def]
         """Resume clears the latch: the machine is served on the roster and the
         agent machine list again; resuming a not-paused machine is a no-op
         (resumed=False)."""
-        set_machine_identity(role="gateway", name="test-host")
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="test-host")
         seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             client.post("/api/cluster/machines/away/pause", json={})
             r = client.post("/api/cluster/machines/away/resume", json={})
             again = client.post("/api/cluster/machines/away/resume", json={})
@@ -509,14 +525,16 @@ class TestMachinePauseResume:
             paused_at, pause_reason = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
         assert paused_at is None and pause_reason is None
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine) as client:
             roster = client.get("/api/cluster/roster").json()
             machines_list = client.get("/api/cluster/machines").json()
         assert "away" in [m["name"] for m in roster]
         assert "away" in [m["name"] for m in machines_list]
 
-    def test_resume_unknown_machine_404(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
-        set_machine_identity(role="gateway", name="test-host")
-        with TestClient(app) as client:
+    def test_resume_unknown_machine_404(
+        self, db_conn, set_machine_identity: MachineIdentitySetter
+    ) -> None:  # type: ignore[no-untyped-def]
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="test-host")
+        with gateway_test_client(machine=machine) as client:
             r = client.post("/api/cluster/machines/ghost/resume", json={})
         assert r.status_code == 404

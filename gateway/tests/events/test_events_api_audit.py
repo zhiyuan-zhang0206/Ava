@@ -12,9 +12,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
-from fastapi.testclient import TestClient
 
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 
@@ -63,7 +62,7 @@ def _telemetry(
 
 
 def _get(**params: Any) -> dict[str, Any]:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get("/api/events", params=params)
     assert response.status_code == 200, response.text
     return response.json()

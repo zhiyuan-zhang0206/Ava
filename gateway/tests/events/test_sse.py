@@ -21,7 +21,6 @@ from types import SimpleNamespace
 import psycopg
 import pytest
 import redis as sync_redis
-from fastapi.testclient import TestClient
 from redis.asyncio.client import PubSub
 
 from base.config import settings
@@ -34,8 +33,8 @@ from base.events.live.projection import (
     CodeDelta,
     LabelUpdated,
 )
-from gateway.app import app
 from gateway.events.sse import decode_frames_for_test, event_stream
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @dataclass
@@ -213,7 +212,7 @@ def test_sse_subscribe_failure_after_http_start_sends_error_frame(
 
     monkeypatch.setattr(PubSub, "subscribe", fail_subscribe)
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with gateway_test_client(raise_server_exceptions=False) as client:
         response = client.get(path)
 
     assert response.status_code == 200  # StreamingResponse already sent response.start
@@ -370,7 +369,7 @@ def test_sse_system_endpoint_response_headers(
 
     monkeypatch.setattr(system_router, "event_stream", fake_stream)
 
-    with TestClient(app) as client, client.stream("GET", "/api/agents/1/system") as resp:
+    with gateway_test_client() as client, client.stream("GET", "/api/agents/1/system") as resp:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")
         assert resp.headers["cache-control"] == "no-cache"

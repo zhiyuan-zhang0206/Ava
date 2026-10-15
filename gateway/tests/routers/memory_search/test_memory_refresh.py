@@ -7,11 +7,10 @@ from collections.abc import Callable
 from typing import cast
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 class TestRefreshPath:
@@ -32,7 +31,7 @@ class TestRefreshPath:
 
         monkeypatch.setattr(_memory_repo, "pull_main", _fake_pull_main)
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine_identity) as client:
             resp = client.post("/api/memory/refresh")
         assert resp.status_code == 200
         assert resp.json()["head"] == "abc1234"
@@ -70,7 +69,7 @@ class TestRefreshOffEventLoop:
         monkeypatch.setattr(_memory_repo, "pull_main", _fake_pull_main)
         monkeypatch.setattr(_asyncio, "to_thread", _probe_to_thread)
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine_identity) as client:
             resp = client.post("/api/memory/refresh")
         assert resp.status_code == 200
         assert resp.json()["head"] == "abc1234"

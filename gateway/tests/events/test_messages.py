@@ -8,7 +8,6 @@ from pathlib import Path
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
@@ -20,7 +19,7 @@ from base.daemon.schedules.completion_notices import (
 )
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 UPLOAD_HEADERS = {"Idempotency-Key": "silent-upload", "Idempotency-Scope": "principal-v1"}
 
@@ -58,7 +57,7 @@ def test_post_message_inserts_chat_pending(
     db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages", json={"content": "hi agent", "source": "user"}
         )
@@ -84,7 +83,7 @@ def test_hourly_completion_policy_buffers_every_notice(
     policy = policy_for_agent(
         db_conn, tid, current_default_completion_notice_policy(authority=config_authority)
     )
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         first = client.post(
             f"/api/agents/{tid}/messages",
             json={
@@ -118,7 +117,7 @@ def test_default_completion_policy_preserves_every_completion(
 ) -> None:
     """No overlay retains the pre-policy one-completion-message behavior."""
     tid = _seed_agent(db_conn, local_machine=machine_identity)
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         response = client.post(
             f"/api/agents/{tid}/messages",
             json={
@@ -136,7 +135,7 @@ def test_post_message_empty_content_422(
 ) -> None:
     """Blank / oversized rejected by schema layer (pydantic 422), not stuffed into pending."""
     tid = _seed_agent(db_conn, local_machine=machine_identity)
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(f"/api/agents/{tid}/messages", json={"content": "   ", "source": "user"})
     assert resp.status_code == 422
     assert _pending_rows(db_conn, tid) == []
@@ -148,7 +147,7 @@ def test_post_message_large_content_is_accepted(
     """A handoff-sized message remains a normal durable chat inbound."""
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "a" * 100_000
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages", json={"content": content, "source": "user"}
         )
@@ -162,7 +161,7 @@ def test_post_message_content_at_one_mib_is_accepted(
     """The byte cap is inclusive: exactly 1 MiB remains deliverable."""
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "a" * 1_048_576
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages", json={"content": content, "source": "user"}
         )
@@ -177,7 +176,7 @@ def test_post_message_content_over_one_mib_is_413(
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "é" * 524_289
     assert len(content.encode("utf-8")) > 1_048_576
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages", json={"content": content, "source": "user"}
         )
@@ -193,7 +192,7 @@ def test_post_message_block_list_over_one_mib_is_413(
     """The limit also counts serialized content-block lists, not only strings."""
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     blocks = [{"type": "text", "text": "a" * 1_100_000}]
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages", json={"content": blocks, "source": "user"}
         )
@@ -208,7 +207,7 @@ def test_reconcile_rejects_over_limit_after_timeout(
     """The idempotency reconcile route carries the same byte gate as the POST."""
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "é" * 524_289
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages/reconcile",
             json={"content": content, "source": "user"},
@@ -219,7 +218,7 @@ def test_reconcile_rejects_over_limit_after_timeout(
 
 
 def test_post_message_404_when_agent_missing(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/agents/9999/messages", json={"content": "x", "source": "user"})
     assert resp.status_code == 404
     assert _pending_rows(db_conn, 9999) == []
@@ -239,7 +238,7 @@ def test_post_message_terminated_agent_allows_insert(
         (tid,),
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(f"/api/agents/{tid}/messages", json={"content": "x", "source": "user"})
     assert resp.status_code == 201  # SDK path does not block terminated
     assert "status" in resp.json()
@@ -256,7 +255,7 @@ def test_post_message_command_chain_is_one_inbound(
     expansion happens in the agent's claim node, not here, so the agent reads
     the chain as a single composite instruction."""
     tid = _seed_agent(db_conn, local_machine=machine_identity)
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages",
             json={"content": "/recap the week /compact", "source": "user"},
@@ -273,7 +272,7 @@ def test_post_message_does_not_inspect_the_command_chain(
     is queued verbatim: the gateway has no opinion about which prompts belong
     together, and adding one would put prompt semantics in the transport."""
     tid = _seed_agent(db_conn, local_machine=machine_identity)
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages",
             json={"content": "/compact /recap the week", "source": "user"},
@@ -292,7 +291,7 @@ def test_post_message_invalid_source_422(
     channel prefix has been removed and is the canonical example of this rejected
     source (see envelope.validate_source)."""
     tid = _seed_agent(db_conn, local_machine=machine_identity)
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.post(f"/api/agents/{tid}/messages", json={"content": "x", "source": "ui:web"})
     assert resp.status_code == 422
     assert "Unrecognized inbound source" in resp.text
@@ -334,7 +333,7 @@ class TestMultimodalMessage:
         tid = _seed_agent(
             db_conn, local_machine=machine_identity
         )  # no overlay → default (deepseek-flash)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine_identity) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
                 json={
@@ -366,7 +365,7 @@ class TestMultimodalMessage:
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine_identity) as client:
             up = client.post(
                 f"/api/agents/{tid}/uploads",
                 headers=UPLOAD_HEADERS,
@@ -426,12 +425,10 @@ class TestMultimodalMessage:
                 )
             },
         )
-        import gateway.app as gateway_app
-
-        monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, model=model, local_machine=machine_identity)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine_identity) as client:
+            client.app.state.catalog = catalog
             up = client.post(
                 f"/api/agents/{tid}/uploads",
                 headers=UPLOAD_HEADERS,
@@ -467,7 +464,7 @@ class TestMultimodalMessage:
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine_identity) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
                 json={
@@ -497,7 +494,7 @@ class TestMultimodalMessage:
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine_identity) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
                 json={
@@ -518,7 +515,7 @@ class TestMultimodalMessage:
     ) -> None:
         """The string content path is unchanged (no payload written)."""
         tid = _seed_agent(db_conn, local_machine=machine_identity)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=machine_identity) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages", json={"content": "hi", "source": "user"}
             )

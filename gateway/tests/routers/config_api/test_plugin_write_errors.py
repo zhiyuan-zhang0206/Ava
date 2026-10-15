@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Literal, Self
 
 import pytest
-from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import model_validator
 
@@ -18,9 +17,9 @@ from base.host.system.tests.fake_commands import fake_host
 from base.packages import plugin_config_admin as plugin_config
 from base.packages import plugin_config_images
 from base.packages.plugin_config_images import PluginConfigOwner
-from gateway.app import app
 from ops.host_config import config_write_op
 from ops.rpc_schemas import ConfigWriteOpResult
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 class ValidatedFleetConfig(FleetConfig):
@@ -50,7 +49,7 @@ def write_request(
     local_machine: str,
 ) -> Response | ConfigWriteOpResult:
     if consumer == "gateway":
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             return client.put("/api/config", json={"task_escalate_n": -1 if bad_candidate else 7})
     return config_write_op(
         {"task_maintenance_enabled": not bad_candidate},

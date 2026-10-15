@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
 from base.api_contracts.idempotency import keyed_headers
@@ -17,17 +16,16 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
 from gateway.tests.test_agents_endpoints import inbound_rows, returned_id, terminate_hosted
 from gateway.tests.test_agents_endpoints import withdrawn_model as withdrawn_model
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 class TestSystemNote:
     def test_system_note_inserts_system_note_inbound(self, db_conn: psycopg.Connection) -> None:
         """POST /system-note → kind='system_note' inbound with the task note tag
         (no peer-chat row), delivered to a live agent without resurrection."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
@@ -57,7 +55,7 @@ class TestSystemNote:
         self, db_conn: psycopg.Connection
     ) -> None:
         """resurrect=True (task assignment) revives a terminated target, like chat."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             terminate_hosted(db_conn, agent_id)
             resp = client.post(
@@ -76,7 +74,7 @@ class TestSystemNote:
     ) -> None:
         """resurrect=False (plain update / reminder notice) never revives a
         terminated owner — the note stays queued (user ruling 2026-08-27)."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             terminate_hosted(db_conn, agent_id)
             resp = client.post(
@@ -91,7 +89,7 @@ class TestSystemNote:
 
     def test_system_note_unknown_tag_rejected_422(self, db_conn: psycopg.Connection) -> None:
         """note_tag outside the closed NoteTag set → 422 (fail loud)."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
@@ -102,7 +100,7 @@ class TestSystemNote:
 
     def test_system_note_task_id_requires_task_tag(self, db_conn: psycopg.Connection) -> None:
         """Task attribution cannot silently ride an unrelated system-note kind."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
@@ -116,7 +114,7 @@ class TestSystemNote:
         self, db_conn: psycopg.Connection
     ) -> None:
         """A task note must link to an existing task."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
@@ -130,7 +128,7 @@ class TestSystemNote:
         self, db_conn: psycopg.Connection
     ) -> None:
         """A task note cannot charge one agent's task for another agent's turn."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             owner_id = spawn_via_http(client, {}).json()["id"]
             recipient_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
@@ -246,7 +244,7 @@ class TestSystemNote:
 
     def test_system_note_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
         """source not in envelope allowlist → 422."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
@@ -273,7 +271,7 @@ class TestRestart:
     def test_incompatible_merged_model_effort_is_rejected_without_writes(
         self, db_conn: psycopg.Connection, initial: dict[str, str], overlay: dict[str, str]
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             spawned = spawn_via_http(client, {"config": initial})
             assert spawned.status_code == 201, spawned.text
             agent_id = spawned.json()["id"]
@@ -293,7 +291,7 @@ class TestRestart:
     def test_restart_inserts_inbound_and_returns_enqueued(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/restart")
         assert resp.status_code == 200
@@ -304,7 +302,7 @@ class TestRestart:
         self, db_conn: psycopg.Connection
     ) -> None:
         """The persisted overlay and restart marker payload advance together."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -340,7 +338,7 @@ class TestRestart:
 
         model, catalog = withdrawn_model
         monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
@@ -361,7 +359,7 @@ class TestRestart:
         self, db_conn: psycopg.Connection, config_overlay: dict[str, object] | None
     ) -> None:
         """None and {} do not change persistent config or add a payload sidecar."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -387,7 +385,7 @@ class TestRestart:
     def test_restart_invalid_config_overlay_is_rejected_before_enqueue(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
@@ -398,7 +396,7 @@ class TestRestart:
         assert inbound_rows(db_conn, agent_id) == []
 
     def test_restart_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -411,6 +409,6 @@ class TestRestart:
         assert inbound_rows(db_conn, agent_id) == []  # not delivered
 
     def test_restart_nonexistent_404(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.post("/api/agents/9999/restart")
         assert resp.status_code == 404

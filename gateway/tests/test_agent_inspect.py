@@ -7,13 +7,12 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.config import settings
-from gateway.app import app
 from gateway.inspect import router as inspect_router
 from ops.cluster import rpc as cluster_rpc
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:
@@ -96,7 +95,7 @@ def _insert_pending_inbound(
 def test_inspect_unknown_agent_404(db_conn: psycopg.Connection) -> None:
     """No agents_meta row → 404 (fail-fast, no empty shell)."""
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/agents/999999/inspect/statistics")
     assert resp.status_code == 404
 
@@ -129,7 +128,7 @@ def test_inspect_live_returns_only_window_independent_fields(
         }
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
 
     assert response.status_code == 200
@@ -171,7 +170,7 @@ def test_inspect_live_returns_only_window_independent_fields(
 
 def test_inspect_live_unknown_agent_404(db_conn: psycopg.Connection) -> None:
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get("/api/agents/999999/inspect/live")
     assert response.status_code == 404
 
@@ -187,7 +186,7 @@ def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
         raise inspect_router.cluster_rpc.ClusterOpUnreachable("connect failed")
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", unreachable)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200
     assert response.json()["shells"] == []
@@ -205,7 +204,7 @@ def test_inspect_live_distinguishes_valid_empty_from_missing_shell_data(
         return {} if malformed else {"shells": []}
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", probe)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         if malformed:
             with pytest.raises(KeyError, match="shells"):
                 client.get(f"/api/agents/{aid}/inspect/live")
@@ -223,7 +222,7 @@ def test_inspect_config_overlay_roundtrips(db_conn: psycopg.Connection) -> None:
         config_overlay={"llm_model": "claude-opus-4-8", "auto_compact_fraction": 0.7},
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["agent_id"] == aid
     assert body["config_overlay"] == {
@@ -237,7 +236,7 @@ def test_inspect_null_config_overlay_is_empty_dict(db_conn: psycopg.Connection) 
     """config_overlay NULL (cluster defaults) → {} not null."""
     aid = _insert_agent(db_conn, config_overlay=None)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["config_overlay"] == {}
 
@@ -272,7 +271,7 @@ def test_inspect_shells_probed_on_agents_machine(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert seen == {
         "machine": "runner-a",
@@ -320,7 +319,7 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     by_id = {s["id"]: s for s in body["shells"]}
     assert datetime.fromisoformat(by_id[5]["expires_at"]) == deadline
@@ -344,7 +343,7 @@ def test_inspect_shells_degrade_to_empty_on_unreachable(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{aid}/inspect/live")
     assert resp.status_code == 200
     assert resp.json()["shells"] == []
@@ -367,7 +366,7 @@ def test_inspect_shells_degrade_to_empty_on_failed_op(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed_dispatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{aid}/inspect/live")
     assert resp.status_code == 200
     assert resp.json()["shells"] == []
@@ -378,7 +377,7 @@ def test_inspect_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> Non
     """hours outside {0,1,6,24,72,168} → 422 (fail-fast, reusing StatsWindowHours)."""
     aid = _insert_agent(db_conn)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{aid}/inspect/statistics", params={"hours": bad})
     assert resp.status_code == 422
 
@@ -391,7 +390,7 @@ def test_inspect_heartbeat_running_agent_dashes(db_conn: psycopg.Connection) -> 
     last_pause None. interval_s echoes the configuration value."""
     aid = _insert_agent(db_conn, status="running")
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["interval_s"] == int(settings.daemon.heartbeat_interval_seconds)
     assert hb["next_at"] is None
@@ -405,7 +404,7 @@ def test_inspect_heartbeat_idle_projects_next_at(db_conn: psycopg.Connection) ->
     paused_until None. Parked 120s ago, so next_at ≈ now + (idle_threshold - 120)s."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
@@ -427,7 +426,7 @@ def test_inspect_heartbeat_paused_shows_window(db_conn: psycopg.Connection) -> N
         db_conn, status="idling", status_changed_s_ago=600, paused_until_s_ahead=1800
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["next_at"] is None
     assert hb["paused_until"] is not None
@@ -441,7 +440,7 @@ def test_inspect_heartbeat_expired_pause_is_not_paused(db_conn: psycopg.Connecti
         db_conn, status="idling", status_changed_s_ago=60, paused_until_s_ahead=-120
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["next_at"] is not None
@@ -459,7 +458,7 @@ def test_inspect_heartbeat_pending_inbound_marks_heartbeat_pending(
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=500)
     _insert_pending_inbound(db_conn, agent_id=aid)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["paused_until"] is None
     assert hb["heartbeat_pending"] is True
@@ -475,7 +474,7 @@ def test_inspect_heartbeat_no_pending_projects_from_last_active(
     baseline (the old event-floor was therefore redundant). heartbeat_pending False."""
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["heartbeat_pending"] is False
     assert hb["paused_until"] is None
@@ -498,7 +497,7 @@ def test_inspect_heartbeat_consumed_checkin_uses_durable_reminder_floor(
         )
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
 
     assert hb["heartbeat_pending"] is False
@@ -524,7 +523,7 @@ def test_inspect_heartbeat_stuck_after_expired_pause_no_past_next_at(
     # daemon sent a check-in after pause expired, but agent stuck and never processed → inbound still pending.
     _insert_pending_inbound(db_conn, agent_id=aid)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     # expired pause treated as no pause.
     assert hb["paused_until"] is None
@@ -546,7 +545,7 @@ def test_inspect_heartbeat_overdue_still_projects_raw_next_at(
         status_changed_s_ago=7200,  # last_active_at 2h ago — far past due
     )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
@@ -567,7 +566,7 @@ def test_inspect_heartbeat_stale_pending_does_not_suppress(
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     _insert_pending_inbound(db_conn, agent_id=aid, created_s_ago=STALE_PENDING_S + 300)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["heartbeat_pending"] is False
     assert hb["next_at"] is not None
@@ -586,7 +585,7 @@ def test_inspect_heartbeat_last_pause_newest_wins(db_conn: psycopg.Connection) -
     # another agent's pause — must not appear in this agent's last_pause
     _pause_row(db_conn, agent_id=other, duration_s=999, hours_ago=0)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["last_pause"] is not None
     assert hb["last_pause"]["duration_s"] == 1800
@@ -599,7 +598,7 @@ def test_inspect_heartbeat_last_pause_beyond_lookback_is_none(db_conn: psycopg.C
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=60)
     _pause_row(db_conn, agent_id=aid, duration_s=3600, hours_ago=30)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     assert hb["last_pause"] is None
 
@@ -622,7 +621,7 @@ def test_inspect_notice_when_agent_has_open_require_response(db_conn: psycopg.Co
     assert row is not None
     nid, _created_at = row
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     notice = body["notice"]
     assert notice is not None
@@ -649,7 +648,7 @@ def test_inspect_notice_when_agent_has_open_fyi(db_conn: psycopg.Connection) -> 
     assert row is not None
     nid = row[0]
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     notice = body["notice"]
     assert notice is not None
@@ -663,7 +662,7 @@ def test_inspect_notice_when_agent_has_none(db_conn: psycopg.Connection) -> None
     """An agent with no open notices → notice is None (not missing, not empty dict)."""
     aid = _insert_agent(db_conn)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["notice"] is None
 
@@ -686,7 +685,7 @@ def test_inspect_notice_resolved_not_returned(db_conn: psycopg.Connection) -> No
             (aid, aid),
         )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["notice"] is not None
     assert body["notice"]["title"] == "Current"
@@ -704,7 +703,7 @@ def test_inspect_notice_other_agent_not_visible(db_conn: psycopg.Connection) -> 
             (other, other),
         )
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     assert body["notice"] is None
 
@@ -723,7 +722,7 @@ def test_inspect_live_reads_committed_pause(
     _pause_row(db_conn, agent_id=aid, duration_s=900, hours_ago=1)
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200
     assert response.json()["heartbeat"]["last_pause"]["duration_s"] == 900
@@ -746,6 +745,6 @@ def test_inspect_last_pause_same_timestamp_uses_newest_id(db_conn: psycopg.Conne
     _pause_row(db_conn, agent_id=aid, duration_s=3600, hours_ago=1)
     _pause_row(db_conn, agent_id=aid, duration_s=600, hours_ago=1)
     db_conn.commit()
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.json()["heartbeat"]["last_pause"]["duration_s"] == 600

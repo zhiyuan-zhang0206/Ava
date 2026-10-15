@@ -15,10 +15,8 @@ from typing import Any
 
 import pytest
 from fastapi import Request
-from fastapi.testclient import TestClient
 
 from base.config import settings
-from gateway.app import app
 from gateway.routers import memory as memory_router
 from gateway.schemas.memory import MemorySearchRequest
 from gateway.tests.routers.test_memory_search import (
@@ -26,6 +24,7 @@ from gateway.tests.routers.test_memory_search import (
     StubProvider,
     asgi_client,
     memory_root,
+    memory_search_app,
     patch_provider,
 )
 from gateway.tests.routers.test_memory_search import (
@@ -36,6 +35,7 @@ from gateway.tests.routers.test_memory_search import (
 )
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
+from tests.fixtures.gateway_config import gateway_test_client
 
 _CANDIDATES = 30
 _POOL_SIZE = 150
@@ -78,7 +78,7 @@ class _Pool:
         monkeypatch.setattr(settings.services, "memory_rerank_candidates", _CANDIDATES)
         # The handler reads its gate from `app.state`, which only the gateway lifespan fills; a
         # fresh one per test (a semaphore binds to the loop of its first contended acquire).
-        monkeypatch.setattr(app.state, "memory_search_gate", asyncio.Semaphore(2), raising=False)
+        memory_search_app().state.memory_search_gate = asyncio.Semaphore(2)
 
 
 @pytest.fixture
@@ -103,7 +103,7 @@ def test_decision_requests_do_not_grow_with_the_exclusion_list(
     pool: _Pool, judge: Judge, excluded: int
 ) -> None:
     """A long-lived session excludes more notes every turn; the ranking work stays the same."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             "/api/memory/search",
             json=_search(exclude=[_name(index) for index in range(excluded)]),
@@ -125,7 +125,7 @@ def test_excluded_notes_never_reach_the_decision_model_or_the_response(
     judge.rules = {"passage 001": 0.99, "passage 002": 0.98, "passage 031": 0.97}
     excluded = [_name(1), _name(2)]
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/memory/search", json=_search(exclude=excluded))
 
     assert resp.status_code == 200
@@ -144,7 +144,7 @@ def test_a_large_k_does_not_raise_the_decision_request_count(
     pool: _Pool, judge: Judge, k: int
 ) -> None:
     """Asking for more results than there are candidates ranks the candidates, not `k` notes."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/memory/search", json=_search(purpose="search", k=k))
 
     assert resp.status_code == 200
@@ -158,7 +158,7 @@ def test_dedup_ranks_its_own_smaller_candidate_count_whatever_k_is(
 ) -> None:
     monkeypatch.setattr(settings.services, "memory_dedup_candidates", 7)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/memory/search", json=_search(purpose="dedup", k=50))
 
     assert resp.status_code == 200
@@ -195,7 +195,7 @@ _VALID_PATHS = ["a.md", "notes/n001.md", "a b/c-d_e.md", "ünï/çode.md"]
     ids=lambda value: repr(value)[:40],
 )
 def test_an_invalid_exclusion_list_is_rejected(pool: _Pool, exclude: Any) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/memory/search", json=_search(exclude=exclude))
 
     assert resp.status_code == 422
@@ -204,7 +204,7 @@ def test_an_invalid_exclusion_list_is_rejected(pool: _Pool, exclude: Any) -> Non
 
 def test_the_largest_exclusion_list_is_accepted(pool: _Pool) -> None:
     exclude = [f"n{i}.md" for i in range(800)]
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/memory/search", json=_search(exclude=exclude))
 
     assert resp.status_code == 200
@@ -223,7 +223,7 @@ def test_the_exclusion_limit_fits_the_vector_service_query_limit() -> None:
 
 
 def test_valid_paths_are_accepted(pool: _Pool) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/api/memory/search", json=_search(exclude=_VALID_PATHS))
 
     assert resp.status_code == 200
@@ -232,7 +232,7 @@ def test_valid_paths_are_accepted(pool: _Pool) -> None:
 
 @pytest.mark.parametrize("deadline", [0, -1, "soon", "inf"])
 def test_an_invalid_deadline_is_rejected(pool: _Pool, deadline: Any) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             "/api/memory/search",
             content=_json({"deadline_seconds": deadline}),
@@ -321,7 +321,7 @@ def _request_that_disconnects_when(gone: asyncio.Event) -> Request:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
-    return Request({"type": "http", "app": app}, receive)
+    return Request({"type": "http", "app": memory_search_app()}, receive)
 
 
 async def test_a_disconnect_cancels_the_decision_requests_still_in_flight(
