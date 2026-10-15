@@ -1,15 +1,3 @@
-"""Per-machine steward: rebuild the indexes, stage, commit, push, create PR.
-
-Usage: python steward.py -m "memory: <machine> <date> local sync"
-
-The multi-host flow: each machine runs this on its own checkout, creating a
-PR from machine-<name> → main. It never merges — that is the arbiter's job.
-The runner refuses to start outside this machine's own branch: the push
-carries whatever branch the checkout is on, so a run from `main` would push
-straight to main and bypass the PR flow.
-After it returns, message the Memory Arbiter that the PR is ready.
-"""
-
 from __future__ import annotations
 
 import argparse

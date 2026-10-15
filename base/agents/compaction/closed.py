@@ -1,5 +1,3 @@
-"""Locate retained original execution closure; the pointer is never a substitute target."""
-
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.compaction.execution import CompactCommand, decode_command

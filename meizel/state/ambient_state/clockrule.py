@@ -1,9 +1,3 @@
-"""The ambient-clock rule: only a package's named roots build the cluster clock.
-
-The cluster timezone and the agent-facing timestamp format come from `base.clock.Clock`, which
-reads the settings once, in `Clock.from_settings()`. See `rootrule` for the shared shape.
-"""
-
 from __future__ import annotations
 
 from meizel.state.ambient_state.rootrule import FromSettingsRule

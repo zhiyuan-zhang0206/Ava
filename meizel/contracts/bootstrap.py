@@ -1,5 +1,3 @@
-"""`bootstrap --out DIR`: manifests derived from today's fact edges, and a cycle report."""
-
 from __future__ import annotations
 
 import json

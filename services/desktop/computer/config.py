@@ -1,9 +1,3 @@
-"""Configuration slice of the computer-use MCP daemon.
-
-Fields keep their flat registry names. `services/desktop/computer/mcp_daemon.py` builds the slice
-(`computer_use_config()`, the composition root) and hands it to the daemon.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

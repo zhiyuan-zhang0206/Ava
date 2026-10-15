@@ -1,11 +1,3 @@
-"""The helper artifact's build record: the inputs and identity it was signed from.
-
-`lifecycle.build_and_sign` reuses a bundle only when the recorded content hash
-matches every build input, and compares the recorded designated requirement with
-the current one to tell whether macOS permission grants survive a rebuild. A
-missing or malformed record reads as absent, which forces a rebuild.
-"""
-
 from __future__ import annotations
 
 import json

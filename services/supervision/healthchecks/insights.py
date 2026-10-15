@@ -1,10 +1,3 @@
-"""Read-only identity probe for the insights service; the root supervisor owns recovery.
-
-The service has no TCP port: it answers `/healthz` on its Unix socket. Alive means the
-answer names this service, this home and the pid its pidfile records, so a stale socket
-file or another home's process is not mistaken for it.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

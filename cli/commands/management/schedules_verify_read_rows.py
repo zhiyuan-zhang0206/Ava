@@ -1,13 +1,3 @@
-"""Read step of the pre-update schedule verify: dump the stored schedule rows to a file.
-
-`cli.fleet_update` sends this file's text to a host as `python -c` and runs it under the home's
-own (OLD) source checkout, so it may lean on nothing NEW-only: it dispatches on the signature of
-`_read_schedule_rows` and its operator factory. The local host, opener and gateway URL reader
-are supplied only for the factory generation that declares them; a real error fails loudly
-instead of falling back.
-Usage: `schedules_verify_read_rows.py OUT_FILE`.
-"""
-
 import inspect
 import json
 import sys

@@ -1,5 +1,3 @@
-"""`ava backup` parser: WAL-G physical backup commands."""
-
 from __future__ import annotations
 
 import argparse

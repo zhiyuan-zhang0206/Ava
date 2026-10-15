@@ -1,15 +1,3 @@
-"""Arbiter merge: squash-merge all open PRs targeting main, then refresh.
-
-Usage: python arbiter_merge.py
-
-Run by the Memory Arbiter after all per-machine stewards have reported their
-PRs ready. Merges PRs one at a time (each merge advances main, which may make
-later PRs conflict — those are skipped with a warning), then refreshes the
-index. Refresh is bundled deliberately: merging without refreshing is what
-caused the 2026-06-22 → 2026-08-01 index staleness incident. Exit code 1 if
-any PR was skipped or the refresh failed — treat that as an alert.
-"""
-
 from __future__ import annotations
 
 import sys

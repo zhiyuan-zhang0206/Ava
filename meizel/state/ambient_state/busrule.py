@@ -1,11 +1,3 @@
-"""The ambient-bus rule: only a package's named roots build the event bus.
-
-Redis and the live-events channel come from `base.events.live.bus.EventBus`, which reads the
-settings once, in `EventBus.from_settings()`. The gateway builds its bus in the lifespan
-(`app.state.bus`) and its routers read it from there, so those packages name no root. See
-`rootrule` for the shared shape.
-"""
-
 from __future__ import annotations
 
 from meizel.state.ambient_state.rootrule import FromSettingsRule

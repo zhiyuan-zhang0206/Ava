@@ -1,16 +1,3 @@
-"""WAL-G config — WalgSettings.
-
-One key switches the physical-backup engine (`services/backup/walg/`) on:
-the path of a 0600 JSON file in WAL-G's own configuration format
-(`WALG_OSS_PREFIX`, `OSS_*`, `WALG_LIBSODIUM_KEY_PATH`, ...). Ava does not
-translate that format into typed settings, so there is no second copy of any
-credential in `.env` and no field to keep in step with WAL-G. Unset (the
-default) every WAL-G code path is a no-op: Postgres gets no archive arguments,
-converge installs nothing, the health probe has nothing to check.
-
-Aggregated by base/config.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

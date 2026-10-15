@@ -1,11 +1,3 @@
-"""Single-box consolidation: rebuild the indexes, stage, commit, push, refresh index.
-
-Usage: python consolidate.py -m "memory: <machine> <date> daily sync"
-
-The single-box flow for a checkout that tracks its own branch directly.
-For the multi-host flow see steward.py (per-machine) and arbiter_merge.py.
-"""
-
 from __future__ import annotations
 
 import argparse

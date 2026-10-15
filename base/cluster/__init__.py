@@ -1,39 +1,3 @@
-"""Cluster identity and membership: path-only identity and each home's own record,
-this host's machine identity and the machines roster, cluster auth,
-ports, and the per-cluster data-plane instances.
-
-A cluster is one logical deployment: its OWN Postgres+Redis instance (under its
-`$AVA_HOME`, on the fixed port table), one outward gateway. A host runs one
-cluster; its ports are the fixed table every new home records at birth.
-
-**Identity IS the home path.** There is no cluster name: a unit's identity is
-the `$AVA_HOME` it runs from (single-machine self-reference), and a remote
-runner's identity is the gateway URL + cluster secret it joins with.
-The human-facing label is the home's basename. The single `ava start`
-lifecycle persists identity before effects and brings up or resumes that home;
-runner initialization obtains its explicit gateway connection projection.
-
-**Names-as-data.** The Postgres database/role and the redis ACL user a cluster
-uses are carried by its `.env` connection URLs and read from there as data
-(`identity_from_url`), never re-derived from any name — so an existing cluster
-whose data plane still uses a historical identifier (prod's `ava_main`) keeps
-working unchanged until an explicit ops rename rewrites its URLs. A newly-born
-cluster gets the fixed identifier `DATA_PLANE_IDENTITY` (`ava`): its instance
-is single-tenant, so the identifier needs no per-cluster distinction.
-The public namespace exports the home record, the fixed port table, URL
-derivation, Postgres provisioning and Redis ACL helpers. `ownership` provides the shared
-native storage observer used before startup and maintenance effects, and the home's Redis
-data directory and configured port it observes.
-
-Membership and access live in member modules the door does not re-export:
-`machine` (this host's machine name and capability set), `machines` and
-`machine_exclusions` (the multi-machine roster and its operator exclusions),
-`auth` (cluster bearer auth), `rate_limit` (gateway login throttling),
-`transport_encryption` (the precondition for secret-bearing off-box listeners)
-and `port_preflight` (the listener scan the ownership checks and health checks share, and
-the bind posture, `bind_addrs`, the data plane's listeners are expected to hold).
-"""
-
 from __future__ import annotations
 
 from base.cluster.derive import (
