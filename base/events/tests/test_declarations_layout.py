@@ -1,5 +1,3 @@
-"""Layout of the event declarations: one domain module per file, nothing central to append to."""
-
 from __future__ import annotations
 
 import ast
@@ -60,8 +58,6 @@ def test_merge_rejects_a_key_that_is_not_the_spec_name() -> None:
 
 
 def test_events_are_not_declared_outside_the_domain_modules() -> None:
-    """No central file to append to: the package's own modules hold the vocabulary,
-    the derived views and the scan tool; an event goes in declarations/<domain>.py."""
     assert {p.name for p in _EVENTS_DIR.glob("*.py")} == {
         "__init__.py",
         "contract.py",

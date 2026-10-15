@@ -1,9 +1,3 @@
-"""`scripts/content_lint/lint_audit_record.py` — every audit emit site records to Postgres first.
-
-The rule is per function: a call that builds an audit event is a violation unless
-the same function also calls (or hands to a runner) a recorder.
-"""
-
 from __future__ import annotations
 
 from scripts.content_lint import lint_audit_record as _lint

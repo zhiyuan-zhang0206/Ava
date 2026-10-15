@@ -208,3 +208,12 @@ Frontend prerequisites are checked against the collected fixture dependency clos
 frontend or Playwright consumers skip before fixture setup when npm or Next is
 missing; tests without those dependencies still execute. Browser fixtures that
 select a frontend dynamically retain the Playwright prerequisite check.
+### Long-history fixture size
+
+`fakes/scenarios/load_older.py` scripts 35 turns with reasoning, narration and
+an exec call, followed by a final reply. Roughly 140 items exceed the default
+50-item tail and leave enough history for two successful older-page loads,
+which is the intended multi-round anchor-drift scenario. Preserve that history
+length when changing the fake. The helper's `rounds` counter increments before
+confirming page arrival, so `rounds >= 2` alone does not prove two successful
+loads; history availability and the actual page/anchor assertions matter too.

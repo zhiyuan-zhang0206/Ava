@@ -1,9 +1,3 @@
-"""Where this home keeps its PgBouncer files.
-
-The cli bring-up/stop and the root diagnostics read the same two paths; a drift between
-them makes a diagnostic look at a different pooler than the process it observes.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

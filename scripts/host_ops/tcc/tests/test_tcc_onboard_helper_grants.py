@@ -1,13 +1,3 @@
-"""scripts/host_ops/tcc/onboard-helper-grants.py: the tier model is data, and it stays honest.
-
-The tier table is the machine-facing contract from design v1 (user decisions
-2026-09-17): L2 is macmini's target, L3 gained Full Disk Access, and extended
-groups must have their state read and reported. --fill-pending adds
-best-effort triggers for appdata/media/icloud; fda/devtools stay read-only by
-decision, and the guard keeps the experimental fill list behind an explicit
-user-present attestation.
-"""
-
 from __future__ import annotations
 
 import ast

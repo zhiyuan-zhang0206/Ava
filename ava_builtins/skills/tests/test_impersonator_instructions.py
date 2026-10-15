@@ -1,8 +1,3 @@
-"""Repository contracts for native impersonator instructions and lease-safe output.
-
-These fixtures carry literal harness markup and stay outside shipped skill packages.
-"""
-
 import sys
 from typing import Any
 

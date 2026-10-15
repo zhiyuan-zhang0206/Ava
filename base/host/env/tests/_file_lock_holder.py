@@ -1,8 +1,3 @@
-"""Holds a file lock in a separate interpreter; never imported by a production entry.
-
-Run as ``python _file_lock_holder.py <repo-root> <lock-target> <ready-file> <hold-seconds>``.
-"""
-
 from __future__ import annotations
 
 import pathlib

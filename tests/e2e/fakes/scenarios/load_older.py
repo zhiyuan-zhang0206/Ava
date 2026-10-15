@@ -1,15 +1,3 @@
-"""Long-history scenario — enough turns to exceed the timeline tail window
-(display.timeline_default_limit, default 50), so scroll-up history loading has a previous page
-to fetch (has_more=true).
-
-35 turns, each thinking + narration + a trivial execute_code tool call → the
-real exec runs → ~4 timeline items per turn (agent_reasoning, agent_chat,
-agent_code, code_output); the final turn replies only. One user message drives
-the whole script (the agent graph loops the SCRIPT per inbound). ~140 items
-means the 50-item tail window pages two more rounds — enough for the #2623
-multi-round drift regression.
-"""
-
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage

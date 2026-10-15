@@ -1,10 +1,3 @@
-"""Tests for base.host.converge.accessibility -- the status type and its status file.
-
-The probe that produces a status lives with the permissions helper client; this
-module owns the three-state result and the file that carries it from converge to
-agent startup.
-"""
-
 from __future__ import annotations
 
 import json

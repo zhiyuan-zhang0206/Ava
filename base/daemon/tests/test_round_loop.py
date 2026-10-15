@@ -1,6 +1,3 @@
-"""The shared round loop: sequential rounds, a skipped round on an unreachable
-database, and the bounded per-item fan-out."""
-
 from __future__ import annotations
 
 import asyncio

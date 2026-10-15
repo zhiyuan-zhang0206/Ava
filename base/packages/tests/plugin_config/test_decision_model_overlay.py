@@ -1,10 +1,3 @@
-"""A decision-model overlay field is checked against the catalog's decision table.
-
-`skill_recall_model` names a decision model, which never appears in the chat table
-(`catalog.models`), so the chat-model membership check cannot serve it. An id outside the
-decision table would pass the type check, persist, and fail every recall pass at runtime.
-"""
-
 import pytest
 
 from base.config import settings
@@ -48,7 +41,6 @@ def test_an_unknown_id_is_rejected(model_catalog: ModelCatalog) -> None:
 def test_a_caller_without_the_decision_table_cannot_admit_the_field(
     model_catalog: ModelCatalog,
 ) -> None:
-    """The check is not silently skipped when the table is not supplied."""
     with pytest.raises(InvalidConfigOverlay, match="no decision-model table"):
         validate_config_overlay({"skill_recall_model": "jev-1.13.0"}, models=model_catalog.models)
 

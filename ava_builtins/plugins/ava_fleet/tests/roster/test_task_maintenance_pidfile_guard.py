@@ -1,9 +1,3 @@
-"""The task-maintenance singleton guard checks only the pidfile its daemon writes, once.
-
-The fleet plugin's counterpart of `test_daemon_guard_checks_only_current_pidfile` in
-`services/tests/test_pidfile.py` (which covers the core daemons).
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

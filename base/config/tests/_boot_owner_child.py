@@ -1,8 +1,3 @@
-"""Parallel eager builds of read-only config owners; never imported by a production entry.
-
-Run as ``python _boot_owner_child.py`` with delivered ``AVA_*`` values in the environment.
-"""
-
 from __future__ import annotations
 
 import os

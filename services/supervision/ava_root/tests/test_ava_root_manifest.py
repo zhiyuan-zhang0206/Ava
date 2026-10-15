@@ -1,10 +1,3 @@
-"""services.supervision.ava_root.manifest: K2 manifest validation and the registry tree.
-
-The K2 field set is closed and validated fail-fast: unknown fields, malformed
-values, duplicate ids, unknown attachments, and attach cycles are all errors.
-The registry is the single source of the tree's shape.
-"""
-
 from __future__ import annotations
 
 import json

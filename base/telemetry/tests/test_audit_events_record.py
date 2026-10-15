@@ -1,11 +1,3 @@
-"""`audit_events` — the Postgres system of record for category=audit events.
-
-`record_audit` writes in the caller's transaction, `record_audit_standalone`
-in its own short one, and the table itself rejects every rewrite. The per-test
-TRUNCATE cannot clear the table (the trigger refuses it by design), so every
-test keys its rows on a unique `source` and never assumes an empty table.
-"""
-
 from __future__ import annotations
 
 import uuid

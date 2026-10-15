@@ -1,5 +1,3 @@
-"""Focused construction contracts for new GPT and Claude model tiers."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -47,8 +45,6 @@ class TestGpt6Builds:
     def test_gpt6_astra_defaults_to_medium_effort(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """gpt-6-astra builds on the Responses API with the OpenAI default
-        effort pinned per model, like the gpt-5.6 tiers."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 

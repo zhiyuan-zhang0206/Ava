@@ -1,9 +1,3 @@
-"""Disposable blocking child for the scheduler shutdown tests.
-
-Usage: `shutdown_blocker.py <pid file> [stubborn]`. Records its pid, then sleeps;
-`stubborn` ignores SIGTERM so only a kill ends it.
-"""
-
 import os
 import signal
 import sys

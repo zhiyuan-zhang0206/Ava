@@ -1,6 +1,3 @@
-"""The stop window: the labeler's poll loop skips its pass while the unit is quiesced, so it
-borrows no connection from a pool the stop is about to close."""
-
 from __future__ import annotations
 
 import asyncio

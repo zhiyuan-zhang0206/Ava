@@ -1,5 +1,3 @@
-"""Health observations cannot select, roll back, or publish a release."""
-
 import subprocess
 from collections.abc import Callable
 from functools import partial
@@ -60,7 +58,6 @@ def test_repeated_observations_never_mutate_release_state(
     monkeypatch: pytest.MonkeyPatch,
     health: str,
 ) -> None:
-    """Repeated good/bad rounds ignore prior rollback and promotion counters."""
     legacy_state = {
         "health_probe_failures": "999\ncode\nold outage\n2026-09-01T00:00:00+00:00",
         "health_probe_pending_lkg_passes": "candidate\n999",
@@ -118,9 +115,6 @@ def test_full_disk_is_reported_when_gateway_is_down(
     signals: FollowedAttributes,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Disk pressure leads the report of a gateway outage: with no short-circuit,
-    the cause (disk) and the consequence (gateway_liveness) both report in one
-    run, and the cause is first."""
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(
         cluster_health, "disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"

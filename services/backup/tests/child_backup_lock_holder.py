@@ -1,8 +1,3 @@
-"""Separate interpreter that takes `backup_lock`, signals readiness and holds it.
-
-Usage: `child_backup_lock_holder.py <ready file> <hold seconds>`.
-"""
-
 import sys
 import time
 from pathlib import Path

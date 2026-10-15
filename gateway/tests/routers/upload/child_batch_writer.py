@@ -1,10 +1,3 @@
-"""Child process that writes an upload batch and hard-dies at a configured phase.
-
-Reads one JSON object from stdin (`dsn`, `directory`, `phase`, `home`, `machine`,
-optional `key`), points `AVA_HOME` at `home` before the gateway modules load, and
-exits with status 41 at `phase` (`receiving`, `first-file`, `published`, `ready`).
-"""
-
 import json
 import os
 import sys

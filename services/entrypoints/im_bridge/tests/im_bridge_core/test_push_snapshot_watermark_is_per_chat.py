@@ -1,5 +1,3 @@
-"""Im bridge core cases: the push snapshot watermark is per chat."""
-
 from __future__ import annotations
 
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
@@ -14,11 +12,6 @@ from services.entrypoints.im_bridge.types import ChatState
 
 
 async def test_push_snapshot_watermark_is_per_chat() -> None:
-    """Regression (audit round 2, P1): the watermark used to be keyed by
-    agent alone, so two chats switched to the same agent clobbered each
-    other — the second chat's snapshot advanced the shared watermark past
-    what the first chat had pushed, and the first chat permanently missed
-    those items. The key must be (channel, chat_id, agent_id)."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
         core = create_test_core(gateway, tasks=_owned_tasks)

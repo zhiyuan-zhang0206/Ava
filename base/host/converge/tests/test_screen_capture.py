@@ -1,11 +1,3 @@
-"""Tests for base.host.converge.screen_capture -- the status type and its status file.
-
-The probe that produces a status lives with the process it interrogates
-(`base.host.permissions_helper.client.check_screen_capture`, covered by
-services/desktop/permissions_helper/tests/test_permissions_helper.py); what is pinned here is the three-state
-result and the file that carries it from converge to agent startup.
-"""
-
 from __future__ import annotations
 
 import json
@@ -26,13 +18,11 @@ from base.host.converge.screen_capture import (
 
 class TestScreenCaptureStatus:
     def test_only_the_available_state_reads_as_available(self):
-        """An unread grant is not a granted one -- both faults stay unavailable."""
         assert ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE).available is True
         assert ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT).available is False
         assert ScreenCaptureStatus(state=ScreenCaptureState.HELPER_UNREACHABLE).available is False
 
     def test_headline_distinguishes_the_two_faults(self):
-        """The notification title alone must say which of the two problems it is."""
         no_grant = ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT).headline
         unreachable = ScreenCaptureStatus(state=ScreenCaptureState.HELPER_UNREACHABLE).headline
         assert no_grant != unreachable
@@ -71,8 +61,6 @@ class TestScreenCaptureStatus:
         assert ScreenCaptureStatus.from_file(path) is None
 
     def test_from_file_returns_none_on_a_file_written_by_an_older_build(self, tmp_path: Path):
-        """The pre-state shape carried a bare bool; an unreadable file is rewritten
-        by the next converge, so the changeover costs at most one skipped notice."""
         path = tmp_path / "legacy.json"
         path.write_text(json.dumps({"available": False, "diagnostic": "started from SSH"}))
         assert ScreenCaptureStatus.from_file(path) is None

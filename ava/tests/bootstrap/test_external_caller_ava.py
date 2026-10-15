@@ -1,7 +1,3 @@
-"""The SDK's actor resolution: an explicit external profile beats an inherited agent id.
-
-A hosted turn context stays authoritative over both."""
-
 import pytest
 
 import ava

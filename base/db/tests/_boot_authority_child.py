@@ -1,8 +1,3 @@
-"""Database handle behind a refused config boot; never imported by a production entry.
-
-Run as ``python -B _boot_authority_child.py`` with the boot mode selected by the environment.
-"""
-
 from __future__ import annotations
 
 import sys

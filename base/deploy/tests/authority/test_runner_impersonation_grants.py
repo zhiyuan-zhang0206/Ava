@@ -1,7 +1,3 @@
-"""The runner holds no UPDATE on agents; impersonation session allocation goes through
-a SECURITY DEFINER function. The runner matrix itself lives in
-base/agents/incarnation/tests/test_runner_role.py."""
-
 from __future__ import annotations
 
 import psycopg

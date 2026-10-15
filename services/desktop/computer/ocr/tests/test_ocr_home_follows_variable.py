@@ -1,9 +1,3 @@
-"""The OCR helper binary path follows `AVA_HOME` after the module is imported.
-
-`services.desktop.computer.ocr` once bound `logs_dir() / "computer" / "ocr-bin"` when it was
-imported; `bin_path()` now derives it when asked.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

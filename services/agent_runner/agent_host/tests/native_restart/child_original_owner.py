@@ -1,10 +1,3 @@
-"""Child process that admits an original native owner and reports its work target.
-
-Run as a script by the cold-owner tests; configuration comes from the
-`AVA_TEST_NATIVE_DB`, `AVA_TEST_NATIVE_AGENT` and optional
-`AVA_TEST_NATIVE_SUCCESSOR` environment variables.
-"""
-
 import asyncio
 import json
 import os

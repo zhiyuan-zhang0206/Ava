@@ -1,5 +1,3 @@
-"""The single WAL-G key: off by default, writable, host-scoped, never distributed."""
-
 from __future__ import annotations
 
 from base.config.config_registry import DOMAIN_MODELS, fields, schema_extra
@@ -19,8 +17,6 @@ def test_the_key_is_the_domains_only_field_and_off_by_default() -> None:
 
 
 def test_the_key_can_be_set_and_unset_and_stays_on_its_host() -> None:
-    """Writable, so `ava config unset` can always remove it; host scope and
-    `bootstrap: False` keep a gateway path from being pushed to other machines."""
     ref = fields()["walg_config_file"]
     extra = schema_extra(ref.info)
 

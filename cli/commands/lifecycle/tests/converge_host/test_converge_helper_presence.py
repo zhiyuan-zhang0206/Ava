@@ -1,5 +1,3 @@
-"""A converge step that needs the permissions helper fails fast when its context carries none."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -42,8 +40,6 @@ def test_a_host_that_can_run_the_helper_never_runs_without_one(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """None means only that a platform has no helper, so a capable host that arrives
-    without one is a composition defect to stop on, not a reason to skip the step."""
     ctx = capable_helper_context(
         monkeypatch,
         tmp_path,

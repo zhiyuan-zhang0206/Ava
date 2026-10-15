@@ -1,7 +1,3 @@
-"""The fleet plugin's task model is the shared task model.
-
-Split out of `ops/agents/tests/test_creation_transactions.py`."""
-
 from base.agents.tasks.model import Task
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 

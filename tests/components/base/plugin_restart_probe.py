@@ -1,9 +1,3 @@
-"""Child process for the plugin-restart shutdown test.
-
-Usage: `plugin_restart_probe.py <marker path>`. The agent host's plugin watcher sees a fingerprint
-change and the process is then stopped; the marker file proves the product handler's cleanup ran.
-"""
-
 import asyncio
 import contextlib
 import sys

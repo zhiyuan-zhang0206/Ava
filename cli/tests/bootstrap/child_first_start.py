@@ -1,10 +1,3 @@
-"""Fresh-interpreter run of the real `ava init` then `ava start` dispatch into a new home.
-
-Identity publication, then the sinks, then a service phase replaced by the real pgvector
-pre-create against a port nothing listens on. The parent test reads this process's stderr
-and the log it wrote.
-"""
-
 import os
 from pathlib import Path
 from typing import Any

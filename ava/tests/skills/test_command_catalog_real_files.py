@@ -1,7 +1,3 @@
-"""The composer command catalog read from real files: a user command, an installed skill, the
-built-in commands, and what a message expands to. No patching: a per-test home holds the user's
-command files and skills, the repository holds the built-ins."""
-
 from pathlib import Path
 
 import pytest

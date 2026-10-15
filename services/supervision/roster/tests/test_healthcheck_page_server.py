@@ -1,10 +1,3 @@
-"""The page-server roster entry keeps its kebab-case ``ServiceSpec.session``.
-
-Task #1291: the unit name must be ``page-server`` — the module name
-("page_server") differs, and a launch under the module name writes a record the CLI
-cannot see or kill.
-"""
-
 from __future__ import annotations
 
 from services.supervision.roster import build_services

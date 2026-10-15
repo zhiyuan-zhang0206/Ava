@@ -1,12 +1,3 @@
-"""Runtime contract of the `Hook` base class.
-
-The *static* half of the contract — that pyright rejects an incompatible
-`__call__` override — is proven in `hook_typing_contract.py` (a pyright-only
-module; see its docstring). This file covers the runtime half: ABC enforcement
-(can't instantiate an abstract hook), callability, and the `name` diagnostic
-label.
-"""
-
 from unittest.mock import MagicMock
 
 from langchain_core.runnables import RunnableConfig
@@ -66,9 +57,6 @@ def _runtime(database_gate: ProcessDbGate) -> Runtime[AvaContext]:
 
 
 def test_base_hook_cannot_be_instantiated():
-    """`Hook` has an abstract `__call__` — direct instantiation raises TypeError.
-    The `type` alias erases abstractness for pyright while keeping the runtime
-    class object."""
     cls: type = Hook
     try:
         cls()
@@ -78,8 +66,6 @@ def test_base_hook_cannot_be_instantiated():
 
 
 def test_subclass_without_call_cannot_be_instantiated():
-    """A subclass that forgets to override `__call__` is still abstract."""
-
     class _Incomplete(Hook):
         pass
 

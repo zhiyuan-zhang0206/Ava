@@ -1,10 +1,3 @@
-"""`ava plugins verify` — the loader's contained failures, turned into an exit code.
-
-The 2026-10-03 shape: the declarative rework deleted `register_after_exec` and its siblings; an
-out-of-repo plugin under `~/.ava/plugins` that still imported them failed to load at every boot and
-the update looked healthy, because the loader skips a broken plugin instead of failing the process.
-"""
-
 from __future__ import annotations
 
 import json
@@ -108,7 +101,6 @@ def test_a_plugin_without_a_manifest_is_red(capsys: pytest.CaptureFixture[str]) 
 
 
 def test_a_broken_runtime_face_is_red_too(capsys: pytest.CaptureFixture[str]) -> None:
-    """`agent_runtime.py` is where hooks are declared; it loads on the same path."""
     _plugin("half", "LOADED = True\n", **{"agent_runtime.py": "from agent.hooks import gone\n"})
     _enable("half")
 
@@ -137,7 +129,6 @@ def test_a_disabled_broken_plugin_is_never_imported(capsys: pytest.CaptureFixtur
 def test_nothing_is_emitted_while_verifying_and_the_canonical_reporter_is_unchanged(
     emitted_events: EmittedEvents,
 ) -> None:
-    """Read-only: no `plugin_load_failed` telemetry from a verify; a later canonical report still emits."""
     _plugin("old_hooks", "raise RuntimeError('boom')\n")
     _enable("old_hooks")
 

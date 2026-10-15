@@ -62,3 +62,14 @@ verified or pruned either hides a broken chain or fills the bucket. It is one co
 ## Notes
 - Operator procedure and the alert texts: [WAL-G operations](operations.md).
 - Retention is the only deleter under the prefix: a bucket lifecycle rule must not expire objects there.
+
+## Parser fixture provenance
+
+`tests/fixtures/backup-list.json` records WAL-G v3.0.9 output after three full
+backups and one increment of the first; the hostname and data directory were
+replaced. `test_backups.py` parses that capture.
+
+`tests/fixtures/wal-verify-warning.json` records v3.0.9 output while two segments
+were still uploading: overall WARNING with exit status zero. The FAILURE cases
+in `test_verify.py` derive from this capture by changing statuses. These are
+recorded fixture origins, not a new live WAL-G verification run.

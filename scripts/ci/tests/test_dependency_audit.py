@@ -1,9 +1,3 @@
-"""scripts/ci/dependency_audit.py: severity grading, pin discovery, report and issue upkeep.
-
-The audit tools and upstream registries are real network calls, exercised by the weekly workflow;
-here they are replaced by recorded shapes.
-"""
-
 from __future__ import annotations
 
 import subprocess

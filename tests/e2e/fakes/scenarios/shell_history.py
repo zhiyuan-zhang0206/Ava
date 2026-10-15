@@ -1,12 +1,3 @@
-"""Shell-monitor history-state scenario -- a tall timeline plus a long terminal.
-
-Turn 1 prints a 300-row block (the timeline needs vertical range so a
-scroll-position assertion has somewhere to go); turn 2 creates one of the
-agent's persistent shell sessions and fills it with 400 numbered lines plus a
-`SHELL_SID=<id>` marker the test parses to address the monitor page. Turn 3
-is the final reply that tells the test the script is done.
-"""
-
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage

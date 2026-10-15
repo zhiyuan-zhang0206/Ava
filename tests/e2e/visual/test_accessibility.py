@@ -1,5 +1,3 @@
-"""Keyboard-accessibility browser regressions for the frontend shell."""
-
 from __future__ import annotations
 
 import pytest
@@ -14,11 +12,6 @@ def test_first_tab_focuses_skip_link_to_main_content(
     frontend_proc: None,
     playwright_page: Page,
 ) -> None:
-    """The first keyboard stop is a visible link to the main landmark.
-
-    Removing the body-first skip link, changing its fragment target, or keeping
-    it visually clipped while focused makes this test fail.
-    """
     playwright_page.goto(FRONTEND_URL, wait_until="domcontentloaded")
     playwright_page.locator("#main-content").wait_for(state="attached", timeout=20_000)
 

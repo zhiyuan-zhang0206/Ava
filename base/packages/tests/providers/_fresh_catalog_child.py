@@ -1,8 +1,3 @@
-"""Fresh-process model catalog scenarios; never imported by a production entry.
-
-Run as ``python _fresh_catalog_child.py withdrawal`` or ``... budget <model>`` from the repo root.
-"""
-
 from __future__ import annotations
 
 import sys

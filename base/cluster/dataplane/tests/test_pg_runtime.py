@@ -1,6 +1,3 @@
-"""Start must provision the toolchain that it will actually execute: the pinned vendored tree
-where the platform has one, a validated installed PostgreSQL 17 only where it does not."""
-
 from __future__ import annotations
 
 import shlex
@@ -121,9 +118,6 @@ def test_mixed_installations_fail_before_data_mutation(
 def test_supported_platform_provisions_the_pinned_tree_whatever_is_installed(
     installed: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, existing_vendor: bool
 ) -> None:
-    """A valid system PostgreSQL 17 must not stand in for the pinned vendored tree: with the
-    pinned directory absent (first start, or a pin bump that left only an older version
-    directory) the pinned version is downloaded, never the installed binary selected."""
     calls: list[str] = []
     monkeypatch.setattr(runtime_binaries, "vendored_pg_supported", lambda: True)
     monkeypatch.setattr(

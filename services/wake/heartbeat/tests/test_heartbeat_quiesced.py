@@ -1,7 +1,3 @@
-"""The stop window: the heartbeat's check-in, liveness and completion-digest loops skip their
-passes while the unit is quiesced, so none borrows a connection from a pool the stop is about
-to close."""
-
 from __future__ import annotations
 
 import asyncio

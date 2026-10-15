@@ -1,8 +1,3 @@
-"""A process whose DB gate learns it is behind the minimum from a worker thread; never imported by production.
-
-Run as ``python _stale_worker_child.py``; the gate must hard-exit the process instead of returning.
-"""
-
 from __future__ import annotations
 
 import threading

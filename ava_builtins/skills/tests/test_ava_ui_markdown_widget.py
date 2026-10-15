@@ -1,20 +1,3 @@
-"""Invariant tests for the Ava Guide page Markdown resource template.
-
-`ava_builtins/skills/platform/ava-guide/pages/widgets/markdown/md.html` is a template an agent
-copies into a page directory and injects Markdown into. It used to carry the
-`{{MARKDOWN_CONTENT}}` token twice — once in the descriptive header comment and
-once in the real `<script type="text/markdown" id="md-source">` slot — while the
-widget README taught a file-wide replace, so following the README injected the
-whole Markdown into the comment as well: the page still rendered, but the
-artifact doubled (92,155 bytes doubled vs 48,106 bytes slot-only), and a body
-containing `--` also made the comment illegal HTML (task #3185).
-
-These tests lock the template invariant and the replacement behavior — exactly
-one token, inside the md-source slot, and a slot-only replacement that injects
-the Markdown once — not the rendering. They also lock the #3653 single-tilde
-guards: a lone ~ must stay literal, in both the html and the react widget.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -56,11 +39,6 @@ _TSX = _TEMPLATE.parent / "Markdown.tsx"
 
 
 def test_template_keeps_a_lone_tilde_literal() -> None:
-    """Task #3653: two lone ~ in one sentence must not pair into strikethrough.
-
-    marked's GFM del rule accepts a single tilde per side; the template's
-    renderer guard keeps the double form only.
-    """
     template = _TEMPLATE.read_text()
     assert "startsWith('~~')" in template, "the single-tilde guard must stay"
     assert "marked.use({" in template

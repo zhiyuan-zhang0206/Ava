@@ -1,5 +1,3 @@
-"""Live-incarnation and maintenance boundaries for unowned resurrection receipts."""
-
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -48,9 +46,6 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An idle agent its host still owns: the force targets that incarnation,
-    and resurrection waits for the original host to observe it, whatever origin
-    the row has."""
     aid, _, _, _ = create_agent_row(
         database,
         event_bus,
@@ -88,8 +83,6 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A resurrected row is the unowned idle row it was before the force, which
-    the drain parks; a terminated row carrying a receipt is outside its cohort."""
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
     resurrected = await restarted(

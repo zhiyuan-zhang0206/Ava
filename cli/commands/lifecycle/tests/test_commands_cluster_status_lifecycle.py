@@ -1,5 +1,3 @@
-"""`cli status` on a gateway cluster shows the observability station line."""
-
 from __future__ import annotations
 
 import pytest
@@ -14,10 +12,6 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 def test_cmd_status_gateway_cluster_serves_line_shows_station(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`ava status`'s gateway cluster-status supplement renders the station
-    capability in the serves: line when the gateway snapshot carries it
-    (the function imports fetch_gateway_cluster_status at call time, so the
-    module attribute patch is the rebind that takes effect)."""
     monkeypatch.setattr(
         control,
         "fetch_gateway_cluster_status",

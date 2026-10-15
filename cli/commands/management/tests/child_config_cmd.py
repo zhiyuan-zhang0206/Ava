@@ -1,9 +1,3 @@
-"""Run one `cmd_config_*` function in a fresh interpreter whose `.env` may not boot Settings.
-
-Usage: `child_config_cmd.py get` or `child_config_cmd.py set <KEY=VALUE>`; both run the
-local verb and exit with its code.
-"""
-
 import sys
 
 if __name__ == "__main__":

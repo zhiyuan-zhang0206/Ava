@@ -1,10 +1,3 @@
-"""`tail_has_skill_recall_inbound`: which inbound sources wake skill recall.
-
-Only a person (`user`, `ui:page:<name>`) or a schedule (`schedule:<id>`) states a request the
-agent has to choose a playbook for. It is deliberately narrower than
-`tail_has_recallable_inbound`, which memory recall keeps using.
-"""
-
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 

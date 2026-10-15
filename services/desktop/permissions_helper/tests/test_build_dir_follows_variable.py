@@ -1,9 +1,3 @@
-"""The permissions-helper build directory follows `AVA_HOME` after import.
-
-`lifecycle` once bound `base.paths.permissions_helper_app_dir()` as a module
-constant; `build_directory(None)` now derives it when asked.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path

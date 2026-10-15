@@ -1,5 +1,3 @@
-"""`emitted_events`: the real emitter delivers into a list, and nothing is patched."""
-
 from __future__ import annotations
 
 import pytest
@@ -47,8 +45,6 @@ def test_clear_forgets_what_was_emitted_so_far(emitted_events: EmittedEvents) ->
 def test_an_event_emitted_through_the_exposed_producer_lands_in_the_capture(
     emitted_events: EmittedEvents,
 ) -> None:
-    """Code that is handed `producer=` instead of reading the process pipeline writes to the same
-    list: the one capture serves both routes."""
     telemetry.emit(
         "telemetry",
         "understanding_chunk_failed",

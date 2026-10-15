@@ -1,5 +1,3 @@
-"""The `ava schedules` argument surface."""
-
 from __future__ import annotations
 
 import pytest
@@ -8,8 +6,6 @@ from cli.parsers import build_parser, parse_args
 
 
 def test_every_schedules_verb_is_registered() -> None:
-    """The parser exposes every schedules verb — the routed ones plus the
-    local provision / verify pair."""
     import argparse
     from typing import cast
 
@@ -55,7 +51,6 @@ def test_enable_and_disable_are_mutually_exclusive() -> None:
 def test_create_requires_a_script_source_at_parse_time(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Neither source is refused by the parse layer (previously the command body)."""
     p = build_parser()
     with pytest.raises(SystemExit) as raised:
         p.parse_args(["schedules", "create", "--name", "n"])
