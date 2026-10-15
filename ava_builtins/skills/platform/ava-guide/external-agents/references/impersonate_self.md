@@ -1,39 +1,47 @@
 # Let the coding agent take over your identity
 
-Use this mode when Codex should replace you, address the human through your
-normal Ava chat, and call Ava capabilities as you. A takeover is **file-less**:
-write the briefing as text and pass it inline with `--brief` — no task file, no
-work file, no watcher; the process reads nothing from the workspace and writes
-nothing back into it. Run the spawn script in your Ava execution context:
+Use this mode when an external coding agent should replace you, address the
+human through your normal Ava chat, and call Ava capabilities as you. A takeover
+is **file-less**: spawn the coding agent normally and pass the takeover prompt
+inline with `--prompt` — no task file, no work file, no watcher; the process
+reads nothing from the workspace and writes nothing back into it. Run the spawn
+script in your Ava execution context:
 
 ```bash
-.venv/bin/python scripts/spawn_codex.py <workspace-dir> --impersonate-self \
-  --impersonation-name 'Fix login' --brief '<the full briefing text>'
+.venv/bin/python scripts/spawn_codex.py <workspace-dir> \
+  --prompt '<briefing + instructions to read impersonator-guide and run ava impersonate request>'
 ```
 
-The briefing is inlined verbatim into the launch message the new process wakes
-up with: include the current goal, decisions, constraints and paths. The
-script's startup checks — readiness, message submission, the generation's owner
-record — run before it returns; for Codex it also starts the shared app server
-the takeover and the relay both use, with the endpoint carried in the launch
-message. On the next safe boundary Ava saves your checkpoint, verifies the
-inbound relay and activates the replacement; the executor may freely choose its
-display name. Activation and relay liveness are not host receipt: once active,
-the takeover verifies the start message actually arrived in its conversation
-before relying on push delivery. Run it from your own workspace —
-usually the best choice for a takeover: spawn the takeover under your
-workspace and pass that directory as the spawn workspace argument, so the
-workspace is directly the impersonator's working directory (other locations
-are not forbidden; this is the recommended default). Both launch paths are live: `spawn_claude.py --impersonate-self` takes
-the same inline `--brief`; its relay starts automatically with the session (the
-bundled `ava-relay` plugin, resident mode — no `timeout_ms` arming; the request
-output names the credential stub and the manual fallback). `--no-relay-resident`
-restores the executor-armed flow. `spawn_dsh.py --impersonate-self` launches
-DeepSeek Harness the same way (takeover-only): it boots dsh's `headless`
-profile with the bundled `ava-relay-dsh` plugin, which opens one persistent
-session with the launch message and starts the relay from the stub the request
-writes — nothing to arm. dsh needs `node` and `dsh` on PATH and its own model
-credential; see the `docs/conventions/agents/agent-impersonation-hosts.md#deepseek-harness-dsh` in the Ava source checkout.
+The `--prompt` text is sent as the initial message the new session wakes up
+with: include your agent id (`ava.self.AGENT_ID`), the current goal, decisions,
+constraints, paths, and instructions to read `impersonator-guide` and run
+`ava impersonate request --agent <agent_id> --provider <provider> ...`.
+The script's startup checks — readiness, message submission, the generation's
+owner record — run before it returns; for Codex it also starts the shared app
+server the session and the relay both use (`codex_app_server=<endpoint>`, so
+the executor can pass `--codex-remote <endpoint>` or rely on the default). On
+the next safe boundary Ava saves your checkpoint, verifies the inbound relay
+and activates the replacement; the executor may freely choose its display name.
+Activation and relay liveness are not host receipt: once active, the takeover
+verifies the start message actually arrived in its conversation before relying
+on push delivery. Run it from your own workspace — usually the best choice for
+a takeover: spawn the session under your workspace and pass that directory as
+the spawn workspace argument, so the workspace is directly the impersonator's
+working directory (other locations are not forbidden; this is the recommended
+default).
+
+All four launchers accept `--prompt`:
+- `spawn_codex.py <workspace-dir> --prompt '...'` — starts the shared app server
+  (`codex_app_server=<endpoint>`) and launches Codex connected with `--remote`.
+- `spawn_claude.py <workspace-dir> --prompt '...'` — launches Claude Code and
+  sends the prompt; the executor requests the lease with `--provider claude` and
+  arms its `Monitor` watch.
+- `spawn_antigravity.py <workspace-dir> --prompt '...'` — launches `agy chat -a <workspace>`
+  and sends the prompt; the executor requests the lease with `--provider antigravity`
+  (the runtime starts and supervises the ConnectRPC relay).
+- `spawn_dsh.py <workspace-dir> --prompt '...'` — boots dsh's `headless` profile
+  with the bundled `ava-relay-dsh` plugin, which opens one persistent session
+  with the prompt and starts the relay from the stub the request writes.
 
 The two states, and nothing else:
 
@@ -48,19 +56,19 @@ The two states, and nothing else:
   operations and consumed events — and an ACK means received, never finished,
   so check acknowledged messages for work the summary does not show as done.
 
-If the takeover's shell is closed (a full stop, a reboot, a crash), the platform
-ends the impersonation session ("the executor process is gone") and resumes
-you with the handoff JSON. To continue with the same executor, relaunch with
-`--impersonate-self --resume <claude_session|codex_session> --brief '...'`: it
-reopens the executor's own conversation, and the brief tells it which session
+If the takeover's shell is closed (a full stop, a reboot, a crash), the lease
+expires at its TTL or when ended, and resumes you with the handoff JSON. To
+continue with the same executor, relaunch with
+`--resume <claude_session|codex_session|antigravity_session> --prompt '...'`: it
+reopens the executor's own conversation, and the prompt tells it which session
 ended and where the handoff JSON is; it then opens a new impersonation session,
 since the old one is over. See [Resume after an
 interruption](resume_after_interruption.md). A DeepSeek Harness takeover is
 relaunched fresh instead.
 
-TTL remains the recovery deadline if the takeover dies. Without
-`--impersonate-self` the normal delegated workflow applies and you remain the
-supervisor making decisions.
+TTL remains the recovery deadline if the takeover dies. Without `--prompt` the
+normal delegated workflow applies and you remain the supervisor making
+decisions.
 
 
 ### Delivery safety

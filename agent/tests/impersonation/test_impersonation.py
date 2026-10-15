@@ -399,6 +399,7 @@ def test_establish_relay_codex_provisions_spawns_and_waits_for_heartbeat(
     provision_token = provision.call_args.args[3]
     assert spawn.call_count == 1
     assert spawn.call_args.args == (42, "lease-1", provision_token, "thread-1", None, None)
+    assert spawn.call_args.kwargs == {"provider": "codex"}
     assert relays.children[42].token == provision_token
 
 
@@ -539,7 +540,6 @@ async def test_claim_gate_records_a_stale_relay_as_degraded_and_never_replaces_i
 
     session = _relay_session("active", relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5))
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     old = MagicMock()
     old.poll.return_value = None if running else 1
     if owned:
@@ -604,7 +604,6 @@ async def test_confirmed_child_exit_is_degraded_at_once_without_replacement(
         "lease-1", old, "old-token", impersonation.time.monotonic(), 1
     )
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     provision = Mock(return_value={"relay_generation": 2})
     monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     spawn = Mock()
@@ -626,7 +625,6 @@ async def test_stale_session_relay_retains_authority_with_visible_unsupported_re
     native_gate_ctx: AvaContext,
 ) -> None:
     session = _relay_session("active", provider="claude")
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
@@ -637,70 +635,6 @@ async def test_stale_session_relay_retains_authority_with_visible_unsupported_re
     degradation.assert_called_once()
     assert "unsupported" in degradation.call_args.args[-1]
     abort.assert_not_called()
-
-
-@pytest.mark.parametrize("states", [["dead"], ["reused"], ["dead", "reused"]])
-async def test_claim_gate_stops_the_lease_when_the_executor_anchors_are_gone(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    states: list[str],
-    native_gate_ctx: AvaContext,
-) -> None:
-    """Component A: all recorded provider anchors dead/reused stops the lease
-    even with a fresh relay heartbeat (task #3998)."""
-    fresh = _relay_session("active", relay_heartbeat_at=datetime.now(UTC))
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=fresh))
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=list(states)))
-    abort = Mock(return_value={"id": "lease-1"})
-    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
-    from agent.nodes import END
-
-    decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
-    assert decision is not None and decision.goto == END
-    abort.assert_called_once()
-    assert abort.call_args.args[4] == "the executor process is gone"
-
-
-async def test_repeated_unknown_executor_evidence_keeps_original_authority(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    native_gate_ctx: AvaContext,
-) -> None:
-    session = _relay_session(
-        "active", expires_at=datetime.now(UTC), relay_heartbeat_at=datetime.now(UTC)
-    )
-    before = dict(session)
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["denied"]))
-    degradation = Mock()
-    monkeypatch.setattr(relay, "record_degradation", degradation)
-    abort = Mock()
-    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
-    for _ in range(3):
-        await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
-    assert degradation.call_count == 3
-    assert "unknown" in degradation.call_args.args[-1]
-    assert session == before
-    abort.assert_not_called()
-
-
-async def test_claim_gate_records_unknown_without_recorded_anchors(
-    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation, native_gate_ctx: AvaContext
-) -> None:
-    """Absent legacy evidence is unknown, never folded into all-dead authority."""
-    session = _relay_session("active", relay_heartbeat_at=datetime.now(UTC))
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=[]))
-    degradation = Mock()
-    monkeypatch.setattr(relay, "record_degradation", degradation)
-    abort = Mock(return_value={"id": "lease-1"})
-    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
-    from agent.nodes import END
-
-    decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
-    assert decision is not None and decision.goto == END
-    abort.assert_not_called()
-    assert "unknown" in degradation.call_args.args[-1]
 
 
 @pytest.mark.parametrize("fresh", [False, True])
@@ -719,7 +653,6 @@ async def test_unknown_relay_exit_evidence_degrades_only_when_the_heartbeat_is_s
     )
     before = dict(session)
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     monkeypatch.setattr(OwnedProcess, "live", Mock(side_effect=RuntimeError("birth unavailable")))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)

@@ -13,15 +13,15 @@ claim gate (native loop paused or resuming) and the held-controls pass
 parks the agent outside the graph — the dispatcher's pending scan wakes rows
 with an open lease periodically, pull-based from the database, so supervision
 does not depend on wake delivery. Executor authority is separate from relay
-transport: only confirmed provider-anchor death, explicit end or original TTL
-ends the lease. Unknown liveness remains visible until the original deadline.
-Confirmed Codex relay exit (the host's own child handle) bypasses heartbeat
+transport: only explicit end, native runtime replacement or original TTL
+ends the lease.
+Confirmed host-supervised relay exit (the host's own child handle for Codex or Antigravity) bypasses heartbeat
 freshness and startup grace on the next existing supervision pass; missing or
 unknown evidence is not confirmed exit. Alive senders keep the existing
 heartbeat/startup grace behavior. No additional scan or wake loop is introduced.
 A stale or exited relay of any provider is recorded as degraded and is never
-replaced: the lease keeps its one credential and runs to its original TTL, the
-executor's confirmed death or an explicit end, and the controller re-requests
+replaced: the lease keeps its one credential and runs to its original TTL or an
+explicit end, and the controller re-requests
 if it wants a new relay. Message attempts and ACK remain durable; exhaustion
 pauses a message, never identity. The ended-lease notice uses the shared
 `base.agents.impersonation.host_transport` owner; native handoff does not wait for

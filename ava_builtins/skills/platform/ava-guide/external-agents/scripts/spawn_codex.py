@@ -4,8 +4,9 @@
 The launch logic lives in ``ava.shell.coding_tools.codex``; this script is its
 command-line entry and passes its own skill directory, whose ``references/``
 holds the collaboration contract and whose ``scripts/`` holds the supervisor
-script (``watch_work.py``). See ``references/canonical_codex_owner.md`` for
-the ownership contract and the printed ``key=value`` fields.
+script (``watch_work.py``). Every launch starts a shared ``codex app-server``
+endpoint and prints ``codex_app_server`` and ``codex_session`` so the session
+can also accept an impersonation handover when instructed via a message.
 """
 
 from __future__ import annotations
@@ -16,15 +17,12 @@ from pathlib import Path
 
 from ava.shell.coding_tools import codex
 
-# This skill's own directory: its references/ holds the collaboration
-# contract and locates the impersonator guide, its scripts/ (this file's own
-# directory) holds the supervisor script.
 _SKILL_DIR = Path(__file__).resolve().parent.parent
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Launch, inspect, or stop Codex sessions (a supervised worker or a takeover)."
+        description="Launch, inspect, or stop Codex sessions in persistent shells."
     )
     parser.add_argument("workspace", help="Workspace directory for Codex.")
     parser.add_argument(
@@ -43,6 +41,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="STATUS and log file, absolute or relative to the workspace "
         "(default: work.md). Supervised worker mode only.",
+    )
+    parser.add_argument(
+        "--prompt",
+        default=None,
+        help="Initial prompt text sent instead of the two-file collaboration contract.",
     )
     parser.add_argument(
         "--ttl-seconds",
@@ -65,37 +68,17 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="GENERATION",
         help="Stop and terminalize exactly this generation.",
     )
-    parser.add_argument(
-        "--impersonate-self", action="store_true", help="replace the launching Ava agent"
-    )
-    parser.add_argument("--impersonation-name", help="display name for the takeover session")
-    parser.add_argument(
-        "--brief",
-        default=None,
-        help="Takeover briefing text, inlined verbatim into the launch message. "
-        "Required with --impersonate-self; a takeover reads no files.",
-    )
     return parser
 
 
 def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    if args.impersonate_self:
-        from ava.sdk_surface.agent_identity import require_agent_id
-
-        require_agent_id()
-        if args.status or args.cancel_generation:
-            parser.error("--impersonate-self requires a new launch")
+    if args.prompt is not None:
+        if args.status or args.cancel_generation or args.resume is not None:
+            parser.error("--prompt requires a fresh launch")
         if args.tasks_file is not None or args.work_file is not None:
-            parser.error(
-                "--tasks-file/--work-file serve the supervised worker mode; a takeover reads no files"
-            )
-        if args.brief is None or not args.brief.strip():
-            parser.error("--impersonate-self requires a non-empty --brief")
-    else:
-        if args.impersonation_name is not None:
-            parser.error("--impersonation-name requires --impersonate-self")
-        if args.brief is not None:
-            parser.error("--brief requires --impersonate-self")
+            parser.error("--tasks-file/--work-file cannot be combined with --prompt")
+        if not args.prompt.strip():
+            parser.error("--prompt must be non-empty")
 
 
 def main() -> int:
@@ -112,7 +95,7 @@ def main() -> int:
         return codex.cancel(workspace, args.cancel_generation)
     tasks_file = None
     work_file = None
-    if not args.impersonate_self:
+    if args.prompt is None:
         tasks_file = codex.resolve_file(workspace, args.tasks_file or "tasks.md")
         work_file = codex.resolve_file(workspace, args.work_file or "work.md")
     return codex.launch(
@@ -121,9 +104,8 @@ def main() -> int:
         work_file,
         args.ttl_seconds,
         args.caller_instance,
-        (args.impersonation_name or workspace.name) if args.impersonate_self else None,
-        args.brief,
         resume=args.resume,
+        prompt=args.prompt,
         skill_dir=_SKILL_DIR,
     )
 

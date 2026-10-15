@@ -32,9 +32,9 @@ codex_session=<uuid>
 `codex_session` is Codex's own session id, read from its `/status` card: the id
 `--resume` takes after an interruption.
 
-A takeover generation (`--impersonate-self`) prints no `supervisor_*`,
+A prompt-driven generation (`--prompt`) prints no `supervisor_*`,
 `tasks_file`, or `work_file` line: it runs file- and supervisor-less, its
-briefing inlined in the launch message, and its coding session alone is its
+initial message inlined, and its coding session alone is its
 liveness signal.
 
 The numeric ids remain scoped to `owner_agent_id`. Another Ava agent must not
@@ -49,20 +49,19 @@ the workspace and turn off the startup update check (an unattended launch must
 never answer "update now"). A fresh generation starts a new Codex session;
 `--resume <codex_session>` reopens a recorded one instead — see [Resume after
 an interruption](resume_after_interruption.md). The generation's private state
-directory holds only a takeover's app-server log.
+directory holds the app-server log.
 
-Every takeover generation also owns the explicit shared app server the relay
+Every generation also owns the explicit shared app server an impersonation relay
 delivers into: the endpoint must belong to the server holding the existing
 conversation; Pending queue acceptance does not establish Steer delivery. The
 launcher starts `codex app-server --listen unix://<socket>` on a private
 per-generation socket (with `approval_policy="never"` and
 `sandbox_mode="danger-full-access"` configured on the server itself), starts a
 janitor that ends the server when the coding session dies, connects the TUI with
-`--remote` to that exact endpoint, and carries the endpoint into the launch
-message so the request records it (`--codex-remote`). This needs a codex release
-with `app-server --listen`, TUI `--remote`, and app-server start-or-steer
-support (verified on 0.155.1). Missing host capabilities fail visibly, and a
-takeover additionally prints `codex_app_server=<endpoint>`.
+`--remote` to that exact endpoint, and prints `codex_app_server=<endpoint>`.
+This needs a codex release with `app-server --listen`, TUI `--remote`, and
+app-server start-or-steer support (verified on 0.155.1). Missing host
+capabilities fail visibly.
 
 The socket sits in a short per-user directory, not under the cluster home:
 `/private/tmp/ava-<uid>` on macOS and `/tmp/ava-<uid>` elsewhere. The directory

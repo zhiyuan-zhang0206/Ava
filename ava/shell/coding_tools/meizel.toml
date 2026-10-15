@@ -1,9 +1,7 @@
-exports = ["claude.py", "codex.py"]
+exports = ["antigravity.py", "claude.py", "codex.py"]
 
 [uses]
-"claude.py" = ["__init__.py", "_claude_checks.py", "_common.py", "_first_run.py"]
-"codex.py" = ["__init__.py", "_common.py"]
-"tests" = ["__init__.py", "_claude_checks.py", "_common.py", "_first_run.py", "claude.py", "codex.py"]
-
-[debt.private-name]
-"tests/test_claude_canonical_owner.py -> claude.py#_takeover_bootstrap_message" = 2
+"antigravity.py" = ["_common.py"]
+"claude.py" = ["_claude_checks.py", "_common.py", "_first_run.py"]
+"codex.py" = ["_common.py"]
+"tests" = ["_claude_checks.py", "_common.py", "_first_run.py", "antigravity.py", "claude.py", "codex.py"]

@@ -65,14 +65,21 @@ def test_codex_emitter_delivers_literal_input_to_the_owning_server(
     assert attempts == [(str(THREAD_ID), message, endpoint)]
 
 
-@pytest.mark.parametrize("provider", ["claude", "dsh"])
+@pytest.mark.parametrize("provider", ["claude", "dsh", "antigravity"])
 def test_controller_adapter_rejects_codex_remote(provider: str) -> None:
     with pytest.raises(ValueError, match="--codex-remote"):
         adapters.resolve_adapter(provider, None, codex_remote="unix:///tmp/codex.sock")
 
 
 @pytest.mark.parametrize(
-    "provider,thread_id", [("codex", None), ("claude", "thread"), ("dsh", "thread"), ("?", None)]
+    "provider,thread_id",
+    [
+        ("codex", None),
+        ("antigravity", None),
+        ("claude", "thread"),
+        ("dsh", "thread"),
+        ("?", None),
+    ],
 )
 def test_host_target_must_be_explicit(provider: str, thread_id: str | None) -> None:
     with pytest.raises(ValueError):
@@ -102,3 +109,5 @@ def test_codex_terminal_notice_is_left_to_the_native_host() -> None:
         "codex", str(THREAD_ID), codex_remote="unix:///tmp/ava-codex.sock"
     )
     assert not adapter.notify_terminal
+    ag = adapters.resolve_adapter("antigravity", str(THREAD_ID))
+    assert not ag.notify_terminal

@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -44,25 +44,19 @@ def test_termination_atomically_revokes_but_restart_preserves(
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     assert (
-        leases.get(
-            database, event_bus, lease["id"], attested_caller(lease), local_machine=local_machine
-        )["status"]
+        leases.get(database, event_bus, lease["id"], local_machine=local_machine)["status"]
         == "active"
     )
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     assert (
-        leases.get(
-            database, event_bus, lease["id"], attested_caller(lease), local_machine=local_machine
-        )["status"]
+        leases.get(database, event_bus, lease["id"], local_machine=local_machine)["status"]
         == "expired"
     )
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="not active"):
-        leases.require_active(
-            database, lease["id"], attested_caller(lease), local_machine=local_machine
-        )
+        leases.require_active(database, lease["id"], local_machine=local_machine)
 
 
 def test_expiry_between_driver_read_and_activation_returns_control(
@@ -129,7 +123,6 @@ def test_renew_replaces_ttl_and_reject_records_reason(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         ttl_seconds=600,
         local_machine=local_machine,
     )
@@ -180,7 +173,6 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
                 database,
                 event_bus,
                 lease["id"],
-                attested_caller(lease),
                 local_machine=local_machine,
             )["status"]
             == "expired"

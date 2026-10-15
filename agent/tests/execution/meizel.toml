@@ -23,7 +23,6 @@
 [debt.first-party-patch]
 "child_external_cli.py#assignment agent.extensions.plugin_state_codec.load_snapshot" = 1
 "child_external_cli.py#assignment ava.impersonation.attachment.control.require_active" = 1
-"child_external_cli.py#assignment ava.impersonation.attachment.process_metadata" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.init_logger" = 1

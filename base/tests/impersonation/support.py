@@ -57,7 +57,7 @@ def request_controller(
 ) -> dict[str, Any]:
     """Request the recorded controller tree's consent on the caller's machine."""
     kwargs: dict[str, Any] = {}
-    if provider == "codex":
+    if provider in ("codex", "antigravity"):
         kwargs["relay_thread_id"] = thread or str(uuid4())
     return leases.request(
         Database.from_settings(gate=database_gate),

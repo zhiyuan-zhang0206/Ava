@@ -11,7 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.impersonation.test_impersonation import gate_ctx as gate_ctx
 from agent.tests.impersonation.test_impersonation import incarnation as incarnation
 from agent.tests.impersonation.test_impersonation import relays as relays
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.incarnation.resources import ResourceProcess
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -113,7 +113,6 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_de
             database,
             event_bus,
             lease["id"],
-            attested_caller(lease),
             "Done after the restart",
             local_machine=machine_identity.name(),
         )

@@ -68,12 +68,10 @@ def write_relay_stub(
 ) -> None:
     """Write the resident-relay credential stub the session plugin consumes once.
 
-    The claude takeover launcher scopes the path per session through
-    ``AVA_IMPERSONATION_RELAY_STUB``; a dsh request uses the per-session path
-    its dsh plugin exports (``DSH_AVA_RELAY_STUB``) and names the relay
-    interpreter. The plugin deletes the file
-    immediately after loading it into the relay's environment. The file is
-    created 0600 (``fchmod`` defeats the umask): the credential is never
+    A dsh request uses the per-session path its dsh plugin exports
+    (``DSH_AVA_RELAY_STUB``) and names the relay interpreter. The plugin deletes
+    the file immediately after loading it into the relay's environment. The file
+    is created 0600 (``fchmod`` defeats the umask): the credential is never
     briefly world-readable between create and write.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,47 +96,8 @@ def write_relay_stub(
             os.close(fd)
 
 
-def _reject_used_resident_relay() -> None:
-    """A Claude session's wrapper can consume only one scoped credential stub."""
-    # env-ok: per-session relay stub handoff, not cluster configuration
-    stub_path = os.environ.get("AVA_IMPERSONATION_RELAY_STUB")
-    if not stub_path:
-        return
-    stub = Path(stub_path)
-    consumed = Path(f"{stub_path.removesuffix('.env')}.pid")
-    if stub.exists() or consumed.exists():
-        raise ValueError(
-            "this Claude takeover session has already assigned its one resident relay; "
-            "finish or cancel it, then use a fresh Claude takeover session in a "
-            "separate workspace to request another agent"
-        )
-
-
-def _print_claude_relay_instructions(response: dict[str, Any], *, agent_id: int) -> None:
-    """Name the claude relay start-up path: the resident stub handoff, else the manual flow."""
-    # env-ok: per-session relay stub handoff, not cluster configuration
-    stub_path = os.environ.get("AVA_IMPERSONATION_RELAY_STUB")
-    token = response.get("relay_token")
-    if stub_path and token:
-        write_relay_stub(
-            Path(stub_path),
-            agent_id=agent_id,
-            session_id=int(response["session_id"]),
-            token=str(token),
-        )
-        print(
-            "The session plugin starts the claude relay automatically: its "
-            f"credential stub was written to {stub_path}; do not arm a Monitor "
-            "watch. If the stub is not consumed and no relay heartbeat starts, "
-            "fall back to the manual flow: start the relay (ava impersonate "
-            "relay) inside the controller session with "
-            "AVA_IMPERSONATION_RELAY_TOKEN set to the relay token printed above, "
-            "arm it as a Monitor watch with timeout_ms 1800000 and re-arm on "
-            "each expiry notice (see the host conventions). Preparation fails "
-            "without its heartbeat.",
-            file=sys.stderr,
-        )
-        return
+def _print_claude_relay_instructions() -> None:
+    """Name the claude relay start-up path."""
     print(
         "Start the claude relay (ava impersonate relay) inside the controller "
         "session immediately, with AVA_IMPERSONATION_RELAY_TOKEN set to the "
@@ -171,7 +130,6 @@ def _dsh_relay_stub() -> Path:
 async def _wait_inbox(
     db: Database,
     lease_id: str,
-    caller: dict[str, Any],
     limit: int,
     wait: float,
     *,
@@ -184,7 +142,7 @@ async def _wait_inbox(
     if not math.isfinite(wait) or wait < 0:
         raise ValueError("--wait must be finite and nonnegative")
     lease = await asyncio.to_thread(
-        control.require_active, db, lease_id, caller, local_machine=local_machine
+        control.require_active, db, lease_id, local_machine=local_machine
     )
     listener = RedisInboundListener(settings.data_plane.redis_url, lease["agent_id"])
     try:
@@ -193,7 +151,7 @@ async def _wait_inbox(
         deadline = time.monotonic() + wait
         while True:
             messages = await asyncio.to_thread(
-                control.inbox, db, lease_id, caller, limit=limit, local_machine=local_machine
+                control.inbox, db, lease_id, limit=limit, local_machine=local_machine
             )
             remaining = deadline - time.monotonic()
             if messages or remaining <= 0:
@@ -229,24 +187,17 @@ def _run_local(args: argparse.Namespace) -> int:
 
 
 def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
-    """`impersonate send` — one message to another agent as the leased identity.
-
-    Attested through the session's caller-presence rule; the delivered source is
-    ``agent:<the leased agent>`` — the borrowed identity the SDK attachment
-    stamps for ``ava.agents.send_message`` (task #4102).
-    """
+    """`impersonate send` — one message to another agent as the leased identity."""
     from base.agents import impersonation as control
     from base.agents.impersonation import sessions
-    from base.native_process.ownership import process_metadata
     from cli.commands.agents.control import send_agent_message
 
     content = sys.stdin.read() if args.content == "-" else args.content
-    caller = process_metadata()
     db = database_factory()
     lease_id = sessions.private_id(
         db, args.agent_id, args.session_id, local_machine=args.runtime.machine.name()
     )
-    lease = control.require_active(db, lease_id, caller, local_machine=args.runtime.machine.name())
+    lease = control.require_active(db, lease_id, local_machine=args.runtime.machine.name())
     source = f"agent:{lease['agent_id']}"
     status = send_agent_message(args.target_agent_id, content, source=source)
     _emit({"status": status, "to": args.target_agent_id, "source": source})
@@ -256,17 +207,31 @@ def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int
 def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
     from base.agents.impersonation import sessions
-    from base.agents.impersonation.host_transport import require_control_endpoint
+    from base.agents.impersonation.host_transport import (
+        discover_antigravity_server,
+        require_control_endpoint,
+    )
     from base.config import Settings, settings
     from base.config.service_read import ConfigAuthority
     from base.native_process.ownership import process_metadata
     from base.paths import ava_home
 
-    _reject_used_resident_relay()
     dsh_stub = _dsh_relay_stub() if args.relay_provider == "dsh" else None
     endpoint = args.relay_codex_remote
+    thread_id = args.relay_thread_id
     if args.relay_provider == "codex":
         endpoint = require_control_endpoint(endpoint)
+    elif args.relay_provider == "antigravity":
+        # env-ok: Antigravity conversation ID injected by the host into run_command subprocesses
+        thread_id = (
+            thread_id or (os.environ.get("ANTIGRAVITY_CONVERSATION_ID") or "").strip() or None
+        )
+        if not thread_id:
+            raise ValueError(
+                "the antigravity relay needs --thread-id or ANTIGRAVITY_CONVERSATION_ID in the environment"
+            )
+        thread_id = str(UUID(thread_id))
+        discover_antigravity_server()
     response = sessions.request(
         database_factory(),
         EventBus.from_settings(),
@@ -282,7 +247,7 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
         ttl_seconds=args.ttl,
         reason=args.reason,
         provider=args.relay_provider,
-        thread_id=args.relay_thread_id,
+        thread_id=thread_id,
         codex_remote=endpoint,
         batch_window_seconds=args.relay_batch_window_seconds,
         local_machine=args.runtime.machine.name(),
@@ -304,6 +269,14 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
             "heartbeat starts, preparation fails and the takeover is rejected.",
             file=sys.stderr,
         )
+    elif args.relay_provider == "antigravity":
+        print(
+            "The runtime starts the antigravity relay automatically at activation; "
+            "no relay process starts here. The relay pushes each inbound batch into "
+            "this conversation via SendAgentMessage. Wait for the start message "
+            "before acting as the agent.",
+            file=sys.stderr,
+        )
     elif args.relay_provider == "codex":
         print(
             "The runtime starts the codex relay automatically at activation; "
@@ -316,7 +289,7 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
             file=sys.stderr,
         )
     else:
-        _print_claude_relay_instructions(response, agent_id=args.agent_id)
+        _print_claude_relay_instructions()
     return 0
 
 
@@ -324,7 +297,6 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
     from base.agents import impersonation as control
     from base.agents.impersonation import sessions
     from base.agents.impersonation.history import public_session, say
-    from base.native_process.ownership import process_metadata
 
     command = args.impersonation_cmd
     db = database_factory()
@@ -336,16 +308,13 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
         return 0
     if command == "send":
         return _send(args, database_factory=database_factory)
-    caller = process_metadata()
     args.lease_id = sessions.private_id(
         db, args.agent_id, args.session_id, local_machine=args.runtime.machine.name()
     )
     if command == "status":
         _emit(
             public_session(
-                control.get(
-                    db, bus, args.lease_id, caller, local_machine=args.runtime.machine.name()
-                )
+                control.get(db, bus, args.lease_id, local_machine=args.runtime.machine.name())
             )
         )
     elif command == "renew":
@@ -355,7 +324,6 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
                     db,
                     bus,
                     args.lease_id,
-                    caller,
                     ttl_seconds=args.ttl,
                     local_machine=args.runtime.machine.name(),
                 )
@@ -369,7 +337,6 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
                     db,
                     bus,
                     args.lease_id,
-                    caller,
                     summary,
                     local_machine=args.runtime.machine.name(),
                 )
@@ -381,7 +348,6 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
                 _wait_inbox(
                     db,
                     args.lease_id,
-                    caller,
                     args.limit,
                     args.wait,
                     local_machine=args.runtime.machine.name(),
@@ -393,7 +359,6 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
             db,
             bus,
             args.lease_id,
-            caller,
             args.message_ids,
             local_machine=args.runtime.machine.name(),
         )
@@ -406,7 +371,6 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
                     db,
                     bus,
                     args.lease_id,
-                    caller,
                     content,
                     phase=args.phase,
                     message_key=args.key,

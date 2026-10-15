@@ -1,21 +1,17 @@
-"""Skill-level contracts for the isolated Claude Code launch and its file-less takeover."""
+"""Skill-level contracts for the isolated Claude Code and Antigravity launchers."""
 
 from __future__ import annotations
 
 import datetime as dt
 import importlib.util
-import os
-import subprocess
 import sys
-from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 from ava.sdk_surface import agent_identity
-from ava.sdk_surface.tests.agent_binding import BindAgent
-from ava.shell.coding_tools import _claude_checks, _common, claude, impersonator_guide
+from ava.shell.coding_tools import antigravity, claude
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 
@@ -39,20 +35,9 @@ def _load(name: str, path: Path) -> ModuleType:
 
 
 spawn_claude = _load("spawn_claude_under_test", _SKILL_DIR / "scripts" / "spawn_claude.py")
-
-
-def _launch_takeover(workspace: Path, brief: str) -> int:
-    """A one-hour "Fix login" takeover of ``workspace`` through the library entry."""
-    return claude.launch(
-        workspace, None, None, 3600, None, "Fix login", brief, skill_dir=_SKILL_DIR
-    )
-
-
-def _unwrap_paste(text: str) -> str:
-    """The pasted bootstrap body; the operator's own words must follow the paste."""
-    assert text.startswith(_claude_checks.PASTE_BEGIN)
-    assert text.endswith(_claude_checks.PASTE_END + _claude_checks.OWN_WORDS)
-    return text[len(_claude_checks.PASTE_BEGIN) : text.index(_claude_checks.PASTE_END)]
+spawn_antigravity = _load(
+    "spawn_antigravity_under_test", _SKILL_DIR / "scripts" / "spawn_antigravity.py"
+)
 
 
 def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
@@ -104,167 +89,21 @@ def test_launch_command_can_explicitly_declare_external_caller(tmp_path: Path) -
     assert '"instance":"run-42"' in command
 
 
-def test_relay_command_wiring_is_default_on_and_opt_out_clean(tmp_path: Path) -> None:
-    """Resident wiring: the plugin command carries the stub export; the opt-out stays silent."""
-    record = _owner(tmp_path)
-    workspace = Path(record.key.workspace)
-    plugin = _SKILL_DIR / "scripts" / "ava-relay"
-    stub = tmp_path / "generation" / "relay.env"
-
-    resident = claude.claude_command(workspace, relay_stub=stub, relay_plugin_dir=plugin)
-    manual = claude.claude_command(workspace)
-    with pytest.raises(ValueError, match="stub path and its plugin dir"):
-        claude.claude_command(workspace, relay_plugin_dir=plugin)
-
-    assert f"export AVA_IMPERSONATION_RELAY_STUB={stub.as_posix()} " in resident
-    assert "AVA_IMPERSONATION_RELAY_PY=" in resident
-    assert resident.endswith(
-        f'exec "$claude_bin" --dangerously-skip-permissions --plugin-dir {plugin.as_posix()} || exit $?'
-    )
-    assert "AVA_IMPERSONATION_RELAY_STUB" not in manual
-    assert "--plugin-dir" not in manual
-
-    fallback = claude._takeover_bootstrap_message(
-        1, "Fix login", "brief", impersonator_guide(), relay_resident=False
-    )
-    resident_message = claude._takeover_bootstrap_message(
-        1, "Fix login", "brief", impersonator_guide(), relay_resident=True
-    )
-    assert "Immediately start the Claude Monitor relay" in fallback
-    assert "do not arm a Monitor watch" in resident_message
-
-
-def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    active = _owner(tmp_path)
-    launching = replace(
-        active, status=CodingSessionStatus.LAUNCHING, session_id=None, session_name=None
-    )
-    sent: list[str] = []
-    killed: list[int] = []
-    terminated: list[str] = []
-
-    def _kill(sid: int) -> None:
-        killed.append(sid)
-
-    def _claim(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionOwner:
-        return launching
-
-    def _pretrust(_workspace: Path) -> None:
-        return None
-
-    def _new(**_kwargs: object) -> int:
-        return 7
-
-    def _send(_sid: int, text: str) -> None:
-        sent.append(text)
-
-    def _capture(_sid: int, *, scrollback: bool) -> str:
-        assert scrollback is False
-        return (
-            "error: claude executable not found in PATH or $HOME/.local/bin/claude\n"
-            + "bash prompt $ " * 10
-        )
-
-    original_command = claude.claude_command
-
-    def _missing_command(
-        workspace: Path,
-        caller_instance: str | None = None,
-        *,
-        failure_marker: Path,
-        relay_stub: Path | None = None,
-        relay_plugin_dir: Path | None = None,
-        claude_session: str | None = None,
-        resume: bool = False,
-    ) -> str:
-        failure_marker.write_text("claude executable not found\n")
-        return original_command(
-            workspace,
-            caller_instance,
-            failure_marker=failure_marker,
-            relay_stub=relay_stub,
-            relay_plugin_dir=relay_plugin_dir,
-            claude_session=claude_session,
-            resume=resume,
-        )
-
-    def _publish(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionOwner:
-        return active
-
-    def _terminate(_key: object, generation: str, *, reason: str) -> bool:
-        assert reason == "launch-failed"
-        terminated.append(generation)
-        return True
-
-    def _receipt(_sid: int, _submitted: object) -> None:
-        pytest.fail("bootstrap sent")
-
-    monkeypatch.setattr(claude, "new_generation", _claim)
-    monkeypatch.setattr(claude, "pretrust", _pretrust)
-    monkeypatch.setattr(claude.sessions, "new", _new)
-    monkeypatch.setattr(claude.sessions, "send", _send)
-    monkeypatch.setattr(claude.sessions, "capture", _capture)
-    monkeypatch.setattr(claude.sessions, "kill", _kill)
-    monkeypatch.setattr(claude, "claude_command", _missing_command)
-    monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
-    monkeypatch.setattr(claude.coding_session_owner, "terminate_generation", _terminate)
-    monkeypatch.setattr(claude, "verify_start_receipt", _receipt)
-
-    with pytest.raises(RuntimeError, match="claude executable not found"):
-        claude.run_takeover_launch(
-            Path(active.key.workspace),
-            "Fix login",
-            "brief",
-            3600,
-            None,
-            _SKILL_DIR,
-            "11111111-2222-3333-4444-555555555555",
-            relay_resident=False,
-        )
-
-    assert len(sent) == 1
-    assert killed == [7]
-    assert terminated == [launching.generation]
-
-
-def test_takeover_launch_inlines_brief_without_files_or_supervisor(
+def test_prompt_launch_sends_prompt_without_creating_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    active = _owner(tmp_path)
-    launching = replace(
-        active,
-        status=CodingSessionStatus.LAUNCHING,
-        session_id=None,
-        session_name=None,
-        tasks_file=None,
-        work_file=None,
-    )
     events: list[str] = []
     sent: list[str] = []
 
-    def _claim(
-        _key: coding_session_owner.CodingSessionKey,
-        *,
-        tasks_file: Path | None,
-        work_file: Path | None,
-        ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionOwner:
-        assert tasks_file is None and work_file is None
-        assert ttl_seconds == 3600
-        events.append("claim")
-        return launching
-
     def _unexpected(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("a takeover launch must not create files or start a supervisor")
+        raise AssertionError("a prompt launch must not create task or work files")
 
     def _pretrust(_workspace: Path) -> None:
         events.append("pretrust")
 
     def _new(*, name: str, ttl: float) -> int:
-        assert name == launching.expected_suffix
+        assert name.startswith("claude-")
         assert ttl == 3600
         events.append("new")
         return 7
@@ -277,253 +116,42 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     def _ready(_session_id: int, **_kwargs: object) -> None:
         events.append("ready")
 
-    def _receipt(_session_id: int, _submitted: object) -> None:
-        events.append("receipt")
-
-    def _publish(
-        _key: coding_session_owner.CodingSessionKey,
-        _generation: str,
-        *,
-        session_id: int,
-        session_name: str,
-    ) -> coding_session_owner.CodingSessionOwner:
-        assert session_id == 7
-        assert session_name.endswith("-claude-workspace-11111111")
-        events.append("publish")
-        return replace(
-            launching, status=CodingSessionStatus.ACTIVE, session_id=7, session_name=session_name
-        )
-
-    monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "init_file", _unexpected)
     monkeypatch.setattr(claude, "pretrust", _pretrust)
     monkeypatch.setattr(claude.sessions, "new", _new)
     monkeypatch.setattr(claude.sessions, "send", _send)
     monkeypatch.setattr(claude, "wait_for_ready", _ready)
-    monkeypatch.setattr(claude, "verify_start_receipt", _receipt)
-    monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
 
-    workspace = Path(launching.key.workspace)
-    brief = "Goal: replace the agent. The briefing is inline; read no files."
-    rc = _launch_takeover(workspace, brief)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    prompt = "Please run ava impersonate request --agent 41 --name 'Fix login' --provider claude"
+    rc = claude.launch(
+        workspace,
+        None,
+        None,
+        3600,
+        None,
+        skill_dir=_SKILL_DIR,
+        prompt=prompt,
+        preset_first_run=False,
+        check_session_exists=lambda _name: False,
+    )
 
     assert rc == 0
-    assert events == ["claim", "pretrust", "new", "publish", "send", "ready", "send", "receipt"]
+    assert events == ["pretrust", "new", "send", "ready", "send"]
     assert sent[0].startswith(f"cd {workspace.as_posix()} && ")
-    # The bootstrap goes out as one bracketed paste so the composer cannot
-    # fold it into content-dropping fragments (#4364).
-    message = _unwrap_paste(sent[1])
-    assert "take over Ava agent 41" in message
-    assert brief in message
-    assert "tasks.md" not in message and "work.md" not in message
-
-
-def test_resident_launch_scopes_the_credential_stub_to_its_generation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An earlier session's wrapper, orphaned in the same workspace, polls its own
-    generation's dir; the new stub lives only in the new generation's private dir."""
-    active = _owner(tmp_path)
-    launching = replace(
-        active, status=CodingSessionStatus.LAUNCHING, session_id=None, session_name=None
-    )
-    sent: list[str] = []
-
-    def _claim(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionOwner:
-        return launching
-
-    def _pretrust(_workspace: Path) -> None:
-        return None
-
-    def _new(**_kwargs: object) -> int:
-        return 7
-
-    def _send(_sid: int, content: str) -> None:
-        sent.append(content)
-
-    def _ready(_sid: int, *, failure_marker: Path, resumed: bool) -> None:
-        assert not resumed
-        assert failure_marker.parent.is_dir()
-
-    def _receipt(_sid: int, _submitted: object) -> None:
-        return None
-
-    def _publish(
-        _key: coding_session_owner.CodingSessionKey,
-        _generation: str,
-        *,
-        session_id: int,
-        session_name: str,
-    ) -> coding_session_owner.CodingSessionOwner:
-        return replace(
-            launching,
-            status=CodingSessionStatus.ACTIVE,
-            session_id=session_id,
-            session_name=session_name,
-        )
-
-    monkeypatch.setattr(claude, "new_generation", _claim)
-    monkeypatch.setattr(claude, "pretrust", _pretrust)
-    monkeypatch.setattr(claude.sessions, "new", _new)
-    monkeypatch.setattr(claude.sessions, "send", _send)
-    monkeypatch.setattr(claude, "wait_for_ready", _ready)
-    monkeypatch.setattr(claude, "verify_start_receipt", _receipt)
-    monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
-
-    workspace = Path(launching.key.workspace)
-    assert launching.state_dir is not None
-    stub = launching.state_dir / "relay.env"
-
-    assert _launch_takeover(workspace, "brief") == 0
-
-    assert launching.state_dir.is_dir()
-    assert launching.state_dir.stat().st_mode & 0o777 == 0o700
-    assert f"export AVA_IMPERSONATION_RELAY_STUB={stub.as_posix()} " in sent[0]
-    assert workspace.as_posix() not in stub.as_posix()
-    assert "--plugin-dir" in sent[0]
-
-
-def test_relay_wrapper_marks_the_standby_stub_consumed(tmp_path: Path) -> None:
-    stub = tmp_path / ".ava-relay.env"
-    stub.write_text("SID=9\nAGENT=41\nAVA_IMPERSONATION_RELAY_TOKEN=token\n", encoding="utf-8")
-    wrapper = _SKILL_DIR / "scripts" / "ava-relay" / "scripts" / "relay-wrapper.sh"
-    result = subprocess.run(  # noqa: S603 - wrapper path is fixed in this checkout
-        ["bash", str(wrapper)],
-        env=os.environ
-        | {
-            "AVA_IMPERSONATION_RELAY_STUB": str(stub),
-            "AVA_IMPERSONATION_RELAY_PY": "/usr/bin/true",
-            "AVA_IMPERSONATION_RELAY_STUB_WAIT_SECONDS": "1",
-        },
-        capture_output=True,
-        text=True,
-        timeout=5,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert not stub.exists()
-    assert int((tmp_path / ".ava-relay.pid").read_text(encoding="utf-8")) > 0
-
-
-def test_start_receipt_survives_a_dead_session_at_the_enter_retry(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A dead pane's send_keys refusal stays loud-not-fatal: warn, do not raise."""
-
-    def no_receipt() -> bool:
-        return False
-
-    def no_sleep(_seconds: float) -> None:
-        return None
-
-    def dead_keys(_sid: int, *_keys: str) -> None:
-        raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
-
-    monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
-    monkeypatch.setattr(claude.sessions, "send_keys", dead_keys)
-
-    _claude_checks.verify_start_receipt(7, no_receipt, timeout=0.01)
-    out = capsys.readouterr().out
-    assert "start-receipt=not-submitted" in out
-    assert "Enter retry failed" in out
-
-
-def test_start_receipt_does_not_press_enter_when_the_bootstrap_is_submitted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A submitted bootstrap never reaches the Enter retry or any send path."""
-
-    def transcript_evidence() -> bool:
-        return True
-
-    def unexpected_enter(_sid: int, _key: str) -> None:
-        pytest.fail("submitted bootstrap must not receive Enter")
-
-    def unexpected_send(_sid: int, _message: str) -> None:
-        pytest.fail("submitted bootstrap must not be sent again")
-
-    monkeypatch.setattr(claude.sessions, "send_keys", unexpected_enter)
-    monkeypatch.setattr(claude.sessions, "send", unexpected_send)
-
-    _claude_checks.verify_start_receipt(7, transcript_evidence)
-
-
-def test_start_receipt_accepts_evidence_that_appears_after_the_enter_retry(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A bootstrap parked in the composer submits on one Enter; nothing is sent again."""
-    evidence = iter([True])
-    keys: list[str] = []
-
-    def transcript_evidence() -> bool:
-        return next(evidence)
-
-    def no_sleep(_seconds: float) -> None:
-        return None
-
-    def send_enter(_sid: int, key: str) -> None:
-        keys.append(key)
-
-    def unexpected_send(_sid: int, _message: str) -> None:
-        pytest.fail("the bootstrap must not be sent a second time")
-
-    monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
-    monkeypatch.setattr(claude.sessions, "send_keys", send_enter)
-    monkeypatch.setattr(claude.sessions, "send", unexpected_send)
-
-    _claude_checks.verify_start_receipt(7, transcript_evidence, timeout=0.0)
-
-    assert keys == ["Enter"]
-    assert "start-receipt=submitted after Enter retry" in capsys.readouterr().out
-
-
-def test_start_receipt_warns_and_never_resends_when_one_enter_leaves_no_evidence(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Without evidence after one Enter the launcher warns; it never sends the bootstrap again.
-
-    A second send could deliver the takeover twice, so an unconfirmed bootstrap is
-    left for the operator to check.
-    """
-    keys: list[str] = []
-    sent: list[str] = []
-
-    def no_receipt() -> bool:
-        return False
-
-    def no_sleep(_seconds: float) -> None:
-        return None
-
-    def send_enter(_sid: int, key: str) -> None:
-        keys.append(key)
-
-    def record_send(_sid: int, message: str) -> None:
-        sent.append(message)
-
-    monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
-    monkeypatch.setattr(claude.sessions, "send_keys", send_enter)
-    monkeypatch.setattr(claude.sessions, "send", record_send)
-
-    _claude_checks.verify_start_receipt(7, no_receipt, timeout=0.0)
-
-    assert keys == ["Enter"]
-    assert sent == []
-    out = capsys.readouterr().out
-    assert "start-receipt=not-submitted" in out
-    assert "not resent" in out
+    assert sent[1] == prompt
 
 
 @pytest.mark.parametrize(
     "extra",
     [
-        ["--brief", "briefing", "--tasks-file", "tasks.md"],
-        ["--brief", "briefing", "--work-file", "work.md"],
-        [],
-        ["--brief", "   "],
+        ["--prompt", "hello", "--tasks-file", "tasks.md"],
+        ["--prompt", "hello", "--work-file", "work.md"],
+        ["--prompt", "   "],
     ],
 )
-def test_claude_takeover_cli_rejects_files_and_requires_a_brief(
+def test_claude_prompt_cli_rejects_files_and_blank_prompt(
     extra: list[str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -532,145 +160,32 @@ def test_claude_takeover_cli_rejects_files_and_requires_a_brief(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["spawn_claude.py", str(tmp_path), "--impersonate-self", *extra],
+        ["spawn_claude.py", str(tmp_path), *extra],
     )
 
     with pytest.raises(SystemExit):
         spawn_claude.main()
 
 
-def test_claude_brief_requires_takeover_mode(
+def test_supervised_launch_needs_its_files_or_prompt(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="a supervised launch needs its task and work files"):
+        claude.launch(tmp_path, None, None, 3600, skill_dir=_SKILL_DIR, preset_first_run=False)
+
+
+def test_antigravity_launch_needs_its_files_or_prompt(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="a supervised launch needs its task and work files"):
+        antigravity.launch(tmp_path, None, None, skill_dir=_SKILL_DIR)
+
+
+def test_antigravity_prompt_cli_rejects_files_and_blank_prompt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sys, "argv", ["spawn_claude.py", str(tmp_path), "--brief", "briefing"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["spawn_antigravity.py", str(tmp_path), "--prompt", "   "],
+    )
 
     with pytest.raises(SystemExit):
-        spawn_claude.main()
-
-
-def test_supervised_launch_needs_its_files(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="supervised launch needs its task and work files"):
-        claude.launch(tmp_path, None, None, 3600, skill_dir=_SKILL_DIR)
-
-
-def test_a_new_generation_lets_the_sweep_ask_about_terminated_owners(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    bound_agent: BindAgent,
-) -> None:
-    record = _owner(tmp_path)
-    bound_agent(41)
-    seen: list[object] = []
-
-    def _launch_generation(
-        _key: coding_session_owner.CodingSessionKey, **kwargs: object
-    ) -> coding_session_owner.CodingSessionOwner:
-        seen.append(kwargs["owner_terminated"])
-        return record
-
-    monkeypatch.setattr(claude.coding_session_owner, "launch_generation", _launch_generation)
-
-    assert (
-        claude.new_generation(record.key, tasks_file=None, work_file=None, ttl_seconds=3600)
-        is record
-    )
-    assert seen == [_common.owner_terminated]
-
-
-def test_failed_early_publish_kills_claude_session_before_startup(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    active = _owner(tmp_path)
-    launching = replace(
-        active,
-        status=CodingSessionStatus.LAUNCHING,
-        session_id=None,
-        session_name=None,
-        tasks_file=None,
-        work_file=None,
-    )
-    events: list[str] = []
-    killed: list[int] = []
-    terminated: list[tuple[str, str]] = []
-
-    def _claim(
-        _key: coding_session_owner.CodingSessionKey,
-        *,
-        tasks_file: Path | None,
-        work_file: Path | None,
-        ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionOwner:
-        events.append("claim")
-        return launching
-
-    def _pretrust(_workspace: Path) -> None:
-        events.append("pretrust")
-
-    def _new(*, name: str, ttl: float) -> int:
-        events.append("new")
-        return 7
-
-    def _send(_session_id: int, _content: str) -> None:
-        events.append("send")
-
-    def _ready(_session_id: int) -> None:
-        events.append("ready")
-
-    def _publish(
-        _key: coding_session_owner.CodingSessionKey,
-        _generation: str,
-        *,
-        session_id: int,
-        session_name: str,
-    ) -> coding_session_owner.CodingSessionOwner:
-        events.append("publish")
-        raise coding_session_owner.CodingSessionGenerationChangedError("replacement won")
-
-    def _kill(session_id: int) -> None:
-        killed.append(session_id)
-
-    def _terminate(
-        _key: coding_session_owner.CodingSessionKey,
-        _generation: str,
-        *,
-        reason: str,
-    ) -> bool:
-        terminated.append((_generation, reason))
-        return False
-
-    monkeypatch.setattr(claude, "new_generation", _claim)
-    monkeypatch.setattr(claude, "pretrust", _pretrust)
-    monkeypatch.setattr(claude.sessions, "new", _new)
-    monkeypatch.setattr(claude.sessions, "send", _send)
-    monkeypatch.setattr(claude, "wait_for_ready", _ready)
-    monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
-    monkeypatch.setattr(claude.sessions, "kill", _kill)
-    monkeypatch.setattr(claude.coding_session_owner, "terminate_generation", _terminate)
-
-    workspace = Path(launching.key.workspace)
-    with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
-        _launch_takeover(workspace, "the briefing")
-
-    assert events == ["claim", "pretrust", "new", "publish"]
-    assert killed == [7]
-    assert terminated == [(launching.generation, "launch-failed")]
-
-
-def test_bracketed_paste_wraps_a_multi_chunk_payload() -> None:
-    payload = "x" * (_claude_checks.PASTE_WRAP_THRESHOLD_CHARS + 1)
-    assert _claude_checks.bracketed_paste(payload) == f"\x1b[200~{payload}\x1b[201~"
-
-
-def test_bracketed_paste_leaves_a_single_chunk_payload_unchanged() -> None:
-    payload = "x" * _claude_checks.PASTE_WRAP_THRESHOLD_CHARS
-    assert _claude_checks.bracketed_paste(payload) == payload
-
-
-def test_bracketed_paste_strips_inner_markers() -> None:
-    payload = "\x1b[201~" + "y" * (_claude_checks.PASTE_WRAP_THRESHOLD_CHARS + 1) + "\x1b[200~"
-    wrapped = _claude_checks.bracketed_paste(payload)
-    assert wrapped.startswith("\x1b[200~") and wrapped.endswith("\x1b[201~")
-    assert wrapped.count("\x1b[200~") == 1
-    assert wrapped.count("\x1b[201~") == 1
+        spawn_antigravity.main()

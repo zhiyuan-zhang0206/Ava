@@ -37,7 +37,6 @@
 "test_heartbeat_snapshots.py#monkeypatch.setattr services.wake.heartbeat.daemon.sleep_with_liveness" = 2
 "test_impersonation_heartbeat.py#monkeypatch.setattr agent.extensions.plugin_state_codec.load_snapshot" = 1
 "test_impersonation_heartbeat.py#monkeypatch.setattr ava.__plugin_installation__" = 1
-"test_impersonation_heartbeat.py#monkeypatch.setattr ava.impersonation.attachment.process_metadata" = 1
 "test_impersonation_heartbeat.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_station_healthcheck.py#monkeypatch.setattr base.config.settings.observability.observability_url" = 6
 "test_station_healthcheck.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_port" = 1

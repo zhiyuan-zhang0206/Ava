@@ -219,12 +219,9 @@ def test_failed_context_entry_detaches_and_allows_next_attachment(
 
     next_lease = {**lease, "id": "next", "status": "active", "delta_version": 0}
 
-    def require_next(
-        _db: Database, lease_id: str, attesting: dict[str, Any], *, local_machine: str
-    ) -> dict[str, Any]:
+    def require_next(_db: Database, lease_id: str, *, local_machine: str) -> dict[str, Any]:
         assert local_machine == next_lease["machine"]
         assert lease_id == "next"
-        assert attesting == {"pid": 777}
         return next_lease
 
     monkeypatch.setattr(attachment_module.control, "require_active", require_next)
@@ -243,13 +240,11 @@ def test_concurrent_constructor_fails_before_lease_lookup(
     first_lookup = Event()
     continue_lookup = Event()
 
-    def blocked_require(
-        db: Database, lease_id: str, attesting: dict[str, Any], *, local_machine: str
-    ) -> dict[str, Any]:
+    def blocked_require(db: Database, lease_id: str, *, local_machine: str) -> dict[str, Any]:
         if next(calls) == 0:
             first_lookup.set()
             assert continue_lookup.wait(5), "test did not release the first lease lookup"
-        return require(db, lease_id, attesting, local_machine=local_machine)
+        return require(db, lease_id, local_machine=local_machine)
 
     def attach_in_worker() -> None:
         with impersonation.attach("lease"):
@@ -461,9 +456,7 @@ def test_attach_rejects_other_machine_without_binding_identity(
     lease, _, _ = attached_runtime
     lease["machine"] = "another-runner"
 
-    def foreign_lease(
-        _db: Database, _lease_id: str, _attesting: dict[str, Any], *, local_machine: str
-    ) -> dict[str, Any]:
+    def foreign_lease(_db: Database, _lease_id: str, *, local_machine: str) -> dict[str, Any]:
         assert local_machine == "local-runner"
         return dict(lease)
 

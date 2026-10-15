@@ -8,7 +8,6 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
-from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -71,7 +70,6 @@ def test_closure_restores_six_native_owners(
                 database,
                 event_bus,
                 lease["id"],
-                attested_caller(lease),
                 "Complete",
                 local_machine=local_machine,
             )
@@ -79,7 +77,6 @@ def test_closure_restores_six_native_owners(
                 database,
                 event_bus,
                 lease["id"],
-                attested_caller(lease),
                 "Complete again",
                 local_machine=local_machine,
             )

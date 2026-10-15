@@ -250,19 +250,18 @@ def test_ack_uses_explicit_processed_ids_only(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    seen: list[tuple[str, dict[str, Any], list[int]]] = []
+    seen: list[tuple[str, list[int]]] = []
 
     def ack(
         _db: object,
         _bus: object,
         lease: str,
-        attesting: dict[str, Any],
         ids: list[int],
         *,
         local_machine: str,
     ) -> None:
         assert local_machine == command_runtime.machine.name()
-        seen.append((lease, attesting, ids))
+        seen.append((lease, ids))
 
     monkeypatch.setattr(
         sessions,
@@ -278,8 +277,7 @@ def test_ack_uses_explicit_processed_ids_only(
         == 0
     )
     assert seen[0][0] == "lease"
-    assert seen[0][1]["pid"] > 0
-    assert seen[0][2] == [11, 13]
+    assert seen[0][1] == [11, 13]
     assert json.loads(capsys.readouterr().out) == {"acknowledged": [11, 13]}
 
 
@@ -292,9 +290,7 @@ def test_classified_attestation_refusal_fails_without_leaking_state(
 ) -> None:
     from base.agents.impersonation import ImpersonationError
 
-    def deny(
-        _db: object, _bus: object, _lease: str, _caller: object, *, local_machine: str
-    ) -> dict[str, Any]:
+    def deny(_db: object, _bus: object, _lease: str, *, local_machine: str) -> dict[str, Any]:
         raise ImpersonationError("Controller caller check failed (chain-mismatch): see docs")
 
     monkeypatch.setattr(sessions, "private_id", _private_id)
@@ -320,7 +316,7 @@ def test_release_preserves_summary(
     seen: list[str] = []
 
     def release(
-        _db: object, _bus: object, _lease: str, _caller: object, summary: str, *, local_machine: str
+        _db: object, _bus: object, _lease: str, summary: str, *, local_machine: str
     ) -> dict[str, Any]:
         assert local_machine == command_runtime.machine.name()
         seen.append(summary)
@@ -352,9 +348,13 @@ def test_release_preserves_summary(
 
 
 def test_request_relay_spec_is_checked_at_the_cli_boundary(
-    capsys: pytest.CaptureFixture[str], *, command_runtime: CommandRuntime
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     """`_relay_spec_problem` mirrors the shared validator before dispatch."""
+    monkeypatch.delenv("ANTIGRAVITY_CONVERSATION_ID", raising=False)
     base = [
         "request",
         "--name",
@@ -371,6 +371,10 @@ def test_request_relay_spec_is_checked_at_the_cli_boundary(
     codex_without_thread = _args(*base, "--provider", "codex", command_runtime=command_runtime)
     assert codex_without_thread.func(codex_without_thread) == 2
     assert "needs --thread-id" in capsys.readouterr().err
+
+    ag_without_thread = _args(*base, "--provider", "antigravity", command_runtime=command_runtime)
+    assert ag_without_thread.func(ag_without_thread) == 2
+    assert "ANTIGRAVITY_CONVERSATION_ID" in capsys.readouterr().err
 
     bad_remote = _args(
         *base,
@@ -432,7 +436,7 @@ def test_relay_spec_is_checked_at_the_cli_boundary(
     assert "routes to its owner" in capsys.readouterr().err
 
 
-# -- impersonate send: the attested CLI form of speaking as the leased agent --
+# -- impersonate send: the CLI form of speaking as the leased agent --
 
 
 def test_send_delivers_as_the_borrowed_agent(
@@ -448,11 +452,8 @@ def test_send_delivers_as_the_borrowed_agent(
         seen.append((agent_id, content, source))
         return "enqueued"
 
-    def require_active(
-        _db: object, lease: str, caller: dict[str, Any], *, local_machine: str
-    ) -> dict[str, Any]:
+    def require_active(_db: object, lease: str, *, local_machine: str) -> dict[str, Any]:
         assert lease == "lease"
-        assert caller["pid"] > 0
         return {"agent_id": 405}
 
     monkeypatch.setattr(sessions, "private_id", _private_id)
@@ -614,111 +615,6 @@ def test_numeric_options_accept_runtime_boundaries(
     for value in values:
         parsed = _args(*command, option, value, command_runtime=command_runtime)
         assert getattr(parsed, option.removeprefix("--")) == float(value)
-
-
-def test_request_writes_the_resident_stub_when_scoped(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-
-    def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
-        return {
-            "id": "lease",
-            "session_id": 9,
-            "relay_token": "tok-123",
-            "status": "preparing",
-        }
-
-    stub = tmp_path / ".ava-relay.env"
-    monkeypatch.setattr(sessions, "request", request)
-    monkeypatch.setenv("AVA_IMPERSONATION_RELAY_STUB", str(stub))
-    assert (
-        cli.cmd_impersonate(
-            _args(
-                "request",
-                "--name",
-                "Fix login",
-                "--agent",
-                "405",
-                "--as",
-                "Claude: task1",
-                "--ttl",
-                "3600",
-                "--provider",
-                "claude",
-                "--batch-window",
-                "0",
-                command_runtime=command_runtime,
-            ),
-            database_factory=operator_database,
-        )
-        == 0
-    )
-    assert stub.read_text() == "SID=9\nAGENT=405\nAVA_IMPERSONATION_RELAY_TOKEN=tok-123\n"
-    assert (stub.stat().st_mode & 0o777) == 0o600
-    err = capsys.readouterr().err
-    assert "session plugin starts the claude relay automatically" in err
-    assert "arm it as a Monitor watch" in err
-
-
-@pytest.mark.parametrize("handoff_state", ["pending", "consumed"])
-def test_request_rejects_second_resident_relay_handoff_before_creating_a_lease(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    handoff_state: str,
-    operator_database: Callable[[], Any],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    from unittest.mock import Mock
-
-    stub = tmp_path / ".ava-relay.env"
-    marker = tmp_path / ".ava-relay.pid"
-    if handoff_state == "pending":
-        stub.write_text("original credential", encoding="utf-8")
-    else:
-        marker.write_text("1234\n", encoding="utf-8")
-    request = Mock(return_value={"session_id": 10, "relay_token": "new-token"})
-    monkeypatch.setattr(sessions, "request", request)
-    monkeypatch.setenv("AVA_IMPERSONATION_RELAY_STUB", str(stub))
-
-    assert (
-        cli.cmd_impersonate(
-            _args(
-                "request",
-                "--name",
-                "Another takeover",
-                "--agent",
-                "406",
-                "--as",
-                "Claude: task2",
-                "--ttl",
-                "3600",
-                "--provider",
-                "claude",
-                "--batch-window",
-                "0",
-                command_runtime=command_runtime,
-            ),
-            database_factory=operator_database,
-        )
-        == 1
-    )
-    request.assert_not_called()
-    output = capsys.readouterr()
-    assert output.out == ""
-    assert "fresh Claude takeover session" in output.err
-    if handoff_state == "pending":
-        assert stub.read_text(encoding="utf-8") == "original credential"
-        assert not marker.exists()
-    else:
-        assert not stub.exists()
-        assert marker.read_text(encoding="utf-8") == "1234\n"
 
 
 def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(

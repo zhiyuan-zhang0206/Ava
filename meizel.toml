@@ -236,8 +236,7 @@ frontend = ["ui"]
 "base/config/tests/test_config_authority.py -> cli/main.py" = 1
 
 [debt.private-module]
-"agent/tests/impersonation/test_impersonation_transport_integration.py -> base/agents/impersonation/_store.py" = 2
-"ava_builtins/skills/platform/ava-guide/external-agents/tests/test_coding_session_resume.py -> ava/shell/coding_tools/_claude_checks.py" = 9
+"ava_builtins/skills/platform/ava-guide/external-agents/tests/test_coding_session_resume.py -> ava/shell/coding_tools/_claude_checks.py" = 4
 "ava_builtins/skills/platform/ava-guide/external-agents/tests/test_coding_session_resume.py -> ava/shell/coding_tools/_common.py" = 3
 "conftest.py -> tests/_asyncio_stall_probe.py" = 1
 "gateway/tests/agents/test_external_agent_source.py -> agent/graph/claim/_chat_inbound.py" = 1
