@@ -10,6 +10,7 @@ from agent.state import AgentState, CompactState
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.plugins.extensions import EMPTY
 
 build_model_catalog()
 
@@ -34,7 +35,10 @@ def _agent(**pins: float) -> AgentSlices:
 
 def test_an_unpinned_agent_is_below_its_models_thresholds() -> None:
     assert not auto_compact_will_fire(_state(), _agent(), catalog=build_model_catalog())
-    assert compact_reminder_update(_state(), _agent(), catalog=build_model_catalog()) is None
+    assert (
+        compact_reminder_update(_state(), _agent(), catalog=build_model_catalog(), extensions=EMPTY)
+        is None
+    )
 
 
 @pytest.mark.parametrize(
@@ -57,7 +61,10 @@ def test_a_raised_force_threshold_is_what_keeps_a_long_conversation_going() -> N
 
 def test_an_agent_reminder_threshold_below_the_conversation_injects_the_reminder() -> None:
     update: dict[str, Any] | None = compact_reminder_update(
-        _state(), _agent(compact_reminder_fraction=_TINY_FRACTION), catalog=build_model_catalog()
+        _state(),
+        _agent(compact_reminder_fraction=_TINY_FRACTION),
+        catalog=build_model_catalog(),
+        extensions=EMPTY,
     )
     assert update is not None
     compact: CompactState = update["compact"]

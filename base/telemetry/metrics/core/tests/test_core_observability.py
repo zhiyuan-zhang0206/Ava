@@ -29,8 +29,9 @@ EXPECTED = {
         ["grafana"],
         "compaction_completed",
         "telemetry",
-        1,
+        5,
     ),
+    "ava_obs_compaction_soft_share": ("stat", ["grafana"], "compaction_completed", "telemetry", 2),
     "ava_obs_exec_success_rate": ("timeseries", ["grafana"], "exec", "telemetry", 6),
     "ava_obs_exec_envelope_size": ("timeseries", ["grafana"], "exec_envelope", "telemetry", 3),
     "ava_obs_exec_envelope_serialize": (
@@ -297,3 +298,39 @@ def test_inspector_agent_queries_render_agent_id() -> None:
         assert 'agent_id="1234"' in rendered
         assert "{{agent_id}}" not in rendered
         validate_logql(rendered, name)
+
+
+def test_soft_compaction_share_excludes_manual_and_unattributed_history() -> None:
+    rendered = _all_rendered()
+    share = rendered["ava_obs_compaction_soft_share"][0]
+    assert 'attributes_compact_kind="compact_summary"' in share
+    assert 'attributes_compact_kind=~"compact_summary|auto"' in share
+    assert 'attributes_reminder_shown=~"true|false"' in share
+    assert "compact_request" not in share
+    assert " or (0 * sum(count_over_time(" in share
+    assert "$__range" in share
+
+
+def test_preparation_target_requires_a_reminder_in_the_completed_window() -> None:
+    reminded = _all_rendered()["ava_obs_compaction_soft_share"][1]
+    assert 'attributes_reminder_shown="true"' in reminded
+    assert 'attributes_compact_kind="compact_summary"' in reminded
+    assert 'attributes_compact_kind=~"compact_summary|auto"' in reminded
+    assert " or (0 * sum(count_over_time(" in reminded
+
+
+def test_completed_paths_separate_reminder_coverage_from_hard_fallback() -> None:
+    paths = _all_rendered()["ava_obs_compaction_rate"][1:]
+    assert len(paths) == 4
+    for query, (kind, shown) in zip(
+        paths,
+        (
+            ("compact_summary", "true"),
+            ("compact_summary", "false"),
+            ("auto", "true"),
+            ("auto", "false"),
+        ),
+        strict=True,
+    ):
+        assert f'attributes_compact_kind="{kind}"' in query
+        assert f'attributes_reminder_shown="{shown}"' in query

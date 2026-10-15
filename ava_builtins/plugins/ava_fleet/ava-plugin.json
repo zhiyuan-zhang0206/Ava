@@ -16,6 +16,9 @@
       "fleet_self_section",
       "reduce_context_switch_section"
     ],
+    "compactReminderSections": [
+      "fleet_compact_reminder"
+    ],
     "metrics": [
       "ava_fleet_task_done_rate",
       "ava_fleet_agent_task_done_rate"

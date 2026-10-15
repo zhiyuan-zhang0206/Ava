@@ -79,6 +79,7 @@ def test_exec_child_boot_payload_exposes_ready_duration() -> None:
 def test_compaction_completion_payload_exposes_ratio_and_frequency() -> None:
     assert payload_keys("compaction_completed") == (
         "compact_kind",
+        "reminder_shown",
         "compactions",
         "history_chars",
         "summary_chars",

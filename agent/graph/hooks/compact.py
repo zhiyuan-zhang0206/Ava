@@ -1,20 +1,3 @@
-"""Compaction LLM operation and the built-in, model-free reminder hook.
-
-Exhausted attempts raise `CompactionFailedError`; the hosted boundary preserves
-history and halts until new input. Consumed legacy requests are not replayed.
-
-Compaction is a core capability (Issue #1284) — this module is always active,
-not gated by plugins; its hook belongs to `framework_hooks()`.
-
-Compaction replaces the whole history with `[system prompt, summary]` — the
-summary retains needed recency; no raw tail is carried into the replacement.
-
-The request preserves the conversation's prefix and appends one instruction;
-provider preparation receives the actual model's binding. The system prompt is
-built once on the first round, preserving the cache prefix across restarts and
-configuration changes. See docs/decisions/agents/context/2026-04-18-in-place-compact.md.
-"""
-
 __description__ = "Auto-compact history when token count exceeds threshold"
 
 from collections.abc import Callable
@@ -41,30 +24,24 @@ from agent.llm.invoke import ainvoke_tool_call
 from agent.messages import (
     NoteTag,
     system_note_message,
-    tail_has_agent_inbound,
 )
-from agent.nodes import CLAIM, INIT_CONTEXT
+from agent.nodes import CLAIM, INIT_CONTEXT, NodeName
 from agent.state import AgentState, CompactState, ContextReset
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.history.closing_request import ClosingRequest
 from base.agents.history.compact_boundary import mark_compact_boundary
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.agents.to_user import DOCUMENT_FILENAME
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
 from base.lm.errors import is_retryable_provider_error
 from base.log import logger
+from base.packages.plugins import activation
+from base.packages.plugins.extensions import ExtensionRegistry
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
 
-# Compaction bookkeeping lives in the nested `compact` sub-state (CompactState)
-# on BaseAgentState — read via `state.compact.version` etc.; writers overwrite
-# the whole `compact` channel via `state.compact.model_copy(update=...)`.
-
-# The one compaction contract — what a summary must contain and how to write
-# it — lives in one place: the `ava.self.compact` docstring, which the agent
-# can read on demand. Forced compaction cannot call tools, so append that same
-# contract to its request independently of standing SDK expansion settings.
 COMPACTION_INSTRUCTION = """[system] Context compaction checkpoint: the conversation above is about to be
 replaced by the summary you write now. Produce it now as plain text — do not
 write code or call any tool; anything other than text is discarded. Write it
@@ -75,32 +52,19 @@ section filled, "(none)" only when one genuinely has nothing. Refer to others as
 """
 
 
-# Compaction summary monitoring + retry knobs.
 COMPACT_MIN_SUMMARY_CHARS = 1000
 COMPACT_MAX_ATTEMPTS = 3
 
 
 class CompactionFailedError(RuntimeError):
-    """Compaction could not produce a usable summary after retries.
-
-    Raised by both compaction paths (the LLM node automatic operation and the
-    claim node's compact_request arm) once every attempt failed — the model
-    ignored the template, or the provider kept failing. It is the framework
-    signal the runloop turns into a turn-abort (agent stays alive, idles for
-    the next inbound) instead of an unhandled exception that kills the process
-    into a non-resurrectable 'exit' termination. Subclasses RuntimeError so
-    pre-existing `except RuntimeError` handling keeps working.
-    """
+    pass
 
 
 class EmptyCompactionSummaryError(RuntimeError):
-    """The model returned no summary text; retry the explicit summary validation."""
+    pass
 
 
-# Compaction keeps every pre-compact checkpoint (never-delete ruling). The
-# boundary stamp below anchors the compaction segment for reads and audits.
-
-
+# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#retained-boundary-checkpoints
 async def stamp_compact_boundary(
     pool: AsyncConnectionPool | None,
     agent_id: int,
@@ -109,16 +73,6 @@ async def stamp_compact_boundary(
     *,
     read_agent: Callable[[str], Any],
 ) -> None:
-    """Best-effort: stamp the newest pre-compact checkpoint as the segment anchor.
-
-    The stamped checkpoint is the full-snapshot record of this compaction segment; segment
-    reads and audits anchor on it. Must never abort the agent's turn, so a failure is logged
-    and swallowed. `pool is None` (container / eval mode) is a no-op. Shared by the automatic
-    LLM compaction here and the agent-/user-triggered paths in the claim node. Nothing is
-    trimmed (never-delete ruling, 2026-09-12, task #3180). `closing` (the compaction LLM call)
-    is recorded in the boundary's metadata. With `state`, the segment's closing understanding
-    chunk is enqueued against the stamped checkpoint — `enqueue_closing_chunk`.
-    """
     if pool is None:
         return
     boundary: str | None = None
@@ -144,26 +98,21 @@ async def stamp_compact_boundary(
 
 
 def conversation_messages(messages: list[AnyMessage]) -> list[AnyMessage]:
-    """Strip the leading SystemMessage (Ava's SYSTEM_PROMPT snapshot) — it is
-    the prompt, not conversation history, and is not part of what gets
-    summarized."""
     has_system = bool(messages) and isinstance(messages[0], SystemMessage)
     return messages[1:] if has_system else messages
 
 
+# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#completed-window-attribution
 def emit_compaction_monitoring(
-    messages: list[AnyMessage], summary: str, *, agent_id: int, compact_kind: str
+    messages: list[AnyMessage],
+    summary: str,
+    *,
+    agent_id: int,
+    compact_kind: str,
+    compact: CompactState,
 ) -> None:
-    """Record one applied compaction's size reduction and completed count.
-
-    Requests and agent-authored summaries are audit events, but neither proves
-    that the history replacement happened. This event is emitted only by the
-    two paths that apply the replacement, so its counter is compaction
-    frequency. The ratio intentionally excludes Ava's standing system prompt:
-    it is rebuilt after compaction and is not part of the discarded history.
-    """
     history_chars = sum(
-        len(message.content) if isinstance(message.content, str) else len(str(message.content))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        len(message.content) if isinstance(message.content, str) else len(str(message.content))
         for message in conversation_messages(messages)
     )
     summary_chars = len(summary)
@@ -173,6 +122,9 @@ def emit_compaction_monitoring(
         event="compaction_completed",
         agent_id=agent_id,
         compact_kind=compact_kind,
+        reminder_shown=(
+            compact.reminder_shown and compact.reminder_seen_version == compact.version
+        ),
         compactions=1,
         history_chars=history_chars,
         summary_chars=summary_chars,
@@ -180,6 +132,7 @@ def emit_compaction_monitoring(
     )
 
 
+# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#summary-request-prefix
 async def generate_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
@@ -187,12 +140,6 @@ async def generate_summary(
     *,
     catalog: ModelCatalog,
 ) -> SummaryText:
-    """Summarize the complete conversation with one tool-bound model call.
-
-    Manual compact requests and automatic compaction share this operation;
-    agent-written summaries skip generation. The system prefix and instruction
-    stay in-band as in streaming. Empty conversations and empty responses fail.
-    """
     has_system = bool(messages) and isinstance(messages[0], SystemMessage)
     system_head = messages[:1] if has_system else []
     content_msgs = messages[1:] if has_system else messages
@@ -223,39 +170,27 @@ async def generate_summary(
         raise EmptyCompactionSummaryError(
             f"Compaction LLM returned no text content"
             f" (summarizing {len(content_msgs)} messages,"
-            f" response content type {type(response.content).__name__});"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            f" response content type {type(response.content).__name__});"
             f" cannot replace history with an empty summary"
         )
     return SummaryText(summary, closing)
 
 
 def _estimate_tokens(messages: list[AnyMessage]) -> int:
-    """Simple estimate: total content chars / 4. Used only as the turn-1
-    fallback for context occupancy — before the first LLM call completes there
-    is no real ``input_tokens`` to read (see ``_context_occupancy``)."""
     total_chars = sum(
-        len(m.content) if isinstance(m.content, str) else len(str(m.content))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-        for m in messages
+        len(m.content) if isinstance(m.content, str) else len(str(m.content)) for m in messages
     )
     return total_chars // 4
 
 
+# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#occupancy-and-reply-opportunity
 def _context_occupancy(messages: list[AnyMessage]) -> int:
-    """The last provider input count, or a chars/4 estimate before the first call.
-
-    Matches the frontend gauge. It measures the previous model request, so the
-    completion buffer absorbs the one-turn delay before a compaction threshold.
-    """
     tokens = latest_input_tokens(messages)
     return tokens if tokens is not None else _estimate_tokens(messages)
 
 
+# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#occupancy-and-reply-opportunity
 def _summary_awaits_reply(messages: list[AnyMessage]) -> bool:
-    """A committed summary gets one ordinary generation before another auto compact.
-
-    Derive this from checkpointed messages: cancellation, restart, and new
-    inbounds do not erase the exemption; only a committed AIMessage ends it.
-    """
     for message in reversed(messages):
         if isinstance(message, AIMessage):
             return False
@@ -268,11 +203,6 @@ def _summary_awaits_reply(messages: list[AnyMessage]) -> bool:
 
 
 def auto_compact_will_fire(state: AgentState, agent: AgentSlices, *, catalog: ModelCatalog) -> bool:
-    """Apply the same agent-owned budget gate the automatic compact path uses.
-
-    Plugins use this to defer writes on a turn that compaction will claim.
-    A missing model window fails explicitly rather than silently mis-gating.
-    """
     if _summary_awaits_reply(state.messages):
         return False
     budget = resolve_context_budget(agent.brain.llm_model, agent.overrides, catalog=catalog)
@@ -281,6 +211,7 @@ def auto_compact_will_fire(state: AgentState, agent: AgentSlices, *, catalog: Mo
     return bool(conversation_messages(state.messages))
 
 
+# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#compact-failure-boundary
 async def auto_compact_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
@@ -289,7 +220,6 @@ async def auto_compact_summary(
     *,
     catalog: ModelCatalog,
 ) -> str:
-    """Generate and validate a summary without committing any context change."""
     summary: str = ""
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
@@ -319,12 +249,6 @@ async def auto_compact_summary(
         last_error = None
     else:
         detail = f"error: {last_error}" if last_error else f"{len(summary)} chars"
-        # CompactionFailedError (not a bare RuntimeError) so the runloop can
-        # turn it into a turn-abort instead of process death: the agent stays
-        # alive and the error is visible on the timeline (2026-08-08 audit,
-        # P1-1 — a compact failure used to kill the process into a
-        # non-resurrectable 'exit', one crash per incoming message while the
-        # cause persisted).
         raise CompactionFailedError(
             f"Compaction produced no usable summary across {COMPACT_MAX_ATTEMPTS}"
             f" attempts (last: {detail}); the model is not following the"
@@ -335,27 +259,12 @@ async def auto_compact_summary(
     return summary
 
 
+# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#compact-failure-boundary
 async def auto_compact_for_llm(
     state: AgentState,
     runtime: Runtime[AvaContext],
     config: RunnableConfig,
 ) -> dict[str, Any] | None:
-    """Run automatic compaction inside the LLM node when above the ceiling.
-
-    The compaction gate below (occupancy over the model's hard ceiling AND a
-    non-empty conversation to compress) is exposed as `auto_compact_will_fire`
-    for plugins that must defer a message write on a turn this fires — the one
-    gate, no replicated estimate to drift.
-
-    The summary itself is generated by `generate_summary`, whose
-    COMPACTION_INSTRUCTION template is the actual quality defense. The only
-    extra safety here is a retry: a summary shorter than
-    COMPACT_MIN_SUMMARY_CHARS means the model ignored the template (the
-    agent-240 incident), so the cache-mostly request is retried; if every
-    attempt stays short (or returns no text), this raises rather than overwrite
-    history with a non-summary — a real instruction-following regression that
-    must surface, not a state to paper over.
-    """
     if _summary_awaits_reply(state.messages):
         return None
     occupancy = _context_occupancy(state.messages)
@@ -374,7 +283,8 @@ async def auto_compact_for_llm(
         )
         return None
     llm = runtime.context.llm
-    assert llm is not None, "auto_compact_for_llm requires ctx.llm"  # noqa: S101
+    if llm is None:
+        raise RuntimeError("auto_compact_for_llm requires ctx.llm")
     logger.info(
         "[{label}] {body}",
         label="auto-compact",
@@ -407,7 +317,6 @@ async def auto_compact_for_llm(
         emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.REPLACED)
         if publisher is not None:
             publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
-        # No replacement or version bump: claim owns the still-pending command.
         return {"halted": True, "goto": CLAIM}
     except BaseException:
         emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.FAILURE)
@@ -425,12 +334,10 @@ async def auto_compact_for_llm(
         summary,
         agent_id=agent_id,
         compact_kind="auto",
+        compact=state.compact,
     )
     pool = runtime.context.ops_pool
 
-    # Record the compact as an audit event. The summary exists and the window is
-    # about to be replaced; a failed audit write is reported (`audit_write_failed`)
-    # rather than aborting the compaction half-way.
     if pool is not None:
         await record_audit_reported_async(
             pool,
@@ -445,23 +352,6 @@ async def auto_compact_for_llm(
     if publisher is not None:
         publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())
 
-    # REMOVE_ALL wipes the whole window, standing head included. Re-establishing
-    # it is `init_context`'s job: clear the history, park the summary as what
-    # follows the head, and detour there. Then claim handles commands that
-    # arrived while the summary was being prepared before any new model call.
-    #
-    # The summary message carries the same ava_msg_type stamp as the claim-node
-    # compact path (Task #1017): without it the timeline read side classifies
-    # the HumanMessage as a catch-all system_marker with source=null and the
-    # frontend renders the red "UNRECOGNIZED SYSTEM_MARKER" alarm. Force and
-    # auto compaction must produce identical message contracts.
-    #
-    # Pre-compact history dump: snapshot the full conversation to the agent
-    # workspace and point the fresh context at it. The note rides the parked
-    # tail (after the summary), never the live channel — the wipe is a clean
-    # REMOVE_ALL, and a note between an AIMessage and its ToolMessage would be
-    # rejected by the provider. Best-effort: a dump failure must never abort
-    # the compaction itself.
     dump_path = dump_history(state.messages, agent_id, runtime.context.require_agent().history_dump)
     summary_kwargs: dict[str, Any] = {
         "additional_kwargs": {
@@ -469,8 +359,6 @@ async def auto_compact_for_llm(
             "ava_created_at": datetime.now(UTC).isoformat(),
         },
     }
-    # The durable anchor tying this summary to its live run — both compact
-    # paths carry it, so the UI can match the ticking block to this item.
     if compact_run_id is not None:
         summary_kwargs["additional_kwargs"]["ava_compact_id"] = compact_run_id
     transition = build_compact_transition(
@@ -491,34 +379,14 @@ async def auto_compact_for_llm(
     return transition
 
 
-# ── Shared compact transition builder ──
-# Both the claim node (agent-/user-triggered) and the LLM compaction operation
-# (forced) need the same ContextReset + REMOVE_ALL + INIT_CONTEXT skeleton.
-# This function is the single source of truth; callers layer their own extras
-# (halted, update_initiated, version bump, event publish, checkpoint trim).
-
-
+# ava:ref agent/graph/docs/context-window/replacement.ava.okf.md#clean-replacement
 def build_compact_transition(
     summary: str,
     *,
-    resume: str,
+    resume: NodeName,
     extra_msgs: list[AnyMessage] | None = None,
     summary_kwargs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Shared skeleton for every compact path.
-
-    Returns a partial state update dict carrying:
-    - ``messages``: REMOVE_ALL (wipes the whole window, standing head included)
-    - ``context_reset``: ContextReset with the summary message and any
-      framework lifecycle notes (resurrect / fork markers) following it,
-      resuming at *resume* — a compact is a clean wipe: raw conversation
-      messages never survive it (the claim node re-delivers chats co-batched
-      with the compact as pending inbounds instead of parking them here)
-    - ``goto``: INIT_CONTEXT (the detour every compact path takes)
-
-    Callers must add ``compact`` version bump, ``halted``, ``update_initiated``,
-    event publish, and checkpoint trim as their path needs.
-    """
     summary_msg_kwargs = summary_kwargs or {}
     tail_msgs: list[AnyMessage] = [
         HumanMessage(
@@ -532,40 +400,59 @@ def build_compact_transition(
         "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)],
         "context_reset": ContextReset(
             tail=tail_msgs,
-            resume=resume,  # type: ignore[arg-type]
+            resume=resume,
         ),
         "goto": INIT_CONTEXT,
     }
 
 
-# ── Compact reminder (moved from ava_builtins/plugins/ava_compact/plugin.py, Issue #1284) ──
-
 COMPACT_REMINDER_NOTE = (
-    "Your working context is getting long — you may want to wind it "
-    "down soon. Persist anything durable to files first, then call "
-    "ava.self.compact(summary), written as its docstring specifies. "
+    "Your working context has reached the soft compaction threshold. "
+    "Wind down this context now: finish only the immediate safe step, "
+    "persist new durable information, and complete the preparation below. "
+    "Then call ava.self.compact(summary) before starting further substantive work. "
+    "Keep preparation brief; do not start a new investigation or wait for the "
+    "hard limit, where automatic compaction cannot run file-writing tools. "
+    "Write the summary as its docstring specifies. "
     "Read ava.help(ava.self.compact) if you need the contract."
 )
 
 
+# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#soft-preparation-delivery
+def _reminder_content(
+    agent: AgentSlices, *, catalog: ModelCatalog, extensions: ExtensionRegistry
+) -> str:
+    parts = [COMPACT_REMINDER_NOTE]
+    if agent.read("agent", "workspace_in_system_prompt"):
+        parts.append(
+            f"Update your workspace's `{DOCUMENT_FILENAME}` shared with the user if it is stale: "
+            "preserve current results, decisions, open questions and next steps; "
+            "remove outdated status. Edit in place, without a separate notification."
+        )
+    for plugin, section in extensions.compact_reminder_sections():
+        contribution = section(agent, catalog=catalog)
+        if not isinstance(contribution, str):
+            raise TypeError(f"{plugin}.{section.__name__} must return reminder text")
+        if contribution.strip():
+            parts.append(f"[{plugin}]\n{contribution.strip()}")
+            activation.record(
+                plugin,
+                "compactReminderSections",
+                section.__name__,
+                model=agent.brain.llm_model,
+                detail=f"chars={len(contribution)}",
+            )
+    return "\n\n".join(parts)
+
+
+# ava:ref agent/graph/docs/context-window/preparation.ava.okf.md#soft-preparation-delivery
 def compact_reminder_update(
-    state: AgentState, agent: AgentSlices, *, catalog: ModelCatalog
-) -> dict | None:
-    """The one-time wind-down reminder, injected when occupancy sits in the band
-    below the forced ceiling (soft_compact_tokens < occupancy <=
-    hard_compact_tokens). Returns the `messages` update + bookkeeping, or None.
-
-    The reminder hook invokes this only below the hard ceiling, so occupancy
-    is already at-or-below the hard ceiling — force and reminder are mutually
-    exclusive by threshold and never both write `messages` in one pass.
-
-    Returns None (no reminder) when:
-    - tokens are below the reminder threshold, or there is nothing to compact;
-    - the turn was woken by an agent inbound: the agent-reply note claims the
-      single `messages` write a before_llm pass allows;
-    - the reminder already fired this context window. It re-arms when a
-      compaction advances compact.version past the stored bookmark.
-    """
+    state: AgentState,
+    agent: AgentSlices,
+    *,
+    catalog: ModelCatalog,
+    extensions: ExtensionRegistry,
+) -> dict[str, Any] | None:
     occupancy = _context_occupancy(state.messages)
     if (
         occupancy
@@ -576,14 +463,11 @@ def compact_reminder_update(
         return None
     if not conversation_messages(state.messages):
         return None
-    if tail_has_agent_inbound(state.messages):
-        return None
-
     compact: CompactState = state.compact
     shown: bool = compact.reminder_shown
     seen: int = compact.reminder_seen_version
     if compact.version > seen:
-        shown = False  # a compaction summarized the old reminder away -> re-arm
+        shown = False
         seen = compact.version
     if shown:
         return None
@@ -597,14 +481,11 @@ def compact_reminder_update(
     return {
         "messages": [
             system_note_message(
-                content=COMPACT_REMINDER_NOTE,
+                content=_reminder_content(agent, catalog=catalog, extensions=extensions),
                 tag=NoteTag.COMPACT_REMINDER,
                 created_at=datetime.now(UTC),
             )
         ],
-        # Overwrite the whole compact channel: flip the reminder flags, keep
-        # version (model_copy from the current value) so the last-value channel
-        # does not reset it.
         "compact": compact.model_copy(
             update={"reminder_shown": True, "reminder_seen_version": seen}
         ),
@@ -612,26 +493,22 @@ def compact_reminder_update(
 
 
 class _CompactReminderHook(Hook):
-    """Before-LLM reminder only; model work belongs to the LLM node.
-
-    Above the hard ceiling the LLM node compacts first, so a reminder would
-    immediately be summarized away. Other hooks use the same ceiling gate.
-    """
-
     async def __call__(
         self,
         state: AgentState,
         runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         agent = runtime.context.require_agent()
         catalog = runtime.context.require_catalog()
         if _summary_awaits_reply(state.messages) or auto_compact_will_fire(
             state, agent, catalog=catalog
         ):
             return None
-        return compact_reminder_update(state, agent, catalog=catalog)
+        return compact_reminder_update(
+            state, agent, catalog=catalog, extensions=runtime.context.plugin_registry()
+        )
 
 
 compact_reminder = _CompactReminderHook()

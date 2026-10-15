@@ -54,4 +54,4 @@ Telemetry: each completed pass logs `event=passive_recall` with `search_ms` and 
 - [[services/docs/gateway_side/memory_indexer/memory-indexer.ava.okf.md]] — Vector index service
 - [[base/lm/docs/lm/lm.ava.okf.md]] — Embedding model for semantic search
 - [[agent/graph/docs/context-notes/context-notes.ava.okf.md]] — the standing head recall notes are injected beside
-- [[agent/graph/docs/context-window.ava.okf.md]] — injection is constrained by context window capacity
+- [[agent/graph/docs/context-window/context-window.ava.okf.md]] — injection is constrained by context window capacity

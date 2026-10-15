@@ -1,17 +1,3 @@
-"""ava_builtins.plugins.ava_fleet integration.
-
-Two layers:
-- plugin surface end-to-end (`install` of its `contribute()`): installs the
-  `ava.self.set_label` self member + the `ava.ui.notify` /
-  `edit_notice` / `dismiss_notice` push members + a system-prompt section.
-- `set_label()` writes the agent's own label (sticky, so the
-  labeler won't overwrite it) — reflected in the agent snapshot (the single
-  source the monitoring view reads). `notify()` / `edit_notice()` /
-  `dismiss_notice()` write and read the unified agent_notices queue
-  (migration 0053). At most one notice is open per agent (notify auto-resolves
-  the previous one), so edit/dismiss take no id.
-"""
-
 import importlib
 import inspect
 from collections.abc import Iterator
@@ -50,7 +36,6 @@ def _fleet_slices(**changes: Any) -> AgentSlices:
 
 @pytest.fixture
 def load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Install Fleet with a valid local sampling policy; uninstall after the test."""
     from base.agents.sdk import call_policy
 
     def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
@@ -68,7 +53,6 @@ def test_plugin_registers_self_members(load_activity_plugin: None):
 
 
 def test_member_torn_down_on_uninstall(load_activity_plugin: None):
-    # Uninstall must remove the member from both the module and its __all_for_ava__.
     install.uninstall()
     assert not hasattr(ava.self, "set_label")
     assert "set_label" not in ava.self.__all_for_ava__
@@ -82,7 +66,6 @@ def test_plugin_registers_prompt_section(load_activity_plugin: None):
 
 
 def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
-    """The rendered prompt carries the reporting contract with the plugin."""
     prompt = build_system_prompt(
         fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
     )
@@ -95,7 +78,6 @@ def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
 
 
 def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None):
-    """Fleet preserves core parallel guidance without requiring task tracking."""
     prompt = build_system_prompt(
         fleet_registry(),
         _fleet_slices(agent__prompt_delegation_check_enabled=True),
@@ -123,7 +105,6 @@ def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None
 
 
 def test_fleet_does_not_duplicate_core_lifecycle(load_activity_plugin: None):
-    """Fleet adds collaboration guidance without owning the core lifecycle."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import fleet_self_section
 
     section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
@@ -140,7 +121,6 @@ def test_peer_communication_survives_human_guidance_toggle(
     load_activity_plugin: None,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Turning off human interruption guidance must not remove peer discipline."""
 
     set_fleet_configuration(reduce_context_switch=False)
     prompt = build_system_prompt(
@@ -155,9 +135,6 @@ def test_peer_communication_survives_human_guidance_toggle(
 
 
 def test_prompt_section_dismiss_notice_after_dialog_reply(load_activity_plugin: None):
-    """When the user has already answered in the dialog, the agent must
-    actively dismiss the pending notice instead of leaving it open — and the
-    rule is phrased semantically (no dismiss_notice call name)."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import fleet_self_section
 
     section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
@@ -167,7 +144,6 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(load_activity_plugin: 
 
 
 def test_prompt_section_queue_delivery_mandate(load_activity_plugin: None):
-    """Keep asynchronous delivery and resolved-notice semantics resident."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import fleet_self_section
 
     section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
@@ -182,9 +158,6 @@ def test_prompt_section_queue_delivery_mandate(load_activity_plugin: None):
 def test_prompt_section_reduce_context_switch_gating(
     load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
-    """The platform reduce-context-switch default renders only while the
-    FleetConfig.reduce_context_switch toggle is on; off is the escape hatch
-    back to the pre-platform behavior (empty section)."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
         reduce_context_switch_section,
     )
@@ -201,7 +174,6 @@ def test_prompt_section_reduce_context_switch_gating(
 def test_prompt_section_reduce_context_switch_content(
     load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
-    """Keep interruption limits resident and route procedures to the skill."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
         reduce_context_switch_section,
     )
@@ -223,8 +195,6 @@ def test_prompt_section_reduce_context_switch_content(
 def test_reduce_context_switch_reaches_the_prompt(
     load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
-    """End to end: the toggle gates the section's presence in the assembled
-    system prompt."""
 
     section = "## Reduce context switch for the human"
     set_fleet_configuration(reduce_context_switch=True)
@@ -239,7 +209,6 @@ def test_reduce_context_switch_reaches_the_prompt(
 
 
 def test_fleet_operating_contract_is_loaded_on_demand(load_activity_plugin: None):
-    """The prompt routes chosen capabilities to complete, preserved procedures."""
     from ava_builtins.plugins.ava_fleet import agent_runtime
 
     section = agent_runtime.fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
@@ -267,7 +236,6 @@ def test_fleet_operating_contract_is_loaded_on_demand(load_activity_plugin: None
 
 
 def test_fleet_contract_preserves_numeric_identifier_prefixes():
-    """Identifier formatting belongs to the opt-in operating contract."""
     from ava_builtins.plugins.ava_fleet import agent_runtime
 
     contract = (
@@ -283,8 +251,6 @@ def test_fleet_contract_preserves_numeric_identifier_prefixes():
 
 
 def test_task_conversion_absent_when_plugin_disabled(**changes: Any):
-    """Prompt copy and the task SDK reference disappear together with the
-    fleet plugin."""
     prompt = build_system_prompt(
         EMPTY,
         AgentSlices.resolve(
@@ -301,16 +267,11 @@ def test_task_conversion_absent_when_plugin_disabled(**changes: Any):
 
 
 def test_spawn_label_param_gated_on_plugin(load_activity_plugin: None):
-    # With the plugin enabled, spawn is wrapped and exposes the `label` arg. The
-    # wrap fact lives in the introspectable stack (the chained callable mimics
-    # the original's __module__), and the added `label` shows in the signature.
     assert [p for p, _ in ava.extend.stack("agents.spawn")] == ["ava_fleet"]
     assert "label" in inspect.signature(ava.agents.spawn).parameters
 
 
 def test_core_spawn_has_no_label_arg():
-    # Without the plugin (plain core spawn), there is no `label` arg —
-    # the labeler auto-names new agents. Reload to guarantee an unwrapped state.
     importlib.reload(ava.agents)
     assert ava.agents.spawn.__module__ == "ava.agents"
     assert "label" not in inspect.signature(ava.agents.spawn).parameters
@@ -335,30 +296,29 @@ def test_set_label_hands_the_agents_own_label_to_the_gateway(
 
     monkeypatch.setattr(gateway_client, "patch_label", patch_label)
     pin_agent(7)
-    ava.self.set_label("auth-refactor lead")  # type: ignore[attr-defined]
-    # Empty string clears back to the default (#N fallback).
-    ava.self.set_label("")  # type: ignore[attr-defined]
+    set_label = ava.self.set_label
+    assert callable(set_label)
+    set_label("auth-refactor lead")
+    set_label("")
 
     assert calls == [(7, "auth-refactor lead", "self"), (7, "", "self")]
 
 
 def test_plugin_registers_ui_notice_members(load_activity_plugin: None):
-    # The whole notice surface is a push to the user's queue — registered on the
-    # ui namespace (not self), gated on this plugin: it depends on a human
-    # supervising.
     for name in ("notify", "edit_notice", "dismiss_notice"):
-        assert callable(getattr(ava.ui, name))  # type: ignore[attr-defined]
+        assert callable(getattr(ava.ui, name))
         assert name in ava.ui.__all_for_ava__
 
 
 def test_notify_validates_title_priority_and_blocking(load_activity_plugin: None):
+    notify = ava.ui.notify
+    assert callable(notify)
     with pytest.raises(ValueError, match="title"):
-        ava.ui.notify("   ", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+        notify("   ", idempotency_key=str(uuid4()))
     with pytest.raises(ValueError, match="priority"):
-        ava.ui.notify("ok", priority="P9", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    # blocking is a strict subset of require_response: an FYI can never stall you.
+        notify("ok", priority="P9", idempotency_key=str(uuid4()))
     with pytest.raises(ValueError, match="require_response"):
-        ava.ui.notify("ok", blocking=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+        notify("ok", blocking=True, idempotency_key=str(uuid4()))
 
 
 def test_fleet_spawn_preserves_caller_creation_key(
@@ -395,3 +355,19 @@ def test_fleet_spawn_forwards_keyed_fork_without_mode_flag(
     with pytest.raises(TypeError, match="require_idempotency"):
         ava.agents.spawn(**obsolete)
     assert len(captured) == 1
+
+
+def test_fleet_declares_compact_preparation_in_its_manifest() -> None:
+    from pathlib import Path
+
+    from ava_builtins.plugins.ava_fleet import agent_runtime
+    from base.packages.plugins.gate import check_manifest
+    from base.packages.plugins.loading.registry import FACE_KEYS
+
+    contribution = agent_runtime.contribute()
+    assert [fn.__name__ for fn in contribution.compact_reminder_sections] == [
+        "fleet_compact_reminder"
+    ]
+    check_manifest(
+        "ava_fleet", Path(agent_runtime.__file__).parent, contribution, FACE_KEYS["agent_runtime"]
+    )
