@@ -49,7 +49,11 @@ still validates every typed record. It is not whole-tree migration success.
 ## Parser boundaries
 
 Python bindings include qualified definitions and simple assignments; ambiguous
-definitions fail. API ownership reuses `scripts/codegen/sdk_surface`, so dynamic
+definitions fail. Entry shebangs recognize exactly `/usr/bin/env python`,
+`/usr/bin/env python3`, `/usr/bin/env python3.12`, `/usr/bin/python3` and
+`/usr/bin/python3.12` at the start of the first line. Interpreter arguments,
+trailing prose and the same text at another position remain comments.
+API ownership reuses `scripts/codegen/sdk_surface`, so dynamic
 exports which that resolver cannot prove cannot authorize generated docstrings.
 PEP 224 constant documentation is projected beside its assignment. A statically
 proved module-class property can instead project beside its unique module-level
@@ -66,6 +70,14 @@ The checker proves syntax and reference integrity, not external-source freshness
 test execution or semantic truth. The contribution's independent review owns
 those judgments. The current migration and reviewer rules are in
 [structured code comments](../../../../docs/conventions/engineering/structured-code-comments.md).
+
+```ava-contract
+id = "python-entry-shebang"
+kind = "invariant"
+statement = "A Python shebang is syntax only at the start of the first line and only for the exact supported interpreter forms, including the unversioned /usr/bin/env python entry. Arguments, trailing prose, forged interpreters and misplaced shebangs remain rejected comments."
+code = ["scripts/content_lint/code_comments/python_source.py:parse_python"]
+tests = ["scripts/content_lint/code_comments/tests/test_check.py::test_python_entry_shebang_is_syntax", "scripts/content_lint/code_comments/tests/test_check.py::test_python_shebang_does_not_hide_comments"]
+```
 
 ```ava-contract
 id = "api-help-owner"
