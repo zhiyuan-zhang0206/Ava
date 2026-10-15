@@ -1,7 +1,3 @@
-"""The heartbeat poll and liveness loops log an unexpected failed round and carry
-on, but a run of failures ends the process for the supervisor; a round that
-completes starts the count over and an unreachable database is skipped."""
-
 from __future__ import annotations
 
 import asyncio
@@ -33,8 +29,6 @@ def _drive(loop: str, gate: ProcessDbGate) -> Awaitable[None]:
 def _script(
     monkeypatch: pytest.MonkeyPatch, loop: str, outcomes: list[BaseException | None]
 ) -> Callable[[], int]:
-    """Each round raises its scripted outcome (None: completes); the loop is
-    cancelled when the script runs out. Returns the number of rounds run."""
     rounds = 0
 
     def next_outcome() -> None:

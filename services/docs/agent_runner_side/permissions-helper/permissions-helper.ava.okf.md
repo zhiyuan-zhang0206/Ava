@@ -81,3 +81,5 @@ lands on with the system capture badge (`ping.capture_indicator_v1`;
 (`ping.mouse_hold_v1`): [[../computer-mcp/mouse-hold.ava.okf.md]]. The
 `move`, `cursor_position`, `list_apps`, `list_windows`, `focus_app` and
 `screencapture_window` methods use the same single-call JSON transport.
+
+Tests: [[native-test-evidence]].

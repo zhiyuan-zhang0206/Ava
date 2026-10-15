@@ -1,5 +1,3 @@
-"""Hosted ownership as the agent layer observes it: status events, restart release and the owner beat."""
-
 from unittest.mock import ANY, AsyncMock
 from uuid import UUID, uuid4
 
@@ -38,7 +36,6 @@ def _agent(conn: psycopg.Connection) -> int:
 
 
 def _seed_managed_row(conn: psycopg.Connection, agent_id: int, owner: UUID) -> RuntimeIncarnation:
-    """A row with stored resource evidence, as a managed-writer birth leaves it."""
     generation = uuid4()
     native = psutil.Process()
     evidence = IncarnationResources(
@@ -73,8 +70,6 @@ async def test_hosted_status_changes_publish_agent_updated(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert incarnation is not None
-    # #1687 moved admission's live announce into the bounded _run_turn
-    # settlement boundary, so admit_hosted_runtime itself no longer publishes.
     publish.assert_not_awaited()
 
     publish.reset_mock()
@@ -128,19 +123,11 @@ async def test_owner_beat_renews_a_mid_turn_row_and_the_guard_stays_green(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """A turn's length never expires its lease: the beat renews, not the turn.
-
-    A turn may run for hours with the row 'running' (agent 2697, 2026-09-20:
-    ~375k tokens in flight); the host beat renews the lease the whole time, so
-    the fail-closed guard read stays green however long the turn takes. A
-    genuinely lapsed lease still refuses until a beat lands.
-    """
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert incarnation is not None
-    # Mid-turn, with a stand-in for any renewal silence longer than the TTL.
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at = now() - interval '5 minutes' WHERE id = %s",
         (agent_id,),
@@ -148,7 +135,7 @@ async def test_owner_beat_renews_a_mid_turn_row_and_the_guard_stays_green(
     db_conn.commit()
     with pytest.raises(ImpersonationError):
         await native_status(database, event_bus, agent_id, incarnation=incarnation)
-    await renew_hosted_owner(aops_pool, "host-test", owner)  # one beat
+    await renew_hosted_owner(aops_pool, "host-test", owner)
     assert db_conn.execute(
         "SELECT lease_expires_at > now() FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone() == (True,)

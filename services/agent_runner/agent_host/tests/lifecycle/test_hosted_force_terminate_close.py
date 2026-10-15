@@ -1,19 +1,3 @@
-"""An externally commanded force terminate ends a turn quietly, never as a crash.
-
-The delivery watchdog's hosted-turn wedge recovery (`services/wake/delivery_watchdog/
-turn_liveness.py`) force-terminates a wedged hosted incarnation
-(`terminate_agent_op(force=True, source='system')`): the durable force command
-is applied and anchored on `agents_meta.lifecycle_command_id`, and the pump's
-own boundary observes it (`original_host_force(quiescent=True)`) as the turn
-ends. Between those two facts the wedged turn's next fail-closed probe refuses
-("Native runtime no longer owns this agent"); `services.agent_runner.agent_host.
-force_termination` classifies exactly that command — bound to the turn's own
-incarnation, still unobserved, still anchored — as the deliberate termination
-it is, so the turn closes quietly (no crash, no error event, no failure
-receipt); an observed, foreign-target, or detached command — or any other
-exception — still raises (fail-closed, unchanged).
-"""
-
 import asyncio
 import time
 from dataclasses import replace
@@ -76,7 +60,6 @@ def _raising_graph(exc: BaseException | None = None) -> Mock:
 
 
 def _apply_force(conn: psycopg.Connection, agent_id: int, *, source: str = "system") -> int:
-    """The wedge recovery's durable shape: applied force + live pointer + terminated row."""
     row = conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) "
         "VALUES(%s,'','terminate',%s) RETURNING id",
@@ -95,7 +78,6 @@ def _apply_force(conn: psycopg.Connection, agent_id: int, *, source: str = "syst
 
 
 def _resurrect_shape(conn: psycopg.Connection, agent_id: int) -> None:
-    """The home runner's final resurrect CAS: terminated -> idling, incarnation NULLed."""
     conn.execute(
         "UPDATE agents_meta SET status='idling', pid=NULL, termination_source=NULL, "
         "lease_expires_at=NULL, last_turn_fatal_at=NULL, runtime_generation=NULL, "
@@ -122,9 +104,6 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
         failure = ImpersonationError(_FORCE_ERROR)
 
         async def graph_return(*args: object, **kwargs: object) -> dict[str, object]:
-            # The force lands while the invocation runs, exactly as observed on
-            # company-air 6240 (2026-09-20 07:33:21Z -> 07:33:49Z): the guard read
-            # then refuses.
             commands.append(_apply_force(db_conn, agent_id))
             raise failure
 
@@ -151,13 +130,11 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
         )
 
         assert outcome.truncated and not outcome.crashed and not outcome.exited
-        assert graph.ainvoke.await_count == 1  # the force landed mid-invocation
+        assert graph.ainvoke.await_count == 1
         assert resources.require_service().failures == [(resources, failure)]
-        publisher.emit.assert_not_called()  # no error event on the quiet close
-        assert agent_id not in host._runtimes  # dropped for the successor
+        publisher.emit.assert_not_called()
+        assert agent_id not in host._runtimes
 
-        # The classify does NOT consume the command: the pump's own boundary
-        # observes it, and the settle boundary leaves the row as the force left it.
         await close_hosted_turn(
             aops_pool,
             aops_pool,
@@ -184,12 +161,6 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """The predicate reads the command, not the row (state-independence pin).
-
-    The resurrection path's outstanding-command guard
-    normally prevents this ordering; the classification stays correct across
-    the race rather than claiming the ordering is routine.
-    """
     agent_id = agent_row(db_conn)
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
@@ -223,7 +194,6 @@ async def test_the_turn_starting_under_the_force_closes_quietly(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Site host.py:683 — the turn starts already under the applied force."""
     agent_id = agent_row(db_conn)
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
@@ -246,7 +216,7 @@ async def test_the_turn_starting_under_the_force_closes_quietly(
         ),
     )
     assert outcome.truncated and not outcome.crashed
-    assert graph.ainvoke.await_count == 0  # the settle probe refused first
+    assert graph.ainvoke.await_count == 0
 
 
 async def test_a_cli_style_user_force_closes_quietly_too(
@@ -256,7 +226,6 @@ async def test_a_cli_style_user_force_closes_quietly_too(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """No source whitelist: the durable shape, not the caller, classifies."""
     agent_id = agent_row(db_conn)
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id, source="user")
@@ -290,7 +259,6 @@ async def test_the_held_wake_force_guard_stops_quietly(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Site host.py:371 (held-controls probe) — the wake must not crash."""
     agent_id = agent_row(db_conn)
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
@@ -302,7 +270,7 @@ async def test_the_held_wake_force_guard_stops_quietly(
     host = _host(
         _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
     )
-    await host._run_held_controls(agent_id, "running", resources=None)  # must not raise
+    await host._run_held_controls(agent_id, "running", resources=None)
 
 
 async def test_an_observed_force_still_crashes(
@@ -455,16 +423,9 @@ async def test_a_superseded_older_force_cannot_classify(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """The pointer anchors the decision (N4 pin).
-
-    A newer termination command has taken `lifecycle_command_id` while it is
-    still unapplied: the older applied-but-unobserved force must not be
-    borrowed to classify — the fail-closed direction of the force-supersede
-    shape.
-    """
     agent_id = agent_row(db_conn)
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    _apply_force(db_conn, agent_id)  # applied + unobserved, pointer -> this force
+    _apply_force(db_conn, agent_id)
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) "
         "VALUES(%s,'','terminate','user') RETURNING id",
@@ -504,7 +465,6 @@ async def test_a_lapsed_lease_still_crashes(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Renewal is the host beat's job; a truly expired lease stays fail-closed."""
     agent_id = agent_row(db_conn)
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     db_conn.execute(
@@ -593,8 +553,7 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
         _assert_failed_exec_owner(owner, domain.proc.pid, failure)
         assert not scope.complete(path, object())
         assert scope.unresolved[path] is owner
-        assert domain.proc.returncode is None  # unresolved closure must not reap
-        # A formatted tool failure cannot become a positive lifecycle barrier.
+        assert domain.proc.returncode is None
         assert (
             await hosted.apply_hosted_lifecycle(
                 aops_pool, incarnation, bus=event_bus, resources=scope
@@ -604,7 +563,7 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
         assert not await hosted.settle_hosted_runtime(
             aops_pool, incarnation, bus=event_bus, resources=scope
         )
-        assert scope.unresolved[path] is owner  # reset preserves the original owner
+        assert scope.unresolved[path] is owner
         assert domain.proc.returncode is None
     finally:
         original_close(domain, time.monotonic() + 5)

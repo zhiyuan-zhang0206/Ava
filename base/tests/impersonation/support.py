@@ -1,9 +1,3 @@
-"""Explicit native-owner and controller-lease factories for database contract tests.
-
-The caller supplies its machine label and admission gate. These factories retain
-the production consent, incarnation and controller-attestation transitions.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -24,7 +18,6 @@ __all__ = ["accept_controller", "create_native_owner", "native_status", "request
 
 
 def create_native_owner(conn: psycopg.Connection, *, local_machine: str) -> RuntimeIncarnation:
-    """Persist this caller's native incarnation on its explicitly supplied machine."""
     agent_id = create_agent(conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     conn.execute(
@@ -38,7 +31,6 @@ def create_native_owner(conn: psycopg.Connection, *, local_machine: str) -> Runt
 
 
 def native_status(owner: RuntimeIncarnation, *, database_gate: ProcessDbGate) -> dict[str, Any]:
-    """Read the incarnation-gated native state without authenticating a controller."""
     result = leases.native_status(
         Database.from_settings(gate=database_gate), EventBus.from_settings(), owner.agent_id, owner
     )
@@ -55,7 +47,6 @@ def request_controller(
     database_gate: ProcessDbGate,
     local_machine: str,
 ) -> dict[str, Any]:
-    """Request the recorded controller tree's consent on the caller's machine."""
     kwargs: dict[str, Any] = {}
     if provider in ("codex", "antigravity"):
         kwargs["relay_thread_id"] = thread or str(uuid4())
@@ -81,7 +72,6 @@ def accept_controller(
     database_gate: ProcessDbGate,
     local_machine: str,
 ) -> dict[str, Any]:
-    """Accept and activate consent against the same incarnation and machine."""
     lease = request_controller(
         owner, authority=authority, database_gate=database_gate, local_machine=local_machine
     )

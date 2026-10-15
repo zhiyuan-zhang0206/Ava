@@ -1,5 +1,3 @@
-"""A common executor wedge for statically selected daemon test children."""
-
 import asyncio
 import os
 import signal
@@ -11,20 +9,16 @@ MARKERS_ENV = "DAEMON_SHUTDOWN_TEST_MARKERS"
 INTERNAL_STOP_ENV = "DAEMON_SHUTDOWN_TEST_INTERNAL_STOP"
 CLEANUP_FAILURE_ENV = "DAEMON_SHUTDOWN_TEST_CLEANUP_FAILURE"
 
-# Outlive every harness deadline: the daemon must exit while the job still runs.
 WEDGE_SECONDS = 600.0
 
 
 class DaemonModule(Protocol):
-    """A daemon entry module whose `run` loop is replaced by the wedge probe."""
-
     run: Any
 
     def main(self) -> None: ...
 
 
 def _mark(name: str) -> None:
-    """Append one marker line in the child-to-parent protocol."""
     with Path(os.environ[MARKERS_ENV]).open("a", encoding="utf-8") as markers:
         markers.write(f"{name}\n")
 
@@ -45,7 +39,6 @@ async def _wait_for_stop() -> None:
 
 
 def run_wedged_daemon(mod: DaemonModule) -> None:
-    """Run the supplied daemon's main with one cancellable task and a wedged executor."""
 
     async def wedge_run(**_process_inputs: object) -> None:
         try:

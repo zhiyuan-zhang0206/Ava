@@ -1,5 +1,3 @@
-"""Owned PgBouncer shutdown remains non-escalating across retries and callers."""
-
 from __future__ import annotations
 
 import contextlib
@@ -35,15 +33,8 @@ from cli.commands.data_plane.config import DataPlaneConfig
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-# Port 1 on loopback never listens for an unprivileged test: a refused dial is
-# the stop path's proof that this home has no Redis, and no other process can
-# take the port between allocation and use (the placeholder URL's choice).
 _ABSENT_REDIS = "redis://127.0.0.1:1"
 _BIND_ATTEMPTS = 5
-# The pooler port comes from a range no OS ephemeral allocator hands out (macOS
-# 49152+, Linux 32768+) and no cluster port block uses (18000-20000): a draining
-# pooler closes its listener while it waits, and a port-0 allocation elsewhere in
-# the suite must not be able to land on it before the final stop checks custody.
 _PRIVATE_PORTS = range(21000, 30000)
 
 
@@ -80,15 +71,12 @@ def _kill(identity: OwnedProcess | None) -> None:
 
 
 def _owned_listener(identity: OwnedProcess | None, port: int) -> bool:
-    """Whether `identity` alone listens on `port` (bounded wait for its bind)."""
     deadline = time.monotonic() + 5
     while identity is not None and identity.live() and time.monotonic() < deadline:
         try:
             if port_preflight.require_listener(identity, port):
                 return True
         except RuntimeError:
-            # A foreign listener took the port between allocation and bind, or
-            # the pooler has not bound yet; only our own listener proves custody.
             if port_preflight.strict_listeners_on(port):
                 return False
         time.sleep(0.01)
@@ -98,12 +86,6 @@ def _owned_listener(identity: OwnedProcess | None, port: int) -> bool:
 def _start_private_pooler(
     binary: str, directory: Path, backend_port: int
 ) -> tuple[OwnedProcess, int]:
-    """Start the fixture pooler on a port it provably owns.
-
-    A free-port probe is only a hint: another process can bind the port before
-    PgBouncer does. Custody is proven by the listener table, and a lost port is
-    retried on a fresh one instead of failing the test that follows.
-    """
     config = directory / "pgbouncer.ini"
     record = directory / "pgbouncer.pid"
     for _attempt in range(_BIND_ATTEMPTS):
@@ -124,7 +106,6 @@ def _start_private_pooler(
 
 
 def pooler_plane(config: DataPlaneConfig) -> DataPlaneConfig:
-    """The plane the native-pooler fixture stands up: loopback URLs and no Redis admin login."""
     return dataclasses.replace(
         config,
         db_url="postgresql://ava@127.0.0.1:12345/test",
@@ -146,7 +127,6 @@ def native_pooler(
         pytest.skip("native PgBouncer is not installed")
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
-    # The root diagnostics still read `settings`; they follow this plane until they take a config.
     plane = pooler_plane(data_plane_config)
     monkeypatch.setattr(settings.data_plane, "db_url", plane.db_url)
     monkeypatch.setattr(settings.data_plane, "redis_url", plane.redis_url)
@@ -185,8 +165,6 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
     with psycopg.connect(pooled) as client:
         client.execute("INSERT INTO pooler_stop_receipt VALUES (42)")
         if preexisting_drain:
-            # A prior native stop has no Ava intent record. Closed listeners
-            # still forbid a second signal; native custody remains observable.
             os.kill(custodian.identity.pid, signal.SIGINT)
             deadline = time.monotonic() + 5
             while port_preflight.require_listener(
@@ -222,15 +200,10 @@ def test_a_drain_that_finishes_during_the_listener_scan_is_stopped(
     force: bool,
     budget: float,
 ) -> None:
-    """A retained drain can complete while a retry (or the force leg) scans the
-    pooler's listeners — a busy host's socket scan outlasts the pooler's exit:
-    the birth that exits mid-scan is stopped, never a foreign listener."""
     custodian, pooled, direct = native_pooler
     scan = port_preflight.strict_listeners_on
     with contextlib.closing(psycopg.connect(pooled)) as client:
         client.execute("INSERT INTO pooler_stop_receipt VALUES (7)")
-        # The open transaction retains the drain for the whole budget; the budget
-        # only has to outlast one listener scan before the signal (lsof on macOS).
         assert not custodian.stop(deadline=time.monotonic() + 2)
 
         def drain_finishes_during_scan(port: int) -> list[int]:
@@ -255,8 +228,6 @@ def test_explicit_force_can_finish_a_retained_drain(
     custodian, pooled, direct = native_pooler
     with contextlib.closing(psycopg.connect(pooled)) as client:
         client.execute("INSERT INTO pooler_stop_receipt VALUES (99)")
-        # Allow native listener validation and the durable intent write during setup.
-        # The transaction retains the drain; the force budget below is under test.
         assert not custodian.stop(deadline=time.monotonic() + 2)
         assert custodian.identity.live()
         assert custodian.stop(deadline=time.monotonic() + force_budget, force=True)
@@ -267,8 +238,6 @@ def test_explicit_force_can_finish_a_retained_drain(
 
 
 class _StopClock:
-    """Only the mocked pooler's wait consumes this test's virtual budget."""
-
     def __init__(self) -> None:
         self.now = 0.0
 

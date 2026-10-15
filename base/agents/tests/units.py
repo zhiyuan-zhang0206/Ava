@@ -1,5 +1,3 @@
-"""Explicit unit setup helpers; pytest fixtures live in capability modules."""
-
 from typing import Any
 
 from base.cluster.machine import MachineIdentity
@@ -22,7 +20,6 @@ def spawn_agent(
     config: dict[str, object] | None = None,
     **kw: Any,
 ) -> int:
-    """Allocate a real agent row and publish its normal host-dispatch wake."""
     from base.agents.birth.spawn import create_agent_row
     from base.agents.impersonation.wake import publish_inbound_wake
 

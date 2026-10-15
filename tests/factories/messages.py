@@ -1,10 +1,7 @@
-"""AIMessage / HumanMessage factories."""
-
 from langchain_core.messages import AIMessage, HumanMessage
 
 
 def ai_message_with_code(code: str, tool_call_id: str = "1") -> AIMessage:
-    """Construct AIMessage with a single execute_code tool_call."""
     return AIMessage(
         content="",
         tool_calls=[
@@ -18,7 +15,6 @@ def ai_message_with_code(code: str, tool_call_id: str = "1") -> AIMessage:
 
 
 def ai_message_multi_tool_use(first_code: str, second_code: str) -> AIMessage:
-    """Construct AIMessage with two tool_use content blocks (multi-tool_call merge scenario)."""
     import json
 
     return AIMessage(
@@ -48,10 +44,8 @@ def ai_message_multi_tool_use(first_code: str, second_code: str) -> AIMessage:
 
 
 def human_message(content: str) -> HumanMessage:
-    """Construct HumanMessage shortcut."""
     return HumanMessage(content=content)
 
 
 def stop_turn_ai(content: str = "ok") -> AIMessage:
-    """Construct stop-turn AIMessage without tool_calls."""
     return AIMessage(content=content)

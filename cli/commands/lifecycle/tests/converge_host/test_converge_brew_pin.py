@@ -1,5 +1,3 @@
-"""Converge's warning-only assertion for manually pinned Homebrew formulae."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -70,7 +68,6 @@ def _ctx(
 
 
 def _brew(pinned: set[str], installed: set[str] | None = None) -> Host:
-    """A macOS host whose `brew list` answers with the pinned and the installed formulae."""
     installed_formulae = set(EXPECTED_PINNED_FORMULAE) if installed is None else installed
     commands = FakeCommands()
     commands.on(["brew", "list", "--pinned"], Reply("\n".join(sorted(pinned))))
@@ -185,7 +182,7 @@ def test_non_macos_is_silent_without_calling_brew(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    commands = FakeCommands()  # nothing scripted: a brew call would fail the test
+    commands = FakeCommands()
     host = fake_host(commands, platform=LINUX_X86)
 
     cbp.ensure_brew_pin(

@@ -1,16 +1,3 @@
-"""`FakeUrlOpener`: a scripted `UrlOpener` for tests of code that makes HTTP requests.
-
-It records every request and answers from a script routed by URL prefix. A response is shaped
-like what `urllib.request.urlopen` returns (`status`, `headers`, `read()`, a context manager),
-and a status outside 2xx raises `urllib.error.HTTPError`, as `urlopen` does, so the code under
-test sees the same exceptions it sees in production. A URL nobody scripted fails the test.
-
-    opener = FakeUrlOpener()
-    opener.on("http://127.0.0.1:9/health", Answer(b'{"ok": true}'), URLError("refused"))
-    ...
-    assert opener.urls == ["http://127.0.0.1:9/health"]
-"""
-
 from __future__ import annotations
 
 import io
@@ -25,8 +12,6 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Answer:
-    """What a scripted URL answers: a status, its headers and its body."""
-
     body: bytes | str = b""
     status: int = 200
     headers: Mapping[str, str] = field(default_factory=dict[str, str])
@@ -34,8 +19,6 @@ class Answer:
 
 @dataclass(frozen=True)
 class Opened:
-    """One request a component made: its URL, the timeout it asked for, method, headers and body."""
-
     url: str
     timeout: float
     method: str
@@ -44,8 +27,6 @@ class Opened:
 
 
 class FakeResponse:
-    """The object `urlopen` returns for a 2xx answer: a readable context manager."""
-
     def __init__(self, answer: Answer, url: str) -> None:
         self.status = answer.status
         self.url = url
@@ -89,15 +70,12 @@ def _starts_with(prefix: str) -> Callable[[str], bool]:
 
 
 class FakeUrlOpener:
-    """A `UrlOpener` that records requests and replays a script routed by URL prefix."""
-
     def __init__(self) -> None:
         self.calls: list[Opened] = []
         self._routes: list[_Route] = []
 
     @property
     def urls(self) -> list[str]:
-        """The URL of every request, in order."""
         return [call.url for call in self.calls]
 
     def on(
@@ -106,13 +84,6 @@ class FakeUrlOpener:
         *answers: Answer | BaseException,
         repeat: bool = False,
     ) -> None:
-        """Script the URLs that `match` selects: a URL prefix, or a predicate over the whole URL.
-
-        Each matching request consumes the next answer: an `Answer` is returned (raised as
-        `HTTPError` when its status is outside 2xx), an exception is raised (`URLError`,
-        `TimeoutError`). With `repeat=True` the last answer serves every request after the script
-        runs out. The first route that matches wins, so register the more specific prefix first.
-        """
         if not answers:
             raise ValueError("a route needs at least one answer")
         if callable(match):

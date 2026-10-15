@@ -1,5 +1,3 @@
-"""services.supervision.ava_root.wiring: the daemon's optional deployment-hook contract."""
-
 from __future__ import annotations
 
 import sys
@@ -49,7 +47,6 @@ def _install(monkeypatch: pytest.MonkeyPatch, name: str, attr: str, value: objec
 
 
 def _returns(value: object) -> Callable[[WiringContext], object]:
-    """A typed wiring factory returning `value` regardless of the context."""
 
     def factory(_context: WiringContext) -> object:
         return value

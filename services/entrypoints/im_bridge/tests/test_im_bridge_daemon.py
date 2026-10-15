@@ -1,11 +1,3 @@
-"""`services.entrypoints.im_bridge.daemon` liveness wiring.
-
-The im_bridge main loop never iterates once the adapters are launched (it parks
-on ``asyncio.Event().wait()``), so the healthz liveness must be carried by a
-dedicated background task — without it, ``/healthz`` flips to 503 two minutes
-after startup and the watchdog respawns a perfectly healthy daemon in a loop.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -38,8 +30,6 @@ from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 
 
 class _FakeServer:
-    """Minimal stand-in for the asyncio.Server ``stop_health_server`` touches."""
-
     def close(self) -> None:
         pass
 
@@ -48,8 +38,6 @@ class _FakeServer:
 
 
 def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The beat task keeps a Liveness fresh — the regression guard for the
-    503-after-startup bug."""
 
     async def parked_outbound(_core: Any, _alerts: Any):
         await asyncio.Event().wait()
@@ -61,7 +49,7 @@ def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> No
     async def scenario() -> None:
         task = asyncio.create_task(daemon.liveness_loop(liveness))
         try:
-            await asyncio.sleep(0.5)  # ~25 beats, several times the timeout
+            await asyncio.sleep(0.5)
             assert liveness.is_alive()
         finally:
             task.cancel()
@@ -78,8 +66,6 @@ def test_run_wires_the_liveness_task(
     process_config: ConfigBoot,
     tmp_path: Path,
 ) -> None:
-    """run() hands the health server a Liveness that keeps getting beaten: the
-    beat task is actually created and running, not merely defined."""
     captured: list[Liveness] = []
 
     send_auth: list[frozenset[str] | None] = []
@@ -100,7 +86,6 @@ def test_run_wires_the_liveness_task(
         send_auth.append(auth_digests)
         return _FakeServer()
 
-    # /send accepts the machine API tokens of the write generation, never the human secret.
     monkeypatch.setattr(
         daemon, "daemon_acceptance", daemon_acceptance_stub(frozenset({"digest-of-a-token"}))
     )
@@ -121,8 +106,6 @@ def test_run_wires_the_liveness_task(
     monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start_health_server)
 
-    # run() imports IMBridgeCore inside the function; patch the module it
-    # imports from, not the daemon module itself.
     created_cores: list[Any] = []
 
     class _FakeCore:
@@ -182,7 +165,6 @@ def test_run_wires_the_liveness_task(
             assert captured, "run() never started the health server"
             assert captured[0].is_alive()
             assert send_auth == [frozenset({"digest-of-a-token"})]
-            # The root builds the slice once and hands the same one to every consumer.
             assert created_cores[0].config == daemon.im_bridge_config()
             assert isinstance(created_cores[0].gateway, GatewayClient)
             assert loaded_with == [frozenset(created_cores[0].config.im_disabled_adapters)]
@@ -195,8 +177,6 @@ def test_run_wires_the_liveness_task(
 
 
 def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AVA_IM_DISABLED_ADAPTERS skips the named adapters at load; the code
-    stays importable (user ruling 2026-08-06 disabled WeChat iLink + Feishu; Feishu was re-enabled 2026-09)."""
     imported: list[str] = []
 
     def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
@@ -226,7 +206,6 @@ def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_load_adapters_hands_each_adapter_its_slice(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The root passes the Telegram and Feishu adapters their own slice; Weixin reads none."""
     received: dict[str, tuple[Any, ...]] = {}
 
     def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
@@ -257,8 +236,6 @@ def test_load_adapters_hands_each_adapter_its_slice(monkeypatch: pytest.MonkeyPa
 def test_a_built_slice_carries_the_live_value_of_every_field(
     build: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Each slice field is the flat registry field of the same name, so an operator's
-    `.env` edit reaches the component through the root, and no field is left at a default."""
     monkeypatch.setattr(settings.services, "im_disabled_adapters", ["weixin"])
     monkeypatch.setattr(settings.services, "im_send_retry_delays", [0.5, 1.5])
     monkeypatch.setattr(settings.telegram, "telegram_owner_id", 4242)
@@ -282,15 +259,10 @@ def test_the_gateway_client_gets_the_gateway_url_and_bearer_from_the_root(
 
 
 def test_httpx_info_logs_gated(caplog: pytest.LogCaptureFixture) -> None:
-    """Telegram's bot token rides in the request URL, so httpx's per-request
-    INFO line must not be emitted at all once the daemon gates it; library
-    warnings still surface (task #4067)."""
     httpx_logger = logging.getLogger("httpx")
     previous_level = httpx_logger.level
     caplog.set_level(logging.INFO)
     try:
-        # Control: ungated, the URL-bearing INFO line does reach the log —
-        # the pre-fix state this test exists to keep out.
         httpx_logger.setLevel(logging.NOTSET)
         caplog.clear()
         httpx_logger.info(

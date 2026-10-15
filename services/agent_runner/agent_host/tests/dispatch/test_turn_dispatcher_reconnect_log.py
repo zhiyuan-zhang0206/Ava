@@ -1,13 +1,3 @@
-"""The dispatcher reconnect line's severity contract (2026-10-03 triage, E1).
-
-A dropped subscription read — a host stall outliving the read deadline — is
-expected, self-healing noise (the declared event tier is "noise"): the loop
-reconnects and re-scans, and the delivery watchdog re-publishes wakes missed
-meanwhile. The reconnect therefore reports at WARNING without a traceback,
-with the exception type in the payload. This module exists beside
-`test_turn_dispatcher.py` because that file sits at its frozen size ceiling.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -22,8 +12,6 @@ from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 
 
 class _IdleScheduler:
-    """The `_WakeScheduler` slice the reconnect path touches: nothing active."""
-
     @property
     def active_agents(self) -> frozenset[int]:
         return frozenset()
@@ -46,15 +34,13 @@ async def test_reconnect_logs_warning_without_a_traceback(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    """A half-open subscription read reconnects quietly: WARNING, no traceback,
-    exception_type on the payload — never logger.exception's ERROR + stack."""
 
     class _HangingPubSub:
         async def psubscribe(self, _pattern: str) -> None:
             return None
 
         async def get_message(self, **_kwargs: object) -> None:
-            await asyncio.Event().wait()  # TCP-open but never answers
+            await asyncio.Event().wait()
 
         async def aclose(self) -> None:
             return None

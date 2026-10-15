@@ -1,5 +1,3 @@
-"""Real durable restart ownership, journal failure and parked-intent preservation."""
-
 import asyncio
 from dataclasses import replace
 from pathlib import Path
@@ -398,7 +396,6 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
 def _model_that_runs_the_effect_tool_once(
     calls: list[str], entered: asyncio.Event, finish: asyncio.Event, effect: Path
 ) -> Any:
-    """The llm node: park on `finish`, then ask `execute_code` to write `effect`; end on the next call."""
 
     async def model(_state: states.BaseAgentState) -> Command[Any]:
         calls.append("model")
@@ -432,7 +429,6 @@ def _model_that_runs_the_effect_tool_once(
 
 
 def _real_exec_graph_builder(model: Any, calls: list[str]) -> Any:
-    """claim -> before_llm -> llm -> before_exec -> real exec -> after_exec -> claim."""
 
     async def route(_state: Any, _runtime: Any, _config: Any) -> Command[Any]:
         return Command(goto="llm")
@@ -598,7 +594,6 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         assert calls == ["model", "before_exec", "after_exec"]
         await host.run_turn(agent)
         assert calls == ["model", "before_exec", "after_exec"]
-        # Explicit release observes the restart; it cannot resume the old graph.
         assert current.maintenance is not None
         start_cluster_through_ready_gate(monkeypatch, machine=machine_identity)
         successor = _host_driving_invoke_until_done(

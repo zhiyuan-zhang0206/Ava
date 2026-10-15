@@ -1,10 +1,3 @@
-"""Unit intent records: explicit policy, explicit failure states, boot merge (#4872).
-
-The record is what a restarted root re-derives: a failed self-rescue must never
-read back as an operator stop, and a recorded failure must survive a root
-restart until a fresh generation proves it gone.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -38,8 +31,6 @@ _SLEEP_FOREVER = ("sleep",)
 
 
 class _Recorder:
-    """The structured log calls so far, as their field dictionaries (read from `loguru_records`)."""
-
     def __init__(self, records: LogRecords) -> None:
         self._records = records
 
@@ -79,13 +70,6 @@ def _supervisor(run_dir: Path, units: list[UnitManifest]) -> Supervisor:
 def _up_failure_supervisor(
     run_dir: Path, units: list[UnitManifest], monkeypatch: pytest.MonkeyPatch
 ) -> Supervisor:
-    """Arrange a proven down half, retaining real intent and activation behavior.
-
-    These three tests own single disposable sleepers with no descendants. Their
-    contract is the input-seal failure and its durable episode, not TERM timing.
-    Native refusal and graceful closure stay in the down-refusal and stop-window
-    tests. Await the real watcher before testing the replacement half.
-    """
     owner = _supervisor(run_dir, units)
     stop = owner._stop_unit
 
@@ -130,11 +114,7 @@ async def _wait_file(path: Path) -> None:
     raise AssertionError(f"file {path} never appeared")
 
 
-# -- the boot merge table ------------------------------------------------------
-
-
 def test_boot_merge_rules() -> None:
-    # No record: the admitted start is the only word.
     merged = merge_record_for_boot(None)
     assert (merged.intent, merged.source, merged.restart_failed, merged.start) == (
         UnitIntent.RUNNING,
@@ -142,7 +122,6 @@ def test_boot_merge_rules() -> None:
         None,
         True,
     )
-    # An explicit operator stop holds; boot never overrides it.
     failure = RestartFailure(RestartStage.UP, 1234.5, "boom")
     merged = merge_record_for_boot(IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None))
     assert (merged.intent, merged.source, merged.start) == (
@@ -151,17 +130,14 @@ def test_boot_merge_rules() -> None:
         False,
     )
     assert merged.note is not None
-    # A selection stop holds the same way (never re-run implicitly).
     merged = merge_record_for_boot(IntentRecord(UnitIntent.STOPPED, IntentSource.SELECTION, None))
     assert (merged.intent, merged.start) == (UnitIntent.STOPPED, False)
-    # A stop the root gave itself (shutdown) is mechanical: the start supersedes it.
     merged = merge_record_for_boot(IntentRecord(UnitIntent.STOPPED, IntentSource.SELF, None))
     assert (merged.intent, merged.source, merged.start) == (
         UnitIntent.RUNNING,
         IntentSource.SELECTION,
         True,
     )
-    # A running record keeps its source; an unresolved failure is carried.
     merged = merge_record_for_boot(IntentRecord(UnitIntent.RUNNING, IntentSource.OPERATOR, failure))
     assert (merged.intent, merged.source, merged.restart_failed, merged.start) == (
         UnitIntent.RUNNING,
@@ -172,7 +148,7 @@ def test_boot_merge_rules() -> None:
 
 
 def test_record_round_trip_and_corruption(tmp_path: Path) -> None:
-    assert intent_store.read(tmp_path, "svc") is None  # absent
+    assert intent_store.read(tmp_path, "svc") is None
     record = IntentRecord(
         UnitIntent.RUNNING,
         IntentSource.OPERATOR,
@@ -186,9 +162,6 @@ def test_record_round_trip_and_corruption(tmp_path: Path) -> None:
         '{"intent": "sideways", "source": "operator", "restart_failed": null, "updated_at": 1}'
     )
     assert intent_store.read(tmp_path, "svc") is None
-
-
-# -- boot behavior -------------------------------------------------------------
 
 
 async def test_boot_holds_an_explicit_stored_stop(
@@ -207,7 +180,6 @@ async def test_boot_holds_an_explicit_stored_stop(
         assert entry["state"] == "stopped" and entry["pid"] is None
         assert owner.revival_deferral("svc") == "held down"
         assert "stored operator stop held" in caplog.text
-        # The operator's own up supersedes the stored stop.
         await owner.up("svc")
         entry = await _entry(owner)
         assert entry["intent"] == "running" and entry["state"] == "running"
@@ -236,7 +208,7 @@ async def test_boot_holds_a_stored_selection_stop(tmp_path: Path) -> None:
 async def test_boot_supersedes_a_stored_root_stop(tmp_path: Path) -> None:
     first = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
     await first.start()
-    await first.shutdown()  # writes stopped/self for the unit
+    await first.shutdown()
     stored = intent_store.read(tmp_path, "svc")
     assert stored is not None and stored.source is IntentSource.SELF
 
@@ -252,9 +224,6 @@ async def test_boot_supersedes_a_stored_root_stop(tmp_path: Path) -> None:
         await second.shutdown()
 
 
-# -- restart failure atomicity -------------------------------------------------
-
-
 async def test_restart_up_half_failure_records_explicit_state(
     tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -262,7 +231,7 @@ async def test_restart_up_half_failure_records_explicit_state(
     owner = _up_failure_supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
     await owner.start()
     try:
-        input_path.write_text("v2")  # the seal no longer matches: the up half must fail
+        input_path.write_text("v2")
         result = await owner.restart("svc")
         entry = cast("list[dict[str, Any]]", result["units"])[0]
         assert entry["action"] == "failed"
@@ -283,8 +252,6 @@ async def test_restart_up_half_failure_records_explicit_state(
 async def test_restart_up_half_failure_retry_replaces_and_clears(
     tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The up-half episode must not depend on a live child's TERM deadline.
-    # The old fixture entered this boundary before it could test the seal.
     input_path, seal = _sealed_input(tmp_path)
     owner = _up_failure_supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
     live_stop = Mock(wraps=owner._signal_owned)
@@ -299,7 +266,7 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
         failed = intent_store.read(tmp_path, "svc")
         assert failed is not None and failed.intent is UnitIntent.RUNNING
         assert failed.restart_failed is not None and failed.restart_failed.stage is RestartStage.UP
-        input_path.write_text("v1")  # the retry can activate again
+        input_path.write_text("v1")
         result = await owner.restart("svc")
         assert cast("list[dict[str, Any]]", result["units"])[0]["action"] == "restarted"
         status = await _entry(owner)
@@ -325,7 +292,7 @@ async def test_restart_down_refusal_records_stage_down_and_retry_settles(tmp_pat
     owner = _supervisor(tmp_path, [_unit("restart_down", str(ready), str(release))])
     await owner.start()
     try:
-        await _wait_file(ready)  # the child now ignores TERM for real
+        await _wait_file(ready)
         active = await _entry(owner)
         assert active["state"] == "running"
         with pytest.raises(RuntimeError, match=r"did not stop within its 0\.2s window"):
@@ -336,7 +303,7 @@ async def test_restart_down_refusal_records_stage_down_and_retry_settles(tmp_pat
         assert status["pid"] == active["pid"]
         assert status["restart_failed"]["stage"] == "down"
         assert owner.revival_deferral("svc") is None, "retryable, not an operator stop"
-        release.touch()  # the unit finishes on its own; the retry is safe
+        release.touch()
         await _wait_state(owner, "stopped")
         result = await owner.restart("svc")
         assert cast("list[dict[str, Any]]", result["units"])[0]["action"] == "restarted"
@@ -358,9 +325,8 @@ async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
     stored = intent_store.read(tmp_path, "svc")
     assert stored is not None and stored.restart_failed is not None
     since = stored.restart_failed.since
-    # Simulated root restart: a fresh supervisor over the same run directory.
     second = _up_failure_supervisor(tmp_path, [unit], monkeypatch)
-    await second.start()  # the carried failure blocks nothing; the start attempt fails
+    await second.start()
     try:
         entry = await _entry(second)
         assert entry["intent"] == "running" and entry["state"] == "stopped"

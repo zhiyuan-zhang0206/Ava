@@ -1,5 +1,3 @@
-"""The ops serving loop retains its explicit config and resource owners."""
-
 from __future__ import annotations
 
 import functools
@@ -22,7 +20,6 @@ from services.agent_runner.agent_ops import boot, daemon
 
 
 def _assert_live_saturation(inputs: dict[str, object], config: ConfigBoot) -> None:
-    """The actual health callback rereads this root rather than a startup scalar."""
     routes = cast(dict[tuple[str, str], functools.partial[object]], inputs["extra_routes"])
     active = cast(dict[str, tuple[str, float]], routes[("POST", "/ops")].keywords["active_ops"])
     extra = cast(Callable[[], dict[str, object]], inputs["extra"])
@@ -39,8 +36,6 @@ def _assert_live_saturation(inputs: dict[str, object], config: ConfigBoot) -> No
 
 
 class _PidfileOperations:
-    """Record cleanup while checking each resource operation's explicit owner."""
-
     def __init__(self, config: ConfigBoot, runtime: Path, events: list[str]) -> None:
         self.config = config
         self.runtime = runtime
@@ -70,7 +65,6 @@ async def test_server_failure_releases_owned_resources(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The single serving loop keeps the primary failure and closes its resources."""
     from base.deploy.schema import migrations
 
     config = snapshot_process_config()
@@ -144,9 +138,7 @@ async def test_server_failure_releases_owned_resources(
         assert home == unit_home
 
     monkeypatch.setattr(boot, "register_boot", register_boot)
-    assert (
-        ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("ops").health_port
-    )  # the port table still names the ops slot
+    assert ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("ops").health_port
 
     with pytest.RaisesGroup(pytest.RaisesExc(RuntimeError, match="ops server crashed")):
         await daemon.serve_ops_daemon(

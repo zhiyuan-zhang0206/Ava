@@ -1,27 +1,3 @@
-"""Lint: backend NoteTag enum ⊆ frontend system_marker dispatch sets.
-
-The frontend classifies a system_marker's `source` (a NoteTag value) through
-the dispatch sets in `ui/web/src/components/timeline/markers.tsx`
-(LIFECYCLE_TAGS / MEMORY_SOURCES / NOTE_SOURCES); any source outside them
-renders the red UnknownMarkerChip alarm — fail-loud by design, but a NEW
-backend tag landing without a frontend branch is exactly the regression class
-the user hit as "UNRECOGNIZED SYSTEM_MARKER (FRONTEND NOT ADAPTED)" (#1017).
-
-This test machine-checks the contract in the backend job (milliseconds, no
-browser): the backend enum is AST-parsed from `base/agents/messages/kwargs.py` (the
-single source of truth), the frontend sets are read from `markers.tsx`, and a
-backend member with no frontend branch fails CI immediately.
-
-The frontend side of the same contract — every dispatch-set member renders
-its chip and never the alarm — lives in
-`ui/web/src/components/timeline/timeline.test.tsx` ("Marker contract: every
-dispatch-set source renders without the red alarm").
-
-Companion backend-internal contract: `gateway/tests/history/test_timeline.py`
-`TestAvaMsgTypeDispatch` asserts every AvaMsgType member dispatches to its
-intended item kind and never hits the HumanMessage catch-all.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -39,7 +15,6 @@ _SYSTEM_NOTE_WRITER_DIRS = ("agent", "ava_builtins", "demos")
 
 
 def _note_tag_members() -> set[str]:
-    """AST-extract the NoteTag StrEnum member values from base/agents/messages/kwargs.py."""
     tree = ast.parse(_MESSAGE_KWARGS.read_text())
     for node in tree.body:
         if (
@@ -60,15 +35,9 @@ def _note_tag_members() -> set[str]:
 
 
 def _frontend_dispatch_members() -> set[str]:
-    """Extract the string members of the exported dispatch sets in markers.tsx.
-
-    Read as text (it is TypeScript): each exported const is either an array
-    literal (LIFECYCLE_TAGS) or a Set literal (MEMORY_SOURCES / NOTE_SOURCES).
-    """
     text = _MARKERS_TS.read_text()
     members: set[str] = set()
     for name in ("LIFECYCLE_TAGS", "MEMORY_SOURCES", "NOTE_SOURCES"):
-        # `export const NAME = [ ... ]` or `export const NAME = new Set([ ... ])`
         m = re.search(rf"export const {name} = (?:new Set\()?\[(.*?)\]", text, re.S)
         assert m, f"exported const {name} not found in markers.tsx"
         members.update(re.findall(r'"([^"]+)"', m.group(1)))
@@ -94,7 +63,6 @@ def test_note_tag_and_frontend_dispatch_sets_agree() -> None:
 
 
 def _note_writer_sources() -> list[Path]:
-    """Every production `.py` under the framework note writers' directories."""
     return [
         path
         for directory in _SYSTEM_NOTE_WRITER_DIRS
@@ -104,7 +72,6 @@ def _note_writer_sources() -> list[Path]:
 
 
 def _system_note_calls(path: Path) -> list[ast.Call]:
-    """Every `system_note_message(...)` call in one source file."""
     tree = ast.parse(path.read_text(), filename=path)
     return [
         node
@@ -132,7 +99,6 @@ def _is_validated_inbound_tag(tag: ast.expr) -> bool:
 
 
 def test_system_note_writers_use_notetag_values() -> None:
-    """Framework note writers must use the closed NoteTag vocabulary."""
     for path in _note_writer_sources():
         for node in _system_note_calls(path):
             tag = next((kw.value for kw in node.keywords if kw.arg == "tag"), None)
@@ -152,8 +118,6 @@ def test_send_system_note_default_tag_is_live_notetag_value() -> None:
 
 
 def test_send_system_note_rejects_unknown_notetag_before_gateway() -> None:
-    """Changing the SDK guard to forward an unknown tag must fail this test: the check runs in
-    `peers.validate_system_note`, which has no gateway client to reach."""
     from ava.agents import peers
 
     with pytest.raises(ValueError) as exc_info:

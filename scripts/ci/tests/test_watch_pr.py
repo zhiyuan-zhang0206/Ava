@@ -1,17 +1,3 @@
-"""Hermetic tests for the optional Ava CI watcher.
-
-`scripts/ci/pull_requests/watch_pr.py` is a launched code string,
-not an importable module: the launching agent reads the file, string-substitutes
-the placeholder assignments (REPO_ROOT / PR_NUMBER / CI_UTILS / WATCHER_ID), then
-hands the result to `ava.watcher.launch`. These tests exercise that same
-artifact the same way — substitute the placeholders, stub `ava` and `ci_utils`,
-exec — so the settle semantics the template exists to guarantee stay locked
-(2026-09-12, task #3158: a just-pushed PR read as a settled NO_CHECKS) and the
-delivery semantics stay locked too (2026-09-17, task #3692: the verdict is
-persisted before the send, the send is made once, and a failed delivery exits 2
-with the persisted verdict left behind).
-"""
-
 from __future__ import annotations
 
 import sys
@@ -30,14 +16,10 @@ from scripts.ci.cli import CIStatus
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TEMPLATE = _REPO_ROOT / "scripts" / "ci" / "pull_requests" / "watch_pr.py"
-# The substitution below pins PR_NUMBER = "1234"; the verdict file name follows
-# from it (the template's VERDICT_FILE).
 _VERDICT_NAME = "ci-verdict-1234.txt"
 
 
 class _Result:
-    """The CIResult surface the watcher reads."""
-
     def __init__(self, verdict: Any) -> None:
         self.verdict = verdict
         self.mergeable = "MERGEABLE"
@@ -47,13 +29,6 @@ class _Result:
 
 
 class _FakeAva:
-    """Records wakes and file writes instead of doing them.
-
-    `send_failures` / `write_failures` make that many leading calls raise —
-    the shapes of a gateway refusing connections and of an unwritable verdict
-    file.
-    """
-
     def __init__(
         self,
         files_root: Path,
@@ -67,8 +42,6 @@ class _FakeAva:
         self.write_calls = 0
         self.write_failures = write_failures
         self.send_error = send_error
-        # Whether the verdict file existed at each send attempt — locks the
-        # persist-before-send order, not just the end state.
         self.verdict_written_at_send: list[bool] = []
         fake = self
 
@@ -89,8 +62,6 @@ class _FakeAva:
                 fake.write_calls += 1
                 if fake.write_calls <= fake.write_failures:
                     raise RuntimeError("disk is full")
-                # Stand-in for the SDK's workspace resolution: the watcher's
-                # relative VERDICT_FILE lands under the test's tmp dir.
                 target = files_root / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
@@ -110,13 +81,6 @@ def _run_watcher(
     forbid_sleep: bool = False,
     on_atexit: Callable[..., None] | None = None,
 ) -> tuple[list[tuple[int, str]], list[Any], _FakeAva]:
-    """Exec the substituted template; return its wakes, polls, and fake.
-
-    `verdicts` is how `check_ci` answers, one entry per poll; the last entry
-    repeats if the watcher polls again.  A caller that must assert after the
-    watcher raises (the exhausted-delivery or probe-error exit) passes its own
-    fake; `raise_on_poll` makes the probe raise instead of answering.
-    """
     polled: list[Any] = []
     timers = ManualTimers()
     clock = Clock(
@@ -157,9 +121,6 @@ def _run_watcher(
         ('PR_NUMBER = ""', 'PR_NUMBER = "1234"'),
         ('CI_UTILS = ""', f'CI_UTILS = "{tmp_path}"'),
         ("WATCHER_ID = 0", "WATCHER_ID = 42"),
-        # The imports are substituted rather than patched through
-        # sys.modules: a stub left there leaks into fixture teardown, which
-        # re-imports `ava` (same substitution the generated-watcher tests use).
         ("import atexit\n", ""),
         ("import ava\n", ""),
         ("from base.clock import Clock\n", ""),
@@ -195,16 +156,13 @@ def _run_watcher(
 def test_attach_window_does_not_wake_as_no_checks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The reported bug (2026-09-12, PR #2249): the watcher starts right after
-    the push, and the empty rollup while the checks attach must not be reported
-    as a settled NO_CHECKS — the wake comes only once CI actually settles."""
     wakes, polled, _ = _run_watcher(
         monkeypatch,
         tmp_path,
         [CIStatus.NO_CHECKS, CIStatus.NO_CHECKS, CIStatus.PENDING, CIStatus.ALL_PASSED],
     )
 
-    assert len(polled) == 4  # both attach-window NO_CHECKS verdicts were absorbed
+    assert len(polled) == 4
     assert len(wakes) == 1
     agent_id, message = wakes[0]
     assert agent_id == 42
@@ -214,11 +172,9 @@ def test_attach_window_does_not_wake_as_no_checks(
 def test_persistent_no_checks_is_reported_after_bounded_retries(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A rollup that stays empty is still reported — never swallowed: after its
-    retry budget the watcher wakes with the verdict and says it re-polled."""
     wakes, polled, _ = _run_watcher(monkeypatch, tmp_path, [CIStatus.NO_CHECKS])
 
-    assert len(polled) == 4  # the 3 retries + the poll that reports
+    assert len(polled) == 4
     assert len(wakes) == 1
     assert "no_checks" in wakes[0][1]
     assert "re-polled 3 times" in wakes[0][1]
@@ -228,8 +184,6 @@ def test_persistent_no_checks_is_reported_after_bounded_retries(
 def test_settled_verdict_wakes_on_the_first_poll(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, member: str
 ) -> None:
-    """Retries are confined to NO_CHECKS: any other settled verdict — a red PR or
-    a failed probe — wakes on the first poll."""
     wakes, polled, _ = _run_watcher(monkeypatch, tmp_path, [getattr(CIStatus, member)])
 
     assert len(polled) == 1
@@ -240,10 +194,6 @@ def test_settled_verdict_wakes_on_the_first_poll(
 def test_settled_verdict_is_persisted_before_the_wake(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The fallback record (2026-09-17, task #3692): the settled verdict is
-    written to the agent workspace before the first send attempt and holds
-    exactly the message the wake delivers — one representation, so a wake lost
-    in a restart window still leaves the verdict behind."""
     wakes, _, fake = _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED])
 
     assert fake.send_calls == 1
@@ -257,7 +207,6 @@ def test_settled_verdict_is_persisted_before_the_wake(
 def test_wake_is_sent_once_after_the_verdict_is_persisted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """One send, made after the verdict file exists."""
     wakes, _, fake = _run_watcher(monkeypatch, tmp_path, [CIStatus.ALL_PASSED])
 
     assert fake.send_calls == 1
@@ -269,9 +218,6 @@ def test_wake_is_sent_once_after_the_verdict_is_persisted(
 def test_failed_delivery_exits_2_after_one_send_and_keeps_the_verdict(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A refused send is not a silent death and not a retry window: the watcher
-    exits 2 after the single attempt (the exit notice is the second delivery
-    path) and the persisted verdict remains for a later read."""
     fake = _FakeAva(tmp_path, send_failures=100)
     with pytest.raises(SystemExit) as excinfo:
         _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake, forbid_sleep=True)
@@ -287,8 +233,6 @@ def test_failed_delivery_exits_2_after_one_send_and_keeps_the_verdict(
 def test_probe_error_is_persisted_then_exits_1(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The probe-error terminal path (2026-09-17 review): persist + echo run
-    before exit 1, so the error survives even a wake that cannot land."""
     fake = _FakeAva(tmp_path, send_failures=100)
     error = RuntimeError("gh exploded")
     with pytest.raises(SystemExit) as excinfo:
@@ -305,7 +249,6 @@ def test_probe_error_is_persisted_then_exits_1(
 def test_owner_url_error_reports_its_cause_with_absolute_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A guarded config error is reported by its cause, not its wrapper."""
     from pydantic import BaseModel, ValidationError, model_validator
 
     from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
@@ -333,7 +276,6 @@ def test_owner_url_error_reports_its_cause_with_absolute_fallback(
 def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The final atexit line survives a later cleanup traceback in --tail-file."""
     from pydantic import BaseModel, ValidationError, model_validator
 
     from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
@@ -372,9 +314,6 @@ def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
 def test_persist_failure_does_not_claim_a_stored_verdict(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A persist failure must not be reported as a stored verdict (2026-09-17
-    review): the message still goes out, and the exhaustion report says the log
-    holds the only copy."""
     fake = _FakeAva(tmp_path, send_failures=100, write_failures=100)
     with pytest.raises(SystemExit) as excinfo:
         _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake, forbid_sleep=True)

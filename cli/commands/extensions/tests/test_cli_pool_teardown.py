@@ -1,5 +1,3 @@
-"""Regression coverage for deterministic CLI connection-pool teardown."""
-
 from __future__ import annotations
 
 import contextlib
@@ -23,8 +21,6 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 class _PoolSpy:
-    """ConnectionPool stand-in recording close(); supports ``with pool``."""
-
     def __init__(self) -> None:
         self.closed = False
 
@@ -42,7 +38,6 @@ class _PoolSpy:
 
 
 def _install_pool_spy(monkeypatch: pytest.MonkeyPatch) -> _PoolSpy:
-    """Replace the lazy CLI pool factory with a pool whose close is observable."""
     spy = _PoolSpy()
     patch_database(monkeypatch, pool=lambda: spy)
     return spy
@@ -51,7 +46,6 @@ def _install_pool_spy(monkeypatch: pytest.MonkeyPatch) -> _PoolSpy:
 def test_materialize_cluster_extensions_closes_pool_on_success(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_database: Callable[[], Any]
 ) -> None:
-    """Materialization closes its eagerly opened worker-owning pool after use."""
     spy = _install_pool_spy(monkeypatch)
 
     def _noop_materialize(_conn: object, *, _dest_root: Path) -> SimpleNamespace:
@@ -67,7 +61,6 @@ def test_materialize_cluster_extensions_closes_pool_on_success(
 def test_materialize_cluster_extensions_closes_pool_when_materialize_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operator_database: Callable[[], Any]
 ) -> None:
-    """The best-effort materialization failure path still closes the pool."""
     spy = _install_pool_spy(monkeypatch)
 
     def raise_materialize(*args: object, **kwargs: object) -> None:
@@ -87,7 +80,6 @@ def test_adopt_local_extensions_closes_pool_on_success(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Adoption closes its eagerly opened worker-owning pool after use."""
     spy = _install_pool_spy(monkeypatch)
 
     def _noop_adopt(_pool: object, *, _skills_root: Path) -> SimpleNamespace:
@@ -111,7 +103,6 @@ def test_adopt_local_extensions_closes_pool_when_adopt_raises(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The best-effort adoption failure path still closes the pool."""
     spy = _install_pool_spy(monkeypatch)
 
     def raise_adopt(*args: object, **kwargs: object) -> None:
@@ -134,7 +125,6 @@ def test_register_in_cluster_closes_pool(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Registration closes its pool even when there are no packages to register."""
     spy = _install_pool_spy(monkeypatch)
 
     register_in_cluster(

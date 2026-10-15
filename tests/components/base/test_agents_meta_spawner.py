@@ -1,5 +1,3 @@
-"""Database invariants for immutable agent spawner lineage."""
-
 from __future__ import annotations
 
 import psycopg
@@ -11,7 +9,6 @@ def _seed_agents_meta(
     db_conn: psycopg.Connection,
     rows: list[tuple[int, str, str, int | None]],
 ) -> None:
-    """Insert explicit agent identities and their lifecycle metadata."""
     with db_conn.cursor() as cur:
         for agent_id, spawner, status, fork_source_agent_id in rows:
             cur.execute("INSERT INTO agents (id) VALUES (%s)", (agent_id,))
@@ -50,7 +47,6 @@ def _born_spawner(db_conn: psycopg.Connection, agent_id: int) -> str | None:
 def test_terminating_parent_leaves_live_child_spawner_unchanged(
     db_conn: psycopg.Connection,
 ) -> None:
-    """Terminating a parent does not reassign a live child's lineage."""
     _seed_agents_meta(
         db_conn,
         [
@@ -69,7 +65,6 @@ def test_terminating_parent_leaves_live_child_spawner_unchanged(
 def test_terminating_root_leaves_child_spawner_unchanged(
     db_conn: psycopg.Connection,
 ) -> None:
-    """Terminating a user-spawned parent does not promote its child to user."""
     _seed_agents_meta(
         db_conn,
         [
@@ -87,7 +82,6 @@ def test_terminating_root_leaves_child_spawner_unchanged(
 def test_terminating_middle_of_chain_leaves_descendant_spawners_unchanged(
     db_conn: psycopg.Connection,
 ) -> None:
-    """Every descendant retains its direct spawn record after a middle terminates."""
     _seed_agents_meta(
         db_conn,
         [
@@ -107,7 +101,6 @@ def test_terminating_middle_of_chain_leaves_descendant_spawners_unchanged(
 def test_resurrecting_terminated_agent_leaves_spawner_unchanged(
     db_conn: psycopg.Connection,
 ) -> None:
-    """Returning to a live status does not reassign a terminated parent's child."""
     _seed_agents_meta(
         db_conn,
         [
@@ -125,7 +118,6 @@ def test_resurrecting_terminated_agent_leaves_spawner_unchanged(
 def test_terminating_parent_preserves_spawner_and_fork_provenance(
     db_conn: psycopg.Connection,
 ) -> None:
-    """A lifecycle event cannot rewrite any immutable spawn or fork record."""
     _seed_agents_meta(
         db_conn,
         [
@@ -148,7 +140,6 @@ def test_terminating_parent_preserves_spawner_and_fork_provenance(
 def test_terminating_agent_without_children_leaves_spawner_unchanged(
     db_conn: psycopg.Connection,
 ) -> None:
-    """A terminal status transition without children only changes that status."""
     _seed_agents_meta(db_conn, [(1, "user", "running", None)])
 
     with db_conn.cursor() as cur:

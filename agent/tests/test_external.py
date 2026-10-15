@@ -1,5 +1,3 @@
-"""Borrowed identities and plugin state honor consent, TTL and checkpoint ownership."""
-
 from __future__ import annotations
 
 import time
@@ -42,7 +40,6 @@ from base.telemetry.otlp.tests.external_flush import paused_otlp_record as pause
 
 
 def _skip_local_capture(event: telemetry.Event, **_kwargs: Any) -> telemetry.Event:
-    """The symbolic-lease harness leaves receipt writes to the real SQL suite."""
     return event
 
 
@@ -67,7 +64,6 @@ def test_legacy_attachment_never_opens_an_event_receipt(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A NULL-version legacy attachment has no event-log database side effect."""
 
     def unexpected_open(_db: object, _lease_id: str, *, agent_id: int, source_key: str) -> bool:
         del agent_id, source_key
@@ -108,13 +104,6 @@ def test_attach_requests_native_plugin_load(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The attach path asks for the faces-included plugin load (#2616 review).
-
-    ``load_snapshot`` rebuilds the checkpoint through ``build_agent_state(build_registry())``,
-    so a surface-only load silently drops the plugin state fields the lease
-    carries. Locks the wiring; the loader's own surface/full split is
-    exercised in agent/tests/execution/test_lazy_child_imports.py.
-    """
     calls: list[dict[str, Any]] = []
 
     def spy_loader(**kwargs: Any) -> None:
@@ -170,7 +159,6 @@ def test_stale_attachment_refuses_sdk_identity_and_removes_identity_on_close(
 
 
 def _invalidate_lease(lease: dict[str, Any], invalidated: str) -> str:
-    """Invalidate the attached lease; the error text its next use must raise."""
     if invalidated == "expiry":
         lease["status"] = "expired"
         return "expired"
@@ -179,14 +167,12 @@ def _invalidate_lease(lease: dict[str, Any], invalidated: str) -> str:
 
 
 def _borrowed_agent_id() -> int | None:
-    """The agent id the process's bound context borrows through an attachment, if any."""
     context = getattr(ava, "context", None)
     lease = None if context is None or context.identity is None else context.identity.lease
     return None if lease is None else lease.agent_id
 
 
 def _assert_detached() -> None:
-    """After a detach the process holds no exec slot and no attached config."""
     assert not process_context.in_exec_turn()
     assert _settings.attached_agent_view() is None
 
@@ -215,7 +201,7 @@ def test_failed_context_entry_detaches_and_allows_next_attachment(
     assert _borrowed_agent_id() is None
     _assert_detached()
     assert not staged
-    attachment.close()  # Already detached; must not retry the failed lease or flush.
+    attachment.close()
 
     next_lease = {**lease, "id": "next", "status": "active", "delta_version": 0}
 
@@ -314,7 +300,6 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:
-    """Close fences a new SDK call before its gateway effect, not only at detach."""
     from base.agents.impersonation import manifest
 
     attachment = impersonation.attach("lease")
@@ -348,7 +333,6 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:
-    """An SDK call already inside its metering admission finishes its gateway effect."""
     from base.agents.impersonation import manifest
 
     attachment = impersonation.attach("lease")
@@ -386,7 +370,6 @@ def test_close_delivers_telemetry_when_plugin_flush_fails(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The close finally path must run delivery as well as detachment."""
     attachment = impersonation.attach("lease")
     delivered: list[int | None] = []
 
@@ -413,14 +396,12 @@ def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
     paused_otlp_record: tuple[Event, InMemoryLogRecordExporter],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A closing attachment waits for the OTLP worker's already-dequeued tail."""
 
     def no_sync(*_args: object, **_kwargs: object) -> telemetry.DrainResult:
         return telemetry.DrainResult(telemetry.DrainStatus.COMPLETED, telemetry.DrainPhase.DRAIN)
 
     monkeypatch.setattr(telemetry, "sync", no_sync)
     release, exporter = paused_otlp_record
-    # Bind the dequeued record to the client owner whose close performs delivery.
     ava.context.clients.event_pipeline()
     attachment = impersonation.attach("lease")
     timer = Timer(0.1, release.set)
@@ -509,7 +490,6 @@ def test_external_delta_rejects_full_history_reset_before_any_mutation(
         if boundary == "encode":
             encode_plugin_delta(delta, ExampleState)
         elif boundary == "decode":
-            # A persisted envelope must pass the same check before native replay.
             import base64
 
             encoding, payload = plugin_state_codec.serializer().dumps_typed(delta)

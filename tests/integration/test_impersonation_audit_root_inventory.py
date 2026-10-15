@@ -1,10 +1,3 @@
-"""Static census for every production audit-construction root.
-
-The event log is complete only when every audit producer is classified: a
-newly-added one must declare whether it is controller-local, central, or
-deliberately outside the borrowed-identity boundary.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -36,14 +29,12 @@ _INVENTORY: dict[str, str] = {
     "base/agents/inbox/insert.py::insert_inbound_message_in_transaction": "central",
     "base/agents/inbox/insert.py::insert_spawn_prompt_in_transaction": "central",
     "base/agents/inbox/control_delivery.py::insert_compact_in_transaction": "ineligible",
-    # Verified HTTP control acceptance records source=user, not a borrowed agent caller.
     "base/agents/compaction/commands.py::accept": "ineligible",
     "ops/env_audit.py::_emit_audit_event": "ineligible",
 }
 
 
 def _audit_roots(root: Path) -> set[str]:
-    """Return all production call sites that construct an audit event."""
     found: set[str] = set()
     for path in root.rglob("*.py"):
         relative = path.relative_to(root)
@@ -64,8 +55,6 @@ def _audit_roots(root: Path) -> set[str]:
 
 
 class _AuditRootVisitor(ast.NodeVisitor):
-    """Find helper calls plus direct telemetry construction through aliases."""
-
     def __init__(self) -> None:
         self.scope_lines: dict[str, list[int]] = {}
         self._scope: list[str] = []
@@ -180,8 +169,6 @@ def _attribute_name(node: ast.expr) -> str:
 
 
 def _assert_classified(roots: set[str], inventory: dict[str, str]) -> None:
-    # A one-for-one root replacement in the same scope keeps its key; count
-    # changes and scope renames require an inventory update.
     missing = sorted(roots - inventory.keys())
     stale = sorted(inventory.keys() - roots)
     if missing or stale:
@@ -194,8 +181,6 @@ def test_every_production_audit_root_has_one_event_log_classification() -> None:
     root = Path(__file__).parents[2]
     roots = _audit_roots(root)
     _assert_classified(roots, _INVENTORY)
-    # The central registration paths must be visible at their roots, not hidden
-    # behind an implicit generic hook that can accidentally tag a system event.
     for location, classification in _INVENTORY.items():
         if classification != "central":
             continue
@@ -317,7 +302,6 @@ def test_an_unclassified_import_base_audit_helper_fails(tmp_path: Path) -> None:
 
 
 def test_an_unclassified_module_alias_audit_helper_fails(tmp_path: Path) -> None:
-    """The package-member form production uses (`from base.telemetry import audit_events`)."""
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(

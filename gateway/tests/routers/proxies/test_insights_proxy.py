@@ -1,5 +1,3 @@
-"""The gateway's insights proxy: what it forwards, what it refuses, how an outage reads."""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -32,7 +30,6 @@ _PROXIED = (
 
 
 def _upstream() -> FastAPI:
-    """A stand-in service that echoes what it was asked."""
     app = FastAPI()
 
     @app.get("/{path:path}")
@@ -140,8 +137,6 @@ def test_an_unavailable_service_is_a_gateway_error_not_a_crash(
 def test_the_gateway_declares_exactly_what_the_service_serves(
     tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    """Same query parameters and response schema per proxied route, so the OpenAPI contract
-    (and the frontend types generated from it) cannot drift from the service."""
     service = build_app(
         cast(Database, object()),
         cast(ConnectionPool[Any], object()),

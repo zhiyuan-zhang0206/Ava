@@ -1,19 +1,3 @@
-"""Load-older scroll anchor (#1272) — reading-position preservation in the real
-browser.
-
-The user scrolls up to read older history; the previous window is fetched and
-prepended. The reading position (the topmost visible message) must not move —
-not even when the user keeps scrolling while the fetch is in flight (the old
-code pinned the compensation to the trigger-time viewport top, so every
-landing yanked the viewport back by the distance scrolled in between; with
-the anchor below the viewport it scrolled by the anchor's whole displacement
-— the "whole list jumps after loading older messages" report).
-
-Reaching the top stops at the prepared pull boundary without loading. A fresh
-native wheel pull requests the previous window on release. The first request
-is paused so continued reading movement happens before its response lands.
-"""
-
 from __future__ import annotations
 
 import re
@@ -27,8 +11,6 @@ from playwright.sync_api import Page, Route
 from tests.e2e._settings import pin_expand_runs_all
 from tests.e2e.fixture_environment import E2EEnv
 
-# Records (scrollTop, scrollHeight, item count, first real item + its viewport
-# top) on every frame + scroll event, into window.__tl.samples.
 _SAMPLER_JS = """
 () => {
   const all = [...document.querySelectorAll('[data-slot="scroll-area-viewport"]')];
@@ -97,10 +79,6 @@ def _reading_top(sample: _ReadingSample) -> float:
 
 
 def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
-    """The reading position is the first real item's viewport top. Locate the
-    landing frame (the first sample whose item count differs from the previous
-    one) and require the anchor to have stayed put across it — a > 3 px move
-    is the #1272 yank / #2623 under-compensation."""
     samples = page.evaluate("window.__tl.samples")[sample_start:]
     landing_idx = next(
         (i for i, s in enumerate(samples) if i > 0 and s["n"] != samples[i - 1]["n"]),
@@ -110,10 +88,6 @@ def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
     before = [s for s in samples[:landing_idx] if s["anchorTop"] is not None]
     after = [s for s in samples[landing_idx:] if s["anchorTop"] is not None]
     assert before and after, f"round {round_no}: no anchor measurements around the landing"
-    # The fixture's standing prompt (0.0) stays above prepended history. When
-    # only it is visible, a successful page closes the exposed pull space
-    # smoothly; compare its reading position after removing that intended motion.
-    # Real message anchors retain the strict, unadjusted viewport comparison.
     before_top = _reading_top(before[-1])
     for s in after:
         top = _reading_top(s)
@@ -141,7 +115,7 @@ def _wait_landing(
             "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
         )
         if n > before_n:
-            return n  # the older window landed
+            return n
         page.wait_for_timeout(200)
     rest_items = httpx.get(
         f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
@@ -163,11 +137,6 @@ def _run_rounds(
     agent_id: int,
     gateway_url: str,
 ) -> int:
-    """Each released pull must preserve the reading position within 3px.
-
-    The first request pauses while the reader moves. Later pulls grow the
-    above-anchor stack that exposed estimate-based under-compensation.
-    """
     sample_start = page.evaluate("window.__tl.samples.length")
     _load_older_at_top(page, before_requests, paused_routes)
     _wait_landing(page, init_n, 1, agent_id, gateway_url, before_requests)
@@ -177,7 +146,6 @@ def _run_rounds(
     round_no = 1
     while round_no < 5:
         round_no += 1
-        # Leave the top, then start a separate released pull for the next page.
         page.evaluate("window.__tl.vp.scrollTop = 240")
         page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
         page.wait_for_timeout(200)
@@ -197,8 +165,6 @@ def _run_rounds(
                 break
             page.wait_for_timeout(200)
         if n <= before_n:
-            # No landing: either history is exhausted (everything the backend
-            # has is already mounted) or the released pull failed to load.
             rest = httpx.get(
                 f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
                 timeout=30.0,
@@ -209,14 +175,13 @@ def _run_rounds(
                     f"mounted={before_n} rest_total={len(rest)}, "
                     f"last_samples={page.evaluate('window.__tl.samples')[-6:]}"
                 )
-            break  # history exhausted — no more rounds
+            break
         page.wait_for_timeout(1200)
         _assert_landing_holds(page, sample_start, round_no)
     return round_no
 
 
 def _pull_history_page(page: Page, before_requests: list[str]) -> bool:
-    """Arrival alone is quiet; a fresh native wheel pull loads one older page."""
     count = len(before_requests)
     page.evaluate(_SCROLL_UP_JS)
     page.wait_for_function("() => window.__tl.arrivalEnded", timeout=15_000)
@@ -241,7 +206,6 @@ def _pull_history_page(page: Page, before_requests: list[str]) -> bool:
 
 
 def _load_older_at_top(page: Page, before_requests: list[str], paused_routes: list[Route]) -> None:
-    """Hold the first released-pull request until the in-flight reading move completes."""
     assert _pull_history_page(page, before_requests), "the initial history page is unavailable"
 
     assert len(paused_routes) == 1, "the first paging request was not held"
@@ -249,9 +213,6 @@ def _load_older_at_top(page: Page, before_requests: list[str], paused_routes: li
         "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
     )
 
-    # The user keeps scrolling while the paused fetch is in flight (the
-    # #1272 yank happened exactly when the landing compensated against a
-    # stale trigger-time position).
     page.evaluate("window.__tl.vp.scrollTop = 600")
     page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
     assert page.evaluate("window.__tl.vp.scrollTop") == 600
@@ -269,9 +230,6 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
     page = e2e_env.page
     agent_id = e2e_env.agent_id
 
-    # Pause the first older-page response until the user has scrolled. A
-    # blocking sleep in this sync callback cannot establish that ordering:
-    # the test resumes only after the callback has released the response.
     before_requests: list[str] = []
     paused_routes: list[Route] = []
 
@@ -284,16 +242,11 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
 
     page.route(re.compile(r"/api/agents/\d+/timeline\?.*before="), pause_first_page)
 
-    # Pin expanded rendering so the sampler can observe the exact child card
-    # the reader sees inside a work block.
     pin_expand_runs_all(e2e_env.gateway_url)
 
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
-    # The scripted scenario runs when an inbound arrives — drive it, then wait
-    # until the final reply is committed in the timeline (the whole script
-    # ran; IDLING alone is racy — the agent idles between turns too).
     page.fill('[data-testid="composer-input"]', "\u8dd1\u5b8c\u5168\u90e8\u6b65\u9aa4\u3002")
     page.click('[data-testid="composer-send"]')
     deadline = time.monotonic() + 120.0
@@ -313,15 +266,9 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
             break
         time.sleep(0.5)
 
-    # Reload AFTER the scenario ran: the SSE-folded store holds every item
-    # (hasMoreOlder=false — nothing older exists client-side), but a fresh
-    # GET returns the 50-item tail window with has_more=true — the state the
-    # user hits when opening an agent with a long history.
     page.reload()
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
-    # The timeline now holds ~60 items — past the 50-item tail window, so
-    # scroll-up paging has a previous page (has_more=true).
     n = 0
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:

@@ -1,6 +1,3 @@
-"""Incarnation attribution and process proof for leftover exec request envelopes —
-and the bounded disposition of the ones whose own bytes cannot be read (D-2)."""
-
 import json
 import os
 import subprocess
@@ -42,7 +39,6 @@ def _write_envelope(
     payload: dict[str, object] | None = None,
     age_s: float = 0.0,
 ) -> Path:
-    """One request envelope; `age_s` moves it outside any live birth window."""
     target = exec_dir / str(agent_id) / name
     target.parent.mkdir(parents=True, exist_ok=True)
     envelope: dict[str, object] = {
@@ -65,7 +61,6 @@ def _superseded() -> RuntimeIncarnation:
 
 
 def _only_process(process: Mock) -> Callable[[list[str]], Iterator[Mock]]:
-    """A `psutil.process_iter` stand-in yielding exactly one fake process."""
 
     def iter_processes(_attrs: list[str]) -> Iterator[Mock]:
         return iter([process])
@@ -101,7 +96,6 @@ def test_superseded_envelope_is_stale_and_quarantined_with_receipt(
     quarantine_dir: Path,
     home: Path,
 ) -> None:
-    """An old incarnation's envelope moves aside; its bytes and proof survive."""
     owner = uuid4()
     request = _write_envelope(exec_dir, owner=owner, age_s=3600)
     before = request.read_text()
@@ -133,7 +127,6 @@ def test_unattributed_envelope_is_retained_and_never_moved(
     quarantine_dir: Path,
     home: Path,
 ) -> None:
-    """Absent structured evidence stays exactly where it is, with its reason."""
     request = _write_envelope(
         exec_dir, payload={"v": 1, "code": "x", "agent_id": _AGENT, "timeout_s": 5.0}, age_s=3600
     )
@@ -147,28 +140,20 @@ def test_unattributed_envelope_is_retained_and_never_moved(
 
 
 def _age(path: Path, age_s: float) -> None:
-    """Move `path`'s mtime `age_s` into the past."""
     stamp = time.time() - age_s
     os.utime(path, (stamp, stamp))
 
 
 def _unreadable(request: Path, *, age_s: float) -> None:
-    """Turn one written envelope into the killed parent's unreadable remnant."""
     request.write_text("{not json")
     _age(request, age_s)
 
 
 def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
-    """A `psutil.process_iter` stand-in yielding no processes at all."""
     return iter(())
 
 
 def _no_processes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hide machine processes so a classification test isolates its own legs.
-
-    This box runs other agents' exec children; the widened unknown-timeout
-    birth window would otherwise sweep a freshly started one and report LIVE.
-    """
     monkeypatch.setattr(exec_request_evidence.psutil, "process_iter", _no_process_iteration)
 
 
@@ -178,7 +163,6 @@ def test_unreadable_envelope_inside_the_bound_is_retained(
     monkeypatch: pytest.MonkeyPatch,
     home: Path,
 ) -> None:
-    """Young evidence still defers — a deferral that may settle is not a stall."""
     request = _write_envelope(exec_dir)
     _unreadable(request, age_s=60.0)
     _no_processes(monkeypatch)
@@ -194,7 +178,6 @@ def test_unreadable_envelope_inside_the_bound_is_retained(
 def test_bounded_age_resolves_profile_safely_without_the_sandbox_domain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A sandbox-less process reads the cluster .env, then the declared default."""
     from base import config as config_module
     from base.host.env import dotenv_file
 
@@ -217,7 +200,6 @@ def test_routine_stale_quarantine_is_not_the_bounded_alert(
     quarantine_dir: Path,
     home: Path,
 ) -> None:
-    """Only the unreadable class escalates; attributed staleness stays quiet."""
     from loguru import logger
 
     _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
@@ -245,7 +227,6 @@ def test_live_reference_of_any_process_shape_is_never_excluded(
     quarantine_dir: Path,
     home: Path,
 ) -> None:
-    """A live process naming the request keeps it deferred, whatever its argv."""
     request = _write_envelope(exec_dir, owner=uuid4())
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -263,13 +244,9 @@ def test_live_reference_of_any_process_shape_is_never_excluded(
         )
         (entry,) = report.retained
         assert entry.verdict is Verdict.LIVE
-        # Machine noise (concurrent exec children) may add pids, never remove
-        # this one: the live reference is what must keep the envelope deferred.
         assert child.pid in entry.live_pids
         assert request.exists()
     finally:
-        # SIGKILL: SIGTERM=SIG_IGN is inherited from a shell session, so the
-        # graceful call would leave the exec child alive.
         child.kill()
         child.wait(timeout=5)
 
@@ -279,7 +256,6 @@ def test_exec_child_with_hidden_environment_is_never_excluded(
     monkeypatch: pytest.MonkeyPatch,
     home: Path,
 ) -> None:
-    """Unreadable is not absence: a hidden exec-child root still defers."""
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
     hidden = Mock()
     hidden.info = {
@@ -308,7 +284,6 @@ def test_exec_child_birth_window_bounds_a_scrubbed_root(
     verdict: Verdict,
     home: Path,
 ) -> None:
-    """A readable non-matching exec child counts only inside the request's lifetime."""
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
     scrubbed = Mock()
     scrubbed.info = {
@@ -330,7 +305,6 @@ def test_live_stored_host_identity_retains_a_superseded_envelope(
     quarantine_dir: Path,
     home: Path,
 ) -> None:
-    """Resource evidence that contradicts the boot premise vetoes every verdict."""
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
     native = psutil.Process()
 
@@ -351,7 +325,6 @@ def test_live_stored_host_identity_retains_a_superseded_envelope(
 def test_reused_pid_is_the_ended_boot_not_a_live_host(
     exec_dir: Path, quarantine_dir: Path, home: Path
 ) -> None:
-    """A recycled PID means the recorded host ended; the file may be quarantined."""
     request = _write_envelope(exec_dir, owner=uuid4(), age_s=3600)
     native = psutil.Process()
     current = ResourceProcess.capture(native)
@@ -471,7 +444,6 @@ def test_cli_force_still_quarantines_retained_evidence(
     capsys: pytest.CaptureFixture[str],
     home: Path,
 ) -> None:
-    """--force keeps its review override for everything retention still holds."""
     request = _write_envelope(
         exec_dir, payload={"v": 1, "code": "x", "agent_id": _AGENT, "timeout_s": 5.0}, age_s=3600
     )

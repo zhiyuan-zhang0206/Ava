@@ -1,5 +1,3 @@
-"""Real shell-session and watcher effects observed by a recording model."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -138,8 +136,6 @@ print("timeout-watcher", wid)
 
 
 class WatcherResurrectionModel(RecordingModel):
-    """Consume the real wake and completion notices, separately or in one batch."""
-
     _wake_seen: bool = PrivateAttr(default=False)
     _completion_seen: bool = PrivateAttr(default=False)
     _response: AIMessage | None = PrivateAttr(default=None)

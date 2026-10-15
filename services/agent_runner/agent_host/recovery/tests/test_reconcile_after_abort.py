@@ -1,12 +1,3 @@
-"""Real-row abort settlement: every claimed chat is consumed, none is redelivered.
-
-The same `consume_claimed_inbounds` pass disposes rows left claimed after a
-hosted abort, at turn end and on cold admission. Coverage includes ownership
-fences and idempotency. The pass never reads checkpoint history: an interrupted
-claim has an unknown result whether or not its message reached the checkpoint,
-so it is consumed and an abort cannot cause execution to replay.
-"""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -38,7 +29,6 @@ from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import 
 def claimed_row(
     conn: psycopg.Connection[Any], agent: int, content: str, *, age: timedelta = timedelta()
 ) -> int:
-    """One `'claimed'` chat row, exactly what an aborted turn leaves behind."""
     row = conn.execute(
         "INSERT INTO inbound_messages (agent_id, content, kind, source, status, claimed_at) "
         "VALUES (%s, %s, 'chat', 'user', 'claimed', %s) RETURNING id",
@@ -67,7 +57,6 @@ async def test_settled_abort_consumes_every_claimed_row(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Abort settlement consumes young and stale claims alike, with no history read."""
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
@@ -97,8 +86,6 @@ async def test_boot_consume_after_the_abort_pass_changes_nothing(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A kill after the abort leaves the rows already final: the boot pass
-    (the same helper) is idempotent and silent on the second run."""
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
@@ -150,7 +137,6 @@ async def test_next_claim_does_not_re_deliver_any_interrupted_row(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """No interrupted claim is retried after abort."""
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
@@ -180,11 +166,6 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The cold runtime build consumes claims whatever the checkpoint holds.
-
-    The checkpointer handed to the host is unusable: any read of it raises, so
-    consumption cannot depend on history evidence of what was committed.
-    """
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,

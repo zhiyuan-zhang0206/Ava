@@ -1,5 +1,3 @@
-"""MCP schema, daemon coordination and real helper socket input contracts."""
-
 from __future__ import annotations
 
 import json
@@ -31,9 +29,9 @@ class Desktop:
         self.clipboard_capable = True
         self.clipboard: str | None = None
         self.hold_capable = True
-        self.held: str | None = None  # the button the fake helper reports as down
-        self.notices: list[dict[str, Any]] = []  # auto-release notices for the next mouse reply
-        self.refusals: dict[str, str] = {}  # helper method -> error it answers with
+        self.held: str | None = None
+        self.notices: list[dict[str, Any]] = []
+        self.refusals: dict[str, str] = {}
         self.denied: str | None = None
         self.daemon = ComputerMcpDaemon(
             ComputerUseConfig(30, 0.01, 30, 60, 1),
@@ -66,7 +64,6 @@ class Desktop:
         return {"ok": True, "result": result}
 
     def reply(self, method: str, req: dict[str, Any]) -> dict[str, Any]:
-        """The helper's answer, carrying a pending auto-release notice on a mouse call."""
         result = self.act(method, req)
         if self.notices and method in {"click", "move", "scroll", "drag", "mouse_down", "mouse_up"}:
             result["auto_released"], self.notices = self.notices, []

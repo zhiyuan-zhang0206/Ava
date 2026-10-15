@@ -104,3 +104,7 @@ Nothing the postmaster runs needs more.
 Startup ordering and remote stop/status contracts are tested beside the data-plane
 owner in `../tests/test_start_data_plane.py` and `../tests/test_remote_data_plane.py`.
 The lifecycle tests retain the `ava start` caller dispatch contracts.
+
+Pooler drain tests combine low candidate ports, actual listener custody and
+retries to reduce reuse of a just-closed port. A free-port preflight is only an
+observation at that moment; it cannot grant later exclusive ownership.

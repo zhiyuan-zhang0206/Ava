@@ -1,11 +1,3 @@
-"""Checkpoint schema verification belongs to the start migration phase.
-
-Only fresh install may call ``PostgresSaver.setup()``. Existing clusters move
-checkpoint schema through Ava migrations. Every capability verifies the full upstream applied set after
-Ava migrations; a dependency bump without that explicit bridge fails before
-any database work.
-"""
-
 from __future__ import annotations
 
 import threading
@@ -50,8 +42,6 @@ class _FakeCursor:
 
 
 class _FakeAdminConnection:
-    """The admin socket as `owner_session` sees it: the startup role is honored."""
-
     autocommit = False
 
     def __init__(self, owner: str) -> None:
@@ -94,7 +84,6 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     def fake_admin_connect(url: str, **kwargs: object) -> _FakeAdminConnection:
         if threading.current_thread() is not owner:
-            # a bystander thread's dial never enters this test's call log
             return _FakeAdminConnection("ava")
         assert url == authority.conninfo
         calls.append(f"admin:{kwargs}")
@@ -145,8 +134,6 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A locally owned plane migrates as the admin acting as the owner, then
-    every capability shares the read-only post-migration checkpoint gate."""
     from base.cluster.dataplane import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
@@ -193,8 +180,6 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A dial that dropped the startup role (a pooler) would create
-    superuser-owned objects; the owner check refuses before any DDL."""
     from base.cluster.dataplane import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
@@ -202,7 +187,6 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
 
     def superuser_dial(_url: str, **_kwargs: object) -> _FakeAdminConnection:
         if threading.current_thread() is not owner:
-            # a bystander thread's dial never enters this test's assertion path
             return _FakeAdminConnection("ava")
         return _FakeAdminConnection("postgres")
 
@@ -244,12 +228,6 @@ def test_remote_managed_migration_preserves_explicit_provider_authority(
 
 
 def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the owner authority at the session database's own postmaster.
-
-    The session Postgres is a throwaway without a home launch receipt, so the
-    native custody proof is replaced by a same-instance check: the admin dial
-    must reach the data directory the authority names.
-    """
     from base.cluster.dataplane import pg_admin
     from base.config import settings
 
@@ -282,7 +260,6 @@ def test_real_start_phase_converges_ava_then_is_idempotent(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Real PG proves both migration domains are exact on repeated starts."""
     from base.deploy.schema.migrations import required_migration_set
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
@@ -313,14 +290,6 @@ def test_dependency_drift_fails_before_any_database_change(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """An unmirrored upstream v10 cannot strand update recovery on new schema.
-
-    When a real v10 arrives, this red gate may only move after an Ava
-    migration exists and real-PG tests cover BOTH existing-v9 update and
-    fresh-v10-birth first-start registration. The mirrored up must be
-    idempotent against schema + checkpoint_migrations effects already created
-    by fresh-install setup while still recording its Ava migration name.
-    """
     from langgraph.checkpoint.postgres import PostgresSaver
 
     from base.cluster.provision import CheckpointDependencyDriftError
@@ -347,7 +316,6 @@ def test_dependency_drift_fails_before_any_database_change(
 
 
 def test_checkpoint_schema_upstream_baseline_is_frozen() -> None:
-    """Future versions extend the migration manifest, never baseline."""
     from base.cluster.provision import (
         CHECKPOINT_SCHEMA_AVA_MIGRATIONS,
         CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION,
@@ -371,7 +339,6 @@ def test_checkpoint_migration_manifest_must_be_contiguous(
 def test_checkpoint_migration_manifest_follows_upstream_version_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ava applies filenames in order, so mapping order is semantic."""
     from base.cluster import provision
 
     monkeypatch.setattr(

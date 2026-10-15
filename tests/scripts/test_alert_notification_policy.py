@@ -1,5 +1,3 @@
-"""The provisioned notification policy: the one place alert merging and repetition are decided."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,7 +21,6 @@ def _policy() -> dict[str, Any]:
 
 
 def _routes() -> dict[str, dict[str, Any]]:
-    """Child routes keyed by what they match (the webhook has a critical route and a catch-all)."""
     routes: dict[str, dict[str, Any]] = {}
     for route in _policy()["routes"]:
         label = route["object_matchers"][0][0]
@@ -38,11 +35,10 @@ def test_every_alert_reaches_the_webhook_receiver() -> None:
     contacts = {c["name"]: c for c in _document()["contactPoints"]}
     (receiver,) = contacts["ava-alerts-webhook"]["receivers"]
     assert receiver["type"] == "webhook"
-    assert receiver["disableResolveMessage"] is False  # the ingest flips the row on resolve
+    assert receiver["disableResolveMessage"] is False
     policy = _policy()
     assert policy["receiver"] == "ava-alerts-webhook"
     assert policy["matchers"] == []
-    # The root receiver serves only alerts no child matched, so the catch-all is explicit.
     assert _routes()["catch-all"]["object_matchers"] == [["alertname", "=~", ".+"]]
     assert list(_routes()) == [
         "telegram:attributes_check",
@@ -81,11 +77,9 @@ def test_critical_alerts_skip_the_batching_wait() -> None:
 
 
 def test_gateway_liveness_also_reaches_telegram_directly_and_still_the_webhook() -> None:
-    """The webhook cannot report the gateway being down; the direct notifier does not depend on it."""
     contacts = {c["name"]: c for c in _document()["contactPoints"]}
     (receiver,) = contacts["ava-alerts-telegram"]["receivers"]
     assert receiver["type"] == "telegram"
-    # Credentials expand from the process env like the webhook token (secureSettings are dropped).
     assert receiver["settings"] == {
         "bottoken": "$__env{AVA_ALERTS_TELEGRAM_BOT_TOKEN}",
         "chatid": "$__env{AVA_ALERTS_TELEGRAM_CHAT_ID}",
@@ -96,4 +90,4 @@ def test_gateway_liveness_also_reaches_telegram_directly_and_still_the_webhook()
     ):
         route = _routes()[key]
         assert route["object_matchers"] == [matcher]
-        assert route["continue"] is True  # the webhook routes below still match it
+        assert route["continue"] is True

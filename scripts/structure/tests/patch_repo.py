@@ -1,10 +1,3 @@
-"""A synthetic repository for the placement and import-fact tests.
-
-Three packages (`cli`, `ava`, `base`) and a handful of
-modules with public and private names. `services/` is absent on purpose: a repository
-without it is legal, and `services.<x>` units only appear when a test adds one.
-"""
-
 from __future__ import annotations
 
 import pathlib
@@ -44,7 +37,6 @@ def write(root: pathlib.Path, rel: str, text: str) -> pathlib.Path:
 
 
 def make_repo(root: pathlib.Path, extra: dict[str, str] | None = None) -> pathlib.Path:
-    """Write the synthetic repository into `root` (and `extra` files on top)."""
     write(root, "pyproject.toml", PYPROJECT)
     write(root, "scripts/structure/baseline/README.md", "Structure baseline shards.\n")
     for rel, text in {**SOURCES, **(extra or {})}.items():

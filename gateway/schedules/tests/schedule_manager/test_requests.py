@@ -1,5 +1,3 @@
-"""The sync-request queue: what the API leaves and what the service consumes."""
-
 from __future__ import annotations
 
 import asyncio
@@ -17,8 +15,6 @@ from gateway.schedules import session_control
 from services.wake.schedule_manager import requests
 from services.wake.schedule_manager.manager import ScheduleManager
 
-# The autouse API guard replaces the wait for every test; the two tests of the real
-# wait put it back from this reference taken at import.
 _REAL_WAIT = session_control.wait_consumed
 
 
@@ -32,8 +28,6 @@ def pool(*, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
 
 
 class _Manager:
-    """Stands in for ScheduleManager: records syncs, can hold or intercept."""
-
     def __init__(self) -> None:
         self.synced: list[int] = []
         self.held = False
@@ -76,10 +70,8 @@ def test_a_queued_request_is_synced_and_removed(
 def test_a_request_for_a_deleted_schedule_is_still_synced(
     db_conn: psycopg.Connection, pool: ConnectionPool
 ) -> None:
-    """No foreign key: the delete route queues the kill of the orphaned session
-    after the schedule row is already gone."""
     manager = _Manager()
-    _queue(db_conn, 999_999)  # no such schedule
+    _queue(db_conn, 999_999)
 
     requests.consume_requests(pool, cast(ScheduleManager, manager))
 
@@ -90,8 +82,6 @@ def test_a_request_for_a_deleted_schedule_is_still_synced(
 def test_a_newer_request_made_during_the_sync_survives(
     db_conn: psycopg.Connection, pool: ConnectionPool
 ) -> None:
-    """The row is deleted only if it is still the one that was read, so a request
-    that lands while the sync runs is not lost."""
     manager = _Manager()
     _queue(db_conn, 5)
 
@@ -107,7 +97,7 @@ def test_a_newer_request_made_during_the_sync_survives(
     requests.consume_requests(pool, cast(ScheduleManager, manager))
 
     assert manager.synced == [5]
-    assert _queued(db_conn) == [5]  # the next pass syncs it again
+    assert _queued(db_conn) == [5]
 
 
 def test_requests_stay_queued_while_a_maintenance_hold_is_up(
@@ -128,8 +118,6 @@ def test_requests_stay_queued_while_a_maintenance_hold_is_up(
 async def test_the_api_side_queues_one_row_and_waits_until_it_is_consumed(
     db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`request_sync` upserts the row and returns once the service has removed it."""
-    # the autouse guard neutralizes the wait; this test needs the real one
     monkeypatch.setattr(session_control, "wait_consumed", _REAL_WAIT)
     manager = _Manager()
 
@@ -152,8 +140,6 @@ async def test_the_api_side_gives_up_waiting_when_no_service_consumes(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A down service must not hang start / stop: the request stays queued and the
-    call returns after the bounded wait."""
     monkeypatch.setattr(session_control, "wait_consumed", _REAL_WAIT)
     monkeypatch.setattr(session_control, "CONSUME_WAIT_S", 0.3)
 

@@ -1,5 +1,3 @@
-"""Plugin write consumers distinguish request rejection from unexpected failure."""
-
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -23,8 +21,6 @@ from tests.fixtures.gateway_config import gateway_test_client
 
 
 class ValidatedFleetConfig(FleetConfig):
-    """Exercise whole-candidate validation after valid scalar coercion."""
-
     @model_validator(mode="after")
     def validate_policy(self) -> Self:
         if self.task_escalate_n < 1 or not self.task_maintenance_enabled:

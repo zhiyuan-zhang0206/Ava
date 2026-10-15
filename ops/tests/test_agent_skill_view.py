@@ -1,5 +1,3 @@
-"""Unit tests for the runner-side per-agent command view."""
-
 from __future__ import annotations
 
 import contextlib
@@ -82,8 +80,6 @@ def _empty_mcp_sources(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _OneConnectionPool:
-    """Minimal daemon-pool stand-in backed by the test's real database connection."""
-
     def __init__(self, conn: psycopg.Connection) -> None:
         self._conn = conn
 
@@ -95,7 +91,6 @@ class _OneConnectionPool:
 def test_agent_skill_view_inputs_read_checkpointed_cwd_and_pinned_narrowing(
     db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    """The runner reads ava-code's persisted channel and the agent's two config maps."""
     agent_id = create_agent(db_conn)
     db_conn.execute(
         "INSERT INTO agents_meta (id, status, config_overlay, birth_config) VALUES (%s, 'running', %s, %s)",
@@ -125,7 +120,6 @@ def test_agent_skill_view_inputs_read_checkpointed_cwd_and_pinned_narrowing(
 def test_agent_skill_view_missing_row_is_load_dir_only(
     db_conn: psycopg.Connection, load_dir: Path
 ) -> None:
-    """A removed row has no cwd or narrowing, rather than failing the op."""
     view = cluster.agent_skill_view_op(999_999_999, _OneConnectionPool(db_conn))
 
     assert [command.name for command in view.commands] == ["load-skill"]
@@ -134,7 +128,6 @@ def test_agent_skill_view_missing_row_is_load_dir_only(
 def test_agent_skill_view_includes_project_skills_for_persisted_cwd(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
 ) -> None:
-    """A cwd inside a git repository contributes its project-local skill command."""
     repo, _ = _project_with_skill(tmp_path)
     monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(repo, ["*"]))
 
@@ -146,7 +139,6 @@ def test_agent_skill_view_includes_project_skills_for_persisted_cwd(
 def test_agent_skill_view_without_cwd_or_repo_is_load_dir_only(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
 ) -> None:
-    """Missing cwd and non-repository cwd never add a project-local root."""
     monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
     missing_cwd_view = cluster.agent_skill_view_op(42, object())
 
@@ -164,7 +156,6 @@ def test_agent_skill_view_without_cwd_or_repo_is_load_dir_only(
 def test_agent_skill_view_clears_project_provider_after_each_op(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
 ) -> None:
-    """One agent's project root cannot leak into the next op's command view."""
     repo, _ = _project_with_skill(tmp_path)
     monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(repo, ["*"]))
     assert "project-skill" in {
@@ -180,7 +171,6 @@ def test_agent_skill_view_clears_project_provider_after_each_op(
 def test_agent_skill_view_honors_per_agent_skill_narrowing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
 ) -> None:
-    """A named prompt capability keeps only its corresponding skill command."""
     _write_skill(load_dir, "other-skill", "other converged skill")
     monkeypatch.setattr(
         install_registry,
@@ -201,7 +191,6 @@ def test_agent_skill_view_honors_per_agent_skill_narrowing(
 def test_agent_skill_view_includes_sorted_enabled_mcp_names(
     monkeypatch: pytest.MonkeyPatch, load_dir: Path
 ) -> None:
-    """The runner view carries its effective enabled MCP server names."""
     monkeypatch.setattr(
         mcp_config,
         "load_mcp_config",
@@ -218,7 +207,6 @@ def test_agent_skill_view_includes_sorted_enabled_mcp_names(
 def test_agent_skill_view_excludes_disabled_mcp_names(
     monkeypatch: pytest.MonkeyPatch, load_dir: Path
 ) -> None:
-    """The host overlay removes disabled servers from the runner view."""
     monkeypatch.setattr(
         mcp_config,
         "load_mcp_config",
@@ -235,7 +223,6 @@ def test_agent_skill_view_excludes_disabled_mcp_names(
 def test_agent_skill_view_without_mcp_config_returns_empty_names(
     monkeypatch: pytest.MonkeyPatch, load_dir: Path
 ) -> None:
-    """An empty merged MCP map leaves the command op successful."""
     monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
 
     view = cluster.agent_skill_view_op(42, object())

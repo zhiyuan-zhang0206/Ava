@@ -1,6 +1,3 @@
-"""The private generation ledger without a database: transitions, refusals,
-secret-file adoption, exclusive publication, digests and file custody."""
-
 from __future__ import annotations
 
 import json
@@ -24,8 +21,6 @@ _GROUPS = Groups(gateway="ava_gateway", runner="ava_runner")
 
 
 class _Encrypt:
-    """A stand-in verifier function that counts how often a secret is generated."""
-
     def __init__(self) -> None:
         self.calls = 0
 
@@ -70,7 +65,7 @@ def test_exact_retry_returns_the_same_pending_generation(home: Path) -> None:
     encrypt = _Encrypt()
     first = store.begin_mint(home, encrypt=encrypt)
     assert store.begin_mint(home, encrypt=encrypt) == first
-    assert encrypt.calls == 2  # one gateway and one runner verifier, generated once
+    assert encrypt.calls == 2
 
 
 def test_secret_published_before_a_crash_is_adopted_not_regenerated(
@@ -108,8 +103,6 @@ def test_mint_refuses_once_the_generation_is_active(home: Path) -> None:
 
 
 def test_a_ledger_written_before_generations_stopped_rotating_loads(home: Path) -> None:
-    """Production's ledger records `counter: 0`, `revoked: []` and an origin with
-    null `operation`/`direction`; it loads unchanged and is rewritten without them."""
     _born(home)
     path = home / "db-authority" / "ledger.json"
     recorded = json.loads(path.read_text())
@@ -284,9 +277,9 @@ def _generation(**changes: Any) -> Generation:
     "fields",
     [
         {"active": _generation(), "pending": _generation()},
-        {"counter": 0},  # a recorded counter names a generation the ledger does not hold
-        {"active": _generation(gateway="ava_gateway")},  # a login named like a group
-        {"active": _generation(runner="ava_g0_gateway")},  # one name twice
+        {"counter": 0},
+        {"active": _generation(gateway="ava_gateway")},
+        {"active": _generation(runner="ava_g0_gateway")},
         {"owner": "ava_runner"},
     ],
 )

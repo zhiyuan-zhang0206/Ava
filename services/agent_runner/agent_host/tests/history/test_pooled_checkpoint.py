@@ -1,5 +1,3 @@
-"""Real PostgreSQL regressions for checkpoint pool isolation and lease cleanup."""
-
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -47,7 +45,6 @@ def _checkpoint() -> Checkpoint:
 
 
 async def _wait_for_blocked_query(conn: AsyncConnection) -> None:
-    """Observe PostgreSQL waiting on a lock, not just an asyncio task starting."""
     async with asyncio.timeout(5):
         while True:
             cur = await conn.execute(
@@ -81,8 +78,6 @@ async def test_blocked_agent_checkpoint_does_not_block_another_agent(
         )
 
         if operation == "read":
-            # Ordinary reads do not wait on row locks. Add one advisory-lock
-            # expression to this real read, evaluated only for the blocked ID.
             monkeypatch.setattr(
                 saver,
                 "SELECT_SQL",
@@ -95,8 +90,6 @@ async def test_blocked_agent_checkpoint_does_not_block_another_agent(
             )
             await adb_conn.execute("SELECT pg_advisory_xact_lock(%s)", (_LOCK_KEY,))
         else:
-            # The upsert must wait for this exact agent's row; another agent's
-            # row and every spare pool connection remain available.
             await adb_conn.execute(
                 "SELECT 1 FROM checkpoints WHERE thread_id = %s FOR UPDATE",
                 ("101",),
@@ -148,9 +141,6 @@ async def test_same_agent_flush_serializes_with_newer_checkpoint(
         )
         tail, newer = _checkpoint(), _checkpoint()
         await saver.aput(initial, tail, {"source": "loop", "step": 1}, {"value": "1"})
-        # Model a save that reached PostgreSQL before its acknowledgement was
-        # lost: the buffered flush must retry this existing row. Lock it so
-        # the real flush waits while another connection remains available.
         tail_config = await PooledPostgresSaver(pool).aput(
             initial, tail, {"source": "loop", "step": 1}, {"value": "1"}
         )
@@ -170,8 +160,6 @@ async def test_same_agent_flush_serializes_with_newer_checkpoint(
             await _wait_for_blocked_query(adb_conn)
             writing = asyncio.create_task(write_newer())
             await asyncio.wait_for(started.wait(), timeout=2)
-            # A skipped write has no database await: without the per-thread
-            # lock it completes here and replaces the in-flight flush's tail.
             assert not writing.done()
             assert not flushing.done()
         finally:
@@ -198,7 +186,6 @@ async def test_failed_cursor_returns_a_clean_reusable_pool_connection(
     supports_pipeline: bool,
     failure: Literal["error", "cancel"],
 ) -> None:
-    # Exercise upstream's transaction fallback as well as real pipeline mode.
     if not supports_pipeline:
 
         def unavailable(_self: Capabilities) -> bool:

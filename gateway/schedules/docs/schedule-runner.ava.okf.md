@@ -50,3 +50,10 @@ skip-and-continue path). A failed script remains primary when guard close also
 fails, and a successful `SystemExit` (`0`, `None` or `False`) is completion that
 cannot mask a guard close failure or produce a completed marker. Severable
 run-record write failures are logged.
+
+## Execution-engine test boundary
+
+`gateway/tests/extensions/test_schedule_runner.py` uses the real test database
+for the execution engine. It does not run a live gateway/agent spawn-resurrect-
+wake chain. Its stall-verdict case replaces `os._exit` and faulthandler, proving
+row and verdict bookkeeping rather than an actual hard-exit deadline.

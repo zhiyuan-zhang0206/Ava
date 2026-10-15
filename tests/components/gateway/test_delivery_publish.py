@@ -1,8 +1,3 @@
-"""`deliver_chat_inbound`: a redis outage must neither roll back the user's write
-nor escape as an exception, and the badge-refresh event must be published only
-AFTER the delivery transaction commits (commit-before-publish).
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -27,8 +22,6 @@ from ops.lifecycle.delivery import deliver_chat_inbound
 
 
 def _sync_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
-    """A sync ConnectionPool typed to match `deliver_chat_inbound`'s param; opened
-    by the caller's `with` block (mirrors conftest's `aops_pool`, open=False)."""
     return ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=False)
 
 
@@ -70,15 +63,12 @@ async def test_deliver_survives_publish_failure(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """redis down (both the sync badge publish and the async InboundArrived) must
-    not stop the inbound INSERT from committing, and nothing may escape."""
     tid = _seed_idling_agent(db_conn)
 
     patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(RedisConnectionError("down")))
     patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(RedisConnectionError("down")))
 
     with _sync_pool() as pool:
-        # Must NOT raise despite every publish on the path throwing.
         await deliver_chat_inbound(
             pool,
             Database.from_settings(gate=database_gate),
@@ -89,7 +79,6 @@ async def test_deliver_survives_publish_failure(
             local_machine=machine_identity.name(),
         )
 
-    # The user's inbound is durably committed.
     with db_conn.cursor() as cur:
         cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (tid,))
         rows = cur.fetchall()
@@ -156,8 +145,6 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The durable chat id is the evidence the home runner re-checks before
-    reviving; delivery must not fall back to an unguarded resurrect."""
     from ops.lifecycle import delivery
 
     tid = _seed_idling_agent(db_conn)
@@ -206,7 +193,6 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A same-key retry reuses one chat and cannot create two resurrection effects."""
     from ops.lifecycle import delivery
 
     tid = create_agent(db_conn)
@@ -285,7 +271,6 @@ async def test_fresh_peer_message_wakes_owner_despite_previous_suppression(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A new explicit peer message retries after a previous wake failure."""
     from ops.cluster import rpc as cluster_rpc
 
     tid = create_agent(db_conn)
@@ -341,11 +326,6 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Two requests that both observe terminated create at most one wake effect.
-
-    The exact-trigger/fence SQL itself has real-DB coverage in
-    test_agents_internals; this test concentrates on the delivery fan-in.
-    """
     from ops.lifecycle import delivery
 
     tid = create_agent(db_conn)
@@ -435,18 +415,11 @@ async def test_badge_publish_happens_after_commit(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The refresh_badge publish must run only AFTER the delivery transaction
-    commits: a separate connection must already see `prepare`'s write at the
-    moment the publish fires. (Old code published inside the transaction, so a
-    fresh connection could not yet see the uncommitted write — and a publish
-    failure there rolled the write back.)"""
     tid = _seed_idling_agent(db_conn)
 
     observed: dict[str, bool] = {}
 
     def _spy_publish(_bus: object, agent_id: int) -> None:
-        # A DISTINCT connection: it sees the marker only if the delivery txn has
-        # already committed by the time the badge publish is invoked.
         probe = psycopg.connect(settings.data_plane.db_url)
         try:
             with probe.cursor() as cur:
@@ -459,8 +432,6 @@ async def test_badge_publish_happens_after_commit(
     monkeypatch.setattr(agents_delivery, "publish_agent_updated_sync", _spy_publish)
 
     def _prepare(conn: psycopg.Connection) -> None:
-        # A write inside the delivery txn, no inbound content (so the txn commits
-        # only at block exit — the case where in-txn publish would roll it back).
         with conn.cursor() as cur:
             cur.execute("UPDATE agents SET label = 'ordering-marker' WHERE id = %s", (tid,))
 
@@ -478,7 +449,6 @@ async def test_badge_publish_happens_after_commit(
     assert observed.get("committed") is True, (
         "badge publish saw uncommitted state — it ran before the delivery commit"
     )
-    # And the write itself is durable.
     with db_conn.cursor() as cur:
         cur.execute("SELECT label FROM agents WHERE id = %s", (tid,))
         row = cur.fetchone()

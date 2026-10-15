@@ -1,7 +1,3 @@
-"""The maintenance loops log an unexpected failed pass and carry on, but a run of
-failures ends the process for the supervisor; a pass that completes starts the
-count over and an unreachable database is skipped, not counted."""
-
 from __future__ import annotations
 
 import asyncio
@@ -47,8 +43,6 @@ def _drive(
 def _script(
     monkeypatch: pytest.MonkeyPatch, outcomes: list[BaseException | None]
 ) -> Callable[[], int]:
-    """Make each pass raise its scripted outcome (None: complete); the loop is
-    cancelled once the script runs out. Returns the number of passes run."""
     passes = 0
 
     async def fake_pass(*_args: object, **_kwargs: object) -> None:
@@ -95,8 +89,6 @@ async def test_a_completed_pass_and_a_db_outage_do_not_exhaust_the_budget(
 ) -> None:
     limit = CONSECUTIVE_ROUND_FAILURE_LIMIT
     boom = RuntimeError("boom")
-    # `limit - 1` failures, a completed pass, `limit - 1` more failures with
-    # database outages between them: never `limit` unexpected failures in a row.
     outcomes: list[BaseException | None] = [boom] * (limit - 1)
     outcomes += [None]
     outcomes += [psycopg.OperationalError("db down")] * limit

@@ -1,9 +1,3 @@
-"""Released runtime ownership transfers an empty resource set after a crash.
-
-Historical release records are not admission credentials. Refusals preserve
-current ownership and emit the classified host_admission_refused event.
-"""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -49,12 +43,6 @@ async def _reaped_closed_life(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> tuple[int, UUID, IncarnationResources]:
-    """Run the crash path with no lifecycle command up to a reaped closed row.
-
-    Returns the agent, the released owner and the closed resource set as the
-    resurrection will see them (status terminated, retained hosted identity,
-    this live process as the recorded host).
-    """
     machine = machine_identity.name()
     aid, _owner, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
@@ -163,7 +151,6 @@ async def test_reaper_released_closed_life_readmits_on_its_live_host(
     )
     _resurrect(db_conn, aid, machine, database_gate)
 
-    # The closed released life re-admits on its own live host — no restart.
     healed = await admit_hosted_runtime(
         aops_pool, aid, machine, owner, expected_from="idling", db=database
     )
@@ -186,7 +173,6 @@ async def test_released_row_does_not_require_a_release_record(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Current ownership remains sufficient even when all release payload is gone."""
     machine = machine_identity.name()
     aid, owner, _resources = await _reaped_closed_life(
         db_conn,
@@ -199,7 +185,6 @@ async def test_released_row_does_not_require_a_release_record(
         machine_identity=machine_identity,
     )
     _resurrect(db_conn, aid, machine, database_gate)
-    # Admission does not depend on retaining the historical release payload.
     db_conn.execute(
         "UPDATE inbound_messages SET payload = '{}'::jsonb WHERE agent_id=%s AND kind='resurrect'",
         (aid,),
@@ -226,7 +211,6 @@ async def test_unreleased_live_owner_refuses_a_successor(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An empty set cannot release the current owner of a still-live host."""
     machine = machine_identity.name()
     aid, _owner, resources = await _reaped_closed_life(
         db_conn,
@@ -270,8 +254,6 @@ async def test_attached_requests_refuse_as_receipt_less(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An attached allocation without a terminal receipt (the V23 shape) refuses
-    and is classified as receipt-less, even after runtime ownership is released."""
     machine = machine_identity.name()
     aid, owner, resources = await _reaped_closed_life(
         db_conn,
@@ -321,7 +303,6 @@ async def test_force_freeze_fences_old_owner_until_release(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A freeze blocks same-owner continuation until ownership is released."""
     machine = machine_identity.name()
     aid, owner, resources = await _reaped_closed_life(
         db_conn,
@@ -367,8 +348,6 @@ async def test_deferred_resurrection_rolls_back_its_epoch(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """No half state: a refused resurrection (an unsettled applied restart still
-    anchoring the pointer) leaves no epoch and no flip behind."""
     machine = machine_identity.name()
     aid, _owner, resources = await _reaped_closed_life(
         db_conn,

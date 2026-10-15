@@ -1,9 +1,3 @@
-"""execute_code / SDK effect scenarios, on the recording model (`fakes/_recording.py`).
-
-Each scenario is a handful of scripted `execute_code` calls; tests assert on what the
-model was handed back (tool output, framework notes) and on files, never on a return value.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,7 +19,6 @@ def sandbox() -> Path:
 
 
 def build_exec_failures(model: str, *, agent_id: int | None) -> RecordingModel:
-    """A raising exec, a hard-crashing exec, then a healthy one: the agent keeps going."""
     return RecordingModel(
         agent_id=agent_id,
         script=(
@@ -38,7 +31,6 @@ def build_exec_failures(model: str, *, agent_id: int | None) -> RecordingModel:
 
 
 def build_files_edges(model: str, *, agent_id: int | None) -> RecordingModel:
-    """Edit contract (missing / ambiguous / replace_all) and the injection scan on read."""
     base = sandbox()
     code = f"""
 import ava
@@ -81,7 +73,6 @@ def build_upload(model: str, *, agent_id: int | None) -> RecordingModel:
 
 
 def build_timeout(model: str, *, agent_id: int | None) -> RecordingModel:
-    """An exec that outlives the suite's exec timeout, with a child process of its own."""
     base = sandbox()
     code = f"""
 import os, subprocess, time

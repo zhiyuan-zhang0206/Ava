@@ -1,15 +1,3 @@
-"""AgentEventPublisher (base/events/live/publisher.py) unit tests.
-
-The publisher is the best-effort SSE fan-out for one agent process: callers
-`emit(payload)` (synchronous, never blocks, never raises) and a single
-background worker serially publishes to the central Redis. Serial = the SSE
-ordering contract (Start before Delta, chunk concatenation) is preserved.
-A slow/unreachable central Redis must degrade the live view, never stall the
-agent's control flow — so a publish with a known transport/auth failure drops that event
-and the worker keeps going; unknown command/programming defects fail the owning
-invocation. A full queue drops rather than blocking emit.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -24,12 +12,6 @@ from ..publisher import AgentEventPublisher
 
 
 class _FakePipeline:
-    """Minimal pipeline: collects publish commands, executes them in order on
-    execute() — one round-trip, mirroring the real Redis pipeline contract.
-    `fail` payloads are unexpected command-level rejections: under
-    `raise_on_error=False` they come back as Exception results and the rest of
-    the batch still goes out, matching redis-py's real semantics."""
-
     def __init__(self, redis: _FakeRedis) -> None:
         self._redis = redis
         self._cmds: list[tuple[str, str]] = []
@@ -47,7 +29,7 @@ class _FakePipeline:
         results: list[object] = []
         for channel, payload in self._cmds:
             if payload in self._redis.hang:
-                await asyncio.Event().wait()  # block forever — connection-level stall
+                await asyncio.Event().wait()
             if payload in self._redis.fail:
                 err = ResponseError("invalid publish command")
                 if raise_on_error:
@@ -55,15 +37,11 @@ class _FakePipeline:
                 results.append(err)
                 continue
             self._redis.published.append((channel, payload))
-            results.append(1)  # subscriber count
+            results.append(1)
         return results
 
 
 class _FakeRedis:
-    """Records publish(channel, payload) calls in arrival order. A payload in
-    `fail` raises; one in `hang` never returns (to exercise the publish timeout).
-    """
-
     def __init__(self) -> None:
         self.published: list[tuple[str, str]] = []
         self.fail: set[str] = set()
@@ -71,7 +49,7 @@ class _FakeRedis:
         self.auth_failures_remaining = 0
         self.auth_error_type: type[AuthenticationError | NoPermissionError] = AuthenticationError
         self.pipeline_attempts = 0
-        self.connection_pool: object = self  # async disconnect, like a real client pool
+        self.connection_pool: object = self
 
     async def disconnect(self, *, inuse_connections: bool = False) -> None:
         pass
@@ -81,16 +59,13 @@ class _FakeRedis:
 
     async def publish(self, channel: str, payload: str) -> None:
         if payload in self.hang:
-            await asyncio.Event().wait()  # block forever
+            await asyncio.Event().wait()
         if payload in self.fail:
             raise ConnectionError("redis down")
         self.published.append((channel, payload))
 
 
 def _pub(redis: _FakeRedis, **kwargs: Any) -> AgentEventPublisher:
-    """Build a publisher over the fake redis. The cast bridges `_FakeRedis`
-    (which only duck-types the `publish()` the worker calls) to the declared
-    `redis_async: aredis.Redis` parameter — production always passes a real one."""
     return AgentEventPublisher(cast(aredis.Redis, redis), "ch", agent_id=1, **kwargs)
 
 
@@ -101,7 +76,7 @@ async def test_emits_in_fifo_order() -> None:
         await pub.start(tasks)
         for i in range(5):
             pub.emit(f"e{i}")
-        await pub.aclose()  # bounded drain flushes the queue
+        await pub.aclose()
         assert [p for _, p in redis.published] == ["e0", "e1", "e2", "e3", "e4"]
 
 
@@ -132,16 +107,12 @@ async def test_batch_retries_acl_transition_without_real_waiting(
 
 
 async def test_emit_never_blocks_or_raises_even_unstarted() -> None:
-    # No worker started: emit past maxsize must neither block nor raise.
     pub = _pub(_FakeRedis(), maxsize=2)
     for i in range(10):
-        pub.emit(f"e{i}")  # must not raise QueueFull
+        pub.emit(f"e{i}")
 
 
 async def test_sheds_oldest_when_queue_full() -> None:
-    # Worker not started, so nothing drains: past capacity the OLDEST buffered
-    # event is shed to keep the newest — the live view is worth the most-recent
-    # state; the turn-end snapshot repairs any gap in the past.
     pub = _pub(_FakeRedis(), maxsize=3)
     for i in range(5):
         pub.emit(f"e{i}")
@@ -152,8 +123,6 @@ async def test_sheds_oldest_when_queue_full() -> None:
 
 
 async def test_aclose_drain_is_bounded() -> None:
-    # A publish that never returns must not make aclose hang: the drain is
-    # time-boxed, then the worker is cancelled.
     async with asyncio.TaskGroup() as tasks:
         redis = _FakeRedis()
         redis.hang.add("stuck")
@@ -166,14 +135,13 @@ async def test_aclose_drain_is_bounded() -> None:
 async def test_aclose_is_idempotent_and_safe_without_start() -> None:
     async with asyncio.TaskGroup() as tasks:
         pub = _pub(_FakeRedis())
-        await pub.aclose()  # never started — must not raise
+        await pub.aclose()
         await pub.start(tasks)
         await pub.aclose()
-        await pub.aclose()  # second close is a no-op
+        await pub.aclose()
 
 
 async def test_drains_in_batches_preserving_order() -> None:
-    # Many queued events go out in one pipeline round-trip, FIFO preserved.
     async with asyncio.TaskGroup() as tasks:
         redis = _FakeRedis()
         pub = _pub(redis)
@@ -207,18 +175,15 @@ async def test_batch_publish_timeout_sheds_batch_and_continues() -> None:
         redis.hang.add("slow")
         pub = _pub(redis, publish_timeout=0.05)
         await pub.start(tasks)
-        pub.emit("slow")  # connection-level stall -> batch shed
-        await pub._queue.join()  # slow's batch is processed (and shed)
-        pub.emit("fast")  # next batch publishes normally
+        pub.emit("slow")
+        await pub._queue.join()
+        pub.emit("fast")
         await pub.aclose()
         assert ("ch", "fast") in redis.published
         assert ("ch", "slow") not in redis.published
 
 
 async def test_connection_level_failure_tears_down_pool_for_reconnect() -> None:
-    # A connection-level failure (timeout) sheds the batch AND disconnects the
-    # pool, so the next batch reconnects fresh instead of riding a half-dead
-    # socket (keepalive/health-check would otherwise take up to ~30s).
     async with asyncio.TaskGroup() as tasks:
         redis = _FakeRedis()
 
@@ -227,9 +192,6 @@ async def test_connection_level_failure_tears_down_pool_for_reconnect() -> None:
                 self.disconnects = 0
 
             async def disconnect(self, inuse_connections: bool = False) -> None:
-                # async like redis-py's real ConnectionPool.disconnect: the worker
-                # must await it or the tear-down never runs (an async method called
-                # without await is a discarded coroutine).
                 self.disconnects += 1
 
         pool = _Pool()
@@ -246,20 +208,12 @@ async def test_connection_level_failure_tears_down_pool_for_reconnect() -> None:
 
 
 async def test_aclose_join_completes_after_queue_full_shed() -> None:
-    # A queue-full shed must account the shedded event's task_done: an
-    # asyncio.Queue's unfinished-task count is released only by task_done (get
-    # does not touch it) and the worker never dequeues a shedded event, so
-    # without the accounting join() — aclose's bounded drain — can never
-    # complete once the queue has ever been full and aclose always waits the
-    # full drain_timeout before cancelling the worker.
     async with asyncio.TaskGroup() as tasks:
         redis = _FakeRedis()
         pub = _pub(redis, maxsize=2)
         await pub.start(tasks)
         for i in range(20):
-            pub.emit(f"e{i}")  # repeatedly full -> sheds the oldest each time
-        # join() completes once the worker has drained; with the task_done bug it
-        # never completes and this wait_for times out.
+            pub.emit(f"e{i}")
         await asyncio.wait_for(pub._queue.join(), timeout=2.0)
         await pub.aclose()
         assert ("ch", "e19") in redis.published

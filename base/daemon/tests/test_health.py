@@ -1,15 +1,3 @@
-"""`base.daemon.health` — minimal asyncio HTTP server.
-
-Validates:
-- GET /healthz → 200 + JSON includes name / pid / home / started_at
-- Other paths → 404
-- start server + stop pair is idempotent (stop called twice does not raise)
-- health_port: env override takes priority, defaults to DEFAULT_PORTS, unregistered raises KeyError
-- probe_daemon: 200 only counts as alive when the name/home/pid triple matches
-- probe_home: the pid-less sibling for `/api/health`, where the reload fork makes
-  a pid comparison meaningless — 200 plus this unit's `$AVA_HOME`
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -48,8 +36,6 @@ async def test_healthz_returns_200_with_json_body() -> None:
 
 @pytest.mark.asyncio
 async def test_liveness_flips_stale_then_fresh_on_beat() -> None:
-    """Liveness: fresh at construction; goes stale once timeout elapses with no
-    beat; beat() resets it to fresh."""
     lv = health.Liveness(timeout_s=0.05)
     assert lv.is_alive()
     await asyncio.sleep(0.15)
@@ -62,7 +48,6 @@ async def test_liveness_flips_stale_then_fresh_on_beat() -> None:
 def test_loop_progress_flips_stale_then_fresh_on_completed_unit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A loop becomes stale after its own deadline; another completed unit resets it."""
     now = 100.0
     monkeypatch.setattr(health.time, "monotonic", lambda: now)
     progress = health.LoopProgress("dispatch", timeout_s=5.0)
@@ -81,7 +66,6 @@ def test_loop_progress_flips_stale_then_fresh_on_completed_unit(
 
 
 def test_loop_progress_snapshot_records_success_error_and_permanent_wedge() -> None:
-    """Fail records the reason and permanently wins over later sibling-style beats."""
     progress = health.LoopProgress("resolution", timeout_s=60.0)
     progress.mark_success()
     progress.mark_error("loki unavailable")
@@ -106,7 +90,6 @@ def test_loop_progress_snapshot_records_success_error_and_permanent_wedge() -> N
 def test_liveness_group_reports_the_worst_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A fresh sibling cannot hide a loop whose own progress age exceeds its deadline."""
     now = 10.0
     monkeypatch.setattr(health.time, "monotonic", lambda: now)
     group = health.LivenessGroup()
@@ -133,7 +116,6 @@ def test_liveness_group_reports_the_worst_loop(
 
 @pytest.mark.asyncio
 async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> None:
-    """The audit regression: a beating sibling cannot keep a wedged loop's healthz at 200."""
     port = find_free_port()
     group = health.LivenessGroup()
     dispatch = group.register("dispatch", timeout_s=60.0)
@@ -156,8 +138,6 @@ async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> No
 
 @pytest.mark.asyncio
 async def test_healthz_503_when_liveness_stale() -> None:
-    """A stale main loop must flip /healthz to 503 so the watchdog respawns it.
-    timeout_s=-1.0 keeps stale_for() (always >= 0) permanently over the bound."""
     port = find_free_port()
     stale = health.Liveness(timeout_s=-1.0)
     server = await health.start_health_server(
@@ -178,7 +158,6 @@ async def test_healthz_503_when_liveness_stale() -> None:
 
 @pytest.mark.asyncio
 async def test_healthz_200_when_liveness_fresh() -> None:
-    """A beating loop keeps /healthz at 200, with stale_for reported."""
     port = find_free_port()
     fresh = health.Liveness(timeout_s=1e9)
     server = await health.start_health_server(
@@ -253,7 +232,6 @@ async def test_unknown_path_returns_404() -> None:
 async def _http_request(
     port: int, method: str, path: str, *, auth: str | None = None, body: bytes = b""
 ) -> tuple[int, bytes]:
-    """HTTP/1.1 request with optional Authorization header + body."""
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     head = f"{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n"
     if auth is not None:
@@ -275,7 +253,6 @@ async def _ok_route(_body: bytes) -> tuple[int, bytes, str]:
 
 @pytest.mark.asyncio
 async def test_extra_route_requires_auth_when_token_set() -> None:
-    """auth_digests set: a missing / wrong bearer gets 401; a listed digest's token passes."""
     port = find_free_port()
     server = await health.start_health_server(
         "ops",
@@ -298,8 +275,6 @@ async def test_extra_route_requires_auth_when_token_set() -> None:
 
 @pytest.mark.asyncio
 async def test_healthz_unauthenticated_even_with_auth_token() -> None:
-    """/healthz stays open even when extra routes require a token — the watchdog
-    probes it locally and it leaks no secret."""
     port = find_free_port()
     server = await health.start_health_server(
         "ops",
@@ -309,7 +284,7 @@ async def test_healthz_unauthenticated_even_with_auth_token() -> None:
         image=unknown_image(),
     )
     try:
-        status, _ = await http_get(port, "/healthz")  # no Authorization header
+        status, _ = await http_get(port, "/healthz")
         assert status == 200
     finally:
         await health.stop_health_server(server)
@@ -317,7 +292,6 @@ async def test_healthz_unauthenticated_even_with_auth_token() -> None:
 
 @pytest.mark.asyncio
 async def test_extra_route_open_when_no_auth_token() -> None:
-    """No auth_digests (the loopback daemons): extra routes need no bearer."""
     port = find_free_port()
     server = await health.start_health_server(
         "memory_indexer",
@@ -337,17 +311,10 @@ async def test_stop_idempotent() -> None:
     port = find_free_port()
     server = await health.start_health_server("labeler", port=port, image=unknown_image())
     await health.stop_health_server(server)
-    # Second stop does not raise
     await health.stop_health_server(server)
 
 
 def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With nothing overriding it, health_port falls back to DEFAULT_PORTS.
-
-    The overrides have to be cleared to see that: the suite pins a free port per
-    daemon for the whole session (tests/fixtures/env_bootstrap.py) precisely so no test can bind
-    or probe a prod default. Stubbing the settings lookup is what "unconfigured"
-    means to `health_port`."""
 
     def unconfigured(_name: str) -> None:
         return None
@@ -361,8 +328,6 @@ def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_health_ports_are_isolated_from_prod_defaults() -> None:
-    """The session's own pinned ports are in force — the property that keeps a
-    daemon leaked out of a test run off prod's ports."""
     for name in DEFAULT_PORTS:
         assert health_port(name, read_field=get_field) != DEFAULT_PORTS[name], (
             f"{name} health port is not isolated from its prod default"

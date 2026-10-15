@@ -1,9 +1,3 @@
-"""`services.upkeep.events_maintenance.token_totals` — the whole-life token sum folded from the ledger.
-
-Days older than the recompute horizon are folded once into `agent_model_tokens_total` and the watermark
-moves up to them; a fold is idempotent, a rebuild refolds from scratch after old days changed.
-"""
-
 from __future__ import annotations
 
 import json
@@ -64,7 +58,7 @@ def test_only_days_past_the_recompute_horizon_are_folded(db: psycopg.Connection)
     horizon = _TODAY - timedelta(days=token_totals.FOLD_AFTER_DAYS)
     _ledger(db, agent, horizon - timedelta(days=5), 100, 10)
     _ledger(db, agent, horizon, 200, 20)
-    _ledger(db, agent, horizon + timedelta(days=1), 400, 40)  # still open to recomputation
+    _ledger(db, agent, horizon + timedelta(days=1), 400, 40)
 
     assert token_totals.folded_through(db) == token_totals.NOTHING_FOLDED
     token_totals.fold_totals(db, today=_TODAY)
@@ -78,7 +72,7 @@ def test_a_fold_is_idempotent_and_adds_only_newly_settled_days(db: psycopg.Conne
     horizon = _TODAY - timedelta(days=token_totals.FOLD_AFTER_DAYS)
     _ledger(db, agent, horizon, 200, 20)
     token_totals.fold_totals(db, today=_TODAY)
-    assert token_totals.fold_totals(db, today=_TODAY) == 0  # nothing settled since
+    assert token_totals.fold_totals(db, today=_TODAY) == 0
     assert _total(db, agent) == (200, 20)
 
     _ledger(db, agent, horizon + timedelta(days=1), 5, 1)
@@ -96,9 +90,9 @@ def test_rebuild_refolds_the_whole_ledger_after_a_folded_day_changed(
     token_totals.fold_totals(db, today=_TODAY)
     assert _total(db, agent) == (100, 10)
 
-    _ledger(db, agent, old, 150, 15)  # a backfill of an old day, behind the watermark
+    _ledger(db, agent, old, 150, 15)
     token_totals.fold_totals(db, today=_TODAY)
-    assert _total(db, agent) == (100, 10)  # the fold never revisits a folded day
+    assert _total(db, agent) == (100, 10)
 
     token_totals.rebuild_totals(db, today=_TODAY)
     assert _total(db, agent) == (150, 15)
@@ -162,8 +156,6 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
     assert _total(db, agent) == (100, 10)
 
     class _Database:
-        """The service's database handle, dialing the test connection."""
-
         @contextmanager
         def connect(self) -> Generator[psycopg.Connection]:
             yield db
@@ -177,7 +169,7 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
         return _Database()
 
     monkeypatch.setattr(rollup, "events_maintenance_db", database)
-    _raw_usage(db, agent, old, 150)  # the backfilled history of a folded day
+    _raw_usage(db, agent, old, 150)
 
     recent = (today - timedelta(days=1)).strftime("%Y%m%d")
     rollup.main(["--from", recent, "--to", recent])
@@ -188,6 +180,6 @@ def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_wa
     rollup.main(["--from", day, "--to", day])
     assert "rebuilt agent_model_tokens_total" in capsys.readouterr().out
     assert _total(db, agent) == (150, 1)
-    assert capture.call_count == 2  # Each independent entry invocation captures once.
+    assert capture.call_count == 2
     assert count.call_count == 2
     count.assert_called_with(tmp_path, image.sha)

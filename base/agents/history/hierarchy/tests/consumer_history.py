@@ -1,5 +1,3 @@
-"""History and durable job views used by chunk consumer tests."""
-
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
@@ -7,7 +5,6 @@ from base.agents.history.checkpoint import FullHistory
 
 
 def notes_history() -> FullHistory:
-    """The same four messages, but framework notes."""
     body: list[BaseMessage] = [
         HumanMessage(content=f"m{i}", id=f"m{i}", additional_kwargs={"ava_msg_type": "system_note"})
         for i in range(4)

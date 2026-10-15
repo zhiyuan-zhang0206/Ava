@@ -1,11 +1,3 @@
-"""Unit tests for the deadlock-retried TRUNCATE helper (`tests/e2e/_truncate.py`).
-
-Cover the retry semantics — a first-attempt `DeadlockDetected` is rolled back
-and the retry wins; three consecutive deadlocks re-raise; any other error
-passes straight through. The real two-session deadlock (and its CI DETAIL) is
-reproduced against Postgres outside the suite, not here.
-"""
-
 from __future__ import annotations
 
 from typing import Any, LiteralString, cast
@@ -36,8 +28,6 @@ class _FakeCursor:
 
 
 class _FakeConnection:
-    """Records TRUNCATE traffic; pops one scripted outcome per `execute`."""
-
     def __init__(self, outcomes: list[psycopg.Error | None]) -> None:
         self._outcomes = list(outcomes)
         self.executed: list[str] = []

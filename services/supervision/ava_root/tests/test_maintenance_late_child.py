@@ -1,5 +1,3 @@
-"""A direct child stop does not certify disappearance of children forked during TERM."""
-
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +11,6 @@ import psutil
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 
-# A native fork after TERM may outlive the known leader (`child_unit.py forked_late_child`).
 _CHILD = Path(__file__).with_name("child_unit.py")
 
 
@@ -35,7 +32,6 @@ async def _wait_for(path: Path) -> None:
 
 
 def _late_child(child_file: Path) -> psutil.Process | None:
-    """The late child, or None when it already exited and was reaped."""
     try:
         return psutil.Process(int(child_file.read_text()))
     except psutil.NoSuchProcess:

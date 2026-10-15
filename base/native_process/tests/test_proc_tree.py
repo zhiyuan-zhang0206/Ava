@@ -1,5 +1,3 @@
-"""Native custody requires exact stable birth, with Linux starttime as its primary key."""
-
 from __future__ import annotations
 
 import os
@@ -18,13 +16,11 @@ from base.native_process.ownership import OwnedProcess, stable_create_time
 
 
 def _identity_with_drift(offset: float) -> OwnedProcess:
-    # Exercise the stable native birth branch even on Linux CI.
     return OwnedProcess(os.getpid(), stable_create_time(psutil.Process()) + offset, None)
 
 
 @pytest.mark.parametrize("offset", [-1.0, 1.0, -0.0001, 0.0001])
 def test_live_rejects_a_different_native_birth(offset: float) -> None:
-    """A nearby birth is another process, never an ownership tolerance."""
     if is_linux():
         with pytest.raises(RuntimeError, match="missing Linux start ticks"):
             _identity_with_drift(offset).live()
@@ -37,7 +33,6 @@ def test_live_accepts_the_exact_captured_native_birth() -> None:
 
 
 def test_birth_matches_exposes_the_same_rule() -> None:
-    """Signal delivery and the deadline report call this guard directly."""
     process = psutil.Process()
     native = OwnedProcess.capture(process)
     assert native.birth_matches(process)
@@ -53,15 +48,6 @@ def test_birth_matches_exposes_the_same_rule() -> None:
 def test_live_converges_when_the_proc_entry_vanishes_mid_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """psutil validated the pid, then the raw read found no /proc entry: the
-    tracked process was reaped in between, and that IS the exit.
-
-    2026-09-20 wave-2: this window raised `cannot verify process identity` out
-    of the stop wait and aborted the whole cluster update with the tracked
-    daemon already exiting. The reap is timed by the patched read so the
-    interleave is deterministic; the read itself, psutil and pid_exists stay
-    real.
-    """
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     pid = child.pid
     starttime = pid_starttime_ticks(pid)
@@ -87,9 +73,6 @@ def test_live_converges_when_the_proc_entry_vanishes_mid_check(
 def test_live_keeps_the_error_when_a_present_process_cannot_be_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A pid that still exists while its start time cannot be read is not
-    converged: the identity question genuinely went unanswered, and the loud
-    error is the safety answer."""
     process = psutil.Process()
     identity = OwnedProcess(process.pid, process.create_time(), pid_starttime_ticks(process.pid))
     assert identity.starttime is not None
@@ -109,15 +92,9 @@ def test_live_keeps_the_error_when_a_present_process_cannot_be_read(
 def test_stable_create_time_ignores_a_simulated_clock_step(
     monkeypatch: pytest.MonkeyPatch, seconds: float
 ) -> None:
-    """The identity key must not move when the wall clock (boot epoch) steps.
-
-    psutil's public create_time() adds `INIT_BOOT_TIME - boot_time()`, so the
-    simulated step moves the public reading — the artifact a 2s tolerance
-    cannot absorb — while the key stays identical.
-    """
     from psutil import _psosx
 
-    psosx: Any = _psosx  # the macOS-only stub does not declare `INIT_BOOT_TIME`
+    psosx: Any = _psosx
 
     key_before = stable_create_time(psutil.Process())
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", psosx.INIT_BOOT_TIME + seconds)
@@ -133,14 +110,9 @@ def test_stable_create_time_ignores_a_simulated_clock_step(
 def test_capture_and_verify_span_clock_epochs(
     monkeypatch: pytest.MonkeyPatch, seconds: float
 ) -> None:
-    """A record captured under one import epoch still verifies under another.
-
-    One side stays unpatched on purpose: psutil's correction adds |diff| in
-    either direction, so a -N patch models the same epoch as +N.
-    """
     from psutil import _psosx
 
-    psosx: Any = _psosx  # the macOS-only stub does not declare `INIT_BOOT_TIME`
+    psosx: Any = _psosx
 
     base = psosx.INIT_BOOT_TIME
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + seconds)
@@ -150,8 +122,6 @@ def test_capture_and_verify_span_clock_epochs(
 
 
 class _FakeProcess:
-    """A psutil.Process stand-in for one link of a recorded parent chain."""
-
     def __init__(self, pid: int, name: str, argv: list[str], parent: _FakeProcess | None) -> None:
         self.pid = pid
         self._name = name
@@ -177,7 +147,6 @@ class _FakeProcess:
 def test_process_metadata_records_the_script_of_a_node_ancestor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A Node controller (DeepSeek Harness) is only identifiable by its script."""
     shell = _FakeProcess(10, "zsh", ["-zsh"], None)
     node = _FakeProcess(20, "node", ["node", "/opt/homebrew/bin/dsh", "web"], shell)
     caller = _FakeProcess(30, "python3.12", ["python", "-m", "cli"], node)

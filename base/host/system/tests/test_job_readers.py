@@ -1,5 +1,3 @@
-"""Live job policy readers preserve gate order and platform generation timing."""
-
 from collections.abc import Callable
 from pathlib import Path
 
@@ -84,7 +82,6 @@ def test_packages_refresh_gate_follows_home_and_precedes_platform(
 
 
 def _isolate_jobs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Point the generated job specs at a scratch home, and make that home the default one."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".ava"))
     monkeypatch.setattr(cron, "ava_binary_path", _isolated_ava)
@@ -97,7 +94,6 @@ def _isolate_jobs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def _assert_definitions(kind: str, platform: str, first: str, second: str) -> None:
-    """Each registration carries the value its own reader returned at definition time."""
     if kind == "packages":
         assert (
             ("*/20 " in first and "*/30 " in second)

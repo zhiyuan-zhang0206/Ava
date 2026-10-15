@@ -1,12 +1,3 @@
-"""The daemon files agent-created pages into per-agent tab groups.
-
-Covers where grouping hangs off the daemon (both page-creation sites), which
-pages it applies to, that a grouping failure never reaches the browser
-operation, and the one thing it relies on instead of code: Chrome deletes a tab
-group when its last page closes, so every path that closes an agent's last page
-(all of them go through ``close_page``) also removes the group.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -27,8 +18,6 @@ from services.desktop.browser.tests.test_browser_mcp_daemon import (
 
 
 class RecordingGroups(AgentTabGroups):
-    """Records what the daemon asks for; hands out one fake target id per snapshot."""
-
     def __init__(self) -> None:
         super().__init__(cdp_port=0, tasks=asyncio.TaskGroup())
         self.events: list[tuple[str, Any]] = []
@@ -56,7 +45,6 @@ async def test_explicit_new_page_is_grouped_around_the_upstream_call() -> None:
     d, up, groups = _grouped_daemon()
     result = await d.call_tool_for_agent("new_page", {"url": "https://a.example/"}, 7)
     assert not result.is_error
-    # snapshot BEFORE the page exists, group AFTER the upstream created it
     assert groups.events == [("snapshot", 1), ("group", (7, frozenset({"before-1"})))]
     assert [c[0] for c in up.calls] == ["new_page"]
 
@@ -67,7 +55,7 @@ async def test_first_navigate_auto_created_page_is_grouped() -> None:
     assert not result.is_error
     assert up.pages == {1: "https://a.example/"}
     assert groups.grouped() == [7]
-    assert 1 in d.pages.ttl_deadlines  # same creation bookkeeping as before
+    assert 1 in d.pages.ttl_deadlines
 
 
 async def test_one_agent_many_pages_and_two_agents_are_told_apart_by_agent_id() -> None:
@@ -75,12 +63,10 @@ async def test_one_agent_many_pages_and_two_agents_are_told_apart_by_agent_id() 
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
     await d.call_tool_for_agent("new_page", {"url": "b"}, 8)
     await d.call_tool_for_agent("new_page", {"url": "c"}, 7)
-    assert groups.grouped() == [7, 8, 7]  # the title (one group per id) is derived from this id
+    assert groups.grouped() == [7, 8, 7]
 
 
 async def test_only_pages_the_stack_creates_are_grouped() -> None:
-    """An agent merely selecting a user's tab, or working on a page it already
-    has, never reaches the grouping hook."""
     d, up, groups = _grouped_daemon()
     up.pages[99] = "https://user.example/tab"
     up.next_id = 100
@@ -92,8 +78,6 @@ async def test_only_pages_the_stack_creates_are_grouped() -> None:
 
 
 async def test_isolated_context_page_is_left_out_of_grouping() -> None:
-    """Chrome extensions cannot see tabs of an isolated browser context (measured:
-    `chrome.debugger.getTargets()` omits them), so grouping them could only fail."""
     d, up, groups = _grouped_daemon()
     result = await d.call_tool_for_agent(
         "new_page", {"url": "https://discord.com/app", "isolatedContext": "reg-7"}, 7
@@ -101,7 +85,7 @@ async def test_isolated_context_page_is_left_out_of_grouping() -> None:
     assert not result.is_error
     assert up.isolated_contexts == {1: "reg-7"}
     assert groups.events == []
-    assert 1 in d.pages.ttl_deadlines  # still a created, TTL-governed page
+    assert 1 in d.pages.ttl_deadlines
 
 
 async def test_a_failed_new_page_is_not_grouped() -> None:
@@ -120,7 +104,6 @@ async def test_a_failed_new_page_is_not_grouped() -> None:
 
 
 async def test_agentless_legacy_connection_is_not_grouped() -> None:
-    """No agent identity, no group title: the legacy per-connection path stays ungrouped."""
     d, _up, groups = _grouped_daemon()
     await d.call_tool("new_page", {"url": "a"}, None)
     await d.call_tool("navigate_page", {"url": "b"}, None)
@@ -128,7 +111,6 @@ async def test_agentless_legacy_connection_is_not_grouped() -> None:
 
 
 def _closed_local_port() -> int:
-    """A loopback port nothing listens on: Chrome "is not running" there."""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
@@ -154,13 +136,6 @@ async def test_grouping_failure_leaves_the_page_created_registered_and_selected(
 
 
 class WedgedChrome:
-    """A loopback "Chrome" whose /json endpoints answer and whose websocket never does.
-
-    `/json/list` reports one page target, then two (the page a `new_page` created);
-    the browser websocket accepts the connection and stays silent, so any grouping
-    step that needs it hangs.
-    """
-
     def __init__(self) -> None:
         self.listings = 0
         self.server: asyncio.Server | None = None
@@ -175,7 +150,7 @@ class WedgedChrome:
     async def __aexit__(self, *exc: object) -> None:
         assert self.server is not None
         self.server.close()
-        for writer in self._writers:  # the silent websocket connection, if any
+        for writer in self._writers:
             writer.close()
         await self.server.wait_closed()
 
@@ -193,7 +168,7 @@ class WedgedChrome:
             body = json.dumps(
                 {"webSocketDebuggerUrl": f"ws://127.0.0.1:{self.port}/devtools/browser/x"}
             )
-        else:  # the websocket upgrade: accepted, never answered
+        else:
             await asyncio.Event().wait()
             return
         head = (
@@ -205,9 +180,6 @@ class WedgedChrome:
 
 
 async def test_a_stuck_grouping_neither_delays_new_page_nor_holds_the_daemon_lock() -> None:
-    """The grouping needs a websocket to Chrome that never answers. The page creation
-    returns at once and another agent's call is not queued behind it: the daemon's
-    serial lock is held only for the two target listings."""
     async with WedgedChrome() as chrome, asyncio.TaskGroup() as tasks:
         groups = AgentTabGroups(chrome.port, tasks)
         d = new_daemon(FakeUpstream(), tab_groups=groups)
@@ -219,19 +191,14 @@ async def test_a_stuck_grouping_neither_delays_new_page_nor_holds_the_daemon_loc
             other = await asyncio.wait_for(d.call_tool_for_agent("list_pages", {}, 8), timeout=1)
             assert not created.is_error and not other.is_error
             assert time.monotonic() - started < 3
-            assert chrome.listings == 2  # snapshot + diff, nothing else under the lock
+            assert chrome.listings == 2
             stuck = [t for t in asyncio.all_tasks() if t.get_name() == "tab-group-agent-7"]
-            assert len(stuck) == 1 and not stuck[0].done()  # still hanging in the background
+            assert len(stuck) == 1 and not stuck[0].done()
         finally:
-            groups.cancel_pending()  # the root group's exit waits for the tasks to end
-
-
-# ── Chrome deletes the group with its last page: nothing in this stack does ───
+            groups.cancel_pending()
 
 
 class _CloseObserver(FakeUpstream):
-    """Notes every page that was actually closed through the upstream."""
-
     def closed_pages(self) -> list[int]:
         return [args["pageId"] for name, args, _sel in self.calls if name == "close_page"]
 
@@ -263,8 +230,5 @@ async def test_hard_ttl_reaper_closes_through_close_page() -> None:
 
 
 async def test_no_closing_or_ungrouping_helper_exists_to_keep_in_sync() -> None:
-    """The grouping module is create-only. Removing a group is Chrome's job (it
-    deletes a group, and its saved-group record, when the last page closes), so a
-    second code path that deleted groups could only drift from that."""
     public = {n for n in dir(AgentTabGroups) if not n.startswith("_")}
     assert public == {"snapshot", "group_new_page", "cancel_pending"}

@@ -1,6 +1,3 @@
-"""A failed turn is alerted, never latched: only an owed continuation is reported,
-and the journal keeps nothing that blocks the drain, the stop or `ava start`."""
-
 import asyncio
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -29,9 +26,6 @@ from services.agent_runner.agent_host.scheduling.pending_wakes import held_maint
 
 
 class Alerts:
-    """Every `agent_continuation_lost` row the maintenance receipts logged, as message plus fields
-    (read from `loguru_records`)."""
-
     def __init__(self, records: LogRecords) -> None:
         self._records = records
 
@@ -58,7 +52,6 @@ def _held() -> MaintenanceHold:
 
 
 def _no_pool() -> AsyncConnectionPool[Any]:
-    """A pool that must never be used: the journal alone says nothing is owed."""
     return cast("AsyncConnectionPool[Any]", MagicMock(side_effect=AssertionError("no db")))
 
 
@@ -69,7 +62,6 @@ def _owed(
     *,
     applied: bool = False,
 ) -> tuple[int, int, MaintenanceHold]:
-    """A cohort member with a real restart command and a draining hold over it."""
     agent = maintenance_agent(db_conn, machine_name=machine.name())
     command = insert_inbound_message(
         db_conn,
@@ -125,8 +117,6 @@ async def test_a_failed_continuation_ends_its_restart_and_alerts_exactly_once(
     machine_identity: MachineIdentity,
     database: Database,
 ) -> None:
-    """Every exception class settles the unapplied restart as failed, clears the
-    pointer, alerts once, and keeps later scans from driving the agent again."""
     agent, command, hold = _owed(db_conn, machine_identity, database)
 
     await receipts.record_failure(aops_pool, agent, exc)
@@ -192,8 +182,6 @@ async def test_an_applied_restart_is_not_rewritten(
     machine_identity: MachineIdentity,
     database: Database,
 ) -> None:
-    """An effect that already started is neither undone nor declared unexecuted:
-    the failure is reported and the command keeps its normal completion path."""
     agent, command, _hold = _owed(db_conn, machine_identity, database, applied=True)
 
     await receipts.record_failure(aops_pool, agent, RuntimeError("node failed"))
@@ -210,7 +198,6 @@ async def test_an_unreachable_database_still_alerts_and_keeps_the_restart_open(
     machine_identity: MachineIdentity,
     database: Database,
 ) -> None:
-    """The failure may be the database outage itself: the alert must not depend on it."""
     agent, command, _hold = _owed(db_conn, machine_identity, database)
     broken = MagicMock()
     broken.connection.side_effect = psycopg.OperationalError("connection refused")
@@ -229,7 +216,6 @@ async def test_a_member_with_an_open_restart_is_run_held(
     machine_identity: MachineIdentity,
     database: Database,
 ) -> None:
-    """Until its command is ended the held control still runs on a wake."""
     agent, _command_id, _hold = _owed(db_conn, machine_identity, database)
     controls: list[tuple[int, str]] = []
 
@@ -247,8 +233,6 @@ async def test_failure_outside_a_hold_is_not_reported(alerts: Alerts) -> None:
 
 
 def test_a_journal_written_by_an_older_release_still_decodes_without_its_receipts() -> None:
-    """Receipts an earlier release latched are ignored, not an unreadable hold:
-    the unit has a way out (`ava start`) whatever the old journal recorded."""
     decoded = MaintenanceHold.decode(
         {
             "phase": "draining",
@@ -294,9 +278,6 @@ def test_unpause_releases_the_hold(
     assert pause_owner.read().status == "resumed"
 
 
-# FC-10 F20, the LX unit: the rollout's hold drained this unit's agents 2, 6
-# and 7; its stop then cancelled wakes for agents 3, 8 and 9 (fc10-mac2's,
-# woken as that host resumed) before their row read could say "not ours".
 FC10_HOLDER = "fc10-gw:pid17913"
 FC10_AT = datetime(2026, 9, 29, 5, 35, 53, 41351, tzinfo=UTC)
 FC10_FOREIGN = (3, 8, 9)
@@ -305,7 +286,6 @@ FC10_FOREIGN = (3, 8, 9)
 def fc10_hold(
     phase: str = "stopping", drained: tuple[int, ...] = (2, 6, 7), parked: tuple[int, ...] = ()
 ) -> None:
-    """The LX hold, cohort 2, 6, 7; as its services stop began, all drained."""
     before = pause_owner.begin_maintenance(FC10_HOLDER, FC10_AT).snapshot
     assert before.maintenance is not None
     hold = MaintenanceHold.decode(
@@ -341,14 +321,12 @@ def test_a_failure_outside_the_captured_cohort_is_not_reported(
 def test_a_drained_members_failure_after_the_certified_drain_is_not_reported(
     phase: str, exc: BaseException, alerts: Alerts
 ) -> None:
-    """Its continuation settled and its held wake claims nothing: nothing is owed."""
     fc10_hold(phase)
     asyncio.run(receipts.record_failure(_no_pool(), 2, exc))
     assert alerts.rows == []
 
 
 def test_before_the_drain_is_certified_only_undrained_members_are_owed(alerts: Alerts) -> None:
-    """Draining: a member still draining reports; one already drained owes nothing."""
     fc10_hold("draining", drained=(6, 7))
     for agent in (2, 6):
         asyncio.run(receipts.record_failure(_no_pool(), agent, asyncio.CancelledError()))
@@ -363,8 +341,6 @@ def test_before_the_cohort_is_captured_nothing_is_owed(alerts: Alerts) -> None:
 
 @pytest.mark.parametrize("phase", ["draining", "stopped"])
 def test_a_parked_member_owes_no_continuation(phase: str, alerts: Alerts) -> None:
-    """Parked agents belong to the unit and are never drained: no restart command
-    is pending for them in any phase."""
     before = pause_owner.begin_maintenance(FC10_HOLDER, FC10_AT).snapshot
     assert before.maintenance is not None
     hold = MaintenanceHold.decode(

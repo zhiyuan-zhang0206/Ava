@@ -1,13 +1,3 @@
-"""The roster's identity probe for each standard daemon asks the right questions.
-
-`probe_daemon` believes a 200 only when the body's `name` and `home` match and its
-`pid` equals this unit's pidfile, so a probe built from the wrong name, URL or pidfile
-would accept another daemon as healthy or reject the right one forever. Root probes
-every standard `/healthz` daemon through `services.supervision.roster.healthz.daemon_identity`; this pins
-that the three facts reaching `probe_daemon` are the daemon's own, for every such entry
-in the roster (the per-module copies of this check died with the modules).
-"""
-
 from __future__ import annotations
 
 import inspect
@@ -64,7 +54,6 @@ def _standard_daemons() -> list[ServiceSpec]:
 
 
 def _inner_probe(spec: ServiceSpec) -> partial[DaemonProbe]:
-    """The standard daemon declares its protocol probe directly."""
     return cast("partial[DaemonProbe]", spec.identity_probe)
 
 
@@ -88,12 +77,8 @@ def test_every_standard_daemon_probe_is_scoped_to_its_name_url_and_pidfile() -> 
 def test_every_standard_daemon_records_the_pidfile_its_probe_reads(
     process_config: ConfigBoot,
 ) -> None:
-    """The daemon writes the pidfile of its health name and the roster probe cross-checks
-    that same file, so the two cannot drift apart (a hyphenated `agent-host.pid`
-    once sat beside the underscored health name)."""
     for spec in _standard_daemons():
         module = _DAEMON_MODULES[spec.cmd.rsplit(" ", 1)[1]]
-        # Resource operations are called at their actual definition owner.
         if module is page_server:
             operation = page_resources.pidfile
         elif module is agent_ops:

@@ -1,8 +1,3 @@
-"""Helpers for tests that drive real shells through the pty-sessions client.
-
-Used with the `pty_service` fixture (`base/sessions/pty/tests/pty_service.py`); `pty_jobs`
-holds the jobs a test types into those shells."""
-
 from __future__ import annotations
 
 import time
@@ -15,8 +10,6 @@ from base.sessions.pty import client
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.keys import keys_to_bytes
 
-# A ceiling, not a delay: every wait returns the moment its condition holds. Under CI
-# CPU oversubscription a reader thread can lag a reap well past 10 s.
 WAIT_S = 30.0
 
 
@@ -39,12 +32,10 @@ def new(
     *,
     config: PtyClientConfig | None = None,
 ) -> bool:
-    """Create the session; `config` is the production tuning unless a test shortens it."""
     return client.create_session(name, str(cwd), env or {}, cmd, config=config or PtyClientConfig())
 
 
 def type_line(name: str, text: str) -> None:
-    """Type `text` and submit it."""
     client.send(name, text.encode() + b"\r")
 
 
@@ -57,12 +48,6 @@ def screen(name: str, *, scrollback: bool = True) -> str:
 
 
 def output_until(name: str, word: str, *, timeout: float = WAIT_S) -> str:
-    """Wait until a BARE output line equal to `word` appears in the capture.
-
-    The typed command line is echoed onto the screen, so a substring wait is
-    satisfied by the echo before the command has run. Waiting for the bare
-    line (the command's own output) pins the shell to "command executed".
-    """
 
     def seen() -> bool:
         return word in [line.strip() for line in screen(name).split("\n")]
@@ -77,7 +62,6 @@ def shell_process(name: str) -> psutil.Process:
 
 
 def gone(process: psutil.Process) -> bool:
-    """True once the process can no longer execute: reaped, or a zombie awaiting reap."""
     try:
         return process.status() == psutil.STATUS_ZOMBIE
     except psutil.NoSuchProcess:

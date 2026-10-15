@@ -1,5 +1,3 @@
-"""The raw-message range read behind a node's or unit's expand."""
-
 from __future__ import annotations
 
 from dataclasses import replace
@@ -42,8 +40,6 @@ def history(count: int) -> list[BaseMessage]:
 
 
 class Views:
-    """The `HistoryViewCache` the app state serves, pinned to one view."""
-
     def __init__(self, messages: list[BaseMessage]) -> None:
         read = read_times(messages, timeline_inputs=_TIMELINE_INPUTS)
         units = display_blocks(

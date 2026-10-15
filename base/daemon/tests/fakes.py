@@ -1,6 +1,3 @@
-"""Pin the endpoint table for tests whose code under test builds it with
-`ServiceEndpoints.from_settings()` and needs a specific port or pidfile directory."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -17,8 +14,6 @@ def pin_endpoints(
     port: Callable[[str], int] | None = None,
     pid_dir: Path | None = None,
 ) -> None:
-    """`from_settings()` returns the live table with each health port replaced by `port(name)`
-    and each pidfile moved to `pid_dir/<name>.pid`, where given."""
     live = ServiceEndpoints.from_settings()
     table = ServiceEndpoints(
         {

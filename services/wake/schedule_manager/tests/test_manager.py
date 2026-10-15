@@ -1,11 +1,3 @@
-"""Tests for services/wake/schedule_manager/manager.py — the reconcile decisions.
-
-The DB is real (a small ConnectionPool on the test DB); the session backend is
-faked (a class-level `new_session` stub + `get_shell_backend` monkeypatch), so
-these tests assert the manager's launch / adopt / kill / backoff / breaker logic
-without a real session backend.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -78,12 +70,10 @@ def fake_session(
     def _fake_new_session(
         _self: object, name: str, cmd: str, cwd: object, *, env: dict[str, object]
     ) -> bool:
-        # The schedule id rides env (AVA_SCHEDULE_ID) — the cmd tail is now
-        # `... schedule_runner <id>; exit $?`, so argv parsing is a trap.
         sid = int(str(env["AVA_SCHEDULE_ID"]))
         launched.append(sid)
         backend.launch_envs.append(dict(env))
-        backend.live.append(session_name(f"schedule-{sid}"))  # launch => session appears
+        backend.live.append(session_name(f"schedule-{sid}"))
         return True
 
     monkeypatch.setattr(sm, "get_shell_backend", lambda: backend)
@@ -117,7 +107,6 @@ def _status(conn: psycopg.Connection, sid: int) -> str:
 
 
 def _insert_null_run(conn: psycopg.Connection, sid: int) -> int:
-    """A run-history row left in-progress (ok IS NULL) by a process."""
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO schedule_runs (schedule_id) VALUES (%s) RETURNING id",
@@ -140,10 +129,6 @@ def _run_row(conn: psycopg.Connection, rid: int) -> tuple[bool | None, str | Non
 def test_reconcile_does_not_sweep_orphan_null_rows(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    # A run row left in-progress by a process something else killed is closed
-    # only when the manager next launches or reaps that schedule (the tests
-    # below), not by a periodic sweep: a disabled schedule with no session and a
-    # NULL row keeps showing in-progress until then.
     _backend, launched = fake_session
     sid = _insert(db_conn, "orphan-a", enabled=False)
     rid = _insert_null_run(db_conn, sid)
@@ -157,9 +142,6 @@ def test_reconcile_does_not_sweep_orphan_null_rows(
 def test_reconcile_keeps_null_row_for_live_session(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    # A NULL row for a schedule WITH a live session is a genuinely running
-    # process — the sweep must not touch it (a resident schedule's row stays
-    # in-progress for its whole lifetime).
     backend, launched = fake_session
     sid = _insert(db_conn, "orphan-b")
     rid = _insert_null_run(db_conn, sid)
@@ -174,9 +156,6 @@ def test_reconcile_keeps_null_row_for_live_session(
 def test_launch_closes_null_rows_of_dead_predecessor(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    # Restart/edit-save shape: an enabled schedule whose old process was
-    # SIGKILLed (NULL row, no live session) is relaunched — the old row must
-    # close so the drawer does not show it beside the new run's row.
     _backend, launched = fake_session
     sid = _insert(db_conn, "orphan-c")
     rid = _insert_null_run(db_conn, sid)
@@ -190,9 +169,6 @@ def test_launch_closes_null_rows_of_dead_predecessor(
 def test_sync_stop_closes_orphan_rows_immediately(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    # The explicit stop path (API stop) kills the session directly — the
-    # killed process's in-progress row closes right away, not at the next
-    # reconcile tick.
     backend, launched = fake_session
     sid = _insert(db_conn, "orphan-d", enabled=True)
     rid = _insert_null_run(db_conn, sid)
@@ -204,7 +180,7 @@ def test_sync_stop_closes_orphan_rows_immediately(
     sm.ScheduleManager(pool).sync_one(sid)
 
     assert session_name(f"schedule-{sid}") in backend.killed
-    assert launched == []  # disabled — not relaunched
+    assert launched == []
     assert _run_row(db_conn, rid) == (False, "interrupted")
 
 
@@ -214,7 +190,6 @@ def test_launches_enabled_missing_session(
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
-    """An enabled schedule remains desired after a current-generation restart."""
     from base.sessions.pty import allocation_freeze
 
     _backend, launched = fake_session
@@ -234,11 +209,6 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     fake_session: tuple[_FakeBackend, list[int]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failed gateway start leaves an enabled schedule stopped until retry.
-
-    Removing the serving check would launch on the first reconcile; applying it
-    to the whole reconcile would break disabled-schedule cleanup tests.
-    """
 
     _backend, launched = fake_session
     start_serving.clear_serving()
@@ -263,7 +233,6 @@ def test_live_superseded_generation_is_reaped_before_schedule_reconcile(
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
-    """A same-name schedule session from a flip cannot be adopted as current."""
     from base.sessions.pty import allocation_freeze
 
     backend, _launched = fake_session
@@ -282,7 +251,6 @@ def test_superseded_generation_reap_retries_before_rebuilding_enabled_schedule(
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
-    """A failed old-generation reap blocks replacement until the official retry wins."""
     from base.sessions.pty import allocation_freeze
 
     backend, launched = fake_session
@@ -308,14 +276,6 @@ def test_superseded_generation_reap_retries_before_rebuilding_enabled_schedule(
 def test_launch_env_carries_cluster_timezone(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    """The runner's spawn env carries the gateway's resolved cluster timezone.
-
-    A unit .env that misses AVA_TIMEZONE must not silently leave the runner on
-    the America/Los_Angeles field default (2026-08-21: schedule #3 fired at PT
-    midnight instead of Shanghai midnight). The forward dict deliberately
-    excludes cluster-scope keys, so the launch pins it explicitly from the
-    gateway's own settings — dotenv_boot's authority pass keeps the value
-    (never drops it) and lets a declared .env override it."""
     backend, launched = fake_session
     sid = _insert(db_conn, "job-tz")
 
@@ -332,23 +292,20 @@ def test_adopts_live_session_without_relaunch(
 ) -> None:
     backend, launched = fake_session
     sid = _insert(db_conn, "job-b")
-    backend.live.append(session_name(f"schedule-{sid}"))  # already running (survived a restart)
+    backend.live.append(session_name(f"schedule-{sid}"))
 
     sm.ScheduleManager(pool).reconcile()
 
-    assert launched == []  # adopted, not relaunched
+    assert launched == []
 
 
 def test_reaps_stale_session_before_launch(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    """A same-name session surviving a gateway restart must be reaped, not
-    collide with the spawn ("duplicate session" -> 5x breaker trip ->
-    every schedule paused; #1119)."""
     backend, launched = fake_session
     sid = _insert(db_conn, "job-stale")
     stale = session_name(f"schedule-{sid}")
-    backend.live.append(stale)  # leftover from the pre-restart gateway run
+    backend.live.append(stale)
 
     sm.ScheduleManager(pool)._launch(sid)
 
@@ -360,7 +317,6 @@ def test_reaps_stale_session_before_launch(
 def test_retries_enabled_stale_session_reap_before_launch(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    """An enabled stale survivor is retried rather than adopted forever."""
     backend, launched = fake_session
     sid = _insert(db_conn, "job-stale-retry")
     stale = session_name(f"schedule-{sid}")
@@ -384,7 +340,7 @@ def test_kills_orphan_session(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
     backend, _launched = fake_session
-    sid = _insert(db_conn, "job-c", enabled=False)  # disabled => not desired
+    sid = _insert(db_conn, "job-c", enabled=False)
     orphan = session_name(f"schedule-{sid}")
     backend.live.append(orphan)
 
@@ -403,24 +359,19 @@ def _set_status(conn: psycopg.Connection, sid: int, status: str) -> None:
 def test_completed_schedule_not_relaunched(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    # A clean exit leaves the schedule enabled but status='completed' with no live
-    # session. Reconcile must treat that as terminal, not a vanished session to
-    # relaunch (the false-crash bug this fixes).
     _backend, launched = fake_session
     sid = _insert(db_conn, "done-a")
     _set_status(db_conn, sid, "completed")
 
     sm.ScheduleManager(pool).reconcile()
 
-    assert launched == []  # left alone, not resurrected
+    assert launched == []
     assert _status(db_conn, sid) == "completed"
 
 
 def test_sync_recovers_errored_schedule(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    # The recovery path: an explicit start/restart routes through sync(), which
-    # relaunches and pulls the row out of 'error' back to 'running'.
     backend, launched = fake_session
     sid = _insert(db_conn, "err-b")
     _set_status(db_conn, sid, "error")
@@ -443,33 +394,27 @@ def test_sync_launches_enabled_and_kills_disabled(
     sid = _insert(db_conn, "sync-a", enabled=True)
     mgr = sm.ScheduleManager(pool)
 
-    mgr.sync_one(sid)  # enabled -> launch
+    mgr.sync_one(sid)
     assert launched == [sid]
     assert session_name(f"schedule-{sid}") in backend.live
 
-    with db_conn.cursor() as cur:  # now disable and sync -> kill
+    with db_conn.cursor() as cur:
         cur.execute("UPDATE schedules SET enabled = false WHERE id = %s", (sid,))
     db_conn.commit()
     mgr.sync_one(sid)
     assert session_name(f"schedule-{sid}") in backend.killed
-    assert launched == [sid]  # not relaunched
+    assert launched == [sid]
 
 
 def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    """A stopped schedule has no live PTY, including after a fresh manager.
-
-    The final fresh-manager reconcile models a rollout restart. Its disabled
-    desired row prevents revival; re-enabling is the only transition that
-    creates a replacement session.
-    """
     backend, launched = fake_session
     sid = _insert(db_conn, "stop-start")
     name = session_name(f"schedule-{sid}")
     manager = sm.ScheduleManager(pool)
 
-    manager.sync_one(sid)  # enabled -> create
+    manager.sync_one(sid)
     assert launched == [sid]
     assert name in backend.live
     assert _status(db_conn, sid) == "running"
@@ -477,12 +422,12 @@ def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
     with db_conn.cursor() as cur:
         cur.execute("UPDATE schedules SET enabled = false WHERE id = %s", (sid,))
     db_conn.commit()
-    manager.sync_one(sid)  # disable -> official PTY reap
+    manager.sync_one(sid)
     assert name in backend.killed
     assert name not in backend.live
     assert _status(db_conn, sid) == "stopped"
 
-    sm.ScheduleManager(pool).reconcile()  # gateway restart: stopped stays dead
+    sm.ScheduleManager(pool).reconcile()
     assert launched == [sid]
     assert name not in backend.live
 
@@ -492,7 +437,7 @@ def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
             (sid,),
         )
     db_conn.commit()
-    manager.sync_one(sid)  # explicit start -> create a new PTY
+    manager.sync_one(sid)
     assert launched == [sid, sid]
     assert name in backend.live
     assert _status(db_conn, sid) == "running"
@@ -501,12 +446,6 @@ def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
 def test_failed_reap_keeps_runtime_status_and_retries_on_reconcile(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    """A backend refusal cannot falsely record a dead schedule or run.
-
-    Disabled plus a still-live named session is the durable reap queue: the
-    next reconciliation must retry the same official backend operation and
-    only then write stopped and interrupt the run history.
-    """
     backend, launched = fake_session
     sid = _insert(db_conn, "retry-reap")
     name = session_name(f"schedule-{sid}")
@@ -539,7 +478,6 @@ def test_reap_failure_error_logs_are_rate_limited(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A persistent reap failure emits periodic ERROR summaries, not a flood."""
     backend, _launched = fake_session
     sid = _insert(db_conn, "rate-limit-reap")
     backend.kill_results = [False, False, False]
@@ -564,15 +502,6 @@ def test_reap_failure_error_logs_are_rate_limited(
 
 
 def test_schedule_manager_uses_shell_backend() -> None:
-    """The manager's sessions are PTY-supervisor sessions — it must use
-    `get_shell_backend()` (PtySessionBackend on POSIX). The schedule migration
-    (S6, 2026-08-09) moved schedule sessions into the PTY
-    supervisor, the same backend as agent shells/watchers: one supervisor, one
-    record namespace, no raw spawn on the schedule path. The service backend
-    (S7 — services AND orchestration) must NOT see schedules — a reconcile
-    loop on it would collide with the live PTY sessions on relaunch (the
-    inverse of #1119).
-    """
     from base.sessions.backend import get_backend, get_shell_backend
 
     assert sm.get_shell_backend is get_shell_backend
@@ -585,9 +514,6 @@ def test_successful_launch_clears_stale_last_error(
     fake_session: tuple[_FakeBackend, list[int]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression (2026-08-11): a schedule recovered via explicit restart kept
-    the breaker's "auto-restart paused" text forever -- _launch set status to
-    'running' but never nulled last_error. A successful launch must clear it."""
     _backend, launched = fake_session
     sid = _insert(db_conn, "job-recovered")
     with db_conn.cursor() as cur:
@@ -598,8 +524,6 @@ def test_successful_launch_clears_stale_last_error(
             (sid,),
         )
     db_conn.commit()
-    # Simulate an explicit restart: clear status to a launchable state first
-    # (the manager's API restart does this), then reconcile launches it.
     _set_status(db_conn, sid, "stopped")
 
     clock = {"t": 0.0}
@@ -623,7 +547,6 @@ def _clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
 
 
 def _tick(manager: sm.ScheduleManager, clock: dict[str, float], seconds: float) -> None:
-    """Reconcile every 30s for `seconds`: well inside one failure streak's gap."""
     end = clock["t"] + seconds
     while clock["t"] < end:
         manager.reconcile()
@@ -643,11 +566,6 @@ def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
     monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
-    """The retry of a surviving session is bounded by time, not by another layer.
-
-    A stop whose session never dies is retried every reconcile for the window,
-    then the manager records an error, alerts once, consumes the request and
-    stops calling the backend until the desired revision changes."""
     backend, launched = fake_session
     clock = _clock(monkeypatch)
     sid = _insert(db_conn, "survivor", enabled=False)
@@ -658,12 +576,12 @@ def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
 
     _tick(manager, clock, sm.BLOCKED_GIVE_UP_AFTER_S - 30)
     retried = len(backend.killed)
-    assert retried == sm.BLOCKED_GIVE_UP_AFTER_S // 30 - 1  # every tick retried the reap
+    assert retried == sm.BLOCKED_GIVE_UP_AFTER_S // 30 - 1
     assert len(emitted_events) == 0
     assert _status(db_conn, sid) == "running"
 
     clock["t"] += 30
-    manager.reconcile()  # the attempt that crosses the window
+    manager.reconcile()
     assert len(backend.killed) == retried + 1
     assert _status(db_conn, sid) == "error"
     assert "gave up" in (_last_error(db_conn, sid) or "")
@@ -674,16 +592,14 @@ def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
     for _ in range(3):
         clock["t"] += 30
         manager.reconcile()
-        assert manager.sync_one(sid) is True  # the request is consumed, not requeued
+        assert manager.sync_one(sid) is True
     assert len(backend.killed) == retried + 1
     assert len(emitted_events) == 1
-    assert name in backend.live  # the process is left alone
+    assert name in backend.live
     assert launched == []
 
 
-@pytest.mark.usefixtures(
-    "emitted_events"
-)  # the abandon alert has a pipeline to land in; not asserted here
+@pytest.mark.usefixtures("emitted_events")
 def test_an_explicit_new_revision_lifts_the_give_up(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
@@ -700,7 +616,6 @@ def test_an_explicit_new_revision_lifts_the_give_up(
     assert _status(db_conn, sid) == "error"
     attempts = len(backend.killed)
 
-    # A new desired revision (an explicit stop/start/restart); the process now yields.
     backend.kill_results = []
     db_conn.execute(
         "UPDATE schedules SET desired_revision = desired_revision + 1 WHERE id = %s", (sid,)
@@ -720,7 +635,6 @@ def test_a_failure_streak_is_broken_by_a_gap(
     monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
-    """Failures separated by a hold or a paused service are not one streak."""
     clock = _clock(monkeypatch)
     sid = _insert(db_conn, "gappy")
     manager = sm.ScheduleManager(pool)

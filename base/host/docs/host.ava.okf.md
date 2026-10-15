@@ -51,3 +51,7 @@ composition root passes `SYSTEM_URL_OPENER`. `base.host.net.tests.fake_url_opene
 records each request and answers from a script routed by URL prefix, raises `HTTPError` for a
 status outside 2xx as `urlopen` does, and refuses a URL nobody scripted. A test that wants the
 real client starts a listener on port 0; none patches `urlopen` or `socket`.
+
+The private-storage live Unix-socket test uses a short `/tmp` root so macOS's
+AF_UNIX path limit does not fail at bind before the test reaches socket skipping
+and ordinary-file mode repair.

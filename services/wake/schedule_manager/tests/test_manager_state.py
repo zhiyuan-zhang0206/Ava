@@ -1,5 +1,3 @@
-"""Persisted one-attempt schedule admission and outage alerts survive restart."""
-
 from __future__ import annotations
 
 import logging
@@ -65,7 +63,7 @@ def fake_session(
         _self: object, name: str, cmd: str, cwd: object, *, env: dict[str, object]
     ) -> bool:
         launched.append(int(str(env["AVA_SCHEDULE_ID"])))
-        backend.live.append(name)  # launch => session appears
+        backend.live.append(name)
         return True
 
     monkeypatch.setattr(sm, "get_shell_backend", lambda: backend)
@@ -105,7 +103,6 @@ def _set_status(conn: psycopg.Connection, sid: int, status: str) -> None:
 
 
 def _backoff_state(conn: psycopg.Connection, sid: int) -> tuple[int, bool]:
-    """(launch_count, backing off) of a schedule row."""
     row = conn.execute(
         "SELECT launch_count, next_launch_at > clock_timestamp() FROM schedules WHERE id = %s",
         (sid,),
@@ -115,7 +112,6 @@ def _backoff_state(conn: psycopg.Connection, sid: int) -> tuple[int, bool]:
 
 
 def _end_backoff(conn: psycopg.Connection, sid: int) -> None:
-    """Move the row's backoff deadline into the past."""
     conn.execute(
         "UPDATE schedules SET next_launch_at = clock_timestamp() - interval '1 second' "
         "WHERE id = %s",
@@ -134,7 +130,6 @@ def _set_backoff(conn: psycopg.Connection, sid: int, count: int, *, seconds_ahea
 
 
 def _age_not_live(conn: psycopg.Connection, sid: int, seconds: float) -> None:
-    """Make the current outage `seconds` old."""
     conn.execute(
         "UPDATE schedules SET not_live_since = clock_timestamp() - make_interval(secs => %s) "
         "WHERE id = %s",
@@ -146,16 +141,13 @@ def _age_not_live(conn: psycopg.Connection, sid: int, seconds: float) -> None:
 def test_error_schedule_not_relaunched_after_restart(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    # The terminal failure lives in the DB (status='error'). A fresh ScheduleManager
-    # (a restarted service) must treat an enabled+error+no-session row as
-    # terminal, not a vanished session to relaunch — the crashloop-amnesia bug.
     _backend, launched = fake_session
     sid = _insert(db_conn, "err-a")
     _set_status(db_conn, sid, "error")
 
     sm.ScheduleManager(pool).reconcile()
 
-    assert launched == []  # not resurrected with a clean counter
+    assert launched == []
     assert _status(db_conn, sid) == "error"
 
 
@@ -172,17 +164,17 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
     manager = sm.ScheduleManager(pool)
 
     with caplog.at_level(logging.WARNING, logger=sm.__name__):
-        manager.reconcile()  # first sessionless observation starts the clock
+        manager.reconcile()
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S - 5)
         manager.reconcile()
         assert len(emitted_events) == 0
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
         manager.reconcile()
-        manager.reconcile()  # one alert per outage
+        manager.reconcile()
 
         name = session_name(f"schedule-{sid}")
         backend.live.append(name)
-        manager.reconcile()  # seen live again: the alert rearms
+        manager.reconcile()
         backend.live.remove(name)
         manager.reconcile()
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
@@ -203,17 +195,15 @@ def test_the_stall_alert_clock_and_flag_survive_a_restart(
     fake_session: tuple[_FakeBackend, list[int]],
     emitted_events: EmittedEvents,
 ) -> None:
-    """A restarted service neither restarts the two-hour clock nor alerts again for
-    an outage it already alerted on: both live on the row."""
     _backend, _launched = fake_session
     sid = _insert(db_conn, "stall-restart")
     _set_status(db_conn, sid, "error")
 
     sm.ScheduleManager(pool).reconcile()
     _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
-    sm.ScheduleManager(pool).reconcile()  # a fresh process meets an aged outage
+    sm.ScheduleManager(pool).reconcile()
     assert emitted_events.names() == ["schedule_stalled"]
-    sm.ScheduleManager(pool).reconcile()  # and another fresh process stays quiet
+    sm.ScheduleManager(pool).reconcile()
     assert emitted_events.names() == ["schedule_stalled"]
 
 
@@ -227,7 +217,7 @@ def test_completed_and_disabled_schedules_do_not_stall_alert(
     _set_status(db_conn, completed, "completed")
     disabled = _insert(db_conn, "disabled-no-alert", enabled=False)
     for sid in (completed, disabled):
-        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)  # a leftover outage
+        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
 
     sm.ScheduleManager(pool).reconcile()
 
@@ -243,8 +233,6 @@ def test_completed_and_disabled_schedules_do_not_stall_alert(
 def test_a_launch_is_claimed_once(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    """The claim holds only for the count the reconcile read and outside a
-    backoff, so two callers cannot both launch the same attempt."""
     _backend, _launched = fake_session
     sid = _insert(db_conn, "claim-once")
     mgr = sm.ScheduleManager(pool)

@@ -1,5 +1,3 @@
-"""Durable usage aggregation and ledger-tail regressions."""
-
 from __future__ import annotations
 
 import json
@@ -57,9 +55,6 @@ def _row(
     cost: float,
     unpriced: int,
 ) -> Row:
-    """One grouped row: agent_id, model, in_total, out_total, cache_read,
-    reasoning, calls, summed cost snapshots, unpriced calls — the shape
-    `_rows` fetches (ledger + events) and `aggregate` folds."""
     return (agent_id, model, tin, tout, cached, reason, calls, cost, unpriced)
 
 
@@ -132,9 +127,9 @@ def test_a_window_sums_the_llm_usage_rows_per_agent_and_model(
     base: dict[str, Any] = {"in_total": 100, "out_total": 50, "cache_read": 10, "reasoning": 5}
     _usage(db_conn, a, hours_ago=1, cost_usd=0.5, **base)
     _usage(db_conn, a, hours_ago=2, cost_usd="0.25", **base)
-    _usage(db_conn, a, hours_ago=2, **base)  # no cost snapshot: unpriced
+    _usage(db_conn, a, hours_ago=2, **base)
     _usage(db_conn, a, hours_ago=2, model="other", cost_usd=1.0, in_total=1)
-    _usage(db_conn, a, hours_ago=30, cost_usd=9.0, **base)  # outside the window
+    _usage(db_conn, a, hours_ago=30, cost_usd=9.0, **base)
     _usage(db_conn, b, hours_ago=1, cost_usd=2.0, **base)
 
     out = usage.aggregate(rows([a], None, 3.0, database_gate=database_gate))
@@ -167,9 +162,8 @@ def test_whole_life_is_the_ledger_plus_the_event_tail_from_its_watermark(
         "1.0)",
         (agent, yesterday - timedelta(days=3)),
     )
-    # Events of the ledgered days are already in the ledger; only those after the watermark count.
     _usage(db_conn, agent, hours_ago=24 * 2, cost_usd=100.0, in_total=7000, out_total=1)
-    _usage(db_conn, agent, hours_ago=0, cost_usd=0.5, in_total=10, out_total=5)  # the live tail
+    _usage(db_conn, agent, hours_ago=0, cost_usd=0.5, in_total=10, out_total=5)
     db_conn.commit()
 
     out = usage.aggregate(rows([agent], None, None, database_gate=database_gate))["per_agent"][
@@ -207,7 +201,7 @@ def test_whole_life_is_the_same_before_and_after_the_ledger_is_folded(
             "%s, 1, %s)",
             (agent, today - timedelta(days=age_days), calls, calls, calls * 100, cost),
         )
-    _usage(db_conn, agent, hours_ago=0, cost_usd=0.5, in_total=10, out_total=5)  # the live tail
+    _usage(db_conn, agent, hours_ago=0, cost_usd=0.5, in_total=10, out_total=5)
     db_conn.commit()
 
     before = usage.aggregate(rows([agent], None, None, database_gate=database_gate))["per_agent"][
@@ -219,7 +213,7 @@ def test_whole_life_is_the_same_before_and_after_the_ledger_is_folded(
         str(agent)
     ]
 
-    assert token_totals.folded_through(db_conn) >= today - timedelta(days=20)  # two days folded
+    assert token_totals.folded_through(db_conn) >= today - timedelta(days=20)
     assert (before["llm_calls"], before["tokens_in"], before["cost_usd"]) == (23, 2210, 9.5)
     assert after == before
 

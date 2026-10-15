@@ -1,5 +1,3 @@
-"""A bearer-only runner receives no database login, and a bundle whose login cannot be proven never installs (real PostgreSQL, PgBouncer and Redis)."""
-
 from __future__ import annotations
 
 import os
@@ -30,9 +28,6 @@ born = _single_box.born
 
 
 def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAuthority:
-    """Serve bootstrap from `born`'s `.env`. The single-box gateway binds
-    loopback (empty bearer), so its served endpoint must stay on loopback for
-    the co-located runner under test."""
     from base.host.env import dotenv_file
 
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: born.home)
@@ -45,9 +40,6 @@ def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAut
 def test_a_bearer_only_runner_receives_no_database_login(
     born: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The retired exchange: a stale runner holding the bearer fetches
-    bootstrap. The payload carries no generation login, and its endpoint alone
-    opens no door."""
     bootstrap_authority = _serve_on_loopback(monkeypatch, born)
     served = config.bootstrap_config_values(
         bootstrap_authority,
@@ -77,7 +69,6 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     runner.mkdir(mode=0o700)
     bundle = issue(born.home, runner, endpoint=endpoint)
     pooler.stop_pgbouncer(force=True)
-    # The served endpoint is the arbiter: a login it does not answer never installs.
     with pytest.raises(unit.UnitCapabilityError, match="refuses generation 0"):
         unit.install_bundle(runner, _open(bundle), machine=MACHINE, served_endpoint=endpoint)
     assert unit.load_unit_capability(runner) is None
@@ -95,7 +86,6 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     assert installed.generation.number == 0
     with psycopg.connect(installed.dsn, prepare_threshold=None, connect_timeout=5) as conn:
         assert conn.execute("SELECT current_user").fetchone() == ("ava_g0_runner",)
-    # A re-issued bundle of the same generation installs again.
     again = unit.install_bundle(
         runner,
         _open(issue(born.home, runner, endpoint=endpoint)),

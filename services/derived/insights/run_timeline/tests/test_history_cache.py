@@ -1,5 +1,3 @@
-"""`HistoryViewCache`: a view is shared by concurrent readers and kept while the checkpoint id holds."""
-
 from __future__ import annotations
 
 import threading
@@ -18,8 +16,6 @@ from services.derived.insights.run_timeline.history import HistoryViewCache
 
 
 class FakeStore:
-    """Counts checkpoint reads; `head` is the newest checkpoint id the store reports."""
-
     def __init__(self, monkeypatch: pytest.MonkeyPatch, *, delay: float = 0.0) -> None:
         self.head: str | None = "c1"
         self.loads = 0

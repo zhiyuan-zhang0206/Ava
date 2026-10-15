@@ -1,5 +1,3 @@
-"""Row setup and retained hosted-force operations for resurrection tests."""
-
 from __future__ import annotations
 
 from uuid import uuid4
@@ -54,11 +52,6 @@ def spawn_agent(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
 ) -> int:
-    """Test setup helper — mirrors the pre-#1236 `spawn_agent()` contract
-    (create row + launch) as the two-phase split: `create_agent_row`
-    (gateway-side, the main data-plane identity) then `_launch_agent_process`
-    (runner-side), with the launch stubbed by the autouse guard. The launch op's
-    prompt-delivery half is covered in ops/lifecycle/tests/test_operations.py."""
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
@@ -97,7 +90,6 @@ def hosted_agent(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
 ) -> int:
-    """Seed the retained authority of a hosted incarnation for guard tests."""
     agent_id = spawn_agent(
         config_authority=config_authority,
         model_catalog=model_catalog,
@@ -122,7 +114,6 @@ async def settle_hosted_force(
     *,
     local_machine: MachineIdentity,
 ) -> None:
-    """Complete this inactive fixture through its retained hosted owner."""
     from base.agents.incarnation.hosted_force import original_host_force
 
     row = db.execute("SELECT runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()

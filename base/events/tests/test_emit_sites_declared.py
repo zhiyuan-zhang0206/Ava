@@ -1,14 +1,3 @@
-"""Every event a production call site emits by literal name is declared in the registry.
-
-`emit()` validates the name and the category against `EVENTS` and raises `ValueError` for an
-undeclared name. Producers wrap the call in best-effort handlers, so an undeclared name does not
-crash anything: the event just never exists. The first miss of this kind (task #1136) got a test for
-that one event; nothing scanned the call sites. This scans them.
-
-Scope, stated so the gap is visible: a call whose event name is not a string literal (a variable, an
-f-string, a pass-through parameter) cannot be checked statically and is not covered.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -38,10 +27,6 @@ def _literal(node: ast.expr | None) -> str | None:
 
 
 def literal_emit_sites(source: str) -> list[tuple[int, str, str]]:
-    """(line, category, event_name) of every `emit("<category>", "<event>", ...)`-shaped call.
-
-    A call is recognised by its first argument being a literal event category, whatever the
-    callee is imported as, so `telemetry.emit`, `emitter.emit` and a bare `emit` all count."""
     sites: list[tuple[int, str, str]] = []
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):

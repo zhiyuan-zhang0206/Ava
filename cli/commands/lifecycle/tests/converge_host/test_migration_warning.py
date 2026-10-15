@@ -1,5 +1,3 @@
-"""Converge reports untracked migrations without applying them."""
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -16,8 +14,6 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 class TestWarnUntrackedMigrations:
-    """The converge step that surfaces untracked migrations/ files to the operator."""
-
     def test_warns_and_lists_untracked_files(
         self,
         capsys: pytest.CaptureFixture[str],
@@ -58,8 +54,6 @@ class TestWarnUntrackedMigrations:
         assert capsys.readouterr().out == ""
 
     def test_registered_gateway_only(self) -> None:
-        """The warning is wired into CONVERGE_STEPS with gateway-only roles: the
-        gateway is the single schema writer, so only its console should carry it."""
         step = next(
             s for s in converge_host.CONVERGE_STEPS if s.name == "untracked migrations warning"
         )

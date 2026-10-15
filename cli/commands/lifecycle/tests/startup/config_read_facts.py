@@ -1,5 +1,3 @@
-"""Explicit config-reader facts for the process-domain consumption matrix."""
-
 from __future__ import annotations
 
 import ast
@@ -37,7 +35,6 @@ class _ReaderFacts(ast.NodeVisitor):
         return scope.unmodified_origin(node)
 
     def _written(self, node: ast.expr, scope: bindings.Scope) -> bool:
-        """A receiver's attribute mutations invalidate its declared provenance."""
         expression = ast.unparse(node)
         current: bindings.Scope | None = scope
         while current is not None:
@@ -242,11 +239,6 @@ def _literal_argument(node: ast.Call, position: int, name: str) -> str | None:
 
 
 def explicit_config_reads(source: str, path: str = "") -> list[tuple[str, str | None]]:
-    """Literal reads proven by canonical import origins and unmodified receiver types.
-
-    Dynamic agent fields still prove consumption of a literal domain. Unknown
-    literal fields/domains fail rather than manufacturing a consumption fact.
-    """
     from base.host.env.config_lite_table import FIELD_DOMAINS
 
     tree = ast.parse(source)

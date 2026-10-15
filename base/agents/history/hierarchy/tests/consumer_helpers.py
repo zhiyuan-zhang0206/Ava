@@ -1,12 +1,9 @@
-"""Explicit configuration inputs for real hierarchy consumer tests."""
-
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
 from base.clock import Clock
 from base.config import settings
 
 
 def read_inputs() -> UnderstandingReadInputs:
-    """Keep the test's existing field mutations visible at each real read point."""
     return UnderstandingReadInputs(
         enabled=lambda: settings.agent.understanding_enabled,
         default_model=lambda: settings.lm.llm_model,

@@ -42,7 +42,7 @@ Capability ownership: [[tests/fixtures/unit/docs/unit-fixtures.ava.okf.md]].
 Existing fixture visibility and migration constraints: [[tests/docs/test-fixtures/path-scopes.ava.okf.md]].
 
 ### Isolation invariants
-- `process_config` snapshots a session `ConfigBoot` only when a consumer requests configuration, before its function home. Provisioning publishes requested URLs to that owned value. `configuration.snapshot_process_config()` preserves explicit/default origins. SDK consumers bind `ava.tests.fixtures.sdk` locally for context and recorder isolation. SDK operation tests opt into `sdk_model_owner`; installer preconditions and settings stay separate.
+- `process_config` snapshots a session `ConfigBoot` only when a consumer requests configuration, before its function home. Provisioning publishes requested URLs to that owned value. `configuration.snapshot_process_config()` preserves explicit/default origins in an independent, one-time snapshot; later changes belong on that owner, not legacy settings. SDK consumers bind `ava.tests.fixtures.sdk` locally for context and recorder isolation. SDK operation tests opt into `sdk_model_owner`; installer preconditions and settings stay separate.
 - The pytest entry captures one immutable `LoadedCommit` in its stash. Opt-in `database_version` resolves that entry's native image before subprocess doubles; `database_gate` supplies independent nonexempt budgets shared by each test's builders. Provisioning supplies the explicit boot-owned machine reader to native migration setup. Assembled Gateway owners retain explicit machine inputs and overlapping lifespans borrow their original writer.
 - **Per native xdist worker / session**, only requested instances start and persist for their owner's lifetime. Each DB consumer drains telemetry before TRUNCATE and again before revoking access; each Redis consumer starts with FLUSHDB. URLs in Settings, environment and the private `.env` restore after each function, including failed setup. Checkpoint schema is prepared once per requested database.
 - Real consumers request `db_url` / `db_conn` / `database`, `redis_url` / `event_bus`, or an owner that depends on them. Assembled Gateway fixtures use `gateway_data_plane`, which also binds label and schedule guards. Tests owning their own native instance request only the corresponding access fixture and retain their existing resource cleanup. CLI and permissions-helper owners bind readiness, isolated port and private native-command guards beside their consumers; no resource inference or new path registry is involved.
@@ -54,7 +54,7 @@ Existing fixture visibility and migration constraints: [[tests/docs/test-fixture
   `os.exec*`. Tests of those boundaries explicitly supply their own doubles or
   opt into an isolated native proof with owned cleanup. The `os.exec*` guard
   protects the test runner itself from process replacement.
-- Plugin registrations (sections, namespaces, state fields) reset together after any test that loaded them, and the `_qualname` stamp `install_namespace` leaves on each namespace module taken off: autouse guard in `tests/fixtures/plugin_registrations.py`, wired via `pytest_plugins`
+- Plugin installation restoration and early host-environment cleanup: [[plugin-isolation.ava.okf.md]].
 
 Static execution ownership and CI artifacts: [[tests/fixtures/docs/static-environment.ava.okf.md]].
 

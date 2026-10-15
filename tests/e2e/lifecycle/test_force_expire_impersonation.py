@@ -1,5 +1,3 @@
-"""The sidebar closes a live external session and the native agent resumes."""
-
 from __future__ import annotations
 
 import os
@@ -31,7 +29,6 @@ from tests.e2e.fixture_environment import E2EEnv
 def _seed_active_lease(
     agent_id: int, relay_token: str, database_gate: ProcessDbGate
 ) -> tuple[UUID, int]:
-    """Insert one already-active lease without publishing intermediate consent wakes."""
     lease_id = uuid4()
     with psycopg.connect(settings.data_plane.db_url) as conn:
         row = conn.execute(
@@ -71,7 +68,6 @@ def _exhaust_delivery_budget(
     *,
     local_machine: str,
 ) -> str:
-    """Drive real relay reservations; leave the unanswered UI request for native recovery."""
     request = "Please keep this unanswered request when the external session ends."
     env.page.fill('[data-testid="composer-input"]', request)
     env.page.click('[data-testid="composer-send"]')
@@ -89,7 +85,6 @@ def _exhaust_delivery_budget(
     assert reserve_delivery(
         db, bus, handle, relay_token, pending, local_machine=local_machine
     ) == frozenset(pending)
-    # A stale inbox snapshot must not spend a second attempt in the same window.
     assert not reserve_delivery(db, bus, handle, relay_token, pending, local_machine=local_machine)
 
     def retry_due() -> tuple[bool, object]:
@@ -101,8 +96,6 @@ def _exhaust_delivery_budget(
     poll_until(retry_due, timeout=10.0, what="second delivery becomes due")
 
     def budget_exhausted() -> tuple[bool, object]:
-        # The real expiry check detects the elapsed final ACK window, without
-        # rewriting delivery timestamps or marking the input received.
         session = relay_get(db, bus, handle, relay_token, local_machine=local_machine)
         with psycopg.connect(settings.data_plane.db_url) as conn:
             state = conn.execute(
@@ -115,7 +108,7 @@ def _exhaust_delivery_budget(
         assert session["status"] == "active"
         assert session["expires_at"] == before["expires_at"]
         assert state is not None and state[1:] == (2, None, "pending")
-        assert len(model_inputs(env.agent_id)) == 1  # Native execution remains parked.
+        assert len(model_inputs(env.agent_id)) == 1
         return bool(state[0] and "exhausted its delivery budget" in state[0]), state
 
     poll_until(budget_exhausted, timeout=10.0, what="final ACK window expires")
@@ -134,7 +127,6 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
     exhaust_ack_budget: bool,
     database_gate: ProcessDbGate,
 ) -> None:
-    # The test-process relay driver uses the same machine as the real e2e host.
     local_machine = validate_machine_name(os.environ["AVA_MACHINE_NAME"])
     reset_record()
     page = e2e_env.page
@@ -145,7 +137,6 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
     page.click('[data-testid="composer-send"]')
     page.get_by_text(FIRST_REPLY).wait_for(timeout=30_000)
 
-    # A visible streaming reply can precede its durable checkpoint.
     def first_turn_committed() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn:
             inbound = conn.execute(
@@ -184,12 +175,6 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
     assert card["open_impersonation_session_id"] == session_id
     assert card["open_impersonation_status"] == "active"
 
-    # The sidebar shows no dedicated takeover label or on-row button (the only
-    # visible difference for an impersonated agent is its status) — ending a
-    # takeover is reachable only from the row's right-click context menu.
-    # Radix keeps the menu's content live while it stays open, so a single
-    # right-click followed by a generous wait still lets the frontend's own
-    # SSE-driven roster refetch land the conditional menu item.
     row = page.locator("li.group.relative").filter(has_text=f"#{agent_id}").first
     row.click(button="right")
     menu_item = page.get_by_role("menuitem", name="End external takeover session")
@@ -198,9 +183,6 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
     menu_item.click()
     page.get_by_text("Takeover session ended").wait_for(timeout=10_000)
 
-    # Re-open the menu until the item is gone — proves the frontend, not just
-    # the backend, has picked up the closed session (mirrors the pre-removal
-    # test's poll on the on-row button's disappearance).
     def end_item_absent() -> tuple[bool, object]:
         row.click(button="right")
         present = page.get_by_role("menuitem", name="End external takeover session").is_visible()
@@ -241,4 +223,4 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
                 "WHERE m.lease_id=%s AND i.content=%s",
                 (lease_id, request),
             ).fetchone()
-        assert received == ("done", 2, None)  # Native consumed it; no external ACK was invented.
+        assert received == ("done", 2, None)

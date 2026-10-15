@@ -1,10 +1,3 @@
-"""Sessions of the pty-sessions service: real `bash -l -i` shells on real ptys.
-
-Each test runs a service subprocess under its own tmp `AVA_HOME` (`pty_service`)
-and drives it only through `base.sessions.pty.client`, the shape every consumer
-uses. POSIX-only (pty.fork + bash).
-"""
-
 from __future__ import annotations
 
 import os
@@ -65,9 +58,6 @@ def test_new_honors_cwd(unit_home: Path) -> None:
     new("ava-test-cwd-1", cwd)
     type_line("ava-test-cwd-1", "pwd")
 
-    # The pty is 120 columns wide and pytest's tmp path can exceed that, wrapping
-    # `pwd`'s output mid-path with a newline the terminal inserted rather than the
-    # shell: compare against the capture with the wrap newlines stripped (issue #77).
     assert wait_for(lambda: str(cwd) in screen("ava-test-cwd-1").replace("\n", ""))
 
 
@@ -97,22 +87,19 @@ def test_list_filters_by_prefix_and_has_reflects_liveness(unit_home: Path) -> No
 def test_send_transports_tricky_text(unit_home: Path) -> None:
     name = "ava-test-b64-1"
     new(name, unit_home)
-    wide = chr(0x4F60) + chr(0x597D)  # multi-byte UTF-8 must survive the wire and the shell
+    wide = chr(0x4F60) + chr(0x597D)
     tricky = f'quote " and spaces {wide}'
     type_line(name, f"echo '{tricky}'")
     assert tricky in output_until(name, tricky)
 
 
 def test_send_without_enter_does_not_submit(unit_home: Path) -> None:
-    """Text and Enter are separate writes (the SDK contract); text alone must sit
-    unsubmitted on the line editor."""
     name = "ava-test-noent-1"
     new(name, unit_home)
     type_line(name, "echo ready-check")
     output_until(name, "ready-check")
     client.send(name, b"echo not-submitted-yet")
 
-    # Whitespace-normalized: with a long cwd the echoed text can wrap mid-word.
     assert wait_for(lambda: "echonot-submitted-yet" in "".join(screen(name).split()))
     assert "not-submitted-yet" not in [line.strip() for line in screen(name).split("\n")]
     press(name, "Enter")
@@ -136,7 +123,6 @@ def test_send_keys_ctrl_c_interrupts_the_foreground(unit_home: Path) -> None:
 def test_shell_foreground_wait_does_not_accept_an_interrupted_live_job(
     unit_home: Path,
 ) -> None:
-    """A controlled SIGINT handler keeps the job foreground until explicitly released."""
     ready, interrupted, consumed, release = (
         unit_home / item for item in ("ready", "interrupted", "consumed", "release")
     )
@@ -162,8 +148,6 @@ def test_shell_foreground_wait_does_not_accept_an_interrupted_live_job(
     try:
         press(name, "C-c")
         assert wait_for(interrupted.exists)
-        # Reproduce the old order: the next line still belongs to the job,
-        # so the shell cannot execute it even though SIGINT was delivered.
         type_line(name, "echo premature-input")
         assert wait_for(consumed.exists)
         assert consumed.read_text() == "echo premature-input\n"
@@ -198,8 +182,6 @@ def test_resize_is_seen_by_stty(unit_home: Path) -> None:
 
 
 def test_capture_visible_screen_renders_tui_layout(unit_home: Path) -> None:
-    """A cursor-addressed full-screen program: the visible screen shows the final
-    layout (pyte) and the scrollback still holds the history."""
     name = "ava-test-tui-1"
     new(name, unit_home)
     type_line(name, "echo tui-ready")
@@ -252,10 +234,6 @@ def test_the_caller_env_reaches_the_shell(unit_home: Path) -> None:
 def test_the_service_profile_marker_and_virtualenv_do_not_leak_into_a_shell(
     pty_service: PtyServiceProcess, unit_home: Path
 ) -> None:
-    """A service launched under a profile marker must not hand it to its shells: a
-    leaked marker kills every watcher at `import ava` (Task #856). The service
-    environment is otherwise the shell's base, and the creator's overlay wins,
-    for the marker and for VIRTUAL_ENV alike."""
     pty_service.stop()
     marked = PtyServiceProcess(
         unit_home,
@@ -285,9 +263,6 @@ def test_the_service_profile_marker_and_virtualenv_do_not_leak_into_a_shell(
 
 
 def test_a_shell_inherits_no_descriptor_of_the_service(unit_home: Path) -> None:
-    """The service holds every master; a shell that kept one would hold another
-    session's terminal open past its death and defeat the hangup. Only the
-    standard descriptors (and `ls`'s own directory handle) may be open in a job."""
     for name in ("ava-test-fd-1", "ava-test-fd-2", "ava-test-fd-3"):
         new(name, unit_home)
     type_line(
@@ -357,8 +332,6 @@ def test_kill_is_an_idempotent_noop_on_an_absent_session() -> None:
 
 
 def test_kill_then_an_immediate_same_name_new_is_a_real_session(unit_home: Path) -> None:
-    """kill x then new x with no pause: the new builds a REAL fresh session, never
-    adopts the dying one as its success."""
     name = "ava-test-rebirth-1"
     new(name, unit_home)
     (first,) = client.list_sessions()
@@ -381,7 +354,6 @@ def test_kill_idle_reports_not_interrupted(unit_home: Path) -> None:
 
 @pytest.mark.parametrize(("job", "interrupted"), [("sleep 300", True), ("sleep 300 &", False)])
 def test_kill_verdict_reports_foreground_work(unit_home: Path, job: str, interrupted: bool) -> None:
-    """The verdict describes known foreground work, not all background work."""
     name = "ava-test-verdict-job-1"
     new(name, unit_home)
     type_line(name, "echo verdict-job-ready")
@@ -397,21 +369,16 @@ def test_kill_verdict_reports_foreground_work(unit_home: Path, job: str, interru
 
 
 def test_a_zombie_shell_is_not_a_live_session(unit_home: Path) -> None:
-    """A shell that exited but is not yet reaped cannot execute: `has` says no
-    even before the reader gets to reap it."""
     name = "ava-test-zombie-1"
     new(name, unit_home)
     shell = shell_process(name)
-    os.kill(shell.pid, signal.SIGSTOP)  # the reader's reap needs the shell dead, not stopped
+    os.kill(shell.pid, signal.SIGSTOP)
     os.kill(shell.pid, signal.SIGKILL)
     assert wait_for(lambda: not client.has_session(name))
     assert name not in client.live_sessions()
 
 
 def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) -> None:
-    """A stop or restart closes every persistent terminal, so the host-transition verbs
-    refuse to run from inside one (`hosting_supervised_session`): they would end
-    themselves mid-flight."""
     import sys
 
     from base.sessions.pty.tests.pty_service import REPO
@@ -428,7 +395,6 @@ def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) 
 
 
 def hosting_from_outside() -> str | None:
-    """The same question asked by this test process, which no session hosts."""
     from base.sessions.hosting import hosting_supervised_session
 
     return hosting_supervised_session()

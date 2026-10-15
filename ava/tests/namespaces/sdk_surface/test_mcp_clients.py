@@ -1,5 +1,3 @@
-"""SDK composition keeps per-context MCP policy and lazy resource lifetimes."""
-
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -21,7 +19,6 @@ class _NoCache:
 
 
 def _list_tools(server: str) -> list[Any]:
-    """`list_tools` over the bound context's own MCP clients, with no cache."""
     clients = process_context.current_context().clients.get(McpClients)
     source = mcps.call_funnel.ToolSource(
         remote=clients.remote,

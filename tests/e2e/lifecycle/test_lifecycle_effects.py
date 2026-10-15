@@ -1,10 +1,3 @@
-"""Agent lifecycle: each action's effect is witnessed, not just that the call returned.
-
-Real agents (gateway, agent host, exec child) with a recording scripted model
-(`fakes/scenarios/lifecycle_effects.py`). Witnesses: what each agent's model was handed,
-inbound rows and agent status in the database, the process table, the checkpoint.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -80,9 +73,6 @@ def _wait_for_model_calls(agent_id: int, n: int, what: str) -> None:
     )
 
 
-# -- agent-to-agent message ----------------------------------------------------
-
-
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_relay")
 def test_sdk_message_reaches_the_other_agents_model(spawned_agent: int, clean_record: None) -> None:
     sender = spawned_agent
@@ -92,7 +82,6 @@ def test_sdk_message_reaches_the_other_agents_model(spawned_agent: int, clean_re
         chat_and_wait(sender, "relay a ping")
         _wait_for_model_calls(peer, 1, f"peer {peer} woken by the message")
 
-        # The peer's model was handed the text, and the inbound names the sender.
         assert world.PING in _human_text(model_inputs(peer)[0]), (
             f"peer's first model input lacks the message: {model_inputs(peer)[0][-3:]}"
         )
@@ -101,14 +90,9 @@ def test_sdk_message_reaches_the_other_agents_model(spawned_agent: int, clean_re
             f"agent:{sender}",
             "claimed",
         ) in _inbound(peer), _inbound(peer)
-        # The sender saw its own exec confirm the send; it did not get the peer's reply
-        # as a side channel (messages are not return values).
         assert f"sent-to {peer}" in _tool_text(model_inputs(sender)[1])
     finally:
         _terminate(peer)
-
-
-# -- SDK spawn -----------------------------------------------------------------
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_spawn")
@@ -127,15 +111,11 @@ def test_sdk_spawn_starts_a_child_that_runs_the_prompt(
         assert ("chat", f"agent:{parent}") in [(k, s) for k, s, _ in _inbound(child)], _inbound(
             child
         )
-        # The row in the agent directory is real and reachable through the REST API.
         got = httpx.get(f"{GATEWAY_URL}/api/agents/{child}", timeout=10.0)
         got.raise_for_status()
         assert got.json()["agent_id"] == child
     finally:
         _terminate(child)
-
-
-# -- external terminate --------------------------------------------------------
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_terminate")
@@ -151,10 +131,8 @@ def test_external_terminate_stores_a_message_that_greets_the_revival(
     ).raise_for_status()
     wait_for_status(agent, "terminated")
     assert any(k == "terminate" and s == "user" for k, s, _ in _inbound(agent)), _inbound(agent)
-    # Terminating alone costs no model call: the note is stored, not answered.
     assert len(model_inputs(agent)) == 1
 
-    # A new message revives the same agent; its model is handed the stored note.
     chat_and_wait(agent, "are you back")
     revived = model_inputs(agent)[1]
     assert world.TERMINATE_NOTE in _human_text(revived), (
@@ -175,25 +153,20 @@ def test_forced_terminate_kills_a_running_exec_and_its_process(
     _assert_exec_never_finishes()
 
 
-# -- cancel --------------------------------------------------------------------
-
-
 def _assert_exec_never_finishes() -> None:
-    """Wait past the exec's sleep: an exec that survived would write its marker by now."""
     time.sleep(world.LONG_SLEEP_SECONDS)
     marker = world.exec_finished_marker()
     assert not Path(marker).exists(), "the cancelled exec kept running and finished"
 
 
 def _start_long_exec(agent_id: int) -> None:
-    """Send the message that makes the agent run its long exec; return once it is mid-turn."""
     httpx.post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/messages",
         json={"content": "run the long job", "source": "user"},
         timeout=10.0,
     ).raise_for_status()
     _wait_for_model_calls(agent_id, 1, "model asked for the long exec")
-    time.sleep(3.0)  # let the exec child start sleeping
+    time.sleep(3.0)
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_cancel")
@@ -207,8 +180,6 @@ def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
     from base.db import Database, pool
     from base.events.live.bus import EventBus
 
-    # This stack disables HTTP auth; drive the canonical native admission owner
-    # as a trusted test producer. HTTP credential admission has gateway tests.
     with pool(max_size=2, gate=database_gate) as command_pool:
         target = observe_native_work(command_pool, agent)
         assert target is not None
@@ -233,9 +204,6 @@ def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
 
     chat_and_wait(agent, "are you still there")
     assert any("are you still there" in _human_text(c) for c in model_inputs(agent))
-
-
-# -- agent-initiated compact ---------------------------------------------------
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_self_compact")

@@ -49,3 +49,7 @@ Together with SDK wraps (a plugin's declared `SdkWrap`, applied by `ava/sdk_surf
 - The permission hook example (`demos/permission-hooks/sensitive_op_gate.py:_SensitiveOpGateHook`) demonstrates the hook system's access control application: two-stage interception (block/warn), intercepting sensitive operations (force push, delete files, external sends, etc.) in before_exec; when blocking, returns `goto: "after_exec"` to skip the exec node
 
 Understanding producers receive an explicit live agent-field reader. They read the enabled gate only after the existing pool/state guards and read the chunk ratio only when planning a subsequent segment cut; compaction passes the same reader through its snapshot and closing-chunk helpers.
+
+`tests/fakes.py` gives fake cursors `fetchone=None` and `fetchall=[]` to mean no
+pending interruption. A truthy default mock can falsely trigger cancellation
+or termination probes and their watcher path.

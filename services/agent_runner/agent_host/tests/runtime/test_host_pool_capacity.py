@@ -1,11 +1,3 @@
-"""Real PgBouncer bounds for host pools, not a benchmark of running agents.
-
-These tests deliberately use two PostgreSQL backends and many more client
-leases. Short transactions release the server connection while a Python task
-retains its client lease. Separate control pools reserve client capacity only;
-they do not promise priority when every PgBouncer backend has a long transaction.
-"""
-
 import asyncio
 import time
 from collections.abc import Callable
@@ -66,7 +58,6 @@ async def _hold_workload_lease(
     release: asyncio.Event,
     backend_ids: set[int],
 ) -> None:
-    """Borrow one workload lease, report it, and keep it until `release`."""
     async with workload.connection() as conn:
         row = await (await conn.execute("SELECT %s::int, pg_backend_pid()", (value,))).fetchone()
         assert row is not None and row[0] == value
@@ -87,8 +78,6 @@ async def _observe_full_workload_pool(
     tasks: asyncio.TaskGroup,
     record_property: Callable[[str, object], None],
 ) -> None:
-    """With every lease held, one more workload request queues while control
-    still reads, and PgBouncer's client/server counts stay bounded."""
     async with asyncio.timeout(15):
         for _ in range(borrower_count):
             await acquired.get()
@@ -97,8 +86,6 @@ async def _observe_full_workload_pool(
             await asyncio.sleep(0)
         assert workload.get_stats()["requests_waiting"] == 1
         assert not queued.done()
-        # All workload clients remain borrowed. Their autocommit
-        # queries released the two backends for this control read.
         await _control_query(control)
         assert not queued.done()
         counts = await _pool_counts(admin, str(conninfo_to_dict(pooled)["dbname"]))
@@ -154,15 +141,10 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """The default 64 leases fit; the 65th waits without blocking control.
-
-    The old 20-client workload pool cannot reach this borrower barrier.
-    """
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as direct,
         pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
     ):
-        # The host pools dial the cluster's access URL, which is this pooler.
         monkeypatch.setattr(settings.data_plane, "db_url", pooled)
         async with (
             build_shared_pool(
@@ -185,7 +167,6 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
 async def _cancel_blocked_transaction(
     pool: AsyncConnectionPool, observer: psycopg.AsyncConnection, request_id: int
 ) -> None:
-    """Cancel an actual blocked SQL query after its earlier INSERT succeeded."""
 
     async def transaction() -> None:
         async with pool.connection() as conn, conn.transaction():
@@ -233,8 +214,6 @@ async def _insert_requests_holding_first_lease(
     release: asyncio.Event,
     backend_ids: set[int],
 ) -> None:
-    """Commit each request in its own short transaction; after the first one
-    keep the client lease at the barrier until `release`."""
     for offset, request_id in enumerate(request_ids):
         async with pool.connection() as conn:
             async with conn.transaction():
@@ -260,8 +239,6 @@ async def _observe_barrier_then_release(
     release: asyncio.Event,
     record_property: Callable[[str, object], None],
 ) -> None:
-    """Wait for every worker's first lease, check PgBouncer's counts and the
-    control pools, then let the workers run on."""
     try:
         for _ in range(worker_count):
             await acquired.get()
@@ -282,7 +259,6 @@ async def _settle_requests_across_pools(
     pooled: str,
     record_property: Callable[[str, object], None],
 ) -> set[int]:
-    """Run the worker fleet through the barrier; returns the backend pids seen."""
     worker_count = _RUNNERS * _BORROWERS_PER_RUNNER
     acquired: asyncio.Queue[None] = asyncio.Queue()
     release = asyncio.Event()
@@ -307,8 +283,6 @@ async def _settle_requests_across_pools(
             release=release,
             record_property=record_property,
         )
-        # These control queries now compete with ongoing short workload
-        # transactions. Completion is required; no latency SLO is claimed.
         for pool in controls:
             tasks.create_task(_control_query(pool))
     return backend_ids
@@ -323,19 +297,11 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
     machine_identity: MachineIdentity,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    """Exercise six pool pairs without claiming a thousand full agent turns.
-
-    Seventy-two workers keep the fixture below its 100-client ceiling, although
-    each pool uses the production defaults. The first request holds every client
-    lease at a barrier so PgBouncer's actual client/server counts are observable.
-    Six requests are cancelled in PostgreSQL; all other IDs must commit once.
-    """
     started = time.monotonic()
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as direct,
         pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
     ):
-        # The host pools dial the cluster's access URL, which is this pooler.
         monkeypatch.setattr(settings.data_plane, "db_url", pooled)
         async with AsyncExitStack() as stack:
             observer = await stack.enter_async_context(

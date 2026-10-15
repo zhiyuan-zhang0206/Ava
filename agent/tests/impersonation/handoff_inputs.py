@@ -1,5 +1,3 @@
-"""Real handoff graph, owned clients and transport evidence for integration tests."""
-
 import json
 from collections.abc import Callable, Iterator
 from dataclasses import replace
@@ -192,9 +190,7 @@ async def prepare_graph(
     saver = AsyncPostgresSaver(aops_pool)
     await saver.setup()
     wrap_saver_writes_with_nstep_interval(saver, 100)
-    # Delta write model (#3180): fold delta-written messages on read (daemon parity).
     wrap_saver_reads_with_delta_reconstruction(saver)
-    # The registered plugin fields are a dynamically constructed state schema.
     builder: Any = StateGraph(state_cls, context_schema=AvaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "__end__", "claim"))
     builder.add_node(
@@ -253,7 +249,6 @@ def deliver_peers_and_ack_first(
     *,
     machine_identity: MachineIdentity,
 ) -> int:
-    """Queue two peer messages, ACK the first through the lease; the still-pending id."""
     first_peer = insert_inbound_message(
         db_conn,
         agent_id,
@@ -295,7 +290,6 @@ def end_external_session(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """End the external lease by release or by letting it expire."""
     if finish == "release":
         leases.release(
             database,
@@ -333,7 +327,6 @@ def executor_acks_says_and_releases(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The external executor reads and ACKs the queued input, reports, then releases."""
     from base.agents.impersonation import history as history
 
     leases.inbox(
@@ -387,7 +380,6 @@ def assert_handoff_precedes_queued_input(messages: list[Any]) -> None:
 
 
 def assert_resume_note_delivery_contract(content: str) -> None:
-    """Check that pending delivery cannot be read as no SDK activity."""
     assert "External work complete" in content
     assert "structured handoff" not in content
     assert "The session record is available at:" in content
@@ -403,7 +395,6 @@ async def stop_takeover_with_lost_relay(
     owner: RuntimeIncarnation,
     relays: RelaySupervision,
 ) -> str:
-    """Observe unknown legacy relay custody without revoking the executor lease."""
     session = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert session is not None
     await impersonation.supervise_relay(
@@ -420,7 +411,6 @@ async def stop_takeover_with_lost_relay(
 def stop_takeover_with_exhausted_ack(
     db_conn: psycopg.Connection[Any], requested: dict[str, Any], owner: RuntimeIncarnation
 ) -> str:
-    """Stage an input whose ACK window ran out twice; the death detail the supervisor names."""
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content) "
         "VALUES(%s,'chat','user','Preserve this unacknowledged input') RETURNING id",
@@ -456,7 +446,6 @@ def assert_successor_handoff_preserves_unacknowledged_input(
     transcript = "\n".join(str(message.content) for message in resumed["messages"])
     assert "native runtime restarted" in transcript
     assert "Peer message acknowledged" not in transcript
-    # Inputs the executor read are returned through the handoff record, not replayed.
     handoff_path = workspace / "impersonation/0.json"
     assert str(handoff_path) in transcript
     handoff = json.loads(handoff_path.read_text())
@@ -480,8 +469,6 @@ async def resume_native(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    # The graph boundary pass observes the terminal lease; the resume chain
-    # then delivers the end note (never the abort transaction itself).
     ctx = replace(ctx, original_incarnation=owner)
     await graph.ainvoke(reset, config, context=ctx)
     assert not model_calls

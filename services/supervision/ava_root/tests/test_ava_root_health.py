@@ -1,10 +1,3 @@
-"""services.supervision.ava_root.health: one probe round — counting, policy, deferral.
-
-Policy tests drive the monitor with a stub supervisor and a probe whose verdict
-the test flips; two integration tests drive it against a real `Supervisor`
-replacing real generations and exercising the finite restart budget.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -34,8 +27,6 @@ from services.supervision.ava_root.supervisor import Supervisor
 
 
 class _Recorder:
-    """The structured log calls so far, as their field dictionaries (read from `loguru_records`)."""
-
     def __init__(self, records: LogRecords) -> None:
         self._records = records
 
@@ -53,12 +44,6 @@ def recorder(loguru_records: LogRecords) -> _Recorder:
 
 
 class StubSupervisor:
-    """RevivalHost stand-in: records restart calls; deferral answers from a map.
-
-    `unknown_units` mimic the real supervisor's `revival_deferral` raise for
-    units outside its registry (the static probe path).
-    """
-
     def __init__(
         self,
         deferrals: dict[str, str] | None = None,
@@ -95,8 +80,6 @@ class StubSupervisor:
 
 
 class CellProbe:
-    """A probe returning one flippable verdict; counts its calls."""
-
     def __init__(self, verdict: DaemonProbe) -> None:
         self.verdict = verdict
         self.calls = 0
@@ -107,8 +90,6 @@ class CellProbe:
 
 
 class FakeClock:
-    """The `monotonic` seam: advances a fixed step per call so windows elapse fast."""
-
     def __init__(self, start: float = 1000.0, step: float = 0.02) -> None:
         self.now = start
         self.step = step
@@ -134,7 +115,7 @@ def _registry(unit_id: str, probe: Callable[[], DaemonProbe]) -> ProbeRegistry:
 def _config(**overrides: Any) -> HealthConfig:
     values: dict[str, Any] = {
         "interval_s": 0.01,
-        "startup_grace_s": 0.0,  # Existing policy cases begin after startup grace.
+        "startup_grace_s": 0.0,
         "max_restart_attempts": 3,
     }
     values.update(overrides)
@@ -154,7 +135,7 @@ async def test_restart_uses_one_probe_and_next_round_observes_readiness(clock: F
     stub.on_restart = lambda: setattr(probe, "verdict", DaemonProbe.up("ok"))
     monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
     await monitor.run_round()
-    assert probe.calls == 1  # No replacement confirmation polling.
+    assert probe.calls == 1
     assert stub.restart_calls == ["svc"]
     assert monitor.snapshot()["svc"].last_verdict == "down"
     assert monitor.snapshot()["svc"].restart_attempts == 1
@@ -377,9 +358,6 @@ async def test_maintenance_gate_preserves_spent_attempts(clock: FakeClock) -> No
     assert stub.restart_calls == ["svc"] * 3
 
 
-# -- the round loop ------------------------------------------------------------
-
-
 async def test_start_stop_loop(clock: FakeClock) -> None:
     async with asyncio.TaskGroup() as tasks:
         probe = CellProbe(DaemonProbe.up("ok"))
@@ -393,10 +371,8 @@ async def test_start_stop_loop(clock: FakeClock) -> None:
         await asyncio.sleep(0.05)
         await monitor.stop()
         assert probe.calls >= 1
-        await monitor.stop()  # a second stop is a no-op
+        await monitor.stop()
 
-
-# -- integration against the real supervisor -----------------------------------
 
 _SLEEP_FOREVER = [sys.executable, "-c", "import time; time.sleep(60)"]
 _CHILD = Path(__file__).with_name("child_unit.py")
@@ -480,7 +456,6 @@ async def test_code_gate_exit_is_not_automatically_restarted(
     assert monitor.snapshot()["svc"].restart_attempts == 0
     assert len(recorder.events("root_unit_not_revivable")) == 6
     assert "update required" in str(recorder.events("root_unit_not_revivable")[0]["detail"])
-    # An explicit operator command still owns another attempt.
     await supervisor.up("svc")
     await _wait_stopped(supervisor)
     assert marker.read_text() == "start\nstart\n"
@@ -604,7 +579,6 @@ async def test_each_new_generation_has_bounded_startup_grace(
     stub.on_restart = replace_generation
     await monitor.run_round()
     assert stub.restart_calls == ["svc"]
-    # This newborn generation is still initializing; no extra verification loop runs.
     clock.now += 31
     await monitor.run_round()
     assert stub.restart_calls == ["svc"]

@@ -34,3 +34,11 @@ remain with their existing owners.
 
 Channel payloads and postcommit publishing remain documented in
 [[base/events/live/docs/live/live.ava.okf.md|Live Event Channel]].
+
+## Drop diagnostics
+
+The regressions in `tests/test_event_publisher_drop.py` require failure details
+to retain both exception class and message. A class-only representation loses
+the actionable transport reason. Transport-side `publish_error` reports are
+INFO; a reporting window that also contains local `queue_full` pressure is
+WARNING. Queue overflow drops the oldest buffered event, as described above.

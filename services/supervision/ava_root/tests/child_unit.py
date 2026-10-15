@@ -1,10 +1,3 @@
-"""Disposable supervised processes for the ava-root tests.
-
-Usage: `child_unit.py <scenario> [args]`. Each scenario is a small behavior a
-unit under test can have: sleeping, ignoring or slowly handling TERM, forking a
-child, or exiting with a code. Paths arrive as argv so the tests own the layout.
-"""
-
 import os
 import pathlib
 import signal
@@ -31,7 +24,6 @@ def _ignore_term(ready: str) -> None:
 
 
 def _read_config(output: str, value: str) -> None:
-    # Rename into place: the waiter polls for existence, not content.
     temporary = pathlib.Path(output + ".tmp")
     temporary.write_text(pathlib.Path(value).read_text())
     temporary.replace(output)
@@ -51,7 +43,6 @@ def _wait_for_file(trigger: str) -> None:
 
 
 def _closes_slowly(ready: str, close_s: str) -> None:
-    """Handle TERM by closing for `close_s` seconds before exiting, like a bounded drain."""
 
     def close(*_: object) -> None:
         time.sleep(float(close_s))
@@ -74,7 +65,6 @@ def _restart_down(ready: str, release: str) -> None:
 
 
 def _forked_late_child(child_file: str, ready: str) -> None:
-    """A native fork after TERM may outlive the known leader."""
 
     def finish(*_: object) -> None:
         pid = os.fork()

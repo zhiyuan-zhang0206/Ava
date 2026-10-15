@@ -1,20 +1,3 @@
-"""Child entry for the stop-under-a-blocked-worker test (task #5129).
-
-Usage: `child_stop_blocked_watch.py <home> <port> <ready> <blocked> <draining>
-<clean> <held-s>`
-
-Runs the ops daemon's real stop path (via `child_graceful_stop.run_ops_runner_entry`)
-with `watch_to_user` active alongside a default-executor thread that never
-finishes and a drain leg held open for <held-s>. The daemon must answer
-`/healthz` while that worker thread blocks, and a stop's SIGTERM, retried while
-the drain is held open for <held-s>, must still end the process inside its stop
-window instead of hanging in interpreter teardown joining the blocked thread.
-
-Markers: <ready> once the health server answers, <blocked> inside the blocked
-worker thread, <draining> once the drain is inside its held leg, <clean> once
-cleanup reached the serving body.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -31,17 +14,11 @@ from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 
 
 def _blocked_worker(blocked: Path) -> None:
-    """Occupy a default-executor thread that interpreter teardown would wait on."""
     blocked.write_text("blocked")
     threading.Event().wait()
 
 
 async def _held_cleanup(draining: Path, seconds: float) -> None:
-    """Hold the drain open so a retried stop lands inside it.
-
-    Synchronous on purpose: the drain cancels every task it finds, which cuts an
-    awaited leg short, so a blocking hold is the only one a test can time.
-    """
     try:
         await asyncio.Event().wait()
     finally:

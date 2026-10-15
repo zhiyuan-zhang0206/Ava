@@ -1,11 +1,3 @@
-"""Terminate and resurrect the same agent identity through hosted admission.
-
-The initial fake calls ava.self.terminate(). A later chat or explicit resurrect
-request creates durable resurrection intent; a newly built hosted runtime sees
-that inbound row and selects the follow-up script. The E2E test separately
-checks the new generation and delivery of the pending chat after resurrection.
-"""
-
 from __future__ import annotations
 
 import psycopg
@@ -51,5 +43,4 @@ def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
 
 
 def build_waiting_for_chat(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
-    """Use the same hosted resurrection scenario for the queued-wake test."""
     return build(model, agent_id=agent_id)

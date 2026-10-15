@@ -1,10 +1,3 @@
-"""The pty-sessions wire protocol and its protocol probe, against a real service.
-
-Every request is one JSON line; every response echoes the request's `id`, which
-is what the shared protocol probe (`services.supervision.healthchecks.protocol_probe`) pairs
-a ping with. A bad request must answer, never wedge or kill the service.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -29,7 +22,6 @@ pytestmark = pytest.mark.usefixtures("pty_service")
 
 
 def _raw(payload: bytes) -> dict[str, Any]:
-    """Send raw bytes, read the one response line."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
         conn.settimeout(10)
         conn.connect(str(service_socket_path()))
@@ -82,8 +74,6 @@ def test_a_bad_request_is_answered_and_the_service_keeps_serving(
 
 
 def test_an_oversize_request_is_cut_off_without_wedging_the_service() -> None:
-    """The service stops reading at the limit and hangs up; the sender may see the
-    refusal or only the reset, and the service keeps serving either way."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
         conn.settimeout(10)
         conn.connect(str(service_socket_path()))
@@ -102,7 +92,6 @@ def test_a_client_that_hangs_up_mid_request_does_not_hurt_the_service() -> None:
 def test_the_client_rejects_an_answer_to_another_request(
     pty_service: PtyServiceProcess,
 ) -> None:
-    """A response whose id is not the request's is somebody else's answer."""
     pty_service.stop()
     path = service_socket_path()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as fake:
@@ -124,7 +113,6 @@ def test_the_client_rejects_an_answer_to_another_request(
 
 
 def test_queries_read_a_missing_service_as_no_sessions(unit_home: Path) -> None:
-    """With no service running (the fixture's is stopped), a query answers truthfully."""
     del unit_home
     assert client.has_session("ava-test-anything") is False
     assert client.list_sessions() == []
@@ -142,7 +130,6 @@ def test_a_mutating_request_without_a_service_raises(
 def test_a_mutating_request_waits_for_a_service_that_is_still_starting(
     pty_service: PtyServiceProcess, unit_home: Path
 ) -> None:
-    """A start races its own clients: `new` dials until the socket accepts."""
     pty_service.stop()
     starter = threading.Timer(0.5, pty_service.start)
     starter.start()

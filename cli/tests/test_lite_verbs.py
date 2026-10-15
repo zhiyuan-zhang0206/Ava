@@ -1,16 +1,3 @@
-"""Which verbs `cli.main` opts out of the gateway config fetch (settings-lite).
-
-The lite opt-out exists so a runner's recovery verbs still construct Settings
-with the gateway down. `restart` must NOT be one of them: its preflight
-registers this machine in the central DB and its start leg needs the cluster
-config regardless, so a lite restart on a pure runner could only ever dial the
-never-dialed placeholder DB URL and die with PlaceholderDbUrlError — while a fetching restart works whenever
-restart can work at all.
-
-The dispatch is exercised for real (`cli.main.main`), with only the parser
-stubbed, so the test pins the actual env the dispatched verb runs under.
-"""
-
 from __future__ import annotations
 
 import json
@@ -28,8 +15,6 @@ from cli import parsers
 
 
 def _dispatched_fetch_env(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> str | None:
-    """Run `cli.main.main(argv)` with a stub parser; return the AVA_CONFIG_FETCH
-    value the dispatched verb's handler observed."""
     seen: dict[str, str | None] = {}
 
     def handler(_args: types.SimpleNamespace) -> int:
@@ -48,12 +33,10 @@ def test_restart_is_not_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_normal_drain_requires_cluster_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Native restart/checkpoint draining needs the runner's real data-plane URLs."""
     assert _dispatched_fetch_env(monkeypatch, ["stop"]) is None
 
 
 def test_force_stop_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Explicit force remains available when the gateway cannot supply config."""
     assert _dispatched_fetch_env(monkeypatch, ["stop", "--force"]) == "skip"
 
 
@@ -73,8 +56,6 @@ def test_only_completed_cold_stop_can_skip_gateway_fetch(
     hold: MaintenanceHold | None,
     expected: str | None,
 ) -> None:
-    """A repeated stop works offline; incomplete work must still drain."""
-    # Bootstrap and spawned interpreters consume the raw home before Settings.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))
     journal = tmp_path / "run" / "deploy-pause-owner.json"
     journal.parent.mkdir()
@@ -104,13 +85,10 @@ def test_corrupt_stop_journal_is_not_offline_success(
 
 
 def test_pty_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The allocation gate is an offline host recovery surface."""
     assert _dispatched_fetch_env(monkeypatch, ["pty", "status"]) == "skip"
 
 
 def test_status_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`status` (and `status --json`, the hold's reader) reads the local journal first,
-    so it stays offline-capable."""
     assert _dispatched_fetch_env(monkeypatch, ["status"]) == "skip"
     assert _dispatched_fetch_env(monkeypatch, ["status", "--json"]) == "skip"
 
@@ -163,7 +141,7 @@ def test_lite_cli_uses_its_local_runner_api_token(
                 )
             )
         except GatewayApiTokenMissing:
-            seen.append({})  # no token and no secret: nothing to present, and it says so
+            seen.append({})
         return 0
 
     def parse_args(_argv: list[str] | None) -> types.SimpleNamespace:

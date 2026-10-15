@@ -1,31 +1,3 @@
-"""Default credentials for in-process clients of the assembled Gateway app.
-
-The cluster API always authenticates: every test process carries the suite's
-cluster secret (`tests.fixtures.env_bootstrap`), and the Gateway's middleware
-verifies a request's `Authorization: Bearer <secret>` exactly as it does in
-production. This module gives every `TestClient` built over the Gateway app that
-bearer by default, so a test calls routes without configuring authentication and
-only the tests of authentication itself say anything about credentials.
-
-Scope is the Gateway app and nothing else: `TestClient`s over local FastAPI
-stand-ins, and clients other than `TestClient`, are untouched. The patch never
-imports `gateway.app` (unrelated tests must not depend on every router); it
-compares against the module only once something else has imported it.
-
-The bearer is the cluster secret current when the client is built, so a test that
-monkeypatches `settings.data_plane.cluster_secret` before building its client
-stays authenticated, and one that patches it afterwards is deliberately rejected.
-An explicit `Authorization` header (even an empty one) always wins.
-
-Helpers for the tests that need another posture:
-
-- `without_credentials(client)` drops the default bearer (an unauthenticated caller).
-- `disable_default_gateway_credentials(monkeypatch)` restores the stock `TestClient`
-  for a module whose subject is authentication itself: every client it builds is
-  anonymous until a test gives it a header.
-- `gateway_credentials(config)` is the header dict for an explicit `GatewayConfig`.
-"""
-
 from typing import Any
 
 import pytest
@@ -45,18 +17,15 @@ _STOCK_INIT = TestClient.__init__
 
 
 def gateway_credentials(config: GatewayConfig) -> dict[str, str]:
-    """The `Authorization` header of the given Gateway configuration's cluster secret."""
     return bearer_header(config.cluster_secret)
 
 
 def without_credentials(client: TestClient) -> TestClient:
-    """Make `client` an unauthenticated caller: drop its default bearer. Returns `client`."""
     client.headers.pop("Authorization", None)
     return client
 
 
 def disable_default_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Build `TestClient`s over the Gateway app with no credentials, as a stranger would."""
     monkeypatch.setattr(TestClient, "__init__", _STOCK_INIT)
 
 
@@ -67,7 +36,6 @@ def _gateway_config(app: object) -> GatewayConfig | None:
 
 
 def install_default_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give every `TestClient` over an assembled Gateway app its configured cluster secret."""
     original = TestClient.__init__
 
     def init(self: TestClient, app: Any, *args: Any, **kwargs: Any) -> None:

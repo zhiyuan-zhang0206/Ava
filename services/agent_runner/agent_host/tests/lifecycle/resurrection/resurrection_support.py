@@ -1,5 +1,3 @@
-"""Shared SQL row and lifecycle receipt setup for resurrection tests."""
-
 import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -72,7 +70,6 @@ def legacy_row(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """A row no birth epoch vouches for: only a later lifecycle release can."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),

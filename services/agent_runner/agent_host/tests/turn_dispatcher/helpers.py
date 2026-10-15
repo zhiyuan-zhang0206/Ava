@@ -1,5 +1,3 @@
-"""Turn-dispatcher test helpers: the recording turn, stuck-turn driver, fixed clocks and queueing Redis shared by the dispatcher tests."""
-
 from __future__ import annotations
 
 import asyncio
@@ -15,8 +13,6 @@ from services.agent_runner.agent_host.dispatcher import (
 
 
 class Recorder:
-    """A `run_turn` that records calls and can be released on command."""
-
     def __init__(self) -> None:
         self.started: list[int] = []
         self.finished: list[int] = []
@@ -40,21 +36,11 @@ class Recorder:
 
 
 async def settle() -> None:
-    """Let every ready callback run. Two hops: one for the task to be scheduled,
-    one for it to run to its next await."""
     for _ in range(6):
         await asyncio.sleep(0)
 
 
 class StuckTurn:
-    """A turn that refuses the cancel, then can be released.
-
-    Swallowing `CancelledError` forever is the faithful stand-in for a task
-    blocked in a C call — and it is also unkillable at loop teardown, so a test
-    using one hangs the whole run instead of failing. `release()` re-arms
-    cancellation so the test can clean up after asserting.
-    """
-
     def __init__(self) -> None:
         self.entered = asyncio.Event()
         self._released = False
@@ -69,10 +55,9 @@ class StuckTurn:
             except asyncio.CancelledError:
                 if self._released:
                     raise
-                continue  # refuses to unwind, exactly like a blocked C call
+                continue
 
     async def release(self) -> None:
-        """Let the turn die, so the loop can close on a clean task set."""
         self._released = True
         task = self._task
         if task is not None and not task.done():
@@ -82,18 +67,6 @@ class StuckTurn:
 
 
 async def aclose_without_hanging(sched: TurnScheduler, stuck: StuckTurn) -> bool:
-    """Run `sched.aclose()` and report whether it RETURNED, never hanging.
-
-    `asyncio.wait`, not `wait_for`: the pre-bound implementation sat in
-    `await task` under a `suppress(CancelledError, ...)` which ATE the
-    cancellation `wait_for` sends, so `wait_for` could not rescue the test and
-    the whole run hung instead of failing. Waiting without cancelling turns "it
-    never returned" into a boolean the caller can assert on.
-
-    Cleanup order is load-bearing: releasing the turn is what lets the pump task
-    die, which is what lets a still-parked `aclose` finish. Cancelling `aclose`
-    first cannot do it, for the same reason `wait_for` could not.
-    """
     closing = asyncio.create_task(sched.aclose())
     try:
         done, _ = await asyncio.wait([closing], timeout=5)
@@ -107,7 +80,6 @@ async def aclose_without_hanging(sched: TurnScheduler, stuck: StuckTurn) -> bool
 
 @contextlib.asynccontextmanager
 async def releasing_stuck_turn() -> AsyncGenerator[StuckTurn, None]:
-    """Release the cancellation-resistant fixture even when an assertion fails."""
     turn = StuckTurn()
     try:
         yield turn
@@ -116,8 +88,6 @@ async def releasing_stuck_turn() -> AsyncGenerator[StuckTurn, None]:
 
 
 class QueueingPubSub:
-    """Subscription fake that stays live while tests inject wake frames."""
-
     def __init__(self) -> None:
         self.messages: asyncio.Queue[dict[str, object]] = asyncio.Queue()
         self.closed = False
@@ -148,7 +118,6 @@ class QueueingRedis:
 
 
 def patch_redis(monkeypatch: pytest.MonkeyPatch, pubsub: QueueingPubSub) -> list[QueueingRedis]:
-    """Record every client open; a scan failure must never add one."""
     clients: list[QueueingRedis] = []
 
     def _open(_url: str, **_kw: object) -> QueueingRedis:

@@ -1,12 +1,3 @@
-"""Tests for base.cluster.provision_database + drop_database (the cluster-DB
-lifecycle pair).
-
-Uses the native session DB (settings.data_plane.db_url, provisioned by
-provisioned_db in tests/fixtures/provisioning.py). The admin URL is derived by replacing
-the database path component with 'postgres', matching the pattern used in
-base/deploy/tests/test_migrations.py.
-"""
-
 from __future__ import annotations
 
 import os
@@ -24,11 +15,6 @@ from base.cluster.dataplane.pg_admin import owner_conninfo
 from base.cluster.derive import swap_db
 from base.config import settings
 
-# provision_database creates a NOLOGIN owning role sharing the db identifier and
-# applies the schema acting as that role. The identifier is passed in full
-# (names-as-data) — production callers read it from the cluster's own URLs or
-# pass DATA_PLANE_IDENTITY at birth.
-
 
 def _admin_url() -> str:
     base, _ = settings.data_plane.db_url.rsplit("/", 1)
@@ -40,7 +26,6 @@ def _fresh_identity() -> str:
 
 
 def test_provision_database_creates_db_and_applies_schema(db_conn: object) -> None:
-    """provision_database creates the identity db, applies schema.sql (tables present)."""
     identity = _fresh_identity()
     expected_db = identity
     admin_url = _admin_url()
@@ -50,14 +35,12 @@ def test_provision_database_creates_db_and_applies_schema(db_conn: object) -> No
     try:
         assert provision_database(identity, base_admin_url=admin_url) is True
 
-        # Verify the database was created
         with psycopg.connect(admin_url, autocommit=True) as conn:
             row = conn.execute(
                 "SELECT 1 FROM pg_database WHERE datname = %s", (expected_db,)
             ).fetchone()
         assert row is not None, f"database {expected_db!r} was not created"
 
-        # Verify schema was applied — check a known table exists
         with psycopg.connect(db_url, autocommit=True) as conn:
             row = conn.execute(
                 "SELECT EXISTS ("
@@ -75,13 +58,10 @@ def test_provision_database_creates_db_and_applies_schema(db_conn: object) -> No
                 (expected_db,),
             )
             conn.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(expected_db)))
-            # provision_database also created the owning role (== expected_db).
             conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(expected_db)))
 
 
 def test_drop_database_removes_db_idempotent(db_conn: object) -> None:
-    """drop_database removes the identity db; a second drop on the now-absent DB is a
-    no-op (IF EXISTS), not an error."""
     identity = _fresh_identity()
     expected_db = identity
     admin_url = _admin_url()
@@ -100,22 +80,18 @@ def test_drop_database_removes_db_idempotent(db_conn: object) -> None:
             is None
         ), f"database {expected_db!r} still present after drop_database"
 
-    # idempotent: dropping an absent DB must not raise.
     drop_database(identity, base_admin_url=admin_url)
 
 
 def test_provision_database_idempotent(db_conn: object) -> None:
-    """Calling provision_database twice does not raise and does not re-apply schema."""
     identity = _fresh_identity()
     expected_db = identity
     admin_url = _admin_url()
 
     try:
         assert provision_database(identity, base_admin_url=admin_url) is True
-        # Second call: DB already exists — must be a no-op, no exception.
         assert provision_database(identity, base_admin_url=admin_url) is False
 
-        # DB still exists after both calls.
         with psycopg.connect(admin_url, autocommit=True) as conn:
             row = conn.execute(
                 "SELECT 1 FROM pg_database WHERE datname = %s", (expected_db,)
@@ -130,15 +106,11 @@ def test_provision_database_idempotent(db_conn: object) -> None:
                 (expected_db,),
             )
             conn.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(expected_db)))
-            # provision_database also created the owning role (== expected_db).
             conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(expected_db)))
 
 
 def test_provisioned_role_is_nosuperuser_and_owns_db(db_conn: object) -> None:
-    """The cluster role is created NOLOGIN NOSUPERUSER without a password and owns
-    its database — it never logs in, bypasses no grant, and application logins
-    reach the data only through the capability groups."""
-    role = expected_db = _fresh_identity()  # db and role share the identifier
+    role = expected_db = _fresh_identity()
     admin_url = _admin_url()
     try:
         provision_database(role, base_admin_url=admin_url)
@@ -158,10 +130,6 @@ def test_provisioned_role_is_nosuperuser_and_owns_db(db_conn: object) -> None:
 
 
 def test_role_cannot_read_another_clusters_database(db_conn: object) -> None:
-    """Isolation: cluster B's role, connecting to cluster A's database, cannot read
-    A's tables — it owns nothing there and holds no grant (NOSUPERUSER bypasses none)."""
-    # Distinct suffixes off one base — two _fresh_identity() calls can collide on
-    # the same microsecond, which would make a == b (one cluster) and void the test.
     base = _fresh_identity()
     a, b = f"{base}a", f"{base}b"
     admin_url = _admin_url()
@@ -169,7 +137,6 @@ def test_role_cannot_read_another_clusters_database(db_conn: object) -> None:
     try:
         provision_database(a, base_admin_url=admin_url)
         provision_database(b, base_admin_url=admin_url)
-        # Act as B's (NOLOGIN) role on A's database through the administrator.
         url_a_as_b = owner_conninfo(admin_url, database=db_a, owner=role_b)
         with (
             psycopg.connect(url_a_as_b, autocommit=True) as conn,
@@ -182,7 +149,6 @@ def test_role_cannot_read_another_clusters_database(db_conn: object) -> None:
 
 
 def _drop_db_and_role(admin_url: str, name: str) -> None:
-    """Terminate backends, DROP DATABASE, then DROP ROLE (the db + role share `name`)."""
     with psycopg.connect(admin_url, autocommit=True) as conn:
         conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
@@ -193,13 +159,7 @@ def _drop_db_and_role(admin_url: str, name: str) -> None:
         conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(name)))
 
 
-# ── ensure_pgvector_extension (superuser pre-create; availability-gated no-op) ──
-
-
 class _FakePgConn:
-    """One scripted connection: a single-row answer to the first query, then
-    records every statement (and the URL it dialed with)."""
-
     def __init__(self, url: str, *, first_row: tuple[object, ...] | None) -> None:
         self.url = url
         self.first_row = first_row
@@ -223,13 +183,6 @@ class _FakePgConn:
 def _patch_pg_connect(
     monkeypatch: pytest.MonkeyPatch, rows: list[tuple[object, ...] | None]
 ) -> tuple[list[str], list[_FakePgConn]]:
-    """psycopg.connect pops one scripted row per connection; returns
-    (dialed urls, connections).
-
-    Only the test's own thread draws a scripted row and is recorded: the patch
-    sits on the process-wide ``psycopg.connect``, and a dial from another thread
-    sharing the xdist worker must not consume this test's scripted answers
-    (2026-10-03 shard8 flake)."""
     urls: list[str] = []
     conns: list[_FakePgConn] = []
     owner = threading.current_thread()
@@ -249,8 +202,6 @@ def _patch_pg_connect(
 def test_ensure_pgvector_extension_noop_when_binaries_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A Postgres without the extension binaries is a silent no-op — no
-    CREATE EXTENSION attempt, and the backend preflight owns the failure."""
     from base.cluster.provision import ensure_pgvector_extension
 
     urls, conns = _patch_pg_connect(monkeypatch, [None])
@@ -262,8 +213,6 @@ def test_ensure_pgvector_extension_noop_when_binaries_absent(
 def test_ensure_pgvector_extension_precreates_in_cluster_db(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With the binaries available, CREATE EXTENSION IF NOT EXISTS runs in the
-    cluster identity database over the superuser connection."""
     from base.cluster.provision import ensure_pgvector_extension
 
     urls, conns = _patch_pg_connect(monkeypatch, [(1,), None])
@@ -278,15 +227,12 @@ def test_ensure_pgvector_extension_precreates_in_cluster_db(
 def test_ensure_pgvector_extension_noop_on_connect_failure(
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """An unreachable admin connection is a logged no-op (the ensure re-runs on
-    every bring-up), never a birth-killing raise. The warning names the cause."""
     from base.cluster.provision import ensure_pgvector_extension
 
     owner = threading.current_thread()
 
     def boom(url: str, **_kw: object) -> _FakePgConn:
         if threading.current_thread() is not owner:
-            # a bystander thread sharing the xdist worker gets an inert dial
             return _FakePgConn(url, first_row=None)
         raise psycopg.OperationalError("connection is bad")
 
@@ -297,7 +243,6 @@ def test_ensure_pgvector_extension_noop_on_connect_failure(
 
 
 def test_interrupted_empty_database_requires_initialization_authority(db_conn: object) -> None:
-    """Only the durable first-start owner can complete a crash after CREATE DATABASE."""
     identity = _fresh_identity()
     admin_url = _admin_url()
     with psycopg.connect(admin_url, autocommit=True) as conn:
@@ -346,7 +291,6 @@ def test_interrupted_database_with_unknown_objects_is_preserved(db_conn: object)
 def test_default_schema_check_never_setup_after_concurrent_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A concurrent repair between both reads cannot grant this call DDL authority."""
     from langgraph.checkpoint.postgres import PostgresSaver
 
     from base.cluster import provision
