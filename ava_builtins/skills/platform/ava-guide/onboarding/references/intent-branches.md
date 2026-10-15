@@ -17,9 +17,10 @@ they land somewhere.
 2. Ask what done looks like and the constraints (cadence, budget, what not
    to touch).
 3. Record goal + constraints as `type/project`.
-4. Decompose into tasks. If it is large, load `ava.skills.ava_workflow`
-   (calibrate → align → plan) and `ava.skills.ava_fleet` for
-   parallelization. For the first task, one small real step beats a grand
+4. Choose a working strategy with `ava.skills.ava_workflow` when alignment,
+   evaluation, planning, or coordination needs deliberate attention; these are
+   optional, interleaving methods. Use `ava.skills.ava_fleet` when peer
+   coordination helps. For the first task, one small real step beats a grand
    plan: create the task (`ava.tasks.create`) or spawn the first worker,
    and tell the user what is running.
 

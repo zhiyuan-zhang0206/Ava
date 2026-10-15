@@ -3,24 +3,34 @@ name: plan
 description: "Turns agreed work into an executable task graph. Use when dependencies, parallelism, or checkpoints need planning before execution."
 ---
 
-# Plan — Turn Aligned Intent into an Executable Specification
+# Plan — Make Dependencies and Checkpoints Explicit
 
-Input: an alignment document (or a clear user requirement). Output: an executable plan. The granularity is "one step can be completed by one agent in one continuous session." If you're working alone, the plan is your task list; if collaboration helps, the plan describes responsibilities, dependencies, and how peers exchange results.
+Input: enough shared understanding to act, from a clear requirement or Align.
+Output: an executable plan. Steps should have meaningful outputs and fit the
+available execution context. If working alone, use a task list; if collaboration
+helps, describe responsibilities, dependencies, and how peers exchange results.
 
-For AI-dependent feasibility, scheduling, or pace assumptions, use
+For AI-dependent feasibility, approach, resource, or pace assumptions, use
 [capability-timescale](../capability-timescale/SKILL.md) and carry verified
-evidence and uncertainty into this phase's output.
+evidence and uncertainty into the plan.
 
 ## When Plan Is Needed (and when it isn't)
 
 **Plan is not the default step after Align.** A clear goal with acceptance criteria is enough to start executing directly; an explicit planning pass on top of it is overhead when the path is straightforward.
 
-Plan is useful in these situations; scale its depth to the coordination needed:
+Use a plan when the user asks for one or making dependencies, checkpoints, or
+coordination explicit improves the work. Scale its depth to the need:
 
-1. **The task is very large and the flow is long** — many steps spanning sessions or days, where a roadmap is needed to keep the work from drifting.
-2. **Parallel execution is needed** — you must agree on the target, decompose into independent subtasks, and split them across agents. Each peer needs a well-defined slice, dependencies, and acceptance criteria. A few independent tasks can use short briefs; repeated stages or large fan-outs can use an executable [dynamic workflow](../../../coordination/ava-dynamic-workflow/SKILL.md) instead of a separate plan document.
+- **Ordered or consequential dependencies:** even a small serial task can need
+  evidence, revision, or authorization before a later step.
+- **Uncertainty that can change the remaining work:** identify the observation
+  and decision before committing to a broad approach.
+- **Duration or collaboration:** keep recovery state and handoffs for work
+  spanning sessions or peers. A few tasks can use short briefs; repeated dispatch
+  can use a [dynamic workflow](../../../coordination/ava-dynamic-workflow/SKILL.md).
 
-Everything in this skill (decompose, estimate, mark dependencies, set checkpoints, surface risks) lives inside those two situations. When in doubt, **start executing; plan when execution actually demands it.**
+A short sequence with its key checkpoint is often enough. Continue settled,
+authorized work while planning only what dependencies or uncertainty require.
 
 ## Principles
 
@@ -28,16 +38,18 @@ Everything in this skill (decompose, estimate, mark dependencies, set checkpoint
 2. **Every step has clear output and acceptance criteria.** "Change the code" is not a step — "Modify module X so interface Y returns format Z, verified by unit tests" is a step.
 3. **Mark dependencies and parallelizability.** Which steps can run in parallel? Which must be serial? For parallel work this is the whole point of the plan.
 4. **Surface uncertainty.** Explicitly mark what you don't know — "needs investigation to determine approach" is itself a step.
+   When an untested path controls the plan, schedule a
+   [tracer bullet](../references/working-principles.md#tracer-bullets) before
+   broad execution. Its output includes what we learned, not just what we built.
 5. **Match capabilities to the work.** Follow [Capability Matching](../SKILL.md#capability-matching); name useful skills and tools in substantial plans. Short briefs need only the capabilities their peers require.
 
 ## Process
 
 ### 1. Research existing context
 
-Before decomposing, understand:
-- Where is the relevant code? (Read `AGENTS.md`, scan project structure, search for related files)
-- Are there existing designs or discussions? (Search issues, docs, memory)
-- Are there similar implementations to reference?
+Before decomposing, find the relevant artifacts, evidence, existing decisions,
+and comparable work. For repository tasks, read `AGENTS.md` and locate the
+affected code. Investigate only context that can change the plan.
 
 ### 2. Decompose the task
 
@@ -48,21 +60,33 @@ Use MECE (Mutually Exclusive, Collectively Exhaustive) decomposition:
 3. **Mark parallelism.** Which sub-goals have no dependencies between them and can proceed in parallel?
 4. **Define output for each step.** A file? A PR? A deployment? A document?
 
-### 3. Estimate & prioritize
+### 3. Prioritize and account for resources
 
-- Mark estimated time for each step (rough is fine: minutes / hours / days)
-- Mark risk level (low / medium / high)
-- If time is short, mark what can be cut (P0 / P1 / P2)
-- Identify the critical path — what's the longest dependency chain?
+- Identify consequential uncertainty and the dependencies that control useful
+  completion. Prioritize work that resolves them.
+- Account for limited tools, agent capacity, human review, and external waits.
+  Independent work is parallelizable only within those constraints.
+- Estimate durations when requested or needed for an explicit scheduling
+  decision, using Capability–Timescale's evidence and uncertainty. Otherwise
+  record ordering and checkpoints without invented per-step times.
+- When a budget or deadline constrains the plan, name the trade-offs and what
+  can change within the agreed scope.
 
 ### 4. Define checkpoints
 
-Set checkpoints at key milestones — stop at these points to verify the direction is correct, rather than pushing to the end only to discover you've drifted. **Checkpoints are the evaluation schedule**: they decide *when and how* the work gets evaluated, which is one of the three evaluation questions (the other two live in Align and Calibrate — see the connection below).
+Set checkpoints where observations could change the remaining work. Use
+[Evaluate](../evaluate/SKILL.md) to choose the evidence and its interpretation;
+the plan records when it will be collected and what decisions depend on it.
+Evaluation can also reveal unplanned checkpoints.
 
 - Choose verification checkpoints that exercise the acceptance criteria. Include
   independent review when requested or useful; a plan does not make it mandatory.
 
-### 5. Produce the plan document
+### 5. Keep the plan as small as useful
+
+Use a short ordered list for a small task. The following template is for
+substantial coordination; omit fields that do not help execution. Add time
+estimates only under the conditions above.
 
 ```markdown
 # Execution Plan: [Task Name]
@@ -80,14 +104,14 @@ Carry forward material capability decisions from existing context; an Align phas
 Each task node names the skills and MCP tools it depends on in the `Skills / MCP` field.
 Use the table for a substantial plan; a short brief or orchestration script can express the same dependencies without this template.
 
-| # | Task | Skills / MCP | Output | Estimate | Depends On | Risk | Priority | Parallelizable |
-|---|------|--------------|--------|----------|------------|------|----------|----------------|
-| 1 | ... | ... | ... | ... | - | Low | P0 | - |
-| 2 | ... | ... | ... | ... | #1 | Medium | P0 | - |
-| 3 | ... | ... | ... | ... | #1 | Low | P1 | #2 |
+| # | Task | Skills / MCP | Output and evidence | Depends On | Risk | Priority | Parallelizable |
+|---|------|--------------|---------------------|------------|------|----------|----------------|
+| 1 | ... | ... | ... | - | Low | P0 | - |
+| 2 | ... | ... | ... | #1 | Medium | P0 | - |
+| 3 | ... | ... | ... | #1 | Low | P1 | #2 |
 
 ## Critical Path
-[The longest dependency chain, determining total timeline]
+[Dependencies, resource limits, and waits that control completion]
 
 ## Checkpoints
 1. [After step N]: [what to verify]
@@ -109,27 +133,35 @@ not settled by existing instructions; do not request approval merely because a
 plan was written. Highlight relevant open choices:
 - Key decision points ("I chose approach A over B because…")
 - Uncertainties ("Step 3 needs investigation to determine the approach")
-- Time estimates ("Estimated total: X hours / days")
+- Resource or schedule assumptions that affect a requested commitment
 
 Proceed with authorized work and the chosen verification strategy; wait only
 for decisions that dependent work actually needs.
 
 ## The Evaluation Connection
 
-Planning is where **the evaluation schedule is designed**: "when and how do we evaluate" is decided here.
+Evaluate can run without a plan. When planning is useful, connect each important
+checkpoint to a claim, observable evidence, and a possible change of direction.
+Allocate attention to consequential uncertainty rather than evenly across steps.
 
-- **Each step's acceptance criteria** are mini-evaluation standards — the Work & Evaluate loop checks against them per step, before checking the whole against Align's success criteria.
-- **Checkpoints are the evaluation gates** — planned moments where you stop and verify direction. A plan without checkpoints is a plan that defers all evaluation to the very end.
-- **Dependencies and risks** tell evaluation *where to look*: the critical path and high-risk steps are the ones to evaluate most carefully, not evenly across all steps.
-- Mid-execution, if evaluation shows the *decomposition* is wrong (steps are too big, wrong order, missing pieces), that's a planning failure — return here, re-split the remaining work, and update the plan. Evaluation doesn't only judge execution; it judges the plan too.
+Evidence may change the decomposition, criteria, or goal. Revise the remaining
+plan and return to Align for material choices; do not force new observations
+into obsolete acceptance criteria. A checkpoint need not stop independent work
+or create a new approval gate.
+
+If an outcome or stopping condition is still unclear, use
+[Define Goal](../define-goal/SKILL.md). A checkpoint may test an anchored
+qualitative judgment; it need not manufacture a numeric quality threshold.
 
 ## Standalone Use
 
-Plan can be used independently — if you already have a clear alignment document, just say "help me plan X." Even standalone, apply the two-situation test: if the task is small and serial, skip planning and execute.
+Plan can be used independently with a clear request or enough shared
+understanding. A small serial task may need only a few ordered steps and a
+checkpoint; a clear direct action may need no separate plan.
 
 ## Don't
 
-- Don't plan by default — after Align, most work goes straight to execution; plan only for very large or parallel tasks
+- Don't add a planning phase by default; use it when requested or when explicit dependencies, checkpoints, or coordination help
 - Don't decompose too finely — each step should be a meaningful atomic operation, not "open the file" granularity
-- Don't decompose too coarsely — if a step description exceeds 3 sentences, it probably needs further breakdown
+- Don't hide an unresolved dependency or decision inside a step that cannot be verified as a whole
 - Don't hide uncertainty — be honest about what you don't know

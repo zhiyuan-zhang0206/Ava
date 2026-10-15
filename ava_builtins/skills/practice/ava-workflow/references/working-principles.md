@@ -1,5 +1,39 @@
 ## Core Principles
 
+### Tracer bullets
+
+A tracer bullet is the smallest real path from an input through the relevant
+work to an observable outcome and feedback. Use one when an untested assumption
+or integration could invalidate the larger effort. Narrow the breadth while
+preserving the connection that needs testing. Keep the path usable so later
+work can extend it; revise or replace it when evidence warrants.
+
+Choose the question it should answer and how the result will be observed.
+Exercise the actual critical dependency within the authorized scope, inspect
+the result, and use it to revise understanding or the system before expanding.
+Mocked dependencies and constructed examples can answer narrower questions;
+name those limits instead of treating them as evidence of a real integration.
+
+This is a general working principle:
+
+- In engineering, exercise one input through the real stack to a checked result.
+- In research, carry one observation through collection, analysis, and an
+  inspectable claim before scaling the study.
+- In content work, take one item through creation, its intended use, and feedback
+  from the relevant audience before expanding production.
+
+An early success proves only that path worked under those conditions. It does
+not establish reliability, prevalence, or transfer. Use
+[Evaluate](../evaluate/SKILL.md) to decide what additional evidence matters.
+A direct checked answer may already complete the path; do not add a pilot to a
+simple task. A discussion-only request authorizes designing the path, not
+performing its external actions.
+
+The software pattern is described in Thomas and Hunt's *The Pragmatic
+Programmer* (see the local [source note](../../ava-serious-engineering/references/03-pragmatic-programmer.md)).
+Its extension to general work and shared learning here is a Workflow design
+choice, not a claim that the original source defines every application.
+
 ### Invest in future work
 
 Apply the system prompt's **Invest in the future** rule when choosing the work,
@@ -21,8 +55,8 @@ Before a substantial implementation, and whenever progress repeatedly stalls:
    that sustain the problem. Ground the intervention in causal evidence and
    name its current consumers. A substantial share of effort, such as 30%, can
    be worthwhile; that example is neither a quota nor a ceiling.
-3. **Close the feedback loop early.** Exercise the smallest real path through
-   the relevant system before expanding the implementation or test matrix.
+3. **Close the feedback loop early.** Use a tracer bullet before expanding
+   an untested implementation or test matrix.
    Automate reproducible setup, observation and cleanup when those are the
    repeated work. When a failure exposes a recurring gap, improve that shared
    path rather than require another disposable script or isolated patch.
@@ -57,20 +91,38 @@ Explicit user constraints and resource limits still govern. New spending,
 external effects and changes beyond existing authorization need the appropriate
 authority; technical depth alone does not require another ceremonial approval.
 
-### 1. Reality first, question second (Calibrate → Align)
+### Align intent and understanding with reality
 
-Before asking the user anything, look for the answer in the environment — codebase, docs, config files, running state. Facts are discovered; material decisions need the user. When the user's model of the subject is uncalibrated, run the Calibrate loop first so the plan is grounded in reality. Then actively question — inspired by Matt Pocock's ["grill me"](https://github.com/mattpocock/skills) — working unresolved material decisions as a design tree in rounds, every question carrying your recommended answer. Existing instructions and confirmed decisions remain authorization; do not require another sign-off just because you restated them in a document. Settle genuinely open scope, trade-off and authority questions before dependent work.
+[Align](../align/SKILL.md) owns alignment with human intent and calibration of
+both human and agent understanding against evidence. Investigate discoverable
+facts; ask material human-only choices directly. Use a consequential
+counterexample or contrast when it can improve a decision, and expose the
+agent's assumptions to correction too. Existing instructions and confirmed
+decisions remain authorization. Settle genuinely open scope, trade-off, and
+authority questions before dependent work.
 
-### 2. Plan when execution demands it (Plan)
+### Plan when execution demands it
 
-Record a roadmap when dependencies, duration, or coordination make it useful.
+Record a roadmap when dependencies, checkpoints, duration, or coordination make
+it useful, including a short sequence for a small serial task.
 A few independent peer briefs or a dynamic workflow script can express the plan;
 parallel work alone does not require a separate document or confirmation phase.
 
-### 3. Check the work (Work & Eval)
+### Recalibrate capability as a working dimension
 
-Challenge the assumptions and exercise the relevant behavior as you work. Use
-concrete acceptance criteria and record verification limits. Independent review
+Use [Capability–Timescale](../capability-timescale/SKILL.md) before an uncertain
+AI/tool capability drives scope, approach, rejection, resources, or a schedule.
+Current evidence can reveal new possibilities as well as limits. Distinguish
+production speed from verified completion, including human attention and waits.
+Feed the observed bottleneck into Align, Define Goal, Plan, and Evaluate rather
+than treating capability calibration as a one-time estimate.
+
+### Evaluate while doing the work
+
+Use [Evaluate](../evaluate/SKILL.md) for evidence selection, meaningful criteria,
+trace review, calibrated judges, and controlled comparisons. Evaluate the
+system and our beliefs as work proceeds; feed discoveries back into Align and
+implementation. Record verification limits. Independent review
 can help with unfamiliar or consequential changes; choose it when the user
 requests it or the task benefits from another perspective. It is optional,
 and parallel work or writing a plan does not require a reviewer agent.

@@ -1,194 +1,112 @@
 ---
 name: align
-description: "Clarifies purpose, constraints, and decisions with the user. Use when material task choices remain unresolved or the user requests goal alignment."
+description: "Aligns intent and calibrates human and agent understanding against evidence. Use when an unresolved preference, assumption, or knowledge gap changes the work."
 ---
 
-# Align — Sync Intent Between Agents and Human
+# Align — Intent, Understanding, and Reality
 
-Don't start building on vague requirements. Invest a few turns asking questions to surface implicit assumptions, constraints, and success criteria. Resolve the material uncertainty with a short clarification for routine work or an alignment document when the decisions need a durable record. Choose depth through [Workflow](../SKILL.md); do not force an interview when intent is already clear.
+Align has three responsibilities:
 
-The goal is to resolve every branch of the **decision tree** — surface each open fork, make an explicit choice, and close it — until no material ambiguity remains. Routine method choices within the authorized scope belong to the agent.
+| Relationship | What can need correction | What helps |
+|---|---|---|
+| Agent and human intent | A misunderstood purpose, preference, trade-off, or authority boundary | Existing instructions, a concrete choice, or a brief clarification |
+| Human understanding and reality | An incomplete or mistaken model of the problem or system | Inspectable observations, contrasts, counterexamples, and experience |
+| Agent understanding and reality | An unsupported assumption, stale knowledge, or mistaken interpretation | Direct investigation, independent evidence, and testing a prediction |
 
-For AI-dependent feasibility, scheduling, or pace assumptions, use
-[capability-timescale](../capability-timescale/SKILL.md) and carry verified
-evidence and uncertainty into this phase's output.
+Calibration is part of Align throughout the work. There is no separate
+Calibrate stage to finish first. The objective is enough shared understanding
+to choose the next useful action, with uncertainty visible.
 
-## What Align syncs
+Human preferences and permission are authoritative within the task; factual
+beliefs are claims to investigate. Evidence can challenge "this cannot be done
+locally" without overruling "these records must stay on this device." Human agreement
+and agreement among agents do not establish a fact.
 
-Align calibrates **intent** — what the human wants and what the agents will do — rather than calibrating facts (that's Calibrate's job; see below). The alignment document is the contract that both sides sign: it says what "good" means, what's off-limits, and what ranks first. **The success criteria in this document are the evaluation standard for everything that follows** — evaluation first shows up here, not at the end.
+## Start from the Actual Gap
 
-## Core Idea
+Reuse the conversation, existing decisions, and available evidence. Briefly
+identify the desired outcome, the belief or choice that could change the next
+action, and whose understanding is uncertain. Do not assume the human lacks
+knowledge, or that an unfamiliar topic makes the agent correct.
 
-When a user says "build me an X," roughly 80% is still in their head: why, who it's for, the deadline, what "good" means, what's off-limits. Your job is to **surface that 80%**.
+Distinguish observations, interpretations, preferences, and unknowns. For a
+consequential assumption, state the current prediction and what observation
+would change it. Label inferred beliefs as tentative; let the human correct
+your interpretation without requiring a survey of everything they know.
 
-Inspired by Matt Pocock's ["grill me" skills](https://github.com/mattpocock/skills): the agent shouldn't passively accept vague instructions. Instead, actively question the user — challenge assumptions, uncover context, expose risks. This applies to **any** task — coding, research, writing, analysis, ops changes, even personal decisions. The technique is the same; only the domain vocabulary changes.
+Investigate discoverable facts before outsourcing that work to the human.
+Ask human-only choices directly. When a question is needed, explain what
+depends on it and offer a supported recommendation. Present a real trade-off,
+not a leading question designed to obtain agreement. Existing authorization
+persists; a written alignment note creates no new approval gate.
 
-### Infer the purpose behind the request
+## Spend Attention Where Understanding Can Change
 
-Step back from the requested artifact. Read the conversation, ongoing role and
-prior failures to infer what the human is trying to improve over time. For
-example, "fix the updater" may serve the larger goal "make maintaining my daily
-production system reliable and inexpensive." Completing a patch while leaving
-every future validation just as difficult may miss that goal.
+Agents can search, compare, replay, and group far more material than the human
+can review. Use that capacity to prepare a small amount of high-value evidence:
 
-State the supported inference and carry it into priorities and success criteria.
-Ask about a remaining uncertainty only when its answer changes the goal, a
-material trade-off or authority; do not ask the user to repeat settled context.
-An inference guides a recommendation, not permission for unrelated work.
-Use the workflow's [investment loop](../SKILL.md#invest-in-future-work) to decide
-what recurring cause to address, following the evidence through architecture
-and even the project's purpose. Distinguish explicit user constraints from
-boundaries inherited from the current code. Resolve genuine changes in purpose,
-priorities or authority; do not use alignment to impose a maximum refactoring
-depth or automatically defer necessary infrastructure as "not this task."
+- A consequential counterexample to a current belief.
+- A contrasting pair that makes a hidden distinction visible.
+- A disagreement between outcomes, a metric, and a judge's explanation.
+- An unfamiliar dependency whose failure would change the plan.
 
-## Process
+Prioritize expected decision value per unit of human attention: consequence,
+uncertainty, and whether seeing the evidence could change an action. Surprise
+is useful when it corrects a material belief; novelty alone is not a reason to
+interrupt. Include ordinary cases when needed to convey context. A curated
+surprise set does not estimate how common a problem is.
 
-### 0. Explore the environment before asking
+Show the concrete artifact or relevant trace segment with access to its source.
+Separate what happened from what you infer. Ask for a judgment or prediction
+only when it would reveal a useful distinction. Give the human room to notice
+something the agent missed; record corrections to the agent's model as well
+as changes in the human's understanding.
 
-Before firing any question at the user, ask yourself: **can I answer this by looking?**
+Use [Evaluate](../evaluate/SKILL.md) when evidence selection, grading, trace
+review, or evaluator reliability needs deliberate work. Its
+[human review guidance](../evaluate/references/human-review.md) describes how
+to keep preparation cheap for the human without hiding uncertainty.
 
-- Is the answer in the codebase? (Read files, search for related code, check git history)
-- Is it in the project docs? (AGENTS.md, CONTEXT.md, docs/conventions/, memory pool)
-- Is it an observable fact? (Check running processes, config files, deployed state)
+## Learn Through a Real Path
 
-**Facts come from the environment. Material goals and trade-offs come from the user.** Don't ask "what database do we use?" when you can inspect the configuration. Make routine implementation choices within the agreed scope; ask when a choice changes user-visible guarantees, scope or authority.
+When discussion cannot settle a material uncertainty, propose or run an
+authorized [tracer bullet](../references/working-principles.md#tracer-bullets):
+one small path through actual work to an observable outcome and feedback.
+Choose what it needs to teach before expanding its breadth.
 
-**When the user's model of the subject itself is off**, that's not an Align problem — it's a Calibrate problem. Stop aligning, run a quick calibration slice on the contested fact, then resume. Align on top of a wrong model produces a confident alignment document that is wrong anyway.
+For example, a teaching pilot can go from one lesson to a learner's attempt
+at a new problem. Their errors may change the human's belief about prerequisite
+knowledge, the agent's understanding of the learning objective, and the next
+lesson. A polished lesson outline alone cannot establish learning. Reuse the
+working path while revising it from evidence.
 
-### 1. Receive the task, quickly scan for missing information
+A request to discuss a pilot authorizes its design, not contacting participants
+or building it. Continue independent work while waiting for genuinely missing
+authority or preferences.
 
-After reading the task description and exploring the environment, immediately ask yourself:
-- Do I know **why** we're doing this? (What's the underlying problem?)
-- Do I know **what this enables next**? (Which recurring work should become easier?)
-- Do I know **who** the end user / beneficiary is?
-- Do I know what **success** looks like? (Concrete, verifiable criteria)
-- Do I know the **constraints**? (Time, resources, tools, platform, things not to do)
-- Do I know the **priorities**? (If there are multiple goals, which ranks first?)
-- Do I know the **context**? (What's the background? What has been tried before?)
-- Are there **open decision branches** I haven't identified yet?
+## Keep a Small, Revisable Shared Model
 
-### 2. Build a decision tree and work it in rounds
+For substantial or continuing work, retain only what the next decision needs:
 
-Map the open decisions as a **design tree**: every decision branches into the decisions that hang off it. Then work the tree in **rounds**.
+- Purpose, relevant preferences, boundaries, and settled decisions.
+- Material beliefs, supporting observations, and remaining uncertainty.
+- What changed in either participant's understanding and why.
+- The next action, its expected evidence, and what would make us reconsider.
 
-The **frontier** is every decision whose prerequisites are already settled — the questions you can ask *now* without guessing at answers you haven't heard yet. Each round:
+A few sentences may suffice. Do not require every branch of a design tree to
+be closed. Continue when the next action is justified and authorized; unresolved
+questions can remain explicit. Reopen alignment when evidence challenges the
+goal, assumptions, or criteria, without reopening settled consent.
 
-1. Ask the whole current frontier at once, numbered.
-2. A question whose answer depends on another question still open *this* round belongs to a *later* round — hold it back.
-3. Wait for the user's answers. Each answer settles a decision and pushes the frontier outward, unblocking the questions that depended on it. Recompute the frontier and ask the next round.
+Use [Capability–Timescale](../capability-timescale/SKILL.md) when the shared
+model depends on what AI or tools can do now, at what quality, or at what pace.
+Its evidence can expand feasible choices as well as expose limits; calibrate
+both participants' expectations before rejecting or committing to an approach.
+Use [Define Goal](../define-goal/SKILL.md) if the resulting intent still lacks
+a recognizable outcome or stopping condition.
 
-Keep each round compact. Ask only the frontier questions whose answers materially
-change the outcome, trade-off, or authority; routine method choices can be made
-within the agreed scope. Stop when those material branches are settled. **Order rounds by dependency**: a decision's prerequisites are answered before the decision itself is asked. Importance only orders questions *within* a round, never across them.
-
-A useful checklist for what the frontier's earliest rounds should surface:
-
-1. **Goal & motivation** — "Why do this? What problem does it solve?"
-2. **Success criteria** — "How do we know it's done? What conditions must be met?" (These become the evaluation standard.)
-3. **Constraints & boundaries** — "Deadline? Budget? Platform restrictions? Things we absolutely cannot do?"
-4. **Priorities & trade-offs** — "If time runs short, what can we cut first?"
-5. **Context & history** — "What's been tried before? Why didn't it work?"
-
-**Every question carries your recommended answer — no exceptions.** This is the heart of the technique. Committing to an answer first forces you to actually think it through; it lets the user just accept or reject instead of composing from scratch; and any gap between your recommendation and their reality surfaces on the spot. A question with no recommendation attached is one you haven't done your homework on — don't ask it yet.
-
-**Fact reconnaissance during grilling is non-blocking.** When a frontier question turns on a *fact* you could look up rather than a *decision* only the user can make, ask a suitable peer to investigate it when delegation helps — never ask the user for something you could discover yourself. Don't stall the round on it: a running lookup is just an unsettled prerequisite, so only the questions *downstream* of that fact wait for the peer to report — ask the rest of the frontier now. (This is the dynamic counterpart to §0: §0 is the static sweep before you open your mouth; this is the reconnaissance you spin up mid-interview as new unknowns appear.)
-
-### 3. Questioning technique
-
-- **Be specific. Ask about scenarios.** Don't ask "do you want high code quality?" (the answer is always yes). Ask "if test coverage and delivery speed conflict, which do you choose?"
-- **Offer options, and bet on one.** Don't ask "how do you want to do this?" Give 2-3 concrete directions *and* commit to a recommendation: "Option A is fast but rough, Option B is slow but robust — I'd take B because this is load-bearing; agree?" Options without a recommendation just push the thinking back onto the user; the bet is what makes it a grilling.
-- **Challenge assumptions.** "You mentioned React — is that because the team knows it, or is there a hard technical requirement? What if we used something lighter?"
-- **Surface risks.** "Given this timeline, if we discover mid-way that the data format is incompatible, rolling back would be expensive — should we do a quick spike first?"
-
-### 4. Check the outcome and record the decisions
-
-Check that the outcome, acceptance evidence, boundaries, and stopping conditions
-are clear. Use [Define Goal](../define-goal/SKILL.md) only when these need refinement;
-choose skills through [Capability Matching](../SKILL.md#capability-matching).
-Goal supervision and dynamic orchestration remain independent choices.
-
-A short clarification can finish in the conversation. When a durable alignment
-record is useful, use this template and omit sections that add no information:
-
-```
-# Alignment Document: [Task Name]
-
-## Goal
-[One sentence: what are we trying to achieve]
-
-## Larger Purpose and Investment
-[What ongoing goal this serves; evidence for any inferred intent; the recurring
-cause to address, current consumers and the next concrete checkpoint. Omit when
-the task has no meaningful reusable investment.]
-
-## Success Criteria
-- [ ] Concrete, verifiable condition 1
-- [ ] Concrete, verifiable condition 2
-
-## Constraints
-- Time: [deadline or time budget]
-- Tech: [language / framework / platform restrictions]
-- Scope: [explicitly out of scope]
-
-## Capabilities
-- Use: [skill or MCP] — [one-line reason]
-- Alternative: [only a rejected capability whose trade-off matters]
-
-## Priorities
-1. [Highest priority]
-2. [Second priority]
-
-## Decisions Made
-- [Decision]: [chosen path, with brief rationale]
-- [Decision]: [chosen path, with brief rationale]
-
-## Risks & Assumptions
-- Risk: [what could go wrong]
-- Assumption: [premises we're treating as true]
-
-## Context
-[Background, previous attempts, relevant links]
-```
-
-For a heavyweight alignment that settles a **load-bearing design decision** (chose X over Y, and the reasoning), also record it per repo discipline in `docs/decisions/YYYY-MM-DD-<topic>.md` — one curated entry per decision. The alignment document is the working artifact; `docs/decisions/` is the durable record of *why*. Follow the repo's doc-maintenance discipline; don't reach for heavier domain-modeling machinery.
-
-### 5. Confirm, then proceed
-
-Use the user's existing instructions and confirmed decisions as authorization;
-do not demand another sign-off because you wrote an alignment document. When
-material choices remain open, present those choices and your recommendation for
-confirmation before dependent work. Continue useful work that does not depend
-on the answer. If the user corrects the scope, update the alignment and clarify
-only what remains unsettled; an inferred purpose never grants new authority.
-
-**The alignment document is the input to the Plan phase — or straight to execution.** After confirmation, if the task is small or serial, start executing directly; only very large or parallel tasks need a Plan phase (see `plan/SKILL.md`).
-
-**When the aligned work will run autonomously**, settle any unresolved scope,
-spending, authority, and reporting choices before dependent work. Existing
-instructions may already settle them. Preserve the agreement and recovery notes
-in a durable artifact appropriate to the environment; no particular task system,
-notification interface, or collaboration plugin is required.
-
-## The Evaluation Connection
-
-Alignment is where **the evaluation standard is born**: "what counts as good" is defined here, and every later check measures against it.
-
-- The **Success Criteria** section is the acceptance test. Work & Evaluate verifies against it item by item; a criterion that can't be checked ("high quality", "fast") is a criterion that was never actually aligned — push until it's concrete and verifiable.
-- **Priorities** are evaluation weights: when two criteria conflict mid-execution, the priority order is the tiebreaker. If the user says "when time runs short, cut X first," that *is* an evaluation rule.
-- **Risks & Assumptions** are the evaluation watchlist: each listed risk is a thing to actively check for during execution, not a static note.
-- Mid-execution, if evaluation reveals the *goal itself* was wrong (not just a step), that's an alignment failure — return here, re-question the affected branch, and update the document before continuing. Evaluation doesn't only judge execution; it judges alignment too.
-
-## Standalone Use
-
-Align can be used independently — any time you feel the task isn't clear enough, align before building. You can do alignment without entering the later phases. It works for non-coding decisions too — architecture choices, tool selection, process changes, even personal decisions.
-
-## Don't
-
-- Don't use "just start and we'll see" to hide material uncertainty — propose concrete success criteria from the context and clarify what remains open
-- Don't dump 20 questions in one round — keep each round compact (≤5-8), but keep running rounds until the frontier is empty. A tight round cap is not a total-question cap; no branch gets silently assumed to stay under some number.
-- Don't ask a question without your recommended answer attached — if you can't recommend one, you haven't explored enough to be asking it yet
-- Don't reopen settled choices; clarify the worst acceptable outcome when that unresolved trade-off would change the work
-- Don't ask the user for facts you can look up — explore the environment first, and investigate facts that surface mid-grilling, using a peer when useful
-- Don't leave material branches unresolved; make routine method choices within the agreed scope
-- Don't align on top of an uncalibrated model — if the user's picture of the subject is wrong, calibrate that slice first
+Evaluate tests whether the observations support a belief or result. Align
+uses those observations to revise understanding and choices. Neither is a
+linear gate, and neither treats a more confident human as proof of better
+understanding. Where learning matters, a later prediction or judgment on a
+fresh case is stronger evidence than "I understand."

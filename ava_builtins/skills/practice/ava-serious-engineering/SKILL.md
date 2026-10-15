@@ -76,6 +76,14 @@ belongs in the layer that matches.
 
 ## How to Use
 
+For uncertain intent or assumptions, use Workflow's
+[Align](../ava-workflow/align/SKILL.md). For failure discovery, human trace review,
+or judge calibration, use [Evaluate](../ava-workflow/evaluate/SKILL.md).
+Workflow also owns the general
+[tracer bullet principle](../ava-workflow/references/working-principles.md#tracer-bullets);
+this family supplies engineering design, testing, and verification methods.
+Load those shared guides only when the task needs them.
+
 1. Read the layer/principle that matches your task (above, or the Quick Start).
 2. Each skill has a **checklist** — run it, don't skim it. Items are marked
    `MUST` (non-negotiable) or `SHOULD` (strongly recommended; skip only with a
