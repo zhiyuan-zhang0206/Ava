@@ -152,3 +152,53 @@ def test_typescript_blob_comparison_rejects_cross_function_and_class_moves(
     before = parse_blobs(tmp_path, {"core.ts": old})["core.ts"]
     after = parse_blobs(tmp_path, {"core.ts": current})["core.ts"]
     assert new_note_indexes(after, before) == frozenset({0})
+
+
+@pytest.mark.parametrize("container", ["", "class C:\n"])
+def test_trailing_body_comments_cannot_move_between_functions(
+    tmp_path: Path, container: str
+) -> None:
+    old = "def left():\n    pass\n    # Keep\n\ndef right():\n    pass\n\n"
+    new = old.replace("    # Keep\n", "") + "    # Keep\n\n"
+    if container:
+        old = container + "".join("    " + line for line in old.splitlines(keepends=True))
+        new = container + "".join("    " + line for line in new.splitlines(keepends=True))
+        old += "    marker = 1\n"
+        new += "    marker = 1\n"
+    assert findings(tmp_path, old, old.replace("pass", "value = 1")) == []
+    assert findings(tmp_path, old, new) == ["free-comment"]
+
+
+def test_trailing_nested_comment_stays_in_nearest_actual_body(tmp_path: Path) -> None:
+    old = (
+        "def outer():\n    def inner():\n        pass\n        # Keep\n\n    # Outer\n\n# Module\n"
+    )
+    new = old.replace("        # Keep\n", "") + "# Keep\n"
+    assert findings(tmp_path, old, new) == ["free-comment"]
+
+
+def test_tab_indented_tail_uses_visual_body_columns(tmp_path: Path) -> None:
+    old = "class C:\n\tdef left(self):\n\t\tpass\n                # Keep\n\n\tdef right(self):\n\t\tpass\n\n"
+    new = old.replace("                # Keep\n", "") + "                # Keep\n"
+    assert findings(tmp_path, old, new) == ["free-comment"]
+
+
+def test_shallower_tail_comments_belong_to_parent_or_module() -> None:
+    source = parse_python(
+        "core.py", "class C:\n\tdef f(self):\n\t\tpass\n        # Class\n\n# Module\n"
+    )
+    assert source.notes[0].lexical_owner.endswith("/class:C[1/1]")
+    assert source.notes[1].lexical_owner == "<module>"
+
+
+@pytest.mark.parametrize("declaration", ["def f(\n): pass\n", "class C(\n): pass\n"])
+def test_multiline_header_inline_suite_does_not_swallow_module_tail(declaration: str) -> None:
+    source = parse_python("core.py", declaration + "# Module\n")
+    assert source.notes[0].lexical_owner == "<module>"
+
+
+def test_tail_scope_does_not_expand_typed_symbol_or_reference_spans() -> None:
+    source = parse_python("core.py", "def f():\n    pass\n    # Keep\n\n")
+    assert source.symbols["f"].end_line == 2
+    assert source.notes[0].owner == "<module>"
+    assert source.notes[0].lexical_owner.endswith("/function:f[1/1]")

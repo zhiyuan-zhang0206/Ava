@@ -15,7 +15,11 @@ new paths and moves to another lexical declaration do. Git uses `--no-renames`,
 so rename/copy similarity cannot grant source text credit across paths.
 
 Python uses the same complete declaration collection that resolves machine
-rationale. JavaScript/TypeScript additionally records actual anonymous callbacks,
+rationale. A multiline Python body's final span includes consecutive trailing
+comments at its body indentation or deeper, using tab-expanded columns; the next
+code line or a shallower nonblank comment ends that tail. Inline suites do not
+invent an indented body. This keeps trailing body notes out of the module bucket.
+JavaScript/TypeScript additionally records actual anonymous callbacks,
 arrow functions and object methods as lexical scopes; these are not new public
 code anchors. Typed reference/SDK assignment ownership stays separate. Named
 function/class declarations and literal test anchors retain their existing role.
@@ -54,7 +58,7 @@ id = "new-note-scope"
 kind = "invariant"
 statement = "Incremental strict checks consume exact old note text once within the same path and real lexical declaration identity. New copies, rewrites and cross-owner moves remain strict; unrelated code changes and local assignment renames do not force migration of unchanged notes. Global reference integrity is never grandfathered."
 code = ["scripts/content_lint/code_comments/changes.py:new_note_indexes"]
-tests = ["scripts/content_lint/code_comments/tests/test_incremental.py::test_unrelated_code_changes_do_not_migrate_legacy_notes", "scripts/content_lint/code_comments/tests/test_incremental.py::test_new_rewritten_copied_or_reowned_notes_are_strict", "scripts/content_lint/code_comments/tests/test_incremental.py::test_duplicate_declarations_keep_separate_occurrence_credit", "scripts/content_lint/code_comments/tests/test_incremental.py::test_duplicate_group_growth_cannot_reuse_an_inserted_ordinal", "scripts/content_lint/code_comments/tests/test_incremental.py::test_global_reference_integrity_survives_legacy_matching"]
+tests = ["scripts/content_lint/code_comments/tests/test_incremental.py::test_unrelated_code_changes_do_not_migrate_legacy_notes", "scripts/content_lint/code_comments/tests/test_incremental.py::test_new_rewritten_copied_or_reowned_notes_are_strict", "scripts/content_lint/code_comments/tests/test_incremental.py::test_duplicate_declarations_keep_separate_occurrence_credit", "scripts/content_lint/code_comments/tests/test_incremental.py::test_duplicate_group_growth_cannot_reuse_an_inserted_ordinal", "scripts/content_lint/code_comments/tests/test_incremental.py::test_global_reference_integrity_survives_legacy_matching", "scripts/content_lint/code_comments/tests/test_incremental.py::test_trailing_body_comments_cannot_move_between_functions", "scripts/content_lint/code_comments/tests/test_incremental.py::test_tab_indented_tail_uses_visual_body_columns", "scripts/content_lint/code_comments/tests/test_incremental.py::test_shallower_tail_comments_belong_to_parent_or_module"]
 ```
 
 ```ava-contract
