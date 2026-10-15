@@ -22,7 +22,11 @@ original owner and resources are positively absent; unresolved evidence
 remains pending.
 
 Resurrection requires the terminated hosted incarnation's retained generation
-and owner, no per-agent PID, and no outstanding applied lifecycle command. A
+and owner, no per-agent PID, no unresolved exec allocations, and no outstanding
+applied lifecycle command. The resource check precedes identity release so
+receipt recovery can still address the original incarnation. Admission then
+uses the released metadata row and closed resource set, without consulting
+historical lifecycle receipts or requiring the shared host to exit. A
 row with no runtime identity resurrects as a fresh hosted birth instead, in
 two cases, each rechecked in the final CAS. One is a never-admitted row whose
 birth marker is still unconsumed. The other is a row this runtime
@@ -67,18 +71,6 @@ acceptance settles any such row it still finds instead of adopting it. An
 applied command is never rewritten, and no observation timestamp is invented.
 A command created after the resurrect inbound is current intent and can still
 stop the new incarnation.
-
-When the resurrection closes out a retained hosted incarnation whose resource
-set is closed (no attached requests, not force-frozen, a recorded host
-process), the same transaction records the released generation and owner on
-its own resurrect inbound (`release_target` inside the existing
-`lifecycle_release` payload). A successor admission consumes that
-generation-scoped record only for the same live host process, only while the
-row is unowned, and only while the predecessor life holds no unsettled
-restart/terminate command. A release without the record — a legacy row, a
-frozen set, or an unclean previous life — keeps refusing
-(`docs/decisions/agents/lifecycle/2026-09-29-unowned-termination-resurrects.md`,
-"Follow-up shipped").
 
 ## Resurrection and user wakes
 

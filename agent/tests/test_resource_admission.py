@@ -100,11 +100,32 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(
         (target.agent_id,),
     )
     db_conn.commit()
+    # Force completion retains the old owner. A status-only wake cannot
+    # authorize a successor, even with a settled force receipt.
+    successor_owner = uuid4()
+    assert (
+        await admit_hosted_runtime(
+            aops_pool,
+            target.agent_id,
+            "resource-test",
+            successor_owner,
+            expected_from="idling",
+            db=database,
+        )
+        is None
+    )
+    # Model the ownership release committed by ordinary resurrection.
+    db_conn.execute(
+        "UPDATE agents_meta SET runtime_generation=NULL,runtime_owner=NULL,"
+        "runtime_kind=NULL,lease_expires_at=NULL,pid=NULL,started_at=NULL WHERE id=%s",
+        (target.agent_id,),
+    )
+    db_conn.commit()
     successor = await admit_hosted_runtime(
         aops_pool,
         target.agent_id,
         "resource-test",
-        uuid4(),
+        successor_owner,
         expected_from="idling",
         db=database,
     )

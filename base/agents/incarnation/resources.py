@@ -35,11 +35,11 @@ class ResourceEvidenceError(RuntimeError):
 
 
 class ResourceClosureError(ResourceEvidenceError):
-    """A successor cannot close its predecessor's resource/lifecycle set.
+    """A successor requires released ownership and closed exec resources.
 
     ``receipt_less`` distinguishes the two shapes: attached allocations whose
-    terminal receipt never landed, versus a closed set whose release record is
-    missing, damaged or not this successor's to consume.
+    terminal receipt never landed, versus an empty set whose runtime owner
+    has not released it and whose host has not provably exited.
     """
 
     def __init__(self, message: str, *, receipt_less: bool) -> None:

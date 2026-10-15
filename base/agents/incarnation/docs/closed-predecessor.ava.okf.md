@@ -17,17 +17,13 @@ value, and resurrection refuses with `runtime_cutover_required`.
 
 The closed-predecessor form is the incarnation a retired value named, with no
 host identity, no freeze and an empty set; rows converted from the retired
-shape carry it. It is backed by that incarnation's existing predecessor
-receipt (the old drain's applied restart still held as the lifecycle pointer,
-or an applied and observed terminate). An applied restart superseded by a
-later force retains its closure evidence: the receipt must still name the
-resource set's exact incarnation and carry the original `lifecycle_release`
-plus the force supersession result. An unapplied or failed restart cannot
-satisfy this rule. The ordinary predecessor rule admits
-the form once: admission rewrites the set for its own incarnation and
-observes a restart receipt. Without its receipt the form is not admissible,
-and a same-owner continuation refuses it because no host identity is
-recorded.
+shape carry it. Once the metadata row has released runtime ownership, the
+ordinary admission transaction replaces this empty set with its own incarnation.
+Historical lifecycle receipts are not admission credentials. A pending applied
+restart is still observed by its successor for command completion, but retaining
+that history is not required to transfer resources. A row that still has an owner
+does not qualify merely because its resources are empty or an old receipt exists;
+same-owner continuation also requires the recorded host identity.
 
 A drained restart leaves NULL or the complete, empty, unfrozen set of exactly
 the incarnation it released (`DRAINED_RESOURCES`). The host drain receipt,
@@ -39,7 +35,7 @@ only when that is proven: no runtime identity and the fresh-INSERT birth
 marker unconsumed, rechecked in the final CAS. NULL resources are unknown and
 refuse there. A row the current runtime force-terminated while it was
 unowned resurrects the same way. Force preserves its resource evidence; a
-managed successor still needs the original incarnation's closure receipt.
+managed successor requires an empty resource set and released row ownership.
 The force recorded an `unowned_termination` receipt because the runtime's own birth
 epoch or `lifecycle_release` had left the row unowned
 (`docs/decisions/agents/lifecycle/2026-09-29-unowned-termination-resurrects.md`). A legacy row
@@ -54,4 +50,5 @@ admitted as protocol zero like any NULL row. It is never admission evidence
 (`docs/decisions/agents/lifecycle/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
 No code mints such an identity.
 
-Why: `docs/decisions/agents/lifecycle/2026-09-27-existing-agent-closed-predecessor-admission.md`.
+Historical receipt-based admission:
+`docs/decisions/agents/lifecycle/2026-09-27-existing-agent-closed-predecessor-admission.md`.

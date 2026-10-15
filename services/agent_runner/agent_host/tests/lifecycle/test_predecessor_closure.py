@@ -1,6 +1,4 @@
-"""Retired-writer rows refuse. The closed-predecessor form (the incarnation a
-retired value names, with no host identity and an empty set) is admitted
-exactly once by the ordinary successor rule, and drainable afterwards."""
+"""Released ownership admits a closed resource set, independent of historical receipts."""
 
 from datetime import datetime
 from typing import Any
@@ -219,17 +217,17 @@ async def test_closed_form_is_admitted_exactly_once(
     assert admitted_row[0]["lifecycle_command_id"] is None
     assert admitted_row[1]["status"] == "done"
 
-    # Exactly once: the successor's own set has no closure receipt for another
-    # owner to consume (a recorded refusal, not a raised crash).
+    # Exactly once: the successor now owns the row and its host is still live.
     assert (
         await _admit(
             aops_pool, aid, uuid4(), database_gate=database_gate, local_machine=machine_identity
         )
         is None
     )
+    assert _snapshot(db_conn, aid, receipt) == admitted_row
 
 
-async def test_closed_form_without_its_receipt_is_not_admissible(
+async def test_released_closed_form_does_not_need_a_historical_receipt(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -247,14 +245,15 @@ async def test_closed_form_without_its_receipt_is_not_admissible(
         local_machine=machine_identity,
     )
     closed_form(db_conn, aid, before)
-    # Withdraw the receipt: the same bytes without a settled decision prove nothing.
-    db_conn.execute("UPDATE inbound_messages SET applied_at=NULL WHERE id=%s", (receipt,))
+    # The current row owns admission; historical receipt retention does not.
+    db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (aid,))
+    db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (receipt,))
     db_conn.commit()
     assert (
         await _admit(
             aops_pool, aid, uuid4(), database_gate=database_gate, local_machine=machine_identity
         )
-        is None
+        is not None
     )
 
 
@@ -295,7 +294,7 @@ def _resurrected(
     return aid, receipt[0], before
 
 
-async def test_a_resurrected_row_never_readmitted_is_admitted_through_its_terminate_receipt(
+async def test_a_resurrected_row_never_readmitted_is_admitted_after_release(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -305,8 +304,7 @@ async def test_a_resurrected_row_never_readmitted_is_admitted_through_its_termin
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Resurrection released the owner and left no pointer; the successor's
-    admission consumes the closed form through the observed terminate."""
+    """Resurrection released the owner and left no pointer or open resources."""
     aid, receipt, before = _resurrected(
         db_conn,
         model_catalog=model_catalog,

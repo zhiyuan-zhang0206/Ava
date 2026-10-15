@@ -1,16 +1,7 @@
-"""A reaper-released closed previous life transfers through its release record (#5049).
+"""Released runtime ownership transfers an empty resource set after a crash.
 
-The crash path leaves no lifecycle command: the turn fatal is stamped, the
-settled row idles, the reaper flips it terminated (no receipt), and a
-resurrection releases the row to unowned idling. Its recorded resource set is
-closed (empty requests, not frozen) and names this very live host process. The
-resurrection transaction writes a generation-scoped release record on its own
-inbound; the successor admission consumes it for the same live host process,
-and refuses every shape without that record:
-a legacy release, a damaged/unsettled previous life, a different generation, a
-force-frozen set, and attached requests (receipt-less). Every refusal is
-recorded (``last_admission_outcome='resource_fence'`` + a classified
-``host_admission_refused`` event), never a raised crash.
+Historical release records are not admission credentials. Refusals preserve
+current ownership and emit the classified host_admission_refused event.
 """
 
 from __future__ import annotations
@@ -126,17 +117,6 @@ def _resurrect(
     assert isinstance(decode_resources(row[2]), IncarnationResources)
 
 
-def _release_record(db_conn: psycopg.Connection[Any], aid: int) -> tuple[str | None, str | None]:
-    row = db_conn.execute(
-        "SELECT payload -> 'release_target' ->> 'generation', "
-        "payload -> 'release_target' ->> 'owner' FROM inbound_messages "
-        "WHERE agent_id=%s AND kind='resurrect' ORDER BY id DESC LIMIT 1",
-        (aid,),
-    ).fetchone()
-    assert row is not None, "the resurrection must have written its inbound"
-    return row[0], row[1]
-
-
 async def _refused_with(
     aops_pool: AsyncConnectionPool[Any],
     aid: int,
@@ -183,9 +163,6 @@ async def test_reaper_released_closed_life_readmits_on_its_live_host(
     )
     _resurrect(db_conn, aid, machine, database_gate)
 
-    # The release record names the exact released generation and owner.
-    assert _release_record(db_conn, aid) == (str(resources.generation), str(resources.owner))
-
     # The closed released life re-admits on its own live host — no restart.
     healed = await admit_hosted_runtime(
         aops_pool, aid, machine, owner, expected_from="idling", db=database
@@ -197,21 +174,19 @@ async def test_reaper_released_closed_life_readmits_on_its_live_host(
     assert healed.generation != resources.generation
 
 
-async def test_legacy_release_without_record_is_refused(
+async def test_released_row_does_not_require_a_release_record(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
-    loguru_records: list[dict[str, Any]],
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A pre-#5049 release (no generation-scoped record) must keep refusing: the
-    record is the admission door, and nothing derives closure without it."""
+    """Current ownership remains sufficient even when all release payload is gone."""
     machine = machine_identity.name()
     aid, owner, _resources = await _reaped_closed_life(
         db_conn,
@@ -224,30 +199,21 @@ async def test_legacy_release_without_record_is_refused(
         machine_identity=machine_identity,
     )
     _resurrect(db_conn, aid, machine, database_gate)
-    # Withdraw the record to the legacy shape: same release, no target binding.
+    # Admission does not depend on retaining the historical release payload.
     db_conn.execute(
-        "UPDATE inbound_messages SET payload = payload - 'release_target' "
-        "WHERE agent_id=%s AND kind='resurrect'",
+        "UPDATE inbound_messages SET payload = '{}'::jsonb WHERE agent_id=%s AND kind='resurrect'",
         (aid,),
     )
     db_conn.commit()
-    assert _release_record(db_conn, aid) == (None, None)
-
-    await _refused_with(
-        aops_pool,
-        aid,
-        machine,
-        owner,
-        database,
-        loguru_records,
-        reason="successor-closure",
+    assert (
+        await admit_hosted_runtime(
+            aops_pool, aid, machine, owner, expected_from="idling", db=database
+        )
+        is not None
     )
-    assert db_conn.execute(
-        "SELECT last_admission_outcome FROM agents_meta WHERE id=%s", (aid,)
-    ).fetchone() == ("resource_fence",)
 
 
-async def test_release_record_is_generation_bound(
+async def test_unreleased_live_owner_refuses_a_successor(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -260,9 +226,9 @@ async def test_release_record_is_generation_bound(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A record for one predecessor generation must not release another."""
+    """An empty set cannot release the current owner of a still-live host."""
     machine = machine_identity.name()
-    aid, owner, resources = await _reaped_closed_life(
+    aid, _owner, resources = await _reaped_closed_life(
         db_conn,
         aops_pool,
         database,
@@ -273,10 +239,10 @@ async def test_release_record_is_generation_bound(
         machine_identity=machine_identity,
     )
     _resurrect(db_conn, aid, machine, database_gate)
-    changed = resources.model_copy(update={"generation": uuid4()})
     db_conn.execute(
-        "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
-        (Jsonb(changed.model_dump(mode="json")), aid),
+        "UPDATE agents_meta SET runtime_kind='hosted',runtime_generation=%s,runtime_owner=%s "
+        "WHERE id=%s",
+        (resources.generation, resources.owner, aid),
     )
     db_conn.commit()
 
@@ -284,7 +250,7 @@ async def test_release_record_is_generation_bound(
         aops_pool,
         aid,
         machine,
-        owner,
+        uuid4(),
         database,
         loguru_records,
         reason="successor-closure",
@@ -305,7 +271,7 @@ async def test_attached_requests_refuse_as_receipt_less(
     machine_identity: MachineIdentity,
 ) -> None:
     """An attached allocation without a terminal receipt (the V23 shape) refuses
-    and is classified as receipt-less, even in a row carrying a release record."""
+    and is classified as receipt-less, even after runtime ownership is released."""
     machine = machine_identity.name()
     aid, owner, resources = await _reaped_closed_life(
         db_conn,
@@ -342,7 +308,7 @@ async def test_attached_requests_refuse_as_receipt_less(
     )
 
 
-async def test_force_frozen_release_records_nothing_and_refuses(
+async def test_force_freeze_fences_old_owner_until_release(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -355,7 +321,7 @@ async def test_force_frozen_release_records_nothing_and_refuses(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A force-frozen set vouches for nothing: the flip writes no record."""
+    """A freeze blocks same-owner continuation until ownership is released."""
     machine = machine_identity.name()
     aid, owner, resources = await _reaped_closed_life(
         db_conn,
@@ -373,9 +339,6 @@ async def test_force_frozen_release_records_nothing_and_refuses(
         (Jsonb(frozen.model_dump(mode="json")), aid),
     )
     db_conn.commit()
-    _resurrect(db_conn, aid, machine, database_gate)
-    assert _release_record(db_conn, aid) == (None, None)
-
     await _refused_with(
         aops_pool,
         aid,
@@ -383,11 +346,16 @@ async def test_force_frozen_release_records_nothing_and_refuses(
         owner,
         database,
         loguru_records,
-        reason="successor-closure",
+        reason="fences",
     )
+    _resurrect(db_conn, aid, machine, database_gate)
+    successor = await admit_hosted_runtime(
+        aops_pool, aid, machine, owner, expected_from="idling", db=database
+    )
+    assert successor is not None and successor.generation != resources.generation
 
 
-async def test_deferred_resurrection_rolls_back_its_release_record(
+async def test_deferred_resurrection_rolls_back_its_epoch(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -400,7 +368,7 @@ async def test_deferred_resurrection_rolls_back_its_release_record(
     machine_identity: MachineIdentity,
 ) -> None:
     """No half state: a refused resurrection (an unsettled applied restart still
-    anchoring the pointer) leaves no record and no flip behind."""
+    anchoring the pointer) leaves no epoch and no flip behind."""
     machine = machine_identity.name()
     aid, _owner, resources = await _reaped_closed_life(
         db_conn,
