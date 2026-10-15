@@ -13,7 +13,7 @@ import urllib.request
 from datetime import datetime
 from http.client import HTTPMessage
 from pathlib import Path
-from typing import cast
+from typing import Never, cast
 
 import pytest
 from playwright.sync_api import Browser, Page
@@ -189,7 +189,7 @@ def test_wave_id_rejects_path_traversal() -> None:
         validate_wave_id("../outside")
 
 
-def test_base_url_pointing_at_the_gateway_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_base_url_pointing_at_the_gateway_is_refused() -> None:
     class FakeResponse:
         def __enter__(self) -> FakeResponse:
             return self
@@ -200,17 +200,18 @@ def test_base_url_pointing_at_the_gateway_is_refused(monkeypatch: pytest.MonkeyP
         def read(self) -> bytes:
             return json.dumps({"status": "ok", "name": "gateway"}).encode()
 
-    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: FakeResponse())
     with pytest.raises(ValueError, match="gate origin"):
-        assert_gate_origin("http://gateway-only.example:8000")
+        assert_gate_origin(
+            "http://gateway-only.example:8000",
+            open_url=lambda *_args, **_kwargs: FakeResponse(),
+        )
 
 
-def test_base_url_serving_the_gate_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
-    def not_json(req: object, timeout: int) -> None:
+def test_base_url_serving_the_gate_is_accepted() -> None:
+    def not_json(_req: object, timeout: float) -> Never:
         raise ValueError("the SPA wall is HTML, not JSON")
 
-    monkeypatch.setattr("urllib.request.urlopen", not_json)
-    assert_gate_origin("http://gate.example:3000")
+    assert_gate_origin("http://gate.example:3000", open_url=not_json)
 
 
 def test_health_url_defaults_to_base_url_api_health() -> None:
@@ -262,7 +263,7 @@ def test_host_run_requires_the_cookie_env_var(
 ) -> None:
     from scripts.post_deploy_visual.check import run_host
 
-    monkeypatch.setattr(check, "assert_gate_origin", lambda _url: None)
+    monkeypatch.setattr(check, "assert_gate_origin", lambda _url, **_kw: None)
     monkeypatch.setattr(
         check,
         "inherited_process_env",
@@ -274,7 +275,7 @@ def test_host_run_requires_the_cookie_env_var(
         base_url="http://gate.example:3000",
     )
     with pytest.raises(ValueError, match="AVA_VISUAL_GATE_COOKIE_FILE"):
-        run_host(args)
+        run_host(args, open_url=lambda *_args: pytest.fail("Unexpected HTTP call"))
 
 
 def test_accept_wave_requires_complete_captures_and_resets_counter(tmp_path: Path) -> None:
@@ -420,9 +421,7 @@ class _AuthPayloadResponse:
         return json.dumps(self._payload).encode()
 
 
-def test_session_precheck_probes_the_gateway_with_the_raw_cookie(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_session_precheck_probes_the_gateway_with_the_raw_cookie(tmp_path: Path) -> None:
     """The probe hits the gateway's /api/auth/check with the cookie file's
     full text as the Cookie header — the file already carries name=value, so
     no prefix may be added."""
@@ -430,63 +429,59 @@ def test_session_precheck_probes_the_gateway_with_the_raw_cookie(
     cookie_file.write_text("ava_session=abc123\n")
     seen: dict[str, str] = {}
 
-    def fake_urlopen(request: urllib.request.Request, timeout: int) -> _AuthPayloadResponse:
+    def fake_urlopen(request: str | urllib.request.Request, timeout: float) -> _AuthPayloadResponse:
+        assert isinstance(request, urllib.request.Request)
         seen["url"] = request.full_url
         seen["cookie"] = request.get_header("Cookie") or ""
         return _AuthPayloadResponse({"authenticated": True})
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    session_precheck("http://gateway.example:8000/", cookie_file)
+    session_precheck("http://gateway.example:8000/", cookie_file, open_url=fake_urlopen)
 
     assert seen["url"] == "http://gateway.example:8000/api/auth/check"
     assert seen["cookie"] == "ava_session=abc123"
 
 
-def test_session_precheck_rejects_a_dead_session(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_session_precheck_rejects_a_dead_session(tmp_path: Path) -> None:
     cookie_file = tmp_path / "cookies.txt"
     cookie_file.write_text("ava_session=dead\n")
-    monkeypatch.setattr(
-        "urllib.request.urlopen", lambda *_a, **_k: _AuthPayloadResponse({"authenticated": False})
-    )
 
     with pytest.raises(RuntimeError, match="session cookie"):
-        session_precheck("http://gateway.example:8000", cookie_file)
+        session_precheck(
+            "http://gateway.example:8000",
+            cookie_file,
+            open_url=lambda *_a, **_k: _AuthPayloadResponse({"authenticated": False}),
+        )
 
 
-def test_session_precheck_rejects_an_unauthorized_probe(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_session_precheck_rejects_an_unauthorized_probe(tmp_path: Path) -> None:
     cookie_file = tmp_path / "cookies.txt"
     cookie_file.write_text("ava_session=dead\n")
 
-    def unauthorized(request: urllib.request.Request, timeout: int) -> None:
+    def unauthorized(request: str | urllib.request.Request, timeout: float) -> Never:
+        assert isinstance(request, urllib.request.Request)
         raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", HTTPMessage(), None)
 
-    monkeypatch.setattr("urllib.request.urlopen", unauthorized)
     with pytest.raises(RuntimeError, match="session cookie"):
-        session_precheck("http://gateway.example:8000", cookie_file)
+        session_precheck("http://gateway.example:8000", cookie_file, open_url=unauthorized)
 
 
 def test_session_precheck_warns_and_continues_on_network_trouble(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A connection failure is not an auth verdict — the pass proceeds."""
     cookie_file = tmp_path / "cookies.txt"
     cookie_file.write_text("ava_session=abc\n")
 
-    def unreachable(request: urllib.request.Request, timeout: int) -> None:
+    def unreachable(_request: str | urllib.request.Request, timeout: float) -> Never:
         raise OSError("connection refused")
 
-    monkeypatch.setattr("urllib.request.urlopen", unreachable)
-    session_precheck("http://gateway.example:8000", cookie_file)
+    session_precheck("http://gateway.example:8000", cookie_file, open_url=unreachable)
 
     assert "warning" in capsys.readouterr().err
 
 
 def test_session_precheck_warns_and_continues_on_a_non_json_answer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cookie_file = tmp_path / "cookies.txt"
     cookie_file.write_text("ava_session=abc\n")
@@ -501,8 +496,11 @@ def test_session_precheck_warns_and_continues_on_a_non_json_answer(
         def read(self) -> bytes:
             return b"<html>the SPA wall</html>"
 
-    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: HtmlResponse())
-    session_precheck("http://gateway.example:8000", cookie_file)
+    session_precheck(
+        "http://gateway.example:8000",
+        cookie_file,
+        open_url=lambda *_a, **_k: HtmlResponse(),
+    )
 
     assert "warning" in capsys.readouterr().err
 

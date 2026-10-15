@@ -58,7 +58,9 @@ def _edges(cache_root: pathlib.Path) -> dict[str, set[str]]:
             for ref in placement.collect_references(ast.parse(statements), index)
             if ref.kind == "import"
         }
-        for rel, statements in cache.production_imports(cache_root, TOPS).items()
+        for rel, statements in cache.production_imports(
+            cache_root, TOPS, read_source=lambda path: path.read_text(encoding="utf-8")
+        ).items()
     }
 
 
@@ -80,7 +82,9 @@ def cache_root(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 def _statements(cache_root: pathlib.Path) -> dict[str, str]:
-    return cache.production_imports(cache_root, TOPS)
+    return cache.production_imports(
+        cache_root, TOPS, read_source=lambda path: path.read_text(encoding="utf-8")
+    )
 
 
 def test_it_keeps_the_absolute_first_party_import_statements(cache_root: pathlib.Path) -> None:
@@ -145,11 +149,17 @@ def test_a_cached_graph_is_the_graph_of_a_fresh_read_file_by_file(
 ) -> None:
     """The real checkout: every file's cached statements equal a fresh parse of the file."""
     monkeypatch.setattr(cache, "CACHE_PATH", str(cache_root / "real-tree-cache.json"))
-    cold = cache.production_imports(REPO_ROOT, TOPS)
-    warm = cache.production_imports(REPO_ROOT, TOPS)
+    cold = cache.production_imports(
+        REPO_ROOT, TOPS, read_source=lambda path: path.read_text(encoding="utf-8")
+    )
+    warm = cache.production_imports(
+        REPO_ROOT, TOPS, read_source=lambda path: path.read_text(encoding="utf-8")
+    )
     assert cold == warm
     monkeypatch.setattr(cache, "CACHE_PATH", str(cache_root / "fresh-tree-cache.json"))
-    assert warm == cache.production_imports(REPO_ROOT, TOPS)
+    assert warm == cache.production_imports(
+        REPO_ROOT, TOPS, read_source=lambda path: path.read_text(encoding="utf-8")
+    )
 
 
 def test_old_cache_cannot_hide_an_invalid_relative_import(cache_root: pathlib.Path) -> None:

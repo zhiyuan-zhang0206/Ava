@@ -13,8 +13,6 @@ a bump to either one moves the test with it.
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 
 from scripts.content_lint import lint_ava_okf as _lint
@@ -61,10 +59,9 @@ def _node_of_size(tmp_path, char_count: int) -> None:
 def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
     """Lint `tmp_path` as the repo root; return (effective exit code, stdout)."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["lint_ava_okf.py"])
     code = 0
     try:
-        _lint.main()
+        _lint.main([])
     except SystemExit as exc:
         code = int(exc.code or 0)
     return code, capsys.readouterr().out

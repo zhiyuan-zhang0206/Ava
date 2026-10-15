@@ -34,6 +34,10 @@ import json
 import subprocess
 from typing import Any
 
+from base.host.system.hostport import Host
+
+_GH_TIMEOUT_S = 30.0
+
 # Conclusions that mean "this job failed and is re-runnable". Kept in sync
 # with ci_utils.FAILING (scripts/ci/cli.py); REST conclusions arrive
 # lowercase, so the comparison normalizes them on read.
@@ -52,19 +56,22 @@ class CiJobRerunError(RuntimeError):
     """A GitHub query needed to list failed jobs could not be answered."""
 
 
-def _gh_api_json(args: list[str], what: str) -> Any:
+def _gh_api_json(args: list[str], what: str, *, host: Host) -> Any:
     """One `gh api` call parsed as JSON.
 
     A non-zero gh exit or unparseable stdout raises `CiJobRerunError`: the
     caller must distinguish "the query failed" from "the query found nothing",
     never fold the first into the second (issue #1945).
     """
-    r = subprocess.run(  # noqa: S603
-        ["gh", "api", *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        r = host.run(
+            ["gh", "api", *args],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise CiJobRerunError(f"gh api {what} timed out: {error}") from error
     if r.returncode != 0:
         raise CiJobRerunError(f"gh api {what} failed: {(r.stderr or r.stdout).strip()}")
     try:
@@ -75,14 +82,28 @@ def _gh_api_json(args: list[str], what: str) -> Any:
         ) from error
 
 
-def _head_sha_of(pr: str | int, repo: str) -> str:
+def _head_sha_of(pr: str | int, repo: str, *, host: Host) -> str:
     """PR head commit sha; a failed or empty read raises `CiJobRerunError`."""
-    r = subprocess.run(  # noqa: S603
-        ["gh", "pr", "view", str(pr), "-R", repo, "--json", "headRefOid", "--jq", ".headRefOid"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        r = host.run(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(pr),
+                "-R",
+                repo,
+                "--json",
+                "headRefOid",
+                "--jq",
+                ".headRefOid",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise CiJobRerunError(f"gh pr view timed out: {error}") from error
     if r.returncode != 0:
         raise CiJobRerunError(f"gh pr view failed: {(r.stderr or r.stdout).strip()}")
     sha = r.stdout.strip()
@@ -91,7 +112,7 @@ def _head_sha_of(pr: str | int, repo: str) -> str:
     return sha
 
 
-def _current_runs(head_sha: str, repo: str) -> list[dict]:
+def _current_runs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
     """The newest run per workflow name for the PR head, with its REST status.
 
     One head commit hosts several workflow runs (CI, QA reviews, re-runs). A
@@ -104,6 +125,7 @@ def _current_runs(head_sha: str, repo: str) -> list[dict]:
     data = _gh_api_json(
         [f"repos/{repo}/actions/runs?head_sha={head_sha}&per_page=100"],
         "runs",
+        host=host,
     )
     newest: dict[str, tuple[str, int, str]] = {}
     for run in data.get("workflow_runs") or []:
@@ -127,7 +149,7 @@ def _current_runs(head_sha: str, repo: str) -> list[dict]:
     return runs
 
 
-def _all_jobs(head_sha: str, repo: str) -> list[dict]:
+def _all_jobs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
     """Every completed-or-pending job of the head's current workflow runs.
 
     The projection keeps the REST job id (`.id`, the numeric identifier used by
@@ -136,10 +158,11 @@ def _all_jobs(head_sha: str, repo: str) -> list[dict]:
     `run_id`, on which re-run eligibility turns (task #3764).
     """
     jobs: list[dict] = []
-    for run in _current_runs(head_sha, repo):
+    for run in _current_runs(head_sha, repo, host=host):
         data = _gh_api_json(
             [f"repos/{repo}/actions/runs/{run['run_id']}/jobs?per_page=100"],
             f"run {run['run_id']} jobs",
+            host=host,
         )
         for job in data.get("jobs") or []:
             if not isinstance(job, dict):
@@ -156,7 +179,7 @@ def _all_jobs(head_sha: str, repo: str) -> list[dict]:
     return jobs
 
 
-def list_failed_jobs(pr: str | int, repo: str) -> list[dict]:
+def list_failed_jobs(pr: str | int, repo: str, *, host: Host) -> list[dict[str, Any]]:
     """Completed-failed jobs across every current workflow run of the PR's head.
 
     Each entry carries the job's REST id and conclusion plus the containing
@@ -165,15 +188,17 @@ def list_failed_jobs(pr: str | int, repo: str) -> list[dict]:
     never superseded QA checks. A failed GitHub query raises `CiJobRerunError`;
     an empty list means the query succeeded and found nothing to re-run.
     """
-    sha = _head_sha_of(pr, repo)
+    sha = _head_sha_of(pr, repo, host=host)
     return [
         j
-        for j in _all_jobs(sha, repo)
+        for j in _all_jobs(sha, repo, host=host)
         if isinstance(j.get("conclusion"), str) and j["conclusion"].upper() in FAILING
     ]
 
 
-def rerun_failed_jobs(pr: str | int, repo: str) -> tuple[list[dict], list[dict], list[str]]:
+def rerun_failed_jobs(
+    pr: str | int, repo: str, *, host: Host
+) -> tuple[list[dict], list[dict], list[str]]:
     """Re-run the failed jobs of the PR head's current runs.
 
     Returns `(reran, waiting, errors)`: jobs whose re-run was accepted; jobs
@@ -189,42 +214,50 @@ def rerun_failed_jobs(pr: str | int, repo: str) -> tuple[list[dict], list[dict],
     waiting: list[dict] = []
     errors: list[str] = []
     by_run: dict[int, list[dict]] = {}
-    for job in list_failed_jobs(pr, repo):
+    for job in list_failed_jobs(pr, repo, host=host):
         by_run.setdefault(job["run_id"], []).append(job)
     for run_id, jobs in by_run.items():
         if jobs[0]["run_status"] != "completed":
             waiting.extend(jobs)
             continue
         if len(jobs) == 1:
-            r = subprocess.run(  # noqa: S603
-                [
-                    "gh",
-                    "api",
-                    "--method",
-                    "POST",
-                    f"repos/{repo}/actions/jobs/{jobs[0]['job_id']}/rerun",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                r = host.run(
+                    [
+                        "gh",
+                        "api",
+                        "--method",
+                        "POST",
+                        f"repos/{repo}/actions/jobs/{jobs[0]['job_id']}/rerun",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=_GH_TIMEOUT_S,
+                )
+            except subprocess.TimeoutExpired as error:
+                errors.append(f"run {run_id}: re-run outcome unconfirmed after timeout: {error}")
+                continue
             if r.returncode == 0:
                 reran.append(jobs[0])
             else:
                 errors.append(f"{jobs[0]['name']}: {(r.stderr or r.stdout).strip()}")
             continue
-        r = subprocess.run(  # noqa: S603
-            [
-                "gh",
-                "api",
-                "--method",
-                "POST",
-                f"repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            r = host.run(
+                [
+                    "gh",
+                    "api",
+                    "--method",
+                    "POST",
+                    f"repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=_GH_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired as error:
+            errors.append(f"run {run_id}: re-run outcome unconfirmed after timeout: {error}")
+            continue
         if r.returncode == 0:
             reran.extend(jobs)
         else:

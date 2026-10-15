@@ -15,6 +15,7 @@ with the persisted verdict left behind).
 from __future__ import annotations
 
 import sys
+import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ from typing import Any
 import pytest
 
 from base import paths
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
+from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.cli import CIStatus
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -103,6 +107,8 @@ def _run_watcher(
     fake: _FakeAva | None = None,
     raise_on_poll: Exception | None = None,
     run_name: str = "__ci_watcher__",
+    forbid_sleep: bool = False,
+    on_atexit: Callable[..., None] | None = None,
 ) -> tuple[list[tuple[int, str]], list[Any], _FakeAva]:
     """Exec the substituted template; return its wakes, polls, and fake.
 
@@ -112,8 +118,25 @@ def _run_watcher(
     fake; `raise_on_poll` makes the probe raise instead of answering.
     """
     polled: list[Any] = []
+    timers = ManualTimers()
+    clock = Clock(
+        ClockConfig(
+            timezone="UTC",
+            authoritative_timezone="UTC",
+            message_timestamp_weekday=True,
+        ),
+        timers=timers,
+        now=timers.now,
+    )
+    host = fake_host()
 
-    def _check_ci(_pr: str | int) -> _Result:
+    def _check_ci(
+        _pr: str | int,
+        *,
+        host: object = None,
+        clock: object = None,
+    ) -> _Result:
+        assert host is not None and clock is not None
         if raise_on_poll is not None:
             raise raise_on_poll
         verdict = verdicts[min(len(polled), len(verdicts) - 1)]
@@ -134,14 +157,13 @@ def _run_watcher(
         ('PR_NUMBER = ""', 'PR_NUMBER = "1234"'),
         ('CI_UTILS = ""', f'CI_UTILS = "{tmp_path}"'),
         ("WATCHER_ID = 0", "WATCHER_ID = 42"),
-        # The poll interval is behavior; its wall clock is not. Sleep-free
-        # polls keep this test instant — and a template whose default moves must
-        # fail here loudly, not silently sleep the real 60s per poll.
-        ("CHECK_EVERY = 60", "CHECK_EVERY = 0"),
-        # The two imports are substituted rather than patched through
+        # The imports are substituted rather than patched through
         # sys.modules: a stub left there leaks into fixture teardown, which
         # re-imports `ava` (same substitution the generated-watcher tests use).
+        ("import atexit\n", ""),
         ("import ava\n", ""),
+        ("from base.clock import Clock\n", ""),
+        ("from base.host.system.hostport import Host\n", ""),
         ("from scripts.ci.pull_requests.status import CIStatus, check_ci  # noqa: E402\n", ""),
     )
     for old, new in substitutions:
@@ -152,7 +174,12 @@ def _run_watcher(
             compile(code, str(_TEMPLATE), "exec"),
             {
                 "__name__": run_name,
+                "atexit": types.SimpleNamespace(
+                    register=on_atexit if on_atexit is not None else lambda *_a, **_kw: None
+                ),
                 "ava": fake_ava,
+                "Clock": types.SimpleNamespace(from_settings=lambda: clock),
+                "Host": types.SimpleNamespace(system=lambda: host),
                 "CIStatus": CIStatus,
                 "check_ci": _check_ci,
             },
@@ -160,6 +187,8 @@ def _run_watcher(
     finally:
         if str(tmp_path) in sys.path:
             sys.path.remove(str(tmp_path))
+        if forbid_sleep:
+            assert timers.sleeps == [], f"slept {timers.sleeps} after a failed wake"
     return fake_ava.wakes, polled, fake_ava
 
 
@@ -237,15 +266,6 @@ def test_wake_is_sent_once_after_the_verdict_is_persisted(
     assert "all_passed" in wakes[0][1]
 
 
-def _forbid_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failed wake must not wait out a retry window."""
-
-    def _sleep(seconds: float) -> None:
-        raise AssertionError(f"slept {seconds}s after a failed wake")
-
-    monkeypatch.setattr("time.sleep", _sleep)
-
-
 def test_failed_delivery_exits_2_after_one_send_and_keeps_the_verdict(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -253,9 +273,8 @@ def test_failed_delivery_exits_2_after_one_send_and_keeps_the_verdict(
     exits 2 after the single attempt (the exit notice is the second delivery
     path) and the persisted verdict remains for a later read."""
     fake = _FakeAva(tmp_path, send_failures=100)
-    _forbid_sleep(monkeypatch)
     with pytest.raises(SystemExit) as excinfo:
-        _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake)
+        _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake, forbid_sleep=True)
 
     assert excinfo.value.code == 2
     assert fake.send_calls == 1
@@ -272,9 +291,8 @@ def test_probe_error_is_persisted_then_exits_1(
     before exit 1, so the error survives even a wake that cannot land."""
     fake = _FakeAva(tmp_path, send_failures=100)
     error = RuntimeError("gh exploded")
-    _forbid_sleep(monkeypatch)
     with pytest.raises(SystemExit) as excinfo:
-        _run_watcher(monkeypatch, tmp_path, [], fake=fake, raise_on_poll=error)
+        _run_watcher(monkeypatch, tmp_path, [], fake=fake, raise_on_poll=error, forbid_sleep=True)
 
     assert excinfo.value.code == 1
     assert fake.send_calls == 1
@@ -316,8 +334,6 @@ def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The final atexit line survives a later cleanup traceback in --tail-file."""
-    import atexit
-
     from pydantic import BaseModel, ValidationError, model_validator
 
     from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
@@ -334,7 +350,6 @@ def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
     def record_callback(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
         callbacks.append((fn, args, kwargs))
 
-    monkeypatch.setattr(atexit, "register", record_callback)
     with pytest.raises(SystemExit):
         _run_watcher(
             monkeypatch,
@@ -342,6 +357,7 @@ def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
             [CIStatus.ALL_PASSED],
             fake=_FakeAva(tmp_path, send_error=error.value),
             run_name="__main__",
+            on_atexit=record_callback,
         )
     assert len(callbacks) == 1
     sys.stdout.write("later boot cleanup traceback" * 120 + "\n")
@@ -360,12 +376,21 @@ def test_persist_failure_does_not_claim_a_stored_verdict(
     review): the message still goes out, and the exhaustion report says the log
     holds the only copy."""
     fake = _FakeAva(tmp_path, send_failures=100, write_failures=100)
-    _forbid_sleep(monkeypatch)
     with pytest.raises(SystemExit) as excinfo:
-        _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake)
+        _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake, forbid_sleep=True)
 
     assert excinfo.value.code == 2
     out = capsys.readouterr().out
     assert "verdict persist failed" in out
     assert "the verdict was not persisted" in out
     assert not (tmp_path / _VERDICT_NAME).exists()
+
+
+def test_pending_watcher_reaches_its_deadline_without_real_sleep(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    wakes, polled, _ = _run_watcher(monkeypatch, tmp_path, [CIStatus.PENDING])
+    assert polled
+    assert len(wakes) == 1
+    assert "timed out" in wakes[0][1]
+    assert "still pending" in wakes[0][1]

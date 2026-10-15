@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import pathlib
 import shutil
@@ -67,12 +68,12 @@ def test_subdirectories_ci_never_checks_out_do_not_count(
     (package / "empty").mkdir()
     (package / "hidden_only").mkdir()
     (package / "hidden_only" / ".DS_Store").write_bytes(b"")
-    assert lcs.main([], repo_root=tmp_path) == 0
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
     _module(package / "real_pkg" / "module.py")
     _track(package / "real_pkg")
-    assert lcs.main([], repo_root=tmp_path) == 1
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -86,7 +87,7 @@ def test_docs_layer_without_init_counts(
     (package / "docs").mkdir()
     (package / "docs" / "package.ava.okf.md").write_text("# doc\n", encoding="utf-8")
     _track(package)
-    assert lcs.main([], repo_root=tmp_path) == 1
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -100,7 +101,7 @@ def test_docs_package_with_init_counts(
         _module(package / f"entry_{index}.py")
     _module(package / "docs" / "__init__.py")
     _track(package)
-    assert lcs.main([], repo_root=tmp_path) == 1
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -130,7 +131,7 @@ def test_every_tracked_directory_has_the_same_cap(
         (folder / f"entry_{index}.md").write_text("Documentation.\n", encoding="utf-8")
     _track(folder)
 
-    assert lcs.main([], repo_root=tmp_path) == int(count > 20)
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == int(count > 20)
     output = capsys.readouterr().out
     assert (f"{directory}: directory has 21 direct entries" in output) == (count > 20)
 
@@ -147,7 +148,7 @@ def test_changed_files_of_every_suffix_check_their_directory(
     changed.write_bytes(b"x = 1\n")
     _track(folder)
 
-    assert lcs.main(["--only", str(changed)], repo_root=tmp_path) == 1
+    assert lcs.main(["--only", str(changed)], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "docs: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -164,7 +165,7 @@ def test_tracked_hidden_members_and_docs_tests_migrations_take_parent_slots(
         member.write_text("{}\n", encoding="utf-8")
     _track(folder)
 
-    assert lcs.main([], repo_root=tmp_path) == 1
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "base/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -174,7 +175,7 @@ def test_root_can_exceed_the_cap_but_its_child_cannot(
     for index in range(21):
         (tmp_path / f"root_{index}.md").write_text("Root.\n", encoding="utf-8")
     _track(*(tmp_path.glob("root_*.md")))
-    assert lcs.main([], repo_root=tmp_path) == 0
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
     folder = tmp_path / "docs"
     folder.mkdir()
@@ -182,7 +183,7 @@ def test_root_can_exceed_the_cap_but_its_child_cannot(
         (folder / f"entry_{index}.md").write_text("Child.\n", encoding="utf-8")
     _track(*(tmp_path.glob("root_*.md")), folder)
 
-    assert lcs.main([], repo_root=tmp_path) == 1
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "docs: directory has 21 direct entries" in output
     assert "root_" not in output
@@ -201,7 +202,7 @@ def test_untracked_local_artifacts_do_not_add_slots(
         for index in range(30):
             (folder / name / f"local_{index}.bin").write_bytes(b"\x00")
 
-    assert lcs.main([], repo_root=tmp_path) == 0
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -219,7 +220,7 @@ def test_git_filename_quoting_does_not_change_the_count(
     changed.write_text("Changed.\n", encoding="utf-8")
     _track(folder)
 
-    assert lcs.main(["--only", str(changed)], repo_root=tmp_path) == 1
+    assert lcs.main(["--only", str(changed)], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "docs: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -242,11 +243,11 @@ def test_a_tracked_symlink_takes_one_slot_without_traversal(
     link.symlink_to(target, target_is_directory=target_kind == "directory")
     _track(folder)
 
-    assert lcs.main(["--only", str(link)], repo_root=tmp_path) == 0
+    assert lcs.main(["--only", str(link)], repo_root=tmp_path, parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
     (folder / "extra.md").write_text("Extra.\n", encoding="utf-8")
     _track(folder / "extra.md")
-    assert lcs.main(["--only", str(link)], repo_root=tmp_path) == 1
+    assert lcs.main(["--only", str(link)], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "docs: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -284,11 +285,11 @@ def test_a_gitlink_takes_one_slot_without_scanning_local_contents(
     )
     assert result.returncode == 0, result.stderr
 
-    assert lcs.main([], repo_root=tmp_path) == 0
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
     (folder / "extra.md").write_text("Extra.\n", encoding="utf-8")
     _track(folder / "extra.md")
-    assert lcs.main([], repo_root=tmp_path) == 1
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "docs: directory has 21 direct entries" in capsys.readouterr().out
 
 
@@ -425,9 +426,9 @@ def test_explicit_deep_target_checks_all_ancestors_without_an_unrelated_sibling(
         (unrelated / f"entry_{index}.ts").write_text("export {};\n", encoding="utf-8")
     _track(folder, unrelated)
 
-    assert lcs.main(["--only", str(changed)], repo_root=tmp_path) == 1
+    assert lcs.main(["--only", str(changed)], repo_root=tmp_path, parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "docs: directory has 21 direct entries" in output
     assert "ui: directory" not in output
-    assert lcs.main([], repo_root=tmp_path) == 1
+    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
     assert "ui: directory has 21 direct entries" in capsys.readouterr().out

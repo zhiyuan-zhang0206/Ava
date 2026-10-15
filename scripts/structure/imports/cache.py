@@ -21,7 +21,7 @@ from __future__ import annotations
 import ast
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -36,7 +36,12 @@ _SKIPPED_DIRS = frozenset({"tests", "docs", "__pycache__"})
 Entry = tuple[int, int, str]  # (mtime_ns, size, import statements, one per line)
 
 
-def production_imports(repo_root: Path, tops: Sequence[str]) -> dict[str, str]:
+def production_imports(
+    repo_root: Path,
+    tops: Sequence[str],
+    *,
+    read_source: Callable[[Path], str],
+) -> dict[str, str]:
     """Repo-relative path -> the file's first-party import statements (one per line)."""
     cache_file = repo_root / CACHE_PATH
     cached = _load(cache_file)
@@ -47,7 +52,11 @@ def production_imports(repo_root: Path, tops: Sequence[str]) -> dict[str, str]:
         if hit is not None and hit[:2] == (stat.st_mtime_ns, stat.st_size):
             found[rel] = hit
         else:
-            found[rel] = (stat.st_mtime_ns, stat.st_size, _statements(path, rel, tops))
+            found[rel] = (
+                stat.st_mtime_ns,
+                stat.st_size,
+                _statements(path, rel, tops, read_source=read_source),
+            )
     if found != cached:
         _store(cache_file, found)
     return {rel: entry[2] for rel, entry in found.items()}
@@ -65,10 +74,16 @@ def _source_files(repo_root: Path, tops: Sequence[str]) -> list[tuple[str, Path]
     return files
 
 
-def _statements(path: Path, rel: str, tops: Sequence[str]) -> str:
+def _statements(
+    path: Path,
+    rel: str,
+    tops: Sequence[str],
+    *,
+    read_source: Callable[[Path], str],
+) -> str:
     """The absolute first-party import statements of one file, function-level ones included."""
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = ast.parse(read_source(path))
     except (SyntaxError, UnicodeDecodeError):
         return ""  # unparsable members are skipped, as every structure lint skips them
     lines: list[str] = []

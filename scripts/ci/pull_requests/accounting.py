@@ -47,7 +47,11 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+from base.host.system.hostport import Host
+
+_GH_TIMEOUT_S = 60.0
 LINUX_MINUTE_USD = 0.006
 MACOS_MINUTE_USD = 0.062
 INCLUDED_MINUTES_MONTHLY = 3000
@@ -66,14 +70,17 @@ _BRANCH_AGENT_RE = re.compile(r"^ava-(\d+)-")
 _WINDOW_CHUNK_SECONDS = 4 * 3600
 
 
-def _gh_api(path: str, *, jq: str) -> list[dict]:
+def _gh_api(path: str, *, jq: str, host: Host) -> list[dict]:
     """Run `gh api` and return the JSON array; [] on any failure."""
-    result = subprocess.run(  # noqa: S603
-        ["gh", "api", path, "--jq", jq],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = host.run(
+            ["gh", "api", path, "--jq", jq],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return []
     if result.returncode != 0:
         return []
     try:
@@ -92,16 +99,30 @@ def parse_identity(text: str) -> tuple[int | None, int | None]:
     return agent_id, task_id
 
 
-def _pr_title(repo: str, pr_number: int | None) -> str:
+def _pr_title(repo: str, pr_number: int | None, *, host: Host) -> str:
     """PR title for attribution; empty when the PR number is unknown."""
     if pr_number is None:
         return ""
-    result = subprocess.run(  # noqa: S603
-        ["gh", "pr", "view", str(pr_number), "--repo", repo, "--json", "title", "--jq", ".title"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = host.run(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(pr_number),
+                "--repo",
+                repo,
+                "--json",
+                "title",
+                "--jq",
+                ".title",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return ""
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
@@ -125,43 +146,45 @@ def job_minutes(started: str | None, completed: str | None) -> int:
 
 
 def _identity_from_prs(
-    run: dict, repo: str, real_pr: int | None
+    run: dict, repo: str, real_pr: int | None, *, host: Host
 ) -> tuple[int | None, int | None, int | None]:
     """`(pr_number, agent_id, task_id)` from the run's PR payload, or the trunk branch's real PR."""
     pull_requests = [p for p in run.get("pull_requests", []) if isinstance(p, dict)]
     if pull_requests:
         raw_number = pull_requests[0].get("number")
         pr_number = int(raw_number) if isinstance(raw_number, (int, str)) else None
-        title = _pr_title(repo, real_pr if real_pr else pr_number)
+        title = _pr_title(repo, real_pr if real_pr else pr_number, host=host)
         agent_id, task_id = parse_identity(title)
         return (real_pr or pr_number), agent_id, task_id
     if real_pr is not None:
         # Queue test runs on trunk-merge/pr-<n> branches carry no PR payload —
         # the branch name itself names the real PR.
-        agent_id, task_id = parse_identity(_pr_title(repo, real_pr))
+        agent_id, task_id = parse_identity(_pr_title(repo, real_pr, host=host))
         return real_pr, agent_id, task_id
     return None, None, None
 
 
-def _merged_pr_of(run: dict, repo: str) -> int | None:
+def _merged_pr_of(run: dict, repo: str, *, host: Host) -> int | None:
     """The PR a push-to-main merge run landed, from its head commit."""
     head_sha = str(run.get("head_sha") or "")
     if not head_sha:
         return None
-    merged_prs = _gh_api(f"repos/{repo}/commits/{head_sha}/pulls", jq="[.[] | .number] | @json")
+    merged_prs = _gh_api(
+        f"repos/{repo}/commits/{head_sha}/pulls", jq="[.[] | .number] | @json", host=host
+    )
     return merged_prs[0] if merged_prs and isinstance(merged_prs[0], int) else None
 
 
-def _run_identity(run: dict, repo: str) -> tuple[int | None, int | None, int | None]:
+def _run_identity(run: dict, repo: str, *, host: Host) -> tuple[int | None, int | None, int | None]:
     """`(pr_number, agent_id, task_id)` of a run, by PR title, merge commit, subject or branch."""
     real_pr = _real_pr_of_trunk_branch(str(run.get("head_branch") or ""))
-    pr_number, agent_id, task_id = _identity_from_prs(run, repo, real_pr)
+    pr_number, agent_id, task_id = _identity_from_prs(run, repo, real_pr, host=host)
     if agent_id is None and str(run.get("head_branch") or "") == "main":
         # A push-to-main merge run: the merge commit names the PR it landed.
-        merged = _merged_pr_of(run, repo)
+        merged = _merged_pr_of(run, repo, host=host)
         if merged is not None:
             pr_number = merged
-            agent_id, task_id = parse_identity(_pr_title(repo, pr_number))
+            agent_id, task_id = parse_identity(_pr_title(repo, pr_number, host=host))
     if agent_id is None:
         agent_id, task_id = parse_identity(str(run.get("head_commit_msg") or ""))
     if agent_id is None:
@@ -173,11 +196,11 @@ def _run_identity(run: dict, repo: str) -> tuple[int | None, int | None, int | N
     return pr_number, agent_id, task_id
 
 
-def _run_entry(run: dict, repo: str) -> dict:
+def _run_entry(run: dict, repo: str, *, host: Host) -> dict:
     """One ledger entry for a CI run: identity from the PR title (synthetic
     test PRs resolve to their real PR) with the head-commit subject as
     fallback (push-to-main merge runs)."""
-    pr_number, agent_id, task_id = _run_identity(run, repo)
+    pr_number, agent_id, task_id = _run_identity(run, repo, host=host)
     day = (run.get("created_at") or "")[:10]
     return {
         "run_id": int(run["id"]),
@@ -194,10 +217,11 @@ def _run_entry(run: dict, repo: str) -> dict:
     }
 
 
-def _fill_job_minutes(entry: dict, repo: str) -> None:
+def _fill_job_minutes(entry: dict, repo: str, *, host: Host) -> None:
     jobs = _gh_api(
         f"repos/{repo}/actions/runs/{entry['run_id']}/jobs?per_page=100",
         jq="[.jobs[] | {name: .name, started: .started_at, completed: .completed_at}] | @json",
+        host=host,
     )
     for job in jobs:
         # The jobs API returns null started/completed for in-progress and
@@ -217,7 +241,7 @@ def _fill_job_minutes(entry: dict, repo: str) -> None:
         entry["jobs"] += 1
 
 
-def collect(repo: str, since: str, until: str) -> list[dict]:
+def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, Any]]:
     """Attribution entries for every CI run created in [since, until)."""
     entries: dict[int, dict] = {}
     since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
@@ -238,6 +262,7 @@ def collect(repo: str, since: str, until: str) -> list[dict]:
                 "head_branch: .head_branch, head_sha: .head_sha, "
                 "head_commit_msg: .head_commit.message, "
                 "pull_requests: [.pull_requests[]?.number]}] | @json",
+                host=host,
             )
             if not runs:
                 break
@@ -248,8 +273,8 @@ def collect(repo: str, since: str, until: str) -> list[dict]:
         cursor = datetime.fromtimestamp(chunk_end, tz=UTC)
     out = []
     for run in entries.values():
-        entry = _run_entry(run, repo)
-        _fill_job_minutes(entry, repo)
+        entry = _run_entry(run, repo, host=host)
+        _fill_job_minutes(entry, repo, host=host)
         out.append(entry)
     return out
 
@@ -359,7 +384,7 @@ def _print_entries(entries: list[dict]) -> None:
         )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, host: Host) -> int:
     parser = argparse.ArgumentParser(description="CI usage attribution and ledger")
     parser.add_argument(
         "--repo", default=DEFAULT_REPO, help=f"owner/repo (default: {DEFAULT_REPO})"
@@ -383,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.since or not args.until:
         parser.error("--since and --until are required without --report")
-    entries = collect(args.repo, args.since, args.until)
+    entries = collect(args.repo, args.since, args.until, host=host)
     if args.append_ledger:
         appended = append_ledger(Path(args.append_ledger), entries)
         print(f"appended {appended} entry(s) to {args.append_ledger} (of {len(entries)} collected)")
@@ -396,4 +421,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(host=Host.system()))

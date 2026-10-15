@@ -7,5 +7,5 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "pr_flow_export.
 "owner_operations.py" = ["job_rerun.py", "monitor.py", "status.py", "trunk_api.py"]
 "pr_flow_export.py" = ["export_process.py", "trunk_api.py"]
 "runs_export.py" = ["export_process.py"]
-"tests" = ["accounting.py", "commands.py", "export_process.py", "job_rerun.py", "monitor.py", "owner_operations.py", "runs_export.py", "status.py"]
+"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "job_rerun.py", "monitor.py", "owner_operations.py", "runs_export.py", "status.py", "trunk_api.py"]
 "watch_pr.py" = ["status.py"]

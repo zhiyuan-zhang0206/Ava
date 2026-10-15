@@ -50,11 +50,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from base.host.atomic_io import write_text_atomic
 
 _BACKEND_WORKERS = 4  # mirrors the backend-shard job (-n 4)
 _E2E_WORKERS = 2  # mirrors the e2e-shard job (-n 2)
@@ -242,25 +243,7 @@ def write_durations(durations: dict[str, float]) -> dict[str, float]:
     # measurements would therefore price them as unknown, often slow tests.
     rounded = {nodeid: round(value, 3) for nodeid, value in durations.items()}
     content = json.dumps(rounded, sort_keys=True, separators=(",", ":")) + "\n"
-    tmp_path: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=DURATIONS_PATH.parent,
-            prefix=".test_durations.",
-            suffix=".tmp",
-            delete=False,
-        ) as tmp:
-            tmp_path = tmp.name
-            tmp.write(content)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        Path(tmp_path).replace(DURATIONS_PATH)
-        tmp_path = None
-    finally:
-        if tmp_path is not None:
-            Path(tmp_path).unlink(missing_ok=True)
+    write_text_atomic(DURATIONS_PATH, content, encoding="utf-8", prefix=".test_durations.")
     return rounded
 
 

@@ -83,6 +83,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener  # noqa: E402 — script path guard
+
 DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
 DEFAULT_WINDOW_DAYS = 30
 PROCESS_NAME = "pr-flow"
@@ -379,10 +381,10 @@ def trunk_client() -> Any:
     yield trunk_api
 
 
-def fetch_queue_depth(repo: str, token: str, stats: RunStats) -> int | None:
+def fetch_queue_depth(repo: str, token: str, stats: RunStats, *, open_url: UrlOpener) -> int | None:
     """The Trunk merge queue's pending depth right now; None on any failure."""
     with trunk_client() as trunk:
-        data, error = trunk.post("getQueue", trunk.target_payload(repo), token)
+        data, error = trunk.post("getQueue", trunk.target_payload(repo), token, open_url=open_url)
     stats.trunk_calls += 1
     if error is not None or data is None:
         stats.trunk_error = error or "no data"
@@ -391,7 +393,9 @@ def fetch_queue_depth(repo: str, token: str, stats: RunStats) -> int | None:
     return len(items) if isinstance(items, list) else None
 
 
-def fetch_quarantined(repo: str, token: str, stats: RunStats) -> list[dict[str, Any]] | None:
+def fetch_quarantined(
+    repo: str, token: str, stats: RunStats, *, open_url: UrlOpener
+) -> list[dict[str, Any]] | None:
     """Trunk's quarantined-test list (paginated); None on any failure.
 
     Pagination is the response's ``next_page_token`` chain: Trunk ignores a
@@ -413,7 +417,12 @@ def fetch_quarantined(repo: str, token: str, stats: RunStats) -> list[dict[str, 
                 "org_url_slug": trunk.ORG_SLUG,
                 "page_query": page_query,
             }
-            data, error = trunk.post("flaky-tests/list-quarantined-tests", payload, token)
+            data, error = trunk.post(
+                "flaky-tests/list-quarantined-tests",
+                payload,
+                token,
+                open_url=open_url,
+            )
             stats.trunk_calls += 1
             if error is not None or data is None:
                 stats.trunk_error = error or "no data"
@@ -467,14 +476,15 @@ def load_cache(path: Path) -> dict[str, dict[str, Any]]:
 def save_json(path: Path, payload: dict[str, Any]) -> None:
     """Atomic write (tmp + rename) so a crash never leaves a torn file; a
     failed rename keeps the previous file and clears the stranded tmp."""
+    from base.host.atomic_io import write_text_atomic
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    try:
-        tmp.replace(path)
-    except OSError:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_text_atomic(
+        path,
+        json.dumps(payload, indent=1, sort_keys=True) + "\n",
+        encoding="utf-8",
+        sync_file=False,
+    )
 
 
 def collect_records(
@@ -616,7 +626,7 @@ def emit_events(snapshot: dict[str, Any], *, pipeline: Any) -> None:
     telemetry.sync()
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, open_url: UrlOpener) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name to sample")
     parser.add_argument(
@@ -675,8 +685,8 @@ def main(argv: list[str] | None = None) -> int:
         stats.trunk_error = "no ~/.trunk/api-token"
         print("pr-flow: no Trunk token — queue depth / flake fields skipped", file=sys.stderr)
     else:
-        queue_depth = fetch_queue_depth(args.repo, token, stats)
-        quarantined = fetch_quarantined(args.repo, token, stats)
+        queue_depth = fetch_queue_depth(args.repo, token, stats, open_url=open_url)
+        quarantined = fetch_quarantined(args.repo, token, stats, open_url=open_url)
         if quarantined is not None:
             flake_counts = count_quarantined_by_day(quarantined, days, tz)
 
@@ -720,4 +730,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(open_url=SYSTEM_URL_OPENER))

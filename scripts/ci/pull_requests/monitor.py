@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 
+from base.clock import Clock, Timers
+from base.host.system.hostport import Host
 from scripts.ci.pull_requests import status
 from scripts.ci.pull_requests.status import (
     LIMBO_AGE_SECONDS,
@@ -16,11 +17,11 @@ from scripts.ci.pull_requests.status import (
 )
 
 
-def query_once(pr: str, repo: str, *, as_json: bool) -> int:
+def query_once(pr: str, repo: str, *, as_json: bool, host: Host, clock: Clock) -> int:
     """One-shot probe: print the current verdict and exit (legacy contract —
     PENDING / NO_CHECKS / ERROR exit 0; FAILED / MERGE_CONFLICT /
     NO_WORKFLOW_RUNS / draft-gated NOT_READY exit 1)."""
-    result = status.check_ci(pr, repo=repo)
+    result = status.check_ci(pr, repo=repo, host=host, clock=clock)
 
     if as_json:
         print(
@@ -57,13 +58,18 @@ def query_once(pr: str, repo: str, *, as_json: bool) -> int:
 
 
 def deadline_hit(
-    deadline: float | None, pr: str, timeout: int, what: str = "CI still pending"
+    deadline: float | None,
+    pr: str,
+    timeout: int,
+    what: str = "CI still pending",
+    *,
+    timers: Timers,
 ) -> bool:
     """True once `deadline` passes — the --timeout bound for --wait use (which
     has no watchdog). Prints the reason so the completion notice carries it."""
     if deadline is None:
         return False
-    if time.monotonic() >= deadline:
+    if timers.monotonic() >= deadline:
         print(f"PR #{pr} {what} after {timeout}s — timed out.", file=sys.stderr, flush=True)
         return True
     return False
@@ -129,6 +135,9 @@ def wait_for_verdict(
     repo: str,
     every: int,
     timeout: int,
+    *,
+    host: Host,
+    clock: Clock,
 ) -> int:
     """Poll check_ci until the verdict settles, then report and exit.
     Never loops silently: a persistent gh/network failure exits 3 after MAX_CONSECUTIVE_ERRORS
@@ -140,21 +149,21 @@ def wait_for_verdict(
     """
     consecutive_errors = 0
     no_checks_reported = False
-    deadline = time.monotonic() + timeout if timeout else None
+    deadline = clock.monotonic() + timeout if timeout else None
 
     limbo_reported: tuple[int, ...] | None = None
 
     while True:
-        result = status.check_ci(pr, repo=repo)
+        result = status.check_ci(pr, repo=repo, host=host, clock=clock)
         verdict = result.verdict
 
         if verdict is CIStatus.PENDING:
             consecutive_errors = 0
             limbo_reported = report_limbo(result, limbo_reported)
-            if deadline_hit(deadline, pr, timeout, what=pending_reason(result)):
+            if deadline_hit(deadline, pr, timeout, what=pending_reason(result), timers=clock):
                 _limbo_timeout_note(pr, result)
                 return 1
-            time.sleep(every)
+            clock.sleep(every)
             continue
 
         if verdict is CIStatus.NO_CHECKS:
@@ -166,9 +175,9 @@ def wait_for_verdict(
                 print("[ci] no checks yet — waiting", file=sys.stderr, flush=True)
                 no_checks_reported = True
             consecutive_errors = 0
-            if deadline_hit(deadline, pr, timeout):
+            if deadline_hit(deadline, pr, timeout, timers=clock):
                 return 1
-            time.sleep(every)
+            clock.sleep(every)
             continue
 
         if verdict is CIStatus.ERROR:
@@ -187,9 +196,9 @@ def wait_for_verdict(
                     flush=True,
                 )
                 return 3
-            if deadline_hit(deadline, pr, timeout):
+            if deadline_hit(deadline, pr, timeout, timers=clock):
                 return 1
-            time.sleep(every)
+            clock.sleep(every)
             continue
 
         # Settled verdict — FAILED / NOT_READY / MERGE_CONFLICT / NO_WORKFLOW_RUNS / ALL_PASSED

@@ -104,7 +104,7 @@ def _nonlocal_object_use(
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
         return any(
             isinstance(child, ast.expr) and _contains_object(child, objects, scope)
-            for child in bindings.local_nodes(node)
+            for child in bindings.local_nodes(node, iter_children=ast.iter_child_nodes)
         )
     if isinstance(node, ast.Return | ast.Yield | ast.YieldFrom):
         return node.value is not None and _contains_object(node.value, objects, scope)
@@ -114,7 +114,7 @@ def _nonlocal_object_use(
 def _local_bindings(
     tree: ast.AST, execution: ast.Call, objects: tuple[ast.Call, ...], scope: bindings.Scope
 ) -> bool:
-    nodes = tuple(bindings.local_nodes(tree))
+    nodes = tuple(bindings.local_nodes(tree, iter_children=ast.iter_child_nodes))
     exported = {
         name for node in nodes if isinstance(node, ast.Global | ast.Nonlocal) for name in node.names
     }

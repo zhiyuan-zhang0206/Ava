@@ -50,12 +50,13 @@ Usage:
 import atexit
 import os
 import sys
-import time
 
 from pydantic import ValidationError
 
 import ava
+from base.clock import Clock
 from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
+from base.host.system.hostport import Host
 from base.paths import workspace_dir
 
 # ── Configure before launching ───────────────────────────────────────────────
@@ -130,11 +131,13 @@ def finish(message: str) -> bool:
     return delivered
 
 
-start = time.time()
+clock = Clock.from_settings()
+host = Host.system()
+start = clock.monotonic()
 no_checks_retries = 0
-while time.time() - start < TIMEOUT_S:
+while clock.monotonic() - start < TIMEOUT_S:
     try:
-        status = check_ci(PR_NUMBER)
+        status = check_ci(PR_NUMBER, host=host, clock=clock)
     except Exception as e:  # gh / network / JSON failure — report, do not hang
         # Exit 1 — the probe itself failed; persist + echo happen first, so
         # the error survives even when the wake cannot land (exit 2 is for
@@ -145,7 +148,7 @@ while time.time() - start < TIMEOUT_S:
     verdict = status.verdict
     if verdict == CIStatus.PENDING:
         no_checks_retries = 0  # checks are attached — a later NO_CHECKS is a new window
-        time.sleep(CHECK_EVERY)
+        clock.sleep(CHECK_EVERY)
         continue
 
     if verdict == CIStatus.NO_CHECKS and no_checks_retries < NO_CHECKS_RETRIES:
@@ -154,7 +157,7 @@ while time.time() - start < TIMEOUT_S:
         # NO_CHECKS is not yet evidence that nothing was scheduled. Re-poll a
         # bounded number of times before treating it as settled (task #3158).
         no_checks_retries += 1
-        time.sleep(CHECK_EVERY)
+        clock.sleep(CHECK_EVERY)
         continue
 
     # Settled — wake the agent with the full picture. FAILED, MERGE_CONFLICT,

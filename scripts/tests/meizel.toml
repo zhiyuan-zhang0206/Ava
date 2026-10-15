@@ -9,7 +9,6 @@
 "test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export.MAX_LIST_PAGES" = 1
 "test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export.emit_events" = 1
 "test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export.run_gh" = 4
-"test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export.trunk_client" = 2
 "test_understanding_replay_entry.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_understanding_replay_entry.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 2
 "test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.ConfigBoot" = 1
@@ -23,7 +22,3 @@
 "test_hooks_scratch_home.py#python -c" = 1
 "test_test_selector.py#python -c" = 1
 "test_worktree_guard.py#python -c" = 2
-
-[debt.stdlib-patch]
-"test_pr_flow_export.py#monkeypatch.setattr pathlib.Path.replace" = 1
-"test_understanding_replay_entry.py#monkeypatch.setattr sys.argv" = 2

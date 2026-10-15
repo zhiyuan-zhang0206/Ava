@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.pull_requests import accounting
 
 # The script's entries are unparameterized dicts: the call-site rules stay at warning.
@@ -17,18 +20,19 @@ from scripts.ci.pull_requests import accounting
 # pyright: reportUnknownArgumentType = warning
 
 
-def _gh_queue(responses: list[tuple[str, str]]):
+def _gh_queue(responses: list[tuple[str, str]]) -> Host:
     """Subprocess stub: first entry whose key appears in the command wins."""
 
-    def run(cmd: list[str], *_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
-        joined = " ".join(str(c) for c in cmd)
+    def run(argv: Sequence[str], *_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+        argv = list(argv)
+        joined = " ".join(str(c) for c in argv)
         for idx, (key, out) in enumerate(responses):
             if key in joined:
                 responses.pop(idx)
-                return subprocess.CompletedProcess(cmd, 0, out, "")
-        return subprocess.CompletedProcess(cmd, 1, "", "unmatched: " + joined)
+                return subprocess.CompletedProcess(argv, 0, out, "")
+        return subprocess.CompletedProcess(argv, 1, "", "unmatched: " + joined)
 
-    return run
+    return fake_host(run)
 
 
 def _runs(payload: list[dict[str, object]]) -> str:
@@ -62,46 +66,42 @@ _WINDOW_SINCE = "2026-09-06T08:00Z"
 _WINDOW_UNTIL = "2026-09-06T12:00Z"
 
 
-def test_pr_run_attribution_and_minute_split(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pr_run_attribution_and_minute_split() -> None:
     """PR-triggered run: identity from the PR title; minutes split linux/macos
     with ceil billing (30s macOS job = 1 minute)."""
-    monkeypatch.setattr(
-        accounting.subprocess,
-        "run",
-        _gh_queue(
-            [
-                (
-                    "actions/runs",
-                    _runs(
-                        [
-                            _run(
-                                pull_requests=[{"number": 42}],
-                                head_commit_msg="",
-                            )
-                        ]
+    host = _gh_queue(
+        [
+            (
+                "actions/runs",
+                _runs(
+                    [
+                        _run(
+                            pull_requests=[{"number": 42}],
+                            head_commit_msg="",
+                        )
+                    ]
+                ),
+            ),
+            ("pr view 42 ", "[Ava-5811] feat(ci): script queue ops (task #2571)"),
+            (
+                "runs/101/jobs",
+                _jobs(
+                    ("backend shard (1/16)", "2026-09-06T10:00:00Z", "2026-09-06T10:04:00Z"),
+                    (
+                        "permissions helper signing smoke (macOS)",
+                        "2026-09-06T10:00:00Z",
+                        "2026-09-06T10:00:30Z",
+                    ),
+                    (
+                        "cold-offline (ubuntu-24.04)",
+                        "2026-09-06T10:04:00Z",
+                        "2026-09-06T10:05:30Z",
                     ),
                 ),
-                ("pr view 42 ", "[Ava-5811] feat(ci): script queue ops (task #2571)"),
-                (
-                    "runs/101/jobs",
-                    _jobs(
-                        ("backend shard (1/16)", "2026-09-06T10:00:00Z", "2026-09-06T10:04:00Z"),
-                        (
-                            "permissions helper signing smoke (macOS)",
-                            "2026-09-06T10:00:00Z",
-                            "2026-09-06T10:00:30Z",
-                        ),
-                        (
-                            "cold-offline (ubuntu-24.04)",
-                            "2026-09-06T10:04:00Z",
-                            "2026-09-06T10:05:30Z",
-                        ),
-                    ),
-                ),
-            ]
-        ),
+            ),
+        ]
     )
-    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert len(entries) == 1
     entry = entries[0]
     assert entry["agent_id"] == 5811
@@ -112,95 +112,79 @@ def test_pr_run_attribution_and_minute_split(monkeypatch: pytest.MonkeyPatch) ->
     assert entry["jobs"] == 3
 
 
-def test_trunk_synthetic_pr_resolves_to_real_pr(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_trunk_synthetic_pr_resolves_to_real_pr() -> None:
     """A synthetic trunk-merge/pr-42/<uuid> run attributes to real PR 42."""
-    monkeypatch.setattr(
-        accounting.subprocess,
-        "run",
-        _gh_queue(
-            [
-                (
-                    "actions/runs",
-                    _runs(
-                        [
-                            _run(
-                                id=102,
-                                head_branch="trunk-merge/pr-42/e65e4a02-9624-435e-853a-8fb467af307c",
-                                pull_requests=[{"number": 77}],
-                            )
-                        ]
-                    ),
+    host = _gh_queue(
+        [
+            (
+                "actions/runs",
+                _runs(
+                    [
+                        _run(
+                            id=102,
+                            head_branch="trunk-merge/pr-42/e65e4a02-9624-435e-853a-8fb467af307c",
+                            pull_requests=[{"number": 77}],
+                        )
+                    ]
                 ),
-                ("pr view 42 ", "[Ava-5814] feat(gateway): schedule catch-up (task #2492)"),
-                ("runs/102/jobs", _jobs()),
-            ]
-        ),
+            ),
+            ("pr view 42 ", "[Ava-5814] feat(gateway): schedule catch-up (task #2492)"),
+            ("runs/102/jobs", _jobs()),
+        ]
     )
-    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert entries[0]["pr_number"] == 42
     assert entries[0]["agent_id"] == 5814
 
 
-def test_push_run_attributes_from_commit_subject(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        accounting.subprocess,
-        "run",
-        _gh_queue(
-            [
-                (
-                    "actions/runs",
-                    _runs(
-                        [
-                            _run(
-                                id=103,
-                                head_branch="main",
-                                head_commit_msg="[Ava-5814] feat(web): refine graph (task #2561)",
-                            )
-                        ]
-                    ),
+def test_push_run_attributes_from_commit_subject() -> None:
+    host = _gh_queue(
+        [
+            (
+                "actions/runs",
+                _runs(
+                    [
+                        _run(
+                            id=103,
+                            head_branch="main",
+                            head_commit_msg="[Ava-5814] feat(web): refine graph (task #2561)",
+                        )
+                    ]
                 ),
-                ("runs/103/jobs", _jobs()),
-            ]
-        ),
+            ),
+            ("runs/103/jobs", _jobs()),
+        ]
     )
-    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert entries[0]["agent_id"] == 5814
     assert entries[0]["task_id"] == 2561
 
 
-def test_unattributed_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        accounting.subprocess,
-        "run",
-        _gh_queue(
-            [
-                (
-                    "actions/runs",
-                    _runs([_run(id=104, head_branch="main", head_commit_msg="merge main")]),
-                ),
-                ("runs/104/jobs", _jobs()),
-            ]
-        ),
+def test_unattributed_run() -> None:
+    host = _gh_queue(
+        [
+            (
+                "actions/runs",
+                _runs([_run(id=104, head_branch="main", head_commit_msg="merge main")]),
+            ),
+            ("runs/104/jobs", _jobs()),
+        ]
     )
-    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert entries[0]["agent_id"] is None
 
 
-def test_append_ledger_is_idempotent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        accounting.subprocess,
-        "run",
-        _gh_queue(
-            [
-                (
-                    "actions/runs",
-                    _runs([_run(id=105, head_commit_msg="[Ava-5811] x")]),
-                ),
-                ("runs/105/jobs", _jobs()),
-            ]
-        ),
+def test_append_ledger_is_idempotent(tmp_path: Path) -> None:
+    host = _gh_queue(
+        [
+            (
+                "actions/runs",
+                _runs([_run(id=105, head_commit_msg="[Ava-5811] x")]),
+            ),
+            ("runs/105/jobs", _jobs()),
+        ]
     )
-    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     ledger = tmp_path / "ledger.jsonl"
     assert accounting.append_ledger(ledger, entries) == 1
     assert accounting.append_ledger(ledger, entries) == 0
@@ -269,136 +253,116 @@ def test_report_rollup_days_and_cost() -> None:
     assert only[0]["linux_minutes"] == 50
 
 
-def test_trunk_branch_without_pr_payload_attributes_by_branch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_trunk_branch_without_pr_payload_attributes_by_branch() -> None:
     """Queue test runs on trunk-merge/pr-<n> branches have no pull_requests
     payload; the branch name resolves the real PR."""
-    monkeypatch.setattr(
-        accounting.subprocess,
-        "run",
-        _gh_queue(
-            [
-                (
-                    "actions/runs",
-                    _runs(
-                        [
-                            _run(
-                                id=106,
-                                head_branch="trunk-merge/pr-42/ffffffff-ffff-ffff-ffff-ffffffffffff",
-                                pull_requests=[],
-                                head_commit_msg="merge-tree commit",
-                            )
-                        ]
-                    ),
+    host = _gh_queue(
+        [
+            (
+                "actions/runs",
+                _runs(
+                    [
+                        _run(
+                            id=106,
+                            head_branch="trunk-merge/pr-42/ffffffff-ffff-ffff-ffff-ffffffffffff",
+                            pull_requests=[],
+                            head_commit_msg="merge-tree commit",
+                        )
+                    ]
                 ),
-                ("pr view 42 ", "[Ava-5814] feat(gateway): schedule catch-up (task #2492)"),
-                ("runs/106/jobs", _jobs()),
-            ]
-        ),
+            ),
+            ("pr view 42 ", "[Ava-5814] feat(gateway): schedule catch-up (task #2492)"),
+            ("runs/106/jobs", _jobs()),
+        ]
     )
-    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert entries[0]["pr_number"] == 42
     assert entries[0]["agent_id"] == 5814
 
 
-def test_main_push_run_resolves_pr_via_merge_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_push_run_resolves_pr_via_merge_commit() -> None:
     """A push-to-main CI run with a non-convention commit subject attributes
     through the merge commit's associated PR."""
-    monkeypatch.setattr(
-        accounting.subprocess,
-        "run",
-        _gh_queue(
-            [
-                (
-                    "actions/runs",
-                    _runs(
-                        [
-                            _run(
-                                id=107,
-                                head_branch="main",
-                                head_sha="dddd3333dddd3333dddd3333dddd3333dddd3333",
-                                head_commit_msg="Preserve hosted agent continuations",
-                            )
-                        ]
-                    ),
+    host = _gh_queue(
+        [
+            (
+                "actions/runs",
+                _runs(
+                    [
+                        _run(
+                            id=107,
+                            head_branch="main",
+                            head_sha="dddd3333dddd3333dddd3333dddd3333dddd3333",
+                            head_commit_msg="Preserve hosted agent continuations",
+                        )
+                    ]
                 ),
-                ("commits/dddd3333dddd3333dddd3333dddd3333dddd3333/pulls", "[1872]"),
-                ("pr view 1872 ", "[Ava-5814] fix: hosted continuations (task #2566)"),
-                ("runs/107/jobs", _jobs()),
-            ]
-        ),
+            ),
+            ("commits/dddd3333dddd3333dddd3333dddd3333dddd3333/pulls", "[1872]"),
+            ("pr view 1872 ", "[Ava-5814] fix: hosted continuations (task #2566)"),
+            ("runs/107/jobs", _jobs()),
+        ]
     )
-    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert entries[0]["pr_number"] == 1872
     assert entries[0]["agent_id"] == 5814
 
 
-def test_branch_name_attributes_nonprefix_subject(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_branch_name_attributes_nonprefix_subject() -> None:
     """A conventional-commit subject without [Ava-N] attributes through the
     agent worktree branch name."""
-    monkeypatch.setattr(
-        accounting.subprocess,
-        "run",
-        _gh_queue(
-            [
-                (
-                    "actions/runs",
-                    _runs(
-                        [
-                            _run(
-                                id=108,
-                                head_branch="ava-5810-workfailed-bounds",
-                                head_commit_msg="Bound the work-failed webhook text columns (task #2531)",
-                            )
-                        ]
-                    ),
+    host = _gh_queue(
+        [
+            (
+                "actions/runs",
+                _runs(
+                    [
+                        _run(
+                            id=108,
+                            head_branch="ava-5810-workfailed-bounds",
+                            head_commit_msg="Bound the work-failed webhook text columns (task #2531)",
+                        )
+                    ]
                 ),
-                ("runs/108/jobs", _jobs()),
-            ]
-        ),
+            ),
+            ("runs/108/jobs", _jobs()),
+        ]
     )
-    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert entries[0]["agent_id"] == 5810
     assert entries[0]["task_id"] == 2531
 
 
-def test_null_timestamps_bill_zero_and_do_not_crash(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_null_timestamps_bill_zero_and_do_not_crash() -> None:
     """Jobs whose started/completed are null (in-progress, cancelled, or
     cancelled before start) must not crash reconciliation: they bill 0
     minutes and other jobs in the run still bill normally."""
-    monkeypatch.setattr(
-        accounting.subprocess,
-        "run",
-        _gh_queue(
-            [
-                (
-                    "actions/runs",
-                    _runs(
-                        [
-                            _run(
-                                id=109,
-                                head_branch="main",
-                                head_commit_msg="[Ava-5895] fix(ci): null job timestamps (task #2673)",
-                            )
-                        ]
-                    ),
+    host = _gh_queue(
+        [
+            (
+                "actions/runs",
+                _runs(
+                    [
+                        _run(
+                            id=109,
+                            head_branch="main",
+                            head_commit_msg="[Ava-5895] fix(ci): null job timestamps (task #2673)",
+                        )
+                    ]
                 ),
-                (
-                    "runs/109/jobs",
-                    _jobs(
-                        ("backend shard (1/16)", "2026-09-06T10:00:00Z", "2026-09-06T10:04:00Z"),
-                        ("still running (completed null)", "2026-09-06T10:00:00Z", None),
-                        ("cancelled before start (started null)", None, "2026-09-06T10:02:00Z"),
-                        ("queued (both null)", None, None),
-                    ),
+            ),
+            (
+                "runs/109/jobs",
+                _jobs(
+                    ("backend shard (1/16)", "2026-09-06T10:00:00Z", "2026-09-06T10:04:00Z"),
+                    ("still running (completed null)", "2026-09-06T10:00:00Z", None),
+                    ("cancelled before start (started null)", None, "2026-09-06T10:02:00Z"),
+                    ("queued (both null)", None, None),
                 ),
-            ]
-        ),
+            ),
+        ]
     )
-    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    entries = accounting.collect(accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL, host=host)
     assert len(entries) == 1
     entry = entries[0]
     assert entry["agent_id"] == 5895

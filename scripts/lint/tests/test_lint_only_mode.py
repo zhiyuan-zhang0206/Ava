@@ -12,6 +12,7 @@ three things hold, and each lint is held to all of them below:
 
 from __future__ import annotations
 
+import ast
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -309,7 +310,9 @@ def test_code_structure_turns_changed_files_into_explicit_targets(
         run_bounded(
             ["git", "-C", str(tmp_path), *args], timeout=30, capture_output=True
         ).check_returncode()
-    main = partial(code_structure.main, repo_root=tmp_path, baseline_base="HEAD")
+    main = partial(
+        code_structure.main, parse_ast=ast.parse, repo_root=tmp_path, baseline_base="HEAD"
+    )
     assert main([]) == 1
     assert "base/b.py:801:" in capsys.readouterr().out
     assert main(["--only", "base/b.py"]) == 1

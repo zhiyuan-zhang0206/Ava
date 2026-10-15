@@ -9,6 +9,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from base.host.git.gitenv import git_env
+from base.host.net.ports import UrlOpener
+from base.host.system.hostport import Host
+
 # The Ava checkout root this module ships in — anchors base-freshness git reads
 # against THIS repo's origin regardless of the caller's cwd (task #2496).
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -42,7 +46,7 @@ def _is_sha(value: str) -> bool:
     return bool(_SHA1_RE.match(value) or _SHA256_RE.match(value))
 
 
-def base_freshness(pr: str, repo: str) -> tuple[tuple[str, str] | None, bool]:
+def base_freshness(pr: str, repo: str, *, host: Host) -> tuple[tuple[str, str] | None, bool]:
     """Return ((base_sha, main_sha) when stale else None, unreadable).
     The PR's `baseRefOid` is the base-branch SHA GitHub last evaluated the PR against. When
     current main is ahead of it, the queue's predictive branch will include commits this PR's green
@@ -50,26 +54,33 @@ def base_freshness(pr: str, repo: str) -> tuple[tuple[str, str] | None, bool]:
     #2496 (A1) wants operators warned about. Advisory only: any read error or non-SHA output sets
     `unreadable` and never blocks submission.
     """
-    result = subprocess.run(  # noqa: S603
-        ["gh", "pr", "view", pr, "--repo", repo, "--json", "baseRefOid", "--jq", ".baseRefOid"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = host.run(
+            ["gh", "pr", "view", pr, "--repo", repo, "--json", "baseRefOid", "--jq", ".baseRefOid"],
+            capture_output=True,
+            text=True,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return None, True
     if result.returncode != 0:
         return None, True
     base_sha = result.stdout.strip()
     if not _is_sha(base_sha):
         return None, True
-    result = subprocess.run(  # noqa: S603
-        # -C anchors the checkout: cwd can be another git repo (e.g. the memory
-        # pool), whose origin would answer with a VALID sha and mis-refuse in
-        # require mode (QA NIT, 2026-09-06).
-        ["git", "-C", str(_REPO_ROOT), "ls-remote", "origin", "refs/heads/main"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = host.run(
+            # -C anchors the checkout: cwd can be another git repo (e.g. the memory
+            # pool), whose origin would answer with a VALID sha and mis-refuse in
+            # require mode (QA NIT, 2026-09-06).
+            ["git", "-C", str(_REPO_ROOT), "ls-remote", "origin", "refs/heads/main"],
+            env=git_env(),
+            capture_output=True,
+            text=True,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return None, True
     if result.returncode != 0:
         return None, True
     main_sha = result.stdout.split(maxsplit=1)[0]
@@ -81,7 +92,11 @@ def base_freshness(pr: str, repo: str) -> tuple[tuple[str, str] | None, bool]:
 
 
 def post(
-    endpoint: str, payload: dict[str, object], token: str
+    endpoint: str,
+    payload: dict[str, object],
+    token: str,
+    *,
+    open_url: UrlOpener,
 ) -> tuple[dict[str, object] | None, str | None]:
     """POST one Trunk API request, returning its object response or an error."""
     request = urllib.request.Request(  # noqa: S310 - fixed HTTPS Trunk API endpoint
@@ -91,9 +106,7 @@ def post(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(  # noqa: S310 - request uses the fixed HTTPS endpoint above
-            request, timeout=REQUEST_TIMEOUT_SECONDS
-        ) as response:
+        with open_url(request, REQUEST_TIMEOUT_SECONDS) as response:
             status = response.status
             body = response.read()
     except urllib.error.HTTPError as error:

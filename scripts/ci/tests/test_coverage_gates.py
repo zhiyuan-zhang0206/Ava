@@ -9,7 +9,6 @@ reports, so no real coverage data is involved.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -134,7 +133,6 @@ def test_env_threshold_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     the same env the old inline gate read."""
     report = tmp_path / "coverage.json"
     report.write_text(json.dumps({"files": _files(_core_classes(covered=8, valid=10))}))
-    monkeypatch.setattr(sys, "argv", ["coverage_gates", str(report)])
-    assert gates.main() == 1  # 80% below the 85% default
+    assert gates.main([str(report)]) == 1  # 80% below the 85% default
     monkeypatch.setenv("BACKEND_COVERAGE_THRESHOLD", "80")
-    assert gates.main() == 0
+    assert gates.main([str(report)]) == 0

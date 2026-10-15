@@ -17,9 +17,6 @@
 "test_lint_fixture_scope.py#monkeypatch.setattr scripts.lint.fixture_scope._REPO_ROOT" = 4
 "test_lint_only_mode.py#assignment scripts.lint.diagnostics.zombie_pyright_ignores._REPO_ROOT" = 2
 
-[debt.stdlib-patch]
-"test_lint_code_structure.py#monkeypatch.setattr ast.parse" = 1
-
 [debt.unresolved-patch]
 "test_lint_only_mode.py#monkeypatch.setattr lint" = 2
 "test_lint_only_mode.py#monkeypatch.setattr lint._tracked_files" = 1

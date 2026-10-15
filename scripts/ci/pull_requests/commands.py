@@ -24,6 +24,9 @@ import argparse
 import json
 import os
 
+from base.clock import Clock
+from base.host.net.ports import UrlOpener
+from base.host.system.hostport import Host
 from scripts.ci.pull_requests import monitor
 from scripts.ci.pull_requests.accounting import DEFAULT_LEDGER, load_ledger, report_rows
 from scripts.ci.pull_requests.status import DEFAULT_REPO, POLL_INTERVAL
@@ -83,7 +86,13 @@ def _ci_usage_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
     return 0
 
 
-def _diagnose_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
+def _diagnose_command(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    *,
+    host: Host,
+    open_url: UrlOpener,
+) -> int | None:
     """Dispatch --diagnose when set; None when not set."""
     if not args.diagnose:
         return None
@@ -95,7 +104,13 @@ def _diagnose_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
         parser.error("PR number is required with --diagnose")
     from scripts.ci.pull_requests.diagnose import diagnose_pr, print_diagnosis
 
-    diag = diagnose_pr(args.pr, args.repo, token=os.environ.get("TRUNK_API_TOKEN"))
+    diag = diagnose_pr(
+        args.pr,
+        args.repo,
+        token=os.environ.get("TRUNK_API_TOKEN"),
+        host=host,
+        open_url=open_url,
+    )
     if args.json:
         print(json.dumps(diag, indent=2))
     else:
@@ -103,7 +118,13 @@ def _diagnose_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    host: Host,
+    clock: Clock,
+    open_url: UrlOpener,
+) -> int:
     """CLI entry. Default: one-shot query (legacy behavior). `--wait`: poll
     until the verdict settles with the monitor exit-code contract; `--merge`
     implies `--wait` and submits to Trunk once green."""
@@ -221,16 +242,18 @@ def main(argv: list[str] | None = None) -> int:
     if ci_usage_rc is not None:
         return ci_usage_rc
 
-    diagnose_rc = _diagnose_command(args, p)
+    diagnose_rc = _diagnose_command(args, p, host=host, open_url=open_url)
     if diagnose_rc is not None:
         return diagnose_rc
 
     if args.merge or args.queue_status or args.evict or args.rerun_failed_jobs:
         from scripts.ci.pull_requests.owner_operations import dispatch
 
-        return dispatch(args, p)
+        return dispatch(args, p, host=host, clock=clock, open_url=open_url)
     if args.pr is None:
         p.error("PR number is required")
     if args.wait:
-        return monitor.wait_for_verdict(args.pr, args.repo, args.every, args.timeout)
-    return monitor.query_once(args.pr, args.repo, as_json=args.json)
+        return monitor.wait_for_verdict(
+            args.pr, args.repo, args.every, args.timeout, host=host, clock=clock
+        )
+    return monitor.query_once(args.pr, args.repo, as_json=args.json, host=host, clock=clock)

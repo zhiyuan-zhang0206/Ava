@@ -29,6 +29,10 @@ sys.meta_path.insert(0, RejectOwnerImports())
 os.environ.pop("TRUNK_API_TOKEN", None)
 os.environ["CI_QUEUE"] = "unrelated-owner-queue"
 
+from base.clock import Clock, ClockConfig  # noqa: E402
+from base.clock.tests.manual_timers import ManualTimers  # noqa: E402
+from base.host.net.tests.fake_url_opener import FakeUrlOpener  # noqa: E402
+from base.host.system.tests.fake_commands import fake_host  # noqa: E402
 from scripts.ci import cli as ci_utils  # noqa: E402
 from scripts.ci.pull_requests import status  # noqa: E402
 
@@ -38,4 +42,12 @@ def _all_passed(*_args: object, **_kwargs: object) -> status.CIResult:
 
 
 status.check_ci = _all_passed
-raise SystemExit(ci_utils.main(json.loads(sys.argv[2])))
+timers = ManualTimers()
+clock = Clock(
+    ClockConfig(timezone="UTC", authoritative_timezone="UTC", message_timestamp_weekday=False),
+    timers=timers,
+    now=timers.now,
+)
+raise SystemExit(
+    ci_utils.main(json.loads(sys.argv[2]), host=fake_host(), clock=clock, open_url=FakeUrlOpener())
+)

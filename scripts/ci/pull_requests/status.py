@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, TypedDict
 
+from base.clock import Clock
+from base.host.proc import run_bounded
+from base.host.system.hostport import Host
+
+_GH_TIMEOUT_S = 30.0
 PASSING = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
 FAILING = frozenset(
     {
@@ -52,12 +56,11 @@ class CIStatus(Enum):
 def _derive_repo() -> str:
     """owner/repo from the checkout's origin remote, else the fallback."""
     try:
-        out = subprocess.run(
+        out = run_bounded(
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
             timeout=10,
-            check=False,
         ).stdout.strip()
         m = re.search(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$", out)
         if m:
@@ -302,7 +305,7 @@ def partition_checks(checks: list[dict[str, Any]], result: CIResult) -> None:
             result.pending.append(name)
 
 
-def runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None:
+def runs_not_yet_reporting(head_sha: str, repo: str | None, *, host: Host) -> list[str] | None:
     """Names of workflow runs for `head_sha` that are scheduled but have not
     attached a check to the commit yet.
 
@@ -330,20 +333,23 @@ def runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None:
     NO_WORKFLOW_RUNS verdict either way; the all-passed caller reports ERROR (unknown) rather than
     guessing that nothing is coming.
     """
-    r = subprocess.run(  # noqa: S603
-        [
-            "gh",
-            "api",
-            f"repos/{repo}/actions/runs?head_sha={head_sha}"
-            if repo
-            else f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={head_sha}",
-            "--jq",
-            '[.workflow_runs[] | select(.status != "completed") | .name] | @json',
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        r = host.run(
+            [
+                "gh",
+                "api",
+                f"repos/{repo}/actions/runs?head_sha={head_sha}"
+                if repo
+                else f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={head_sha}",
+                "--jq",
+                '[.workflow_runs[] | select(.status != "completed") | .name] | @json',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return None
     if r.returncode != 0:
         return None
     try:
@@ -353,7 +359,7 @@ def runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None:
     return [str(n) for n in names] if isinstance(names, list) else None
 
 
-def main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None:
+def main_workflow_run_completed(head_sha: str, repo: str | None, *, host: Host) -> bool | None:
     """Whether the main CI workflow has a completed, non-skipped run for `head_sha`.
     The incomplete-runs probe cannot prove the suite was ever seen: seconds after a head change
     the rollup can carry a few second-scale checks — GitHub Apps and small proof workflows, all
@@ -372,18 +378,21 @@ def main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None:
     reports ERROR (unknown) rather than guess green.
     """
     owner = repo if repo else "{owner}/{repo}"
-    r = subprocess.run(  # noqa: S603
-        [
-            "gh",
-            "api",
-            f"repos/{owner}/actions/runs?head_sha={head_sha}&status=completed&per_page=100",
-            "--jq",
-            f'[.workflow_runs[] | select(.name == "{MAIN_CI_WORKFLOW_NAME}" and .conclusion != "skipped")] | length',
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        r = host.run(
+            [
+                "gh",
+                "api",
+                f"repos/{owner}/actions/runs?head_sha={head_sha}&status=completed&per_page=100",
+                "--jq",
+                f'[.workflow_runs[] | select(.name == "{MAIN_CI_WORKFLOW_NAME}" and .conclusion != "skipped")] | length',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return None
     if r.returncode != 0:
         return None
     try:
@@ -393,20 +402,23 @@ def main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None:
     return count > 0
 
 
-def _queued_run_candidates(owner: str, head_sha: str) -> list[Any] | None:
+def _queued_run_candidates(owner: str, head_sha: str, *, host: Host) -> list[Any] | None:
     """The head's `queued` runs as {id, name, created_at} rows; None when the probe cannot answer."""
-    r = subprocess.run(  # noqa: S603
-        [
-            "gh",
-            "api",
-            f"repos/{owner}/actions/runs?head_sha={head_sha}",
-            "--jq",
-            '[.workflow_runs[] | select(.status == "queued") | {id, name, created_at}] | @json',
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        r = host.run(
+            [
+                "gh",
+                "api",
+                f"repos/{owner}/actions/runs?head_sha={head_sha}",
+                "--jq",
+                '[.workflow_runs[] | select(.status == "queued") | {id, name, created_at}] | @json',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return None
     if r.returncode != 0:
         return None
     try:
@@ -416,14 +428,17 @@ def _queued_run_candidates(owner: str, head_sha: str) -> list[Any] | None:
     return candidates if isinstance(candidates, list) else None
 
 
-def _run_job_count(owner: str, run_id: int) -> int | None:
+def _run_job_count(owner: str, run_id: int, *, host: Host) -> int | None:
     """How many jobs a run has; None when the count cannot be read."""
-    jobs = subprocess.run(  # noqa: S603
-        ["gh", "api", f"repos/{owner}/actions/runs/{run_id}/jobs", "--jq", ".total_count"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        jobs = host.run(
+            ["gh", "api", f"repos/{owner}/actions/runs/{run_id}/jobs", "--jq", ".total_count"],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return None
     if jobs.returncode != 0:
         return None
     try:
@@ -432,7 +447,9 @@ def _run_job_count(owner: str, run_id: int) -> int | None:
         return None
 
 
-def limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
+def limbo_runs(
+    head_sha: str, repo: str | None, *, host: Host, clock: Clock
+) -> list[LimboRun] | None:
     """Runs for `head_sha` that look permanently stuck in GitHub limbo.
     The class (task #3275, 2026-09-13): `queued`, ZERO jobs ever created, and past
     `LIMBO_AGE_SECONDS`. Such a run stays in every non-completed answer forever, so without this
@@ -441,10 +458,10 @@ def limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
     cannot be read is skipped, not assumed stuck.
     """
     owner = repo if repo else "{owner}/{repo}"
-    candidates = _queued_run_candidates(owner, head_sha)
+    candidates = _queued_run_candidates(owner, head_sha, host=host)
     if candidates is None:
         return None
-    now = time.time()
+    now = clock.now().timestamp()
     limbo: list[LimboRun] = []
     for candidate in candidates:
         if not isinstance(candidate, dict):
@@ -457,14 +474,16 @@ def limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
         age = now - created_ts
         if age < LIMBO_AGE_SECONDS:
             continue
-        if _run_job_count(owner, raw_id) == 0:
+        if _run_job_count(owner, raw_id, host=host) == 0:
             limbo.append(
                 {"id": raw_id, "name": str(candidate.get("name") or "?"), "age_s": round(age)}
             )
     return limbo
 
 
-def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> None:
+def _empty_rollup_verdict(
+    result: CIResult, head_sha: str, repo: str | None, *, host: Host, clock: Clock
+) -> None:
     """Resolve an empty `statusCheckRollup` into a verdict on `result`.
     The rollup alone cannot tell "Actions has not attached the first check of a run yet" from
     "nothing was scheduled for this head". The first is the state of every PR in the seconds after
@@ -477,7 +496,7 @@ def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> 
     encodes: a gh / network failure must not produce the very settled NO_CHECKS the probe exists to
     rule out.
     """
-    scheduled = runs_not_yet_reporting(head_sha, repo)
+    scheduled = runs_not_yet_reporting(head_sha, repo, host=host)
     if scheduled is None:
         result.verdict = CIStatus.ERROR
         result.error_detail = (
@@ -486,7 +505,7 @@ def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> 
     elif scheduled:
         result.pending.extend(scheduled)
         result.verdict = CIStatus.PENDING
-        result.limbo = limbo_runs(head_sha, repo) or []
+        result.limbo = limbo_runs(head_sha, repo, host=host, clock=clock) or []
     else:
         result.verdict = CIStatus.NO_CHECKS
 
@@ -506,7 +525,9 @@ def _merge_conflict_result(data: dict, result: CIResult) -> CIResult:
     return result
 
 
-def _attached_checks_verdict(result: CIResult, head_sha: str, repo: str | None) -> None:
+def _attached_checks_verdict(
+    result: CIResult, head_sha: str, repo: str | None, *, host: Host, clock: Clock
+) -> None:
     """Resolve the verdict once every attached check has passed and none is still pending."""
     # Every check attached so far has passed. Attached, though, is not the same as finished: a
     # run that is queued / in progress has attached nothing to this commit yet, so a rollup
@@ -515,11 +536,11 @@ def _attached_checks_verdict(result: CIResult, head_sha: str, repo: str | None) 
     # MonsoraV2 #774: ALL_PASSED in ~2s while ci.yml run 34487002348 was still queued), and a
     # green verdict there ends the watch early. Ask the runs API once, before any green
     # verdict, whether more is coming.
-    scheduled = runs_not_yet_reporting(head_sha, repo)
+    scheduled = runs_not_yet_reporting(head_sha, repo, host=host)
     if scheduled:
         result.pending.extend(scheduled)
         result.verdict = CIStatus.PENDING
-        result.limbo = limbo_runs(head_sha, repo) or []
+        result.limbo = limbo_runs(head_sha, repo, host=host, clock=clock) or []
     elif not result.workflow_checks and repo_has_workflows():
         # Nothing from a workflow is attached — and nothing is confirmed scheduled (an
         # unanswerable probe, None, reads the same here) — while this checkout does define
@@ -564,7 +585,9 @@ def _attached_checks_verdict(result: CIResult, head_sha: str, repo: str | None) 
         # Not seen -> PENDING with the run name in `pending`: --wait keeps
         # polling (bounded by --timeout), and the one-shot keeps its legacy
         # contract — it prints this pending summary, never "all green".
-        main_run = main_workflow_run_completed(head_sha, repo) if repo_has_workflows() else True
+        main_run = (
+            main_workflow_run_completed(head_sha, repo, host=host) if repo_has_workflows() else True
+        )
         if main_run is None:
             # Same asymmetry as every probe here: unanswerable is unknown,
             # never green (--wait exits 3 if it persists).
@@ -582,7 +605,13 @@ def _attached_checks_verdict(result: CIResult, head_sha: str, repo: str | None) 
             result.verdict = CIStatus.ALL_PASSED
 
 
-def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
+def check_ci(
+    pr_number: str | int,
+    *,
+    repo: str | None = None,
+    host: Host,
+    clock: Clock,
+) -> CIResult:
     """Poll one PR's CI status and mergeability via `gh pr view --json`.
     Returns a CIResult with a clear verdict — no ambiguous exit codes that agents misinterpret.
 
@@ -612,20 +641,24 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
 
     # No --repo => gh resolves the PR against the current checkout's remote, so
     # this works in any clone or fork without a hard-coded slug.
-    r = subprocess.run(  # noqa: S603
-        [
-            "gh",
-            "pr",
-            "view",
-            pr_num,
-            *(("--repo", repo) if repo else ()),
-            "--json",
-            "mergeable,statusCheckRollup,headRefOid,isDraft",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        r = host.run(
+            [
+                "gh",
+                "pr",
+                "view",
+                pr_num,
+                *(("--repo", repo) if repo else ()),
+                "--json",
+                "mergeable,statusCheckRollup,headRefOid,isDraft",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as error:
+        result.error_detail = f"gh CLI timed out: {error}"
+        return result
     if r.returncode != 0:
         result.error_detail = f"gh CLI error: {r.stderr.strip()}"
         return result
@@ -655,7 +688,7 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
         # An empty rollup is probed before it is called settled: only a
         # confirmed-empty runs API makes NO_CHECKS true (the attach window right
         # after a push looks identical to it — 2026-09-12, PR #2249).
-        _empty_rollup_verdict(result, data.get("headRefOid", ""), repo)
+        _empty_rollup_verdict(result, data.get("headRefOid", ""), repo, host=host, clock=clock)
         return result
 
     core_skipped = core_suite_skipped(checks)
@@ -670,6 +703,6 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     elif result.pending:
         result.verdict = CIStatus.PENDING
     else:
-        _attached_checks_verdict(result, data.get("headRefOid", ""), repo)
+        _attached_checks_verdict(result, data.get("headRefOid", ""), repo, host=host, clock=clock)
 
     return result

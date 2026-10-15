@@ -1,15 +1,19 @@
 """Own periodic, GIL-held stack diagnostics for a bounded collection command."""
 
-import faulthandler
 import math
 import threading
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import TextIO
 
 
 @contextmanager
-def periodic_tracebacks(stacks: TextIO, *, interval: float = 60) -> Generator[None]:
+def periodic_tracebacks(
+    stacks: TextIO,
+    *,
+    interval: float = 60,
+    dump_traceback: Callable[..., None],
+) -> Generator[None]:
     """Dump all threads periodically; stop and join before the caller closes the file.
 
     Unlike dump_traceback_later's native watchdog, this Python thread holds the
@@ -27,7 +31,7 @@ def periodic_tracebacks(stacks: TextIO, *, interval: float = 60) -> Generator[No
             try:
                 stacks.write(f"Periodic traceback ({interval:g}s interval):\n")
                 stacks.flush()
-                faulthandler.dump_traceback(file=stacks, all_threads=True)
+                dump_traceback(file=stacks, all_threads=True)
             except Exception as error:
                 # Transfer a diagnostic failure to the owner, never a successful exit.
                 failures.append(error)
