@@ -15,6 +15,7 @@ class NoteKind(StrEnum):
     UNUSED_STRING = "unused-string"
     LINT_DIRECTIVE = "lint-directive"
     MACHINE = "machine"
+    FIXTURE_HELP = "fixture-help"
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,7 @@
 "check.py" = ["directives.py", "model.py", "python_source.py", "records.py"]
 "cli.py" = ["check.py", "render.py", "typescript_index.py"]
 "directives.py" = ["model.py"]
-"python_source.py" = ["directives.py", "model.py"]
+"python_source.py" = ["directives.py", "fixtures.py", "model.py"]
 "records.py" = ["model.py"]
 "render.py" = ["check.py", "model.py", "python_source.py"]
 "tests" = ["check.py", "cli.py", "model.py", "records.py", "render.py", "typescript_index.py"]

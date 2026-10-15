@@ -11,6 +11,7 @@ from scripts.content_lint.code_comments.directives import (
     comment_kind,
     is_quiesce_reference,
 )
+from scripts.content_lint.code_comments.fixtures import fixture_owners
 from scripts.content_lint.code_comments.model import Note, NoteKind, Source, Symbol
 
 
@@ -41,12 +42,13 @@ def attribute_docs(body: list[ast.stmt]) -> list[tuple[str, ast.Expr]]:
 
 
 class SymbolCollector(ast.NodeVisitor):
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, fixtures: frozenset[str]) -> None:
         self.symbols = {"<module>": Symbol("<module>", 1, max(1, len(text.splitlines())))}
         self.definitions = list(self.symbols.values())
         self.notes: list[Note] = []
         self.scope: list[str] = []
         self.docstrings: set[int] = set()
+        self.fixtures = fixtures
 
     def collect_body(
         self, node: ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
@@ -58,7 +60,11 @@ class SymbolCollector(ast.NodeVisitor):
             self.docstrings.add(id(first))
             self.notes.append(
                 Note(
-                    NoteKind.DOCSTRING, first.lineno, first.end_lineno or first.lineno, value, name
+                    NoteKind.FIXTURE_HELP if name in self.fixtures else NoteKind.DOCSTRING,
+                    first.lineno,
+                    first.end_lineno or first.lineno,
+                    value,
+                    name,
                 )
             )
         for attribute, expression in attribute_docs(node.body):
@@ -160,7 +166,7 @@ def comment_owner(symbols: Collection[Symbol], line: int, *, following: bool = T
 # ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-entry-shebang
 def parse_python(path: str, text: str) -> Source:
     tree = ast.parse(text, filename=path)
-    collector = SymbolCollector(text)
+    collector = SymbolCollector(text, fixture_owners(tree))
     collector.visit(tree)
     ambient_lines = ambient_call_lines(path, tree)
     for item in tokenize.generate_tokens(io.StringIO(text).readline):
