@@ -16,6 +16,7 @@ import base64
 import hashlib
 import hmac
 import time
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -57,6 +58,7 @@ def request_with_origin(
         allowed_origins=allowed_origins,
         browser_origin="",
         session_cookie_secure=False,
+        memory_root=Path("/nonexistent/memory"),
     )
     return Request(
         {

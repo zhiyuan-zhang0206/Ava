@@ -5,17 +5,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from functools import partial
 from pathlib import Path
 
 import pytest
 
-from base.cluster.machine import MachineRoles
 from gateway.tests.routers.test_memory_search import (
     SEARCH_PERMITS,
     _search,
     asgi_client,
     assert_semaphore_locked,
+    memory_config,
     never_returns,
     patch_provider,
     stub_search_backend,
@@ -43,10 +42,8 @@ class TestEventLoopIsolation:
         import threading
         import time
 
-        import gateway.routers.memory as _gw_memory
         import services.derived.memory_indexer.backends.factory as _factory
 
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n")
 
         in_flight = threading.Event()
@@ -75,7 +72,7 @@ class TestEventLoopIsolation:
 
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             outcome: dict[str, object] = {}
 
             def _search() -> None:
@@ -345,14 +342,9 @@ def test_semaphore_sized_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
 class TestMemoryNoteEndpoint:
     """GET /api/memory/note — one parsed note by relative path."""
 
-    def test_note_returns_parsed_body_without_frontmatter(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_note_returns_parsed_body_without_frontmatter(self, tmp_path: Path) -> None:
         """The body is the markdown with the YAML frontmatter stripped, and
         frontmatter values arrive as structured fields."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -371,7 +363,7 @@ Body **with** markdown.
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/note", params={"path": "alpha.md"})
 
         assert resp.status_code == 200
@@ -388,11 +380,8 @@ Body **with** markdown.
         assert body["body"] == "\n# Alpha\n\nBody **with** markdown.\n"
         assert "---" not in body["body"]
 
-    def test_note_in_subdirectory(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_note_in_subdirectory(self, tmp_path: Path) -> None:
         """Nested notes resolve by their relative path (the graph's node path)."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "health").mkdir()
         (tmp_path / "health" / "overview.md").write_text(
             """---
@@ -406,30 +395,20 @@ tags: [health]
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/note", params={"path": "health/overview.md"})
 
         assert resp.status_code == 200
         assert resp.json()["path"] == "health/overview.md"
         assert resp.json()["body"] == "\n# Body\n"
 
-    def test_note_missing_returns_404(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
-        with gateway_test_client() as client:
+    def test_note_missing_returns_404(self, tmp_path: Path) -> None:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/note", params={"path": "missing.md"})
         assert resp.status_code == 404
 
-    def test_note_traversal_returns_404(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_note_traversal_returns_404(self, tmp_path: Path) -> None:
         """Traversal paths are rejected, not resolved — no filesystem leak."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "secret.md").write_text(
             """---
 type: Memory
@@ -445,46 +424,31 @@ title: Secret
         # against any implementation (empty pin). "..%2Fsecret.md" on the wire
         # (from "../secret.md") exercises the real encoded-traversal case.
         for bad in ("../secret.md", "/etc/passwd", "alpha"):
-            with gateway_test_client() as client:
+            with gateway_test_client(config=memory_config(tmp_path)) as client:
                 resp = client.get("/api/memory/note", params={"path": bad})
             assert resp.status_code == 404, bad
 
-    def test_note_without_frontmatter_is_404(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_note_without_frontmatter_is_404(self, tmp_path: Path) -> None:
         """A .md file that is not a note (no frontmatter) is not a note."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "plain.md").write_text("# Just a heading\n", encoding="utf-8")
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/note", params={"path": "plain.md"})
         assert resp.status_code == 404
 
-    def test_note_null_byte_path_is_404_not_500(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_note_null_byte_path_is_404_not_500(self, tmp_path: Path) -> None:
         """A path with an embedded null byte must be 404 (QA #1169 F3).
 
         `Path.resolve()` / `is_file()` raise ValueError on such paths
         (lstat: embedded null character); the endpoint's failure surface must
         map every unresolvable path to 404 rather than escaping as a 500.
         """
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/note", params={"path": "ok\x00.md"})
         assert resp.status_code == 404
 
-    def test_note_traversal_slash_rules(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_note_traversal_slash_rules(self, tmp_path: Path) -> None:
         """`foo.md/../bar.md` resolves inside the root and is a plain read —
         a non-canonical-but-in-root path is legal, only escapes are 404."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "bar.md").write_text(
             """---
 type: Memory
@@ -496,13 +460,7 @@ tags: [tech-ops]
 """,
             encoding="utf-8",
         )
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/note", params={"path": "bar.md/../bar.md"})
         assert resp.status_code == 200
         assert resp.json()["title"] == "Bar"
-
-
-def _memory_root(root: Path, *, roles: MachineRoles) -> Path:
-    """Keep the original test filesystem while accepting the explicit role input."""
-    del roles
-    return root

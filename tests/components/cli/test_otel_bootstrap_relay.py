@@ -37,7 +37,9 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
 ) -> None:
     """The current split and a mirrored-loopback migration both keep local ports."""
     (tmp_path / ".env").write_text(
+        "AVA_MACHINE_SERVE_GATEWAY=true\n"
         f"AVA_DB_URL={config.settings.data_plane.db_url}\n"
+        f"AVA_REDIS_URL={config.settings.data_plane.redis_url}\n"
         "AVA_RUNNER_DB_PASSWORD=relay-test-password\n"
         f"AVA_TELEMETRY_OTLP_PORT={gateway_port}\n"
         f"AVA_TELEMETRY_OTLP_ENDPOINT=http://127.0.0.1:{gateway_port}\n"
