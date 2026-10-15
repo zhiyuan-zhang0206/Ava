@@ -1,4 +1,4 @@
-exports = ["cluster_drift.py", "github_pr.py", "memory_repo.py", "repo_change.py", "running_sha.py", "source_tree_guard.py", "worktree_guard.py"]
+exports = ["cluster_drift.py", "github_pr.py", "memory_repo.py", "repo_change.py", "running_sha.py", "source_tree_guard.py", "tests", "worktree_guard.py"]
 
 [uses]
 "github_pr.py" = ["memory_repo.py"]
