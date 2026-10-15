@@ -2,12 +2,15 @@
 must resolve to gateway_url, not the (empty/removed) gateway_url."""
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 import ava
 from ava.boot import process_clients
+from ava.gateway_client import use_client
+from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
@@ -36,9 +39,9 @@ def test_gateway_client_base_url_is_gateway_url(
     ava.context.require_machine().set(role="agent-runner")
     client_config.set_field("gateway_url", "https://cp.example.com")
 
-    import ava.gateway_client.transport as gc
+    import base.agents.context.gateway_client.transport as gc
 
-    client = cast(Any, gc.gateway_http())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc.gateway_http(context=process_context.current_context()))  # pyright: ignore[reportUnknownMemberType]
     assert str(client.base_url).rstrip("/") == "https://cp.example.com"
 
 
@@ -51,9 +54,9 @@ def test_gateway_client_sends_cluster_secret_bearer(
 
     client_config.set_field("cluster_secret", "s3cr3t-token")
 
-    import ava.gateway_client.transport as gc
+    import base.agents.context.gateway_client.transport as gc
 
-    client = cast(Any, gc.gateway_http())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc.gateway_http(context=process_context.current_context()))  # pyright: ignore[reportUnknownMemberType]
     assert client.headers.get("Authorization") == "Bearer s3cr3t-token"
 
 
@@ -67,11 +70,11 @@ def test_gateway_client_without_any_credential_fails_instead_of_sending_none(
     client_config.set_field("cluster_secret", "")
     monkeypatch.delenv("AVA_API_TOKEN", raising=False)
 
-    import ava.gateway_client.transport as gc
+    import base.agents.context.gateway_client.transport as gc
     from base.cluster.machine import GatewayApiTokenMissing
 
     with pytest.raises(GatewayApiTokenMissing):
-        gc.gateway_http()  # pyright: ignore[reportUnknownMemberType]
+        gc.gateway_http(context=process_context.current_context())  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_gateway_client_in_an_agent_presents_the_delivered_token(
@@ -85,9 +88,9 @@ def test_gateway_client_in_an_agent_presents_the_delivered_token(
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
     monkeypatch.setenv("AVA_API_TOKEN", "delivered-token")
 
-    import ava.gateway_client.transport as gc
+    import base.agents.context.gateway_client.transport as gc
 
-    client = cast(Any, gc.gateway_http())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc.gateway_http(context=process_context.current_context()))  # pyright: ignore[reportUnknownMemberType]
     assert client.headers.get("Authorization") == "Bearer delivered-token"
 
 
@@ -100,10 +103,10 @@ def test_gateway_client_in_an_agent_without_a_token_fails_instead_of_using_the_s
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
     monkeypatch.delenv("AVA_API_TOKEN", raising=False)
 
-    import ava.gateway_client.transport as gc
+    import base.agents.context.gateway_client.transport as gc
 
     with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):
-        gc.gateway_http()  # pyright: ignore[reportUnknownMemberType]
+        gc.gateway_http(context=process_context.current_context())  # pyright: ignore[reportUnknownMemberType]
 
 
 def _answering(label: str, seen: list[str]) -> Any:
@@ -120,26 +123,25 @@ def test_use_client_routes_sdk_calls_through_the_injected_client_and_restores_th
     monkeypatch: pytest.MonkeyPatch,
     client_config: ConfigBoot,
 ) -> None:
-    import ava.gateway_client.transport as gc
+    import base.agents.context.gateway_client.transport as gc
 
     seen: list[str] = []
     outer = _answering("outer", seen)
 
-    with gc.use_client(outer):
-        with gc.use_client(_answering("injected", seen)) as injected:
-            assert gc.gateway_http() is injected  # pyright: ignore[reportUnknownMemberType]
-            gc.get("/api/x")  # pyright: ignore[reportUnknownMemberType]
-        gc.get("/api/y")  # pyright: ignore[reportUnknownMemberType]
+    with use_client(outer):
+        with use_client(_answering("injected", seen)) as injected:
+            assert gc.gateway_http(context=process_context.current_context()) is injected  # pyright: ignore[reportUnknownMemberType]
+            gc.get("/api/x", context=process_context.current_context())  # pyright: ignore[reportUnknownMemberType]
+        gc.get("/api/y", context=process_context.current_context())  # pyright: ignore[reportUnknownMemberType]
 
     assert seen == ["injected http://injected.test/api/x", "outer http://outer.test/api/y"]
 
 
 def test_use_client_leaves_the_lazy_default_unbuilt_when_none_was_installed() -> None:
-    import ava.gateway_client.transport as gc
 
     clients = ava.context.clients
 
-    with pytest.raises(RuntimeError, match="boom"), gc.use_client(_answering("injected", [])):
+    with pytest.raises(RuntimeError, match="boom"), use_client(_answering("injected", [])):
         raise RuntimeError("boom")
     assert clients._gateway is None
 
@@ -152,11 +154,11 @@ def test_client_carries_the_configured_timeout(
     Without this, `USE_CLIENT_DEFAULT` could be deferring to httpx's own
     5s default rather than `AVA_GATEWAY_HTTP_TIMEOUT_SECONDS`.
     """
-    import ava.gateway_client.transport as gc
+    import base.agents.context.gateway_client.transport as gc
 
     client_config.set_field("gateway_client_http_timeout_seconds", 20.0)
 
-    client = cast(Any, gc.gateway_http())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc.gateway_http(context=process_context.current_context()))  # pyright: ignore[reportUnknownMemberType]
     assert client.timeout.read == 20.0
     assert client.timeout.connect == 20.0
 
@@ -164,9 +166,10 @@ def test_client_carries_the_configured_timeout(
 def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> None:
     import httpx
 
-    from ava.gateway_client import get_born_chain, memory_search
-    from ava.gateway_client.transport import agent_jitter_seconds
+    from ava.gateway_client import get_born_chain
     from ava.tests.fixtures.pin_agent import pin_no_identity
+    from base.agents.context.gateway_client.memory_search import memory_search
+    from base.agents.context.gateway_client.transport import agent_jitter_seconds
     from base.agents.context.identity import AgentIdentity
 
     seen: list[str] = []
@@ -175,8 +178,8 @@ def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> Non
         seen.append(str(request.url))
         return httpx.Response(200, json={"results": [], "ancestors": []})
 
-    from ava.gateway_client.transport import GatewayTransportInputs
     from base.agents.context.clients import ClientSet
+    from base.agents.context.gateway_client.transport import GatewayTransportInputs
 
     context = AvaContext(
         identity=AgentIdentity(44, True),
@@ -208,8 +211,8 @@ def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> Non
 def test_explicit_host_transport_failure_keeps_its_own_client_and_error() -> None:
     import httpx
 
-    from ava.gateway_client.transport import get
     from ava.tests.fixtures.pin_agent import pin_no_identity
+    from base.agents.context.gateway_client.transport import get
     from base.api_contracts.agent_contract import GatewayUnavailable
 
     def fail(request: httpx.Request) -> httpx.Response:
@@ -224,3 +227,71 @@ def test_explicit_host_transport_failure_keeps_its_own_client_and_error() -> Non
     ):
         get("/api/check", max_retries=1, context=context)
     assert getattr(ava, "context", None) is None
+
+
+def test_get_adapter_keeps_explicit_context_ahead_of_the_sdk_binding() -> None:
+    import httpx
+
+    from ava.gateway_client import get, use_client
+    from base.agents.context.clients import ClientSet
+    from base.agents.context.gateway_client.transport import GatewayTransportInputs
+
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"host": request.url.host})
+
+    explicit = AvaContext(
+        clients=ClientSet(
+            factories={
+                GatewayTransportInputs: lambda: GatewayTransportInputs(
+                    max_retries_reader=lambda: 1,
+                    retry_delay_reader=lambda: 0.0,
+                    memory_deadline_reader=lambda: 1.0,
+                )
+            }
+        )
+    )
+    try:
+        with (
+            httpx.Client(
+                base_url="http://bound", timeout=5, transport=httpx.MockTransport(answer)
+            ) as bound,
+            httpx.Client(
+                base_url="http://explicit", timeout=8, transport=httpx.MockTransport(answer)
+            ) as supplied,
+            use_client(bound),
+            explicit.clients.using_gateway(supplied),
+        ):
+            assert get("/api/read", params={"q": "bound"}).json() == {"host": "bound"}
+            assert get(
+                "/api/read", params={"q": "supplied"}, timeout=httpx.Timeout(13), context=explicit
+            ).json() == {"host": "explicit"}
+    finally:
+        explicit.clients.close()
+    assert [str(request.url) for request in seen] == [
+        "http://bound/api/read?q=bound",
+        "http://explicit/api/read?q=supplied",
+    ]
+    assert [request.extensions["timeout"]["read"] for request in seen] == [5, 13]
+
+
+def test_get_adapter_refuses_ambient_shared_host_but_accepts_its_explicit_context(
+    tmp_path: Path,
+) -> None:
+    import os
+    import subprocess
+    import sys
+
+    env = {key: value for key, value in os.environ.items() if key != "AVA_AGENT_ID"}
+    env.update(AVA_HOME=str(tmp_path), AVA_CONFIG_FETCH="skip")
+    result = subprocess.run(  # noqa: S603 — fixed interpreter and local contract probe
+        [sys.executable, "-I", str(Path(__file__).with_name("child_get_context.py"))],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

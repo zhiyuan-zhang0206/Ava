@@ -1,4 +1,5 @@
 [uses]
+"test_gateway_client_base_url.py" = ["child_get_context.py"]
 "test_strong_creation.py" = ["test_gateway_client.py"]
 
 [debt.env-patch]
@@ -11,6 +12,5 @@
 "test_gateway_client.py#monkeypatch.setattr ava.__plugin_installation__" = 1
 "test_gateway_client_base_url.py#assignment ava.context" = 1
 "test_gateway_client_base_url.py#del ava.context" = 1
-"test_strong_creation.py#monkeypatch.setattr ava.gateway_client.transport.retry_delay_seconds" = 1
 "test_transport_inputs.py#monkeypatch.delattr ava.__plugin_installation__" = 1
 "test_transport_inputs.py#monkeypatch.delattr ava.context" = 1

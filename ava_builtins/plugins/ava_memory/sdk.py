@@ -13,8 +13,8 @@ from typing import NamedTuple
 
 import ava as _ava
 import base.paths
-from ava import gateway_client as _client
 from ava.sdk_surface.validation import coerce_str, coerce_typed
+from base.agents.context.gateway_client import memory_search as _client
 from base.api_contracts.agent_contract import IndexerUnavailable as IndexerUnavailable
 from base.paths import ava_home as _ava_home
 
@@ -129,7 +129,9 @@ def search_unwrapped(query: str, k: int = 5, *, timeout: float | None = None) ->
     query = coerce_str(query, "query")
     k = coerce_typed(k, "k", int)
     timeout = coerce_typed(timeout, "timeout", (int, float), allow_none=True)
-    results = _client.memory_search(query, k, purpose="search", timeout=timeout)
+    results = _client.memory_search(
+        query, k, purpose="search", timeout=timeout, context=_ava.context
+    )
     return [
         MemoryMatch(pool_root() / r.path, r.description, list(r.tags), r.score, r.chunk)
         for r in results

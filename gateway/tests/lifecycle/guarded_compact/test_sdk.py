@@ -12,7 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import agent_row
 from ava.agents import compaction
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from base.agents.incarnation.resources import ResourceBirth
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.config import settings
@@ -83,7 +83,7 @@ async def test_lost_sdk_acceptance_replays_original_source_after_owner_change(
             headers={"Authorization": f"Bearer {secret}"},
             transport=httpx.MockTransport(handle),
         ) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         target = compaction.observe(agent)
         with pytest.raises(GatewayUnavailable):

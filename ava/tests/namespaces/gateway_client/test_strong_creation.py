@@ -6,20 +6,16 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from ava.gateway_client import spawn, transport
+from ava.gateway_client import spawn
+from ava.sdk_surface import process_context
 from ava.tests.namespaces.gateway_client.test_gateway_client import mock_client as mock_client
+from base.agents.context.gateway_client import transport
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, mock_client: MagicMock) -> MagicMock:
-    client = mock_client
-
-    def no_delay(*_args: object) -> int:
-        return 0
-
-    monkeypatch.setattr(transport, "retry_delay_seconds", no_delay)
-    return client
+def client(mock_client: MagicMock, retry_waits: list[float]) -> MagicMock:
+    return mock_client
 
 
 def _spawn(**kwargs: object) -> int:
@@ -109,13 +105,21 @@ def test_transport_rejects_an_invalid_key_before_the_network(
     client: MagicMock, key: object
 ) -> None:
     with pytest.raises((ValueError, TypeError), match="idempotency key"):
-        transport.post("/api/keyed/v1/agents", idempotency_key=key)  # type: ignore[arg-type]
+        transport.post(
+            "/api/keyed/v1/agents",
+            idempotency_key=key,  # type: ignore[arg-type]
+            context=process_context.current_context(),
+        )
     client.post.assert_not_called()
 
 
 def test_transport_has_no_scope_override(client: MagicMock) -> None:
     with pytest.raises(TypeError):
-        transport.post("/api/keyed/v1/agents", idempotency_scope="legacy")  # type: ignore[call-arg]
+        transport.post(
+            "/api/keyed/v1/agents",
+            idempotency_scope="legacy",  # type: ignore[call-arg]
+            context=process_context.current_context(),
+        )
     client.post.assert_not_called()
 
 

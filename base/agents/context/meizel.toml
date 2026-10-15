@@ -1,5 +1,6 @@
-exports = ["clients.py", "identity.py"]
+exports = ["clients.py", "gateway_client", "identity.py"]
 
 [uses]
 "__init__.py" = ["clients.py", "identity.py"]
+"gateway_client" = ["__init__.py", "clients.py", "identity.py"]
 "tests" = ["__init__.py", "clients.py", "identity.py"]

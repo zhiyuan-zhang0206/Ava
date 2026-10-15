@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 import ava.agents as agents_mod
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from ava.sdk_surface import agent_identity
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
@@ -28,7 +28,7 @@ def _gateway_answering(text: str | None) -> Generator[None]:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         yield
 

@@ -10,7 +10,7 @@ import pytest
 
 import ava
 from ava.agents import work
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from ava.sdk_surface import agent_identity
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
@@ -50,7 +50,7 @@ def test_observation_and_cancel_use_scoped_routes_and_exact_target() -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         target = work.observe(42)
         accepted = work.cancel(target, idempotency_key="intent")
@@ -76,7 +76,7 @@ def test_lost_response_is_retried_and_keeps_the_original_target() -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         assert work.cancel(TARGET, idempotency_key="intent").command_id == COMMAND
     assert len(calls) == 2
@@ -97,7 +97,7 @@ def test_unsupported_or_refused_cancel_never_falls_back(status: int) -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(httpx.HTTPStatusError),
     ):
         work.cancel(TARGET, idempotency_key="intent")
@@ -111,7 +111,7 @@ def test_invalid_key_refused_before_http(key: str) -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(unexpected)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(ValueError),
     ):
         work.cancel(TARGET, idempotency_key=key)
@@ -126,7 +126,7 @@ def test_copied_invalid_target_is_revalidated_before_http(field: str) -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(unexpected)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(ValueError),
     ):
         work.cancel(invalid, idempotency_key="intent")
@@ -155,7 +155,7 @@ def test_mismatched_response_cannot_claim_acceptance(operation: str) -> None:
 
     with (
         httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        transport.use_client(http),
+        use_client(http),
         pytest.raises(ValueError, match="another"),
     ):
         if operation == "cancel":

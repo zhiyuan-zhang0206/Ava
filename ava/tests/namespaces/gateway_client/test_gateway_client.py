@@ -16,10 +16,12 @@ import httpx
 import pytest
 
 import ava
-from ava.gateway_client.transport import use_client
+from ava.gateway_client import use_client
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
 from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
+from base.agents.context import AvaContext
+from base.agents.context.gateway_client import memory_search as memory_client
 from base.api_contracts.agent_contract import GatewayUnavailable
 
 
@@ -39,7 +41,7 @@ def mock_client(
 
 class TestRaiseFromResponse:
     def test_success_does_not_raise(self):
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         resp = MagicMock(spec=httpx.Response)
         resp.is_success = True
@@ -47,7 +49,7 @@ class TestRaiseFromResponse:
 
     def test_wire_json_error_reconstructed(self):
         """HTTP 400 + body {"reason":"agent_not_found","detail":"..."} → AgentNotFound."""
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         resp = MagicMock(spec=httpx.Response)
         resp.is_success = False
@@ -61,7 +63,7 @@ class TestRaiseFromResponse:
 
     def test_non_json_body_falls_through_to_http_error(self):
         """body is not JSON → raise_for_status raises HTTPStatusError."""
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         resp = MagicMock(spec=httpx.Response)
         resp.is_success = False
@@ -82,7 +84,7 @@ class TestRaiseFromResponse:
 
         Regression: _wire_reason only caught JSONDecodeError (task #1669).
         """
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         resp = MagicMock(spec=httpx.Response)
         resp.is_success = False
@@ -100,7 +102,7 @@ class TestRaiseFromResponse:
 
     def test_missing_reason_field_falls_through(self):
         """JSON present but missing reason field → raise_for_status."""
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         resp = MagicMock(spec=httpx.Response)
         resp.is_success = False
@@ -114,7 +116,7 @@ class TestRaiseFromResponse:
 
     def test_invalid_reason_value_falls_through(self):
         """reason value not in ErrorReason enum → ValueError → raise_for_status."""
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         resp = MagicMock(spec=httpx.Response)
         resp.is_success = False
@@ -134,7 +136,7 @@ class TestRaiseFromResponse:
         a guard, so a reason-bearing body with no detail leaked a raw KeyError
         and the HTTP status code never reached the caller.
         """
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         request = httpx.Request("POST", "http://gw/api/agents/42/messages")
         resp = httpx.Response(404, json={"reason": "agent_not_found"}, request=request)
@@ -148,7 +150,7 @@ class TestRaiseFromResponse:
         """Valid `reason` but non-string `detail` → HTTPStatusError with the
         status code; a malformed detail is a protocol mismatch, not an
         application error to reconstruct."""
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         request = httpx.Request("GET", "http://gw/api/agents/7")
         resp = httpx.Response(
@@ -169,7 +171,7 @@ class TestRaiseFromResponse:
         FastAPI-default body has no wire `reason`) and the 503 status was
         buried in the exception chain instead of being the primary error.
         """
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         request = httpx.Request("POST", "http://gw/api/agents/42/messages")
         resp = httpx.Response(503, json={"detail": "gateway unavailable"}, request=request)
@@ -183,7 +185,7 @@ class TestRaiseFromResponse:
 
     def test_non_object_json_body_falls_through(self):
         """JSON body that is not an object (no `reason` possible) → raise_for_status."""
-        from ava.gateway_client.transport import raise_from_response
+        from base.agents.context.gateway_client.transport import raise_from_response
 
         request = httpx.Request("GET", "http://gw/api/agents")
         resp = httpx.Response(503, json=["not", "an", "object"], request=request)
@@ -199,18 +201,18 @@ class TestRaiseFromResponse:
 
 class TestPostRetry:
     def test_first_attempt_succeeds(self, mock_client: MagicMock):
-        from ava.gateway_client.transport import post
+        from base.agents.context.gateway_client.transport import post
 
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 200
         mock_client.post.return_value = mock_resp
 
-        result = post("/api/memory/search", {"key": "val"})
+        result = post("/api/memory/search", {"key": "val"}, context=ava.context)
         assert result is mock_resp
         assert mock_client.post.call_count == 1
 
     def test_retries_on_transport_error(self, mock_client: MagicMock, retry_waits: list[float]):
-        from ava.gateway_client.transport import post
+        from base.agents.context.gateway_client.transport import post
 
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 200
@@ -222,24 +224,24 @@ class TestPostRetry:
             mock_resp,
         ]
 
-        result = post("/api/memory/search")
+        result = post("/api/memory/search", context=ava.context)
         assert result is mock_resp
         assert mock_client.post.call_count == 3
         assert len(retry_waits) == 2
 
     @pytest.mark.usefixtures("retry_waits")
     def test_all_retries_exhausted_raises_gateway_unavailable(self, mock_client: MagicMock):
-        from ava.gateway_client.transport import post
+        from base.agents.context.gateway_client.transport import post
 
         mock_client.post.side_effect = httpx.ConnectError("refused")
 
         with pytest.raises(GatewayUnavailable, match="after 3 retries"):
-            post("/api/memory/search")
+            post("/api/memory/search", context=ava.context)
         assert mock_client.post.call_count == 3
 
     def test_http_4xx_not_retried(self, mock_client: MagicMock):
         """HTTP 4xx is an application error, no retry."""
-        from ava.gateway_client.transport import post
+        from base.agents.context.gateway_client.transport import post
 
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.is_success = False
@@ -248,7 +250,7 @@ class TestPostRetry:
         mock_client.post.return_value = mock_resp
 
         # post returns the response, raise_from_response is called by the caller
-        result = post("/api/memory/search")
+        result = post("/api/memory/search", context=ava.context)
         assert result is mock_resp
         assert mock_client.post.call_count == 1  # no retry
 
@@ -269,13 +271,13 @@ class TestPostTimeoutContract:
 
     def test_default_defers_to_client_timeout(self, mock_client: MagicMock):
         """No per-call timeout → httpx gets the sentinel, never None."""
-        from ava.gateway_client.transport import post
+        from base.agents.context.gateway_client.transport import post
 
         ok = MagicMock(spec=httpx.Response)
         ok.status_code = 200
         mock_client.post.return_value = ok
 
-        post("/api/memory/search", {"query": "x", "k": 5})
+        post("/api/memory/search", {"query": "x", "k": 5}, context=ava.context)
 
         passed = mock_client.post.call_args.kwargs["timeout"]
         assert passed is httpx.USE_CLIENT_DEFAULT
@@ -283,14 +285,19 @@ class TestPostTimeoutContract:
 
     def test_explicit_timeout_is_forwarded(self, mock_client: MagicMock):
         """A per-call timeout still overrides the client default."""
-        from ava.gateway_client.transport import post
+        from base.agents.context.gateway_client.transport import post
 
         ok = MagicMock(spec=httpx.Response)
         ok.status_code = 200
         mock_client.post.return_value = ok
         per_call = httpx.Timeout(120.0)
 
-        post("/api/agents/1/messages", {"content": "hi"}, timeout=per_call)
+        post(
+            "/api/agents/1/messages",
+            {"content": "hi"},
+            timeout=per_call,
+            context=ava.context,
+        )
 
         assert mock_client.post.call_args.kwargs["timeout"] is per_call
 
@@ -300,24 +307,24 @@ class TestPostTimeoutContract:
 
 class TestGetRetry:
     def test_first_attempt_succeeds(self, mock_client: MagicMock):
-        from ava.gateway_client.transport import get
+        from base.agents.context.gateway_client.transport import get
 
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 200
         mock_client.get.return_value = mock_resp
 
-        result = get("/api/agents/1")
+        result = get("/api/agents/1", context=ava.context)
         assert result is mock_resp
         assert mock_client.get.call_count == 1
 
     @pytest.mark.usefixtures("retry_waits")
     def test_all_retries_exhausted_raises_gateway_unavailable(self, mock_client: MagicMock):
-        from ava.gateway_client.transport import get
+        from base.agents.context.gateway_client.transport import get
 
         mock_client.get.side_effect = httpx.ConnectError("refused")
 
         with pytest.raises(GatewayUnavailable):
-            get("/api/agents/1")
+            get("/api/agents/1", context=ava.context)
         assert mock_client.get.call_count == 3
 
 
@@ -422,7 +429,7 @@ class TestTransientHttpRetry:
     @pytest.mark.usefixtures("retry_waits")
     def test_memory_search_unknown_500_is_exposed_once(self, mock_client: MagicMock):
         """An unhandled server failure must not be retried as backend congestion."""
-        from ava.gateway_client import memory_search
+        from base.agents.context.gateway_client.memory_search import memory_search
 
         ok = _transient_resp(
             200,
@@ -435,7 +442,7 @@ class TestTransientHttpRetry:
         mock_client.post.side_effect = [_transient_resp(500), ok]
 
         with pytest.raises(httpx.HTTPStatusError):
-            memory_search("query", 5, purpose="search")
+            memory_search("query", 5, purpose="search", context=ava.context)
         assert mock_client.post.call_count == 1
 
     @pytest.mark.usefixtures("retry_waits")
@@ -446,7 +453,6 @@ class TestTransientHttpRetry:
         exhausted after ONE retry instead of stacking the default 3 — the
         gateway's own deadline has already spent that time, so re-sending only
         re-queues behind the same congestion."""
-        from ava import gateway_client as gc
         from base.api_contracts.agent_contract import IndexerUnavailable
         from base.config import settings
 
@@ -454,7 +460,7 @@ class TestTransientHttpRetry:
         mock_client.post.return_value = fail
 
         with pytest.raises(IndexerUnavailable, match="busy"):
-            gc.memory_search("query", 5, purpose="search")
+            memory_client.memory_search("query", 5, purpose="search", context=ava.context)
         assert mock_client.post.call_count == 2
 
         # Per-attempt timeout derives from the gateway deadline + 3s margin.
@@ -467,18 +473,19 @@ class TestTransientHttpRetry:
                 ]
             },
         )
-        gc.memory_search("query", 5, purpose="search")
+        memory_client.memory_search("query", 5, purpose="search", context=ava.context)
         passed = mock_client.post.call_args.kwargs["timeout"]
         assert (
             passed.read
-            == settings.services.memory_search_deadline_seconds + gc.MEMORY_SEARCH_TIMEOUT_MARGIN_S
+            == settings.services.memory_search_deadline_seconds
+            + memory_client.MEMORY_SEARCH_TIMEOUT_MARGIN_S
         )
 
     def test_memory_search_sends_the_purpose(self, mock_client: MagicMock):
-        from ava.gateway_client import memory_search
+        from base.agents.context.gateway_client.memory_search import memory_search
 
         mock_client.post.return_value = _transient_resp(200, {"results": []})
-        memory_search("query", 5, purpose="recall")
+        memory_search("query", 5, purpose="recall", context=ava.context)
         assert mock_client.post.call_args.kwargs["json"] == {
             "query": "query",
             "k": 5,
@@ -487,7 +494,10 @@ class TestTransientHttpRetry:
 
     def test_memory_search_maps_the_wire_result(self, mock_client: MagicMock):
         """Every wire field lands on `MemorySearchResult`, tags as a tuple."""
-        from ava.gateway_client import MemorySearchResult, memory_search
+        from base.agents.context.gateway_client.memory_search import (
+            MemorySearchResult,
+            memory_search,
+        )
 
         mock_client.post.return_value = _transient_resp(
             200,
@@ -503,7 +513,7 @@ class TestTransientHttpRetry:
                 ]
             },
         )
-        assert memory_search("query", 5, purpose="search") == [
+        assert memory_search("query", 5, purpose="search", context=ava.context) == [
             MemorySearchResult("n/a.md", "d", ("type/user", "x"), 0.75, "the passage")
         ]
 
@@ -511,44 +521,49 @@ class TestTransientHttpRetry:
     def test_memory_search_caller_timeout_travels_in_the_request(self, mock_client: MagicMock):
         """An explicit `timeout` is the caller's deadline: the gateway is told, and the HTTP
         timeout sits a margin above it so the gateway's own answer arrives first."""
-        from ava import gateway_client as gc
 
         mock_client.post.return_value = _transient_resp(200, {"results": []})
-        gc.memory_search("query", 5, purpose="search", timeout=9.0)
+        memory_client.memory_search("query", 5, purpose="search", timeout=9.0, context=ava.context)
         call = mock_client.post.call_args.kwargs
-        assert call["timeout"].read == 9.0 + gc.MEMORY_SEARCH_TIMEOUT_MARGIN_S
+        assert call["timeout"].read == 9.0 + memory_client.MEMORY_SEARCH_TIMEOUT_MARGIN_S
         assert call["json"]["deadline_seconds"] == 9.0
 
     def test_memory_search_without_a_timeout_sends_no_deadline(self, mock_client: MagicMock):
-        from ava.gateway_client import memory_search
+        from base.agents.context.gateway_client.memory_search import memory_search
 
         mock_client.post.return_value = _transient_resp(200, {"results": []})
-        memory_search("query", 5, purpose="search")
+        memory_search("query", 5, purpose="search", context=ava.context)
         assert "deadline_seconds" not in mock_client.post.call_args.kwargs["json"]
 
     def test_memory_search_sends_the_exclusion_sorted_and_only_when_given(
         self, mock_client: MagicMock
     ):
-        from ava.gateway_client import memory_search
+        from base.agents.context.gateway_client.memory_search import memory_search
 
         mock_client.post.return_value = _transient_resp(200, {"results": []})
-        memory_search("query", 3, purpose="recall", exclude={"b.md", "a/c.md", "a.md"})
+        memory_search(
+            "query",
+            3,
+            purpose="recall",
+            exclude={"b.md", "a/c.md", "a.md"},
+            context=ava.context,
+        )
         assert mock_client.post.call_args.kwargs["json"]["exclude"] == ["a.md", "a/c.md", "b.md"]
-        memory_search("query", 3, purpose="recall", exclude=())
+        memory_search("query", 3, purpose="recall", exclude=(), context=ava.context)
         assert "exclude" not in mock_client.post.call_args.kwargs["json"]
 
     @pytest.mark.usefixtures("retry_waits")
     def test_memory_search_attempts_bound_the_retries(self, mock_client: MagicMock):
         """A caller that gives up on its own deadline asks for one attempt: a retry would start
         a second search after it stopped waiting for the first."""
-        from ava.gateway_client import memory_search
+        from base.agents.context.gateway_client.memory_search import memory_search
         from base.api_contracts.agent_contract import IndexerUnavailable
 
         mock_client.post.return_value = _transient_resp(
             503, {"reason": "indexer_unavailable", "detail": "busy"}
         )
         with pytest.raises(IndexerUnavailable):
-            memory_search("query", 5, purpose="recall", attempts=1)
+            memory_search("query", 5, purpose="recall", attempts=1, context=ava.context)
         assert mock_client.post.call_count == 1
 
     @pytest.mark.usefixtures("retry_waits")
@@ -556,13 +571,13 @@ class TestTransientHttpRetry:
         """After retries are exhausted the wire contract is preserved: a 503
         with reason indexer_unavailable raises IndexerUnavailable (the error
         callers catch to degrade), not a generic transport error."""
-        from ava.gateway_client.transport import post, raise_from_response
+        from base.agents.context.gateway_client.transport import post, raise_from_response
         from base.api_contracts.agent_contract import IndexerUnavailable
 
         fail = _transient_resp(503, {"reason": "indexer_unavailable", "detail": "embed failed"})
         mock_client.post.return_value = fail
 
-        resp = post("/api/memory/search", {"query": "q", "k": 5})
+        resp = post("/api/memory/search", {"query": "q", "k": 5}, context=ava.context)
         assert mock_client.post.call_count == 3  # pyright: ignore[reportUnknownArgumentType]  # 3 attempts, all 503
         with pytest.raises(IndexerUnavailable, match="embed failed"):
             raise_from_response(resp)  # pyright: ignore[reportUnknownArgumentType]
@@ -587,23 +602,23 @@ class TestTransientHttpRetry:
 
     @pytest.mark.usefixtures("retry_waits")
     def test_get_transient_5xx_retried(self, mock_client: MagicMock):
-        from ava.gateway_client.transport import get
+        from base.agents.context.gateway_client.transport import get
 
         ok = _transient_resp(200)
         mock_client.get.side_effect = [_transient_resp(503), ok]
 
-        resp = get("/api/agents")
+        resp = get("/api/agents", context=ava.context)
         assert resp is ok
         assert mock_client.get.call_count == 2
 
     @pytest.mark.usefixtures("retry_waits")
     def test_429_retried(self, mock_client: MagicMock):
-        from ava.gateway_client.transport import get
+        from base.agents.context.gateway_client.transport import get
 
         ok = _transient_resp(200)
         mock_client.get.side_effect = [_transient_resp(429), ok]
 
-        resp = get("/api/agents")
+        resp = get("/api/agents", context=ava.context)
         assert resp is ok
         assert mock_client.get.call_count == 2
 
@@ -613,31 +628,33 @@ class TestRetryBackoffJitter:
     (heartbeat-daemon de-phasing pattern, task #960)."""
 
     def test_agent_jitter_zero_without_agent_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava.gateway_client import transport as gc
+        from base.agents.context.gateway_client import transport as gc
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
         pin_no_identity()
-        assert gc.agent_jitter_seconds() == 0.0
+        assert gc.agent_jitter_seconds(context=AvaContext()) == 0.0
 
     def test_agent_jitter_deterministic_and_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava.gateway_client import transport as gc
+        from base.agents.context.gateway_client import transport as gc
 
         pin_agent(1234)
-        assert gc.agent_jitter_seconds() == gc.agent_jitter_seconds()  # deterministic
-        assert 0.0 <= gc.agent_jitter_seconds() < gc.JITTER_SPAN_S
+        assert gc.agent_jitter_seconds(context=ava.context) == gc.agent_jitter_seconds(
+            context=ava.context
+        )  # deterministic
+        assert 0.0 <= gc.agent_jitter_seconds(context=ava.context) < gc.JITTER_SPAN_S
 
     def test_agent_jitter_differs_across_agents(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava.gateway_client import transport as gc
+        from base.agents.context.gateway_client import transport as gc
 
         pin_agent(1)
-        a = gc.agent_jitter_seconds()
+        a = gc.agent_jitter_seconds(context=ava.context)
         pin_agent(2)
-        b = gc.agent_jitter_seconds()
+        b = gc.agent_jitter_seconds(context=ava.context)
         assert a != b
 
     def test_backoff_bounded_exponential(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """1s → 2s → 4s → 8s cap (defaults), no jitter without an agent id."""
-        from ava.gateway_client import transport as gc
+        from base.agents.context.gateway_client import transport as gc
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
         pin_no_identity()
@@ -668,14 +685,14 @@ class TestRetryBackoffJitter:
         self, mock_client: MagicMock, retry_waits: list[float], monkeypatch: pytest.MonkeyPatch
     ):
         """Retries sleep the bounded backoff schedule, not the old fixed 1s."""
-        from ava.gateway_client.transport import post
+        from base.agents.context.gateway_client.transport import post
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
         process_context.bind_context(replace(ava.context, identity=None))
         mock_client.post.side_effect = httpx.ConnectError("refused")
 
         with pytest.raises(GatewayUnavailable):
-            post("/api/x")
+            post("/api/x", context=ava.context)
         assert retry_waits == [1.0, 2.0]  # attempts 0 and 1; no jitter without agent id
 
 
@@ -760,9 +777,9 @@ class TestSendMessageAtLeastOnceWithKey:
 def test_retry_settings_are_read_when_a_request_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     """The attempt count and base delay come from the settings at use, not from values
     captured when the module imported."""
-    from ava.gateway_client import transport
     from base.agents.context import AvaContext
     from base.agents.context.clients import ClientSet
+    from base.agents.context.gateway_client import transport
 
     values = {"attempts": 3.0, "delay": 1.0}
     context = AvaContext(

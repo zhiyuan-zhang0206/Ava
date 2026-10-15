@@ -164,13 +164,13 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "gateway_client_max_retries",
         "literal",
         None,
-        "ava/gateway_client/transport.py module level (:66)",
+        "base/agents/context/gateway_client/transport.py GatewayTransportInputs",
     ),
     LiteField(
         "gateway_client_retry_delay_seconds",
         "literal",
         None,
-        "ava/gateway_client/transport.py module level (:67)",
+        "base/agents/context/gateway_client/transport.py GatewayTransportInputs",
     ),
     LiteField("gateway_url", "literal", None, "sdk_call_policy / gateway transport"),
     LiteField(

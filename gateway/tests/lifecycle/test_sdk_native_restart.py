@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from ava.agents import work
-from ava.gateway_client import transport
+from ava.gateway_client import use_client
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.config import settings
@@ -90,7 +90,7 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
             headers={"Authorization": f"Bearer {secret}"},
             transport=httpx.MockTransport(handle),
         ) as http,
-        transport.use_client(http),
+        use_client(http),
     ):
         observed = work.observe(target.agent_id)
         with pytest.raises(GatewayUnavailable):

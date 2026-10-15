@@ -6,10 +6,10 @@ import httpx
 import pytest
 
 import ava
-from ava.gateway_client import memory_search
-from ava.gateway_client.transport import GatewayTransportInputs, post
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
+from base.agents.context.gateway_client.memory_search import memory_search
+from base.agents.context.gateway_client.transport import GatewayTransportInputs, post
 
 
 def test_contexts_keep_live_deadlines_and_rebuild_inputs_without_an_sdk_installation(

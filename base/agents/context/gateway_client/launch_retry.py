@@ -3,16 +3,23 @@
 from typing import cast
 from uuid import UUID
 
-from ava.gateway_client import transport
+from base.agents.context import AvaContext
 from base.api_contracts.idempotency import validate_idempotency_key
 from base.api_contracts.launch_retry import RetryLaunchAccepted, RetryLaunchRequest
 
+from . import transport
 
-def get_launch_attempt(agent_id: int) -> UUID:
-    """Read the current metadata attempt; an absent old field is not evidence."""
+
+def validate_agent_id(agent_id: int, *, operation: str) -> None:
+    """Reject invalid launch IDs before context selection or HTTP admission."""
     if type(agent_id) is not int or not 0 < agent_id < 2**63:
-        raise ValueError("launch attempt observation requires a positive agent ID")
-    response = transport.get(f"/api/agents/{agent_id}")
+        raise ValueError(f"{operation} requires a positive agent ID")
+
+
+def get_launch_attempt(agent_id: int, *, context: AvaContext) -> UUID:
+    """Read the current metadata attempt; an absent old field is not evidence."""
+    validate_agent_id(agent_id, operation="launch attempt observation")
+    response = transport.get(f"/api/agents/{agent_id}", context=context)
     transport.raise_from_response(response)
     raw: object = response.json()
     if not isinstance(raw, dict):
@@ -39,18 +46,19 @@ def retry_launch(
     *,
     idempotency_key: str,
     expected_prior_attempt_id: str | UUID,
+    context: AvaContext,
 ) -> int:
     """Retry one observed attempt through the fixed guarded operation."""
     key, request = validate_retry_admission(
         key=idempotency_key,
         prior=expected_prior_attempt_id,
     )
-    if type(agent_id) is not int or not 0 < agent_id < 2**63:
-        raise ValueError("guarded launch retry requires a positive agent ID")
+    validate_agent_id(agent_id, operation="guarded launch retry")
     response = transport.post(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
         request.model_dump(mode="json"),
         idempotency_key=key,
+        context=context,
     )
     transport.raise_from_response(response)
     raw: object = response.json()

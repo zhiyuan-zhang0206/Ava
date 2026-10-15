@@ -154,7 +154,7 @@ def test_default_clients_capture_only_on_first_read_without_delivery(
 ) -> None:
     code = """
 import os
-from ava.gateway_client.transport import GatewayTransportInputs
+from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from ava.boot import process_clients
 from base.config import ConfigBoot
 
