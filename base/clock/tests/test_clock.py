@@ -1,5 +1,3 @@
-"""`Clock`: the handle binds one config; the format and the host-zone fallback are the contract."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -65,7 +63,6 @@ def test_boot_clock_reads_keep_two_owners_and_previous_handles_separate(
     from base.clock import clock_config_from_boot
     from base.config import ConfigBoot
 
-    # ConfigBoot applies TZ when a timezone overlay changes; restore process state.
     with monkeypatch.context() as env:
         env.setattr(os, "environ", os.environ.copy())
         first, second = ConfigBoot(), ConfigBoot()

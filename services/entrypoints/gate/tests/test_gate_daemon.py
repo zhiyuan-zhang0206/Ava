@@ -1,5 +1,3 @@
-"""Gate entry owns one image, a lazy database gate and its writer's exit."""
-
 from __future__ import annotations
 
 import sys
@@ -108,11 +106,11 @@ def test_entry_keeps_one_image_gate_factory_and_producer(
     monkeypatch.setattr(Database, "from_settings", database)
     daemon.main()
     entry.capture.assert_called_once_with()
-    assert opened == []  # Neither pipeline construction nor boot eagerly dials DB.
+    assert opened == []
     assert entry.database is not None
     assert entry.database() is not entry.database()
     assert len(opened) == 2 and opened[0] is opened[1]
-    assert opened[0].min_read_due()  # Gate is not a CLI-exempt process.
+    assert opened[0].min_read_due()
     assert opened[0].application_name() == "ava:gate:v17"
     version.assert_called_once_with(entry.image.source_root, entry.image.sha)
     args, kwargs = entry.logging.call_args

@@ -1,5 +1,3 @@
-"""base.packages.docs.frontmatter — the minimal `---` parser shared by skills + commands."""
-
 import pytest
 
 from base.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
@@ -12,15 +10,11 @@ def test_parses_fields_and_body():
 
 
 def test_unquoted_colon_in_value_raises():
-    """Unquoted values containing ``:`` are no longer supported —
-    they must be quoted (standard YAML)."""
     with pytest.raises(FrontmatterError, match="invalid YAML"):
         parse_frontmatter("---\nargument-hint: e.g. foo: bar\n---\nb")
 
 
 def test_double_quoted_value_is_unquoted():
-    """A ``"..."`` value has its quotes removed — they're YAML syntax, not content
-    (else a description renders with literal ``"`` in every consumer)."""
     fields, _ = parse_frontmatter('---\ndescription: "You MUST do it."\n---\nb')
     assert fields["description"] == "You MUST do it."
 
@@ -31,14 +25,11 @@ def test_single_quoted_value_is_unquoted():
 
 
 def test_quoted_value_may_contain_colon():
-    """Quotes protect a ``: `` that a bare value couldn't carry in YAML — and it
-    survives unquoting."""
     fields, _ = parse_frontmatter('---\ndescription: "a tool: when to use it"\n---\nb')
     assert fields["description"] == "a tool: when to use it"
 
 
 def test_malformed_quoted_value_raises():
-    """An opening quote with no proper close is a well-formedness error."""
     with pytest.raises(FrontmatterError, match="invalid YAML"):
         parse_frontmatter('---\nname: "unterminated\n---\nb')
 
@@ -59,13 +50,11 @@ def test_unterminated_raises():
 
 
 def test_non_dict_raises():
-    """A frontmatter that does not parse to a dict raises."""
     with pytest.raises(FrontmatterError, match="must be key: value pairs"):
         parse_frontmatter("---\njust a line\n---\nb")
 
 
 def test_literal_block_scalar():
-    """YAML ``|`` block scalar preserves newlines."""
     fields, _ = parse_frontmatter(
         "---\n"
         "description: |\n"
@@ -80,7 +69,6 @@ def test_literal_block_scalar():
 
 
 def test_folded_block_scalar():
-    """YAML ``>`` folded block scalar joins lines with spaces."""
     fields, _ = parse_frontmatter(
         "---\ndescription: >\n  This is a long\n  description.\n---\nbody\n"
     )
@@ -88,7 +76,6 @@ def test_folded_block_scalar():
 
 
 def test_boolean_values():
-    """YAML booleans are converted to string ``true`` / ``false``."""
     fields, _ = parse_frontmatter("---\nname: x\nuser-invokable: true\n---\nbody\n")
     assert fields["user-invokable"] == "true"
 
@@ -103,15 +90,7 @@ def test_numeric_value():
     assert fields["version"] == "3"
 
 
-# ─── Agent Skills standard tolerance ──────────────────────────────────────
-#
-# A SKILL.md is a file Ava receives from the wider ecosystem, so anything the
-# published standard allows has to parse. Rejecting a valid standard skill is
-# an incompatibility, not a fail-fast.
-
-
 def test_crlf_line_endings():
-    """A skill authored on Windows carries CRLF; the content is standard."""
     fields, body = parse_frontmatter("---\r\nname: x\r\ndescription: y\r\n---\r\n\r\nbody\r\n")
     assert fields == {"name": "x", "description": "y"}
     assert body == "\nbody\n"
@@ -123,16 +102,12 @@ def test_utf8_bom_stripped():
 
 
 def test_closing_fence_at_end_of_file():
-    """Frontmatter-only SKILL.md, no trailing newline after the closing fence."""
     fields, body = parse_frontmatter("---\nname: x\ndescription: y\n---")
     assert fields == {"name": "x", "description": "y"}
     assert body == ""
 
 
 def test_optional_standard_fields_preserved():
-    """`license` / `compatibility` / `allowed-tools` / `metadata` are optional
-    fields of the Agent Skills spec. The parser returns them; each caller reads
-    the keys it honors and ignores the rest."""
     fields, _ = parse_frontmatter(
         "---\n"
         "name: pdf-processing\n"
@@ -149,10 +124,9 @@ def test_optional_standard_fields_preserved():
     assert fields["license"] == "Apache-2.0"
     assert fields["compatibility"] == "Requires Python 3.14+ and uv"
     assert fields["allowed-tools"] == "Bash(git:*) Bash(jq:*) Read"
-    assert "example-org" in fields["metadata"]  # nested mapping, stringified
+    assert "example-org" in fields["metadata"]
 
 
 def test_unknown_field_is_not_an_error():
-    """A client-specific extension key parses like any other field."""
     fields, _ = parse_frontmatter("---\nname: x\ndescription: y\nx-vendor-key: v\n---\nbody\n")
     assert fields["x-vendor-key"] == "v"

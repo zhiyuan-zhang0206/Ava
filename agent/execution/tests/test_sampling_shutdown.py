@@ -1,5 +1,3 @@
-"""Real SDK refresh attempts finish before the child's outcome is materialized."""
-
 import threading
 from types import SimpleNamespace
 
@@ -35,9 +33,7 @@ def _assert_outcome(
         assert payload.exc_msg == "sampling reader bug"
 
 
-@pytest.mark.usefixtures(
-    "emitted_events"
-)  # the SDK's real emit runs; its events are not asserted here
+@pytest.mark.usefixtures("emitted_events")
 @pytest.mark.parametrize("outcome", ["blocked", "body_failure", "refresh_failure"])
 def test_run_code_collects_sampling_at_its_result_boundary(
     monkeypatch: pytest.MonkeyPatch, outcome: str

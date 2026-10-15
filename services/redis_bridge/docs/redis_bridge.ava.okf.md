@@ -91,3 +91,9 @@ failure is infrastructure state.
   standalone launchd job and installed copy
 - `cli/commands/converge/redis_bridge.py:probe_redis_bridge()` — authenticated
   end-to-end PING
+
+## Idle connection regression
+
+`tests/test_redis_bridge_relay.py` uses a real TCP connection and a six-second
+idle wait to cross the five-second connect timeout. A socketpair does not inherit
+the timeout set by `socket.create_connection`, so it cannot reproduce this defect.

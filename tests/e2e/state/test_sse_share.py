@@ -1,5 +1,3 @@
-"""Three visible pages in one browser profile share three gateway SSE sockets."""
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -90,7 +88,6 @@ def _wait_counts(pages: list[Page], expected: list[int], what: str, *, sorted_co
 
 def _assert_requests(pages: list[Page], requests: dict[Page, list[str]]) -> None:
     def delivered() -> tuple[bool, object]:
-        # Constructors are synchronous; Playwright dispatches request events later.
         for page in pages:
             page.evaluate("() => 1")
         observed = {
@@ -136,7 +133,6 @@ def test_three_pages_share_sse_and_promote_on_close_and_hide(e2e_env: E2EEnv) ->
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_terminate:build")
 def test_without_web_locks_keeps_per_page_streams_and_navigation(e2e_env: E2EEnv) -> None:
     requests: dict[Page, list[str]] = defaultdict(list)
-    # Two pages fill Chromium's six HTTP/1.1 SSE slots in fallback mode.
     pages = _open_pages(e2e_env, requests, without_locks=True, count=2)
     _wait_counts(pages, [3, 3], "two independent fallback stream sets", sorted_counts=False)
     for page in pages:

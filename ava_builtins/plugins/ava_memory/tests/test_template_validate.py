@@ -1,9 +1,3 @@
-"""The seed OKF validator of the AvaMemory template reports every rule violation it was written for.
-
-One crafted bundle trips each check; the expected messages pin the validator's behavior so its
-functions can be restructured without changing what it reports.
-"""
-
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -284,9 +278,6 @@ def test_file_validator_reports_each_frontmatter_violation(bundle: Path) -> None
         if errors:
             found[str(note.relative_to(bundle))] = sorted(errors)
     assert found == _EXPECTED["validate_file"]
-
-
-# ── validate_note: the single-note rules a writer can check on its own ──
 
 
 def _note(tmp_path: Path, text: str, name: str = "n.md") -> Path:

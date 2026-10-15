@@ -1,5 +1,3 @@
-"""The operator's database factory carries the one gateway-login adoption of a process."""
-
 from __future__ import annotations
 
 import pytest
@@ -29,7 +27,7 @@ def test_handles_before_adoption_keep_their_url_and_later_ones_dial_the_adopted_
     after = factory()
 
     assert factory.db_url() == _ADOPTED
-    assert before.direct_url() == dialed_before != _ADOPTED  # a handle keeps what it was built with
+    assert before.direct_url() == dialed_before != _ADOPTED
     assert after.direct_url() == _ADOPTED
 
 

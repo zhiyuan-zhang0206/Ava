@@ -1,13 +1,3 @@
-"""Per-unit database capability for remote agent-runners (the manual delivery).
-
-Bootstrap serves no database login. The gateway operator issues a sealed,
-unit-bound bundle of the ACTIVE write generation's runner login; the runner
-installs it at start and its launcher delivers it. This module holds the tamper,
-binding and issue checks, which need no database; the boot pass, the launcher and the
-end-to-end path against a real single-box gateway are in `test_unit_capability_*.py`
-beside the code they exercise.
-"""
-
 from __future__ import annotations
 
 import json
@@ -31,8 +21,6 @@ from base.cluster.authority.tests.unit_capability_support import gateway as gate
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
 from base.host.db_authority import model, unit
 from base.host.db_authority.unit import UNIT_BUNDLE_MAX_TTL_S
-
-# ── sealing: tampering, keys, expiry ────────────────────────────────────────
 
 
 def _flip(text: str) -> str:
@@ -70,7 +58,6 @@ def test_a_bundle_opens_only_with_its_own_transport_key(gateway: Path, runner_ho
         unit.open_bundle(issued.envelope, "AAAA")
     with pytest.raises(unit.UnitCapabilityError, match="not a database capability bundle"):
         unit.open_bundle(b"{}", issued.transport_key)
-    # The envelope never carries the login or the API token in clear.
     bundle = _open(issued)
     assert bundle.capability.api is not None
     for secret in (bundle.capability.password, bundle.capability.api.token):
@@ -112,9 +99,6 @@ def test_issue_names_only_the_credential_free_endpoint(gateway: Path, runner_hom
         issue(gateway, runner_home, endpoint="postgresql://ava:pw@10.0.0.7:6433/ava")
 
 
-# ── install: binding, private store ─────────────────────────────────────────
-
-
 def test_install_binds_the_unit_and_the_served_endpoint(
     gateway: Path, runner_home: Path, tmp_path: Path
 ) -> None:
@@ -139,9 +123,3 @@ def test_install_binds_the_unit_and_the_served_endpoint(
     assert (unit.unit_capability_path(runner_home).parent.stat().st_mode & 0o777) == 0o700
     assert installed == unit.require_unit_capability(runner_home)
     assert installed.role == "ava_g0_runner"
-
-
-# ── the runner's boot pass and launcher ─────────────────────────────────────
-
-
-# ── real PostgreSQL + PgBouncer + Redis: the gateway fixture ────────────────

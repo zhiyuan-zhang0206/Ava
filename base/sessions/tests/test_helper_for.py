@@ -1,5 +1,3 @@
-"""Which permissions-helper factory a platform runs with: macOS always one, Linux none."""
-
 import pytest
 
 from base.native_process.os_platform import Platform
@@ -21,7 +19,6 @@ def test_linux_has_no_helper() -> None:
 def test_an_unknown_platform_is_refused_not_given_a_default() -> None:
     with pytest.raises(ValueError, match="unsupported platform"):
         _platform("freebsd")
-    # A platform that slipped past its own validation still reaches no silent answer.
     platform = _platform("linux")
     object.__setattr__(platform, "system", "freebsd")
     with pytest.raises(ValueError, match=r"no permissions-helper decision.*freebsd"):

@@ -1,5 +1,3 @@
-"""Contract tests for the daily Dev/CI metrics schedule."""
-
 from __future__ import annotations
 
 import importlib.util
@@ -48,8 +46,6 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
         }
 
     exporter = SimpleNamespace(DEFAULT_REPO="owner/repo", main=run_exporter)
-    # Pin the cluster timezone: the day label must follow the cluster wall
-    # clock, not the test environment's zone (CI has no cluster config).
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     monkeypatch.setattr(module, "_load_exporter", lambda: exporter)
     monkeypatch.setattr(module, "_snapshot", snapshot)
@@ -129,7 +125,6 @@ def test_report_failure_uses_exact_label_and_existing_message(
 
 
 def test_load_exporter_resolves_under_scripts_ci() -> None:
-    """The loader must resolve runs_export.py from its post-move home (scripts/ci/pull_requests/)."""
     module = _load()
     saved_path = list(sys.path)
     try:

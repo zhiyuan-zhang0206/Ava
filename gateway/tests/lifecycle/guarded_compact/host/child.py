@@ -1,5 +1,3 @@
-"""Offline actual hosted compact child that parks after its original restart settles."""
-
 import asyncio
 import json
 import os
@@ -51,7 +49,6 @@ def install(
 
         patch.setattr(compact_execute, "save_result", before_close)
         patch.setattr(compact_lifecycle, "settle_original_restart", after_close)
-        # Driver and resource tail share this owner; replace their imported seam too.
         from services.agent_runner.agent_host.invocation import driver
         from services.agent_runner.agent_host.invocation.compact import source
 

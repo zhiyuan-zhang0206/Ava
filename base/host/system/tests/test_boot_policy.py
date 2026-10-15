@@ -1,5 +1,3 @@
-"""The boot attempt budget: counted per boot, never refuses a start."""
-
 from __future__ import annotations
 
 import json
@@ -25,7 +23,7 @@ def test_the_count_survives_clock_jitter_of_the_boot_time(
     tmp_path: Path, boot_time: list[float]
 ) -> None:
     boot_policy.begin_attempt(tmp_path)
-    boot_time[0] += 1.5  # the wall-clock-derived boot time moves by a second or so
+    boot_time[0] += 1.5
     assert boot_policy.begin_attempt(tmp_path) == 2
 
 
@@ -39,7 +37,7 @@ def test_a_new_boot_starts_the_count_again(tmp_path: Path, boot_time: list[float
 def test_success_clears_the_count(tmp_path: Path, boot_time: list[float]) -> None:
     boot_policy.begin_attempt(tmp_path)
     boot_policy.clear_attempts(tmp_path)
-    boot_policy.clear_attempts(tmp_path)  # idempotent
+    boot_policy.clear_attempts(tmp_path)
     assert boot_policy.begin_attempt(tmp_path) == 1
 
 

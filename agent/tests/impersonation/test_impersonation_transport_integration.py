@@ -1,5 +1,3 @@
-"""Real PostgreSQL + compiled graph + exec child cooperative handoff."""
-
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -56,7 +54,6 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Actual graph fencing persists through delivery faults; only authority end resumes it."""
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
@@ -117,7 +114,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         config,
         context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
     )
-    assert not model_calls  # No native invocation overlaps valid external authority.
+    assert not model_calls
     leases.release(
         database,
         event_bus,
@@ -146,8 +143,6 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A newly admitted runtime does not inherit the takeover: its admission closed the
-    lease, and the return chain resumes native work with the unacknowledged input."""
     from dataclasses import replace
 
     from base.agents.impersonation import history
@@ -259,7 +254,6 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Delivery exhaustion limits pushes, but does not revoke a valid controller's receipt."""
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
@@ -309,7 +303,6 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
             [pending],
             local_machine=machine_identity.name(),
         ) == {pending}
-        # Advance the recorded window, not the attempt count; reserve is the real writer.
         db_conn.execute(
             "UPDATE agent_impersonation_messages SET last_delivery_at="
             "clock_timestamp()-%s*interval '1 second' WHERE lease_id=%s AND inbound_id=%s",
@@ -375,13 +368,6 @@ async def test_end_note_resumes_an_empty_queue(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A release with nothing queued must still run the end note's first turn.
-
-    Regression: the end-of-session note is a system note, so a window that never
-    carried a real exchange reports has_conversation() == False and the claim
-    idled out with the note unprocessed. The note is the resumed input: the claim
-    runs before_llm with an empty queue, and delivery publishes a wake.
-    """
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
@@ -412,7 +398,7 @@ async def test_end_note_resumes_an_empty_queue(
         config,
         context=replace(ctx, original_incarnation=owner, hosted_resources=None, native_work=None),
     )
-    assert not model_calls  # No native model acceptance turn.
+    assert not model_calls
     await flush_checkpoint(saver, owner.agent_id)
     assert await settle_checkpoint(
         graph,
@@ -457,7 +443,6 @@ async def test_end_note_resumes_an_empty_queue(
     assert note.id == f"impersonation-handoff:{owner.agent_id}:0"
     assert note.additional_kwargs["ava_note_tag"] == "impersonation"
     assert_resume_note_delivery_contract(note.content)
-    # The note is consumed once: another pass finds an idle agent, not a resume.
     await graph.ainvoke(
         reset,
         config,
@@ -480,8 +465,6 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Task #5010: an ACK acknowledges the message, not the work — input the executor
-    received and never finished survives expiry into the record and the resume note."""
     from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
@@ -534,7 +517,6 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         [inbound_id],
         local_machine=machine_identity.name(),
     )
-    # Receipt is recorded; the executor dies before finishing the work.
     end_external_session(
         db_conn, database, event_bus, requested, "expire", machine_identity=machine_identity
     )

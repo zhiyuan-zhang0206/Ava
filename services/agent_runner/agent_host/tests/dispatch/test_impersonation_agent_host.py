@@ -1,5 +1,3 @@
-"""A held agent's host wake returns before any runtime or slot, refuses an unaccepted control batch and supervises the active lease's relay."""
-
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -79,7 +77,6 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     settlement = AsyncMock(return_value=True)
     monkeypatch.setattr(agent_host_host, "admit_hosted_runtime", admission)
     monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", settlement)
-    # No admission slot or graph exists: touching either is a test failure.
     await host._run_turn(42, resources=HostedTurnResources())
     host._runtime_for.assert_not_awaited()
     admission.assert_awaited_once()
@@ -124,8 +121,6 @@ async def test_held_controls_supervise_the_active_lease_relay(
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The claim gate never runs during an active lease; the held-controls pass
-    must carry the relay supervision (task #2634)."""
     from services.agent_runner.agent_host.host import AgentHost
 
     host = object.__new__(AgentHost)

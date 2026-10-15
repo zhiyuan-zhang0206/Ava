@@ -1,5 +1,3 @@
-"""Lexical walking preserves definition-time inputs and excludes nested bodies."""
-
 import ast
 from collections.abc import Iterator
 
@@ -197,4 +195,4 @@ def test_binding_projection_does_not_expand_inert_leaf_fields() -> None:
     assert [ast.unparse(n.func) for n in projected if isinstance(n, ast.Call)] == ["sink", "range"]
     assert expanded_leaves == []
     list(bindings.local_nodes(tree, iter_children=observe))
-    assert expanded_leaves  # The default public walk still visits these fields.
+    assert expanded_leaves

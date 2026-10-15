@@ -140,3 +140,5 @@ allocation lock.
   (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md).
 
 Initial command metadata is opt-in; see [[initial-command.ava.okf.md]].
+
+Related test premise: [Screen fixture input](screen-tests.ava.okf.md).

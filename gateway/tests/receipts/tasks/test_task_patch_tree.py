@@ -1,5 +1,3 @@
-"""Keyed task PATCH preserves parent/child and closed-tree invariants."""
-
 from uuid import uuid4
 
 import psycopg
@@ -137,9 +135,6 @@ class TestParent:
     def test_patch_closed_parent_rejected(
         self, db_conn: psycopg.Connection, closed_status: str
     ) -> None:
-        """PATCH mirrors the SDK reparent check: moving a task under a closed
-        (done / cancelled) parent is a 422 — a closed task never gains
-        children (task #1975)."""
         owner = make_agent(db_conn)
         parent = make_task(
             db_conn,
@@ -156,7 +151,6 @@ class TestParent:
             )
         assert resp.status_code == 422
         assert "closed parent" in resp.json()["detail"]
-        # The tree is unchanged: the child has no parent.
         assert _parent(db_conn, tid) is None
 
     def test_patch_missing_parent_rejected(self, db_conn: psycopg.Connection) -> None:

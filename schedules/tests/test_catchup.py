@@ -1,5 +1,3 @@
-"""Online schedule slots skip downtime and retain at-most-once claims."""
-
 from __future__ import annotations
 
 import importlib.util
@@ -146,7 +144,6 @@ def test_winner_receives_utc_slot_and_payload_after_claim_commits(
     def fire(claimed: datetime, received: object) -> None:
         assert claimed.tzinfo is UTC
         assert received is payload
-        # A separate connection must already see the durable claim.
         assert _claimed_slots(db_conn, schedule_id) == [slot]
         observed.append((claimed, received))
 
@@ -377,7 +374,6 @@ def test_restart_does_not_fire_a_slot_inside_the_previous_two_minutes(
     machine_identity: MachineIdentity,
 ) -> None:
     module = _load_daily_script(filename)
-    # Monday, thirty seconds after the missed 09:00 slot.
     started = datetime(2026, 9, 7, 9, 0, 30, tzinfo=UTC)
 
     class FakeDatetime:

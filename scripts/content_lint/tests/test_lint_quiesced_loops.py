@@ -1,6 +1,3 @@
-"""`scripts/content_lint/lint_quiesced_loops.py` — every resident periodic loop declares its
-stance on the stop window: it gates on `admission.quiesced()` or carries a reasoned exemption."""
-
 from __future__ import annotations
 
 import textwrap
@@ -86,11 +83,8 @@ def test_a_wait_with_a_timeout_is_a_periodic_wait() -> None:
 @pytest.mark.parametrize(
     "src",
     [
-        # a bounded retry: the test is a deadline, not `True`
         "async def f(deadline):\n    while now() < deadline:\n        await asyncio.sleep(1)\n",
-        # no periodic wait: it blocks on a queue
         "async def f(queue):\n    while True:\n        await queue.get()\n",
-        # the sleep belongs to a nested function, not the loop
         "def f():\n    while True:\n        def later():\n            time.sleep(1)\n        later()\n",
     ],
 )

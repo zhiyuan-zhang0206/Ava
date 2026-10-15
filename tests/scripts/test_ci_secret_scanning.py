@@ -1,5 +1,3 @@
-"""Contract test for the CI secret and dependency audit policy."""
-
 from __future__ import annotations
 
 import tomllib
@@ -25,20 +23,17 @@ def _load_yaml(path: Path) -> dict[object, Any]:
 
 def _assert_secret_scan_job_runs_gitleaks(workflow: dict[object, Any]) -> None:
     secret_scan = workflow["jobs"]["secret-scan"]
-    # The required check name is configured in GitHub and Trunk; renaming it blocks merges.
     assert secret_scan["name"] == "secret scan (Gitleaks)"
     assert secret_scan.get("continue-on-error") is not True
     secret_steps = secret_scan["steps"]
     assert secret_steps[0]["with"]["fetch-depth"] == 0
     assert "github.com/zricethezav/gitleaks/v8@v8.30.1" in secret_steps[1]["run"]
     scan = secret_steps[2]["run"]
-    # A pull request (and so a Trunk queue branch) scans only the commits it adds.
     assert (
         'gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${base}..HEAD" .'
         in scan
     )
     assert "git rev-parse --verify HEAD^1" in scan
-    # Whole-history scanning is the nightly workflow's job, and dispatch keeps it too.
     assert "gitleaks git --config .gitleaks.toml --redact --no-banner ." in scan
 
 

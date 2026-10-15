@@ -1,12 +1,3 @@
-"""Unit tests for LoginRateLimiter's cap-trim behavior (audit 2026-08-08 P3).
-
-The dict used to be bounded only by the stale sweep: under a many-IP attack
-each fresh IP can stay non-stale for a full lockout window (failing just
-under the configured login_max_failures per window), so the entry
-count kept climbing past the
-soft cap forever.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -17,9 +8,6 @@ from base.config import ConfigBoot, settings
 
 
 def test_sweep_trims_oldest_active_entries_over_cap() -> None:
-    """Over the soft cap, the OLDEST entries are dropped even when none are
-    stale — the memory bound holds under a sustained many-IP attack."""
-    # shrink the cap so the test needs no 10k entries
     limit_config = LoginRateLimitConfig(max_entries=5)
     limiter = LoginRateLimiter(
         max_failures_reader=lambda: settings.gateway.login_max_failures,
@@ -36,7 +24,6 @@ def test_sweep_trims_oldest_active_entries_over_cap() -> None:
         )
     assert len(limiter._entries) == 8
     limiter._sweep(now, settings.gateway.login_lockout_seconds)
-    # cap is 5: the 3 oldest (last_failure_at smallest) are gone
     remaining = sorted(limiter._entries)
     assert len(remaining) == 5
     assert "10.0.0.0" not in remaining and "10.0.0.1" not in remaining
@@ -51,8 +38,6 @@ def test_a_cap_that_drops_every_entry_is_refused(cap: int) -> None:
 
 
 def test_sweep_stale_removed_first() -> None:
-    """Stale entries are dropped before the oldest-active trim — a stale
-    streak is the first candidate for reclamation."""
     limiter = LoginRateLimiter(
         max_failures_reader=lambda: settings.gateway.login_max_failures,
         lockout_seconds_reader=lambda: settings.gateway.login_lockout_seconds,

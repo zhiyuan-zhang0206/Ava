@@ -1,5 +1,3 @@
-"""Gateway entry facts and owned admission remain independent of later checkout moves."""
-
 from __future__ import annotations
 
 import json
@@ -160,8 +158,6 @@ def test_asgi_health_keeps_its_explicit_entry_image(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    # Health image rendering uses this explicit native test database owner;
-    # admission refusal for an unknown image has its own gate contract.
     def test_database(_process: GatewayProcess) -> Database:
         return database
 

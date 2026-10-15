@@ -1,5 +1,3 @@
-"""`debt diff --by-target`: recorded patch debt per target group, what a change paid or added."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -76,9 +74,9 @@ def test_unchanged_groups_and_other_codes_stay_out(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
     flat = [cell for row in table(repo(make_repo), capsys) for cell in row]
-    assert "lib.mod.other" not in flat  # unchanged
-    assert "time.sleep" not in flat  # unchanged
-    assert "private-name" not in flat  # not a patch code
+    assert "lib.mod.other" not in flat
+    assert "time.sleep" not in flat
+    assert "private-name" not in flat
 
 
 def test_a_depth_makes_coarser_groups(

@@ -1,11 +1,3 @@
-"""`ava schedules verify`'s call-site check — the signature drift the import check cannot see.
-
-The 2026-10-03 shape: `schedules.catchup.catch_up()` / `fire_slot_once()` gained a required
-leading `db` and the hierarchy-worker's `prepare` moved; the stored scripts still imported cleanly
-(every name still existed) and crash-looped on their first call. These run the real child
-(`schedule_verify_child`) the way the sweep does.
-"""
-
 from __future__ import annotations
 
 import json
@@ -21,7 +13,6 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-# The hierarchy-worker script as stored before the library layer took `db` from its caller.
 _OLD_HIERARCHY = """\
 import time
 from datetime import UTC, datetime
@@ -41,8 +32,6 @@ def main():
     fire_slot_once(nxt, None, fire=_fire)
 """
 
-# The current shape receives `db` and binds it (the shipped templates do
-# `db = Database.from_settings()`); an unbound read is its own red — see the undefined-name tests.
 _NEW_HIERARCHY = (
     _OLD_HIERARCHY.replace("def _fire(_trigger):", "def _fire(_slot, _trigger):")
     .replace("fire_slot_once(nxt", "fire_slot_once(db, nxt")
@@ -90,21 +79,15 @@ def test_a_removed_module_attribute_is_red() -> None:
 @pytest.mark.parametrize(
     "script",
     [
-        # Unbindable statically: starred / double-starred arguments.
         "from schedules.catchup import fire_slot_once\n\na, k = (), {}\nfire_slot_once(*a, **k)\n",
-        # A name the script rebinds is not the imported object.
         "from schedules.catchup import fire_slot_once\n\ndef fire_slot_once(): ...\n\nfire_slot_once()\n",
         "from schedules.catchup import fire_slot_once\n\ndef f(fire_slot_once):\n    fire_slot_once()\n",
-        # A callee reached through an instance cannot be resolved without running anything.
         "from base.db import Database\nfrom base.db.code_version_gate import ProcessDbGate\n"
         "def connect(gate: ProcessDbGate):\n"
         "    Database.from_settings(gate=gate).connect()\n",
-        # The agent SDK is wrapped by plugins at load time, so its static signature is not the contract.
         "import ava\nava.agents.spawn(prompt='x', label='plugin-added keyword')\n",
-        # A namespace a plugin installs into `ava` at load time (2026-10-04, model-scan-backstop).
         "import ava\nresults = ava.tasks.get('x').results\n",
         "import ava\n\ndef scan(task_id):\n    return ava.tasks.get(task_id).results\n",
-        # Code outside the checkout is not this check's business.
         "import json\njson.dumps()\n",
         "import os\nos.getpid(1)\n",
     ],
@@ -140,7 +123,6 @@ def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    """The sweep reads every row of the table; a script an agent wrote is no exception."""
     rows = [(1, "built-in", _NEW_HIERARCHY), (9, "agent-made-poller", _OLD_HIERARCHY)]
 
     def no_alert(**_kwargs: object) -> None:
@@ -164,7 +146,6 @@ def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
 
 
 def test_every_shipped_built_in_script_binds_against_the_library() -> None:
-    """A signature change in a library module must update the templates in the same PR."""
     manifest = json.loads(
         (Path(__file__).resolve().parents[4] / "schedules" / "manifest.json").read_text()
     )
@@ -174,12 +155,6 @@ def test_every_shipped_built_in_script_binds_against_the_library() -> None:
         if red := _check(script):
             reds[entry["name"]] = red
     assert reds == {}
-
-
-# ── the undefined-name check: the read the import dry-run cannot see ──
-# 2026-10-01 audit: three in-store copies read `base` where nothing imported it (shared -> base
-# rename leftovers at a non-import top-level statement); the import check stayed green and the
-# first real fire died with NameError.
 
 
 def test_a_read_of_a_name_nothing_imported_is_red() -> None:
@@ -236,7 +211,6 @@ def test_annotations_are_not_read() -> None:
     ],
 )
 def test_pep695_type_parameters_are_bindings(script: str) -> None:
-    """A type parameter is a name the script binds (2026-10-05 review); reading it is not drift."""
     assert _check(script) is None
 
 
@@ -250,7 +224,6 @@ def test_pep695_type_parameters_are_bindings(script: str) -> None:
     ids=["fn", "class", "alias"],
 )
 def test_type_parameter_bounds_are_not_read(script: str) -> None:
-    """A bound is evaluated lazily like an annotation, never at fire time."""
     assert _check(script) is None
 
 

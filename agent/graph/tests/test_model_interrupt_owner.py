@@ -1,5 +1,3 @@
-"""Model and subscription owners preserve errors through bounded invocation return."""
-
 import asyncio
 from typing import Any, cast
 
@@ -80,7 +78,6 @@ async def test_provider_value_that_is_an_exception_is_still_a_value() -> None:
 
 
 def _pool() -> AsyncConnectionPool:
-    # These tests fail or replace the polling boundary before it uses the pool.
     return cast(AsyncConnectionPool, object())
 
 

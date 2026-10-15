@@ -1,16 +1,3 @@
-"""Screen-model tests for base.sessions.pty.screen — the pyte wrapper.
-
-These exercise the PtyScreen in isolation (no daemon): incremental UTF-8
-decode across reads, the raw byte ring buffer, screen-parity render semantics
-(visible screen vs scrollback, trailing-whitespace trimming, trailing empty
-rows), and the TUI behaviors the capture contract is defined against —
-cursor-addressed full-screen redraws and ANSI attribute sequences.
-
-Line endings are CRLF on the wire (the pty line discipline converts the
-child's LF to CRLF), so feeds use "\r\n" — pyte models LF strictly as
-move-down-without-carriage-return, exactly like the terminal it emulates.
-"""
-
 from __future__ import annotations
 
 from base.sessions.pty.screen import DEFAULT_COLS, DEFAULT_ROWS, PtyScreen
@@ -27,8 +14,6 @@ def test_visible_screen_renders_current_rows() -> None:
     rows = out.split("\n")
     assert rows[0] == "line one"
     assert rows[1] == "line two"
-    # screen parity: rows are trailing-trimmed; empty rows below the content
-    # survive as empty lines, so the rendered text ends in newlines.
     assert rows[2:] == [""] * 3
     assert out.endswith("\n")
 
@@ -39,11 +24,8 @@ def test_scrollback_render_returns_history_tail() -> None:
         _feed(s, f"row-{i}")
         if i < 5:
             _feed(s, "\n")
-    # row-0..2 scrolled off into history; row-3..5 are visible; render is
-    # history (oldest first) + display, so the full transcript in order.
     out = s.render(lines=200, scrollback=True)
     assert out.split("\n") == ["row-0", "row-1", "row-2", "row-3", "row-4", "row-5"]
-    # lines cap: only the last `lines` rows are returned.
     capped = s.render(lines=2, scrollback=True)
     assert capped.split("\n")[0] == "row-4"
 
@@ -74,7 +56,6 @@ def test_scrollback_render_keeps_history_before_visible_content() -> None:
 
 def test_incremental_utf8_split_across_reads() -> None:
     s = PtyScreen(cols=20, rows=5)
-    # '\u4f60' is 3 UTF-8 bytes; split across two feeds must not render U+FFFD.
     b = "\u4f60".encode()
     s.feed(b[:1])
     s.feed(b[1:])
@@ -85,8 +66,6 @@ def test_incremental_utf8_split_across_reads() -> None:
 
 
 def test_tui_cursor_addressed_redraw() -> None:
-    """A full-screen program (top/vim class) addresses cells directly; the
-    visible screen must reflect the final layout, not the raw escape soup."""
     s = PtyScreen(cols=20, rows=8)
     _feed(s, "\x1b[2J\x1b[HHEADER-LINE\x1b[4;3HMID-CELL\x1b[8;1HBOTTOM")
     out = s.render(scrollback=False)
@@ -94,7 +73,6 @@ def test_tui_cursor_addressed_redraw() -> None:
     assert rows[0].startswith("HEADER-LINE")
     assert rows[3] == "  MID-CELL"
     assert rows[7].startswith("BOTTOM")
-    # No raw escape sequences leak into the render.
     assert "\x1b" not in out
 
 
@@ -119,7 +97,7 @@ def test_raw_ring_buffer_caps_and_roundtrips() -> None:
     s = PtyScreen(cols=20, rows=5, raw_cap=100)
     _feed(s, "a" * 60)
     _feed(s, "b" * 60)
-    assert len(s._raw) <= 100  # test observes the ring cap
+    assert len(s._raw) <= 100
     assert bytes(s._raw).endswith(b"b" * 60)
 
 
@@ -135,13 +113,9 @@ def test_default_geometry_matches_classic() -> None:
 
 
 def test_capture_survives_an_orphaned_wide_char_stub() -> None:
-    # Overwriting only the first half of a two-cell character leaves pyte's
-    # empty stub cell standing alone; display() used to die on it with
-    # "IndexError: string index out of range" (2026-10-03, codex sessions on
-    # company-mini surfaced it as "internal error in capture").
     s = PtyScreen(cols=20, rows=3)
     _feed(s, "\u4e2d")
-    _feed(s, "\x1b[H" + "x")  # home; replace the wide glyph's first cell
+    _feed(s, "\x1b[H" + "x")
 
     out = s.render(lines=3, scrollback=False)
     assert out.split("\n")[0] == "x"

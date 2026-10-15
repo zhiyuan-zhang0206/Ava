@@ -1,5 +1,3 @@
-"""Finite close, admission and per-operation receipts of the ordinary event writer."""
-
 from __future__ import annotations
 
 import subprocess
@@ -109,12 +107,11 @@ def test_sync_deadline_covers_marker_admission_and_write(monkeypatch: pytest.Mon
         )
         assert time.monotonic() - started < 0.5
 
-        # No caller-side writer or rescue worker may be started by sync.
         def forbid_thread(*args: Any, **kwargs: Any) -> None:
             raise AssertionError("sync started another writer")
 
         monkeypatch.setattr(threading, "Thread", forbid_thread)
-        pipe._queue.get_nowait()  # give the barrier a slot while the sole writer stays blocked
+        pipe._queue.get_nowait()
         assert pipe.sync(timeout=0.03) == telemetry.DrainResult(
             telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN
         )
@@ -176,7 +173,6 @@ def test_worker_failure_reports_immediately_and_never_acknowledges(
     assert observed.value is failure
     assert pipe._finished.wait(1)
     assert reports == [failure]
-    # Late producer observations still shed; stop owns the retained failure.
     pipe.enqueue(event(2))
     assert pipe.dropped == 1
     with pytest.raises(type(failure)) as stopped:

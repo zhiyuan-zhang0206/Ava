@@ -15,7 +15,6 @@ def _artifact(directory: Path, name: str, signature: str | None = None) -> None:
 
 def test_builds_tauri_static_manifest_for_universal_macos(tmp_path: Path) -> None:
     _artifact(tmp_path, "Ava.app.tar.gz", "mac-signature\n")
-    # Installers and the Android download are release assets, not updater archives.
     _artifact(tmp_path, "Ava_0.4.1_aarch64.dmg")
     _artifact(tmp_path, "Ava_0.4.1.apk")
 

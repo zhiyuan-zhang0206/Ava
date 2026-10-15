@@ -1,10 +1,3 @@
-"""`ava plugins inspect` rendering — the shape an agent greps.
-
-The catalog itself is covered in `agent/tests/plugins/test_plugin_catalog.py`; here it is
-handed in ready-made, so these tests fix the OUTPUT contract: the line prefixes,
-the diff vocabulary, and the exit codes.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -74,8 +67,6 @@ def test_no_argument_lists_every_surface_and_every_plugin(
     out = capsys.readouterr().out
     for surface in SURFACES:
         assert f"surface {surface.id}\n" in out
-    # The signature is rendered live, not transcribed — so it carries the real
-    # field name a plugin author passes in `contribute()`.
     assert "entry        base.packages.plugins.extensions.PluginContributions(" in out
     assert "before_llm: tuple[GraphHook, ...] = ()" in out
     assert "plugin demo  enabled  builtin  hooks 1, sdkWraps 1" in out
@@ -85,9 +76,6 @@ def test_no_argument_lists_every_surface_and_every_plugin(
 def test_a_surface_nobody_uses_says_so(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    """An unused surface still gets its block — the reference half of the
-    catalog is what a plugin-authoring agent reads, and it must not shrink to
-    whatever this machine happens to run."""
     _install(monkeypatch, _view(contributions=(_HOOK,)))
 
     plugins_inspect.cmd_plugins_inspect(None)
@@ -110,17 +98,12 @@ def test_detail_lists_every_registered_fact(
     assert "state                demo__counter             DemoState.counter: int" in out
     assert "declared 1.0.0  engines.ava=>=0.1.0" in out
     assert "  registered-not-declared  hooks/before_llm" in out
-    # The catalog reports what registered; it points at where "how often did it
-    # actually fire" lives rather than pretending to know (issue #40).
     assert "plugin_activation" in out
 
 
 def test_detail_renders_the_diff_and_what_is_not_drift(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    """Three vocabularies, deliberately distinct: a status per compared
-    identifier, `undeclarable` for surfaces the spec cannot express, and
-    `install-time` for declarations with no runtime registry behind them."""
     _install(
         monkeypatch,
         _view(

@@ -1,5 +1,3 @@
-"""The WAL-G configuration: strict, secret-free in every message, and the key pinned on first use."""
-
 from __future__ import annotations
 
 import json
@@ -68,7 +66,6 @@ def test_every_required_setting_must_be_present(sandbox: Sandbox, missing: str) 
 
 
 def test_the_region_is_the_bare_id_not_the_endpoint_form(sandbox: Sandbox) -> None:
-    """OSS signs with `cn-shanghai`; `oss-cn-shanghai` fails with "Invalid signing region"."""
     sandbox.write_config(valid_config(sandbox.key_file, OSS_REGION="oss-cn-shanghai"))
 
     message = _refused(sandbox, "OSS_REGION")
@@ -183,9 +180,6 @@ def test_no_refusal_ever_contains_a_secret(sandbox: Sandbox) -> None:
 
     assert len(messages) == 6
     assert not any(secret in message for message in messages for secret in SECRETS)
-
-
-# ── the key fingerprint pin (trust on first use) ─────────────────────────────
 
 
 def test_the_first_load_pins_the_key_fingerprint(sandbox: Sandbox) -> None:

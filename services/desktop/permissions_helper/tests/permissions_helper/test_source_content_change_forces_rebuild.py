@@ -1,5 +1,3 @@
-"""Permissions helper cases: source content change forces rebuild."""
-
 from __future__ import annotations
 
 import plistlib
@@ -64,7 +62,6 @@ def test_locale_content_change_forces_rebuild(
 def test_entitlements_content_change_forces_rebuild(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The entitlements file is a build input: editing it must rebuild the artifact."""
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
@@ -185,9 +182,6 @@ def test_identity_change_warns_and_rebuilds(
 def test_ad_hoc_signed_bundle_is_rebuilt_onto_the_stable_certificate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A bundle an earlier build left ad-hoc carries a per-build identity whose
-    grant TCC drops on every rebuild, so re-signing forfeits nothing live and is
-    the only way that host returns to the identity the grants are keyed on."""
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
@@ -239,7 +233,7 @@ def test_every_call_carries_its_declared_bound(
     recorded = fake_tools(monkeypatch, authority=None)
 
     lifecycle.build_and_sign()
-    assert recorded  # an unbounded call site would already have KeyError'd in the fake
+    assert recorded
     for call in recorded:
         expected = (
             lifecycle.ACL_PROBE_TIMEOUT_S
@@ -266,9 +260,6 @@ def test_swiftc_hang_fails_the_build_instead_of_blocking(
 def test_codesign_hang_fails_with_the_acl_remedy_not_the_unlock(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The 2026-08-02 hang, arriving after the preflight cleared this host. It has
-    to surface as a failed step, and name the key's access control: a keychain
-    unlock is not what fixes a per-use confirmation prompt."""
     from services.desktop.permissions_helper import lifecycle
 
     stage_bundle(monkeypatch, tmp_path, exe_present=False)
@@ -293,8 +284,6 @@ def test_acl_probe_precedes_the_build_and_signs_a_scratch_file(
     argvs = recorded_argvs(recorded)
     probe = next(c for c in argvs if c[:2] == ["codesign", "--sign"])
     assert probe[2] == lifecycle.CERT_CN
-    # A scratch path, never the bundle: a probe that DOES trip the dialog must not
-    # be able to leave the helper half-signed.
     assert str(app) not in probe[3]
     assert argvs.index(probe) < argvs.index(next(c for c in argvs if c[0] == "swiftc"))
 
@@ -480,9 +469,6 @@ def test_acl_prompt_refuses_before_anything_is_built(
 def test_acl_probe_nonzero_is_inconclusive_and_the_build_proceeds(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """codesign takes different paths for a loose file and a bundle, so a non-zero
-    probe is no evidence the real sign would fail -- refusing on it would ground
-    hosts that sign fine. The bound on the real sign is the backstop."""
     from services.desktop.permissions_helper import lifecycle
 
     app = stage_bundle(monkeypatch, tmp_path, exe_present=False)
@@ -495,7 +481,6 @@ def test_acl_probe_nonzero_is_inconclusive_and_the_build_proceeds(
 def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A timed-out native ownership query cannot certify helper absence."""
     import subprocess
 
     from services.desktop.permissions_helper import launchd_job, lifecycle
@@ -568,7 +553,6 @@ def test_unresponsive_loaded_helper_keeps_unknown_custody(
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="custody is unknown"):
         lifecycle.install_and_load(app, rebuilt=False, helper=serve(silent), timers=timers)
     assert run_calls == probe_calls == []
-    # Every attempt asked, and the waits between them never really waited.
     assert len(silent.calls) > 1 and set(silent.calls) == {"ping"}
     assert timers.sleeps == [0.5] * (len(silent.calls) - 1)
 

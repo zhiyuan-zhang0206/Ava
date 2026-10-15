@@ -1,17 +1,7 @@
-"""The ensure_agents_meta_row seed helper must refuse a production DB URL
-before opening any connection.
-
-2026-08-12 incident class: synthetic agent rows (spawner="test", high-range
-ids) written into the production agents/agents_meta tables. The helper's guard
-lives in base/db/test_db_guard.py (single source of truth); these tests prove
-the wiring — that the helper actually calls it — without touching a database.
-"""
-
 from __future__ import annotations
 
 import pytest
 
-# The module that holds the `tests/ava` fixtures and the seed helper.
 from ava.tests.fixtures import ava_tests as conftest
 from base.config import settings
 
@@ -31,8 +21,6 @@ def test_ensure_agents_meta_row_refuses_prod_db(
 def test_ensure_agents_meta_row_refuses_before_connecting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The guard fires before psycopg.connect is ever called — a prod URL can
-    never reach the wire."""
     monkeypatch.setattr(
         settings.data_plane, "db_url", "postgresql://ava_main@127.0.0.1:6433/ava_main"
     )

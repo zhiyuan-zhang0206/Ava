@@ -1,5 +1,3 @@
-"""Repository Anthropic and OpenAI model catalog contracts."""
-
 from __future__ import annotations
 
 from base.lm import pricing
@@ -98,7 +96,7 @@ def test_gpt6_sol_luna_successors_and_capabilities(*, model_catalog: ModelCatalo
     for model, cutoff in (("gpt-6-sol", "2026-04"), ("gpt-6-luna", "2026-05")):
         spec = model_catalog.models[model]
         assert spec.spawnable and spec.context_window == 1_050_000
-        assert spec.max_output_tokens is None  # GPT provider leaves the API cap unpinned.
+        assert spec.max_output_tokens is None
         assert spec.knowledge_cutoff == cutoff
         assert spec.effort_levels == ("none", "low", "medium", "high", "xhigh", "max")
         assert spec.tuning.reasoning_effort == "medium"

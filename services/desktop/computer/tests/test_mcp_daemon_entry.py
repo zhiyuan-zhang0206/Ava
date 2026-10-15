@@ -1,5 +1,3 @@
-"""The computer entry shares one captured image gate with logging and actions."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -49,7 +47,7 @@ def test_entry_shares_the_captured_gate_with_logging_and_actions(
 
     def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
         stages.append("producer")
-        assert gates == []  # The producer keeps the existing lazy database dial.
+        assert gates == []
         factories.append(database)
         machines.append(machine)
         return pipeline

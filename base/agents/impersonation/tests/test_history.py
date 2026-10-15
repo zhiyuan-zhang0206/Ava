@@ -1,5 +1,3 @@
-"""Permanent session history, numeric handles, and handoff projection contracts."""
-
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -122,7 +120,6 @@ def test_numbers_are_agent_scoped_and_permanent(
             database_gate=database_gate,
             local_machine=local_machine,
         )
-    # Simulate the native checkpoint receipt, then a second session.
     db_conn.execute(
         "UPDATE agent_impersonations SET handoff_applied_at=now() WHERE id=%s", (first["id"],)
     )
@@ -209,7 +206,6 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     lease = start(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
     )
-    # The plain chat row `insert_inbound_message` writes; the inbox owner sits above this package.
     inbound_row = db_conn.execute(
         "INSERT INTO inbound_messages (agent_id, content, kind, source) "
         "VALUES (%s, %s, 'chat', 'user') RETURNING id",
@@ -274,8 +270,6 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     assert document["statistics"]["outgoing_messages"] == 1
     assert document["session"]["executor_name"] == "Codex: thoughtful squirrel"
     assert document["session"]["process_metadata"]["name"] == "python3.12"
-    # Process facts live once on the session record, not on every message;
-    # rows persisted with the former per-message copy still validate.
     said = document["messages"][1]["payload"]["impersonation"]
     assert said["executor_name"] == "Codex: thoughtful squirrel"
     assert "process" not in said
@@ -299,7 +293,6 @@ def test_legacy_empty_events_never_certify_a_zero_call_claim(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A NULL protocol version is never inferred to be an empty manifest."""
     local_machine = machine_identity.name()
     request_legacy_leases(monkeypatch)
     lease = start(
@@ -342,7 +335,6 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An upgrade retry exports the v2 fields the resumption note requires."""
     local_machine = machine_identity.name()
     request_legacy_leases(monkeypatch)
     from psycopg.types.json import Jsonb
@@ -428,13 +420,6 @@ def test_public_session_exposes_handoff_applied_at(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """INC-927 closure read-face: the applied receipt must be visible.
-
-    `ava impersonate list` projects through `public_session`; before this pin
-    the whitelist omitted `handoff_applied_at`, so a caller reading the CLI
-    output with `.get(...)` saw the missing key as an unapplied handoff while
-    the column held a value.
-    """
     local_machine = machine_identity.name()
     lease = start(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine

@@ -1,5 +1,3 @@
-"""Contract tests for the daily official-model detector."""
-
 from __future__ import annotations
 
 import json
@@ -63,7 +61,6 @@ class _JSONResponse:
 
 
 def test_tracker_script_exists() -> None:
-    """The schedule's subprocess target must ship in the repository."""
     assert _SCRIPT.is_file()
 
 
@@ -272,7 +269,6 @@ def test_candidate_is_reported_once_then_recorded_in_state(
     env_file = tmp_path / ".env"
     write_env_file(tracker, env_file)
     monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
-    # This id must stay unregistered; bump to the next GLM id when glm-5.4 lands.
     monkeypatch.setattr(
         tracker,
         "fetch_provider_models",
@@ -292,9 +288,6 @@ def test_candidate_is_reported_once_then_recorded_in_state(
 def test_check_sources_compares_against_the_provider_catalog(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
 ) -> None:
-    """The comparison must see the catalog the enabled provider plugins build:
-    a registered id is skipped, not surfaced as a new candidate. Comparing
-    against nothing re-reported every registered id once."""
     registered = type("Spec", (), {"provider": "gemini"})()
 
     monkeypatch.setattr(
@@ -321,9 +314,6 @@ def test_check_sources_compares_against_the_provider_catalog(
 
 
 def test_gpt6_family_ids_are_classified_not_dropped_as_other(tracker: Any) -> None:
-    """gpt-6-* must stay inside the gpt family patterns: a registered gpt-6
-    member is skipped, and a same-series gpt-6 variant compares against the
-    5.x registry head (older major) and stays actionable."""
     registry = {
         "gpt-6-astra": type("Spec", (), {"provider": "gpt"})(),
         "gpt-5.6-sol": type("Spec", (), {"provider": "gpt"})(),
@@ -360,13 +350,6 @@ def test_newer_same_series_is_actionable_while_older_upstream_member_is_suppress
 
 
 def test_gemini_flash_lite_ids_are_classified_not_dropped_as_other(tracker: Any) -> None:
-    """Flash-Lite is a roster family Ava evaluates: its numbered upstream ids
-    must reach the report (registered member skipped, unregistered member a
-    candidate against the registered head) instead of falling through to
-    other_ids. The unversioned `gemini-flash-lite-latest` alias stays in
-    other_ids: it is the registered id, and an alias with no version cannot
-    take part in the version compare — a newly numbered flash-lite id showing
-    up as a candidate is what signals the alias moved."""
     registry = {
         "gemini-3.5-flash-lite": type("Spec", (), {"provider": "gemini"})(),
         "gemini-flash-lite-latest": type("Spec", (), {"provider": "gemini"})(),
@@ -392,10 +375,6 @@ def test_gemini_flash_lite_ids_are_classified_not_dropped_as_other(tracker: Any)
 def test_older_flash_lite_member_is_suppressed_while_preview_series_is_separate(
     tracker: Any,
 ) -> None:
-    """Supersession and series splitting behave inside Flash-Lite exactly as in
-    the pro/flash families: an older GA member of the registered series is
-    suppressed, and a `-preview` member is its own series (never compared
-    against the GA head)."""
     registry = {
         "gemini-3.5-flash-lite": type("Spec", (), {"provider": "gemini"})(),
     }
@@ -414,7 +393,6 @@ def test_older_flash_lite_member_is_suppressed_while_preview_series_is_separate(
 def test_qwen_major_only_variant_is_suppressed_but_same_version_variant_is_actionable(
     tracker: Any,
 ) -> None:
-    """Qwen variants without a minor version are older than the registered 3.8 head."""
     registry = {
         "qwen3.8-max": type("Spec", (), {"provider": "qwen"})(),
     }
@@ -644,15 +622,15 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
 
     monkeypatch.setattr(tracker.requests, "get", failing_get)
     calls.clear()
-    assert tracker.main(args) == 0  # first failing round: pending, silent
+    assert tracker.main(args) == 0
     assert len(calls) == 3
 
     calls.clear()
-    assert tracker.main(args) == 2  # second failing round: announced once
+    assert tracker.main(args) == 2
     assert len(calls) == 3
 
     calls.clear()
-    assert tracker.main(args) == 0  # a continuing error never re-announces
+    assert tracker.main(args) == 0
     assert len(calls) == 3
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"].startswith("error:")

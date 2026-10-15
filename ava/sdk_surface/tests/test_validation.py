@@ -1,20 +1,3 @@
-"""Unified SDK argument validation — the trailing-comma guard.
-
-Every ava.* entry point validates its own arguments through the shared
-`ava.sdk_surface.validation` helpers (one implementation, user ruling 2026-08-28):
-
-- string-expected arguments unwrap a one-element list/tuple whose element is a
-  string (the LLM trailing-comma class that 422'd the gateway — issue #1343,
-  2026-08-28 send_message agents 2697/2986);
-- multi-element sequences and wrong types raise TypeError naming the parameter;
-- arguments that are inherently not strings are checked strictly and never
-  unwrapped.
-
-The suite covers ① single-element tuple normalization at every entry point,
-② multi-element / wrong-type TypeError, ③ zero regression of existing behavior
-(str / None / Path / int values still flow through unchanged).
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,8 +5,6 @@ from pathlib import Path
 import pytest
 
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-
-# ── helper units ─────────────────────────────────────────────────────────────
 
 
 class TestCoerceStr:
@@ -80,9 +61,6 @@ class TestCoerceStr:
         assert value == "2026-01-01T00:00:00+08:00"
 
     def test_sequence_allowed_only_for_dict_lists(self) -> None:
-        """The one sequence the SDK accepts as a non-string value is the
-        multimodal content-block list — an all-string array is exactly the
-        shape the gateway rejects."""
         blocks = [{"type": "text", "text": "hi"}]
         assert coerce_str(blocks, "content", allow_types=(list,)) is blocks
         assert coerce_str([], "content", allow_types=(list,)) == []
@@ -110,31 +88,5 @@ class TestCoerceTyped:
         ],
     )
     def test_never_unwraps(self, value: object, expected: type) -> None:
-        """A one-element tuple for a non-string parameter is a TypeError — no
-        expansion outside the string-expected class."""
         with pytest.raises(TypeError, match="n must be"):
             coerce_typed(value, "n", expected)
-
-
-# ── agents ───────────────────────────────────────────────────────────────────
-
-
-# ── files ────────────────────────────────────────────────────────────────────
-
-
-# ── shell ────────────────────────────────────────────────────────────────────
-
-
-# ── ui ───────────────────────────────────────────────────────────────────────
-
-
-# ── watcher ──────────────────────────────────────────────────────────────────
-
-
-# ── web / understand ─────────────────────────────────────────────────────────
-
-
-# ── memory / tasks / notices ─────────────────────────────────────────────────
-
-
-# ── self / attach ────────────────────────────────────────────────────────────

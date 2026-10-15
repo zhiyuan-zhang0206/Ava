@@ -1,5 +1,3 @@
-"""Fresh delta reconstruction excludes durable pending task writes and runtime objects."""
-
 from dataclasses import replace
 from typing import Any, cast
 
@@ -50,7 +48,6 @@ async def test_actual_persisted_pending_write_is_not_materialized_summary_input(
     assert fresh is not None and fresh.pending_writes
     assert any(task == "unexecuted-provider-task" for task, _, _ in fresh.pending_writes)
     assert all(m.id != "pending-proof-gap" for m in fresh.checkpoint["channel_values"]["messages"])
-    # Mutating a previously read runtime object cannot alter fresh persisted input.
     before.checkpoint["channel_values"]["messages"].append(
         HumanMessage(content="RUNTIME NEVER SUMMARIZE")
     )

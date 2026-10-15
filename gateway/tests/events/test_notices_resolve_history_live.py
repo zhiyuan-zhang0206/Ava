@@ -1,5 +1,3 @@
-"""The resolve/read action endpoints and their surfaces: read/resolve/answer routing, live polling, supersede and expire_at TTL defaults; split from gateway/tests/events/test_notices_endpoint.py (task #4922)."""
-
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -14,14 +12,12 @@ from base.lm.catalog import ModelCatalog
 from gateway.tests.events.test_notices_endpoint import insert_notice, pending_rows, seed_agent
 from tests.fixtures.gateway_config import gateway_test_client
 
-# --- POST .../notices/{id}/resolve : read -----------------------------------
-
 
 def test_read_with_reply_marks_and_delivers_inbound(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
     a = seed_agent(db_conn)
-    nid = insert_notice(db_conn, a, "migration done", content="14k rows")  # FYI
+    nid = insert_notice(db_conn, a, "migration done", content="14k rows")
     with gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -41,8 +37,6 @@ def test_read_with_reply_marks_and_delivers_inbound(
     assert resolution == "read"
     assert reply == "nice, thanks"
 
-    # one self-describing chat inbound, carrying the title and the reply —
-    # a notice-system event, not user speech: system-sourced, no User envelope
     rows = pending_rows(db_conn, a)
     assert len(rows) == 1
     kind, _status, inbound_text, source = rows[0]
@@ -51,7 +45,6 @@ def test_read_with_reply_marks_and_delivers_inbound(
     assert "migration done" in inbound_text
     assert "nice, thanks" in inbound_text
 
-    # the read FYI drops off the unread count
     snap = select_one(
         db_conn,
         a,
@@ -77,14 +70,10 @@ def test_read_without_reply_marks_no_inbound(db_conn: psycopg.Connection) -> Non
         cur.execute("SELECT resolved_at, resolution FROM agent_notices WHERE id = %s", (nid,))
         row = cur.fetchone()
     assert row is not None and row[0] is not None and row[1] == "read"
-    # read with no reply delivers nothing
     assert pending_rows(db_conn, a) == []
 
 
 def test_read_twice_second_is_silent_201(db_conn: psycopg.Connection) -> None:
-    """Mark read on an already-read FYI notice silently succeeds (user ruling
-    2026-08-28): the second read is a 201 no-op — no error, no new inbound,
-    the row keeps its original resolution."""
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "fyi")
     with gateway_test_client() as client:
@@ -106,16 +95,12 @@ def test_read_twice_second_is_silent_201(db_conn: psycopg.Connection) -> None:
         )
         row = cur.fetchone()
     assert row is not None and row[0] is not None and row[1] == "read" and row[2] is None
-    # bare reads deliver nothing, the second one included
     assert pending_rows(db_conn, a) == []
 
 
 def test_read_with_reply_on_already_resolved_delivers_note(
     db_conn: psycopg.Connection,
 ) -> None:
-    """A note attached to a read on an already-resolved notice still reaches
-    the agent (the close itself is a no-op) — user input is never silently
-    dropped, matching the normal read-with-note path."""
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "migration done")
     with gateway_test_client() as client:
@@ -131,7 +116,6 @@ def test_read_with_reply_on_already_resolved_delivers_note(
         )
     assert first.status_code == 201
     assert second.status_code == 201
-    # exactly one inbound — from the note, system:notice-reply, carrying title + note
     rows = pending_rows(db_conn, a)
     assert len(rows) == 1
     kind, _status, inbound_text, source = rows[0]
@@ -139,7 +123,6 @@ def test_read_with_reply_on_already_resolved_delivers_note(
     assert source == "system:notice-reply"
     assert "migration done" in inbound_text
     assert "noted" in inbound_text
-    # the row's original resolution is untouched (no clobbered reply cache)
     with db_conn.cursor() as cur:
         cur.execute("SELECT resolution, reply FROM agent_notices WHERE id = %s", (nid,))
         row = cur.fetchone()
@@ -149,8 +132,6 @@ def test_read_with_reply_on_already_resolved_delivers_note(
 def test_read_on_require_response_is_409(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    """read applies to an FYI; on a needs-response notice it is a kind mismatch
-    -> 409 (use answer/dismiss)."""
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "needs answer", require_response=True)
     with gateway_test_client() as client:
@@ -169,9 +150,6 @@ def test_read_on_require_response_is_409(
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
     assert pending_rows(db_conn, a) == []
-
-
-# --- resolve: not-open / cross-agent / double-resolve -----------------------
 
 
 def test_resolve_nonexistent_409(db_conn: psycopg.Connection) -> None:
@@ -202,7 +180,7 @@ def test_resolve_twice_second_is_409_and_delivers_once(db_conn: psycopg.Connecti
         )
     assert first.status_code == 201
     assert second.status_code == 409
-    assert len(pending_rows(db_conn, a)) == 1  # only the first answer delivered
+    assert len(pending_rows(db_conn, a)) == 1
 
 
 def test_resolve_cross_agent_path_409(
@@ -218,7 +196,6 @@ def test_resolve_cross_agent_path_409(
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 409
-    # a's notice is untouched
     snap = select_one(
         db_conn,
         a,
@@ -232,9 +209,6 @@ def test_resolve_cross_agent_path_409(
 def test_open_default_limit_comes_from_display_config(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    """The implicit open-feed cap is ``settings.display.notices_open_default_limit``
-    (``AVA_NOTICES_OPEN_DEFAULT_LIMIT``); the literal 200 is only that field's
-    default, not a hard-coded page size."""
     from base.config import settings
 
     monkeypatch.setattr(settings.display, "notices_open_default_limit", 2)
@@ -251,8 +225,6 @@ def test_open_default_limit_comes_from_display_config(
 def test_feed_defaults_come_from_display_config(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    """The unified feed's implicit open cap and resolved page follow the
-    display-config fields."""
     from base.config import settings
 
     monkeypatch.setattr(settings.display, "notices_open_default_limit", 1)
@@ -285,17 +257,7 @@ def test_feed_defaults_come_from_display_config(
     assert [r["title"] for r in feed["resolved_page"]] == ["resolved r1"]
 
 
-# --- table CHECK constraints (the load-bearing invariants) -------------------
-
-
 def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) -> None:
-    """The four multi-column CHECKs on agent_notices are the invariants the SDK
-    and resolve-endpoint guards rest on: they make an illegal queue state
-    unrepresentable even if an application-layer guard regressed. Every other test
-    here reaches them only through those guards (a 409/422), so this one INSERTs
-    each illegal combo straight into the table and asserts the constraint itself
-    fires -- if a guard were dropped, this is what still catches the bad write.
-    """
     a = seed_agent(db_conn)
     ts = "2026-06-15T01:00:00Z"
 
@@ -317,51 +279,32 @@ def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) ->
             )
 
     def _expect_violation(insert: Callable[[], None]) -> None:
-        # `insert` is a zero-arg thunk doing one illegal _raw_insert; assert the
-        # CHECK fires, then clear the aborted transaction for the next case.
         with pytest.raises(psycopg.errors.CheckViolation):
             insert()
         db_conn.rollback()
 
-    # Each thunk violates exactly one CHECK (the others kept satisfied) so a
-    # failure points at the named constraint, not an accidental second breach.
-    # blocking_requires_response: stalled on a reply you never asked for.
     _expect_violation(lambda: _raw_insert(require_response=False, blocking=True))
-    # resolution_pair: resolved_at without a resolution, and the reverse.
     _expect_violation(lambda: _raw_insert(require_response=True, resolved_at=ts))
     _expect_violation(lambda: _raw_insert(require_response=True, resolution="answered", reply="x"))
-    # resolution_legal: an FYI may be 'answered' (Task #1061 — the user
-    # replies to an FYI from Telegram and the text reaches the notice's
-    # agent); a needs-response cannot be 'read'.
     _expect_violation(lambda: _raw_insert(require_response=True, resolved_at=ts, resolution="read"))
-    # answered_has_reply: an answer must carry text.
     _expect_violation(
         lambda: _raw_insert(require_response=True, resolved_at=ts, resolution="answered")
     )
 
-    # 'superseded' is valid for both kinds (migration 0062).
     _raw_insert(require_response=True, resolved_at=ts, resolution="superseded")
     _raw_insert(require_response=False, resolved_at=ts, resolution="superseded")
-    # 'expired' is valid for both kinds.
     _raw_insert(require_response=True, resolved_at=ts, resolution="expired")
     _raw_insert(require_response=False, resolved_at=ts, resolution="expired")
 
-    # Positive control: the legal shapes the guards DO produce still insert, so the
-    # constraints are proven to reject only the illegal combinations above.
     _raw_insert(require_response=True, resolved_at=ts, resolution="answered", reply="ok")
     _raw_insert(require_response=False, resolved_at=ts, resolution="read")
     _raw_insert(require_response=False, resolved_at=ts, resolution="answered", reply="ok")
     db_conn.commit()
 
 
-# --- GET /api/notices/live (Task #884: IM bridge poll) -----------------------
-
-
 def test_live_returns_new_open_notices_oldest_first(
     db_conn: psycopg.Connection,
 ) -> None:
-    """The IM bridge polls with the max id it has seen; /live returns every
-    open notice newer than that, both kinds, oldest-first."""
     a1 = seed_agent(db_conn)
     a2 = seed_agent(db_conn)
     n1 = insert_notice(db_conn, a1, "FYI one", require_response=False)
@@ -369,7 +312,6 @@ def test_live_returns_new_open_notices_oldest_first(
     n3 = insert_notice(db_conn, a1, "FYI two", require_response=False)
 
     with gateway_test_client() as client:
-        # full poll from 0
         r = client.get("/api/notices/live", params={"after": 0})
         assert r.status_code == 200
         items = r.json()
@@ -378,15 +320,12 @@ def test_live_returns_new_open_notices_oldest_first(
         assert items[1]["require_response"] is True
         assert items[1]["agent_id"] == a2
 
-        # incremental poll from n2's id → only n3
         r2 = client.get("/api/notices/live", params={"after": n2})
         assert r2.status_code == 200
         assert [it["id"] for it in r2.json()] == [n3]
 
 
 def test_live_excludes_resolved(db_conn: psycopg.Connection) -> None:
-    """A resolved notice stops appearing in /live — the bridge cursor simply
-    never sees it again (idempotent, no tombstone needed)."""
     a1 = seed_agent(db_conn)
     n1 = insert_notice(db_conn, a1, "Gone", require_response=False)
     insert_notice(
@@ -407,20 +346,15 @@ def test_live_excludes_resolved(db_conn: psycopg.Connection) -> None:
 def test_open_feed_include_awaiting_returns_both_kinds(
     db_conn: psycopg.Connection,
 ) -> None:
-    """include_awaiting=1 turns /api/notices/open into the full queue view:
-    FYI and require_response notices together (Task #941)."""
     a1 = seed_agent(db_conn)
     insert_notice(db_conn, a1, "FYI one", require_response=False)
     insert_notice(db_conn, a1, "Decision", require_response=True)
 
     with gateway_test_client() as client:
-        # default: FYI only
         default = client.get("/api/notices/open").json()
         assert [it["title"] for it in default] == ["FYI one"]
-        # include_awaiting: both kinds
         both = client.get("/api/notices/open", params={"include_awaiting": True}).json()
         assert {it["title"] for it in both} == {"FYI one", "Decision"}
-        # resolved stays excluded
         insert_notice(
             db_conn,
             a1,
@@ -434,7 +368,6 @@ def test_open_feed_include_awaiting_returns_both_kinds(
 
 
 def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
-    """No newer notices → empty list."""
     a1 = seed_agent(db_conn)
     n1 = insert_notice(db_conn, a1, "Only", require_response=False)
 
@@ -444,34 +377,12 @@ def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
         assert r.json() == []
 
 
-# -- audit cc-backend-runtime P2: supersede events must use the global id ---
-
-
 def test_supersede_publishes_global_notice_id(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When a new notice supersedes an open one, the NoticeResolved event must
-    carry the GLOBAL notice id (the frontend feed matches on it) while the
-    API response's `superseded` list carries LOCAL ids (the SDK's id space).
-
-    Regression: both used the local id, so the frontend could not drop the
-    superseded notice from the open feed until the next snapshot refresh.
-    """
     from ops import lifecycle as ops_lifecycle
 
     agent_id = seed_agent(db_conn)
-    # Skew the per-agent LOCAL sequence clear of the GLOBAL one (a resolved
-    # notice carrying a high local_id) so the next open notice's LOCAL id
-    # differs from its GLOBAL primary key — the test then proves which one each
-    # consumer gets.
-    #
-    # The skew is derived from the current global high-water mark rather than
-    # being a fixed 5: the two id spaces are independent, so a constant skew
-    # collides whenever this worker's DB happens to hold exactly the number of
-    # notices that walks the global sequence onto the same value. The test then
-    # failed in its own setup, on nothing but which files xdist's worksteal put
-    # on this worker. Deriving it makes the premise hold by construction — the
-    # local id lands 100 clear of any global id this test can produce.
     with db_conn.cursor() as cur:
         cur.execute("SELECT coalesce(max(id), 0) FROM agent_notices")
         row = cur.fetchone()
@@ -505,19 +416,11 @@ def test_supersede_publishes_global_notice_id(
         )
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    # The SDK-facing list carries LOCAL ids (the SDK's id space)...
     assert body["superseded"] == [open_local]
-    # ...while the published event carries the GLOBAL id (the frontend feed
-    # matches on it) — the regression that made superseded notices linger in
-    # the open feed until the next snapshot refresh.
     assert published == [open_id], f"expected global id {open_id}, got {published}"
 
 
-# --- expire_at TTL tests ----------------------------------------------------
-
-
 def test_post_notice_sets_default_expire_at(db_conn: psycopg.Connection) -> None:
-    """POST without expire_at sets default expire_at based on daemon setting."""
     aid = seed_agent(db_conn)
     before = datetime.now(UTC)
     with gateway_test_client() as client:
@@ -543,7 +446,6 @@ def test_post_notice_sets_default_expire_at(db_conn: psycopg.Connection) -> None
 
 
 def test_post_notice_with_explicit_expire_at(db_conn: psycopg.Connection) -> None:
-    """POST with explicit expire_at stores the requested timestamp."""
     aid = seed_agent(db_conn)
     target = datetime.now(UTC) + timedelta(hours=2)
     with gateway_test_client() as client:
@@ -566,7 +468,6 @@ def test_post_notice_with_explicit_expire_at(db_conn: psycopg.Connection) -> Non
 
 
 def test_post_notice_clamps_expire_at_when_exceeding_limit(db_conn: psycopg.Connection) -> None:
-    """POST with explicit expire_at exceeding the configured limit is clamped."""
     aid = seed_agent(db_conn)
     now = datetime.now(UTC)
     target = now + timedelta(days=10)
@@ -591,7 +492,6 @@ def test_post_notice_clamps_expire_at_when_exceeding_limit(db_conn: psycopg.Conn
 
 
 def test_post_notice_past_expire_at_is_422(db_conn: psycopg.Connection) -> None:
-    """POST with expire_at in the past returns 422."""
     aid = seed_agent(db_conn)
     past = datetime.now(UTC) - timedelta(minutes=10)
     with gateway_test_client() as client:

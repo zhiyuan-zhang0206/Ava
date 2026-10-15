@@ -1,5 +1,3 @@
-"""Actual serialized pump cannot certify a force over a live pause writer."""
-
 import asyncio
 from typing import Any
 from uuid import uuid4
@@ -105,8 +103,6 @@ async def test_force_observation_waits_for_actual_projection_continuation(
                 local_machine=machine_identity.name(),
             )
         release.set()
-        # The original owner cannot ACK after force changed its authority, but
-        # the pump only records actual force observation after its writer drains.
         with pytest.raises(NativeWorkUncertainError):
             await asyncio.wait_for(running, 5)
         observed = db_conn.execute(

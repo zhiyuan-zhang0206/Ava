@@ -1,11 +1,3 @@
-"""Golden: `ServiceEndpoints.from_settings()` reproduces, row by row, the port and pidfile the
-ambient `health_port(name)` / `pid_path(name)` lookups returned (the functions it replaced).
-
-The reference below is those two lookups as they were: the override field first, else the fixed
-port table; the pidfile as `$AVA_HOME/run/<name>.pid`. A daemon whose row drifted would bind
-another port than its roster probe dials, or write a pidfile its identity probe never reads.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -18,8 +10,6 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.host.env.registry import health_port_env_aliases
 from base.paths import ava_home, run_dir
 
-# The fixed port table as of the cut-over, spelled out: renumbering a daemon is a decision, so
-# it fails here before it reaches a unit whose roster and `.env` still say the old port.
 _FIXED_PORTS: Mapping[str, int] = {
     "labeler": 8103,
     "memory_indexer": 8105,

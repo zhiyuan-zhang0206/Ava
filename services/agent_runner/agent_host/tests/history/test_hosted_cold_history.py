@@ -1,5 +1,3 @@
-"""A cold admission invokes from one unchanged history read and rewrites nothing."""
-
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -139,7 +137,6 @@ async def test_cold_admission_reads_the_history_once_and_never_repairs_it(
         assert checkpoints.graph.checkpointer is checkpoints.saver
         assert checkpoints.saver.serde is saver.serde
         assert checkpoints.saver.aput is saver.aput
-        # Recovery can nest inside this turn without dropping or duplicating its cache.
         with recovery_reconstruction_scope(saver, str(agent), parent=checkpoints.reconstruction):
             await checkpoints.graph.ainvoke({}, config=config)
         return TurnOutcome(exited=False, crashed=False)
@@ -147,9 +144,7 @@ async def test_cold_admission_reads_the_history_once_and_never_repairs_it(
     monkeypatch.setattr(host, "_drive_turns", drive)
     await host._run_turn(agent, resources=None)
     assert reads == 1
-    # Pairing repair is the before_llm hook's job; admission leaves the tail as stored.
     assert not any(isinstance(m, ToolMessage) for m in observed)
     assert host.stats.cache_misses == 1
-    # The retained entry belongs to admission, not the warm runtime or next reader.
     await graph.aget_state(config)
     assert reads == 2

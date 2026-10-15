@@ -1,5 +1,3 @@
-"""Cold restoration precedes readiness without admitting held IM work."""
-
 import datetime as dt
 from typing import cast
 
@@ -82,14 +80,11 @@ async def test_cold_restoration_precedes_hold_release_without_admission_or_dispa
         adapter = cast(FakePlainAdapter, restored.adapters["telegram"])
         assert adapter.sent == []
 
-        # The operator releases the same journal after readiness. A canonical
-        # selection delivers new output without a bridge restart or user command.
         pause_owner.change_maintenance("cold-start", when, held, held, resumed=True)
         assert not admission.quiesced()
         await restored.poll_timeline_outbound()
         assert restored._subscriptions[("telegram", "chat")] is subscription
         if legacy:
-            # Importing a legacy choice must not qualify unknown historical output.
             assert adapter.sent == []
             await restored._cmd_switch(state, "7", replay_id="qualify-legacy")
             await restored.outbound_worker.run_once()

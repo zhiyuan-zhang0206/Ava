@@ -1,5 +1,3 @@
-"""Bounded listener stop observes known work without promising coroutine termination."""
-
 import asyncio
 from typing import Any
 
@@ -310,8 +308,6 @@ async def test_completed_active_open_stays_owned_until_caller_claims_error(
             assert task is not None
 
             def receipt(completed: asyncio.Task[Any]) -> None:
-                # The listener's callback has run; asyncio.wait has not yet
-                # resumed its caller to claim this completed open result.
                 retained.append(completed in listener._operations)
 
             task.add_done_callback(receipt)

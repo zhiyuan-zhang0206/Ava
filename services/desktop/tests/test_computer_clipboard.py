@@ -1,5 +1,3 @@
-"""Clipboard tools through MCP dispatch and the helper's JSON client: contract and privacy."""
-
 from __future__ import annotations
 
 import json
@@ -14,7 +12,7 @@ from ..computer.input import CLIPBOARD_MAX_CHARS
 from .test_computer_input import Desktop
 from .test_computer_input import desktop as desktop
 
-MARKER = "do-not-leak-this-text"  # text that must never reach a log or an audit row
+MARKER = "do-not-leak-this-text"
 
 
 def _result(response: Any) -> dict[str, Any]:

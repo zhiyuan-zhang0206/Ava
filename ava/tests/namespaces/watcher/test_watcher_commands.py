@@ -1,5 +1,3 @@
-"""ava.watcher command parsing, validation, and timezone handling; split from ava/tests/namespaces/watcher/test_watcher.py (task #4922)."""
-
 from __future__ import annotations
 
 import datetime
@@ -52,8 +50,6 @@ _FAR = "2099-01-01T00:00:00Z"
 
 
 def test_at_announcement_uses_cluster_zone_when_authoritative() -> None:
-    """The plan passes the cluster timezone to the generated script when the
-    process holds an authoritative one (user ruling 2026-08-27)."""
     request = plans.plan_at(
         _FAR,
         "ping later",
@@ -67,9 +63,6 @@ def test_at_announcement_uses_cluster_zone_when_authoritative() -> None:
 
 
 def test_at_announcement_uses_host_clock_without_authoritative_zone() -> None:
-    """A settings-lite process (no authoritative cluster timezone) passes
-    None: the announcement renders in the watcher's own wall clock — the
-    documented lite degradation."""
     request = plans.plan_at(
         _FAR, "ping later", name="test-at-lite", notify=None, now=_NOW, announce_timezone=None
     )
@@ -78,9 +71,6 @@ def test_at_announcement_uses_host_clock_without_authoritative_zone() -> None:
 
 
 def test_cron_defaults_to_the_given_default_zone() -> None:
-    """With no explicit timezone the plan uses the default zone it is handed
-    (the cluster zone, else the host's own) — not the silent America/Los_Angeles
-    field default."""
     request = plans.plan_cron(
         "0 * * * *",
         "tick",
@@ -121,7 +111,6 @@ def test_cron_invalid_timezone_raises() -> None:
 
 
 def test_at_past_time_raises() -> None:
-    """at() with a past datetime raises ValueError."""
     past = datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC)
     with pytest.raises(ValueError, match="past"):
         plans.plan_at(
@@ -130,23 +119,17 @@ def test_at_past_time_raises() -> None:
 
 
 def test_cron_past_end_time_raises() -> None:
-    """cron() with an explicit past `end_time` raises ValueError, aligned
-    with at() (issue #2078: a past end otherwise supersedes the live twin
-    and registers a watcher that self-terminates immediately). The plan is
-    built before anything is spawned, so nothing registers for a past end."""
     past = datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC)
     with pytest.raises(ValueError, match="end_time is in the past"):
         _cron(end_time=past)
 
 
 def test_cron_future_end_time_ok() -> None:
-    """An explicit future `end_time` plans normally (no past rejection)."""
     end = _NOW + datetime.timedelta(days=2)
     request = _cron(end_time=end)
     assert request.cron_end_at == end
     assert "daily" in request.code
 
-    # timedelta going backwards should also fail
     with pytest.raises(ValueError):
         plans.plan_at(
             datetime.timedelta(days=-1),
@@ -159,7 +142,6 @@ def test_cron_future_end_time_ok() -> None:
 
 
 def test_at_future_time_ok() -> None:
-    """at() with a future time should not raise about the past."""
     far = plans.plan_at(
         "2099-01-01T00:00:00Z",
         "far future",

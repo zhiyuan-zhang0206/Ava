@@ -1,5 +1,3 @@
-"""A local host's proven exit permits takeover without weakening resource fences."""
-
 import asyncio
 import subprocess
 import sys
@@ -35,8 +33,6 @@ def exited_host() -> ResourceProcess:
         native = psutil.Process(process.pid)
         identity = ResourceProcess.capture(native)
     finally:
-        # kill(), not terminate(): a SIGTERM-ignoring session (Ava shell
-        # sessions inherit SIG_IGN) would leave the child alive and hang here.
         process.kill()
         process.wait(timeout=5)
     return identity
@@ -133,7 +129,6 @@ async def test_two_successors_of_dead_host_admit_only_one_owner(
     )
     admitted = [value for value in results if isinstance(value, RuntimeIncarnation)]
     assert len(admitted) == 1
-    # The loser is a recorded refusal now, not a raised crash.
     assert sum(value is None for value in results) == 1
     stored = db_conn.execute(
         "SELECT runtime_generation,runtime_owner,incarnation_resources FROM agents_meta WHERE id=%s",

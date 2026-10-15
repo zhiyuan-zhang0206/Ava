@@ -1,5 +1,3 @@
-"""Decision-table tests for the shared-checkout full-pytest guard."""
-
 from pathlib import Path
 
 import pytest
@@ -31,9 +29,6 @@ from tests.fixtures import provisioning
             True,
             id="file-looking-option",
         ),
-        # Space-separated value of a value-taking option must not count as a
-        # positional file arg (`pytest --ignore tests/x.py` collects the whole
-        # suite while ignoring one path).
         pytest.param(
             ("Ava",),
             ["--ignore", "tests/components/ava/test_x.py"],
@@ -50,7 +45,6 @@ from tests.fixtures import provisioning
             True,
             id="deselect-nodeid-value",
         ),
-        # ...but a real positional file alongside still counts as targeted.
         pytest.param(
             ("Ava",),
             ["--ignore", "tests/components/ava/test_x.py", "tests/components/ava/test_x.py"],
@@ -77,8 +71,6 @@ from tests.fixtures import provisioning
             id="worktree",
         ),
         pytest.param((".ava", "source"), ["tests"], {}, None, True, id="production-checkout"),
-        # Explicit relative file path given from inside tests/ — pytest resolves
-        # positional args against the invocation dir, not the rootdir.
         pytest.param(
             ("Ava",),
             ["components/ava/test_x.py"],
@@ -87,8 +79,6 @@ from tests.fixtures import provisioning
             False,
             id="in-tests-dir-explicit-path",
         ),
-        # The same arg from the checkout root names no existing file — blocked
-        # (pytest itself would also fail to find it there).
         pytest.param(
             ("Ava",),
             ["components/ava/test_x.py"],

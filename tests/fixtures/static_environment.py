@@ -1,9 +1,3 @@
-"""Process-level environment for explicitly owned pure unit contracts.
-
-The membership below owns both CI's static run and its native exclusions.
-It declares execution requirements; it grants no lint or isolation exemption.
-"""
-
 from __future__ import annotations
 
 from enum import StrEnum
@@ -83,7 +77,6 @@ def _refuse_native_data_plane(patch: pytest.MonkeyPatch) -> None:
     def refuse_container(*_args: object, **_kwargs: object) -> None:
         pytest.fail("Static tests cannot use Postgres or Redis; use the native test environment.")
 
-    # Keep the existing helper-entry refusal before even a private process starts.
     stub_everywhere(patch, containers, "postgres", refuse_container)
     stub_everywhere(patch, containers, "redis_server", refuse_container)
 

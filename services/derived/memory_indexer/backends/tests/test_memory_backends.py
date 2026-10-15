@@ -1,5 +1,3 @@
-"""Backend abstraction unit tests — factory dispatch, the fail-fast switch, row vocabulary."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -22,19 +20,13 @@ def _vec(seed: int) -> np.ndarray:
     return rng.standard_normal(_DIM).astype(np.float32)
 
 
-# ── factory ──────────────────────────────────────────────────────────────
-
-
 def test_factory_and_probe_registries_stay_in_sync() -> None:
-    """Every backend has both a constructor and a preflight probe — the
-    daemon's fail-fast preflight must not silently skip a backend."""
     from services.derived.memory_indexer.backends import probe
 
     assert set(factory.BACKENDS) == set(probe.PROBES)
 
 
 def test_factory_default_is_numpy(*, database_gate: ProcessDbGate) -> None:
-    """The unset switch yields the numpy backend (default since 2026-09-02)."""
     from services.derived.memory_indexer.backends.numpy import NumPyBackend
 
     assert settings.services.memory_search_backend == "numpy"
@@ -53,7 +45,6 @@ def test_factory_default_is_numpy(*, database_gate: ProcessDbGate) -> None:
 def test_factory_numpy_dispatch(
     monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
-    """AVA_MEMORY_SEARCH_BACKEND=numpy yields the NumPyBackend."""
     from services.derived.memory_indexer.backends.numpy import NumPyBackend
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
@@ -72,7 +63,6 @@ def test_factory_numpy_dispatch(
 def test_factory_pgvector_dispatch(
     monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
-    """AVA_MEMORY_SEARCH_BACKEND=pgvector yields the PGVectorBackend."""
     from services.derived.memory_indexer.backends.pgvector import PGVectorBackend
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
@@ -91,9 +81,6 @@ def test_factory_pgvector_dispatch(
 def test_factory_unknown_backend_fails_fast(
     monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
 ) -> None:
-    """An unrecognized AVA_MEMORY_SEARCH_BACKEND must not silently fall
-    back to numpy — a typo would keep the old storage while the operator
-    believes the switch happened."""
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "qdrant")
     with pytest.raises(ValueError, match="unknown memory search backend"):
@@ -104,9 +91,6 @@ def test_factory_unknown_backend_fails_fast(
             uri_reader=lambda: settings.services.memory_search_uri,
             name=settings.services.memory_search_backend,
         )
-
-
-# ── row vocabulary ───────────────────────────────────────────────────────
 
 
 def test_pk_of_roundtrips_path_kind_chunk() -> None:
@@ -127,7 +111,6 @@ def test_empty_upsert_many_is_noop_before_connect(*, database_gate: ProcessDbGat
 
 
 def test_readonly_backends_refuse_mutations(*, database_gate: ProcessDbGate) -> None:
-    """Factory-provided read-only backends reject writes before connect."""
     for name in (PGVectorBackend.name, NumPyBackend.name):
         backend = factory.get_backend_named(
             name,

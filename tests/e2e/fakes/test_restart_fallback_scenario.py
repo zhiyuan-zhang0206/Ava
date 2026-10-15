@@ -1,10 +1,3 @@
-"""Scenario selection must not repeat restart after a consumed request.
-
-This fixes the fake discriminator, not the production completion protocol.
-The durable restarter remains the only process-replacement owner; the fake
-scenario only distinguishes a consumed request from a successful completion.
-"""
-
 from __future__ import annotations
 
 import psycopg
@@ -66,8 +59,6 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'",
         (agent_id,),
     ).fetchone() == (0,)
-    # Selection cannot manufacture completion: the row stays idling until
-    # the durable restarter admits the successor and writes its completion row.
     successor = lifecycle_restart.build("diagnostic", agent_id=agent_id)
     assert successor.cursor == 0
     assert successor.script == lifecycle_restart.IDLE_SCRIPT

@@ -35,3 +35,12 @@ receipt replays the original acceptance. The existing domain receipt table is
 reused without FK or TTL retention. There is no client journal.
 See `gateway/agents/docs/notice-receipts.ava.okf.md` for the transaction and
 event rules.
+
+## Notice ID regression setup
+
+`gateway/tests/events/test_notices_resolve_history_live.py` derives its local-ID
+skew from the current table's `MAX(id)` to distinguish local and global IDs.
+That value is not the sequence high-water mark: fixture truncation can remove
+rows without resetting the sequence. The setup assertion `open_local != open_id`
+is therefore essential; the offset alone does not guarantee distinct IDs across
+all prior allocation histories. Consumer assertions require that premise.

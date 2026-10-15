@@ -1,7 +1,3 @@
-"""Unit tests for the self-evolution record builder
-(ava_builtins/skills/platform/ava-self-evolution/scripts/record.py).
-"""
-
 from __future__ import annotations
 
 from typing import Any, cast
@@ -30,7 +26,6 @@ def record() -> Any:
         ("exec_subprocess_aborted", False, True),
         ("exec_subprocess_killed", False, True),
         ("exec_result_envelope_invalid", False, True),
-        # informational events are outcomes neither ok nor fail
         ("exec_envelope", False, False),
         ("exec_start", False, False),
         ("exec_output", False, False),
@@ -46,10 +41,6 @@ def test_exec_outcome_classification(record: Any, event: str, is_ok: bool, is_fa
 def test_count_tool_calls_ignores_syntax_warnings(
     record: Any, recwarn: pytest.WarningsRecorder
 ) -> None:
-    """Agent-written code with an invalid escape sequence (a non-raw-string
-    regex) parses fine and must not leak a SyntaxWarning into the scan's
-    stderr — where it rode along in the schedule ALERT message as
-    `<unknown>:N` lines (2026-08-27 00:00 run)."""
     codes = [
         "import ava\nava.files.write('x', 'y')",
         "re.compile('a\\|b')",

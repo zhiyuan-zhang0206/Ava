@@ -1,5 +1,3 @@
-"""Operator CLI contract for host-wide PTY allocation freeze."""
-
 from __future__ import annotations
 
 import threading
@@ -24,13 +22,11 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_operator_round_trip_needs_no_gateway_or_data_plane(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The recovery command stays local even when every network client fails."""
 
     owner = threading.current_thread()
 
     def _offline(*_args: object, **_kwargs: object) -> object:
         if threading.current_thread() is not owner:
-            # a bystander thread sharing the xdist worker gets an inert stand-in
             return MagicMock()
         raise AssertionError("PTY allocation commands must not use the gateway or data plane")
 

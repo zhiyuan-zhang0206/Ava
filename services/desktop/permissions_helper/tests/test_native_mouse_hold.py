@@ -1,9 +1,3 @@
-"""Execute the native press-and-hold bodies against inert CGEvent and clock substitutes.
-
-A button Ava holds across calls must never stay stuck, so these exercise every way it ends: the
-model's mouse_up, a stop gesture, the idle bound and the daemon's release.
-"""
-
 from __future__ import annotations
 
 import shutil
@@ -48,7 +42,6 @@ _STUBBED = [
     "clipboardWrite",
 ]
 
-# Shared by every case: leave no hold behind, whatever the previous case did.
 _PRELUDE = r"""
 func clean() {
     _ = try? mouseReleaseAll([:])

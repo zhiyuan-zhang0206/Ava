@@ -1,5 +1,3 @@
-"""The gated child's independent deadline has a real stop/result owner."""
-
 from __future__ import annotations
 
 import threading
@@ -18,7 +16,6 @@ def test_normal_stop_joins_the_actual_watchdog() -> None:
     watchdog.close()
     assert watchdog._finished.is_set()
     assert not watchdog._thread.is_alive()
-    # Stopping is terminal: a later close cannot start another deadline decision.
     watchdog.close()
 
 

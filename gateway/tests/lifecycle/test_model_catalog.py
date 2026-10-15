@@ -1,5 +1,3 @@
-"""The picker receives distinct services, prices and sourced TPS references."""
-
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.schemas.models import ModelsResponse
@@ -39,7 +37,6 @@ def test_picker_exposes_declared_fast_relationships(
     catalog = get_models(local_machine=machine_identity)
     assert catalog.models["gpt-5.6-sol-fast"].fast_of == "gpt-5.6-sol"
     assert catalog.models["gpt-5.6-sol"].fast_of is None
-    # Xiaomi's native SKU does not use a speed switch or a served-speed receipt.
     assert catalog.models["mimo-v2.6-pro-ultraspeed"].fast_of is None
 
 

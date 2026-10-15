@@ -1,13 +1,3 @@
-"""The archive settings Postgres is launched with, and proof that Postgres can run them.
-
-The unit tests pin the argument list. The integration tests launch a real
-Postgres with exactly `archive_pg_args()` on its command line and a stand-in
-`wal-g`, and check what only a real Postgres can: the quoting survives a home
-path with a space and a `%p`, `%p` expands relative to the data directory, a
-closed segment arrives in the store, and no secret reaches a place Postgres or
-`ps` could show it.
-"""
-
 from __future__ import annotations
 
 import shlex
@@ -84,9 +74,6 @@ def test_no_argument_carries_a_secret(tmp_path: Path, monkeypatch: pytest.Monkey
     assert not any(secret in joined for secret in SECRETS)
 
 
-# ── a real Postgres ──────────────────────────────────────────────────────────
-
-
 @pytest.fixture
 def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     return make_sandbox(tmp_path, monkeypatch)
@@ -145,5 +132,5 @@ def test_a_failing_archive_command_is_visible_and_never_blocks_writes(
             return row == (True,)
 
         wait_for(failing, what="the archiver to report a failure")
-        conn.execute("INSERT INTO walg_probe VALUES (-1)")  # writes keep working
+        conn.execute("INSERT INTO walg_probe VALUES (-1)")
         assert sandbox.stored() == []

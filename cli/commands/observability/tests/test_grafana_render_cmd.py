@@ -1,10 +1,3 @@
-"""`ava lgtm render` — the rendered dashboard command (task #3697 S1).
-
-The command is the operator surface of the renderer: diff the render against
-this host's provisioning copy (exit 1 when it differs), write it with
-``--force``, and refuse cleanly on a host without the native LGTM tree.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -33,7 +26,6 @@ def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_render_cmd_previews_writes_and_refreshes(
     target: Path, capsys: pytest.CaptureFixture[str], operator_database: Callable[[], Any]
 ) -> None:
-    # Absent target: the diff preview reports what it would create, exit 1.
     assert (
         grafana_render.cmd_grafana_render(
             force=False, repo_only=True, database_factory=operator_database
@@ -42,7 +34,6 @@ def test_render_cmd_previews_writes_and_refreshes(
     )
     assert not target.is_file()
 
-    # --force writes the render.
     assert (
         grafana_render.cmd_grafana_render(
             force=True, repo_only=True, database_factory=operator_database
@@ -52,7 +43,6 @@ def test_render_cmd_previews_writes_and_refreshes(
     written = target.read_text(encoding="utf-8")
     assert '"uid": "ava-ops-main"' in written
 
-    # A second pass finds the provisioning copy in sync.
     assert (
         grafana_render.cmd_grafana_render(
             force=False, repo_only=True, database_factory=operator_database
@@ -60,7 +50,6 @@ def test_render_cmd_previews_writes_and_refreshes(
         == 0
     )
 
-    # A drifted file is reported (exit 1) and left untouched in diff mode.
     drifted = written.replace("LLM calls (window)", "LLM calls (window) EDITED")
     assert drifted != written
     target.write_text(drifted, encoding="utf-8")
@@ -74,7 +63,6 @@ def test_render_cmd_previews_writes_and_refreshes(
     assert "render differs" in err
     assert target.read_text(encoding="utf-8") == drifted
 
-    # --force refreshes it back to the render.
     assert (
         grafana_render.cmd_grafana_render(
             force=True, repo_only=True, database_factory=operator_database

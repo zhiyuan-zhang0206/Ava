@@ -1,5 +1,3 @@
-"""Machines cases: mark stopping preserves description."""
-
 from __future__ import annotations
 
 import psycopg
@@ -26,7 +24,6 @@ from base.db.code_version_gate import ProcessDbGate
 def test_mark_stopping_preserves_description(
     machine_setup: MachineSetup, *, database_gate: ProcessDbGate
 ) -> None:
-    """stop-triggered recompute does not touch description (host-level, only register writes it)."""
 
     machine_setup(name="keepdesc", role="agent-runner", home="~/.ava")
     machine_setup.machine.set(description="keep me")
@@ -38,12 +35,6 @@ def test_mark_stopping_preserves_description(
 def test_register_self_stamps_up_since_on_unit_and_composed_row(
     machine_setup: MachineSetup, *, database_gate: ProcessDbGate
 ) -> None:
-    """register_self stamps the announce time on the unit row, and the recompute
-    carries it onto the composed machines row.
-
-    The column is the "up since" the CLI and the status page render — it exists to
-    be shown, so what it must survive is exactly this write-then-compose path.
-    """
     machine_setup(name="stamp-host", role="agent-runner", home="~/.ava")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://stamp-host:9100"
@@ -58,12 +49,6 @@ def test_register_self_stamps_up_since_on_unit_and_composed_row(
 def test_composed_up_since_is_the_max_over_live_units(
     machine_setup: MachineSetup, *, database_gate: ProcessDbGate
 ) -> None:
-    """The composed row takes the LATEST announce across a machine's live units.
-
-    Two co-located units announce at different times; the machine has been up
-    since the later one, because that is the one whose announcement is still the
-    most recent claim about this host.
-    """
     machine_setup(name="max-host", role="gateway", home="~/.ava_gateway")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://max-host:8000"
@@ -82,19 +67,10 @@ def test_composed_up_since_is_the_max_over_live_units(
 def test_recompute_tolerates_a_unit_with_null_up_since(
     machine_setup: MachineSetup, *, database_gate: ProcessDbGate
 ) -> None:
-    """A unit row whose `up_since_at` is NULL still composes.
-
-    `up_since_at` is nullable on machine_units (a unit registered before #981
-    has no stamp — the expand migration backfilled it from `last_seen_at`, and
-    the contract migration dropped that column). The composition takes a max
-    across units, so an unhandled NULL there would not degrade the display — it
-    would raise and take the whole register_self down.
-    """
     machine_setup(name="skew-host", role="gateway", home="~/.ava_gateway")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://skew-host:8000"
     )
-    # Rewrite that unit the way a pre-#981 writer would have left it.
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machine_units SET up_since_at = NULL WHERE machine_name = %s AND home = %s",
@@ -109,7 +85,6 @@ def test_recompute_tolerates_a_unit_with_null_up_since(
 
     (runner_unit,) = read_unit_up_since("skew-host", "~/.ava")
     (composed,) = read_up_since("skew-host")
-    # The fresh unit's stamp wins the max (the old unit contributes NULL).
     assert composed == runner_unit
     _gateway_url, role, _desc, _stopped = read_machine("skew-host")
     assert role == ["agent-runner", "gateway"]

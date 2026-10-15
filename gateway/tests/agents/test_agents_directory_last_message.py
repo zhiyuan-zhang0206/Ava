@@ -1,5 +1,3 @@
-"""Agent directory listing and last-message reads: page cards, lineage and detail-field contract, caller filtering; split from gateway/tests/test_agents_endpoints.py (task #4922)."""
-
 from __future__ import annotations
 
 import json
@@ -10,7 +8,6 @@ import pytest
 from gateway.app import openapi_schema
 from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
-# Every field of an `/api/agents` directory card; detail-only fields stay off it.
 _DIRECTORY_CARD_KEYS = frozenset(
     {
         "agent_id",
@@ -62,7 +59,6 @@ class TestList:
         assert by_id[a_id]["spawner"] == "user"
         assert by_id[b_id]["status"] == "idling"
         assert by_id[b_id]["spawner"] == f"agent:{a_id}"
-        # spawn without prompt → label stays NULL (BackgroundTask LLM generation not triggered)
         assert by_id[a_id]["label"] is None
         assert by_id[b_id]["label"] is None
 
@@ -70,7 +66,6 @@ class TestList:
         self,
         db_conn: psycopg.Connection,
     ) -> None:
-        """History is explicit; the default contains all nonterminated states."""
         with gateway_test_client() as client:
             live_id = spawn_via_http(client, {}).json()["id"]
             terminated_id = spawn_via_http(client, {}).json()["id"]
@@ -88,7 +83,6 @@ class TestList:
                 "agents"
             ]
         assert {row["agent_id"] for row in all_rows} == {live_id, terminated_id}
-        # Each request assesses availability at its own time.
         for row in default_rows + live_rows:
             row["availability"].pop("observed_at")
         assert default_rows == live_rows
@@ -101,7 +95,6 @@ class TestList:
         assert response.status_code == 422
 
     def test_directory_cards_omit_detail_only_fields(self, db_conn: psycopg.Connection) -> None:
-        """List consumers receive only the fields they actually render or parse."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             response = client.get("/api/agents")
@@ -163,7 +156,6 @@ class TestList:
         }
 
     def test_get_agents_joins_thread_label(self, db_conn: psycopg.Connection) -> None:
-        """label field fetched from agents JOIN — after PATCH write, GET should see it."""
         with gateway_test_client() as client:
             a_id = spawn_via_http(client, {}).json()["id"]
             client.patch(f"/api/agents/{a_id}", json={"label": "\u6211\u7684 agent"})
@@ -181,11 +173,8 @@ class TestList:
         assert resp.json()["label"] == "single-x"
 
     def test_get_agents_returns_machine_column(self, db_conn: psycopg.Connection) -> None:
-        """AgentRow.machine comes from agents_meta.machine — frontend sidebar uses it to display
-        machine badge + fork picker default placement."""
         with gateway_test_client() as client:
             a_id = spawn_via_http(client, {}).json()["id"]
-            # manually change machine to simulate cross-machine deployment (default spawn_agent writes local machine_name())
             with db_conn.cursor() as cur:
                 cur.execute("UPDATE agents_meta SET machine = 'test-host' WHERE id = %s", (a_id,))
             db_conn.commit()
@@ -209,12 +198,8 @@ class TestList:
 
 class TestGetLastMessage:
     def test_any_agent_can_query_unrelated_agent(self, db_conn: psycopg.Connection) -> None:
-        """Any agent in the cluster can query — not just spawn-chain ancestors."""
         from base.db import create_agent
 
-        # Create two unrelated agents (no spawn chain).
-        # create_agent inserts into agents (LangGraph thread); agents_meta
-        # carries the row the endpoint reads.
         agent_a = create_agent(db_conn)
         agent_b = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -230,7 +215,6 @@ class TestGetLastMessage:
         db_conn.commit()
 
         with gateway_test_client() as client:
-            # Agent B queries Agent A's last message — should succeed
             resp = client.get(
                 f"/api/agents/{agent_a}/last-message",
                 params={"caller": f"agent:{agent_b}"},
@@ -242,7 +226,6 @@ class TestGetLastMessage:
     def test_eval_isolated_caller_is_denied(
         self, db_conn: psycopg.Connection, isolation_column: str
     ) -> None:
-        """The gateway denies the result read even if an eval agent bypasses its SDK."""
         from base.db import create_agent
 
         target_id = create_agent(db_conn)
@@ -277,7 +260,6 @@ class TestGetLastMessage:
         assert "eval-isolated" in resp.json()["detail"]
 
     def test_none_for_agent_without_ai_message(self, db_conn: psycopg.Connection) -> None:
-        """Returns text=None when the agent has no AI message yet."""
         from base.db import create_agent
 
         agent_id = create_agent(db_conn)
@@ -297,7 +279,6 @@ class TestGetLastMessage:
         assert resp.json()["text"] is None
 
     def test_returns_last_message_text_from_column(self, db_conn: psycopg.Connection) -> None:
-        """When last_message_text is set, return it — no checkpoint needed."""
         from base.db import create_agent
 
         agent_id = create_agent(db_conn)
@@ -320,7 +301,6 @@ class TestGetLastMessage:
     def test_last_message_text_survives_without_checkpoint(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """After compact wipes the checkpoint, last_message_text still returns the last AI text."""
         from base.db import create_agent
 
         agent_id = create_agent(db_conn)
@@ -332,8 +312,6 @@ class TestGetLastMessage:
             )
         db_conn.commit()
 
-        # No checkpoint written — simulating post-compact state where
-        # checkpoint only has [SystemMessage, summary] (no AIMessage).
         with gateway_test_client() as client:
             resp = client.get(
                 f"/api/agents/{agent_id}/last-message",
@@ -343,7 +321,6 @@ class TestGetLastMessage:
         assert resp.json()["text"] == "pre-compact message"
 
     def test_empty_text_reads_as_none(self, db_conn: psycopg.Connection) -> None:
-        """An empty-string column value reads as None — no empty message."""
         from base.db import create_agent
 
         agent_id = create_agent(db_conn)

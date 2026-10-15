@@ -1,5 +1,3 @@
-"""Lease renewal reminders and ordered termination interruption notices."""
-
 import sys
 from contextlib import contextmanager
 from dataclasses import replace
@@ -50,8 +48,6 @@ def test_reminder_commands_are_bare_ava(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The renewal reminder names no interpreter or home: a bare `ava` resolves
-    through the executor's inherited AVA_HOME."""
     local_machine = machine_identity.name()
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -99,7 +95,6 @@ def test_reminder_commands_are_bare_ava(
     ).fetchone()
     assert reminder is not None
     content: str = reminder[0]
-    # The renew suggestion repeats the lease's own window, not a fixed hour.
     assert f"\nava impersonate renew 0 --agent {agent_id} --ttl 300\n" in content
     assert f"\nava impersonate release 0 --agent {agent_id} --summary ..." in content
     assert "-m cli" not in content
@@ -266,7 +261,6 @@ async def _terminate_native(
     assert all(row[3] == "pending" for row in notices)
     assert "was interrupted because this agent was terminated" in notices[0][1]
     assert notices[1][1] == "You were terminated."
-    # Notice-only arrivals cannot auto-resurrect a terminated owner.
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (owner.agent_id,)
     ).fetchone() == ("terminated",)
@@ -526,7 +520,6 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
             "claude",
         ]
     )
-    # cmd_relay owns asyncio.run, as a real separately launched relay would.
     import asyncio
 
     result = await asyncio.to_thread(

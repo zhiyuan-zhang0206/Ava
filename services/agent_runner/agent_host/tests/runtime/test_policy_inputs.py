@@ -1,5 +1,3 @@
-"""Two hosts keep their policy inputs separate and preserve live read boundaries."""
-
 import asyncio
 from dataclasses import replace
 
@@ -57,7 +55,7 @@ async def test_hosts_read_their_live_model_defaults_and_preserve_explicit_pins(
     assert first_graph.observations[-1].model == "alpha"
     assert second_graph.observations[-1].model == "beta"
     defaults["first"] = "gamma"
-    first.drop_agent(1)  # Existing cache invalidation remains the model rebuild boundary.
+    first.drop_agent(1)
     await asyncio.gather(first.run_turn(1), second.run_turn(1))
     assert first_graph.observations[-1].model == "gamma"
     assert first_graph.observations[-1].llm.name == "gamma"

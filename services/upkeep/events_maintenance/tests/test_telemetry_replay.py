@@ -1,5 +1,3 @@
-"""Replaying the local JSONL mirror into telemetry_events."""
-
 from __future__ import annotations
 
 import json
@@ -56,8 +54,8 @@ def test_a_pass_stores_telemetry_and_log_rows_and_resumes_after_a_partial_line(
     mirror.write_bytes(
         _line("llm_usage", "telemetry", marker)
         + _line("log", "log", marker, level="error")
-        + _line("log", "log", marker + "-quiet")  # an info log is not stored
-        + _line("exec_envelope", "telemetry", marker)  # no reader by name: not stored
+        + _line("log", "log", marker + "-quiet")
+        + _line("exec_envelope", "telemetry", marker)
         + _line("spawn", "audit", marker)
         + tail[:20]
     )

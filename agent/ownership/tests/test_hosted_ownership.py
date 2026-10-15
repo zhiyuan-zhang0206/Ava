@@ -1,5 +1,3 @@
-"""Hosted owner authority outlives turns but not explicit release/replacement."""
-
 import asyncio
 import subprocess
 import sys
@@ -108,11 +106,6 @@ async def test_legacy_null_resource_row_waits_for_lease_expiry(
     aops_pool: AsyncConnectionPool,
     database: Database,
 ) -> None:
-    """A row without stored host-process evidence is never taken over early.
-
-    Even when the predecessor's lease has been silent for minutes and no host
-    process of this home is alive, only the lease running out frees the row.
-    """
     agent_id = _agent(db_conn)
     old = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", uuid4(), expected_from="idling", db=database
@@ -121,7 +114,6 @@ async def test_legacy_null_resource_row_waits_for_lease_expiry(
     assert db_conn.execute(
         "SELECT incarnation_resources IS NULL FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone() == (True,)
-    # Five minutes of renewal silence out of the ten-minute lease.
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at = now() + interval '5 minutes' WHERE id = %s",
         (agent_id,),
@@ -156,7 +148,6 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """A normal agent-host restart transfers only an empty set whose host died."""
     agent_id = _agent(db_conn)
     old = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     old_host = subprocess.Popen(
@@ -193,8 +184,6 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
             )
             is None
         )
-        # SIGKILL: SIGTERM=SIG_IGN is inherited from a shell session, so a
-        # graceful terminate would never reap this look-alike host.
         old_host.kill()
         old_host.wait(timeout=5)
 
@@ -232,8 +221,6 @@ async def test_admission_does_not_lock_deployment_state(
     aops_pool: AsyncConnectionPool,
     database: Database,
 ) -> None:
-    """A concurrently held row lock on the deployment singleton does not stall a
-    hosted birth: admission reads and locks nothing but the agent's own row."""
     agent_id, owner = _agent(db_conn), uuid4()
     try:
         db_conn.execute("SELECT id FROM deployment_state WHERE id = 1 FOR UPDATE")
@@ -273,9 +260,6 @@ async def test_owner_beat_renews_idle_but_not_other_owner(
     ).fetchone() == (True,)
 
 
-# ── corpse marker: stamp / settle / reap / renew ─────────────────────────────
-
-
 def _marker(db_conn: psycopg.Connection, agent_id: int) -> object:
     row = db_conn.execute(
         "SELECT last_turn_fatal_at FROM agents_meta WHERE id = %s", (agent_id,)
@@ -312,27 +296,18 @@ async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
     )
     assert incarnation is not None
 
-    # First crash stamps.
     assert (await stamp_turn_fatal(aops_pool, incarnation)).applied
     first = _marker(db_conn, agent_id)
     assert first is not None
 
-    # A later crash must NOT refresh the stamp (heartbeat crash-loops would
-    # restart the reap grace forever). Capture the old value first: a
-    # COALESCE -> now() regression would silently pass a `!= first` check
-    # (both stamps read ~now), so the assertion must demand equality with the
-    # pre-existing stamp.
     _set_marker(db_conn, agent_id, minutes_ago=100)
     old_stamp = _marker(db_conn, agent_id)
     assert (await stamp_turn_fatal(aops_pool, incarnation)).applied
     assert _marker(db_conn, agent_id) == old_stamp
 
-    # A settled (non-running) row is not stamped — the mark names the live
-    # incarnation only.
     assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
     assert not (await stamp_turn_fatal(aops_pool, incarnation)).applied
 
-    # A foreign incarnation's stamp is a no-op.
     foreign = RuntimeIncarnation(agent_id, uuid4(), owner)
     assert not (await stamp_turn_fatal(aops_pool, foreign)).applied
 
@@ -343,10 +318,6 @@ async def test_settle_never_touches_the_corpse_marker(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """Settlement only writes the idling flip. The marker lifecycle belongs
-    elsewhere (stamp at crash, clear on a completed LLM turn / resurrect), so
-    a no-work park settle can never relabel a crash-dead row healthy and
-    resume its lease renewal forever (the 5858 escape)."""
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
@@ -357,7 +328,6 @@ async def test_settle_never_touches_the_corpse_marker(
     assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
     assert _marker(db_conn, agent_id) is not None
 
-    # A markerless row stays markerless — settle invents nothing.
     assert await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
@@ -411,16 +381,13 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     healthy = await _row(minutes_ago=None)
     running_corpse = await _row(minutes_ago=16, status="running")
     foreign_corpse = await _row(minutes_ago=16, row_owner=None)
-    # A corpse left by a predecessor host (fresh owner UUID after a restart)
-    # is ownerless with an expired lease: the lease-qualified scope must
-    # reap it too, or it hangs offline forever.
     abandoned_corpse = await _row(minutes_ago=16, row_owner=None)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (abandoned_corpse,)
     )
     db_conn.commit()
 
-    published.clear()  # settle publishes on every flip; keep only reap's
+    published.clear()
     reaped = await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus)
     assert sorted(corpse.agent_id for corpse in reaped) == sorted([past_grace, abandoned_corpse])
 
@@ -449,7 +416,6 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
         ]
     )
     assert sorted(published) == sorted([past_grace, abandoned_corpse])
-    # A second pass finds nothing new (the corpses are terminated).
     assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
 
 
@@ -459,21 +425,16 @@ async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """The 5858 flow end-to-end at the ownership layer: crash stamps while
-    running, the idling settle keeps the stamp, renew stops renewing the
-    corpse, and the reaper terminates it once the grace window elapses."""
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert incarnation is not None
 
-    # Crash while running: stamp first (CAS on running), then settle.
     assert await stamp_turn_fatal(aops_pool, incarnation)
     assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus, resources=None)
     assert _marker(db_conn, agent_id) is not None
 
-    # The beat renews healthy rows only — the corpse's lease stays expired.
     db_conn.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (agent_id,))
     db_conn.commit()
     await renew_hosted_owner(aops_pool, "host-test", owner)
@@ -481,10 +442,8 @@ async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
         "SELECT lease_expires_at FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone() == (None,)
 
-    # Within the grace window the row is dead-but-waiting, not terminated.
     assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
 
-    # Past the grace window the reaper terminates it with the reaper stamp.
     _set_marker(db_conn, agent_id, minutes_ago=16)
     reaped = await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus)
     assert [corpse.agent_id for corpse in reaped] == [agent_id]

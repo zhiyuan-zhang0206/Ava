@@ -1,5 +1,3 @@
-"""One invocation owns lazy identity caches and function-local configuration."""
-
 import pytest
 
 from base.cluster.machine import MachineIdentity
@@ -45,5 +43,4 @@ def test_narrow_machine_fixture_borrows_the_invocation_owner(
 def test_the_runtime_runs_with_the_helper_its_hosts_platform_has() -> None:
     runtime = CommandRuntime.create()
     assert runtime.helper is helper_for(runtime.host.platform)
-    # None answers only "this platform has no helper": macOS never gets it.
     assert (runtime.helper is None) == (runtime.host.platform.system == "linux")

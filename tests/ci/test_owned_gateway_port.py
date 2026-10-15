@@ -1,5 +1,3 @@
-"""Actual inherited-socket transport; full gateway lifespan remains in E2E CI."""
-
 import errno
 import json
 import os
@@ -30,7 +28,7 @@ def test_owned_port_survives_delay_and_real_uvicorn_restart(tmp_path: Path) -> N
         with socket.socket() as competitor, pytest.raises(OSError) as collision:
             competitor.bind(("127.0.0.1", GATEWAY_PORT))
         assert collision.value.errno == errno.EADDRINUSE
-        time.sleep(0.1)  # Simulate the build/start gap while the actual owner retains the FD.
+        time.sleep(0.1)
         command = [
             sys.executable,
             "-m",
@@ -84,7 +82,6 @@ def test_released_allocation_is_not_ownership() -> None:
     with socket.socket() as allocation:
         allocation.bind(("127.0.0.1", 0))
         port = allocation.getsockname()[1]
-    # Deterministic old-protocol counterexample: a different owner can bind it.
     with socket.socket() as competing_owner:
         competing_owner.bind(("127.0.0.1", port))
         with socket.socket() as old_gateway, pytest.raises(OSError) as collision:

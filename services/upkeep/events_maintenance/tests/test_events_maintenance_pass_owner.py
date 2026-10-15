@@ -1,5 +1,3 @@
-"""The service owns timed-out pass proxies without joining blocked worker threads."""
-
 from __future__ import annotations
 
 import asyncio
@@ -37,7 +35,6 @@ async def test_completed_failure_preserves_the_original_exception(failure: Excep
         assert not progress.snapshot()["wedged"]
 
 
-# Passes never touch this pool; the service test supplies its own close recorder.
 _FAKE_POOL: Any = object()
 
 
@@ -93,7 +90,6 @@ def _mock_service(
     async def stop_health(_server: object) -> None:
         closed.append("health")
 
-    # Shared by group-injected resolution and the registry gauge's plain call.
     async def sibling(*_args: object, tasks: asyncio.TaskGroup | None = None) -> None:
         await asyncio.Event().wait()
 

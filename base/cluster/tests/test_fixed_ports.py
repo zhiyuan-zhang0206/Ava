@@ -1,14 +1,3 @@
-"""The fixed port table: its shape, what a new home records, and the test session's
-isolation from it.
-
-A host runs one cluster, so every new home records the same table
-(`base.host.env.port_table`) and a unit whose `.env` names no port binds it too.
-Those are the numbers the operator's cluster on a development box is already bound
-to, so nothing a test binds or dials may be one of them: the tests below keep the
-table apart from every source of test ports, and fail when a setting of the test
-session still holds a table port.
-"""
-
 from __future__ import annotations
 
 import re
@@ -23,8 +12,6 @@ from base.config import FIELD_INFOS, get_field
 from base.host.env import registry
 from base.host.env.port_table import FIXED_PORTS
 
-# The private range the suite draws its own listening ports from when the kernel's
-# ephemeral range is not wanted (cli/commands/data_plane/tests/test_pooler_stop.py).
 _PRIVATE_TEST_PORTS_START = 21000
 
 
@@ -41,9 +28,6 @@ def test_fixed_ports_carry_the_production_values() -> None:
     ("slot", "port"), [("gateway_watchdog", 8119), ("agent_runner_watchdog", 8120)]
 )
 def test_the_watchdog_slots_no_daemon_binds_are_not_in_the_table(slot: str, port: int) -> None:
-    """The per-capability watchdog daemons are gone, and with them the only thing
-    that could bind these two health ports: the table, the recorded ports type, the
-    health-port derive surface and the `Settings` override all stop naming them."""
     assert slot not in FIXED_PORTS
     assert port not in FIXED_PORTS.values()
     assert slot not in get_type_hints(cluster.ClusterPorts)
@@ -52,16 +36,6 @@ def test_the_watchdog_slots_no_daemon_binds_are_not_in_the_table(slot: str, port
 
 
 def test_fixed_ports_are_unique() -> None:
-    """No two services may share a port.
-
-    These are the ports a unit whose `.env` predates a key ACTUALLY BINDS
-    (`host.env.health_ports.DEFAULT_PORTS` is derived from this table), so a duplicate
-    is not a cosmetic clash — the two daemons fight over one socket on every
-    existing unit. The table is deliberately not in any order, so "next number
-    after the last line" is not a safe way to add one: agent_host was written as 8113, which
-    `ops` already held, and nothing caught it until a boot log printed the same
-    port twice.
-    """
     holders: dict[int, list[str]] = {}
     for svc, port in FIXED_PORTS.items():
         holders.setdefault(port, []).append(svc)
@@ -70,9 +44,6 @@ def test_fixed_ports_are_unique() -> None:
 
 
 def test_fixed_ports_sit_below_every_source_of_test_ports() -> None:
-    """The kernel's ephemeral range starts at 32768 (Linux) or 49152 (macOS) and the
-    suite's private range at 21000, so a table that stays below 21000 can never be
-    handed to a test by either: no test port can equal a port a live cluster binds."""
     assert max(FIXED_PORTS.values()) < _PRIVATE_TEST_PORTS_START
 
 
@@ -88,8 +59,6 @@ def test_a_new_home_records_the_table_as_its_own_copy() -> None:
 
 
 def test_settings_defaults_match_the_table() -> None:
-    """A unit whose `.env` names no port reads the `Settings` default, and a new
-    home's `.env` is written from the table: the two copies of each number agree."""
     port_fields = {
         "gateway_port": "gateway",
         "browser_cdp_port": "browser",
@@ -110,11 +79,6 @@ def test_settings_defaults_match_the_table() -> None:
 
 
 def test_the_session_holds_no_table_port_in_any_setting(process_config: object) -> None:
-    """The env block of `tests/fixtures/env_bootstrap.py` pins every setting that
-    defaults to a table port to a kernel-assigned one. A setting added later with a
-    table default, and not pinned there, fails here on any machine — with no
-    cluster running on it — instead of dialing the operator's cluster on the
-    machines that have one."""
     table = set(FIXED_PORTS.values())
     holders: dict[str, object] = {}
     for name in sorted(FIELD_INFOS):
@@ -123,7 +87,6 @@ def test_the_session_holds_no_table_port_in_any_setting(process_config: object) 
             holders[name] = value
         elif isinstance(value, str):
             for match in re.finditer(r"://([^/\s:@]*):(\d{2,5})(?=[/\s]|$)", value):
-                # `.invalid` never resolves (RFC 2606): it cannot reach a cluster.
                 if int(match.group(2)) in table and not match.group(1).endswith(".invalid"):
                     holders[name] = value
     assert not holders, f"settings of the test session still hold a fixed-table port: {holders}"

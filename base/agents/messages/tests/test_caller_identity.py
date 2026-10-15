@@ -1,5 +1,3 @@
-"""External-agent identity contract: asserted provenance cannot become authority."""
-
 import pytest
 from pydantic import ValidationError
 
@@ -17,8 +15,6 @@ def test_external_identity_round_trip(subject: str) -> None:
     validate_source(caller.source())
     rendered = wrap_inbound("hello", caller.source(), inputs=_ENVELOPE_INPUTS)
     assert rendered == f"External agent ({subject} / run-42; asserted provenance):\n\nhello"
-    # Not confusable with other source families: agent's "Agent N:" label, or
-    # the bracketed headers — the bare "[ts]" (user / ui:page) and "[system]".
     assert not rendered.startswith(("Agent ", "["))
 
 

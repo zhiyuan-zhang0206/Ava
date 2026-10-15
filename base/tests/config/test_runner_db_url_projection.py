@@ -1,11 +1,3 @@
-"""The provider runner projection for agents on a remote-managed gateway plane.
-
-A remote-managed plane has no write generation: its gateway-local launcher
-projects the provider `ava_runner` from one fresh `.env` snapshot. A pure
-agent-runner never projects a login; its services receive the installed unit
-capability.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -77,8 +69,6 @@ def test_missing_snapshot_url_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_pure_runner_never_projects_a_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pure agent-runner has no provider credential and no bootstrap-served
-    login to pass through: the projection refuses without reading anything."""
     monkeypatch.setattr(bootstrap, "config_source_is_local", Mock(return_value=False))
     snapshot = Mock(side_effect=AssertionError("must not read local credentials"))
     monkeypatch.setattr(dotenv_file, "read_env_aliases", snapshot)
@@ -90,11 +80,10 @@ def test_pure_runner_never_projects_a_login(monkeypatch: pytest.MonkeyPatch) -> 
 def test_malformed_config_read_does_not_log_raw_credentials(
     tmp_path: Path, loguru_records: LogRecords
 ) -> None:
-    """A rejected fresh file read never logs a raw credential-bearing input."""
     runtime = Settings(profile=None)
     authority = ConfigAuthority(runtime, runtime, tmp_path / ".env")
     authority.env_path.write_text("AVA_DB_URL=postgresql://owner-password@[::1\n")
-    loguru_records.clear()  # building Settings above logs its own warnings; only the read is judged
+    loguru_records.clear()
 
     with pytest.raises(ValidationError):
         authority.current_field_values()

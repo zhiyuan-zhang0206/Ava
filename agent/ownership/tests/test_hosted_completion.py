@@ -1,5 +1,3 @@
-"""Only the original target-bound lifecycle receipt proves lost-commit outcomes."""
-
 from uuid import uuid4
 
 import psycopg
@@ -35,7 +33,6 @@ async def test_completion_requires_original_applied_and_observed_receipt(
     async with async_write_transaction(aops_pool) as conn:
         await accept_lifecycle_intent(conn, agent, incarnation=original)
     assert await pending_hosted_lifecycle_id(aops_pool, original) == command
-    # A graph's exit flag or mutable status does not certify this receipt.
     assert await completed_hosted_lifecycle_kind(aops_pool, original, command) is None
     assert (
         await apply_hosted_lifecycle(
@@ -55,8 +52,6 @@ async def test_completion_requires_original_applied_and_observed_receipt(
         replacement = await admit_owner(aops_pool, agent, database_gate=database_gate)
         async with async_write_transaction(aops_pool) as conn:
             await observe_hosted_admission(conn, replacement)
-        # A successor may have observed the restart before the old host reads
-        # its lost acknowledgement. The retained original receipt still proves it.
         assert await completed_hosted_lifecycle_kind(aops_pool, original, command) == kind
     assert await completed_hosted_lifecycle_kind(aops_pool, original, command + 1) is None
     for wrong in (

@@ -1,5 +1,3 @@
-"""Admission and cancellation invariants for shared in-flight queries."""
-
 import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +10,6 @@ from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 @pytest.mark.parametrize("failed", [False, True])
 @pytest.mark.parametrize("next_key", ["same", "other"])
 def test_shared_completion_allows_immediate_zero_ttl_load(failed: bool, next_key: str) -> None:
-    """A woken follower sees a retired claim and available admission capacity."""
     cache = InspectQueryCache[str, str](max_entries=2, max_inflight=1, max_concurrent_loads=1)
     started, release = threading.Event(), threading.Event()
     observed: list[str | BaseException] = []
@@ -34,7 +31,6 @@ def test_shared_completion_allows_immediate_zero_ttl_load(failed: bool, next_key
         leader = executor.submit(cache.get_or_load, "same", load, ttl_s=0, now=lambda: 0)
         try:
             assert started.wait(timeout=1)
-            # Run at publication itself, before the native worker can return.
             cache._inflight["same"].add_done_callback(on_completion)
         finally:
             release.set()
@@ -49,7 +45,6 @@ def test_shared_completion_allows_immediate_zero_ttl_load(failed: bool, next_key
 
 
 def test_inspect_cache_admission_bounds_concurrent_loads() -> None:
-    """A distinct-key leader is rejected at capacity, while its follower shares the load."""
     cache = InspectQueryCache[str, str](
         max_entries=8,
         max_inflight=8,
@@ -89,7 +84,6 @@ def test_inspect_cache_admission_bounds_concurrent_loads() -> None:
 
 
 def test_inspect_singleflight_cancellation_releases_key_for_retry() -> None:
-    """A cancelled leader never leaves its key in the in-flight map."""
     cache = InspectQueryCache[str, object](max_entries=2, max_inflight=1)
     calls = 0
     expected = object()
@@ -109,7 +103,6 @@ def test_inspect_singleflight_cancellation_releases_key_for_retry() -> None:
 
 @pytest.mark.asyncio
 async def test_inspect_async_followers_timeout_without_retaining_executor_workers() -> None:
-    """Timed-out followers wait on the shared Future without blocking threads."""
     cache = InspectQueryCache[str, object](max_entries=2, max_inflight=1)
     started = threading.Event()
     release = threading.Event()
@@ -149,9 +142,6 @@ async def test_inspect_async_followers_timeout_without_retaining_executor_worker
     results = await asyncio.gather(*followers, return_exceptions=True)
     assert all(isinstance(result, TimeoutError) for result in results)
 
-    # A to_thread probe still starts immediately. An implementation that puts
-    # every follower's Future.result() in the shared executor exhausts all of
-    # its workers here until the leader is released.
     assert await asyncio.wait_for(asyncio.to_thread(lambda: "free"), timeout=1) == "free"
     assert calls == 1
 
@@ -167,7 +157,6 @@ async def test_inspect_async_followers_timeout_without_retaining_executor_worker
 
 @pytest.mark.asyncio
 async def test_inspect_async_leader_deadline_fails_followers_fast() -> None:
-    """A deadline failure reaches all followers and releases the key for a retry."""
     cache = InspectQueryCache[str, object](max_entries=2, max_inflight=1)
     started = threading.Event()
     release = threading.Event()
@@ -207,7 +196,6 @@ async def test_inspect_async_leader_deadline_fails_followers_fast() -> None:
 
 
 def test_inspect_cache_bounds_values_and_distinct_inflight_keys() -> None:
-    """Both retained snapshots and active distinct-key loaders stay bounded."""
     cache = InspectQueryCache[str, str](max_entries=2, max_inflight=1)
     loads: dict[str, int] = {}
 
@@ -218,7 +206,6 @@ def test_inspect_cache_bounds_values_and_distinct_inflight_keys() -> None:
     assert cache.get_or_load("a", lambda: load("a"), ttl_s=10, now=lambda: 0) == "a-1"
     assert cache.get_or_load("b", lambda: load("b"), ttl_s=10, now=lambda: 0) == "b-1"
     assert cache.get_or_load("c", lambda: load("c"), ttl_s=10, now=lambda: 0) == "c-1"
-    # Insertion-order tie breaking evicts the oldest equal-expiry value.
     assert cache.get_or_load("a", lambda: load("a"), ttl_s=10, now=lambda: 0) == "a-2"
 
     started = threading.Event()

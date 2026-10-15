@@ -1,28 +1,3 @@
-"""The S2 headline lock: install on home A, materialize on home B, one Postgres.
-
-`future/infra/extensions/extension-ownership.md`'s own S2 test lock is *"install on home A
-materializes on home B (two homes, one PG)"*, and it is the entire claim the
-slice exists to make: the cluster owns extensions, so a machine that never ran
-the install still ends up with the content.
-
-Every other test in the slice passes whether or not that chain works. The
-registry tests cover rows and blobs; the materializer tests cover the verdicts;
-the install tests cover the local copy. All of them are satisfied by a machine
-talking to itself. This file is the only one that puts a second machine on the
-other end.
-
-## How two machines are simulated honestly
-
-The `as_machine` fixture (`tests/path_scoped/cli_tests.py`) holds the mechanism and the
-reason the identity cache has to be reset on both edges.
-
-What it does NOT simulate: two machines racing concurrently, and network
-partition between a runner and the cluster DB. Those are properties of the
-deployment, not of this chain. Nor two CREDENTIALS — both homes share one
-connection identity, which is why the `ava_runner` read-grant gap had to be
-found somewhere else.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -71,11 +46,6 @@ def test_install_on_home_a_materializes_on_home_b(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """THE lock. Home B never ran the install and never saw the source tree.
-
-    The only path by which its content can arrive is the cluster registry, so a
-    pass here is the cross-machine claim and nothing else.
-    """
     src = _write_skill(tmp_path / "src" / "two-home-demo", "two-home-demo")
     home_a, home_b = tmp_path / "home-a", tmp_path / "home-b"
 
@@ -116,9 +86,6 @@ def test_home_b_is_idempotent_on_a_second_pass(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Converge and `ava start` both run this repeatedly; the second pass must
-    be a no-op, or every start rewrites trees and 'did anything change' stops
-    meaning anything."""
     src = _write_skill(tmp_path / "src" / "idem-demo", "idem-demo")
     home_a, home_b = tmp_path / "home-a", tmp_path / "home-b"
 
@@ -151,10 +118,6 @@ def test_the_row_records_the_installing_machine(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A local-path install is `local:<machine>`, naming WHERE the content came
-    from. That provenance is what the adoption sweep will need to resolve two
-    machines claiming one name with different content — and it is only
-    meaningful if the machine identity is really per-home."""
     src = _write_skill(tmp_path / "src" / "provenance-demo", "provenance-demo")
     home_a = tmp_path / "home-a"
 
@@ -186,9 +149,6 @@ def test_disabling_on_the_cluster_stops_new_machines_getting_it(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Enablement is CLUSTER policy, which is the half of the model that per-
-    machine files could not express. Turning a skill off must reach a machine
-    that has never seen it."""
     src = _write_skill(tmp_path / "src" / "policy-demo", "policy-demo")
     home_a, home_b = tmp_path / "home-a", tmp_path / "home-b"
 
@@ -223,13 +183,6 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The user-edit guard, across machines rather than within one.
-
-    Home B materializes, someone edits B's copy in place, then home A installs a
-    newer version. B must keep its edit — the L3 develop-a-plugin loop is
-    exactly "edit the copy on the machine you are working on", and a silent
-    revert would eat it.
-    """
     src = _write_skill(tmp_path / "src" / "edit-demo", "edit-demo", body="Version one.")
     home_a, home_b = tmp_path / "home-a", tmp_path / "home-b"
 
@@ -254,7 +207,6 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
             _SKILL_MD.format(name="edit-demo", body="MY LOCAL EDIT"), encoding="utf-8"
         )
 
-    # Home A ships a newer version of the same name.
     newer = _write_skill(tmp_path / "src2" / "edit-demo", "edit-demo", body="Version two.")
     with as_machine(home_a) as installing_machine:
         from base import db as base_db

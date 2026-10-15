@@ -1,5 +1,3 @@
-"""Real database proof of source retention, atomic chat and account/cursor fencing."""
-
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -273,7 +271,6 @@ def test_failed_empty_checkpoint_rolls_back_cursor_and_activation_together(
         ) -> Generator[psycopg.Connection, None, None]:
             with original_transaction(native_pool) as conn:
                 yield conn
-                # The real checkpoint SQL already ran, but its commit never succeeds.
                 assert conn.execute(
                     "SELECT state,cursor FROM weixin_ingress_cursors"
                 ).fetchone() == ("active", "new-empty-opaque")

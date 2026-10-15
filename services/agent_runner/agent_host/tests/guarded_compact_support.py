@@ -1,5 +1,3 @@
-"""Offline provider plus actual native host/graph fixtures for guarded compact faults."""
-
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -74,7 +72,6 @@ async def make_host(
         cast(Any, aops_pool),
         serde=JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist()),
     )
-    # Provisioning owns DDL; a real runner may only write existing checkpoint tables.
     wrap_saver_writes_with_nstep_interval(saver, interval)
     wrap_saver_reads_with_delta_reconstruction(saver)
     builder: Any = StateGraph(AgentState, context_schema=AvaContext)

@@ -1,5 +1,3 @@
-"""Actual gateway transactions distinguish business proof from transport uncertainty."""
-
 import asyncio
 import json
 
@@ -39,7 +37,6 @@ async def test_notice_owner_commits_original_target_once_with_or_without_respons
 
     async def gateway(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.path)
-        # A subsequent UI interaction must not redirect the already frozen reply.
         bridge._arm_reply_mode(
             "peer-1", str(native_weixin.agent_id), str(later), account_id=account
         )

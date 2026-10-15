@@ -1,8 +1,3 @@
-"""`ava.self.compact()` must reach its wake + `SystemHalt` even if the
-CompactRequest publish fails — a redis outage must not interrupt this lifecycle
-exit (it used to be a bare `ava.REDIS.publish` that would raise past the wake).
-"""
-
 from __future__ import annotations
 
 import psycopg
@@ -46,8 +41,6 @@ def test_compact_survives_publish_failure(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A throwing redis on the CompactRequest publish must not stop compact from
-    committing its compact_summary inbound and raising SystemHalt."""
     pin_agent(
         spawn_agent(
             catalog=model_catalog,
@@ -55,11 +48,8 @@ def test_compact_survives_publish_failure(
             database_gate=database_gate,
             machine=machine_identity,
         )
-    )  # self identity
+    )
 
-    # Only the CompactRequest publish (EventBus.publish_best_effort_sync → sync_redis) is
-    # broken; the self-inbound wake uses ava.REDIS directly and is already
-    # never-raise, so leave the session redis real for it.
     client = _BoomSyncClient(RedisConnectionError("down"))
     patch_sync_redis(monkeypatch, lambda: client)
 

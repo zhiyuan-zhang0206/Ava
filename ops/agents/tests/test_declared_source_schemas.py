@@ -1,5 +1,3 @@
-"""A declared external-agent source is accepted when well-formed and rejected before dispatch otherwise."""
-
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -37,8 +35,6 @@ def test_declared_source_is_accepted(
 def test_malformed_declaration_is_rejected_before_dispatch(
     schema: type[BaseModel], field: str, other: dict[str, object], source: str
 ) -> None:
-    # Lifecycle audit labels are opaque (see below), but anything in the
-    # external-agent namespace must be a well-formed declaration.
     with pytest.raises(ValidationError):
         schema.model_validate(other | {field: source})
 

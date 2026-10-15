@@ -1,9 +1,3 @@
-"""Unit tests for `base/cluster/machines.py` — env/file precedence + lookup roundtrip + exception paths
-+ composition (machine_units -> machines) semantics.
-
-machines / machine_units schema uses the schema.sql at the top of conftest; here we only verify helper behavior.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -29,9 +23,7 @@ from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 
 
-# gateway_url() source
 def test_gateway_url_comes_from_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """`AVA_GATEWAY_URL` is the only source: a `gateway_url` file in the home is not read."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     (tmp_path / "gateway_url").write_text("http://from-file:8000")
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://from-env:8000/")
@@ -42,19 +34,14 @@ def test_gateway_url_comes_from_settings(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_gateway_url_raises_when_blank(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A blank value is not set."""
     monkeypatch.setattr(settings.gateway, "gateway_url", "   ")
     with pytest.raises(machines.GatewayUrlMissing):
         machines.gateway_url(settings.gateway.gateway_url)
 
 
-# register_self + lookup roundtrip
-
-
 def test_register_self_and_lookup_roundtrip(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """register_self UPSERT through machine_units -> recompute machines; lookup returns same URL."""
     machine_setup(name="test-rt-machine")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://rt:8000")
     assert (
@@ -66,7 +53,6 @@ def test_register_self_and_lookup_roundtrip(
 def test_register_self_composes_single_unit_row(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Single unit (runner style): composed machines row reflects that unit's caps + url."""
     machine_setup(name="runner-a", role="agent-runner")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://runner-a:9100"
@@ -80,7 +66,6 @@ def test_register_self_composes_single_unit_row(
 def test_register_self_overwrites_url(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Same unit second register_self overwrites URL (ON CONFLICT DO UPDATE)."""
     machine_setup(name="test-overwrite")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://old:8000")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://new:8000")
@@ -93,7 +78,6 @@ def test_register_self_overwrites_url(
 def test_register_self_agent_runner_stores_null(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """agent-runner: register_self(machines_test_db(), url=None) → composed gateway_url NULL."""
     machine_setup(name="test-agent-runner", role="agent-runner")
     machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
     with pytest.raises(machines.MachineGatewayUrlMissing):
@@ -103,11 +87,6 @@ def test_register_self_agent_runner_stores_null(
 def test_register_self_station_only_composes_row(
     machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    """A pure observability-station unit (neither gateway nor agent-runner) must
-    compose a machines row carrying its capability — otherwise the station host
-    is invisible to `ava cluster status`. The composed row advertises the
-    station's OTLP ingress URL (its reachable-host dial target, WP4) and
-    stopped_at NULL (the unit is live)."""
     machine_setup.machine.set(host="10.0.0.9")
     machine_setup(name="station-a", role="observability-station")
     machine_setup.register(
@@ -130,17 +109,12 @@ def test_register_self_station_only_composes_row(
 def test_register_self_co_located_station_composes_with_gateway(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Two co-located units (a gateway unit + a station unit on the same host)
-    compose into ONE machines row whose role is the union — the station
-    capability joins the gateway's, exactly like the gateway/agent-runner
-    composition."""
     machine_setup(name="combo", role="gateway", home="~/.ava_gateway")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://gw:8000")
     machine_setup(name="combo", role="observability-station", home="~/.ava_station")
     machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
     gateway_url, role, _desc, stopped_at = read_machine("combo")
     assert role == ["gateway", "observability-station"]
-    # the composed dial URL stays the gateway unit's (the station adds no target)
     assert gateway_url == "http://gw:8000"
     assert stopped_at is None
 
@@ -155,8 +129,6 @@ def _read_stopped_at(name: str):
 def test_mark_stopping_stamps_then_register_clears(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Single unit host: mark_stopping(machines_test_db(), name, home) marks stopped (no live unit → machines
-    stopped_at set); next register_self (comeback) clears back to NULL."""
     machine_setup(name="test-stopping", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
     assert _read_stopped_at("test-stopping") is None
@@ -171,8 +143,6 @@ def test_mark_stopping_stamps_then_register_clears(
 def test_register_self_does_not_fall_back_to_gateway_url_when_url_none(
     machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    """url=None does not use the gateway_url() fallback. Even if AVA_GATEWAY_URL is set,
-    register_self(machines_test_db(), url=None) still writes NULL."""
     machine_setup(name="test-no-fallback", role="agent-runner")
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://should-be-ignored:8000")
     machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
@@ -182,7 +152,6 @@ def test_register_self_does_not_fall_back_to_gateway_url_when_url_none(
 
 
 def test_lookup_raises_when_missing(database_gate: ProcessDbGate) -> None:
-    """No corresponding row in machines table → MachineNotRegistered (wire-encoded, 404)."""
     with pytest.raises(MachineNotRegistered):
         machines.lookup(machines_test_db(database_gate=database_gate), "never-registered")
 
@@ -190,7 +159,6 @@ def test_lookup_raises_when_missing(database_gate: ProcessDbGate) -> None:
 def test_list_all_returns_registered(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """list_all returns all (name, url-or-None) sorted by name."""
     machine_setup(name="alpha")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://a:8000")
     machine_setup(name="beta", role="agent-runner")
@@ -204,8 +172,6 @@ def test_list_all_returns_registered(
 def test_list_agent_runners_filters_by_role(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """list_agent_runners only returns (name, url) where composed role contains 'agent-runner'.
-    gateway-only row not included."""
     machine_setup(name="cp", role="gateway")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://cp:8000")
     machine_setup(name="host-b", role="agent-runner")
@@ -221,7 +187,6 @@ def test_list_agent_runners_filters_by_role(
 def test_list_agent_runners_includes_all_runners(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Every agent-runner row is returned — there is no deployment-scope branch."""
     machine_setup(name="other-box", role="agent-runner")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://other:9000")
     machine_setup(name="this-box", role="agent-runner")
@@ -236,8 +201,6 @@ def test_list_agent_runners_includes_all_runners(
 def test_list_agent_runners_excludes_intentionally_stopped(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """A host that announced an intentional stop is not a rollout target; an
-    unmarked host stays."""
     machine_setup(name="running", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://running:9000")
     machine_setup(name="stopped", role="agent-runner", home="~/.ava")
@@ -252,9 +215,6 @@ def test_list_agent_runners_excludes_intentionally_stopped(
 def test_list_stopped_agent_runners_is_the_exact_complement(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """The excluded rows are enumerable, so a rollout can say "N of M" instead of a
-    bare count of whatever survived the filter — the silent count is what hid the
-    2026-07-28 exclusion."""
     machine_setup(name="running", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://running:9000")
     machine_setup(name="stopped", role="agent-runner", home="~/.ava")
@@ -264,7 +224,6 @@ def test_list_stopped_agent_runners_is_the_exact_complement(
     assert machines.list_stopped_agent_runners(machines_test_db(database_gate=database_gate)) == [
         ("stopped", "http://stopped:9000")
     ]
-    # complement: the two lists partition the agent-runner rows, no overlap, no gap
     assert (
         set(machines.list_agent_runners(machines_test_db(database_gate=database_gate)))
         & set(machines.list_stopped_agent_runners(machines_test_db(database_gate=database_gate)))
@@ -275,9 +234,6 @@ def test_list_stopped_agent_runners_is_the_exact_complement(
 def test_list_agent_runners_excludes_staging(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """A host operator-flagged staging is registered + visible but never a
-    rollout target; the flag is independent of the stop latch (an `ava start`
-    on it clears stopped_at and it STILL is not a fan-out target)."""
     machine_setup(name="prod", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://prod:9000")
     machine_setup(name="stage", role="agent-runner", home="~/.ava")
@@ -292,18 +248,13 @@ def test_list_agent_runners_excludes_staging(
     assert machines.list_agent_runners(machines_test_db(database_gate=database_gate)) == [
         ("prod", "http://prod:9000")
     ]
-    # staging row stays enumerable as stopped-complement? No — it is not the
-    # stopped set either; the rollout's "N of M" counts only non-staging hosts.
     assert machines.list_stopped_agent_runners(machines_test_db(database_gate=database_gate)) == []
 
-    # `ava start` on the staging host clears its stopped latch (register_self)
-    # — the staging flag survives recompute and keeps it out of the fan-out.
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://stage:9000")
     assert machines.list_agent_runners(machines_test_db(database_gate=database_gate)) == [
         ("prod", "http://prod:9000")
     ]
 
-    # unmark → back in the target set
     assert (
         machines.set_staging(
             machines_test_db(database_gate=database_gate), "stage", is_staging=False
@@ -319,8 +270,6 @@ def test_list_agent_runners_excludes_staging(
 def test_set_staging_unknown_machine_returns_false(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """set_staging on a name with no row is a no-op reported as False (the CLI
-    turns it into a 404-style error)."""
     assert (
         machines.set_staging(
             machines_test_db(database_gate=database_gate), "ghost", is_staging=True
@@ -343,9 +292,6 @@ def _read_pause(name: str) -> tuple:
 def test_pause_sets_latch_and_excludes_from_fanout(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """`pause` stamps paused_at + pause_reason; the row drops out of
-    list_agent_runners (probe + rollout skip it) and is enumerable via
-    list_paused. list_stopped is unaffected — pause is not a stop."""
     machine_setup(name="prod", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://prod:9000")
     machine_setup(name="away", role="agent-runner", home="~/.ava")
@@ -366,18 +312,12 @@ def test_pause_sets_latch_and_excludes_from_fanout(
     assert machines.list_paused(machines_test_db(database_gate=database_gate)) == [
         ("away", "http://away:9000")
     ]
-    # the stop complement is untouched — a paused machine is neither a rollout
-    # target nor a "stopped" row
     assert machines.list_stopped_agent_runners(machines_test_db(database_gate=database_gate)) == []
 
 
 def test_register_self_does_not_clear_pause(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """THE pause invariant: a paused machine that re-registers (its `ava start`
-    after a reboot, or a reachable-address change while it is away) stays paused —
-    only `resume` clears the latch. register_self still clears the unit's
-    stopped_at latch (normal comeback semantics) and refreshes the URL."""
     machine_setup(name="away", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
     machines.pause(machines_test_db(database_gate=database_gate), "away", reason="away")
@@ -387,22 +327,18 @@ def test_register_self_does_not_clear_pause(
     )
 
     paused_at, pause_reason = _read_pause("away")
-    assert paused_at is not None  # still paused
+    assert paused_at is not None
     assert pause_reason == "away"
-    assert (
-        machines.list_agent_runners(machines_test_db(database_gate=database_gate)) == []
-    )  # still excluded
+    assert machines.list_agent_runners(machines_test_db(database_gate=database_gate)) == []
     assert (
         machines.lookup(machines_test_db(database_gate=database_gate), "away")
         == "http://away-new-ip:9000"
-    )  # URL refreshed
+    )
 
 
 def test_resume_clears_latch_and_restores_fanout(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """`resume` clears paused_at + pause_reason; the row is a normal rollout
-    target again and list_paused is empty."""
     machine_setup(name="away", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
     machines.pause(machines_test_db(database_gate=database_gate), "away", reason="away")
@@ -418,9 +354,6 @@ def test_resume_clears_latch_and_restores_fanout(
 def test_pause_resume_idempotency(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """pause of an already-paused row and resume of a not-paused row are
-    no-ops reported as False (the CLI turns that into a message, not an
-    error) — a re-run of a partially-failed pause is safe."""
     machine_setup(name="away", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
 
@@ -431,7 +364,6 @@ def test_pause_resume_idempotency(
         )
         is False
     )
-    # the original reason is preserved — the second call changed nothing
     assert _read_pause("away")[1] is None
 
     assert machines.resume(machines_test_db(database_gate=database_gate), "away") is True
@@ -441,7 +373,6 @@ def test_pause_resume_idempotency(
 def test_pause_unknown_machine_returns_false(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """pause/resume on a name with no row are no-ops reported as False."""
     assert (
         machines.pause(machines_test_db(database_gate=database_gate), "ghost", reason="x") is False
     )
@@ -451,8 +382,6 @@ def test_pause_unknown_machine_returns_false(
 def test_is_paused_reads_the_latch(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """is_paused: True while the latch is set, False after resume, raises
-    MachineNotRegistered for an unknown name (same contract as lookup_role)."""
     machine_setup(name="away", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://away:9000")
 
@@ -468,8 +397,6 @@ def test_is_paused_reads_the_latch(
 def test_pause_independent_of_staging_and_stop(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """The three exclusions compose: a paused row is out even if its staging
-    flag is cleared later, and a stopped+paused row is out of both lists."""
     machine_setup(name="prod", role="agent-runner", home="~/.ava")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://prod:9000")
     machine_setup(name="away", role="agent-runner", home="~/.ava")
@@ -480,12 +407,10 @@ def test_pause_independent_of_staging_and_stop(
     assert machines.list_agent_runners(machines_test_db(database_gate=database_gate)) == [
         ("prod", "http://prod:9000")
     ]
-    # unmarking staging does NOT restore a paused machine
     machines.set_staging(machines_test_db(database_gate=database_gate), "away", is_staging=False)
     assert machines.list_agent_runners(machines_test_db(database_gate=database_gate)) == [
         ("prod", "http://prod:9000")
     ]
-    # and the pause is not a stop: list_stopped stays empty even while paused
     assert machines.list_stopped_agent_runners(machines_test_db(database_gate=database_gate)) == []
     machines.resume(machines_test_db(database_gate=database_gate), "away")
     assert machines.list_agent_runners(machines_test_db(database_gate=database_gate)) == [
@@ -494,32 +419,22 @@ def test_pause_independent_of_staging_and_stop(
     ]
 
 
-# unit_dial_url() — the one address definition both writers share
-
-
-# co-located compose + downgrade
 def test_colocated_units_compose_union_and_ops_dial(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Two co-located units on the same machine name (gateway-only @ ~/.ava_gateway + agent-runner @
-    ~/.ava) compose into ONE machines row: role = union; gateway_url = ops URL
-    (agent-runner unit's url, because the host serves agent-runner)."""
-    # gateway-only unit
     machine_setup(name="test-host", role="gateway", home="~/.ava_gateway")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://test-host:8000"
     )
-    # agent-runner-only unit (same machine name, different home)
     machine_setup(name="test-host", role="agent-runner", home="~/.ava")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://localhost:8600"
     )
 
     gateway_url, role, _desc, stopped_at = read_machine("test-host")
-    assert role == ["agent-runner", "gateway"]  # sorted union
-    assert gateway_url == "http://localhost:8600"  # ops URL of the agent-runner unit
+    assert role == ["agent-runner", "gateway"]
+    assert gateway_url == "http://localhost:8600"
     assert stopped_at is None
-    # exactly one machines row, two machine_units rows
     assert machines.list_all(machines_test_db(database_gate=database_gate)) == [
         ("test-host", "http://localhost:8600")
     ]
@@ -528,8 +443,6 @@ def test_colocated_units_compose_union_and_ops_dial(
 def test_colocated_stop_one_unit_retracts_only_its_caps(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Stopping the agent-runner unit on a co-located host: composed role downgrades to gateway only,
-    gateway_url switches back to the gateway unit's url; host still live (gateway unit running)."""
     machine_setup(name="test-host", role="gateway", home="~/.ava_gateway")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://test-host:8000"
@@ -539,22 +452,18 @@ def test_colocated_stop_one_unit_retracts_only_its_caps(
         machines_test_db(database_gate=database_gate), url="http://localhost:8600"
     )
 
-    machines.mark_stopping(
-        machines_test_db(database_gate=database_gate), "test-host", "~/.ava"
-    )  # stop the agent-runner unit
+    machines.mark_stopping(machines_test_db(database_gate=database_gate), "test-host", "~/.ava")
 
     gateway_url, role, _desc, stopped_at = read_machine("test-host")
-    assert role == ["gateway"]  # agent-runner cap retracted
-    assert gateway_url == "http://test-host:8000"  # now the gateway unit's url
-    assert stopped_at is None  # gateway unit still live
-    # the agent-runner unit dropped out of the fan-out target list
+    assert role == ["gateway"]
+    assert gateway_url == "http://test-host:8000"
+    assert stopped_at is None
     assert machines.list_agent_runners(machines_test_db(database_gate=database_gate)) == []
 
 
 def test_colocated_restart_unit_recomposes_union(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Stopped unit re-register_self comes back: composed role again includes agent-runner."""
     machine_setup(name="test-host", role="gateway", home="~/.ava_gateway")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://test-host:8000"
@@ -574,49 +483,33 @@ def test_colocated_restart_unit_recomposes_union(
     assert role == ["agent-runner", "gateway"]
 
 
-# register_self loopback dial-URL guard
 def test_register_self_rejects_loopback_ops_url_when_gateway_remote(
     machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    """An agent-runner-only unit whose gateway is REMOTE must not register a
-    loopback ops URL — the gateway would dial itself (the 2026-07-18 incident).
-    Raised before any DB write."""
     machine_setup(name="runner-a", role="agent-runner")
-    monkeypatch.setattr(
-        settings.gateway, "gateway_url", "https://gw.example.com:8000"
-    )  # remote gateway
+    monkeypatch.setattr(settings.gateway, "gateway_url", "https://gw.example.com:8000")
     with pytest.raises(machines.LoopbackDialUrlRefused):
         machine_setup.register(
             machines_test_db(database_gate=database_gate), url="http://localhost:8600"
         )
-    # nothing landed in the table
     assert machines.list_all(machines_test_db(database_gate=database_gate)) == []
 
 
 def test_register_self_rejects_loopback_station_url_when_gateway_remote(
     machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    """An observability-station-only unit whose gateway is REMOTE must not
-    register a loopback dial URL — the gateway would probe itself instead of
-    the station (WP4 tightening of the runner rule, same 2026-07-18 shape).
-    Raised before any DB write."""
     machine_setup(name="station-a", role="observability-station")
-    monkeypatch.setattr(
-        settings.gateway, "gateway_url", "https://gw.example.com:8000"
-    )  # remote gateway
+    monkeypatch.setattr(settings.gateway, "gateway_url", "https://gw.example.com:8000")
     with pytest.raises(machines.LoopbackDialUrlRefused):
         machine_setup.register(
             machines_test_db(database_gate=database_gate), url="http://localhost:4318"
         )
-    # nothing landed in the table
     assert machines.list_all(machines_test_db(database_gate=database_gate)) == []
 
 
 def test_register_self_allows_loopback_station_url_when_gateway_colocated(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """A station-only unit whose gateway is co-located (loopback gateway URL)
-    may register a loopback dial URL — the zero-config single-box posture."""
     machine_setup(name="station-local", role="observability-station")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://localhost:4318"
@@ -629,12 +522,8 @@ def test_register_self_allows_loopback_station_url_when_gateway_colocated(
 def test_register_self_allows_loopback_ops_url_when_gateway_colocated(
     machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    """Same loopback ops URL is LEGAL when the gateway is co-located (loopback
-    gateway URL) — a split-home single box dials its runner over loopback."""
     machine_setup(name="box", role="agent-runner")
-    monkeypatch.setattr(
-        settings.gateway, "gateway_url", "http://localhost:8000"
-    )  # co-located gateway
+    monkeypatch.setattr(settings.gateway, "gateway_url", "http://localhost:8000")
     machine_setup.register(
         machines_test_db(database_gate=database_gate), url="http://localhost:8600"
     )
@@ -646,9 +535,6 @@ def test_register_self_allows_loopback_ops_url_when_gateway_colocated(
 def test_register_self_allows_loopback_ops_url_when_also_gateway(
     machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    """A single co-located unit that serves BOTH gateway and agent-runner may
-    register a loopback ops URL regardless of its gateway URL — its own gateway
-    self-dials over loopback."""
     machine_setup(name="single", role="gateway,agent-runner")
     monkeypatch.setattr(settings.gateway, "gateway_url", "https://gw.example.com:8000")
     machine_setup.register(
@@ -659,13 +545,9 @@ def test_register_self_allows_loopback_ops_url_when_also_gateway(
     ]
 
 
-# register_self description column
-
-
 def test_register_self_writes_description(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """register_self picks up machine_description() and UPSERTs it."""
 
     machine_setup(name="desc-machine")
     machine_setup.machine.set(description="voice IO + browser")
@@ -676,7 +558,6 @@ def test_register_self_writes_description(
 def test_register_self_description_none_stores_null(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """No description configured → column NULL."""
 
     machine_setup(name="nodesc-machine")
     machine_setup.machine.set(description=None)
@@ -687,7 +568,6 @@ def test_register_self_description_none_stores_null(
 def test_register_self_updates_description_on_conflict(
     machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
-    """Second register_self overwrites description (ON CONFLICT DO UPDATE)."""
 
     machine_setup(name="upd-machine")
     machine_setup.machine.set(description="old")
@@ -695,6 +575,3 @@ def test_register_self_updates_description_on_conflict(
     machine_setup.machine.set(description="new")
     machine_setup.register(machines_test_db(database_gate=database_gate), url="http://u:8000")
     assert read_description("upd-machine") == "new"
-
-
-# up_since_at — the announce stamp (#981)

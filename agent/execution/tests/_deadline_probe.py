@@ -1,5 +1,3 @@
-"""Isolated subprocess probes; never imported by a production entry."""
-
 from __future__ import annotations
 
 import contextlib
@@ -70,10 +68,9 @@ def _exit_status(pid: int, watch: object | None) -> int:
 
 
 def _orphan(context_path: Path, ready: Path) -> None:
-    # Subreaper custody is local to this isolated Linux probe, never pytest/service.
     if sys.platform == "linux":
         libc = ctypes.CDLL(None, use_errno=True)
-        if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+        if libc.prctl(36, 1, 0, 0, 0) != 0:
             raise OSError(ctypes.get_errno(), "private subreaper admission failed")
     parent = psutil.Popen(
         [sys.executable, "-I", "-B", __file__, "parent", str(context_path), str(ready)]
@@ -93,8 +90,7 @@ def _orphan(context_path: Path, ready: Path) -> None:
                 pid,
                 filter=select.KQ_FILTER_PROC,
                 flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
-                # XNU sys/event.h: status is observable for a PID we may signal.
-                fflags=select.KQ_NOTE_EXIT | 0x04000000,  # NOTE_EXITSTATUS
+                fflags=select.KQ_NOTE_EXIT | 0x04000000,
             )
             watch.control([event], 0, 0)
         parent.kill()
@@ -123,7 +119,6 @@ def _entry(mode: str, context: Path, ready: Path) -> None:
             assert any(t.name == "exec-original-deadline" for t in threading.enumerate())
             ready.write_text("entered")
             if mode == "cleanup":
-                # The original entry's finally is still guarded, not only user code.
                 try:
                     return {}
                 finally:
@@ -170,7 +165,6 @@ def _entry(mode: str, context: Path, ready: Path) -> None:
             owner_child.DeadlineWatchdog._wait_until_deadline = stalled
         with owner_child.DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=0.1)) as watchdog:
             if mode == "expired-stop":
-                # Keep the worker out of arbitration; close must not erase expiry.
                 time.sleep(0.15)
                 watchdog.close()
             else:

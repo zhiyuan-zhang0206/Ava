@@ -1,5 +1,3 @@
-"""Fresh wakes abandon interrupted work even when its execution checkpoint is lost."""
-
 import asyncio
 import sys
 from dataclasses import replace
@@ -114,14 +112,11 @@ async def test_checkpoint_failure_after_subprocess_does_not_replay_on_fresh_wake
         with pytest.raises(psycopg.OperationalError, match="execution checkpoint"):
             await invoke()
         assert effect.read_text().splitlines() == ["effect"]
-        # Discard process-local graph/saver state as a restart would. The committed
-        # predecessor still contains a scheduled exec, but a new input starts claim.
         saver = AsyncPostgresSaver(aops_pool)
         graph = builder.compile(checkpointer=saver)
         ctx = replace(ctx)
         await invoke()
         assert effect.read_text().splitlines() == ["effect"]
-        # A genuinely new message can execute new work once.
         fresh_input = True
         await invoke()
         assert effect.read_text().splitlines() == ["effect", "effect"]

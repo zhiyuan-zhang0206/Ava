@@ -1,5 +1,3 @@
-"""Drag options and the press-and-hold tools through MCP dispatch and the helper's JSON client."""
-
 from __future__ import annotations
 
 import json
@@ -43,7 +41,6 @@ async def test_drag_carries_button_and_modifiers_to_the_helper(desktop: Desktop)
         "modifiers": ["shift", "cmd"],
     }
     assert result["button"] == "right"
-    # A plain drag still sends nothing the helper did not always take.
     await desktop.call("drag", DRAG)
     assert set(desktop.action("drag")) == {"id", "method", "start_x", "start_y", "end_x", "end_y"}
 
@@ -104,7 +101,6 @@ async def test_mouse_down_and_up_convert_region_frame_coordinates(desktop: Deskt
     assert (desktop.action("mouse_down")["x"], desktop.action("mouse_down")["y"]) == (-80, 40)
     await desktop.call("mouse_up", {"x": 60, "y": 30, "frame": REGION})
     assert (desktop.action("mouse_up")["x"], desktop.action("mouse_up")["y"]) == (-70, 45)
-    # A frame-relative position never replaces the tracked whole-screen pointer.
     assert desktop.daemon._pointer is None
 
 
@@ -133,7 +129,6 @@ async def test_invalid_mouse_inputs_stop_before_the_helper(
     assert response["ok"] is False
     assert not any(method.startswith("mouse_") for method in _methods(desktop))
     assert desktop.daemon._mouse_holder is None
-    # The refusal is audited too, whatever half of a position the call carried.
     assert desktop.events[-1].attributes["outcome"] == "error"
 
 
@@ -192,7 +187,6 @@ async def test_release_control_lets_go_of_a_held_button(desktop: Desktop) -> Non
     assert result["released"] == 7 and result["mouse_released"] == ["left"]
     assert _sent(desktop, "mouse_release_all") == [{"id": 1, "method": "mouse_release_all"}]
     assert desktop.held is None and desktop.daemon._mouse_holder is None
-    # With nothing held it asks the helper nothing.
     await desktop.call("move", {"x": 1, "y": 1})
     desktop.requests.clear()
     result = _result(await desktop.call("release_control", {}))
@@ -225,7 +219,7 @@ async def test_a_refused_release_control_still_releases_the_holders_button(
     desktop: Desktop,
 ) -> None:
     await desktop.call("mouse_down", {"x": 2, "y": 2})
-    await desktop.daemon._screen.release(None)  # the screen moved on without this agent
+    await desktop.daemon._screen.release(None)
     response = await desktop.call("release_control", {})
     assert response["ok"] is False and "not the screen holder" in response["error"]
     assert "mouse button you held was released" in response["error"]
@@ -245,7 +239,6 @@ async def test_release_control_of_another_agent_does_not_touch_the_button(
 
 async def test_a_new_screen_holder_never_inherits_a_pressed_button(desktop: Desktop) -> None:
     await desktop.call("mouse_down", {"x": 2, "y": 2})
-    # The first agent's lease runs out; another agent takes the screen and acts.
     desktop.daemon._screen._lease_until = 0.0
     response = await desktop.daemon._dispatch(
         {
@@ -260,7 +253,6 @@ async def test_a_new_screen_holder_never_inherits_a_pressed_button(desktop: Desk
     methods = _methods(desktop)
     assert methods.index("mouse_release_all") < methods.index("move")
     assert desktop.held is None and desktop.daemon._mouse_holder is None
-    # The same agent carrying on is not a takeover.
     desktop.requests.clear()
     await desktop.call("mouse_down", {"x": 1, "y": 1})
     await desktop.call("move", {"x": 3, "y": 3})

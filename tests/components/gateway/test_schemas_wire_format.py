@@ -1,14 +1,3 @@
-"""Freeze the HTTP wire format of the gateway wire schemas.
-
-Analogous to `test_events_wire_format.py`: the Python schema and the hand-written TS
-mirror (`ui/web/src/lib/contracts/types.ts`) must stay in sync on fields; a rename like
-`content` → `text` won't be caught by type tests — but external consumers / the
-frontend will blow up at runtime.
-
-This file pins the JSON shape of every schema; renaming a field or changing a type
-goes red immediately.
-"""
-
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -57,9 +46,6 @@ def test_agent_row_wire_shape() -> None:
 
 
 def test_notice_item_wire_shape() -> None:
-    """NoticeItem feeds GET /api/notices/open + /resolved + carries the unified
-    agent_notices row to the frontend. Anchor the field names + the
-    open-vs-resolved nullable shape."""
     t = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
     m = NoticeItem(
         id=5,
@@ -102,7 +88,6 @@ def test_notice_item_wire_shape() -> None:
     assert d["priority"] == "P0"
     assert d["require_response"] is True
     assert d["blocking"] is True
-    # open notice: resolution machinery all NULL
     assert d["resolved_at"] is None
     assert d["resolution"] is None
     assert d["reply"] is None
@@ -111,11 +96,9 @@ def test_notice_item_wire_shape() -> None:
 
 
 def test_resolve_notice_in_wire_shape() -> None:
-    """ResolveNoticeIn is the POST .../resolve body — action enum + optional reply."""
     m = ResolveNoticeIn(action="answer", reply="yes, send it")
     assert m.action == "answer"
     assert m.reply == "yes, send it"
-    # reply optional (dismiss/read may carry none)
     m2 = ResolveNoticeIn(action="read")
     assert m2.action == "read"
     assert m2.reply is None
@@ -125,8 +108,6 @@ def test_resolve_notice_in_rejects_bad_action() -> None:
     import pytest
     from pydantic import ValidationError
 
-    # validate via dict so the bad value is rejected at runtime (Pydantic),
-    # not flagged statically against the action Literal.
     with pytest.raises(ValidationError):
         ResolveNoticeIn.model_validate({"action": "bogus"})
 
@@ -135,7 +116,6 @@ def test_resolve_notice_in_strips_and_rejects_empty_reply() -> None:
     import pytest
     from pydantic import ValidationError
 
-    # reply rides UserContent: stripped, and whitespace-only is rejected.
     assert ResolveNoticeIn(action="answer", reply="  hi  ").reply == "hi"
     with pytest.raises(ValidationError):
         ResolveNoticeIn(action="answer", reply="   ")
@@ -147,21 +127,17 @@ def test_message_enqueued_wire_shape() -> None:
 
 
 def test_user_message_in_strips_and_rejects_empty() -> None:
-    """UserMessageIn StringConstraints: strip_whitespace + min_length=1."""
     import pytest
     from pydantic import ValidationError
 
-    # non-empty after strip — valid
     m = UserMessageIn(content="  hi  ")
     assert m.content == "hi"
 
-    # empty after strip — 422
     with pytest.raises(ValidationError):
         UserMessageIn(content="   ")
 
 
 def test_user_message_in_accepts_long_content_and_rejects_abuse_cap() -> None:
-    """TEXT-backed messages allow legitimate long input up to one million chars."""
     import pytest
     from pydantic import ValidationError
 
@@ -172,11 +148,6 @@ def test_user_message_in_accepts_long_content_and_rejects_abuse_cap() -> None:
 
 
 def test_task_status_enum_is_single_sourced_across_wire_and_frontend() -> None:
-    """The task status set has one source (base/agents/tasks/task_status.TaskStatus): the
-    gateway schemas serialize it, the generated OpenAPI spec / TS types must
-    carry exactly its values, and the hand-written TS mirror aliases the
-    generated schema instead of restating a union ('ongoing' was removed by
-    user ruling 2026-09-15)."""
     from base.agents.tasks.status import TaskStatus
 
     root = Path(__file__).resolve().parents[3]

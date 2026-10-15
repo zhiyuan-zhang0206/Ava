@@ -1,5 +1,3 @@
-"""`ava start --boot`: a failing boot start asks its scheduler to retry, boundedly."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -51,7 +49,7 @@ def test_the_attempt_that_spends_the_budget_alerts_and_stops_launchd(
     monkeypatch.setattr(boot_policy, "is_macos", lambda: True)
     for _ in range(boot_policy.BOOT_MAX_ATTEMPTS - 1):
         assert _boot(tmp_path, 75) == 75
-    assert _boot(tmp_path, 75) == 0  # launchd retries every nonzero exit
+    assert _boot(tmp_path, 75) == 0
     (event,) = emitted_events
     assert (event.category, event.event_name) == ("telemetry", "boot_retries_exhausted")
     assert event.level == "error"
@@ -75,7 +73,6 @@ def test_a_start_after_the_budget_still_runs_and_success_clears_the_count(
     emitted_events: EmittedEvents,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The count only decides what a failure asks for; a restarted boot job gets a real attempt."""
     monkeypatch.setattr(boot_policy, "is_macos", lambda: True)
     for _ in range(boot_policy.BOOT_MAX_ATTEMPTS):
         _boot(tmp_path, 75)

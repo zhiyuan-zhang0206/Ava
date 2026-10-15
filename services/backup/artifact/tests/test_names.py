@@ -1,5 +1,3 @@
-"""The managed-dump naming grammar: what counts as a dump, and the instant a name carries."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -28,19 +26,17 @@ def test_a_utc_stamped_dump_is_managed(name: str, db: str, stamp: str) -> None:
 @pytest.mark.parametrize(
     "name",
     [
-        # Names no writer produces any more.
         "ava-20260609T190000Z.dump.gz.enc",
-        "ava-20260827-030001.dump",  # pre-cutover wall-clock stamp, no offset
+        "ava-20260827-030001.dump",
         "ava-20260930T190000Z.pre-update.dump.enc",
         "ava-20260930T190000Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc",
-        # Never a dump.
         "manual.dump",
         "ava-before-migration.dump",
         "ava-20260930T190000Z.dump.partial",
         "ava-20260930T190000Z.dump.enc.partial",
         ".ava-20260930T190000Z.dump.enc.1.copy",
-        "ava-20260930T190000.dump.enc",  # a stamp without its Z
-        "20260930T190000Z.dump.enc",  # no database name
+        "ava-20260930T190000.dump.enc",
+        "20260930T190000Z.dump.enc",
         "ava-20260930T190000Z.dump.enc.bak",
         "notes.txt",
     ],

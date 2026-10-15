@@ -1,5 +1,3 @@
-"""Contract: the fixture-scope lint flags the real tests/e2e/conftest.py in its pre-fix shape and when its package init is deleted, and reads the real fixture body's env keys."""
-
 from __future__ import annotations
 
 import ast
@@ -14,12 +12,6 @@ _E2E_CONFTEST = _REPO_ROOT / "tests" / "e2e" / "conftest.py"
 
 
 def test_the_real_e2e_conftest_in_its_pre_fix_shape_is_flagged() -> None:
-    """The defect this lint exists for, replayed on the real file.
-
-    Flipping the one keyword back to `session` reproduces `main` as it stood before
-    the 2026-07-29 fix. If this does not fire, the lint is decorative regardless of
-    what the synthetic cases say.
-    """
     src = _E2E_CONFTEST.read_text(encoding="utf-8")
     pre_fix = src.replace(
         '@pytest.fixture(scope="package")',
@@ -35,8 +27,6 @@ def test_the_real_e2e_conftest_in_its_pre_fix_shape_is_flagged() -> None:
 
 
 def test_the_real_e2e_conftest_is_flagged_if_the_package_init_is_deleted() -> None:
-    """The other half. `tests/e2e/__init__.py` is load-bearing and looks like cruft, so
-    the lint has to notice its absence rather than trusting the keyword."""
     src = _E2E_CONFTEST.read_text(encoding="utf-8")
     found = _lint.findings_in_source(src, "tests/e2e/conftest.py", has_package_init=False)
     messages = [m for _, m in found]
@@ -46,11 +36,6 @@ def test_the_real_e2e_conftest_is_flagged_if_the_package_init_is_deleted() -> No
 
 
 def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
-    # Ties the primitive to the fourteen explicit environment assignments,
-    # including the URLs delivered by this native stack's resource fixtures.
-    # The count is what keeps the `literal == declared` assertion below from passing
-    # vacuously (both empty), so it tracks the fixture body — update it when the body
-    # gains or drops an assignment, do not relax it.
     literal, dynamic = _lint.setup_env_keys(
         _E2E_CONFTEST.read_text(encoding="utf-8"), "e2e_process_env"
     )

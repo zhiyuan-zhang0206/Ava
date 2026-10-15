@@ -1,5 +1,3 @@
-"""Config api cases: get explicit self is host view not."""
-
 from __future__ import annotations
 
 import json
@@ -30,25 +28,15 @@ from tests.fixtures.gateway_config import gateway_test_client
 def test_get_explicit_self_is_host_view_not_cluster(
     clean_overrides: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    """GET `?machine=<self>` is a host view: raw_overrides is the remote_writable
-    host set, so a writable-but-not-remote_writable field
-    (cross_machine_transfer_backend) that the Cluster view exposes is ABSENT here —
-    the explicit self selection no longer collapses into the Cluster view."""
     runtime_config.write_fields({"cross_machine_transfer_backend": "none"}, set())
     with gateway_test_client(machine=machine_identity) as client:
         cluster = client.get("/api/config").json()["raw_overrides"]
         host = client.get(f"/api/config?machine={machine_identity.name()}").json()["raw_overrides"]
-    assert (
-        cluster.get("cross_machine_transfer_backend") == "none"
-    )  # writable -> Cluster view exposes it
-    assert (
-        "cross_machine_transfer_backend" not in host
-    )  # not remote_writable -> host view excludes it
+    assert cluster.get("cross_machine_transfer_backend") == "none"
+    assert "cross_machine_transfer_backend" not in host
 
 
 def test_put_remote_rejects_cluster_key(clean_overrides: Path) -> None:
-    """PUT ?machine=<remote> carrying a cluster key -> 400 (cluster config is
-    machine-independent)."""
     seed_machine(REMOTE)
     with gateway_test_client() as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"llm_model": "x"})
@@ -59,9 +47,6 @@ def test_put_remote_rejects_cluster_key(clean_overrides: Path) -> None:
 def test_put_remote_host_field_dispatches_config_write(
     monkeypatch: pytest.MonkeyPatch, clean_overrides: Path
 ) -> None:
-    """PUT ?machine=<remote> with a host remote_writable key -> dispatches a
-    config_write carrying the overrides + gateway-stamped actor/trace, and
-    returns the stubbed ConfigWriteResult."""
     seed_machine(REMOTE)
     stub_result = {
         "machine": REMOTE,
@@ -88,17 +73,13 @@ def test_put_remote_host_field_dispatches_config_write(
     payload = kwargs["payload"]
     assert payload["overrides"] == {"ops_concurrency": 12}
     assert payload["local"] is False
-    assert payload["actor"] == "cluster_bearer:administrator"  # the verified caller
+    assert payload["actor"] == "cluster_bearer:administrator"
     assert isinstance(payload["trace_id"], str) and payload["trace_id"]
 
 
 def test_put_remote_rejects_writable_non_remote_host_field(
     monkeypatch: pytest.MonkeyPatch, clean_overrides: Path
 ) -> None:
-    """A writable-but-not-remote_writable host field (cross_machine_transfer_backend) is
-    rejected at the gate on a machine-addressed PUT — 400 before any dispatch,
-    rather than a 200 applied=False from the host-side op. Locks the shared
-    field_editable gate: remote host edits require remote_writable."""
     seed_machine(REMOTE)
     dispatched = AsyncMock()
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatched)
@@ -114,10 +95,6 @@ def test_put_remote_rejects_writable_non_remote_host_field(
 def test_put_remote_rejects_oss_credential_fields(
     monkeypatch: pytest.MonkeyPatch, clean_overrides: Path
 ) -> None:
-    """The OSS credential path is host-local editable only: a machine-addressed PUT
-    400s at the gate (remote_writable=False), so a remote admin can never point a
-    machine at arbitrary credential files. Locks the security boundary the
-    writable flip must not loosen."""
     seed_machine(REMOTE)
     dispatched = AsyncMock()
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatched)
@@ -136,7 +113,6 @@ def test_put_remote_rejects_oss_credential_fields(
 
 
 def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, clean_overrides: Path) -> None:
-    """PUT ?machine=<known-but-offline>: config_write times out -> 503."""
     seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
@@ -148,7 +124,6 @@ def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, clean_overrides
 
 
 def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, clean_overrides: Path) -> None:
-    """PUT ?machine=<known>: the remote config_write fails (row marked failed) -> 503."""
     seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpFailed({"error": "boom"}))
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
@@ -160,7 +135,6 @@ def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, clean_overrides:
 
 
 def test_put_remote_unknown_machine_404(clean_overrides: Path) -> None:
-    """PUT ?machine=<unknown> -> 404 before any dispatch."""
     with gateway_test_client() as client:
         resp = client.put("/api/config?machine=ghost-host", json={"ops_concurrency": 1})
     assert resp.status_code == 404, resp.text
@@ -168,16 +142,10 @@ def test_put_remote_unknown_machine_404(clean_overrides: Path) -> None:
 
 
 def test_self_machine_name_is_known_without_a_row(*, machine_identity: MachineIdentity) -> None:
-    """Sanity: the resolved self machine_name is treated as known even with no
-    machines row (the GET/PUT self path must not 404)."""
-    # machine_name() resolves to this process's identity; _assert_machine_known
-    # short-circuits it. A bare self GET already exercises this, but assert the
-    # name is non-empty so the short-circuit is meaningful.
     assert machine_identity.name()
 
 
 def test_request_actor_reads_only_middleware_state() -> None:
-    """The write-audit actor comes from verified request state, not caller JSON."""
     from types import SimpleNamespace
 
     from gateway.routers.configuration.runtime import request_actor
@@ -207,7 +175,6 @@ def test_request_actor_reads_only_middleware_state() -> None:
 
 
 def test_put_records_write_audit_with_value_diff(clean_overrides: Path) -> None:
-    """A cluster PUT lands an audit record carrying the non-sensitive value diff."""
     with gateway_test_client() as client:
         resp = client.put("/api/config", json={"llm_model": "audit-model-1"})
     assert resp.status_code == 200, resp.text
@@ -222,7 +189,6 @@ def test_put_records_write_audit_with_value_diff(clean_overrides: Path) -> None:
 
 
 def test_get_config_audit_last_is_bounded() -> None:
-    """`last` is a 1..200 query param; out of range is a 422, never a clamped read."""
     with gateway_test_client() as client:
         assert client.get("/api/config/audit?last=0").status_code == 422
         assert client.get("/api/config/audit?last=201").status_code == 422
@@ -231,9 +197,6 @@ def test_get_config_audit_last_is_bounded() -> None:
 def test_get_config_audit_default_last_comes_from_display_config(
     clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Omitted `last` is ``settings.display.config_audit_default_last``
-    (``AVA_CONFIG_AUDIT_DEFAULT_LAST``); the literal 20 is only that field's
-    default, not a hard-coded cap."""
     from base.api_contracts.agent_contract import MachineNotRegistered
 
     def _unregistered(_db: object, _name: str) -> list[str]:
@@ -268,7 +231,6 @@ def test_get_config_audit_default_last_comes_from_display_config(
 def test_get_config_audit_reads_own_records(
     clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    """A self audit read returns this box's newest records, tagged with its machine."""
     from base.api_contracts.agent_contract import MachineNotRegistered
 
     def _unregistered(_db: object, _name: str) -> list[str]:
@@ -301,7 +263,6 @@ def test_get_config_audit_reads_own_records(
 async def test_get_config_audit_all_merges_runners_newest_first(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    """machine=all fans out to the runners + this box, merges ts-desc, caps at last."""
     stamp = {"m1": "01", "m2": "02", machine_identity.name(): "00"}
     called: list[str] = []
 

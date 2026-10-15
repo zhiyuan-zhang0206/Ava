@@ -1,5 +1,3 @@
-"""The agent-ops daemon dispatches config read and write ops."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -32,7 +30,6 @@ async def test_dispatch_config_read_calls_config_read_op(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """config_read kind -> ops.config_read_op, returns completed with its result."""
     from services.agent_runner.agent_ops import daemon
 
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
@@ -61,7 +58,6 @@ async def test_dispatch_config_read_calls_config_read_op(
         host=fake_host(),
     )
     assert status == "completed"
-    # _dispatch serializes the result model to a JSON dict for the wire.
     assert result["machine"] == "x"
     assert captured == [True]
 
@@ -77,8 +73,6 @@ async def test_dispatch_config_write_passes_overrides(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """config_write kind -> ops.config_write_op(payload['overrides'] + local/actor/trace_id),
-    fail-fast on missing key."""
     from services.agent_runner.agent_ops import daemon
 
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
@@ -118,7 +112,7 @@ async def test_dispatch_config_write_passes_overrides(
     )
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}
-    assert captured["actor"] is None  # payload carried no gateway-stamped identity
+    assert captured["actor"] is None
     assert captured["trace_id"] is None
 
 
@@ -133,14 +127,9 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """payload missing 'overrides' key -> failed result (ConfigWritePayload
-    validation rejects it, fail-fast, no silent fallback)."""
     from services.agent_runner.agent_ops import daemon
 
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
-    # The config_write arm validates payload into ConfigWritePayload, whose
-    # `overrides` is required; a missing key is a caught ValidationError surfaced
-    # as a 'failed' op result (the /ops route returns HTTP 200 + status=failed).
     status, result = await daemon._dispatch(
         "config_write",
         {},
@@ -154,6 +143,6 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
-    )  # no 'overrides' key
+    )
     assert status == "failed"
     assert "overrides" in str(result["error"])

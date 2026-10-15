@@ -1,17 +1,8 @@
-"""What each retired mechanism caught, and that meizel catches it.
-
-Every case is an example the old tool reported (the import-linter contracts, Rule 4's package doors,
-the private-patch lint, the public-contract audit), written as a throwaway repository and judged by
-meizel. Deleting a mechanism needs this proof, so a case that stops holding is a regression of the gate.
-"""
-
 from __future__ import annotations
 
 import pytest
 
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, failures
-
-# --- import-linter: layers, base < ava < agent < gateway < cli, ops, services -----------------------
 
 PACKAGES = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
 STACK = (
@@ -36,15 +27,15 @@ def layered(make_repo: RepoFactory, importer: str, imported: str) -> list[tuple[
 @pytest.mark.parametrize(
     ("importer", "imported"),
     [
-        ("base", "ava"),  # layers: a lower layer never imports a higher one
+        ("base", "ava"),
         ("base", "agent"),
         ("ava", "agent"),
         ("agent", "gateway"),
         ("gateway", "cli"),
-        ("base", "ava_builtins"),  # a chain through a module outside the stack
-        ("base", "services"),  # "base must not import services"
-        ("services", "cli"),  # "services must not import cli"
-        ("ops", "gateway"),  # the ops layer
+        ("base", "ava_builtins"),
+        ("base", "services"),
+        ("services", "cli"),
+        ("ops", "gateway"),
         ("ops", "cli"),
         ("base", "ops"),
         ("gateway", "services"),
@@ -76,8 +67,6 @@ def test_declaring_the_edge_the_layering_refuses_closes_a_cycle(make_repo: RepoF
     [found] = diagnostics(make_repo(files), "manifest-cycle")
     assert "base -> agent -> base" in found.message or "agent -> base -> agent" in found.message
 
-
-# --- Rule 4: package doors -------------------------------------------------------------------------
 
 DOORS = {
     "a/__init__.py": "",
@@ -115,8 +104,6 @@ def test_a_sibling_may_use_an_underscore_module_of_its_own_package(make_repo: Re
     assert [p for _, p in failures(make_repo(DOORS)) if p.startswith("a/")] == []
 
 
-# --- the private-patch lint -------------------------------------------------------------------------
-
 POOL = {
     "base/__init__.py": "",
     "base/db/__init__.py": "",
@@ -153,9 +140,6 @@ def test_a_patch_of_another_packages_private_name_is_reported(
 ) -> None:
     root = make_repo({**POOL, "app/test_x.py": source})
     assert codes <= {d.code.value for d in analysis_of(root).verdict if d.path == "app/test_x.py"}
-
-
-# --- the public-contract audit ----------------------------------------------------------------------
 
 
 def test_entering_a_component_through_a_module_it_does_not_export_is_reported(

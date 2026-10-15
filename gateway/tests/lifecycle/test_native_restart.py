@@ -1,5 +1,3 @@
-"""Gateway requires actual restart domain acceptance, never an old runner hint."""
-
 from typing import Any
 
 import psycopg
@@ -90,7 +88,7 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
         ).status_code
         == 409
     )
-    assert calls == 2  # fresh key is a new refused invocation, never old receipt recovery
+    assert calls == 2
 
 
 @pytest.mark.parametrize(

@@ -1,10 +1,3 @@
-"""GET /api/events reads `audit_events` and `telemetry_events` and merges them.
-
-`category=audit` (and an audit-only event name) is answered from `audit_events`; telemetry and
-log from `telemetry_events`; everything else merges both newest-first, with one page slice over
-the merged rows.
-"""
-
 from __future__ import annotations
 
 import uuid
@@ -143,7 +136,7 @@ def test_audit_rows_honour_the_agent_level_machine_trace_and_window_filters(
     _audit(db_conn, "spawn", minutes_ago=5, agent_id=1, machine="m1", trace_id="ab12")
     _audit(db_conn, "spawn", minutes_ago=5, agent_id=2, machine="m2")
     _audit(db_conn, "env_unauthorized_write", minutes_ago=5, agent_id=1, level="warning")
-    _audit(db_conn, "spawn", minutes_ago=3000, agent_id=1)  # outside the default 24h window
+    _audit(db_conn, "spawn", minutes_ago=3000, agent_id=1)
 
     assert len(_get(category="audit", agent_id=1)["items"]) == 2
     assert len(_get(category="audit", agent_id=1, hours=100)["items"]) == 3

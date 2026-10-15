@@ -1,5 +1,3 @@
-"""Durable task assignments retain owner fences and bounded failure evidence."""
-
 from uuid import uuid4
 
 import psycopg
@@ -40,7 +38,6 @@ def test_reassigned_task_refuses_delayed_home_wake(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An in-flight selector/RPC cannot revive a recipient after reassignment."""
     actor = seed_agent(db_conn)
     pin_agent(actor)
     owner = terminated(
@@ -61,8 +58,6 @@ def test_reassigned_task_refuses_delayed_home_wake(
         "SELECT agent_id,id FROM inbound_messages WHERE agent_id=%s AND status='pending'", (owner,)
     ).fetchall()
     assert len(selected) == 1
-    # Model a producer not using the notification helper, while the old row
-    # remains pending. The final home-side transaction must re-check ownership.
     db_conn.execute("UPDATE agent_tasks SET owner=%s WHERE id=%s", (next_owner, task.id))
     db_conn.commit()
     with pytest.raises(ResurrectTriggerStaleError, match="no longer current"):
