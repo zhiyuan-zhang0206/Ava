@@ -1,4 +1,4 @@
-"""The existing admission may proceed without granting strong cancel authority."""
+"""Historical lifecycle receipts cannot replace current runtime ownership."""
 
 import asyncio
 from uuid import uuid4
@@ -21,7 +21,7 @@ from services.agent_runner.agent_host.tests.managed_work import managed_work
 @pytest.mark.parametrize(
     "fault", ["wrong_freeze", "unobserved", "other_owner", "restart", "unknown"]
 )
-async def test_collector_never_certifies_mismatched_frozen_stop_evidence(
+async def test_resource_transfer_requires_release_even_with_a_settled_stop_receipt(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     fault: str,
@@ -58,13 +58,6 @@ async def test_collector_never_certifies_mismatched_frozen_stop_evidence(
         db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (force,))
     db_conn.commit()
     successor = RuntimeIncarnation(target.agent_id, uuid4(), uuid4())
-    if fault in ("wrong_freeze", "restart"):
-        # Preserve the old admission predicate while declining a stronger proof.
+    with pytest.raises(ResourceEvidenceError, match="released ownership"):
         async with async_write_transaction(aops_pool) as conn:
             await admit_resources_async(conn, successor, ResourceProcess.capture(psutil.Process()))
-    else:
-        with pytest.raises(ResourceEvidenceError, match="closure"):
-            async with async_write_transaction(aops_pool) as conn:
-                await admit_resources_async(
-                    conn, successor, ResourceProcess.capture(psutil.Process())
-                )

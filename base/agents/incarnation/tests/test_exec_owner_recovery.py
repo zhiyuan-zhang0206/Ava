@@ -155,9 +155,7 @@ def test_same_host_admission_keeps_original_receipt_after_clock_movement(
         1,
     )
     linux_birth["birth"] += 60
-    admitted = next_incarnation_resources(
-        row, target, ResourceProcess.capture(psutil.Process()), predecessor=False
-    )
+    admitted = next_incarnation_resources(row, target, ResourceProcess.capture(psutil.Process()))
     assert admitted == state
 
 

@@ -2,15 +2,14 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
 
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.birth.spawn import create_agent_row
+from base.agents.incarnation.resources import IncarnationResources, decode_resources
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -136,7 +135,7 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
 
 
 @pytest.mark.parametrize("invalid", ["unapplied", "other_result"])
-async def test_unowned_force_cannot_invent_predecessor_restart_closure(
+async def test_released_resources_do_not_depend_on_superseded_restart_history(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     invalid: str,
@@ -172,16 +171,9 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
     wake.resurrect_agent(
         database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
     )
-    before = resources(db_conn, aid)
-    assert (
-        await admit_hosted_runtime(
-            aops_pool,
-            aid,
-            machine_identity.name(),
-            uuid4(),
-            expected_from="idling",
-            db=Database.from_settings(gate=database_gate),
-        )
-        is None
+    admitted = await admit_hosted_incarnation(
+        aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
     )
-    assert resources(db_conn, aid) == before
+    state = decode_resources(resources(db_conn, aid))
+    assert isinstance(state, IncarnationResources)
+    assert (state.generation, state.owner) == (admitted.generation, admitted.owner)

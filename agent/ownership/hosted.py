@@ -255,7 +255,7 @@ async def _dead_predecessor_evidence(
     # source module in the resident tests.
     from base.agents.incarnation.exec_owner_recovery import process_ended
 
-    if previous[1] == owner or previous[3] != machine or previous[4] is None:
+    if previous[1] in (None, owner) or previous[3] != machine or previous[4] is None:
         return None
     prior_resources = decode_resources(previous[4])
     if (
@@ -271,8 +271,7 @@ async def _dead_predecessor_evidence(
             if not await asyncio.to_thread(process_ended, prior_resources.host_process):
                 _refuse_hosted_admission(reason=AdmissionRefusalReason.DEAD_OWNER)
             return prior_resources.host_process
-        # The same real host may transfer a closed incarnation only through
-        # admit_resources_async's durable predecessor check.
+        # A different owner in this still-live host has not released the row.
     return None
 
 
