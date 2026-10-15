@@ -135,3 +135,57 @@ test('string/computed methods and class expressions have real lexical scopes wit
   }
   assert.equal(scanSource('core.ts', 'const obj = { [key]() {} };').symbols['[key]'], undefined);
 });
+
+test('static suite labels survive unrelated suite additions and reordering', () => {
+  for (const [imports, suite, example] of [
+    ["import { describe, it } from 'vitest';", 'describe', 'it'],
+    ["import { describe as group, test as example } from 'node:test';", 'group', 'example'],
+    ["import { test } from '@playwright/test';", 'test.describe', 'test'],
+  ]) {
+    const stable = `${suite}('stable', () => { /* Suite */ ${example}('works', () => { /* Test */ }); });`;
+    const other = `${suite}('other', () => {});`;
+    const before = scanSource('core.test.ts', imports + stable);
+    for (const source of [imports + stable + other, imports + other + stable]) {
+      const after = scanSource('core.test.ts', source);
+      assert.deepEqual(after.notes.map(n => n.lexical_owner), before.notes.map(n => n.lexical_owner));
+      assert.deepEqual(Object.keys(after.symbols), Object.keys(before.symbols));
+    }
+  }
+});
+
+test('nested suite labels keep their real parent and stable sibling identities', () => {
+  const imports = "import { describe } from 'vitest';";
+  const before = scanSource('core.test.ts', imports + "describe('outer', () => { describe('inner', () => { /* Keep */ }); });");
+  const after = scanSource('core.test.ts', imports + "describe('outer', () => { describe('new', () => {}); describe('inner', () => { /* Keep */ }); });");
+  const moved = scanSource('core.test.ts', imports + "describe('other', () => { describe('inner', () => { /* Keep */ }); });");
+  assert.equal(after.notes[0].lexical_owner, before.notes[0].lexical_owner);
+  assert.notEqual(moved.notes[0].lexical_owner, before.notes[0].lexical_owner);
+});
+
+test('identical notes moved across suites cannot borrow their original identity', () => {
+  const imports = "import { describe } from 'vitest';";
+  const before = scanSource('core.test.ts', imports + "describe('left', () => { /* Keep */ }); describe('right', () => {});");
+  const after = scanSource('core.test.ts', imports + "describe('left', () => {}); describe('right', () => { /* Keep */ });");
+  assert.notEqual(after.notes[0].lexical_owner, before.notes[0].lexical_owner);
+  assert.deepEqual(Object.keys(after.symbols), ['<module>']);
+});
+
+test('duplicate suite label growth invalidates only its own sibling group', () => {
+  const imports = "import { describe } from 'vitest';";
+  const source = "describe('same', () => { /* First */ }); describe('same', () => {}); describe('stable', () => { /* Stable */ });";
+  const before = scanSource('core.test.ts', imports + source);
+  const after = scanSource('core.test.ts', imports + "describe('same', () => {});" + source);
+  assert.notEqual(after.notes[0].lexical_owner, before.notes[0].lexical_owner);
+  assert.equal(after.notes[1].lexical_owner, before.notes[1].lexical_owner);
+});
+
+test('unproved suite labels retain conservative anonymous identities', () => {
+  for (const [prefix, stable, addition, suffix] of [
+    ["import { describe } from 'vitest';", 'describe(label, () => { /* Keep */ });', 'describe(other, () => {});', ''],
+    ['function helper(describe) {', "describe('stable', () => { /* Keep */ });", "describe('new', () => {});", '}'],
+  ]) {
+    const before = scanSource('core.test.ts', prefix + stable + suffix);
+    const after = scanSource('core.test.ts', prefix + addition + stable + suffix);
+    assert.notEqual(after.notes[0].lexical_owner, before.notes[0].lexical_owner);
+  }
+});

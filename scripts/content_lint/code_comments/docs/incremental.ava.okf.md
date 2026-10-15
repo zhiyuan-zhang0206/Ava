@@ -32,6 +32,21 @@ An inserted/deleted member changes only that repeated group's matching identity.
 No line-history or behavioral AST fingerprint is used. Identical text reordered
 inside the same identity can match; independent review must catch semantic drift.
 
+For an imported runner's recognized direct suite call with a literal string
+label, the real callback's lexical name uses the enclosing suite label chain.
+Adding or reordering a differently named suite leaves existing suite identities
+stable. Repeated labels under the same parent still use ordinal/total matching;
+moving a note across suites cannot reuse its former credit. This creates no
+public suite anchor and does not change existing typed test anchors.
+
+Variable/property names and recognized test labels likewise distinguish their
+existing callback scopes. Other anonymous callbacks, including dynamic suite
+labels and unrecognized or shadowed runner bindings, remain in the anonymous
+group of their real parent. Adding/removing a member conservatively rechecks
+unchanged notes in that group and its descendants. The checker does not infer
+runtime labels, hash function bodies or promise that every code-only edit leaves
+all legacy notes outside strict scope.
+
 Both old and target Python/TypeScript text are read from Git blobs without newline
 normalization. The same TypeScript compiler accepts filesystem or JSON-supplied
 source text; its versioned output includes raw text, lexical identity and hashes.
