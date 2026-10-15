@@ -76,3 +76,12 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - **Qwen**: graded by a token budget, not a level enum, so the knob rides the `enable_thinking` switch (mimo's binary `none`/`high`). Endpoint is CONFIG (`AVA_DASHSCOPE_BASE_URL`) — a dedicated workspace host is unreachable from the public default, and region changes reprice. Verified live 2026-08-20: thinking-off honored, and the streamed usage frame carries `cached_tokens` → `cache_read`. Explicit `cache_control` tier unwired.
 
 - Key deps: [[llm.ava.okf.md]] (agent/graph/llm/node.py calls `build_chat_model`)
+
+Regression assertions: [test contracts](../../../packages/tests/lm/docs/contracts.ava.okf.md#reasoning-visibility).
+
+Construction tests inspect client configuration without making model API calls;
+they do not prove current vendor behavior. Provider builders own the wire
+translation. Extended-thinking-only Claude uses a token budget; adaptive Claude
+uses effort. Qwen uses `enable_thinking` on its compatible endpoint. A caller
+disabling thinking takes precedence where the provider supports that switch;
+always-thinking models retain their provider-specific warning behavior.

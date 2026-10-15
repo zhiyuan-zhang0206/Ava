@@ -43,3 +43,12 @@ agent streams and synchronous SDK calls, so Grafana's provider-grouped HTTP 429
 alert covers batch traffic as well as turns.
 
 - Key deps: [[lm.ava.okf.md]] (provider-layer overview)
+
+Regression assertions: [test contracts](../../packages/tests/lm/docs/contracts.ava.okf.md#billing-evidence).
+
+The DashScope arrears cases are synthetic combinations of the auth-response
+shape captured in `base/tests/test_qwen_live_smoke.py` and the billing vocabulary;
+they do not establish that a live arrears response was observed. The Google
+prepayment body retains the 2026-09-07 incident fixture: integer `code` is HTTP
+status, while `message` carries the depleted-credit reason. A quota or
+`RESOURCE_EXHAUSTED` label alone is insufficient evidence of depleted credit.
