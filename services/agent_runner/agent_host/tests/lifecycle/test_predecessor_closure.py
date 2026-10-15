@@ -16,7 +16,6 @@ from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from base.agents.birth.spawn import create_agent_row
 from base.agents.incarnation.resources import (
     IncarnationResources,
-    ResourceEvidenceError,
     ResourceShapeError,
     decode_resources,
 )
@@ -221,11 +220,13 @@ async def test_closed_form_is_admitted_exactly_once(
     assert admitted_row[1]["status"] == "done"
 
     # Exactly once: the successor's own set has no closure receipt for another
-    # owner to consume.
-    with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
+    # owner to consume (a recorded refusal, not a raised crash).
+    assert (
         await _admit(
             aops_pool, aid, uuid4(), database_gate=database_gate, local_machine=machine_identity
         )
+        is None
+    )
 
 
 async def test_closed_form_without_its_receipt_is_not_admissible(
@@ -249,10 +250,12 @@ async def test_closed_form_without_its_receipt_is_not_admissible(
     # Withdraw the receipt: the same bytes without a settled decision prove nothing.
     db_conn.execute("UPDATE inbound_messages SET applied_at=NULL WHERE id=%s", (receipt,))
     db_conn.commit()
-    with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
+    assert (
         await _admit(
             aops_pool, aid, uuid4(), database_gate=database_gate, local_machine=machine_identity
         )
+        is None
+    )
 
 
 def _resurrected(

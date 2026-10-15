@@ -17,6 +17,12 @@ task even when its host retains ownership. `renew_hosted_owner()` refreshes only
 the current host owner's rows; `release_hosted_owner()` and
 `settle_hosted_runtime()` match the original incarnation. Restart releases it for
 a new generation. A fresh foreign owner blocks admission and stale-row recovery.
+A resurrection that closes out a closed retained incarnation records the
+released generation and owner on its own inbound, and the successor consumes
+that release record for the same live host process; every unmet closure is a
+recorded refusal (`last_admission_outcome` plus a `host_admission_refused`
+event), not a crash. See the shipped follow-up in
+[the unowned-termination decision](../../../docs/decisions/agents/lifecycle/2026-09-29-unowned-termination-resurrects.md).
 A stopping host's release is bounded (`services/agent_runner/agent_host/host.py`,
 `_RELEASE_OWNER_TIMEOUT_S`) so the whole stop fits ava-root's TERM window; with
 the database unreachable it fails and the leases expire by TTL.

@@ -340,7 +340,7 @@ class AgentHost:
             if incarnation is None:
                 logger.info(
                     "hosted turn for agent {agent_id} not started — row left {status} "
-                    "(concurrent lifecycle op); skipping",
+                    "(no admission granted: refused, held or superseded); skipping",
                     agent_id=agent_id,
                     status=stored.status,
                 )
