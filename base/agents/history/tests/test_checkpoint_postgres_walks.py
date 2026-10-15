@@ -1,5 +1,3 @@
-"""Historical delta walks retain their seed and report interrupted read spans."""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -116,7 +114,6 @@ async def test_missing_delta_parent_fails_sync_async_and_public_reader(
         load_checkpoint_messages(_db(database_gate=database_gate), int(thread))
     assert isinstance(failed.value.__cause__, RuntimeError)
     assert str(missing) in str(failed.value.__cause__)
-    # Detection is read-only; it neither removes nor substitutes the live head.
     assert db_conn.execute(
         "SELECT parent_checkpoint_id FROM checkpoints WHERE thread_id=%s AND checkpoint_id=%s",
         (thread, _checkpoint_id(configs[-1])),
@@ -188,9 +185,8 @@ def _append_newer_checkpoints_across_page_boundary(
     parent = first[-1]
     for step in range(6, 1027):
         parent = _append_delta_checkpoint(saver, thread=thread, step=step, parent=parent)
-        if step == 1025:  # 1023 newer checkpoints: target is in the first page.
+        if step == 1025:
             _assert_walk_has_writes_and_seed(_history(saver, target), [1])
-    # 1024 newer checkpoints: target is on page two.
     _assert_walk_has_writes_and_seed(_history(saver, target), [1])
 
 
@@ -210,8 +206,6 @@ async def test_historical_walk_page_boundary_and_compact_segment(
         )["messages"]
     _assert_walk_has_writes_and_seed(async_entry, [1])
 
-    # This is the production boundary shape: a walk checkpoint outside the
-    # newest page, read by the gateway as one retained compaction segment.
     assert "configurable" in target
     segment = load_checkpoint_messages_segment(
         _db(database_gate=database_gate),
@@ -256,9 +250,6 @@ def test_adapter_rejects_foreign_replacement(monkeypatch: pytest.MonkeyPatch) ->
         checkpoint_postgres_walks.validate_checkpoint_postgres_api()
 
 
-# Delta read compatibility failures during the PostgreSQL history walk.
-
-
 def _config() -> RunnableConfig:
     return {
         "configurable": {
@@ -284,7 +275,7 @@ def _failing_saver(*, serde: SerializerProtocol | None = None) -> AsyncPostgresS
             [],
         )
 
-    saver.aget_tuple = raw_tuple  # type: ignore[method-assign]
+    saver.aget_tuple = raw_tuple
     wrap_saver_reads_with_delta_reconstruction(saver)
     return saver
 
@@ -295,7 +286,7 @@ async def test_delta_read_timeout_emits_partial_span(loguru_records: list[Any]) 
     async def timed_out(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
         raise TimeoutError("history timed out")
 
-    saver.aget_delta_channel_history = timed_out  # type: ignore[method-assign]
+    saver.aget_delta_channel_history = timed_out
     with pytest.raises(TimeoutError, match="history timed out"):
         await saver.aget_tuple(_config())
     spans = [
@@ -316,7 +307,7 @@ async def test_delta_read_decode_error_emits_partial_span(loguru_records: list[A
     saver = _failing_saver()
 
     async def bad_history(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
-        return saver._build_delta_channels_writes_history(  # type: ignore[attr-defined]
+        return saver._build_delta_channels_writes_history(
             channels=["messages"],
             chain_by_ch={"messages": ["checkpoint-a"]},
             seed_ver_by_ch={},
@@ -334,7 +325,7 @@ async def test_delta_read_decode_error_emits_partial_span(loguru_records: list[A
             ],
         )
 
-    saver.aget_delta_channel_history = bad_history  # type: ignore[method-assign]
+    saver.aget_delta_channel_history = bad_history
     with pytest.raises(ValueError):
         await saver.aget_tuple(_config())
     spans = [
@@ -355,7 +346,6 @@ async def test_delta_read_decode_error_emits_partial_span(loguru_records: list[A
 async def test_checkpoint_reads_leave_shared_serializer_unchanged(
     loguru_records: list[Any],
 ) -> None:
-    """Cold readers sharing a serializer must not install process-wide instrumentation."""
     shared_serde = JsonPlusSerializer()
     decode = shared_serde.loads_typed
     first = AsyncPostgresSaver(cast(Any, object()), serde=shared_serde)
@@ -365,7 +355,7 @@ async def test_checkpoint_reads_leave_shared_serializer_unchanged(
     assert shared_serde.loads_typed == decode
 
     async def bad_history(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
-        return saver._build_delta_channels_writes_history(  # type: ignore[attr-defined]
+        return saver._build_delta_channels_writes_history(
             channels=["messages"],
             chain_by_ch={"messages": ["checkpoint-a"]},
             seed_ver_by_ch={},
@@ -383,7 +373,7 @@ async def test_checkpoint_reads_leave_shared_serializer_unchanged(
             ],
         )
 
-    saver.aget_delta_channel_history = bad_history  # type: ignore[method-assign]
+    saver.aget_delta_channel_history = bad_history
     with pytest.raises(ValueError):
         await saver.aget_tuple(_config())
     spans = [

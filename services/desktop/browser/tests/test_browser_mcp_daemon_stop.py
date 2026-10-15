@@ -1,20 +1,3 @@
-"""SIGTERM shutdown tests for the shared chrome MCP daemon (#2043).
-
-The 2026-09-09 `cluster update` outage hung because the daemon received
-SIGTERM but never exited: the finally path awaited the cancelled session
-task under ``suppress(Exception)`` (CancelledError is a BaseException, so it
-escaped and skipped the upstream stack / server / socket cleanup) and several
-cleanup awaits were unbounded. These tests run the real daemon as a private
-subprocess with a fake ``npx`` upstream and a fake Chrome listener, and prove:
-
-- TERM on a normally connected daemon exits it and closes server, socket and
-  the upstream child, without touching the independently-retained Chrome.
-- TERM while the upstream connect hangs interrupts the connect immediately.
-- Upstream death exits the daemon without reconnecting or leaving children.
-- A cancelled session task never skips the remaining cleanup (in-process).
-- A wedged cleanup await is bounded, so shutdown always completes.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,10 +22,6 @@ import pytest
 from base.paths import chrome_mcp_socket
 
 
-# The daemon's Unix socket lives under $AVA_HOME/run; pytest's tmp_path on
-# macOS sits under /private/var/folders/... and breaks the 104-byte AF_UNIX
-# path limit, which makes the daemon's single-instance probe fail closed and
-# exit silently. A short home under /tmp keeps every path inside the limit.
 @pytest.fixture
 def home(tmp_path: Path) -> Path:
     return Path(tempfile.mkdtemp(prefix="ava-mcp-home-", dir="/tmp"))
@@ -100,12 +79,6 @@ os._exit(0)
 
 
 class _ChromeFake:
-    """A listening socket standing in for the independently-retained Chrome.
-
-    Counts accepted connections: the daemon never dials the CDP port itself
-    (only the upstream does), so a normal stop must leave this untouched.
-    """
-
     def __init__(self) -> None:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -136,12 +109,6 @@ class _ChromeFake:
 
 
 def _fake_bin(tmp_path: Path, mode: str) -> tuple[Path, Path]:
-    """A PATH dir whose ``npx`` execs the fake upstream in the given mode.
-
-    The mode is baked into the script: the mcp SDK's stdio environment does
-    not pass unknown vars through to the child, so an env-only mode would
-    silently fall back to "ok".
-    """
     bin_dir = tmp_path / "fakebin"
     bin_dir.mkdir()
     upstream = tmp_path / "fake_upstream.py"
@@ -153,17 +120,9 @@ def _fake_bin(tmp_path: Path, mode: str) -> tuple[Path, Path]:
 
 
 def _daemon_env(home: Path, bin_dir: Path, chrome: _ChromeFake, mode: str) -> dict[str, str]:
-    # browser_cdp_port is cluster-pinned: _enforce_cluster_env_authority drops it
-    # from the environment unless the unit's own .env declares it. Write a real
-    # unit .env in the private home — the same source a production unit uses.
-    # The connect timeout is pinned long so the hung-connect test proves the
-    # stop event beats the timeout rather than the other way around.
     home.mkdir(parents=True, exist_ok=True)
     (home / ".env").write_text(
         f"AVA_BROWSER_CDP_PORT={chrome.port}\nAVA_MCP_CONNECT_TIMEOUT_SECONDS=120\n"
-        # A real unit always carries a machine identity (`ava init --machine-name`
-        # records it in `.env`); the daemon's boot seam (init_gateway_process) stamps
-        # the name into every event record.
         "AVA_MACHINE_NAME=browser-mcp-test\n",
         encoding="utf-8",
     )
@@ -175,10 +134,6 @@ def _daemon_env(home: Path, bin_dir: Path, chrome: _ChromeFake, mode: str) -> di
             "PATH": f"{bin_dir}:{env['PATH']}",
         }
     )
-    # A hosted profile's Settings build would fetch config from AVA_GATEWAY_URL
-    # (a test stub here), killing the daemon before it binds its socket; strip
-    # the launcher environment down to a plain private unit that reads its own
-    # .env only — exactly the production single-box/standalone shape.
     for key in (
         "AVA_CONFIG_FETCH",
         "AVA_GATEWAY_URL",
@@ -195,7 +150,6 @@ def _socket_path(home: Path, chrome: _ChromeFake) -> Path:
 def _spawn(
     home: Path, tmp_path: Path, bin_dir: Path, chrome: _ChromeFake, mode: str
 ) -> tuple[subprocess.Popen[bytes], Path]:
-    """Start the daemon; return (process, its output log path)."""
     log_path = tmp_path / "daemon.log"
     env = _daemon_env(home, bin_dir, chrome, mode)
     (tmp_path / "daemon.env").write_text(
@@ -247,8 +201,6 @@ def _client_roundtrip(path: Path, request: dict[str, object]) -> dict[str, objec
 def _client_roundtrip_until_ok(
     path: Path, request: dict[str, object], timeout: float = 30.0
 ) -> dict[str, object]:
-    """The daemon answers transient errors while its upstream connects; retry
-    until the round-trip succeeds (the real bridges retry the same way)."""
     deadline = time.monotonic() + timeout
     last: dict[str, object] = {}
     while time.monotonic() < deadline:
@@ -291,9 +243,6 @@ def test_sigterm_normal_connection_closes_everything_except_chrome(
     sock_path = _socket_path(home, chrome)
     try:
         _wait_socket(sock_path, daemon, daemon_log)
-        # A real round-trip proves the upstream is connected (list_tools goes
-        # through the fake npx subprocess, which serves an empty list); the
-        # daemon-owned renew_page tool rides after the verbatim passthrough.
         resp = _client_roundtrip_until_ok(sock_path, {"id": 1, "method": "list_tools"})
         tools = cast("list[dict[str, Any]]", resp["result"])
         assert [t["name"] for t in tools] == ["renew_page"]
@@ -321,10 +270,9 @@ def test_sigterm_during_hung_connect_interrupts_immediately(home: Path, tmp_path
     sock_path = _socket_path(home, chrome)
     try:
         _wait_socket(sock_path, daemon, daemon_log)
-        time.sleep(0.5)  # the daemon is now inside session.initialize()
+        time.sleep(0.5)
         start = time.monotonic()
         rc = _term_and_wait(daemon, daemon_log)
-        # Connect timeout is 120s; the stop event must win the race far sooner.
         assert rc == 0
         assert time.monotonic() - start < 15, "TERM must interrupt a hung connect"
         assert not sock_path.exists()
@@ -337,7 +285,6 @@ def test_sigterm_during_hung_connect_interrupts_immediately(home: Path, tmp_path
 
 @pytest.mark.flaky
 def test_upstream_death_exits_without_reconnecting(home: Path, tmp_path: Path) -> None:
-    """The real daemon creates one child and exits when that child's session dies."""
     chrome = _ChromeFake()
     bin_dir, _ = _fake_bin(tmp_path, "die-after-init")
     daemon, daemon_log = _spawn(home, tmp_path, bin_dir, chrome, "die-after-init")
@@ -353,9 +300,6 @@ def test_upstream_death_exits_without_reconnecting(home: Path, tmp_path: Path) -
         chrome.close()
 
 
-# ── In-process regressions (no subprocess) ────────────────────────────────
-
-
 async def _run_with_fakes(
     monkeypatch: pytest.MonkeyPatch,
     home: Path,
@@ -363,7 +307,6 @@ async def _run_with_fakes(
     *,
     wedged_stack: bool = False,
 ) -> tuple[asyncio.Task[None], Any]:
-    """Drive run() in-process with a fake upstream; return (task, tracked stack)."""
     from mcp import types
 
     import services.desktop.browser.mcp_daemon as daemon_mod
@@ -399,7 +342,7 @@ async def _run_with_fakes(
         _url: str, _stop: asyncio.Event, *, connect_timeout_reader: Callable[[], float]
     ) -> tuple[Any, Any]:
         assert connect_timeout_reader() == 60.0
-        return FakeSession(), stack  # type: ignore[return-value]
+        return FakeSession(), stack
 
     monkeypatch.setattr(daemon_mod, "create_upstream", fake_create_upstream)
 
@@ -416,7 +359,7 @@ async def _run_with_fakes(
     task = asyncio.create_task(
         run(home=home, browser_cdp_port=9222, connect_timeout_reader=lambda: 60.0)
     )
-    await asyncio.sleep(0.3)  # let run() connect and start the watchdog/reaper
+    await asyncio.sleep(0.3)
     return task, stack
 
 
@@ -424,32 +367,25 @@ async def _run_with_fakes(
 def test_cancelled_session_task_never_skips_cleanup(
     home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#2043 regression: a cancelled session task must not escape the finally.
-
-    The old ``suppress(Exception)`` let CancelledError propagate out of run()
-    and skip the upstream stack / server / socket cleanup entirely.
-    """
     import services.desktop.browser.mcp_daemon as daemon_mod
 
     async def scenario() -> None:
         stop = asyncio.Event()
         task, stack = await _run_with_fakes(monkeypatch, home, stop)
         await asyncio.sleep(0.2)
-        stop.set()  # SIGTERM equivalent
+        stop.set()
         await asyncio.wait_for(task, timeout=20)
         assert stack.closed, "upstream stack must be closed after the task ended"
         assert not chrome_mcp_socket(home, 9222).exists(), "socket must be unlinked"
 
     asyncio.run(scenario())
-    assert daemon_mod  # module imported for the monkeypatch lifetime
+    assert daemon_mod
 
 
 @pytest.mark.flaky
 def test_wedged_cleanup_await_is_bounded(
     home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A cleanup step that never finishes cannot hold the shutdown open."""
-
     async def scenario() -> None:
         stop = asyncio.Event()
         task, _stack = await _run_with_fakes(monkeypatch, home, stop, wedged_stack=True)
@@ -467,8 +403,6 @@ def test_wedged_cleanup_await_is_bounded(
 def test_stopping_the_daemon_drops_in_flight_tab_groupings(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Grouping runs in background tasks off the daemon's lock; a stopping daemon
-    cancels them instead of leaving them to outlive it."""
     import services.desktop.browser.mcp_daemon as daemon_mod
 
     cancelled: list[bool] = []

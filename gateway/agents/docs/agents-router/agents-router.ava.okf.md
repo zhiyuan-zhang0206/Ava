@@ -31,6 +31,14 @@ relationships and the effective cluster default using
 endpoint, birth stamp and spawn preflight.
 `/api/agents/{id}/exited` finalizes agent exit.
 
+The model picker receives `superseded_by` and each model's reasoning-effort
+options from the registry. `gateway/tests/test_agents_endpoints.py` compares
+those options with the corresponding provider binding: shared vocabularies
+match its declared levels, while Gemini's per-model vocabularies stay within the
+binding's fallback. The published effort default is the model's tuning value,
+nonempty and within its options. A cluster-wide effort pin does not replace
+that picker default.
+
 Lifecycle handlers pass the actual request app's database and pool to
 `forward_to_home_machine`; home lookup borrows that pool and RPC uses that
 database. MCP termination passes its server-composed database and pool through

@@ -1,12 +1,3 @@
-"""SQL safety validation + admission for plugin metrics (W13).
-
-Covers what the data registry enforces when it admits a plugin's declared metrics: name
-uniqueness and query safety per dialect — the static-SQL whitelist (single SELECT over
-`agents_meta`, function / operator whitelist, no macros /
-placeholders — task #180 PR C) and the LogQL contract
-(``base/telemetry/metrics/logql.py``).
-"""
-
 import re
 from typing import Any
 
@@ -25,39 +16,26 @@ from base.telemetry.metrics.plugin_metrics import (
     validate_spec_sql,
 )
 
-# ── SQL safety: accepted templates ────────────────────────────────────────────
-
 
 def _good_sqls() -> list[str]:
     return [
-        # plain static count (the core_live_agents shape)
         "SELECT count(*) AS calls FROM agents_meta WHERE event_name='llm_usage' "
         "AND category IN ('telemetry','log')",
-        # FILTER + JSONB access + NULLIF division (static)
         "SELECT 100.0 * count(*) FILTER (WHERE attributes->>'status' = 'done') "
         '/ NULLIF(count(*), 0) AS "done %" FROM agents_meta '
         "WHERE event_name = 'task_update' AND category = 'audit' AND attributes ? 'status'",
-        # subquery with its own FROM agents_meta (static)
         'SELECT agent_id, max(ratio) AS "max agent" FROM ('
         "SELECT agent_id, SUM((attributes->>'cache_read')::bigint)::numeric "
         "/ NULLIF(SUM((attributes->>'in_total')::bigint), 0) AS ratio "
         "FROM agents_meta WHERE event_name = 'llm_usage' AND category = 'telemetry' "
         "AND agent_id IS NOT NULL GROUP BY 1) per_agent "
         "GROUP BY 1 ORDER BY 1",
-        # trailing semicolon tolerated
         "SELECT count(*) FROM agents_meta WHERE event_name = 'llm_usage';",
-        # comparisons / arithmetic / IS NULL / LIMIT / OFFSET / bare columns
         "SELECT count(*) FROM agents_meta WHERE agent_id IS NULL LIMIT 10 OFFSET 5",
-        # CASE expression + comparisons
         "SELECT count(*) FILTER (WHERE CASE WHEN event_name = 'a' THEN 1 ELSE 0 END = 1) FROM agents_meta",
-        # ordered-set aggregate (W18): percentile_cont + WITHIN GROUP
         "SELECT percentile_cont(0.5) WITHIN GROUP "
         "(ORDER BY (attributes->>'duration_seconds')::float8) AS p50 FROM agents_meta",
-        # the live agents_meta table (core_live_agents)
         "SELECT count(*) AS \"live agents\" FROM agents_meta WHERE status IN ('running','idling')",
-        # keyword case-insensitivity (Tracker #766): the first keyword and the
-        # table reference are accepted in any case, like every other keyword
-        # check in the module
         "select count(*) from agents_meta where event_name = 'llm_usage' "
         "and category in ('telemetry', 'log')",
     ]
@@ -69,8 +47,6 @@ def test_validate_accepts_whitelisted_templates(sql: str) -> None:
 
 
 def _bad_sqls() -> list[tuple[str, str]]:
-    """(sql, expected fragment) — every query must be rejected and the
-    message must say why."""
     return [
         ("INSERT INTO agents_meta (event_name) VALUES ('x')", "single SELECT"),
         ("UPDATE agents_meta SET event_name='x'", "single SELECT"),
@@ -98,8 +74,6 @@ def _bad_sqls() -> list[tuple[str, str]]:
         ("SELECT $$dollar$$", "unrecognized"),
         ("EXPLAIN SELECT count(*) FROM agents_meta", "single SELECT"),
         ("SELECT count(*) FROM agents_meta WHERE event_name = 'x' OR 1=1 -- x", "comments"),
-        # the template era is over (task #180 PR C): macros and placeholders
-        # are rejected — the live event stream is read through LogQL
         ("SELECT count(*) FROM agents_meta WHERE $__timeFilter(ts)", "Grafana time macros"),
         (
             "SELECT $__timeGroup(ts, $__interval) AS time, count(*) FROM agents_meta GROUP BY 1",
@@ -124,14 +98,7 @@ def test_validate_rejects_malicious_templates(sql: str, fragment: str) -> None:
         validate_metric_sql(sql)
 
 
-# ── Task #882 core-migration constructs ─────────────────────────────────────
-
-
 def test_validate_accepts_core_migration_sql() -> None:
-    """The static SQL constructs the migrated core panels still need:
-    generate_series in FROM with alias column list, LEFT JOIN of a subquery
-    with ON, the agents_meta table, and the set/date helper functions —
-    all without macros or placeholders (task #180 PR C)."""
     validate_metric_sql(
         "SELECT g.time AS time, coalesce(d.n, 0) AS n "
         "FROM generate_series(1, 10) AS g(time) "
@@ -144,7 +111,6 @@ def test_validate_accepts_core_migration_sql() -> None:
     validate_metric_sql(
         "SELECT count(*) AS \"live agents\" FROM agents_meta WHERE status IN ('running','idling')"
     )
-    # comma-separated tables still work
     validate_metric_sql(
         "SELECT count(*) FROM agents_meta, agents_meta WHERE agents_meta.agent_id = agents_meta.id"
     )
@@ -162,14 +128,10 @@ def test_validate_accepts_core_migration_sql() -> None:
             "SELECT count(*) FROM agents_meta LEFT JOIN agents_meta ON agents_meta.id = agents_meta.id",
             "LEFT JOIN must reference a subquery",
         ),
-        # a subquery smuggled into generate_series args is still validated
         (
             "SELECT count(*) FROM generate_series((SELECT 1 FROM pg_class))",
             "only the `agents_meta`",
         ),
-        # scalar subquery inside a SELECT-list function call is legal SQL
-        # and must still be checked (2026-08-10 audit: coalesce args were
-        # skipped wholesale, smuggling pg_class past the agents_meta-only gate)
         (
             "SELECT coalesce((SELECT count(*) FROM pg_class), 0) FROM agents_meta",
             "only the `agents_meta`",
@@ -186,9 +148,6 @@ def test_validate_rejects_bad_joins(sql: str, fragment: str) -> None:
 
 
 def test_validate_accepts_scalar_subquery_over_agents_meta() -> None:
-    """A scalar subquery inside a whitelisted function call is legal SQL
-    when it reads from `agents_meta` — the FROM gate recurses into call args
-    but must not reject the legitimate case (2026-08-10 audit fix)."""
     validate_metric_sql(
         "SELECT coalesce((SELECT count(*) FROM agents_meta), 0) FROM agents_meta "
         "WHERE event_name = 'llm_usage'"
@@ -199,9 +158,6 @@ def test_validate_accepts_scalar_subquery_over_agents_meta() -> None:
 def test_validate_rejects_unknown_from_function() -> None:
     with pytest.raises(InvalidMetricQuery, match="only the `agents_meta`"):
         validate_metric_sql("SELECT count(*) FROM unnest(ARRAY(1,2))")
-
-
-# ── multi-target specs ────────────────────────────────────────────────────────
 
 
 def test_render_targets_renders_query_and_targets() -> None:
@@ -216,7 +172,6 @@ def test_render_targets_renders_query_and_targets() -> None:
             "SELECT count(*) FROM agents_meta WHERE agent_id = 7",
         ],
     )
-    # static SQL renders verbatim (the template era is over, task #180 PR C)
     rendered = render_targets(spec)
     assert rendered == [
         "SELECT count(*) FROM agents_meta WHERE event_name = 'turn_end'",
@@ -239,9 +194,6 @@ def test_validate_spec_sql_checks_all_targets() -> None:
         )
 
 
-# ── admission ─────────────────────────────────────────────────────────────────────────
-
-
 def _spec(**overrides: Any) -> MetricSpec:
     base: dict[str, Any] = {
         "name": "test_metric",
@@ -252,11 +204,10 @@ def _spec(**overrides: Any) -> MetricSpec:
         "AND category = 'telemetry'",
     }
     base.update(overrides)
-    return MetricSpec(**base)  # type: ignore[arg-type]
+    return MetricSpec(**base)
 
 
 def _admit(*faces: tuple[str, list[MetricSpec]]) -> tuple[list[MetricSpec], list[str]]:
-    """(admitted specs, refused plugin names) of a data registry built from `(plugin, specs)`."""
     registry, refused = build_data_registry(
         [DeclaredFace(plugin, PluginContributions(metrics=tuple(specs))) for plugin, specs in faces]
     )
@@ -301,7 +252,7 @@ def test_a_refused_plugin_leaves_no_metrics_and_spares_the_others() -> None:
 
 def test_spec_bad_event_name_rejected() -> None:
     with pytest.raises(ValidationError):
-        _spec(event_name="TurnEnd")  # uppercase — must be ^[a-z][a-z0-9_-]*$
+        _spec(event_name="TurnEnd")
     with pytest.raises(ValidationError):
         _spec(event_name="turn end")
     with pytest.raises(ValidationError):
@@ -309,9 +260,6 @@ def test_spec_bad_event_name_rejected() -> None:
 
 
 def test_admission_hyphenated_event_name_accepted() -> None:
-    # The live event vocabulary carries hyphens (e.g. recall-filter), so the
-    # event_name charset allows them; SQL templates are static now, so a
-    # hyphenated event name cannot broaden the SQL surface at all.
     admitted, refused = _admit(("ava_demo", [_spec(event_name="recall-filter")]))
     assert refused == []
     (ok,) = admitted
@@ -321,14 +269,10 @@ def test_admission_hyphenated_event_name_accepted() -> None:
 
 def test_spec_bad_category_rejected() -> None:
     with pytest.raises(ValidationError):
-        _spec(category="metrics")  # not audit|telemetry|log
+        _spec(category="metrics")
 
 
 def test_admission_rejects_template_placeholders() -> None:
-    # The template era is over (task #180 PR C): any SQL template carrying
-    # {event_name}/{category}/{{agent_id}} placeholders is refused at
-    # admission — the live event stream is read through LogQL, and the
-    # {{agent_id}} ↔ grafana surface rule died with the placeholders.
     spec = _spec(
         query="SELECT count(*) FROM agents_meta WHERE event_name = {event_name} "
         "AND category = {category} AND {{agent_id}}"
@@ -349,26 +293,15 @@ def test_spec_empty_output_rejected() -> None:
         _spec(output=[])
 
 
-# ── rendering + export ────────────────────────────────────────────────────────
-
-
 def test_render_static_sql_passes_through() -> None:
-    # Static SQL renders verbatim — placeholders were retired with the
-    # template cutover (task #180 PR C).
     (spec,) = _admit(("ava_demo", [_spec()]))[0]
     assert render_query(spec) == _spec().query
 
 
 def test_render_escapes_quotes_defensively() -> None:
-    # event_name/category are validated identifiers, but the literal renderer must
-    # still single-quote-escape — defense in depth (a future schema change
-    # widening the event_name charset cannot turn into SQL injection).
     from base.telemetry.metrics.plugin_metrics import sql_literal
 
     assert sql_literal("a'b") == "'a''b'"
-
-
-# ── time basis: the registry renders the title suffix and the divisor ─────────
 
 
 def _bucket(window: str) -> str:

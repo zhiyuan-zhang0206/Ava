@@ -1,5 +1,3 @@
-"""Schedule directory searches must traverse pages without duplicating role agents."""
-
 from __future__ import annotations
 
 import importlib.util
@@ -36,7 +34,6 @@ def _load(filename: str) -> Any:
 
 
 def _directory(monkeypatch: pytest.MonkeyPatch, module: ModuleType, pages: list[Any]) -> Mock:
-    # An explicit keyword signature makes calls to the removed list API fail.
     fetch = Mock(side_effect=pages)
 
     def list_agents(
@@ -44,7 +41,7 @@ def _directory(monkeypatch: pytest.MonkeyPatch, module: ModuleType, pages: list[
     ) -> Any:
         return fetch(scope=scope, query=query, before_id=before_id, limit=limit)
 
-    monkeypatch.setattr(module.ava.agents, "list_agents", list_agents)  # type: ignore[attr-defined]
+    monkeypatch.setattr(module.ava.agents, "list_agents", list_agents)
     return fetch
 
 

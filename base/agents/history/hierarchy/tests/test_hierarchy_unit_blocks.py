@@ -1,5 +1,3 @@
-"""`base.agents.history.hierarchy.timeline_blocks` — a turn split into thinking, call and output blocks."""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -52,7 +50,7 @@ def turn(
     if reasoning_ms is not None:
         kwargs["ava_reasoning_ms_by_block"] = {"0": reasoning_ms}
     return AIMessage(
-        content=content,  # type: ignore[arg-type]
+        content=content,
         tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "t"}] if code else [],
         additional_kwargs=kwargs,
     )
@@ -86,9 +84,9 @@ def test_a_work_unit_is_shown_as_thinking_call_and_output_on_read_times() -> Non
     msgs = [inbound(0), turn(10), result(25)]
     assert blocks(msgs) == [
         ("inbound", 0, 0, 0, 0),
-        ("thinking", 1, 1, 0, 10),  # from the previous message's read time to the end of the stream
-        ("call", 1, 1, 10, 10),  # an instant at the end of the stream
-        ("output", 1, 2, 10, 25),  # the execution, up to the tool result
+        ("thinking", 1, 1, 0, 10),
+        ("call", 1, 1, 10, 10),
+        ("output", 1, 2, 10, 25),
     ]
 
 
@@ -123,13 +121,12 @@ def test_a_turn_of_only_text_spans_its_stream_and_a_reasoning_only_turn_has_no_c
 
 
 def test_blocks_follow_the_read_order_when_an_arrival_is_stamped_early() -> None:
-    # The inbound message arrived at second 3 while the agent streamed until second 10.
     msgs = [inbound(0), turn(10), inbound(3), turn(20), result(30)]
     assert blocks(msgs) == [
         ("inbound", 0, 0, 0, 0),
         ("thinking", 1, 1, 0, 10),
         ("call", 1, 1, 10, 10),
-        ("inbound", 2, 2, 10, 10),  # read at 10, not its arrival at 3
+        ("inbound", 2, 2, 10, 10),
         ("thinking", 3, 3, 10, 20),
         ("call", 3, 3, 20, 20),
         ("output", 3, 4, 20, 30),
