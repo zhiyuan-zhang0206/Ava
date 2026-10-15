@@ -1,6 +1,6 @@
 ---
 name: ava-workflow
-description: "Selects a working strategy for complex or unclear tasks. Use when shared understanding, evaluation, planning, or coordination needs deliberate attention."
+description: "Selects a working strategy when capability, feasibility, shared understanding, evaluation, planning, or coordination needs deliberate attention."
 ---
 
 # Ava Workflow — Choose How to Work
@@ -8,8 +8,9 @@ description: "Selects a working strategy for complex or unclear tasks. Use when 
 Workflow is the lightweight entry point for choosing a working strategy. Align
 the agent with human intent, and both human and agent understanding with reality.
 The human supplies preferences and authority; neither participant's factual
-beliefs are automatically correct. Evaluate observations to improve both shared
-understanding and the work itself. Loading this skill does not require
+beliefs are automatically correct. Calibrate current capability and timescale
+before they determine what to attempt, rule out, or promise. Evaluate observations
+to improve both shared understanding and the work itself. Loading this skill does not require
 an interview, a plan document, or goal supervision. Direct execution with a
 suitable check fits short or dependent work; parallelize independent work.
 
@@ -23,7 +24,9 @@ interview. Respect the user's explicit choices and existing authorization.
 | Dimension | Available choices | Selection question |
 |---|---|---|
 | Alignment | Existing context, targeted reconnaissance, brief clarification, deeper Align | Which gap in intent, human understanding, or agent understanding changes the next action? |
+| Capability and timescale | Reuse current evidence, investigate a changed capability, run a representative probe | What is feasible now, what limits reliable completion, and which scope, method, or estimate does that change? |
 | Goal definition | Use the stated outcome, sharpen it briefly, Define Goal | Is completion clear and verifiable? |
+| Planning | Execute directly, keep a short dependency plan, plan substantial coordination | Which dependencies or checkpoints need to be explicit, even for small serial work? |
 | Continuation | Finish this turn, sustained goal supervision, event-driven waiting | What should start the next useful action, and what should stop it? |
 | Collaboration | Work alone, reuse or spawn a few peers, Dynamic Workflow | Does delegation or a reusable script improve this task? |
 | Evaluation | Direct checks, trace review, controlled comparisons, calibrated judges, independent review | What observation would change our belief or decision, and how trustworthy is it? |
@@ -40,6 +43,25 @@ Examples:
 - A large batch with known checks: run a dynamic workflow without goal mode.
 - A vague consequential request: Align, then choose the relevant domain skills.
 - An already settled change: skip Align and strengthen independent evaluation.
+- A task dismissed using old AI limitations: check current capability before
+  ruling it out; a recent benchmark also needs task-relevant verification before
+  it supports a commitment.
+
+## Calibrate Capability and Timescale
+
+[Capability–Timescale](capability-timescale/SKILL.md) is a first-class working
+dimension. Use it when an AI/tool capability assumption can change the goal,
+feasibility, approach, delegation, resource commitment, or schedule. Revisit it
+when new evidence changes the bottleneck; it is not only an estimation step
+inside Plan.
+
+Calibration works in both directions: stale assumptions can hide opportunities,
+while faster generation or more agents can conceal verification, rework, human
+attention, integration, and external-wait bottlenecks. Use current task evidence
+and a small real probe where needed. Feed the result into Align's understanding,
+the goal's scope, and Plan's dependencies; use Evaluate to establish what the
+probe actually demonstrates. Match investigation to the decision, reusing
+verified capabilities for routine work instead of repeatedly surveying tools.
 
 ## Recommend Before Asking
 
@@ -73,10 +95,6 @@ real path from input through outcome to feedback. This applies to research,
 content, operations, and software. A checked simple answer already closes that
 loop; do not add a separate pilot to every task.
 
-Load [capability-timescale](capability-timescale/SKILL.md) when a feasibility,
-schedule, or AI-dependent estimate rests on an unverified capability. Reuse
-current evidence; do not perform capability research for every ordinary task.
-
 ## Delegation decisions
 
 Proactively parallelize independent work. Fork when your existing context is
@@ -100,6 +118,10 @@ load the external-agents guide in Ava Guide.
    spawn peers or write orchestration code when that improves the result.
 5. Revisit selection when evidence reveals a new gap or invalidates a premise.
 
+Capability matching selects a candidate tool or skill. Capability–Timescale
+checks whether its demonstrated performance supports this task and commitment;
+a catalog description alone cannot establish feasibility or throughput.
+
 For substantial Align or Plan outputs, name selected skills and tools with a
 short reason. Mention a rejected alternative only when its trade-off matters.
 A routine task needs no capability report or mandatory `Not used` entry.
@@ -111,7 +133,8 @@ acceptance evidence, boundaries, next action, and necessary coordination state
 when work spans turns or needs recovery. Use durable working notes or existing work records; no collaboration plugin,
 task registry, label convention, or specific SDK is required.
 
-Alignment (including calibration), planning, and evaluation can stand alone, interleave,
+Alignment, capability/timescale calibration, goal definition, planning, and
+evaluation can stand alone, interleave,
 and feed back into one another. Execute settled slices while investigating
 others when safe; reassess independent work for parallel execution at useful
 checkpoints. Changes within the agreed scope need no ceremonial reapproval;
@@ -154,6 +177,7 @@ not need that full procedure.
 ## Detailed Guides
 
 - [Align](align/SKILL.md) — align intent and calibrate human and agent understanding against reality.
+- [Capability–Timescale](capability-timescale/SKILL.md) — ground feasibility, scope, approach, and pace in current task evidence and actual bottlenecks.
 - [Define Goal](define-goal/SKILL.md) — sharpen an unclear outcome and its evidence.
 - [Plan](plan/SKILL.md) — record dependencies and checkpoints when useful.
 - [Evaluate](evaluate/SKILL.md) — discover failures, calibrate judgment, compare alternatives, and improve the work with limited human attention.

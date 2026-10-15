@@ -98,6 +98,13 @@ be closed. Continue when the next action is justified and authorized; unresolved
 questions can remain explicit. Reopen alignment when evidence challenges the
 goal, assumptions, or criteria, without reopening settled consent.
 
+Use [Capability–Timescale](../capability-timescale/SKILL.md) when the shared
+model depends on what AI or tools can do now, at what quality, or at what pace.
+Its evidence can expand feasible choices as well as expose limits; calibrate
+both participants' expectations before rejecting or committing to an approach.
+Use [Define Goal](../define-goal/SKILL.md) if the resulting intent still lacks
+a recognizable outcome or stopping condition.
+
 Evaluate tests whether the observations support a belief or result. Align
 uses those observations to revise understanding and choices. Neither is a
 linear gate, and neither treats a more confident human as proof of better

@@ -52,7 +52,7 @@ Breaking large tasks into multi-agent / long tasks and driving them.
 
 | Skill | Purpose | Detail |
 |------|------|------|
-| ava-workflow | Select working strategy, optional goal definition and supervision, peer or script orchestration, and verification | [[ava_builtins/skills/practice/ava-workflow/docs/ava-workflow.ava.okf.md]] |
+| ava-workflow | Select working strategy across alignment, capability and timescale, goals, planning, coordination, and evaluation | [[ava_builtins/skills/practice/ava-workflow/docs/ava-workflow.ava.okf.md]] |
 | ava-dynamic-workflow | Orchestrate parallel workers: explore→fork→join→reduce | [[ava_builtins/skills/coordination/ava-dynamic-workflow/docs/ava-dynamic-workflow.ava.okf.md]] |
 | ava-goal | Sustain a terminal goal with evidence checks and optional peer supervision | [[ava_builtins/skills/coordination/ava-goal/docs/ava-goal.ava.okf.md]] |
 

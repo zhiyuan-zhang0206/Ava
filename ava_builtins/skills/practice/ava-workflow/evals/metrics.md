@@ -13,8 +13,12 @@ record model, available tools, package revision or hash, and output locations.
 Fresh context is not filesystem isolation: record whether access restrictions
 are enforced or instruction-only.
 
-Cases 1-3 are development cases. Reserve case 4 until the candidate is frozen.
-If it informs an edit, mark it development and obtain a new confirmation case.
+Cases 1-3 are development cases; case 4 was reserved for the initial alignment
+and evaluation revision. The capability promotion uses cases 5-6 for development
+and reserves case 7 until candidate freeze. Compare with the preceding revision
+(d3d16c15e7), not the older pre-alignment baseline. Re-run case 3 as a direct-check
+regression; previously used cases are not fresh holdouts.
+If a reserved case informs an edit, mark it development and obtain a new confirmation case.
 Run the same cases for both versions. Grade failures and unavailable evidence
 explicitly; do not drop inconvenient attempts. One attempt per case is a smoke
 check, not a variance estimate or evidence of general improvement.
@@ -43,6 +47,13 @@ workflow or questioning its premises should select Align; diagnosing output
 quality or validating a judge should select Evaluate; a known CSV sum should
 use a direct check. Record manual routing inspection as inspection, not an
 observed invocation result.
+
+For capability promotion, cases 5-7 check output-level decisions: outdated
+capability assumptions, verification/review bottlenecks, a small serial plan,
+qualitative completion, and evidence reuse. Their scope assertions concern what
+the response proposes or claims, not proof of the absence of tool activity.
+Record any unavailable execution audit separately. These explicit-load cases
+do not measure implicit discovery or prove that promotion changes invocation.
 
 ## Follow-up with the human
 
