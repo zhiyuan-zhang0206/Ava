@@ -1,5 +1,3 @@
-"""`defaults` and `model_overrides`: the values a test hands in instead of patching `settings`."""
-
 from __future__ import annotations
 
 import pytest

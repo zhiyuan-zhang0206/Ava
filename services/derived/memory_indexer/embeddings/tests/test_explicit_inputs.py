@@ -1,5 +1,3 @@
-"""Provider inputs belong to each owner and remain live until an operation."""
-
 from __future__ import annotations
 
 import os

@@ -1,5 +1,3 @@
-"""Structured questions commit one numbered answer and one recoverable inbound."""
-
 from uuid import uuid4
 
 import psycopg

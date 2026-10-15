@@ -1,5 +1,3 @@
-"""Remote station routing stays independent of the consuming collector's ports."""
-
 from __future__ import annotations
 
 from collections.abc import Callable

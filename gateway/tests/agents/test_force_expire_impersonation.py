@@ -1,5 +1,3 @@
-"""Gateway force-expire request contract and in-place lease closure."""
-
 from uuid import uuid4
 
 import psycopg

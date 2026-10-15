@@ -1,5 +1,3 @@
-"""Lost-response and concurrent agent creation recover the committed birth."""
-
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 

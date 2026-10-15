@@ -1,5 +1,3 @@
-"""Syntax repair per tool call: it preserves content, an unfixable call does not skip its sibling, and recovered calls keep their repair."""
-
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime

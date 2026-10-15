@@ -1,5 +1,3 @@
-"""Regression for GPT-6 minor releases in the daily model tracker."""
-
 from __future__ import annotations
 
 from scripts.model_registry.check_model_updates import SOURCES, compare_models

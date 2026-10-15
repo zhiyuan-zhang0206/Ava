@@ -1,5 +1,3 @@
-"""Compaction producers and raw event readers share two separate vocabularies."""
-
 from __future__ import annotations
 
 import json

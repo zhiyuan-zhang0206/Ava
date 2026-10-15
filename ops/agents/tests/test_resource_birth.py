@@ -1,5 +1,3 @@
-"""Actual birth owns resource origin; admission and replay cannot invent it."""
-
 from uuid import uuid4
 
 import psycopg

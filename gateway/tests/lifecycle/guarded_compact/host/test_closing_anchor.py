@@ -1,5 +1,3 @@
-"""The original provider usage survives result loss and anchors the exact source segment."""
-
 from dataclasses import replace
 from typing import Any
 

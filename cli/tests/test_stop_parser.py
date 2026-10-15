@@ -1,5 +1,3 @@
-"""`ava stop` parses its flags, `ava pause` no longer exists, and a plain start needs no manual operation."""
-
 from __future__ import annotations
 
 import pytest

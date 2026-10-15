@@ -1,5 +1,3 @@
-"""`check --changed`: the pre-commit depth, judging only the files that changed."""
-
 from __future__ import annotations
 
 import pytest

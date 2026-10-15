@@ -1,5 +1,3 @@
-"""Ops resource builders retain their explicit root at each original lookup."""
-
 import inspect
 from pathlib import Path
 

@@ -1,5 +1,3 @@
-"""Generated package lists and the backstop that keeps other files from re-listing a role."""
-
 from __future__ import annotations
 
 from pathlib import Path

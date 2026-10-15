@@ -1,5 +1,3 @@
-"""App-CI policy checks that do not need a platform toolchain."""
-
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

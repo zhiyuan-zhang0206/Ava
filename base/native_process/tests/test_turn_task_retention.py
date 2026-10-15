@@ -1,5 +1,3 @@
-"""The original hosted child Task stays inside its service's bounded join."""
-
 import asyncio
 
 import pytest

@@ -1,5 +1,3 @@
-"""Child process: the plugin-registration gate sees a surface installed without `agent.state`."""
-
 import sys
 from types import SimpleNamespace
 

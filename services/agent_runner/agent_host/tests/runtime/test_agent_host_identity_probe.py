@@ -1,5 +1,3 @@
-"""The real local stats HTTP route and registered health-port lookup agree."""
-
 import asyncio
 import os
 from pathlib import Path

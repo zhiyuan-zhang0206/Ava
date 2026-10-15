@@ -1,5 +1,3 @@
-"""Unknown plugin gate failures abort roster evaluation instead of enabling services."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -27,8 +25,6 @@ def test_gate_reason_reports_and_propagates_raising_gate(
     loguru_records: list[dict[str, Any]],
     machine_identity: MachineIdentity,
 ) -> None:
-    """The operation receives the original exception and no enabled decision."""
-
     def _boom() -> str | None:
         raise RuntimeError("gate exploded")
 

@@ -1,5 +1,3 @@
-"""Every patch is debt: first-party, standard library, third-party, environment or unresolved."""
-
 from __future__ import annotations
 
 import pytest

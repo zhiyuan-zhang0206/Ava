@@ -1,5 +1,3 @@
-"""Controller surface admission: same-machine check and relay specification validation."""
-
 from typing import Any
 from uuid import uuid4
 

@@ -1,5 +1,3 @@
-"""Held SDK capture retains the original lease admission through context rebinding."""
-
 from __future__ import annotations
 
 import asyncio
@@ -58,7 +56,6 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Real recorders retain separate admissions, despite detach and a new context."""
     previous = open_capture(
         lease, owner.agent_id, "concurrent-original", database_gate=database_gate
     )

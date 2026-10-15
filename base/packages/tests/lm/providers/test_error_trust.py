@@ -1,5 +1,3 @@
-"""Provider retry authority comes from actual SDK and LangChain error types."""
-
 from typing import ClassVar
 
 import httpx

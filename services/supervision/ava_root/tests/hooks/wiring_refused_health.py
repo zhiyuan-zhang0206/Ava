@@ -1,5 +1,3 @@
-"""Drive real root health rounds after the native refusal test opens its gate."""
-
 from functools import partial
 from pathlib import Path
 

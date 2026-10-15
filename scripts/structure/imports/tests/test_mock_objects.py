@@ -1,5 +1,3 @@
-"""Mock object targets retain their import edges without inventing string imports."""
-
 import ast
 from pathlib import Path
 

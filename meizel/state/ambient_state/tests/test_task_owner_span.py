@@ -1,5 +1,3 @@
-"""Original Task-valued map snapshots and one local bounded join."""
-
 from __future__ import annotations
 
 import ast

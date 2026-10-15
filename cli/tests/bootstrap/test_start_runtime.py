@@ -1,5 +1,3 @@
-"""A start runs the checkout that loaded this code, and the lifecycle rechecks that identity."""
-
 from __future__ import annotations
 
 import sys
@@ -13,7 +11,6 @@ from cli.start_runtime import StartRuntime, StartRuntimeChangedError
 
 
 def test_loaded_runtime_package_is_the_checkout_it_was_imported_from() -> None:
-    """The import root is anchored on runtime_interpreter's own path inside the tree."""
     assert runtime_interpreter.loaded_runtime()[2] == Path(__file__).resolve().parents[3]
 
 

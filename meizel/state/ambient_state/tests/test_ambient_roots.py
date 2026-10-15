@@ -1,5 +1,3 @@
-"""The composition roots a package declares in its own `ambient_roots.toml`."""
-
 from __future__ import annotations
 
 import pathlib
@@ -45,7 +43,6 @@ def test_a_malformed_declaration_is_refused(tmp_path: pathlib.Path, text: str) -
 
 
 def test_a_handle_package_may_declare_no_root(tmp_path: pathlib.Path) -> None:
-    """A package that only takes the bus builds none; its `bus = []` still governs it."""
     _declare(tmp_path, "gateway/events", "bus = []\n")
 
     assert package_roots(tmp_path, "bus") == {"gateway/events": frozenset()}

@@ -1,5 +1,3 @@
-"""Frontend availability probes the application behind the entry gate."""
-
 from __future__ import annotations
 
 import subprocess

@@ -1,5 +1,3 @@
-"""Request dispatch requires its invocation's resource bindings."""
-
 from __future__ import annotations
 
 import inspect
@@ -21,13 +19,11 @@ from services.agent_runner.agent_ops import daemon
 
 
 def test_dispatch_requires_daemon_pool() -> None:
-    """An unbound daemon dispatch cannot silently borrow ambient startup state."""
     with pytest.raises(TypeError, match="pool"):
         inspect.signature(daemon._dispatch).bind("status_probe", {}, active_ops={}, workers=set())
 
 
 def test_dispatch_idempotent_requires_daemon_pool() -> None:
-    """Idempotency cannot run without its invocation's pool binding."""
     with pytest.raises(TypeError, match="pool"):
         inspect.signature(daemon.dispatch_idempotent).bind(
             "spawn-launch", {"agent_id": 1}, "key-4", active_ops={}, workers=set()
@@ -45,7 +41,6 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The steady-state probe reuses the daemon's already-open central DB pool."""
     from ops.cluster_status import ClusterStatus
 
     pool: ConnectionPool = ConnectionPool(open=False)

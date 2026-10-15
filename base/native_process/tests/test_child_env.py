@@ -6,7 +6,6 @@ from base.native_process.child_env import daemon_process_env
 
 
 def test_daemon_env_keeps_the_process_essentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`pg_start_env` builds on this set. These are process mechanics, not credentials."""
     essentials = {
         "PATH": "/usr/bin:/bin",
         "HOME": "/home/operator",

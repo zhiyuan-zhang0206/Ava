@@ -1,5 +1,3 @@
-"""Real process evidence for takeover after the original host exited."""
-
 import subprocess
 import sys
 

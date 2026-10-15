@@ -1,5 +1,3 @@
-"""`ava logs rotate` copytruncate and path-boundary contract."""
-
 from __future__ import annotations
 
 import os

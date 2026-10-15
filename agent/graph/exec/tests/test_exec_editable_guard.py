@@ -1,5 +1,3 @@
-"""Exec pre-spawn behavior when the interpreter's editable install is poisoned."""
-
 from __future__ import annotations
 
 import asyncio
@@ -95,8 +93,6 @@ async def test_healthy_editable_guard_preserves_real_child_behavior(
 def test_child_env_drops_foreign_virtual_env_but_preserves_its_own(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Exec children cannot use a checkout venv when inherited cwd is elsewhere."""
-
     source_root = tmp_path / "source"
     inside = source_root / "agent"
     sibling_worktree = source_root / ".worktrees" / "feature"

@@ -1,5 +1,3 @@
-"""The installed SDK keeps a terminal send receipt through emission cleanup."""
-
 from dataclasses import replace
 from pathlib import Path
 from typing import Any

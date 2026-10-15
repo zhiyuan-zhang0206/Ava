@@ -1,5 +1,3 @@
-"""Force cleanup evidence and cancellation handoff retain their actual owners."""
-
 import asyncio
 
 import pytest

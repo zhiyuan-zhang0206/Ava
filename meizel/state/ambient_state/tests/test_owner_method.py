@@ -1,5 +1,3 @@
-"""Shared executable syntax must not manufacture ownership from dead code."""
-
 from __future__ import annotations
 
 import ast

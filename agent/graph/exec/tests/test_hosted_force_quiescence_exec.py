@@ -1,5 +1,3 @@
-"""A missing executable is not an unresolved child."""
-
 import asyncio
 from pathlib import Path
 

@@ -1,5 +1,3 @@
-"""The start converge step accepts an installed PostgreSQL 17 only where the platform has no vendored artifact, and a remote-managed gateway needs no local server or extension."""
-
 from __future__ import annotations
 
 import shlex

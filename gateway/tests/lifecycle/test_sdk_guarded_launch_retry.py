@@ -1,5 +1,3 @@
-"""A lost guarded SDK retry response recovers one real committed launch attempt."""
-
 import json
 
 import httpx

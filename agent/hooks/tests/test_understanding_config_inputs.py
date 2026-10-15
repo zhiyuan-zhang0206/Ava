@@ -1,5 +1,3 @@
-"""Understanding producers read the owning root only at their existing gates."""
-
 from typing import Any
 from unittest.mock import MagicMock
 

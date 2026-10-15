@@ -1,5 +1,3 @@
-"""Contract: the framework directory list of meizel/lint_common.py equals the shipped packages."""
-
 from __future__ import annotations
 
 import tomllib

@@ -1,5 +1,3 @@
-"""Child process: print the SHA-256 of the rendered Grafana dashboard under a scrubbed environment."""
-
 import hashlib
 import sys
 from pathlib import Path

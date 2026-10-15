@@ -1,5 +1,3 @@
-"""Completion policy keeps typed ownership through the config and JSON boundaries."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime

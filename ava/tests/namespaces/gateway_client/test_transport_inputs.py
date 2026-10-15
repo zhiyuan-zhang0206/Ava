@@ -1,5 +1,3 @@
-"""Gateway HTTP calls use the explicit context's live transport policy inputs."""
-
 from dataclasses import replace
 
 import httpx

@@ -1,5 +1,3 @@
-"""Converge registers the recurring packages-refresh OS job."""
-
 from __future__ import annotations
 
 from collections.abc import Callable

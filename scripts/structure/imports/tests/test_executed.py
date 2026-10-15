@@ -1,5 +1,3 @@
-"""Actual -c launches, bounded helper inputs and retained analysis gaps."""
-
 from __future__ import annotations
 
 import ast

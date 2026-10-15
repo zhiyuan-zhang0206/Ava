@@ -1,5 +1,3 @@
-"""Two compact boundaries with distinct replies for the display transition test."""
-
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage

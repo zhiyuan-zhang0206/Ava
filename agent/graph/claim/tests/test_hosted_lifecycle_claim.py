@@ -1,5 +1,3 @@
-"""A hosted restart marker does not claim completion."""
-
 from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound

@@ -1,5 +1,3 @@
-"""Dependency evidence must not silently certify incomplete module subjects."""
-
 import ast
 from pathlib import Path
 

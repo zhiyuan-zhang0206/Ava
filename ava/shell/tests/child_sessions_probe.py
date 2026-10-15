@@ -1,5 +1,3 @@
-"""Child process for the shell-sessions identity test: list sessions or report the refusal."""
-
 from ava.shell import sessions
 
 try:

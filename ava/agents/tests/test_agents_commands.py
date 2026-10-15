@@ -1,5 +1,3 @@
-"""`ava.agents.commands()` lists a peer's commands without their bodies."""
-
 import pytest
 
 from base.packages.composer_commands import Command, CommandCatalog

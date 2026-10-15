@@ -1,5 +1,3 @@
-"""Stored op replay validates terminal results while NULL remains an unfinished owner."""
-
 import hashlib
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor

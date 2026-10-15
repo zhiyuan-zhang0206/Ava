@@ -1,5 +1,3 @@
-"""Actual generation and saver paths do not retain a DB connection across network work."""
-
 import asyncio
 from dataclasses import replace
 from typing import Any

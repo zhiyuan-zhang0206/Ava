@@ -1,5 +1,3 @@
-"""Restart config overlays validate on the profiled gateway boundary."""
-
 from __future__ import annotations
 
 import httpx

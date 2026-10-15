@@ -1,5 +1,3 @@
-"""Actual event-writer failure cannot skip host release or replace resource primary."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime

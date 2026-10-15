@@ -1,5 +1,3 @@
-"""Object-form patching is a use of the patched name; the string form is restricted."""
-
 from __future__ import annotations
 
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics

@@ -1,5 +1,3 @@
-"""HTML content is isolated even when opened outside the Ava frame."""
-
 import pytest
 from fastapi import HTTPException
 

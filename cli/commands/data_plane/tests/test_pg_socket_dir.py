@@ -1,5 +1,3 @@
-"""Administrative and pooler connections use only the home's canonical socket."""
-
 import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -50,7 +48,6 @@ def _pg_socket_path(root: Path, home: Path) -> Path:
 
 
 def test_pg_socket_dir_rejects_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The predictable /tmp socket location cannot follow a pre-placed symlink."""
     home = tmp_path / "home"
     monkeypatch.setattr(_ci, "ava_home", lambda: home)
     socket_dir = _pg_socket_path(tmp_path, home)
@@ -63,7 +60,6 @@ def test_pg_socket_dir_rejects_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path
 def test_pg_socket_dir_rejects_foreign_owner(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A socket directory owned by another local account is refused."""
     home = tmp_path / "home"
     monkeypatch.setattr(_ci, "ava_home", lambda: home)
     socket_dir = _pg_socket_path(tmp_path, home)
@@ -76,7 +72,6 @@ def test_pg_socket_dir_rejects_foreign_owner(
 
 
 def test_pg_socket_dir_repairs_mode_drift(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Existing socket directories are tightened before Postgres binds a trust socket."""
     home = tmp_path / "home"
     monkeypatch.setattr(_ci, "ava_home", lambda: home)
     socket_dir = _pg_socket_path(tmp_path, home)

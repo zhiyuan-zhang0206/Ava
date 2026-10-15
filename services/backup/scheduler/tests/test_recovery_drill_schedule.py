@@ -1,5 +1,3 @@
-"""Durable cadence rules for automated recovery drills."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime, tzinfo

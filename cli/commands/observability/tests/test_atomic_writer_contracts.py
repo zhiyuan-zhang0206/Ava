@@ -1,5 +1,3 @@
-"""Observable contracts of the writers being moved to base.host.atomic_io."""
-
 from __future__ import annotations
 
 import json

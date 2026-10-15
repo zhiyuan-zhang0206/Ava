@@ -1,5 +1,3 @@
-"""External maintenance edits use the installed writer and preserve desired state."""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -274,6 +272,7 @@ def test_utf8_digest_preserves_newlines() -> None:
     assert repair.script_sha256("pass\r\n") != repair.script_sha256("pass\n")
 
 
+# ava:ref scripts/host_ops/tests/docs/schedule-maintenance.ava.okf.md#installed-runtime-writer
 def test_external_file_uses_installed_runtime_and_real_writer(
     db_conn: psycopg.Connection,
     database: Database,
@@ -282,7 +281,6 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Set AVA_TEST_INSTALLED_SOURCE to repeat this contract on an old checkout."""
     source = Path(os.environ.get("AVA_TEST_INSTALLED_SOURCE", Path(sys.prefix).parent)).resolve()
     home = tmp_path / "home"
     (home / "run").mkdir(parents=True)

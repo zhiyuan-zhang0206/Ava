@@ -1,5 +1,3 @@
-"""The shared agent host's startup refuses a launched-agent SDK posture."""
-
 from __future__ import annotations
 
 import sys

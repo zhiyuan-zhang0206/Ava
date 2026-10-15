@@ -1,5 +1,3 @@
-"""Read-only Homebrew pin observations cannot confuse command failure with health."""
-
 import subprocess
 from pathlib import Path
 from unittest.mock import Mock

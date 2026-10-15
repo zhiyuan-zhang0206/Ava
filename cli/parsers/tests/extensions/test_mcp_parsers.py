@@ -1,5 +1,3 @@
-"""`mcp add` validates its spec source, JSON and environment at parse time."""
-
 import argparse
 
 import pytest

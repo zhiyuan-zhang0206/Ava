@@ -1,5 +1,3 @@
-"""Heartbeat projection arithmetic belongs to the inspector read model."""
-
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -10,7 +8,6 @@ from gateway.inspect import _live
 
 
 def test_zero_jitter_span_disables_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disabled jitter never performs modulo zero and leaves the exact idle due time."""
     monkeypatch.setattr(_live, "JITTER_SPAN_S", 0)
     last_active_at = datetime(2026, 1, 1, tzinfo=UTC)
     heartbeat = _live.project_heartbeat(

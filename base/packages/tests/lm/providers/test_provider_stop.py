@@ -54,7 +54,6 @@ def test_openai_content_filter_unexpected(model_catalog: ModelCatalog):
 
 
 def test_openai_responses_status_completed_normal(model_catalog: ModelCatalog):
-    """Responses API (use_responses_api=True) returns status='completed' instead of finish_reason."""
     cat, raw = classify_stop(
         _msg({"model_provider": "openai", "status": "completed"}), stops=model_catalog.stops
     )

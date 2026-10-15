@@ -1,5 +1,3 @@
-"""Actual generation roles preserve gateway-only durable ingress mutation."""
-
 import psycopg
 import pytest
 from psycopg import sql

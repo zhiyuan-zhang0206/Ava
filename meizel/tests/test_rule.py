@@ -1,5 +1,3 @@
-"""The rule: declared edges, exports along the path, private names, acyclic local graphs."""
-
 from __future__ import annotations
 
 from meizel.tests.synthetic import RepoFactory, diagnostics, verdict

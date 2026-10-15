@@ -1,5 +1,3 @@
-"""Execute actual native input bodies with inert CGEvent and clock substitutes."""
-
 from __future__ import annotations
 
 import shutil

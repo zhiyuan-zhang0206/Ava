@@ -1,5 +1,3 @@
-"""Executed Python inputs feed complete or explicitly incomplete placement facts."""
-
 from __future__ import annotations
 
 import ast

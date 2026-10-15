@@ -1,5 +1,3 @@
-"""Owned boot values and fresh file reads have separate, explicit lifetimes."""
-
 from __future__ import annotations
 
 import os

@@ -1,5 +1,3 @@
-"""Only a latest committed halt marker can complete the original intent."""
-
 import asyncio
 from pathlib import Path
 from uuid import uuid4

@@ -1,5 +1,3 @@
-"""The ambient-endpoint rule (meizel/state/ambient_state/endpointrule.py)."""
-
 from __future__ import annotations
 
 import ast

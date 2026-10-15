@@ -1,5 +1,3 @@
-"""Pure leak-audit coverage for isolated self-evolution evaluation runs."""
-
 from __future__ import annotations
 
 from pathlib import Path

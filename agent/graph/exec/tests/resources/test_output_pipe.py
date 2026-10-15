@@ -1,5 +1,3 @@
-"""Real descriptor boundaries for invocation-owned nonblocking output."""
-
 import asyncio
 import os
 from types import SimpleNamespace

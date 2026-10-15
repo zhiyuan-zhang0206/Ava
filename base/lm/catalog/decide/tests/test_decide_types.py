@@ -1,5 +1,3 @@
-"""Question and Decision value types fail fast on malformed construction."""
-
 from __future__ import annotations
 
 import pytest

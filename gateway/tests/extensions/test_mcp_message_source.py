@@ -1,5 +1,3 @@
-"""MCP `send_message` attribution: the user by default, the authenticated client on request."""
-
 from typing import Any
 
 import psycopg

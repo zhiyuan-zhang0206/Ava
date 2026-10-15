@@ -1,5 +1,3 @@
-"""Child process: a read-only attachment with an undelivered login is refused before any dial."""
-
 import os
 from unittest.mock import patch
 

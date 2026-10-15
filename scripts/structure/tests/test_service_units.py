@@ -1,5 +1,3 @@
-"""Placement units under `services/`: a service inside a group, or a package beside the groups."""
-
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,5 +1,3 @@
-"""Fleet owns its policy; bootstrap and service birth snapshots keep each scope."""
-
 import json
 from collections.abc import Generator
 from pathlib import Path

@@ -1,5 +1,3 @@
-"""Audit facts written by the inbox inserts are recorded in the transaction that makes them."""
-
 from __future__ import annotations
 
 from typing import Any

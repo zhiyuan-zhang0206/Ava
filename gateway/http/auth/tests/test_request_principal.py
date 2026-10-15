@@ -1,5 +1,3 @@
-"""Credential scopes cannot be chosen by caller labels or raw storage keys."""
-
 import pytest
 from starlette.requests import Request
 

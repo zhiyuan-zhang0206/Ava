@@ -1,5 +1,3 @@
-"""Timeline cases: timeline compact history boundaries."""
-
 from __future__ import annotations
 
 import psycopg

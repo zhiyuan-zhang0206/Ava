@@ -1,5 +1,3 @@
-"""Observed facts survive replay without multiplying totals or inventing coverage."""
-
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta

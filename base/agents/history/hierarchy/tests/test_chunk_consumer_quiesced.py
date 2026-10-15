@@ -1,5 +1,3 @@
-"""The live consumer's stop-window gate, injected through `UnderstandingReadInputs.quiesced`."""
-
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +17,6 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 async def test_the_forever_loop_claims_nothing_while_the_host_is_quiesced(
     model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
 ) -> None:
-    """A held unit's stop window is database-quiet; claiming resumes once it lifts."""
     claims = 0
     polls = 0
 

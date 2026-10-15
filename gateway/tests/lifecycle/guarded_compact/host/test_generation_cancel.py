@@ -1,5 +1,3 @@
-"""Actual native cancellation waits for generation unwind and retains unknown result proof."""
-
 import asyncio
 from dataclasses import replace
 from typing import Any

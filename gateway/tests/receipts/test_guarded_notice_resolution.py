@@ -1,5 +1,3 @@
-"""Guarded explicit-row resolution uses the existing transactional notice owner."""
-
 from concurrent.futures import ThreadPoolExecutor
 
 import psycopg

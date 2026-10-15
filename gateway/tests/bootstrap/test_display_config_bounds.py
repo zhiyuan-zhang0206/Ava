@@ -1,5 +1,3 @@
-"""Reject invalid saved defaults and keep implicit notice reads page-bounded."""
-
 from pathlib import Path
 
 import psycopg

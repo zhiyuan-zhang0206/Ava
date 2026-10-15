@@ -1,5 +1,3 @@
-"""Run the labeler daemon's bounded shutdown probe."""
-
 from base.deploy.schema.tests.schema_gate import run_child
 from services.derived.labeler import daemon
 

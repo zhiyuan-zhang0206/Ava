@@ -1,5 +1,3 @@
-"""Model defaults remain live inputs of the public history response capabilities."""
-
 from dataclasses import replace
 
 import psycopg

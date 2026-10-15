@@ -1,5 +1,3 @@
-"""Heartbeat failures stay owned until the command's existing stop/join boundary."""
-
 from __future__ import annotations
 
 import argparse

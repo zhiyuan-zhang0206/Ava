@@ -1,5 +1,3 @@
-"""A `path_scopes.toml` mounts a pytest plugin by name; each mounted module is one fact edge."""
-
 from __future__ import annotations
 
 from pathlib import Path

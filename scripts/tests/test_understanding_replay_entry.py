@@ -1,5 +1,3 @@
-"""The preview replay entry owns its captured database admission gate."""
-
 from pathlib import Path
 from unittest.mock import Mock
 

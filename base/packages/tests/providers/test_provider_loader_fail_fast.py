@@ -1,5 +1,3 @@
-"""Provider-loader failures preserve Python errors and permit a fresh corrected build."""
-
 import sys
 from collections.abc import Callable
 from types import ModuleType, TracebackType
@@ -26,7 +24,6 @@ def test_unknown_provider_error_preserves_identity_and_traceback_then_recovers(
     phase: str,
     error: Exception,
 ) -> None:
-    """No import, declaration or final-build failure can publish a partial catalog."""
     provider_plugin(prefix="kept-", model="kept-1", dir_name="a_kept_provider")
     provider_plugin(dir_name="z_broken_provider")
     provider_py = paths.plugins_dir() / "z_broken_provider" / "provider.py"

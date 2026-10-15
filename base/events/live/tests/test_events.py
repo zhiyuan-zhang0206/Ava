@@ -1,5 +1,3 @@
-"""Tests for base.events.live.projection — TokenUsage model."""
-
 from base.events.live.projection import TokenUsage
 
 

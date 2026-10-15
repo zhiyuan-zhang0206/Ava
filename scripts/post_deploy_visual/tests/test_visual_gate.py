@@ -1,5 +1,3 @@
-"""Unit contracts for the CI preview-gate golden minting helpers."""
-
 from __future__ import annotations
 
 import json

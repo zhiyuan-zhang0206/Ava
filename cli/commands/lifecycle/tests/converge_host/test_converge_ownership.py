@@ -1,5 +1,3 @@
-"""Warning-only $AVA_HOME ownership preflight contracts."""
-
 from __future__ import annotations
 
 from collections.abc import Callable

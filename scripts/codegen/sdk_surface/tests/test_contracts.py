@@ -1,5 +1,3 @@
-"""Canonical SDK markers prove declarations without executing application source."""
-
 from __future__ import annotations
 
 import ast

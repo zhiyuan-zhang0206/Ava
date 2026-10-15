@@ -1,5 +1,3 @@
-"""Task maintenance binds its captured image before logging, health and work."""
-
 from __future__ import annotations
 
 from collections.abc import Callable

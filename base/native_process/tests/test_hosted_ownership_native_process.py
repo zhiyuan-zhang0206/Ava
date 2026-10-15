@@ -1,5 +1,3 @@
-"""Concurrent tasks and worker threads retain their explicit original admissions."""
-
 import asyncio
 from uuid import uuid4
 

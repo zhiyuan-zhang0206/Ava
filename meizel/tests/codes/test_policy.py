@@ -1,5 +1,3 @@
-"""`meizel.policy.toml`: allowances the manifests cannot grant themselves."""
-
 from __future__ import annotations
 
 from pathlib import Path

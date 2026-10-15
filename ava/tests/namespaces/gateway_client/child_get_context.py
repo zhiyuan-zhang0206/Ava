@@ -1,5 +1,3 @@
-"""Run SDK context refusal and explicit host transport in a fresh interpreter."""
-
 import httpx
 
 from ava.gateway_client import get, get_launch_attempt, retry_launch

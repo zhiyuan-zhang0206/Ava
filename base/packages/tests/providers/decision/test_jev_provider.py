@@ -1,5 +1,3 @@
-"""Jev (TypeSafe) request and response mapping against a mock HTTP transport."""
-
 from __future__ import annotations
 
 import json

@@ -1,5 +1,3 @@
-"""A committed raw package intent survives a changed server-owned prompt frame."""
-
 import psycopg
 import pytest
 from fastapi.testclient import TestClient

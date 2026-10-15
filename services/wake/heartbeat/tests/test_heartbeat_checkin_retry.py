@@ -1,5 +1,3 @@
-"""A failed check-in preserves its dispatch backoff across heartbeat ticks."""
-
 import asyncio
 import time
 from types import SimpleNamespace
@@ -36,7 +34,6 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A failed check-in stays skipped, then becomes a probe when its window ends."""
     idle_threshold = settings.daemon.heartbeat_idle_threshold_seconds
     aid = spawn_agent(
         spawner="user",

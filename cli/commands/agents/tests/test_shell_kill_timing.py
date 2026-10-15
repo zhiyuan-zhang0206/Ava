@@ -1,5 +1,3 @@
-"""The operator must not display an unknown cleanup timing as completed."""
-
 import httpx
 import pytest
 

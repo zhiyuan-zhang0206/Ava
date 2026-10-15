@@ -1,5 +1,3 @@
-"""Regional mirror transport must never become the committed npm lock."""
-
 from __future__ import annotations
 
 import json

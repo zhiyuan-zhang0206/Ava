@@ -1,5 +1,3 @@
-"""Renderer implementation failures propagate from their owning history component."""
-
 from typing import NoReturn
 
 import pytest

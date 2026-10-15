@@ -1,5 +1,3 @@
-"""An older MCP tool table cannot admit guarded creation through legacy spawn."""
-
 from typing import Any
 
 import psycopg

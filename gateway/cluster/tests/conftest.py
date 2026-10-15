@@ -1,5 +1,3 @@
-"""Opt-in unit fixtures shared by this test directory."""
-
 from base.config.tests.config_authority import config_authority as config_authority
 from base.host.db_authority.tests.generation import seed_write_generation as seed_write_generation
 from base.packages.tests.model_catalog import add_bindings as add_bindings
