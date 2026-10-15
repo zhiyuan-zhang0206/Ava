@@ -1,3 +1,8 @@
+exports = ["memory_checkouts.py"]
+
+[uses]
+"test_memory_repo.py" = ["memory_checkouts.py"]
+
 [debt.env-patch]
 "test_cluster_drift.py#monkeypatch.setenv os.environ.AVA_HOME" = 5
 
@@ -9,8 +14,8 @@
 "test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.is_initialized" = 6
 "test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.memory_remote" = 1
 "test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.run_bounded" = 3
-"test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.run_git" = 12
-"test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.settings.general.memory_keep_local" = 4
+"test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.run_git" = 10
+"test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.settings.general.memory_keep_local" = 3
 "test_memory_repo_bootstrap.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 5
 "test_memory_repo_bootstrap.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
 "test_memory_repo_bootstrap.py#monkeypatch.setattr base.config.settings.general" = 1

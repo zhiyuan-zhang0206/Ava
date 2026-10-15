@@ -1,21 +1,3 @@
-"""Memory endpoints — /api/memory/search + /api/memory/refresh + /api/memory/graph.
-
-`search` (ava.memory.search SDK target) returns relative paths under
-memory_root; the SDK caller prepends `ava.memory.PATH` to reconstruct the
-absolute path (fs-neutral so gateway and agent-runner filesystems can
-differ).
-
-`refresh` fast-forwards the gateway memory checkout to the consolidated
-pool (`origin/main`); the memory indexer then re-embeds the changed files.
-
-`pool` serves the consolidated pool as a git bundle (real main ancestry) —
-the bootstrap source a fresh agent-runner fetches when it has no memory
-remote (memory_repo.bootstrap_from_gateway).
-
-`graph` returns concept notes and cross-links as a graph for the frontend
-OKF knowledge-graph page.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -51,28 +33,10 @@ from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
 
 router = APIRouter()
 
-# Both phases of the search handler are native async I/O (httpx.AsyncClient,
-# the backend's async client); the semaphore caps in-flight Gemini query
-# embeds so a burst of searches cannot pile up unbounded on the shared key.
-# Sized by `memory_search_max_concurrency` (env
-# AVA_MEMORY_SEARCH_MAX_CONCURRENCY, default 20 — see base/config/domains/services/settings.py):
-# the historical hardcoded 2 predated the async-embed fix (2026-08-03, when a
-# sync embed on the event loop froze the whole gateway for up to ~4.5 minutes
-# and cost 13 restarts in 8h) and starved passive recall behind a queue
-# during fleet-wake bursts; query embeds are short single calls on a paid
-# Tier-2 key, so a burst fits well within the quota at 20.
-#
-# Every wait under the semaphore must be bounded — see `post_memory_search`'s
-# deadline. Holding a permit across an unbounded await is what turned a
-# stalled backend into a dead endpoint on 2026-08-03: both permits pinned,
-# every later request parked forever in acquire, and each agent's passive
-# recall wedged with it.
-
 
 @dataclass(frozen=True)
 class MemorySearchInputs:
-    """Live configuration readers owned by the gateway composition root."""
-
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
     embedding_backend: Callable[[], str]
     backend: Callable[[], str]
     uri: Callable[[], str]
@@ -86,26 +50,13 @@ class MemorySearchInputs:
 
 
 def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
-    """The query-embed concurrency gate, built once per process by the app lifespan from
-    the `memory_search_max_concurrency` setting — a knob, not a hardcoded
-    constant, so a deployment can widen or narrow it without a code change
-    (config panel or env; takes effect on gateway restart)."""
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
     return asyncio.Semaphore(max_concurrency)
 
 
 @asynccontextmanager
 async def _bounded_semaphore(semaphore: asyncio.Semaphore, budget: float) -> AsyncGenerator[None]:
-    """Acquire a search-gate permit with a short queue budget.
-
-    The overall search deadline already covers the acquire, but a deep queue
-    under that deadline is exactly the 2026-08-29 fleet-wake storm: every
-    late request waits the full deadline and endpoint latency scales with
-    queue length. Failing fast on the acquire — a permit not free within
-    `memory_search_acquire_timeout_seconds` is congestion, not a backend the
-    caller should wait out — answers 503 in ~1s, so passive recall's own
-    deadline degrades in ~1s instead of ~5s and an explicit search learns
-    immediately instead of queueing.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
     try:
         await asyncio.wait_for(semaphore.acquire(), timeout=budget)
     except TimeoutError as exc:
@@ -116,28 +67,11 @@ async def _bounded_semaphore(semaphore: asyncio.Semaphore, budget: float) -> Asy
         semaphore.release()
 
 
-# Files reserved by OKF spec — excluded from concept graph
 _RESERVED_NAMES = frozenset({"index.md", "log.md", "MEMORY.md"})
 
 
 def _build_memory_graph(memory_root: Path) -> MemoryGraphResponse:
-    """Build a concept graph from the memory pool on the gateway filesystem.
-
-    Scans recursively so notes in subdirectories (health/, ava/, etc.) are
-    included. Node ids are relative paths sans extension (e.g.
-    "health/user-health-overview"); links between notes are resolved relative
-    to the source file's directory (standard Markdown link resolution).
-
-    The graph's main structure is containment: one pseudo node per folder
-    (always including the pool root) with an edge from every note to its
-    folder, plus folder → parent-folder edges so the folder skeleton is a
-    connected tree. Cross-references between notes ride on top as
-    `reference` edges, which the frontend renders visually weaker.
-
-    The pipeline is explicit — walk → parse → node → edge → filter — each
-    stage a pure function over the previous stage's output; node ids are
-    derived from the node set, not accumulated state.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-projection
     if not memory_root.is_dir():
         return MemoryGraphResponse(nodes=[], edges=[], warnings=["memory_root not found"])
 
@@ -151,7 +85,6 @@ def _build_memory_graph(memory_root: Path) -> MemoryGraphResponse:
             for source, target in extract_md_links(note.body, md_file.parent, memory_root, note.rel)
         )
 
-    # Drop reference edges whose target is not a known note.
     note_ids = {node.id for node in nodes}
     reference_edges = [e for e in reference_edges if e.target in note_ids]
 
@@ -165,8 +98,6 @@ def _build_memory_graph(memory_root: Path) -> MemoryGraphResponse:
 
 
 def _folder_id_of(rel_id: str) -> str:
-    """The folder pseudo-node id holding the note `rel_id`: its directory as
-    a posix path with a trailing slash; the pool root is "/"."""
     parts = rel_id.split("/")
     if len(parts) == 1:
         return "/"
@@ -174,7 +105,6 @@ def _folder_id_of(rel_id: str) -> str:
 
 
 def _parent_folder_id(folder_id: str) -> str:
-    """The parent folder pseudo-node id ("a/b/" → "a/"; "/" → "/")."""
     parts = folder_id.rstrip("/").split("/")
     return "/" if len(parts) <= 1 else "/".join(parts[:-1]) + "/"
 
@@ -182,15 +112,7 @@ def _parent_folder_id(folder_id: str) -> str:
 def _folder_structure(
     nodes: list[MemoryGraphNode], memory_root: Path
 ) -> tuple[list[MemoryGraphNode], list[MemoryGraphEdge]]:
-    """Folder pseudo nodes + containment edges — the graph's main structure.
-
-    One pseudo node per folder that holds notes, closed under parent
-    directories (every ancestor of a note's folder becomes a node, so
-    folder → parent-folder edges always land on a node), plus the pool root
-    itself so the skeleton is a single connected tree even when the pool has
-    no root-level notes. An empty pool yields no nodes at all, so the
-    frontend's empty state still triggers.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-projection
     if not nodes:
         return [], []
 
@@ -232,7 +154,6 @@ def _folder_structure(
 
 
 def _node_from_note(note: Note) -> MemoryGraphNode:
-    """Map a parsed note to a graph node — the only schema-touching stage."""
     tags = list(note.tags)
     return MemoryGraphNode(
         id=note.rel,
@@ -249,14 +170,7 @@ def _node_from_note(note: Note) -> MemoryGraphNode:
 
 
 def primary_tag(tags: list[str]) -> str:
-    """The tag the graph view groups nodes by: the first *domain* tag.
-
-    `type/<x>` says how a note is meant to be used, not what it is about, and
-    every note carries one — grouping on it would collapse the graph into six
-    buckets and hide the domain structure the view exists to show. Falls back to
-    the type tag only when a note has nothing else, so a node is never unlabeled
-    when it does carry a tag.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-projection
     domain = [t for t in tags if not t.startswith("type/")]
     if domain:
         return domain[0]
@@ -272,16 +186,7 @@ async def _backend_topk(
     fingerprint: str,
     inputs: MemorySearchInputs,
 ) -> list[ChunkHit]:
-    """The storage half of a search: ask the configured backend for top-k
-    files (each with its best chunk), every step handed an explicit deadline. `dim` + `fingerprint` are
-    the embedding provider's vector space (see `embeddings.factory`) — the
-    backend is constructed for it even though the read path never writes
-    rows.
-
-    An unbounded backend await would pin the request's semaphore permit, so
-    the deadline is handed down to bound the backend's own wait; the caller's
-    `asyncio.timeout` covers the rest.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
     from services.derived.memory_indexer.backends import factory
 
     return await factory.get_backend(
@@ -293,38 +198,40 @@ async def _backend_topk(
     "/api/memory/search",
     response_model=MemorySearchResponse,
     dependencies=[Depends(deny_isolated_result_read)],
+    description=(
+        "Search the memory pool; return the `k` notes most relevant to the query,\n"
+        "each with the chunk that matched and a relevance score.\n"
+        "\n"
+        "Two stages. Vector search finds the best chunk of the closest\n"
+        "`memory_rerank_candidates` notes (`memory_dedup_candidates` for the `dedup`\n"
+        "purpose); a decision model then judges each chunk\n"
+        "against the query, and the response is ordered by the probability that the\n"
+        "chunk is relevant (`score`). No text is generated on this path.\n"
+        "\n"
+        "One search issues at most that many decision requests, whatever `k` is: `k` above the\n"
+        "candidate count returns the candidates. Notes in `exclude` are dropped from the vector\n"
+        "candidates before ranking and take no slot. The ranking stops, and its unanswered requests\n"
+        "are cancelled, when the client disconnects or the deadline passes (the gateway's own, or\n"
+        "the request's `deadline_seconds` when that is shorter).\n"
+        "\n"
+        "Paths are relative to memory pool root (settings.services.memory_root, e.g.\n"
+        "`~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to\n"
+        "reconstruct the absolute path. fs-neutral so gateway fs (e.g.\n"
+        "/Users/x) and agent-runner fs (/home/y) being different still works.\n"
+        "\n"
+        "Only the gateway hosts the search backend (numpy by default), so\n"
+        "this endpoint always runs on the gateway; agent-runner SDK calls reach this\n"
+        "handler via the gateway URL they were configured with (CF Tunnel /\n"
+        "private network) and never enter via a local agent-runner gateway\n"
+        "(agent-runners run no gateway process).\n"
+        "\n"
+        "Raises:\n"
+        "    IndexerUnavailable: embedder API / search backend unreachable, the\n"
+        "        decision model failed, or the search exceeded its deadline (wire 503)"
+    ),
 )
 async def post_memory_search(request: Request, body: MemorySearchRequest) -> MemorySearchResponse:
-    """Search the memory pool; return the `k` notes most relevant to the query,
-    each with the chunk that matched and a relevance score.
-
-    Two stages. Vector search finds the best chunk of the closest
-    `memory_rerank_candidates` notes (`memory_dedup_candidates` for the `dedup`
-    purpose); a decision model then judges each chunk
-    against the query, and the response is ordered by the probability that the
-    chunk is relevant (`score`). No text is generated on this path.
-
-    One search issues at most that many decision requests, whatever `k` is: `k` above the
-    candidate count returns the candidates. Notes in `exclude` are dropped from the vector
-    candidates before ranking and take no slot. The ranking stops, and its unanswered requests
-    are cancelled, when the client disconnects or the deadline passes (the gateway's own, or
-    the request's `deadline_seconds` when that is shorter).
-
-    Paths are relative to memory pool root (settings.services.memory_root, e.g.
-    `~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to
-    reconstruct the absolute path. fs-neutral so gateway fs (e.g.
-    /Users/x) and agent-runner fs (/home/y) being different still works.
-
-    Only the gateway hosts the search backend (numpy by default), so
-    this endpoint always runs on the gateway; agent-runner SDK calls reach this
-    handler via the gateway URL they were configured with (CF Tunnel /
-    private network) and never enter via a local agent-runner gateway
-    (agent-runners run no gateway process).
-
-    Raises:
-        IndexerUnavailable: embedder API / search backend unreachable, the
-            decision model failed, or the search exceeded its deadline (wire 503)
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
     from services.derived.memory_indexer.embeddings import factory as _embedding_factory
 
     inputs: MemorySearchInputs = request.app.state.memory_search_inputs
@@ -335,22 +242,6 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
         api_key_reader=inputs.api_key,
     )
 
-    # Every phase is native async I/O — httpx.AsyncClient for the embed, the
-    # backend's async client for the search, the decision call for the rerank —
-    # so a slow dependency can never block the event loop (2026-08-03 freeze
-    # mechanism, see `build_search_gate` note). The semaphore caps concurrent
-    # query embeds and backend reads only; the rerank runs outside it, so a
-    # slow decision model cannot hold a permit.
-    #
-    # The deadline wraps the semaphore acquires as well as the phases: a
-    # request parked in acquire behind a stalled peer is just as stuck as one
-    # parked in the backend, and only a bound that covers both guarantees the
-    # permit comes back. Each acquire is separately bounded by
-    # `memory_search_acquire_timeout_seconds` (`_bounded_semaphore`), which
-    # is what turns a congested gate into a ~1s 503 instead of a wait until
-    # the overall deadline. On expiry the CancelledError unwinds through
-    # `async with`, whose release is synchronous — so the permit is returned
-    # even though the cleanup awaits below never get to run.
     deadline = inputs.deadline()
     if body.deadline_seconds is not None:
         deadline = min(deadline, body.deadline_seconds)
@@ -363,7 +254,6 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     except TimeoutError as exc:
         raise IndexerUnavailable(f"memory search exceeded its {deadline:g}s deadline") from exc
     if ranked is None:
-        # The caller left; the ranking requests it started were cancelled, and no one reads this.
         return MemorySearchResponse(results=[])
     return MemorySearchResponse(
         results=[
@@ -380,10 +270,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
 
 
 def _candidate_count(inputs: MemorySearchInputs, body: MemorySearchRequest) -> int:
-    """How many notes vector search hands to the decision model for this request's purpose.
-
-    The most decision requests one search issues: `k` and the exclusion list do not change it.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
     return inputs.dedup_candidates() if body.purpose == "dedup" else inputs.rerank_candidates()
 
 
@@ -394,7 +281,6 @@ async def _search_and_rank(
     inputs: MemorySearchInputs,
     deadline: float,
 ) -> list[rerank.RankedChunk]:
-    """Both stages: vector candidates, then the decision model's ranking of them."""
     limit = _candidate_count(inputs, body)
     exclude = frozenset(body.exclude)
     hits = await _vector_candidates(request, body, provider, inputs, deadline, limit + len(exclude))
@@ -419,11 +305,7 @@ async def _vector_candidates(
     deadline: float,
     count: int,
 ) -> list[ChunkHit]:
-    """The first stage: embed the query and read the `count` closest notes' best chunks.
-
-    `count` is the purpose's candidate count plus the notes the request excludes, so the second
-    stage still has a full set of candidates once the excluded ones are dropped.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#bounded-search
     from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
     gate = request.app.state.memory_search_gate
@@ -431,8 +313,6 @@ async def _vector_candidates(
         async with _bounded_semaphore(gate, inputs.acquire_timeout()):
             query_vector = await provider.embed_query_async(body.query)
     except IndexerUnavailable:
-        # The gate was busy (`_bounded_semaphore`'s fast-fail) — a
-        # modelled state, not a backend failure; do not re-wrap it.
         raise
     except EmbeddingAPIError as exc:
         raise IndexerUnavailable(f"embed query failed: {exc}") from exc
@@ -454,41 +334,45 @@ async def _vector_candidates(
         raise IndexerUnavailable(f"memory search backend failed: {exc}") from exc
 
 
-@router.post("/api/memory/refresh", response_model=MemoryRefreshResponse)
+@router.post(
+    "/api/memory/refresh",
+    response_model=MemoryRefreshResponse,
+    description=(
+        "Fast-forward the gateway memory checkout to the consolidated pool.\n"
+        "\n"
+        "The gateway indexes `main`; once the pool's per-machine branches are\n"
+        "merged into `main`, calling this pulls those changes into the local checkout\n"
+        "(fast-forward only). The memory indexer then re-embeds the changed files on\n"
+        "its own. Returns the HEAD sha after the pull.\n"
+        "\n"
+        "This runs only on the gateway (the gateway + memory checkout live\n"
+        "there); a runner reaches it via its configured gateway URL.\n"
+        "\n"
+        "`pull_main` shells out to git (network-bound fetch against the memory\n"
+        "remote): it must run OFF the event loop, or a slow/dead remote blocks the\n"
+        "whole gateway until the watchdog kills it (P2 #2102: the 2026-09-10\n"
+        "04:06-04:35 watchdog kill loop). `asyncio.to_thread` — the same hop the\n"
+        "memory indexer uses for its own pull."
+    ),
+)
 async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
-    """Fast-forward the gateway memory checkout to the consolidated pool.
-
-    The gateway indexes `main`; once the pool's per-machine branches are
-    merged into `main`, calling this pulls those changes into the local checkout
-    (fast-forward only). The memory indexer then re-embeds the changed files on
-    its own. Returns the HEAD sha after the pull.
-
-    This runs only on the gateway (the gateway + memory checkout live
-    there); a runner reaches it via its configured gateway URL.
-
-    `pull_main` shells out to git (network-bound fetch against the memory
-    remote): it must run OFF the event loop, or a slow/dead remote blocks the
-    whole gateway until the watchdog kills it (P2 #2102: the 2026-09-10
-    04:06-04:35 watchdog kill loop). `asyncio.to_thread` — the same hop the
-    memory indexer uses for its own pull.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#refresh-owner
     from base.deploy.git import memory_repo
 
-    head = await asyncio.to_thread(memory_repo.pull_main, machine=request.app.state.machine)
+    config = request.app.state.gateway_process.config.view.general
+    head = await asyncio.to_thread(
+        memory_repo.pull_main,
+        root=request.app.state.gateway_config.memory_root,
+        keep_local=config.memory_keep_local,
+        branch=config.track_branch,
+    )
     return MemoryRefreshResponse(head=head)
 
 
 def _pool_revision(root: Path) -> str | None:
-    """Cheap change marker for the gateway memory checkout: its git HEAD.
-
-    The checkout is advanced only by explicit pulls (refresh, consolidation),
-    and those commit or fast-forward — so HEAD moves exactly when the note set
-    may have changed. Returns None when git cannot answer (not a repo, no git
-    binary, timeout), which disables the cache rather than risking a stale
-    graph.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-revision
     try:
-        out = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        out = subprocess.run(  # noqa: S603
             ["git", "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
@@ -503,16 +387,7 @@ def _pool_revision(root: Path) -> str | None:
 
 
 class MemoryGraphCache:
-    """The graph for the last few pool revisions, built once each (task #4008).
-
-    The full walk+parse of a ~2k-note pool costs ~2s and the endpoint used to
-    re-run it on every request; keying on the revision rebuilds after a pull.
-    `max_entries=4` is headroom for refresh races — consecutive revisions requested
-    around a pull/consolidation (a refresh can advance the pool more than once)
-    must not evict each other and re-run the build. Not a tuning knob. The cached object
-    is returned by reference and is only ever read (pydantic serializes per request).
-    """
-
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-revision
     def __init__(self, *, max_entries: int = 4) -> None:
         self._max_entries = max_entries
         self._graphs: OrderedDict[tuple[str, str], MemoryGraphResponse] = OrderedDict()
@@ -532,9 +407,13 @@ class MemoryGraphCache:
             return graph
 
 
-@router.get("/api/memory/graph", response_model=MemoryGraphResponse)
+@router.get(
+    "/api/memory/graph",
+    response_model=MemoryGraphResponse,
+    description=("Return concept notes and cross-links from the gateway memory bundle."),
+)
 def get_memory_graph(request: Request) -> MemoryGraphResponse:
-    """Return concept notes and cross-links from the gateway memory bundle."""
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#graph-revision
     root = request.app.state.gateway_config.memory_root
     revision = _pool_revision(root)
     if revision is None:
@@ -543,25 +422,27 @@ def get_memory_graph(request: Request) -> MemoryGraphResponse:
     return cache.get(root, revision)
 
 
-@router.get("/api/memory/note", response_model=MemoryNoteResponse)
+@router.get(
+    "/api/memory/note",
+    response_model=MemoryNoteResponse,
+    description=(
+        "Return one parsed memory note by its **relative** path (sans frontmatter).\n"
+        "\n"
+        "`path` is a memory-pool-relative markdown path as the graph carries it\n"
+        "(e.g. `health/user-health-overview.md`). Resolved inside the memory root\n"
+        "only — traversal (`..`, absolute paths) is rejected with 404 rather than\n"
+        "leaking filesystem structure. A file that is not a note (no/invalid\n"
+        "frontmatter) is not a note either: 404. The response carries the parsed\n"
+        "fields plus the markdown body with the YAML frontmatter already stripped."
+    ),
+)
 def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
-    """Return one parsed memory note by its **relative** path (sans frontmatter).
-
-    `path` is a memory-pool-relative markdown path as the graph carries it
-    (e.g. `health/user-health-overview.md`). Resolved inside the memory root
-    only — traversal (`..`, absolute paths) is rejected with 404 rather than
-    leaking filesystem structure. A file that is not a note (no/invalid
-    frontmatter) is not a note either: 404. The response carries the parsed
-    fields plus the markdown body with the YAML frontmatter already stripped.
-    """
+    # ava:ref gateway/routers/docs/memory.ava.okf.md#note-containment
     root = request.app.state.gateway_config.memory_root.resolve()
     rel = Path(path)
     if rel.is_absolute() or rel.suffix != ".md":
         raise HTTPException(status_code=404, detail="memory note not found")
-    # Everything below is one failure surface: a path that cannot be resolved
-    # (null bytes in lstat raise ValueError on POSIX), escapes the root, is
-    # missing, or is unreadable is uniformly "not a note" — 404, never 500
-    # (QA #1169 F3: `ok%00.md` used to escape as an uncaught ValueError).
+
     try:
         candidate = (root / rel).resolve()
         candidate.relative_to(root)
@@ -585,22 +466,26 @@ def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
     )
 
 
-@router.get("/api/memory/pool", response_class=Response)
+@router.get(
+    "/api/memory/pool",
+    response_class=Response,
+    description=(
+        "Download the consolidated memory pool as a git bundle.\n"
+        "\n"
+        "Serves the request-owned memory checkout on `main` as a\n"
+        "`git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch\n"
+        "is a true descendant of `main` and converges cleanly when a memory remote\n"
+        "is configured later). A fresh agent-runner whose memory remote is not\n"
+        "configured (a headless remote runner, no GitHub credentials) fetches this over its\n"
+        "gateway URL and clones it as its initial pool, so the shared index and\n"
+        "notes reach its agents without GitHub. Untracked machine-local paths\n"
+        "(`.cache`, `.githooks`, …) never ride a bundle — git only carries the\n"
+        "tracked tree. Sits behind the normal Bearer/session middleware like every\n"
+        "/api route. `X-Pool-Head` carries the checkout's HEAD sha so the receiver\n"
+        "can verify what it cloned is the advertised snapshot."
+    ),
+)
 def get_memory_pool(request: Request) -> Response:
-    """Download the consolidated memory pool as a git bundle.
-
-    Serves the request-owned memory checkout on `main` as a
-    `git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch
-    is a true descendant of `main` and converges cleanly when a memory remote
-    is configured later). A fresh agent-runner whose memory remote is not
-    configured (a headless remote runner, no GitHub credentials) fetches this over its
-    gateway URL and clones it as its initial pool, so the shared index and
-    notes reach its agents without GitHub. Untracked machine-local paths
-    (`.cache`, `.githooks`, …) never ride a bundle — git only carries the
-    tracked tree. Sits behind the normal Bearer/session middleware like every
-    /api route. `X-Pool-Head` carries the checkout's HEAD sha so the receiver
-    can verify what it cloned is the advertised snapshot.
-    """
     root = request.app.state.gateway_config.memory_root
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="gateway memory pool not initialized")
@@ -619,9 +504,6 @@ def get_memory_pool(request: Request) -> Response:
 
 
 def _build_pool_bundle(root: Path) -> tuple[str, bytes]:
-    """git-bundle HEAD of the consolidated checkout. Raises HTTPException on
-    git failure — outside any try here, so the route's except only wraps the
-    transport/OS layer."""
     import tempfile
 
     from base.host.proc import run_bounded
