@@ -73,3 +73,65 @@ test('only compiler-attached exact deprecation markers are machine syntax', () =
   const result = scanSource('probe.ts', source);
   assert.deepEqual(result.notes.map(note => note.line), [4, 6, 9]);
 });
+
+test('lexical identities ignore ordinary assignments but distinguish declarations', () => {
+  const before = scanSource('core.ts', 'function f() {\n const old = 1; // Keep reserve\n return old;\n}');
+  const after = scanSource('core.ts', 'function f() {\n const renamed = (\n  2); // Keep reserve\n return renamed;\n}');
+  assert.equal(before.notes[0].lexical_owner, after.notes[0].lexical_owner);
+  const moved = scanSource('core.ts', 'function f() {}\nfunction g() {\n // Keep reserve\n}');
+  assert.notEqual(before.notes[0].lexical_owner, moved.notes[0].lexical_owner);
+});
+
+test('duplicate declarations and getter setter groups keep distinct ordinal identities', () => {
+  for (const source of [
+    'function f() {\n// First\n}\nfunction f() {\n// Second\n}',
+    'class C {\nget value() {\n// First\nreturn 1;\n}\nset value(x) {\n// Second\n}\n}',
+  ]) {
+    const notes = scanSource('core.ts', source).notes;
+    assert.notEqual(notes[0].lexical_owner, notes[1].lexical_owner);
+    assert.equal(notes[0].raw_text, '// First');
+  }
+});
+
+test('same-name group growth changes only that declaration group identity', () => {
+  const source = 'function f() {\n// First\n}\nfunction f() {}\nfunction stable() {\n// Stable\n}';
+  const before = scanSource('core.ts', source).notes;
+  const after = scanSource('core.ts', 'function f() {}\n' + source).notes;
+  assert.notEqual(before[0].lexical_owner, after[0].lexical_owner);
+  assert.equal(before[1].lexical_owner, after[1].lexical_owner);
+});
+
+test('raw multiline text preserves CRLF and comments on module code do not borrow next function', () => {
+  const source = scanSource('core.ts', 'const x = 1; // Module\r\nfunction f() {\r\n/* first\r\nsecond */\r\n}');
+  assert.equal(source.notes[0].lexical_owner, '<module>');
+  assert.equal(source.notes[1].raw_text, '/* first\r\nsecond */');
+});
+
+test('actual anonymous callbacks, object methods and arrows do not share note credit', () => {
+  for (const source of [
+    'run(() => { /* First */ }); run(() => { /* Second */ });',
+    'const a = { f() { /* First */ } }; const b = { f() { /* Second */ } };',
+    'const a = () => { /* First */ }; const b = () => { /* Second */ };',
+    'function a() { /* First */ } function b() { /* Second */ }',
+  ]) {
+    const notes = scanSource('core.ts', source).notes;
+    assert.equal(notes.length, 2);
+    assert.notEqual(notes[0].lexical_owner, notes[1].lexical_owner);
+  }
+});
+
+test('string/computed methods and class expressions have real lexical scopes without new anchors', () => {
+  for (const source of [
+    "const obj = { 'a'() { /* First */ }, 'b'() { /* Second */ } };",
+    'const obj = { [first]() { /* First */ }, [second]() { /* Second */ } };',
+    'const A = class { /* First */ }; const B = class { /* Second */ };',
+    'export default class { a() { /* First */ } b() { /* Second */ } }',
+    'const C = class { a() { /* First */ } b() { /* Second */ } };',
+  ]) {
+    const notes = scanSource('core.ts', source).notes;
+    assert.equal(notes.length, 2);
+    assert.notEqual(notes[0].lexical_owner, notes[1].lexical_owner);
+    assert.notEqual(notes[0].lexical_owner, '<module>');
+  }
+  assert.equal(scanSource('core.ts', 'const obj = { [key]() {} };').symbols['[key]'], undefined);
+});

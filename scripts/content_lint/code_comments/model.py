@@ -60,6 +60,7 @@ class Symbol:
     parameters: tuple[str, ...] = ()
     ambiguous: bool = False
     callable: bool = False
+    lexical_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,7 @@ class Note:
     text: str
     owner: str
     lexical_owner: str = ""
+    raw_text: str = ""
 
 
 @dataclass(frozen=True)

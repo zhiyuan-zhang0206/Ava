@@ -35,15 +35,12 @@ free prose in selected sources; without paths it selects the whole supported
 tree. `inventory` is the full strict scan with failure status while work remains;
 pass `--json` before the command for structured output. The CLI prints its scope.
 
-`changed` selects staged paths under pre-commit's unstaged-change isolation.
-When pre-commit supplies from/to refs (including the pre-push branch check), it
-uses that committed range and requires its target to equal the checked-out HEAD.
-Git type changes are included alongside additions, copies, renames and edits.
-`changed BASE_REF` selects the committed diff from that revision to HEAD, as used
-by CI against the checked-out merge tree's base. Both validate the current
-checkout, so manual use requires a checkout matching the selected snapshot.
-The shell wrapper fails when Git or either parser fails. Empty changed scope
-still validates every typed record. It is not whole-tree migration success.
+`changed` checks only new or rewritten notes while validating every typed record.
+It compares HEAD/index for staged work or base/HEAD for committed work, requiring
+a matching tracked checkout. The shell passes pre-commit's from/to values as
+explicit arguments; Git resolution and validation have one owner in `changes.py`.
+See [incremental checks](incremental.ava.okf.md) for exact matching, repeated
+lexical declarations, copies/renames, snapshot failures and validation boundaries.
 
 ## Parser boundaries
 
@@ -59,7 +56,7 @@ proved module-class property can instead project beside its unique module-level
 annotation-only declaration, matching the source read by SDK help. Other
 annotation-only dynamic attributes remain blocked when the provenance resolver
 cannot prove them; preserve their existing help rather than dropping it.
-JavaScript/TypeScript bindings include named declarations and literal test labels
+JavaScript/TypeScript typed bindings include named declarations and literal test labels
 from imported Vitest, Playwright and node:test runners. Unsupported dynamic test
 labels and wrappers do not resolve; use a concrete test definition. An exact
 `/** @deprecated */` is machine syntax only when TypeScript attaches it to a
