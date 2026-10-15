@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts.content_lint.code_comments.check import check
-from scripts.content_lint.code_comments.render import render, render_source
+from scripts.content_lint.code_comments.render import WithoutDocstrings, render, render_source
 from scripts.content_lint.code_comments.tests.cases import record, repository
 
 
@@ -109,5 +109,69 @@ def test_unproved_dynamic_attribute_fails_without_deleting_help(tmp_path: Path) 
     )
     repo = repository(tmp_path, source)
     with pytest.raises(ValueError, match="cannot be proved"):
+        render(repo)
+    assert repo.text("ava/files.py") == source["ava/files.py"]
+
+
+def property_files() -> dict[str, str]:
+    source = api_files()
+    source["ava/files.py"] = "\n".join(
+        [
+            "import sys",
+            "from types import ModuleType",
+            "__all_for_ava__ = ['context']",
+            "context: object",
+            '"Original context help."',
+            "class Surface(ModuleType):",
+            "    @property",
+            "    def context(self): return obtain_context()",
+            "    @context.setter",
+            "    def context(self, value): bind_context(value)",
+            "    @context.deleter",
+            "    def context(self): unbind_context()",
+            "sys.modules[__name__].__class__ = Surface",
+            "raise RuntimeError('Never import application source')",
+            "",
+        ]
+    )
+    source["ava/docs/files.ava.okf.md"] = record(
+        id="context-help",
+        kind="api",
+        statement="Your execution context.",
+        code=["ava/files.py:context"],
+        tests=["ava/tests/test_files.py::test_read"],
+        api="ava.files.context",
+    )
+    return source
+
+
+def test_module_property_help_is_projected_at_the_annotation(tmp_path: Path) -> None:
+    source = property_files()
+    repo = repository(tmp_path, source)
+    assert repo.source("ava/files.py").symbols["Surface.context"].ambiguous
+    assert any(item.code == "contract-binding" for item in check(repo).findings)
+    assert render(repo) == ["ava/files.py"]
+    assert not check(repo, strict_paths=repo.files).findings
+    after = repo.text("ava/files.py")
+    assert "context: object\n'Your execution context.'\nclass Surface" in after
+    before_tree = WithoutDocstrings().visit(ast.parse(source["ava/files.py"]))
+    after_tree = WithoutDocstrings().visit(ast.parse(after))
+    assert ast.dump(before_tree) == ast.dump(after_tree)
+    assert render(repo) == []
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("context: object", "context: object\ncontext: object"),
+        ("sys.modules[__name__].__class__ = Surface", ""),
+        ("    @context.deleter", "    context = replacement\n    @context.deleter"),
+    ],
+)
+def test_unproved_property_help_remains_untouched(tmp_path: Path, old: str, new: str) -> None:
+    source = property_files()
+    source["ava/files.py"] = source["ava/files.py"].replace(old, new)
+    repo = repository(tmp_path, source)
+    with pytest.raises(ValueError):
         render(repo)
     assert repo.text("ava/files.py") == source["ava/files.py"]
