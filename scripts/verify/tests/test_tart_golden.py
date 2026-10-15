@@ -1,10 +1,3 @@
-"""The golden image build is safe to read before it runs, and judges the grant honestly.
-
-A real build pulls a 27 GB image and needs a person to click two toggles, so it is never
-run in a test. `--dry-run` prints every step and touches nothing; the verdict on the
-grant is a pure function of what the guest reported.
-"""
-
 from __future__ import annotations
 
 import copy
@@ -40,7 +33,6 @@ def test_a_dry_run_prints_every_step_in_order_and_touches_nothing(
 ) -> None:
     repo = Path(__file__).resolve().parents[3]
     evidence_root = tmp_path / "evidence"
-    # A binary that does not exist: a dry run that tried to run Tart would fail loudly.
     tart = Tart(str(tmp_path / "no-tart-here"), dry_run=True)
 
     status = tart_golden.build_golden(
@@ -51,11 +43,19 @@ def test_a_dry_run_prints_every_step_in_order_and_touches_nothing(
     steps = re.findall(r"^\[dry-run\] step (\S+):", printed, re.M)
     assert status == 0
     assert steps == [
-        "clone", "configure", "prepare-source", "toolchain", "python", "identity",
-        "key-access", "helper", "restart-helper", "verify", "finalize",
-    ]  # fmt: skip
+        "clone",
+        "configure",
+        "prepare-source",
+        "toolchain",
+        "python",
+        "identity",
+        "key-access",
+        "helper",
+        "restart-helper",
+        "verify",
+        "finalize",
+    ]
     assert not evidence_root.exists()
-    # The click is the one human step, with instructions and a wait before the check.
     assert printed.index("Screen & System Audio Recording") < printed.index("restart-helper")
     assert "press Enter" in printed
 
@@ -87,16 +87,10 @@ def test_the_golden_build_never_overwrites_a_vm_or_boots_a_third(tmp_path: Path)
 
 
 def test_the_guest_scripts_pin_the_pieces_the_experiment_found_necessary() -> None:
-    # The helper is restarted through launchd after the toggles, not left running.
     assert "launchctl kickstart -k" in tart_golden.RESTART_HELPER
-    # The golden image carries no source: each run fetches its own commit.
     assert tart_golden.FINALIZE.splitlines()[-1] == 'rm -rf "$HOME/.ava/source"'
-    # The verification reads the system TCC database read-only and never writes it.
     assert "sqlite3" in tart_golden.VERIFY and "-readonly" in tart_golden.VERIFY
     assert not re.search(r"\b(insert|update|delete)\b", tart_golden.VERIFY, re.I)
-
-
-# --------------------------------------------------------------------------- the verdict
 
 
 def test_a_fully_granted_helper_passes() -> None:
@@ -107,7 +101,6 @@ _DROP = object()
 
 
 def _edit(record: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
-    """Change one field of a granted record: set `path` to `value`, or remove it."""
     *parents, last = path
     target: Any = record
     for key in parents:
