@@ -1,5 +1,3 @@
-"""The archive health probe: states not thresholds, fixed texts, and a real Postgres to read."""
-
 from __future__ import annotations
 
 import os
@@ -66,13 +64,8 @@ def _healthy_state() -> probe.ArchiverState:
 
 
 def test_failure_texts_carry_no_number_that_could_change_between_runs() -> None:
-    """The probe's episode logic keys on the full message text: a changing number would
-    make every run a new episode that never escalates."""
     for text in _ALL_TEXTS:
         assert not any(char.isdigit() for char in text), text
-
-
-# ── judging a state ──────────────────────────────────────────────────────────
 
 
 def test_a_matching_quiet_archiver_is_healthy(sandbox: Sandbox) -> None:
@@ -122,7 +115,6 @@ def test_pending_wal_is_late_only_beyond_the_rpo_objective(sandbox: Sandbox) -> 
 
 
 def test_settings_drift_outranks_the_archiver_conditions(sandbox: Sandbox) -> None:
-    """An archiver that is off cannot be 'failing' or 'late': the settings are the cause."""
     expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
     assert expected is not None
     state = replace(
@@ -130,9 +122,6 @@ def test_settings_drift_outranks_the_archiver_conditions(sandbox: Sandbox) -> No
     )
 
     assert probe.judge(state, expected) == probe.SETTINGS_DIFFER
-
-
-# ── the files: configuration and key ─────────────────────────────────────────
 
 
 def test_off_is_silent_and_never_dials_postgres(
@@ -143,7 +132,7 @@ def test_off_is_silent_and_never_dials_postgres(
     @contextmanager
     def explode() -> Generator[psycopg.Connection[Any]]:
         raise AssertionError("the probe dialed Postgres while WAL-G is off")
-        yield  # pragma: no cover
+        yield
 
     monkeypatch.setattr(probe, "admin_connection", explode)
 
@@ -186,14 +175,11 @@ def test_the_probe_never_raises_when_postgres_cannot_be_read(
     @contextmanager
     def unreachable() -> Generator[psycopg.Connection[Any]]:
         raise psycopg.OperationalError("connection refused")
-        yield  # pragma: no cover
+        yield
 
     monkeypatch.setattr(probe, "admin_connection", unreachable)
 
     assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) == probe.UNREADABLE
-
-
-# ── a real Postgres ──────────────────────────────────────────────────────────
 
 
 def _dial(pg: PgInstance, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,7 +204,7 @@ def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
 
         wait_for(settled, what="the closed segment to be archived")
         monkeypatch.setattr(probe, "RPO_OBJECTIVE_S", 1)
-        time.sleep(2.5)  # idle for longer than the (shrunk) objective: nothing is pending
+        time.sleep(2.5)
 
         state = probe.read_archiver_state(conn)
         expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
@@ -254,8 +240,6 @@ def test_a_failing_archive_command_is_reported_with_work_waiting(
 def test_a_hung_archive_command_is_caught_by_the_age_of_the_waiting_wal(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> None:
-    """A command that neither succeeds nor fails leaves `failing_now` false: only the
-    age of the queued segment shows it."""
     sandbox.set_mode("hang")
     with archiving_postgres() as pg, pg.connect() as conn:
         _dial(pg, monkeypatch)
@@ -286,9 +270,6 @@ def test_a_hung_archive_command_is_caught_by_the_age_of_the_waiting_wal(
 def test_the_application_login_cannot_list_the_archive_queue(
     sandbox: Sandbox, postgres_access: None
 ) -> None:
-    """Why the probe dials the administrator socket: the unprivileged login the other
-    health checks use is refused the queue listing, the only way to see how long a
-    segment has been waiting."""
     with archiving_postgres() as pg:
         with pg.connect() as admin:
             admin.execute("CREATE ROLE app LOGIN")
@@ -304,8 +285,6 @@ def test_the_application_login_cannot_list_the_archive_queue(
 def test_the_admin_dial_is_custody_checked_and_bounded(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The probe reaches the postmaster only through the home's owner-only admin
-    socket, bound to its own data directory, with a connect timeout and a statement timeout."""
     from base.cluster.dataplane import pg_admin
 
     seen: dict[str, Any] = {}
@@ -345,8 +324,6 @@ def test_the_admin_dial_is_custody_checked_and_bounded(
     }
     assert seen["statement"].startswith("SET statement_timeout")
 
-
-# ── the daily tick: A5 (run failed), A6 (tick not running), A7 (chain broken) ─
 
 NOW = datetime(2026, 10, 3, 12, 0, 0, tzinfo=UTC)
 
@@ -482,9 +459,6 @@ def test_an_unreadable_state_file_is_its_own_fixed_failure_not_an_exception(
     walg_state.state_path().write_text("{broken " + "".join(SECRETS))
 
     assert probe.tick_failure(now=NOW) == probe.TICK_STATE_UNREADABLE
-
-
-# ── the recovery drill: A8 (latest failed) and "none succeeded in time" ─────
 
 
 def _drill(
