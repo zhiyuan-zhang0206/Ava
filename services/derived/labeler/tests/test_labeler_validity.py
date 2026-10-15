@@ -172,6 +172,13 @@ class _FakeLLM:
         return AIMessage(content=self.content)
 
 
+def _fake_builder(content: str) -> Any:
+    def _build(_model: str, **_kwargs: object) -> _FakeLLM:
+        return _FakeLLM(content)
+
+    return _build
+
+
 @pytest.fixture
 def _no_publish(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Capture (and suppress) the redis publish so a label write is observable
@@ -287,7 +294,6 @@ class TestGenerateLabelRejectsNonLabels:
         self,
         raw: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         _no_publish: list[str],
         event_bus: EventBus,
         *,
@@ -296,7 +302,6 @@ class TestGenerateLabelRejectsNonLabels:
         database_gate: ProcessDbGate,
     ) -> None:
         tid = create_agent(db_conn)
-        monkeypatch.setattr(labeler_module, "build_chat_model", lambda _m, **_: _FakeLLM(raw))  # pyright: ignore[reportUnknownArgumentType]
 
         result = await generate_label_async(
             tid,
@@ -304,6 +309,7 @@ class TestGenerateLabelRejectsNonLabels:
             labeler_config(labeler_model="deepseek-v4-flash"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(raw),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -317,7 +323,6 @@ class TestGenerateLabelRejectsNonLabels:
     async def test_good_label_still_written(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         _no_publish: list[str],
         event_bus: EventBus,
         *,
@@ -328,13 +333,6 @@ class TestGenerateLabelRejectsNonLabels:
         """The other half of the contract: the classifier must not fire on a
         real label."""
         tid = create_agent(db_conn)
-        monkeypatch.setattr(
-            labeler_module,
-            "build_chat_model",
-            lambda _m, **_: _FakeLLM(
-                "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
-            ),  # pyright: ignore[reportUnknownArgumentType]
-        )
 
         result = await generate_label_async(
             tid,
@@ -342,6 +340,9 @@ class TestGenerateLabelRejectsNonLabels:
             labeler_config(labeler_model="deepseek-v4-flash"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(
+                "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
+            ),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -358,7 +359,6 @@ class TestGenerateLabelRejectsNonLabels:
 @pytest.mark.asyncio
 async def test_generated_label_overwrites_stray_empty_string(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     _no_publish: list[str],
     event_bus: EventBus,
     *,
@@ -373,11 +373,6 @@ async def test_generated_label_overwrites_stray_empty_string(
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents SET label = '' WHERE id = %s", (tid,))
     db_conn.commit()
-    monkeypatch.setattr(
-        labeler_module,
-        "build_chat_model",
-        lambda _m, **_: _FakeLLM("ui docs fix"),  # pyright: ignore[reportUnknownArgumentType]
-    )
 
     result = await generate_label_async(
         tid,
@@ -385,6 +380,7 @@ async def test_generated_label_overwrites_stray_empty_string(
         labeler_config(labeler_model="deepseek-v4-flash"),
         labeler_db(database_gate=database_gate),
         event_bus,
+        build_chat_model=_fake_builder("ui docs fix"),
         catalog=model_catalog,
         llm_override=config_authority.runtime.lm.llm_override,
         overrides=ModelOverrides.from_pins({}),
@@ -398,7 +394,6 @@ async def test_generated_label_overwrites_stray_empty_string(
 @pytest.mark.asyncio
 async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     _no_publish: list[str],
     event_bus: EventBus,
     *,
@@ -413,11 +408,6 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents SET label = '', label_user_set = TRUE WHERE id = %s", (tid,))
     db_conn.commit()
-    monkeypatch.setattr(
-        labeler_module,
-        "build_chat_model",
-        lambda _m, **_: _FakeLLM("ui docs fix"),  # pyright: ignore[reportUnknownArgumentType]
-    )
 
     result = await generate_label_async(
         tid,
@@ -425,6 +415,7 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
         labeler_config(labeler_model="deepseek-v4-flash"),
         labeler_db(database_gate=database_gate),
         event_bus,
+        build_chat_model=_fake_builder("ui docs fix"),
         catalog=model_catalog,
         llm_override=config_authority.runtime.lm.llm_override,
         overrides=ModelOverrides.from_pins({}),
@@ -438,7 +429,6 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
 @pytest.mark.asyncio
 async def test_label_generation_logs_batch_usage_for_the_target_agent(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     _no_publish: list[str],
     loguru_records: list[dict[str, Any]],
     event_bus: EventBus,
@@ -464,8 +454,6 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
     def _build_usage_llm(_model: str, **_kwargs: object) -> _UsageLLM:
         return _UsageLLM()
 
-    monkeypatch.setattr(labeler_module, "build_chat_model", _build_usage_llm)
-
     assert (
         await generate_label_async(
             agent_id,
@@ -473,6 +461,7 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
             labeler_config(labeler_model="deepseek-v4-flash"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_build_usage_llm,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),

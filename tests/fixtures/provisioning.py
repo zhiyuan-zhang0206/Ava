@@ -535,7 +535,6 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 def gateway_data_plane(
     db_url: str,
     redis_url: str,
-    stub_label_llm: None,
     guard_schedule_session_control: None,
 ) -> None:
     """An assembled in-process Gateway consumes both resources and its owner guards."""

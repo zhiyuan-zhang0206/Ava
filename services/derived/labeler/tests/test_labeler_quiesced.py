@@ -30,6 +30,9 @@ async def test_a_quiesced_unit_borrows_no_connection(
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
 ) -> None:
+    def unexpected_build(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("quiesced poll test must not build a label model")
+
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
     monkeypatch.setattr(daemon, "POLL_INTERVAL_S", 0.01)
     pool = MagicMock()
@@ -40,6 +43,7 @@ async def test_a_quiesced_unit_borrows_no_connection(
             EventBus.from_settings(),
             Liveness(daemon.LIVENESS_TIMEOUT_S),
             daemon.labeler_config(),
+            build_chat_model=unexpected_build,
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
