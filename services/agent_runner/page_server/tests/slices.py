@@ -1,5 +1,3 @@
-"""The page-server slice for tests: the daemon's builder over the live settings, with overrides."""
-
 from __future__ import annotations
 
 from dataclasses import replace

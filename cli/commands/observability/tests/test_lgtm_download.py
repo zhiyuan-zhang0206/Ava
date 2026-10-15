@@ -1,5 +1,3 @@
-"""Native LGTM backend archive download: checksum refusal and bounded retries."""
-
 from __future__ import annotations
 
 from pathlib import Path

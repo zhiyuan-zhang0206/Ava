@@ -1,5 +1,3 @@
-"""Validate inspector liveness at the database read boundary."""
-
 import pytest
 
 

@@ -1,5 +1,3 @@
-"""Scheduler stop keeps real stragglers and the original unknown errors."""
-
 import asyncio
 
 import pytest

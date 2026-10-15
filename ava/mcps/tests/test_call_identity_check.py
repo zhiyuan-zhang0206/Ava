@@ -1,5 +1,3 @@
-"""A tool call checks the caller's identity first; a failed check never reaches the daemon."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock

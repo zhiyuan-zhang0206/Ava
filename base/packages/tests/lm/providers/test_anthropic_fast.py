@@ -1,5 +1,3 @@
-"""Actual SDK events retain the service receipt through LangChain conversion."""
-
 import pytest
 from anthropic.types import Message, RawMessageDeltaEvent, RawMessageStartEvent
 from langchain_core.messages import AIMessage

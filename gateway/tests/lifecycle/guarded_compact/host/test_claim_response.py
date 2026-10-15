@@ -1,5 +1,3 @@
-"""A committed attempt with a lost claim response is retained, never called again."""
-
 from dataclasses import replace
 from typing import Any
 

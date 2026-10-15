@@ -1,5 +1,3 @@
-"""Collector download retry errors preserve timing and causal contracts."""
-
 from pathlib import Path
 
 import pytest

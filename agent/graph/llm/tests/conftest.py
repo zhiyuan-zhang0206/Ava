@@ -1,5 +1,3 @@
-"""Cancel-race fixtures shared by this test directory."""
-
 from agent.graph.llm.tests.cancel_fixture import fake_cancel_event as fake_cancel_event
 from ava.tests.fixtures.sdk import sdk_environment as sdk_environment
 from ava.tests.fixtures.sdk import sdk_identity as sdk_identity

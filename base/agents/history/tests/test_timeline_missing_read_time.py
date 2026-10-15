@@ -1,5 +1,3 @@
-"""A message with no recorded read time renders with no time, and never raises."""
-
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items

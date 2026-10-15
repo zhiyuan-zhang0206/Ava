@@ -1,5 +1,3 @@
-"""Explicit context branches retain the original work without task-local native getters."""
-
 from __future__ import annotations
 
 import asyncio

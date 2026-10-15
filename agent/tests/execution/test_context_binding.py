@@ -1,5 +1,3 @@
-"""One disposable child owns one SDK context and working state."""
-
 from __future__ import annotations
 
 import json
@@ -148,7 +146,6 @@ def test_execution_tally_stays_with_its_context_and_out_of_description() -> None
 
 @patch.dict(os.environ)
 def test_child_sdk_tally_includes_plain_thread_calls(tmp_path: Path) -> None:
-    """Threads in the same execution report their real public SDK entries."""
     sample = tmp_path / "thread-sample.txt"
     sample.write_text("hello", encoding="utf-8")
     code = f"""

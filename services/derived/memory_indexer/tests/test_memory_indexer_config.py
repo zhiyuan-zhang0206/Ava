@@ -1,5 +1,3 @@
-"""The indexer root binds required provider and backend inputs to one boot owner; its tuning is validated."""
-
 from __future__ import annotations
 
 from typing import Any

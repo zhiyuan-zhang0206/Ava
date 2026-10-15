@@ -1,5 +1,3 @@
-"""Compaction accounts for the selected service rather than the wire model."""
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

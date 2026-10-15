@@ -1,5 +1,3 @@
-"""A failed metric projection preserves the pipeline's other sinks and diagnostics."""
-
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock

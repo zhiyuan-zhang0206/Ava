@@ -1,5 +1,3 @@
-"""Receipt rollback and lifecycle boundaries remain transactional."""
-
 import psycopg
 import pytest
 

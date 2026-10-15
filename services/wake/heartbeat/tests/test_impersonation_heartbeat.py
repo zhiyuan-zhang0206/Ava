@@ -1,5 +1,3 @@
-"""Active external executors receive periodic, pausable heartbeat check-ins."""
-
 from typing import Any
 
 import psycopg

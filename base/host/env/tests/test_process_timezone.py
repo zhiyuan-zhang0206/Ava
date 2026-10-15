@@ -1,5 +1,3 @@
-"""Explicit startup timezone delivery stays independent of Settings imports."""
-
 from __future__ import annotations
 
 import json

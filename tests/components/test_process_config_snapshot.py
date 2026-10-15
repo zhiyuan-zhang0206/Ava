@@ -1,5 +1,3 @@
-"""Test process roots preserve configuration values and their explicit origins."""
-
 import pytest
 
 from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot

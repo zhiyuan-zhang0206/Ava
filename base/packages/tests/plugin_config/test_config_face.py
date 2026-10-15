@@ -1,5 +1,3 @@
-"""A plugin's `default_config.py` config face — read without importing `plugin.py`."""
-
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,5 +1,3 @@
-"""The real shell owner probe meters its nested public SDK entry."""
-
 from __future__ import annotations
 
 from collections.abc import Callable

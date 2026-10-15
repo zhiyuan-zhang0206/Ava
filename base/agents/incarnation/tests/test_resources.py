@@ -1,5 +1,3 @@
-"""Real metadata locking serializes complete exec registration and force freeze."""
-
 import threading
 import time
 from datetime import UTC, datetime, timedelta

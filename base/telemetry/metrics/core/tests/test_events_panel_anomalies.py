@@ -1,5 +1,3 @@
-"""The Events panel lists the declared anomaly names, and the shipped dashboard matches."""
-
 from __future__ import annotations
 
 import json

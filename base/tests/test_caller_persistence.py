@@ -1,5 +1,3 @@
-"""Structured provenance survives real initiating writes and audit emission."""
-
 from collections.abc import Callable
 from uuid import uuid4
 

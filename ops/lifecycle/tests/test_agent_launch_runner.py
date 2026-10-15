@@ -1,5 +1,3 @@
-"""The versioned launch operation is repeatable and never inserts a prompt."""
-
 from __future__ import annotations
 
 from uuid import uuid4

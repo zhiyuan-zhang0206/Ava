@@ -1,5 +1,3 @@
-"""SDK work control keeps exact observed work, key and receipt boundaries."""
-
 import contextlib
 import io
 import json

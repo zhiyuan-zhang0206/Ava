@@ -1,5 +1,3 @@
-"""Retry policy reads belong to their configuration owner and remain live."""
-
 from __future__ import annotations
 
 import os

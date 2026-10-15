@@ -1,5 +1,3 @@
-"""Fresh-interpreter check that the public parser queries do not load Settings or dispatch."""
-
 import sys
 
 from cli.parsers import command_options, parse_args

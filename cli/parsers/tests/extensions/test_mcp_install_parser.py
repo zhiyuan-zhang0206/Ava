@@ -1,5 +1,3 @@
-"""The `ava mcp install` argument surface."""
-
 import pytest
 
 

@@ -1,5 +1,3 @@
-"""Recorded debt: strict and strict-to-be directories, and what a baseline may and may not cover."""
-
 from __future__ import annotations
 
 import pytest

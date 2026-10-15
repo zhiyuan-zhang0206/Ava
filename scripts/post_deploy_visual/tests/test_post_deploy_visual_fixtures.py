@@ -1,5 +1,3 @@
-"""Preview data must satisfy the browser's current read contracts."""
-
 from base.agents.observation.roster import AgentCard, AgentDirectoryPage, AgentRoster
 from base.agents.observation.snapshot import AgentSnapshot
 from scripts.post_deploy_visual.fixtures import AGENT, AGENT_CARD
@@ -7,7 +5,6 @@ from scripts.post_deploy_visual.matrix import fixture_for
 
 
 def test_preview_agent_reads_resolve_roster_directory_and_selected_detail() -> None:
-    """A missing roster fixture leaves selection empty and hides the inspector."""
     roster = AgentRoster.model_validate(fixture_for("/api/agents/roster"))
     directory = AgentDirectoryPage.model_validate(fixture_for("/api/agents"))
     detail = AgentSnapshot.model_validate(fixture_for("/api/agents/1"))

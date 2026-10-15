@@ -1,5 +1,3 @@
-"""Feedback edges and back-edge bookkeeping on small directed graphs."""
-
 from __future__ import annotations
 
 from meizel.graph.graphs import feedback_edges, is_acyclic, unneeded_back_edges

@@ -1,5 +1,3 @@
-"""An original compact execution closes its accepted restart before any new work."""
-
 import asyncio
 from dataclasses import replace
 from typing import Any

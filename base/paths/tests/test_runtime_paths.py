@@ -1,5 +1,3 @@
-"""Runtime path derivation does not create a home or its runtime directories."""
-
 from pathlib import Path
 
 import pytest

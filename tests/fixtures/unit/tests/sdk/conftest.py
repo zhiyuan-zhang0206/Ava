@@ -1,5 +1,3 @@
-"""The SDK composition capability belongs to its contract tests."""
-
 from ava.tests.fixtures.sdk import sdk_environment as sdk_environment
 from ava.tests.fixtures.sdk import sdk_identity as sdk_identity
 from ava.tests.fixtures.sdk import sdk_metering as sdk_metering

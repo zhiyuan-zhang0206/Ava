@@ -1,5 +1,3 @@
-"""`hosting_supervised_session`: the supervised session this process runs inside."""
-
 from __future__ import annotations
 
 import os
@@ -17,7 +15,6 @@ from base.sessions.record import SessionRecord
 
 
 def test_hosting_supervised_session_resolves_home_when_called(unit_home: Path) -> None:
-    """The settings-free proc module loads its home reader only at this boundary."""
     name = "ava-test-hosting-current"
     path = run_dir(ava_home()) / "sessions" / f"{name}.json"
     SessionRecord(
@@ -38,7 +35,6 @@ def test_hosting_supervised_session_resolves_home_when_called(unit_home: Path) -
 def test_hosting_supervised_session_uses_starttime_despite_wall_clock_drift(
     unit_home: Path,
 ) -> None:
-    """Update lineage recognizes a matching stable tick even when btime drifted."""
     starttime = pid_starttime_ticks(os.getpid())
     assert starttime is not None
     name = "ava-test-hosting-starttime"

@@ -1,5 +1,3 @@
-"""Owner-only directories: refusals and mode repair."""
-
 from __future__ import annotations
 
 import os
@@ -17,7 +15,6 @@ def _mode(path: Path) -> int:
 
 
 def test_private_dir_rejects_symlink(tmp_path: Path) -> None:
-    """A pre-placed symlink must never become a private storage directory."""
     target = tmp_path / "private"
     destination = tmp_path / "elsewhere"
     target.symlink_to(destination, target_is_directory=True)
@@ -28,7 +25,6 @@ def test_private_dir_rejects_symlink(tmp_path: Path) -> None:
 
 
 def test_private_dir_rejects_foreign_owner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A directory owned by another account cannot hold this process's secrets."""
     target = tmp_path / "private"
     target.mkdir()
     owner = os.geteuid()
@@ -41,8 +37,6 @@ def test_private_dir_rejects_foreign_owner(monkeypatch: pytest.MonkeyPatch, tmp_
 
 
 def test_is_foreign_owned_is_uid_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ownership follows the uid alone; a foreign gid does not make a path foreign."""
-
     def _stat(uid: int, gid: int) -> os.stat_result:
         return os.stat_result((0o100644, 0, 0, 1, uid, gid, 0, 0, 0, 0))
 
@@ -54,7 +48,6 @@ def test_is_foreign_owned_is_uid_only(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_private_dir_repairs_mode_drift(tmp_path: Path) -> None:
-    """A lax directory from an older umask is tightened before reuse."""
     target = tmp_path / "private"
     target.mkdir()
     target.chmod(0o755)

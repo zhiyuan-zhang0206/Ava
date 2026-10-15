@@ -1,5 +1,3 @@
-"""The import cache reads changed files and retains unchanged normalized text."""
-
 from __future__ import annotations
 
 from pathlib import Path

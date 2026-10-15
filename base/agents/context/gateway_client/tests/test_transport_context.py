@@ -1,5 +1,3 @@
-"""Gateway transport uses only the context and resources its caller supplied."""
-
 from collections.abc import Callable
 from typing import Any
 

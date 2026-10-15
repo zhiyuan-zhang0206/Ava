@@ -1,5 +1,3 @@
-"""Execute the capture-indicator window decisions and lease logic with inert system substitutes."""
-
 from __future__ import annotations
 
 import shutil

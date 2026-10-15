@@ -1,5 +1,3 @@
-"""Native backend inputs belong to the root generation; storage survives it."""
-
 from pathlib import Path
 
 from base.telemetry.lgtm_local import service_environment, service_input_paths

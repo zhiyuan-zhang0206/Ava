@@ -1,5 +1,3 @@
-"""Actual runner login, not an administrator, produces and completes compact proof."""
-
 from dataclasses import replace
 from uuid import uuid4
 

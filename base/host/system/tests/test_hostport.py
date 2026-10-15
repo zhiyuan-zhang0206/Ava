@@ -1,5 +1,3 @@
-"""`Host`: the real host answers for this machine, a hand-built one for a test."""
-
 from __future__ import annotations
 
 import dataclasses

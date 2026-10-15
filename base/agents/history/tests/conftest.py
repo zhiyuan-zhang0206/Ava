@@ -1,5 +1,3 @@
-"""Consumer-local opt-in fixtures for this test directory."""
-
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.tests.model_catalog import add_bindings as add_bindings
 from base.packages.tests.model_catalog import add_models as add_models

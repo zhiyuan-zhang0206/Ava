@@ -1,5 +1,3 @@
-"""Lease recovery preserves ownership, pending handoffs and expiry receipts."""
-
 from __future__ import annotations
 
 from typing import Any

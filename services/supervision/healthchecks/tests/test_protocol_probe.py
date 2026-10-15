@@ -1,5 +1,3 @@
-"""Application responses determine availability without native ownership queries."""
-
 from __future__ import annotations
 
 import contextlib

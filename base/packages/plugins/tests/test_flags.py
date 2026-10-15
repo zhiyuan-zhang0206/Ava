@@ -1,5 +1,3 @@
-"""Core flag admission and explicit service reads need only the declaration."""
-
 import pytest
 
 from base.config import settings

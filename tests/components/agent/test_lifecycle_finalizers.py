@@ -1,5 +1,3 @@
-"""Generic dead-letter cleanup cannot overwrite a durable lifecycle command."""
-
 import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 

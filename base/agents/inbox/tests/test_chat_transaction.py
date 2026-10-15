@@ -1,5 +1,3 @@
-"""Caller-owned transactions compose chat identity and audit facts without dispatch."""
-
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 

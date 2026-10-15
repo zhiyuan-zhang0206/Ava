@@ -1,5 +1,3 @@
-"""Selecting an existing tab grants affinity without automatic cleanup custody."""
-
 from __future__ import annotations
 
 from typing import Literal

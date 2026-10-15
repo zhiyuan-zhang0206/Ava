@@ -1,5 +1,3 @@
-"""Separate RPC result domains have one owner each and keep their JSON values."""
-
 import pytest
 from pydantic import ValidationError
 

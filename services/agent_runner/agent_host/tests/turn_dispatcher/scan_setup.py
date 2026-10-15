@@ -1,5 +1,3 @@
-"""A controllable scheduler for hosted wake scan tests."""
-
 from __future__ import annotations
 
 import asyncio

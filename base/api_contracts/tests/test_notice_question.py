@@ -1,5 +1,3 @@
-"""Numbered answers preserve references and reject ambiguous or invalid selections."""
-
 import pytest
 
 from base.api_contracts.notice_question import (

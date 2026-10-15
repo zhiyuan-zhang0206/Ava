@@ -1,5 +1,3 @@
-"""The idempotent pass retries only its bounded connection failures."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -33,7 +31,6 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A pass that dies on a closed connection is re-run; the outcome is returned."""
     calls: list[int] = []
 
     async def _flaky_pass(
@@ -91,7 +88,6 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A persistently dying connection raises after the bounded attempts."""
     calls: list[int] = []
 
     async def _always_dead(
@@ -146,7 +142,6 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Any non-OperationalError propagates on the first pass — no retry."""
     calls: list[int] = []
 
     async def _boom(

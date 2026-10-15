@@ -1,5 +1,3 @@
-"""The host's indexing decision is independent of agent prompt injection."""
-
 from pathlib import Path
 from typing import cast
 

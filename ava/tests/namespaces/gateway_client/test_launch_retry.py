@@ -1,5 +1,3 @@
-"""Guarded SDK launch retries keep observed intent and refuse uncertain receipts."""
-
 import json
 from collections.abc import Iterator
 from typing import Any

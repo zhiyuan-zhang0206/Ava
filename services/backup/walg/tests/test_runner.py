@@ -1,5 +1,3 @@
-"""Every wal-g invocation: fixed argv shape, a daemon-grade environment, bounded time."""
-
 from __future__ import annotations
 
 from pathlib import Path

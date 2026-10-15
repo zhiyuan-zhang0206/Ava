@@ -1,5 +1,3 @@
-"""Provider wire formats, bound targets, failures and terminal-notice ownership."""
-
 from __future__ import annotations
 
 import subprocess

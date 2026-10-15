@@ -1,5 +1,3 @@
-"""Durable resource recovery requires boot-scoped native identity, never wall time."""
-
 from __future__ import annotations
 
 from types import SimpleNamespace

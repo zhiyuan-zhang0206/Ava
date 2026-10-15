@@ -1,5 +1,3 @@
-"""Resurrection transfers released ownership without consulting lifecycle history."""
-
 import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -245,7 +243,6 @@ async def test_crash_reap_resurrect_readmits_in_the_same_live_host(
     machine_identity: MachineIdentity,
     fresh_chat: bool,
 ) -> None:
-    """A failed turn needs no synthetic terminate receipt or shared-host restart."""
     old = await _admitted(
         aops_pool,
         model_catalog=model_catalog,

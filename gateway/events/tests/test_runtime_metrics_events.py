@@ -1,5 +1,3 @@
-"""The SSE streams open and close the active-connection gauge in both modes."""
-
 from __future__ import annotations
 
 import asyncio

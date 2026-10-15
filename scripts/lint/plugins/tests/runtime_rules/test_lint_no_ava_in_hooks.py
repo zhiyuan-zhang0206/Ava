@@ -1,5 +1,3 @@
-"""`scripts/lint/plugins/no_ava_in_hooks.py` — hook modules may not import `ava`, in any form."""
-
 from __future__ import annotations
 
 from pathlib import Path

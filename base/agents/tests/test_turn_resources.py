@@ -1,5 +1,3 @@
-"""Explicit invocation contexts retain their original resource and admission owners."""
-
 import asyncio
 from dataclasses import replace
 from pathlib import Path

@@ -1,5 +1,3 @@
-"""An obsolete PTY command cannot execute a newer desired schedule revision."""
-
 import psycopg
 
 from base.cluster.machine import MachineIdentity

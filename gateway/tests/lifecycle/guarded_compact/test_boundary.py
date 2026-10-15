@@ -1,5 +1,3 @@
-"""Guarded compact raw input, principal scope and retained immutable receipt boundaries."""
-
 from uuid import uuid4
 
 import psycopg

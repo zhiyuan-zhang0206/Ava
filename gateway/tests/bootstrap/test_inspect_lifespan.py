@@ -1,5 +1,3 @@
-"""Gateway cancellation drains a real inspector SQL call before pool closure."""
-
 import asyncio
 import threading
 from collections.abc import Callable

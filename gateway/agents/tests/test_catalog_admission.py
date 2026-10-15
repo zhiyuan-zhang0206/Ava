@@ -1,5 +1,3 @@
-"""Transport shape and caller-owned catalog validation have distinct boundaries."""
-
 from collections.abc import Mapping
 from types import SimpleNamespace
 from unittest.mock import MagicMock

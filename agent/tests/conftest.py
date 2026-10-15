@@ -1,5 +1,3 @@
-"""Opt-in unit fixtures shared by this test directory."""
-
 from agent.graph.tests.cancel_fixture import fake_cancel_event as fake_cancel_event
 from ava.tests.fixtures.model_owner import model_installation as model_installation
 from ava.tests.fixtures.model_owner import sdk_model_owner as sdk_model_owner

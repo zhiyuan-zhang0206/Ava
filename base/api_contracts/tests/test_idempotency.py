@@ -1,5 +1,3 @@
-"""Supplied operation keys preserve their identity or fail at the boundary."""
-
 import pytest
 
 from base.api_contracts.idempotency import (

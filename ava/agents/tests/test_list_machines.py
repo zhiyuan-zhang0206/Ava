@@ -1,5 +1,3 @@
-"""ava.agents.list_machines maps the gateway rows to Machine dataclasses."""
-
 from __future__ import annotations
 
 from ava import agents

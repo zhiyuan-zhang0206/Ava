@@ -1,5 +1,3 @@
-"""The process lane must isolate native effects without weakening native runs."""
-
 import os
 from pathlib import Path
 

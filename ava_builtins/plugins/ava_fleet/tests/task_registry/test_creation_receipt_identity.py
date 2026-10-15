@@ -1,5 +1,3 @@
-"""Keyed SDK writes derive an established actor and revalidate borrowed identity."""
-
 import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event

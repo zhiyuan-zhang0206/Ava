@@ -1,5 +1,3 @@
-"""pytest fixtures resolve to the file that defines them, by pytest's own rules."""
-
 from __future__ import annotations
 
 from pathlib import Path

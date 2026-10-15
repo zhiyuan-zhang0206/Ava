@@ -1,5 +1,3 @@
-"""Execute the native clipboard bodies against an inert pasteboard, never the user's clipboard."""
-
 from __future__ import annotations
 
 import shutil

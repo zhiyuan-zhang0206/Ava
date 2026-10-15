@@ -1,5 +1,3 @@
-"""A worker must clean admitted resources and refuse undeclared late effects."""
-
 import pytest
 
 

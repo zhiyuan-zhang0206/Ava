@@ -1,5 +1,3 @@
-"""Observability toggles change intent through the sole start lifecycle."""
-
 from collections.abc import Callable
 from pathlib import Path
 

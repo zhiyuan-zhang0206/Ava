@@ -1,5 +1,3 @@
-"""Real configuration defaults and independent roots feeding the hierarchy component."""
-
 import time
 from unittest.mock import MagicMock
 
@@ -12,7 +10,6 @@ from base.lm.catalog import ModelCatalog
 def test_owned_group_model_readers_are_lazy_isolated_and_live(
     model_catalog: ModelCatalog,
 ) -> None:
-    """Configured grouping never evaluates unrelated defaults, even after a live edit."""
     import os
     from dataclasses import replace
     from unittest.mock import patch

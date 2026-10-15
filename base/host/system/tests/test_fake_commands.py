@@ -1,5 +1,3 @@
-"""`FakeCommands` answers like `run_bounded`: it records, scripts by prefix and shapes the result."""
-
 from __future__ import annotations
 
 import subprocess

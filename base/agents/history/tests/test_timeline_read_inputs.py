@@ -1,5 +1,3 @@
-"""History producers retain independent live policy and original conditional clock reads."""
-
 from datetime import UTC, datetime
 
 from langchain_core.messages import HumanMessage

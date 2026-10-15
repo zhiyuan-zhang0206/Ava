@@ -1,5 +1,3 @@
-"""`ava packages policy` requires a field, rejects a bad duration at parse time and accepts explicit fields."""
-
 from __future__ import annotations
 
 import pytest

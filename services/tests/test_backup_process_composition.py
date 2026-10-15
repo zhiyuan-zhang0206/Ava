@@ -1,5 +1,3 @@
-"""Backup process roots retain their captured image and one database gate."""
-
 from __future__ import annotations
 
 import asyncio

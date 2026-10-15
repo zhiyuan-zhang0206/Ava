@@ -1,5 +1,3 @@
-"""Redis protocol diagnostic observes runtime credentials without ACL repair."""
-
 from unittest.mock import MagicMock
 
 import pytest

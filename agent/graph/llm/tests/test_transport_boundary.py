@@ -1,5 +1,3 @@
-"""Retry authority belongs to typed provider transport and owned timer expiry."""
-
 import asyncio
 from collections.abc import AsyncIterator
 from typing import cast

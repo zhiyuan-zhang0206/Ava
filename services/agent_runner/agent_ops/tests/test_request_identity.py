@@ -1,5 +1,3 @@
-"""Immutable ops identity and crash-window protection on real database rows."""
-
 import asyncio
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor

@@ -1,5 +1,3 @@
-"""Hosted-ownership rows and admission shared by the ownership tests."""
-
 from uuid import uuid4
 
 import psycopg

@@ -1,5 +1,3 @@
-"""Isolated child fixtures for original-owner identity tests."""
-
 import asyncio
 import json
 import os

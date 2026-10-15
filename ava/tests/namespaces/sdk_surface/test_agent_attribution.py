@@ -1,5 +1,3 @@
-"""Ordinary events retain explicit or process identity without turn attribution."""
-
 from __future__ import annotations
 
 import asyncio

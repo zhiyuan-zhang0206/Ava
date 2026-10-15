@@ -1,5 +1,3 @@
-"""Unit contracts for the browser-backed visual snapshot helper."""
-
 from __future__ import annotations
 
 from pathlib import Path

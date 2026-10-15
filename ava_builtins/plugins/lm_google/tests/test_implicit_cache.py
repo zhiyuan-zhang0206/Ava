@@ -1,5 +1,3 @@
-"""Google keeps the ordinary prompt and reports implicit-cache usage."""
-
 from typing import Any
 
 import pytest

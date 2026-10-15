@@ -1,5 +1,3 @@
-"""Interrupted native cancel stays unknown across later inspection attempts."""
-
 import asyncio
 
 import psycopg

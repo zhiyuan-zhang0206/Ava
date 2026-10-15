@@ -1,5 +1,3 @@
-"""Fact edges: which file uses which, derived from import statements and attributes."""
-
 from __future__ import annotations
 
 from pathlib import Path

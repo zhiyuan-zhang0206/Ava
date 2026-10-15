@@ -1,5 +1,3 @@
-"""A returned original invocation settles cancel before its accepted restart."""
-
 import asyncio
 from dataclasses import replace
 from typing import Any

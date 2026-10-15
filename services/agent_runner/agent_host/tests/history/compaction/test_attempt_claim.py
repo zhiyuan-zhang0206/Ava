@@ -1,5 +1,3 @@
-"""Concurrent original attempt claims never authorize two provider invocations."""
-
 import asyncio
 
 import psycopg

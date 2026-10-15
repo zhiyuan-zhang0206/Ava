@@ -1,5 +1,3 @@
-"""Fixture scope merging and source provenance come from one declarative reader."""
-
 from pathlib import Path
 
 import pytest

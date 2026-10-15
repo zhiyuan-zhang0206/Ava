@@ -1,5 +1,3 @@
-"""A lease or status change never substitutes for exact receiver/resource closure."""
-
 from datetime import UTC, datetime
 from uuid import uuid4
 

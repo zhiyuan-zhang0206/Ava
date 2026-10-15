@@ -1,5 +1,3 @@
-"""Explicit lease roots and event-log observations shared by capture contracts."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime

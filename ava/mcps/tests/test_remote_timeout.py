@@ -1,5 +1,3 @@
-"""Remote operations read each client owner's current timeout."""
-
 from unittest.mock import MagicMock
 
 from ava.mcps._tools import call_raw, list_tools
@@ -7,7 +5,6 @@ from ava.mcps.tests._mcps_helpers import tool_source
 
 
 def test_list_tools_uses_remote_when_available() -> None:
-    """daemon available → directly use remote.list_tools, not reading cache / not connecting subprocess."""
     current_timeout = [7.5]
     fake_remote = MagicMock()
     fake_remote.list_tools.return_value = [{"name": "t1", "description": "d", "input_schema": {}}]

@@ -1,5 +1,3 @@
-"""Patching first-party code is a diagnostic of its own: the dependency was not injected."""
-
 from __future__ import annotations
 
 import pytest

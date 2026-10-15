@@ -1,5 +1,3 @@
-"""Standalone exporters retain the entry image, gate and actual writer errors."""
-
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path

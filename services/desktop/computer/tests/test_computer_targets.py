@@ -1,5 +1,3 @@
-"""Observation selectors reject malformed identities before a native request."""
-
 from __future__ import annotations
 
 from typing import Any

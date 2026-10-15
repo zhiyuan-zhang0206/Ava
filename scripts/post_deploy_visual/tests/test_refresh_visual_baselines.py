@@ -1,5 +1,3 @@
-"""Contract tests for runner-native visual baseline refreshes."""
-
 from __future__ import annotations
 
 import subprocess

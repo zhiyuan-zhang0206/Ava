@@ -1,5 +1,3 @@
-"""Repeated cancellation cannot extend a cleanup deadline or cancel its child."""
-
 import asyncio
 
 import pytest

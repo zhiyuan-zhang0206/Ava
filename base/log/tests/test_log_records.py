@@ -1,5 +1,3 @@
-"""`loguru_records` captures records and reads them back by level and by structured event."""
-
 from loguru import logger
 
 from base.log.tests.log_records import LogRecords

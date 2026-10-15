@@ -1,5 +1,3 @@
-"""Slices for the IM Bridge tests: the daemon's own builders over the live settings, with overrides."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

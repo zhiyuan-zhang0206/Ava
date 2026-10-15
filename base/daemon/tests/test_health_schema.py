@@ -1,5 +1,3 @@
-"""Contract tests for the fleet-wide health response envelope."""
-
 from __future__ import annotations
 
 import json

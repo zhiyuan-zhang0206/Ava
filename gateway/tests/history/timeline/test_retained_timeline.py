@@ -1,5 +1,3 @@
-"""Explicit retained history remains readable without trusting the live head."""
-
 from __future__ import annotations
 
 import os

@@ -1,5 +1,3 @@
-"""A fork recovers its committed child rather than copying a later source state."""
-
 from typing import Any
 from unittest.mock import MagicMock
 

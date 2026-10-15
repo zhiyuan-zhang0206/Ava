@@ -1,5 +1,3 @@
-"""Layer 0 of the understanding tree: the deterministic message-unit division."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime

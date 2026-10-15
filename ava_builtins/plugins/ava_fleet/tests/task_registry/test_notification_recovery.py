@@ -1,5 +1,3 @@
-"""Task effects and queued notification intents survive producer/tail crashes."""
-
 from uuid import uuid4
 
 import psycopg

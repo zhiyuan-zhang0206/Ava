@@ -1,5 +1,3 @@
-"""Execute native observation parsing/freshness with inert AppKit/SCK substitutes."""
-
 from __future__ import annotations
 
 import shutil

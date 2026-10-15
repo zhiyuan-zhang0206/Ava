@@ -1,5 +1,3 @@
-"""Browser network diagnostics keep temporary pages out of the user's tab strip."""
-
 import json
 from unittest.mock import AsyncMock, MagicMock
 

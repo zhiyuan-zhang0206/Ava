@@ -1,5 +1,3 @@
-"""Task PATCH retries preserve the first commit across later task changes."""
-
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from uuid import uuid4

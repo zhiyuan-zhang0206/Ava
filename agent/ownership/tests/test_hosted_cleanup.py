@@ -1,5 +1,3 @@
-"""Post-commit cleanup attempts survive cancellation without replacing the first failure."""
-
 import asyncio
 from typing import override
 

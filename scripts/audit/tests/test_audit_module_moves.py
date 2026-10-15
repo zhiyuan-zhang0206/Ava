@@ -1,5 +1,3 @@
-"""Module-move CLI audits use tracked scratch repositories and real imports."""
-
 import importlib
 import sys
 from collections.abc import Iterator

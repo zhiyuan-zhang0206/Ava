@@ -1,5 +1,3 @@
-"""Configured default windows obey their consumers' explicit request ranges."""
-
 import pytest
 from pydantic import ValidationError
 

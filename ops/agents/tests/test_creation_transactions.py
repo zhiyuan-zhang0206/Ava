@@ -1,5 +1,3 @@
-"""Birth and task producers share the caller's actual commit/rollback boundary."""
-
 from contextlib import nullcontext
 
 import psycopg

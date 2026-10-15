@@ -1,5 +1,3 @@
-"""A hosted force cannot be undone by a prior restart. Integration: agent and ops are peers that both write the lifecycle row and fence each other, so no package below the top level may hold it (registered in scripts/structure/tests_location_allowed.py)."""
-
 import asyncio
 from uuid import uuid4
 

@@ -1,5 +1,3 @@
-"""Behavioral contracts for the small dynamic-workflow reference."""
-
 import hashlib
 import importlib.util
 import json

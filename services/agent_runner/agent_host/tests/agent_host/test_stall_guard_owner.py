@@ -1,5 +1,3 @@
-"""The stall guard retains its original invocation in the existing service scope."""
-
 import asyncio
 from unittest.mock import MagicMock
 

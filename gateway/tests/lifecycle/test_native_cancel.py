@@ -1,5 +1,3 @@
-"""Guarded native cancel HTTP never upgrades an unsupported observed tuple."""
-
 from dataclasses import replace
 from uuid import uuid4
 

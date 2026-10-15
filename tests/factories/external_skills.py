@@ -1,5 +1,3 @@
-"""Filesystem, context and ledger inputs for external-skill transaction tests."""
-
 from __future__ import annotations
 
 import json

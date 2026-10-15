@@ -1,5 +1,3 @@
-"""Impersonation wakes refresh the roster only when status changes."""
-
 import pytest
 
 from base.agents.impersonation import wake

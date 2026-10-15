@@ -1,5 +1,3 @@
-"""Read-only contract tests for the memory search reconciliation script."""
-
 from __future__ import annotations
 
 import io
@@ -108,7 +106,6 @@ def _patch_reconcile_dependencies(
 
 
 def test_default_run_connects_both_backends_readonly(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The normal comparison path cannot obtain a write-capable backend."""
     backends = [_FakeBackend(), _FakeBackend()]
     calls = _patch_reconcile_dependencies(monkeypatch, backends)
     monkeypatch.setattr(sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector"])
@@ -123,7 +120,6 @@ def test_default_run_connects_both_backends_readonly(monkeypatch: pytest.MonkeyP
 def test_allow_write_without_exact_confirmation_never_connects_writable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The flag is only the first confirmation; any other answer aborts."""
     backends = [_FakeBackend(), _FakeBackend()]
     calls = _patch_reconcile_dependencies(monkeypatch, backends)
     monkeypatch.setattr(
@@ -137,7 +133,6 @@ def test_allow_write_without_exact_confirmation_never_connects_writable(
 
 
 def test_allow_write_requires_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Piped input cannot supply the second confirmation."""
     backends = [_FakeBackend(), _FakeBackend()]
     calls = _patch_reconcile_dependencies(monkeypatch, backends)
     monkeypatch.setattr(
@@ -154,7 +149,6 @@ def test_allow_write_requires_a_terminal(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_allow_write_with_exact_confirmation_connects_writable_and_runs_comparison(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An operator who types exact yes gets writable backends and a completed comparison."""
     backend_a = _FakeBackend()
     backend_b = _FakeBackend()
     backends = [backend_a, backend_b]
@@ -174,7 +168,6 @@ def test_allow_write_with_exact_confirmation_connects_writable_and_runs_comparis
 def test_writable_connection_failure_is_reported_without_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Any writable connection failure is reported after both backends close."""
     backend_a = _FakeBackend(ValueError("numpy unavailable"))
     backend_b = _FakeBackend()
     calls = _patch_reconcile_dependencies(monkeypatch, [backend_a, backend_b])
@@ -197,7 +190,6 @@ def test_writable_connection_failure_is_reported_without_traceback(
 def test_readonly_connection_mismatch_is_reported_without_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Storage validation failures tell the operator who owns repair."""
     backends = [_FakeBackend(RuntimeError("pgvector table schema mismatch")), _FakeBackend()]
     _patch_reconcile_dependencies(monkeypatch, backends)
     monkeypatch.setattr(sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector"])

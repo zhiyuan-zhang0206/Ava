@@ -1,5 +1,3 @@
-"""Fast rate declarations stay inside the non-executing pricing workflow."""
-
 from decimal import Decimal
 from pathlib import Path
 

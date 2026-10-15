@@ -1,5 +1,3 @@
-"""The `ava cluster health` argument surface."""
-
 from collections.abc import Callable
 
 import pytest

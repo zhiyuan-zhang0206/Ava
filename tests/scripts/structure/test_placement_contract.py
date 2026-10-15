@@ -1,5 +1,3 @@
-"""Contract: scans the tests of every tool under scripts/ for the home of their sample trees."""
-
 from __future__ import annotations
 
 import ast
@@ -17,7 +15,6 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 def test_pytest_importlib_relative_imports_match_ast_with_or_without_test_initializer(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, package_tests: bool
 ) -> None:
-    """Exercise Python's package anchor, including pytest's namespace test directories."""
     root = make_repo(pytester.path)
     initializer = "from .retry import backoff as local_backoff\n"
     write(root, "base/net/__init__.py", initializer)

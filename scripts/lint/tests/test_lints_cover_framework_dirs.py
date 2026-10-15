@@ -1,5 +1,3 @@
-"""Every framework-scoped lint covers every framework directory of `meizel.lint_common`."""
-
 from __future__ import annotations
 
 from pathlib import Path

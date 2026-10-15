@@ -1,5 +1,3 @@
-"""Creation receipts survive concurrent delivery, response loss and resource changes."""
-
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 

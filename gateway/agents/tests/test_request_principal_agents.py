@@ -1,5 +1,3 @@
-"""Chat delivery and reconciliation share one stored message identity."""
-
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request

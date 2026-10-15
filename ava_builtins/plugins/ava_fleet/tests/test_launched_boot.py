@@ -1,5 +1,3 @@
-"""Parent import completes launched SDK composition before functions escape (fleet plugin)."""
-
 import sys
 from pathlib import Path
 

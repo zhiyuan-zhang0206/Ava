@@ -1,5 +1,3 @@
-"""Default credentials for in-process Gateway clients (`gateway.tests.agents.gateway_auth`)."""
-
 from __future__ import annotations
 
 import pytest

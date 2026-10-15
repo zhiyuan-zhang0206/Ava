@@ -1,5 +1,3 @@
-"""Start a test cluster through the CLI's ready gate (drives `cli` and `ops` code)."""
-
 from unittest.mock import MagicMock
 
 import pytest

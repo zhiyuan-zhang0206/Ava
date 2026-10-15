@@ -1,5 +1,3 @@
-"""The telemetry_events table: monthly partitions, append-only, idempotent identity."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime

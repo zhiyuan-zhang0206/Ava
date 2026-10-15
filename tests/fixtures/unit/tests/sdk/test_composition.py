@@ -1,5 +1,3 @@
-"""The SDK test root shares the prepared configuration rather than booting a bare home."""
-
 from pathlib import Path
 
 import pytest

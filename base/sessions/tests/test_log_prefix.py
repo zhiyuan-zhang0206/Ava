@@ -1,5 +1,3 @@
-"""Session identities distinguish transcript prefixes before child output."""
-
 import os
 from datetime import UTC, datetime
 from pathlib import Path

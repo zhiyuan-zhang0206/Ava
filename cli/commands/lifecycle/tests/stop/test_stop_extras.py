@@ -1,5 +1,3 @@
-"""Full-stop helper extras use the shared exact-home retirement boundary."""
-
 from pathlib import Path
 
 import pytest
