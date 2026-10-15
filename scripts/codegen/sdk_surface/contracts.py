@@ -1,8 +1,4 @@
-"""Static SDK declaration provenance, without importing Ava or executing plugins.
-
-Canonical module markers and PluginContributions own the declarations. These
-facts describe declared identity, never the installed or enabled runtime surface.
-"""
+# ava:ref scripts/codegen/sdk_surface/docs/provenance.ava.okf.md#static-declarations
 
 from __future__ import annotations
 
@@ -35,6 +31,7 @@ class MemberProof:
     definition_name: str
     source_path: str
     source_line: int
+    documentation_name: str
     declaration: Declaration
     availability: Availability
 
@@ -56,6 +53,7 @@ class _Definition:
     line: int
     namespace: bool = False
     callable: bool = False
+    documentation_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -125,12 +123,8 @@ def _marker_mutated(tree: ast.Module) -> bool:
     return False
 
 
+# ava:ref scripts/codegen/sdk_surface/docs/provenance.ava.okf.md#canonical-markers
 def declared_names(tree: ast.Module) -> tuple[str, ...] | None:
-    """Read a literal canonical marker; absent markers have no static proof.
-
-    Opaque or locally mutated markers raise ValueError instead of granting the
-    runtime discovery fallback. Private names remain hidden, as in discovery.
-    """
     marker = _marker(tree)
     if marker is None:
         return None
@@ -372,7 +366,28 @@ def _module_property(module: str, path: str, tree: ast.Module, name: str) -> _De
     ]
     if len(getters) != 1:
         return None
-    return _Definition(module, f"{cls.name}.{name}", path, getters[0].lineno)
+    return _Definition(
+        module,
+        f"{cls.name}.{name}",
+        path,
+        getters[0].lineno,
+        documentation_name=_property_documentation_name(tree, path, name),
+    )
+
+
+# ava:ref scripts/codegen/sdk_surface/docs/provenance.ava.okf.md#property-help-owner
+def _property_documentation_name(tree: ast.Module, path: str, name: str) -> str | None:
+    if bindings.Scope(tree, path).stores[name] != 1:
+        return None
+    declarations = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == name
+        and node.value is None
+    ]
+    return name if len(declarations) == 1 else None
 
 
 def _arguments(call: ast.Call, fields: tuple[str, ...]) -> dict[str, ast.expr] | None:
@@ -513,13 +528,8 @@ def _resolve_plugin(sources: _Sources, exposed: str, candidate: _Candidate) -> _
     return origin
 
 
+# ava:ref scripts/codegen/sdk_surface/docs/provenance.ava.okf.md#static-declarations
 def query(index: ModuleSourceLookup, exposed_path: str) -> MemberProof | Unknown:
-    """Prove an exact declared SDK path, including the root namespace.
-
-    Static availability means a source declaration, not process availability.
-    Plugin availability is conditional on installation; wrappers, configuration,
-    skill trees, MCP tools and runtime-generated namespaces are not evaluated.
-    """
     parts = exposed_path.split(".")
     if parts[0] != "ava" or not all(part.isidentifier() for part in parts):
         raise ValueError("SDK query requires an exact ava namespace or member path")
@@ -542,6 +552,7 @@ def query(index: ModuleSourceLookup, exposed_path: str) -> MemberProof | Unknown
             origin.name,
             origin.path,
             origin.line,
+            origin.documentation_name or origin.name,
             declaration,
             availability,
         )

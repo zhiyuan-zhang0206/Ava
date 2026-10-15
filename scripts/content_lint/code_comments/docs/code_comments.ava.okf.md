@@ -51,9 +51,11 @@ still validates every typed record. It is not whole-tree migration success.
 Python bindings include qualified definitions and simple assignments; ambiguous
 definitions fail. API ownership reuses `scripts/codegen/sdk_surface`, so dynamic
 exports which that resolver cannot prove cannot authorize generated docstrings.
-PEP 224 constant documentation is projected beside its assignment. Annotation-only
-dynamic attributes remain blocked when the provenance resolver cannot prove them;
-preserve their existing help and extend the resolver before migrating that file.
+PEP 224 constant documentation is projected beside its assignment. A statically
+proved module-class property can instead project beside its unique module-level
+annotation-only declaration, matching the source read by SDK help. Other
+annotation-only dynamic attributes remain blocked when the provenance resolver
+cannot prove them; preserve their existing help rather than dropping it.
 JavaScript/TypeScript bindings include named declarations and literal test labels
 from imported Vitest, Playwright and node:test runners. Unsupported dynamic test
 labels and wrappers do not resolve; use a concrete test definition. An exact
@@ -64,5 +66,13 @@ The checker proves syntax and reference integrity, not external-source freshness
 test execution or semantic truth. The contribution's independent review owns
 those judgments. The current migration and reviewer rules are in
 [structured code comments](../../../../docs/conventions/engineering/structured-code-comments.md).
+
+```ava-contract
+id = "api-help-owner"
+kind = "invariant"
+statement = "An API contract binds the documentation owner proved by the canonical SDK resolver. A module property's annotation can own PEP 224 help without weakening ambiguous getter/setter rejection. Rendering preserves executable syntax and leaves source untouched when provenance is unproved."
+code = ["scripts/content_lint/code_comments/check.py:check_api"]
+tests = ["scripts/content_lint/code_comments/tests/test_api.py::test_module_property_help_is_projected_at_the_annotation", "scripts/content_lint/code_comments/tests/test_api.py::test_unproved_property_help_remains_untouched", "scripts/content_lint/code_comments/tests/test_api.py::test_unproved_dynamic_attribute_fails_without_deleting_help"]
+```
 
 Parent: [[scripts/content_lint/docs/content_lint.ava.okf.md]].

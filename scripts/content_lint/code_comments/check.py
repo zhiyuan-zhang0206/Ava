@@ -108,13 +108,14 @@ def check_contract(repo: Repository, contract: Contract, *, projection: bool = T
         check_api(repo, contract, projection=projection)
 
 
+# ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#api-help-owner
 def check_api(repo: Repository, contract: Contract, *, projection: bool) -> None:
     match query(ModuleIndex(repo.root), contract.api):
         case MemberProof() as proof:
             pass
         case unknown:
             raise ValueError(f"API export cannot be proved: {contract.api}: {unknown.reason}")
-    definition_name = proof.definition_name or "<module>"
+    definition_name = proof.documentation_name or "<module>"
     anchor = f"{proof.source_path}:{definition_name}"
     if anchor != contract.code[0]:
         raise ValueError(f"API {contract.api} belongs to {anchor}, not {contract.code[0]}")
