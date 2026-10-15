@@ -25,6 +25,7 @@ export function scanSource(file, text) {
   const describeNames = new Set();
   const unused = [];
   const playwrightNames = new Set();
+  const suiteCallbacks = new Map();
   const binding = node => checker.getSymbolAtLocation(node);
   for (const node of tree.statements) {
     if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) continue;
@@ -59,6 +60,7 @@ export function scanSource(file, text) {
     return ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node) || ts.isGetAccessor(node) || ts.isSetAccessor(node) || ts.isConstructorDeclaration(node) ? 'function' : null;
   };
   const declarationName = node => {
+    if (suiteCallbacks.has(node)) return suiteCallbacks.get(node);
     if (node.name) return node.name.getText(tree);
     if (ts.isConstructorDeclaration(node)) return '<constructor>';
     const parent = node.parent;
@@ -100,7 +102,11 @@ export function scanSource(file, text) {
       const label = node.arguments[0].text;
       const body = node.arguments[1];
       if (ts.isArrowFunction(body) || ts.isFunctionExpression(body)) {
-        if (directSuite(node.expression)) { nestedDescribes = [...describes, label]; nestedActive = active; }
+        if (directSuite(node.expression)) {
+          nestedDescribes = [...describes, label];
+          nestedActive = active;
+          suiteCallbacks.set(body, `suite:${JSON.stringify(nestedDescribes)}`);
+        }
         if (active && ts.isIdentifier(node.expression) && testNames.has(binding(node.expression))) {
           const name = `test:${[...describes, label].join('::')}`;
           addSymbol(name, node, true);
