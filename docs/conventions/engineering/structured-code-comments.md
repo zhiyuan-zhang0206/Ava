@@ -21,6 +21,9 @@ banners, commented-out code, suppression comments, internal docstrings and unuse
 standalone strings fail the strict source check. There is no suppression syntax,
 file allowlist or stored legacy baseline. Machine syntax such as a Python entry
 shebang or a JavaScript directive remains syntax, not an explanatory comment.
+An exact `/** @deprecated */` attached to a TypeScript-recognized declaration
+is also machine syntax: the compiler and existing deprecation lint consume it.
+Additional prose, other JSDoc tags and unattached markers still fail.
 
 Agent-visible Python SDK docstrings are generated projections of `api` records.
 They remain available to `ava.help`; edit the document owner and run `render-api`.

@@ -9,24 +9,24 @@
 
 set -e
 
-TMPDIR=$(mktemp -d)
-trap "rm -rf $TMPDIR" EXIT
+types_scratch=$(mktemp -d)
+trap "rm -rf $types_scratch" EXIT
 
 cd "$(dirname "$0")/../.."  # repo root
 
-.venv/bin/python scripts/codegen/dump_openapi.py "$TMPDIR/openapi.json" >/dev/null
-(cd ui/web && npx --no-install openapi-typescript "$TMPDIR/openapi.json" -o "$TMPDIR/types-generated.ts" >/dev/null)
+.venv/bin/python scripts/codegen/dump_openapi.py "$types_scratch/openapi.json" >/dev/null
+node scripts/codegen/typescript-types.mjs "$types_scratch/openapi.json" "$types_scratch/types-generated.ts"
 
-if ! diff -q ui/web/openapi.json "$TMPDIR/openapi.json" >/dev/null; then
+if ! diff -q ui/web/openapi.json "$types_scratch/openapi.json" >/dev/null; then
     echo "ERROR: ui/web/openapi.json is out of sync with Pydantic schema"
     echo "   run ./scripts/codegen/codegen-types.sh to regenerate"
-    diff ui/web/openapi.json "$TMPDIR/openapi.json" | head -30
+    diff ui/web/openapi.json "$types_scratch/openapi.json" | head -30
     exit 1
 fi
 
-if ! diff -q ui/web/src/lib/contracts/types-generated.ts "$TMPDIR/types-generated.ts" >/dev/null; then
+if ! diff -q ui/web/src/lib/contracts/types-generated.ts "$types_scratch/types-generated.ts" >/dev/null; then
     echo "ERROR: ui/web/src/lib/contracts/types-generated.ts is out of sync with OpenAPI spec"
     echo "   run ./scripts/codegen/codegen-types.sh to regenerate"
-    diff ui/web/src/lib/contracts/types-generated.ts "$TMPDIR/types-generated.ts" | head -30
+    diff ui/web/src/lib/contracts/types-generated.ts "$types_scratch/types-generated.ts" | head -30
     exit 1
 fi

@@ -1,7 +1,3 @@
-"""Tests for `base/lm/registry.py` — the single per-model table (facts +
-tuning defaults) and the `resolve_setting` config layering.
-"""
-
 from __future__ import annotations
 
 from dataclasses import fields as dataclass_fields
@@ -20,13 +16,8 @@ from base.lm.registry import (
 )
 from base.packages.tests.model_catalog import AddModels
 
-# ---------------------------------------------------------------------------
-# resolve_setting layering
-# ---------------------------------------------------------------------------
-
 
 def test_shared_floor_applies_when_nothing_set(*, model_catalog: ModelCatalog) -> None:
-    # claude-sonnet-5 carries no compact opinions of its own — the shared floor.
     assert (
         resolve_setting(
             "auto_compact_fraction",
@@ -75,8 +66,6 @@ def test_shared_floor_applies_when_nothing_set(*, model_catalog: ModelCatalog) -
 
 
 def test_deepseek_carries_per_model_compact_thresholds(*, model_catalog: ModelCatalog) -> None:
-    """User decision (2026-08-29): the deepseek entry compacts at soft
-    374k / hard 512k on its 1M window — 0.374 / 0.512 of the window."""
     assert (
         resolve_setting(
             "auto_compact_fraction",
@@ -98,8 +87,6 @@ def test_deepseek_carries_per_model_compact_thresholds(*, model_catalog: ModelCa
 
 
 def test_unregistered_model_falls_back_to_shared_floor(*, model_catalog: ModelCatalog) -> None:
-    """An unknown model simply has no per-model layer — the shared floor (or
-    an explicit value) still resolves."""
     assert (
         resolve_setting(
             "auto_compact_fraction",
@@ -143,7 +130,6 @@ def test_per_model_default_wins_over_shared_floor(
         )
         == "silent"
     )
-    # A field the entry has no opinion on still falls to the shared floor.
     assert (
         resolve_setting(
             "compact_reminder_fraction",
@@ -158,8 +144,6 @@ def test_per_model_default_wins_over_shared_floor(
 def test_explicit_setting_wins_over_per_model_default(
     add_models: AddModels, *, model_catalog: ModelCatalog
 ) -> None:
-    """A non-None settings value (env/.env/per-agent overlay all write one) is
-    the explicit layer — it beats the per-model default."""
     spec = model_catalog.models["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
@@ -185,9 +169,7 @@ def test_explicit_setting_wins_over_per_model_default(
 def test_explicit_empty_string_beats_per_model_effort(
     add_models: AddModels, *, model_catalog: ModelCatalog
 ) -> None:
-    """An explicitly empty AVA_REASONING_EFFORT is a real choice ("use the
-    provider default"), distinct from unset — it must mask a per-model effort
-    default rather than fall through it."""
+    # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#explicit-tuning
     spec = model_catalog.models["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
@@ -220,9 +202,6 @@ def test_explicit_empty_string_beats_per_model_effort(
 
 
 def test_unknown_setting_fails_fast(*, model_catalog: ModelCatalog) -> None:
-    """A name that is not a ModelTuning field raises instead of silently
-    resolving to something — both a typo and a real-but-non-per-model config
-    field (the membership check runs before the explicit-value shortcut)."""
     with pytest.raises(AttributeError):
         resolve_setting(
             "no_such_setting",
@@ -239,14 +218,7 @@ def test_unknown_setting_fails_fast(*, model_catalog: ModelCatalog) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# explain_setting — the same layering, with the winning layer named
-# ---------------------------------------------------------------------------
-
-
 def test_tuning_field_names_are_the_governed_set() -> None:
-    """`tuning_field_names` IS ModelTuning's field list — the per-model view
-    enumerates through it, so a new tunable never needs a second list."""
     assert tuning_field_names() == tuple(f.name for f in dataclass_fields(ModelTuning))
 
 
@@ -269,8 +241,6 @@ def test_explain_setting_names_the_winning_layer(
     *,
     model_catalog: ModelCatalog,
 ) -> None:
-    """Every layer combination reports the value AND which layer produced it,
-    while the losing candidates stay visible (the whole point of the view)."""
     spec = model_catalog.models["deepseek-flash"]
     model_catalog = add_models(
         model_catalog,
@@ -301,8 +271,6 @@ def test_explain_setting_names_the_winning_layer(
 def test_explain_setting_agrees_with_resolve_setting(
     monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
-    """resolve_setting is explain_setting's `.value` — a config panel built on
-    one cannot show a value the runtime doesn't use."""
     monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.33)
     for setting in tuning_field_names():
         runtime = resolve_setting(
@@ -315,8 +283,6 @@ def test_explain_setting_agrees_with_resolve_setting(
 
 
 def test_explain_setting_rejects_a_non_tuning_field(*, model_catalog: ModelCatalog) -> None:
-    """Same fail-fast membership gate as resolve_setting — a real-but-not-per-model
-    config field must not resolve through the per-model path."""
     with pytest.raises(AttributeError):
         explain_setting(
             "labeler_model", model="deepseek-flash", explicit=None, models=model_catalog.models
@@ -324,28 +290,16 @@ def test_explain_setting_rejects_a_non_tuning_field(*, model_catalog: ModelCatal
 
 
 def test_compact_fractions_are_per_agent_overridable() -> None:
-    """The compact fractions ride the per-agent overlay (the topmost layer);
-    the overlay gate is the per_agent flag on the settings field."""
     per_agent = per_agent_field_names()
     assert "auto_compact_fraction" in per_agent
     assert "compact_reminder_fraction" in per_agent
     assert "reasoning_effort" in per_agent
 
 
-# ---------------------------------------------------------------------------
-# Cross-profile reads (Task #944): the tuning fields live in the AGENT config
-# domain, but the gateway's token-usage / context-breakdown display endpoints
-# resolve them too. A profile without the agent domain must degrade to the
-# registry floor, not AttributeError — the agent process itself keeps reading
-# the explicit value.
-# ---------------------------------------------------------------------------
-
-
 def test_resolve_setting_degrades_when_owning_domain_not_in_profile(
     monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
-    """A display caller without the owning domain passes no explicit pin;
-    registry resolution must not recover a hidden settings reader."""
+    # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#explicit-tuning
     import base.config
 
     def _boom(name: str) -> object:
@@ -360,8 +314,6 @@ def test_resolve_setting_degrades_when_owning_domain_not_in_profile(
         models=model_catalog.models,
         explicit=None,
     )
-    # the no-explicit resolution (model layer over the shared floor), never the
-    # sentinel and never a crash
     expected = explain_setting(
         "auto_compact_fraction", model="deepseek-flash", explicit=None, models=model_catalog.models
     ).value
@@ -371,8 +323,6 @@ def test_resolve_setting_degrades_when_owning_domain_not_in_profile(
 def test_resolve_setting_still_reads_explicit_value_in_full_profile(
     *, model_catalog: ModelCatalog
 ) -> None:
-    """In a full (profile-less) process — the agent's own — the explicit value
-    still wins: the degradation must not leak into the owner process."""
     explicit = get_field("auto_compact_fraction")
     value = resolve_setting(
         "auto_compact_fraction",
@@ -389,17 +339,9 @@ def test_resolve_setting_still_reads_explicit_value_in_full_profile(
     assert value == expected
 
 
-# ---------------------------------------------------------------------------
-# attach modalities
-# ---------------------------------------------------------------------------
-
-
 def test_attach_modalities_default_to_the_declared_media_matrix(
     *, model_catalog: ModelCatalog
 ) -> None:
-    """attach_modalities is an override, not a second matrix: a model with no
-    attach-specific opinion attaches exactly its registry media_types, and a
-    text-only model attaches nothing (user ruling 2026-08-28)."""
     from base.lm.factory import attach_modalities_for_model
 
     assert attach_modalities_for_model(
@@ -438,9 +380,6 @@ def test_attach_modalities_default_to_the_declared_media_matrix(
 def test_attach_modalities_declaration_must_stay_within_media_types(
     *, model_catalog: ModelCatalog
 ) -> None:
-    """An attach_modalities declaration outside the model's media_types is a
-    registry error — attach rides the same message pipeline (user ruling
-    2026-08-28)."""
     from dataclasses import replace
 
     from base.lm import registry as reg
@@ -450,7 +389,6 @@ def test_attach_modalities_declaration_must_stay_within_media_types(
         reg.validate_spec(
             "glm-5.3-flash", bad, anthropic_protocol=False, prices=model_catalog.prices
         )
-    # A strict subset (attach narrower than the endpoint) is legal.
     narrower = replace(
         model_catalog.models["gemini-3.8-flash"], attach_modalities=frozenset({"image"})
     )
@@ -462,10 +400,6 @@ def test_attach_modalities_declaration_must_stay_within_media_types(
 def test_reasoning_effort_default_must_stay_within_effort_levels(
     *, model_catalog: ModelCatalog
 ) -> None:
-    """A spawnable model whose pinned default is not one of its effort_levels
-    would render no selected rung in the spawn picker while a different effort
-    goes on the wire — the same what-you-see != what-is-sent class as a
-    missing default."""
     from dataclasses import replace
 
     from base.lm import registry as reg
@@ -481,7 +415,6 @@ def test_reasoning_effort_default_must_stay_within_effort_levels(
 def test_normalize_overlay_settles_withdrawn_model_and_returns_receipt(
     add_models: AddModels, *, model_catalog: ModelCatalog
 ) -> None:
-    """A synthetic withdrawal keeps the write-side settlement contract covered."""
     from dataclasses import replace
 
     model = "deepseek-retired-fixture"
@@ -506,9 +439,6 @@ def test_normalize_overlay_settles_withdrawn_model_and_returns_receipt(
 def test_normalize_overlay_leaves_available_unknown_and_absent_untouched(
     *, model_catalog: ModelCatalog
 ) -> None:
-    """Nothing to settle for: no llm_model key, an available id, or an unknown
-    id (unknown ids are `validate_config_overlay` / `validate_model_config`'s
-    rejection concern — this helper must not invent a fallback for them)."""
     cases: list[dict[str, object]] = [
         {},
         {"llm_model": "deepseek-flash"},

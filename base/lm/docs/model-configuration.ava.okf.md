@@ -41,3 +41,12 @@ membership and provider validation retain typed `InvalidModelConfig` 400 errors
 before entering the write transaction. Guarded native receipt replay precedes
 fresh validation, preserving the original accepted command. SDK and native
 acceptance pass catalog, override and current-default inputs explicitly.
+
+Tuning resolution receives explicit values from its caller. A display caller in
+a profile without the owning settings domain supplies no explicit value and
+resolves the model layer over the shared floor. An explicitly empty effort is a
+real override selecting provider defaults. Agent override slices also feed
+context budgets and model construction; display and runtime must not resolve
+different values for the same supplied layers.
+
+Regression assertions: [test contracts](../../packages/tests/lm/docs/contracts.ava.okf.md#explicit-tuning).

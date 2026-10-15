@@ -29,7 +29,7 @@ exit codes, defaulting to their checkout. Move imports use the caller's Python
 environment; validation algorithms stay local.
 
 ### `codegen/` — derived-artifact generation and OKF tooling
-`build_okf_data.py` (bundle → `graph_data.json`), `serve_okf_viz.py` (local viewer, `okf-d3-template.html` — also read by `gateway/inspect/okf_graph.py`'s `/api/okf/graph`) — OKF tooling. `build_app_update_manifest.py` (Tauri archives → `latest.json`), `dump_event_fixtures.py`, `dump_frontend_constants.py`, `dump_openapi.py`, `gen_config_lite_table.py`, `gen_event_registry.py`, `gen_pyright_test_environments.py` (test hosts from pytest `testpaths`; the `executionEnvironments` entries of `pyproject.toml` that hold each package's `tests/` directory to the tests type-checking standard, written between its GENERATED markers) — one generator per artifact, each with a matching `check-*-fresh.sh` or pre-commit drift gate.
+Tool and artifact owners: [[scripts/codegen/docs/codegen.ava.okf.md]].
 
 ### `ci/` — CI job / test infrastructure
 Collection before sharding has an opt-in, collect-only proof tool:
