@@ -40,6 +40,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from base.host.git.gitenv import git_env
+from base.host.system.hostport import Host
 
 # Branch names denoting a parallel long-lived integration line. `release/`,
 # `hotfix/` and `support/` are prefixes because they are conventionally
@@ -48,7 +54,7 @@ _BREACH_NAMES = frozenset({"develop", "development", "staging", "next", "trunk"}
 _BREACH_PREFIXES = ("release/", "hotfix/", "support/")
 
 
-def remote_branches() -> list[str]:
+def remote_branches(*, host: Host, timeout: float = 60) -> list[str]:
     """Branch names on `origin`, via `git ls-remote --heads`.
 
     Raises:
@@ -56,12 +62,16 @@ def remote_branches() -> list[str]:
             no answer the premise is unverified, and reporting "no breach" on an
             error would rebuild the silent pass-through this replaced.
     """
-    proc = subprocess.run(
-        ["git", "ls-remote", "--heads", "origin"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = host.run(
+            ["git", "ls-remote", "--heads", "origin"],
+            capture_output=True,
+            text=True,
+            env=git_env(),
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"git ls-remote timed out after {timeout:g}s") from exc
     if proc.returncode != 0:
         raise RuntimeError(f"git ls-remote failed (rc={proc.returncode}): {proc.stderr.strip()}")
     names: list[str] = []
@@ -77,9 +87,9 @@ def breaches(branches: list[str]) -> list[str]:
     return sorted(b for b in branches if b in _BREACH_NAMES or b.startswith(_BREACH_PREFIXES))
 
 
-def main() -> int:
+def main(*, host: Host) -> int:
     try:
-        branches = remote_branches()
+        branches = remote_branches(host=host)
     except RuntimeError as exc:
         print(f"cannot verify the single-branch premise: {exc}", file=sys.stderr)
         return 1
@@ -103,4 +113,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(host=Host.system()))

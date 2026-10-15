@@ -8,9 +8,12 @@ import subprocess
 import sys
 from typing import Any
 
+from base.host.net.ports import UrlOpener
+from base.host.system.hostport import Host
 from scripts.ci.pull_requests import trunk_api
 from scripts.ci.pull_requests.job_rerun import FAILING, CiJobRerunError, list_failed_jobs
 
+_GH_TIMEOUT_S = 30.0
 _DIAGNOSE_LOG_TAIL = 4000
 _DIAGNOSE_MAX_JOB_LOGS = 8
 _DIAGNOSE_MAX_SYNTHETIC_PRS = 3
@@ -50,14 +53,17 @@ _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
 ]
 
 
-def _pr_view(pr: str, repo: str, fields: str) -> dict[str, object] | None:
+def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object] | None:
     """gh pr view --json; None when gh fails or the output is not an object."""
-    result = subprocess.run(  # noqa: S603
-        ["gh", "pr", "view", pr, "--repo", repo, "--json", fields],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = host.run(
+            ["gh", "pr", "view", pr, "--repo", repo, "--json", fields],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return None
     if result.returncode != 0:
         return None
     try:
@@ -67,14 +73,17 @@ def _pr_view(pr: str, repo: str, fields: str) -> dict[str, object] | None:
     return data if isinstance(data, dict) else None
 
 
-def _job_log_tail(job_id: int, repo: str) -> str:
+def _job_log_tail(job_id: int, repo: str, *, host: Host) -> str:
     """The last `_DIAGNOSE_LOG_TAIL` chars of a job log; empty when unreadable."""
-    result = subprocess.run(  # noqa: S603
-        ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = host.run(
+            ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return ""
     if result.returncode != 0:
         return ""
     return result.stdout[-_DIAGNOSE_LOG_TAIL:]
@@ -98,28 +107,31 @@ def _pull_head_ref(pull: dict[str, object]) -> str:
     return str(head.get("ref") or "")
 
 
-def _synthetic_test_prs(pr: str, repo: str) -> list[dict[str, object]]:
+def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, object]]:
     """Trunk's trunk-merge/pr-<n>/* test PRs (each = one queue attempt)."""
-    result = subprocess.run(  # noqa: S603
-        [
-            "gh",
-            "api",
-            f"repos/{repo}/pulls",
-            "-X",
-            "GET",
-            "-f",
-            "state=all",
-            "-f",
-            "per_page=100",
-            "-f",
-            "sort=updated",
-            "-f",
-            "direction=desc",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = host.run(
+            [
+                "gh",
+                "api",
+                f"repos/{repo}/pulls",
+                "-X",
+                "GET",
+                "-f",
+                "state=all",
+                "-f",
+                "per_page=100",
+                "-f",
+                "sort=updated",
+                "-f",
+                "direction=desc",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return []
     if result.returncode != 0:
         return []
     try:
@@ -132,7 +144,9 @@ def _synthetic_test_prs(pr: str, repo: str) -> list[dict[str, object]]:
     ][:_DIAGNOSE_MAX_SYNTHETIC_PRS]
 
 
-def _pr_level_issues(view: dict[str, object], pr: str, repo: str) -> list[dict[str, object]]:
+def _pr_level_issues(
+    view: dict[str, object], pr: str, repo: str, *, host: Host
+) -> list[dict[str, object]]:
     """Merge-conflict and base-freshness issues of an open PR (merged/closed PRs have none)."""
     issues: list[dict[str, object]] = []
     mergeable = view.get("mergeable")
@@ -149,7 +163,7 @@ def _pr_level_issues(view: dict[str, object], pr: str, repo: str) -> list[dict[s
     stale = None
     unreadable = False
     if view.get("state") == "OPEN":
-        stale, unreadable = trunk_api.base_freshness(pr, repo)
+        stale, unreadable = trunk_api.base_freshness(pr, repo, host=host)
     if stale:
         issues.append(
             {
@@ -169,10 +183,12 @@ def _pr_level_issues(view: dict[str, object], pr: str, repo: str) -> list[dict[s
     return issues
 
 
-def _failing_check_entries(view: dict[str, object], pr: str, repo: str) -> list[dict[str, object]]:
+def _failing_check_entries(
+    view: dict[str, object], pr: str, repo: str, *, host: Host
+) -> list[dict[str, object]]:
     """Classified entries (with job log tails) for the PR's failing checks."""
     try:
-        failed_jobs = list_failed_jobs(pr, repo)
+        failed_jobs = list_failed_jobs(pr, repo, host=host)
     except CiJobRerunError:
         # Diagnosis stays best-effort: the rollup still names the failing
         # checks; only the per-job log tail enrichment degrades.
@@ -185,7 +201,7 @@ def _failing_check_entries(view: dict[str, object], pr: str, repo: str) -> list[
     for check in failing_checks:
         check_name = str(check.get("name") or "unnamed check")
         job = next((j for j in failed_jobs if j.get("name") == check_name), None)
-        log = _job_log_tail(int(job["job_id"]), repo) if job else ""
+        log = _job_log_tail(int(job["job_id"]), repo, host=host) if job else ""
         classification, action = _classify_check(check_name, log)
         entry: dict[str, object] = {
             "check": check_name,
@@ -200,8 +216,10 @@ def _failing_check_entries(view: dict[str, object], pr: str, repo: str) -> list[
     return entries
 
 
-def _trunk_diagnosis(pr: str, repo: str, token: str) -> dict[str, object]:
-    data, error = trunk_api.post("getSubmittedPullRequest", trunk_api.pr_payload(pr, repo), token)
+def _trunk_diagnosis(pr: str, repo: str, token: str, *, open_url: UrlOpener) -> dict[str, object]:
+    data, error = trunk_api.post(
+        "getSubmittedPullRequest", trunk_api.pr_payload(pr, repo), token, open_url=open_url
+    )
     if error is None and data is not None:
         return {
             "state": data.get("state"),
@@ -212,7 +230,14 @@ def _trunk_diagnosis(pr: str, repo: str, token: str) -> dict[str, object]:
     return {"error": error}
 
 
-def diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
+def diagnose_pr(
+    pr: str,
+    repo: str,
+    *,
+    token: str | None,
+    host: Host,
+    open_url: UrlOpener,
+) -> dict[str, Any]:
     """Collect the PR's failure evidence and classify it (task #2572).
     Diagnosis only — no repair action is taken here; the operator executes the suggested action.
     Evidence sources: the PR's check rollup + job log tails, Trunk's queue state, and
@@ -226,23 +251,23 @@ def diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
         "trunk": None,
         "synthetic_test_prs": [],
     }
-    view = _pr_view(pr, repo, "mergeable,headRefOid,state,statusCheckRollup")
+    view = _pr_view(pr, repo, "mergeable,headRefOid,state,statusCheckRollup", host=host)
     if view is None:
         diag["gh_error"] = "gh pr view failed"
         return diag
     diag["state"] = view.get("state")
     diag["mergeable"] = view.get("mergeable")
-    diag["issues"] = _pr_level_issues(view, pr, repo)
-    diag["checks"] = _failing_check_entries(view, pr, repo)
+    diag["issues"] = _pr_level_issues(view, pr, repo, host=host)
+    diag["checks"] = _failing_check_entries(view, pr, repo, host=host)
     if token:
-        diag["trunk"] = _trunk_diagnosis(pr, repo, token)
+        diag["trunk"] = _trunk_diagnosis(pr, repo, token, open_url=open_url)
     diag["synthetic_test_prs"] = [
         {
             "number": pull.get("number"),
             "state": pull.get("state"),
             "head_ref": _pull_head_ref(pull),
         }
-        for pull in _synthetic_test_prs(pr, repo)
+        for pull in _synthetic_test_prs(pr, repo, host=host)
     ]
     return diag
 

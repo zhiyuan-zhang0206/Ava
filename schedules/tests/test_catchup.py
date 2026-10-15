@@ -16,6 +16,8 @@ from unittest.mock import ANY, Mock, patch
 import psycopg
 import pytest
 
+from base.host.system.tests.fake_commands import fake_host
+
 from base.config import settings
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -253,7 +255,10 @@ def test_schedule_entry_retains_the_loaded_image_gate(
     entry = getattr(module, "_main_loop", None) or module.main
 
     with pytest.raises(_LoopStoppedError), patch.dict(os.environ), fresh_schedule_entry() as inputs:
-        entry(inputs=inputs)
+        if filename == "c9-daily-report-schedule.py":
+            entry(inputs=inputs, host=fake_host())
+        else:
+            entry(inputs=inputs)
 
     capture.assert_called_once_with()
     create.assert_called_once()
@@ -294,11 +299,13 @@ def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
     monkeypatch.setattr(host, "fire_slot_once", claim)
     monkeypatch.setattr(host.time, "sleep", sleep)
 
+    command_host = fake_host()
     with pytest.raises(_LoopStoppedError):
         module._main_loop(
             inputs=ScheduleInputs(
                 Mock(), Mock(), process_context.loaded_code_image(), machine=machine_identity
-            )
+            ),
+            **({"host": command_host} if filename == "c9-daily-report-schedule.py" else {}),
         )
 
     assert [call.kwargs["after"] for call in next_fire_call.call_args_list] == [
@@ -333,11 +340,13 @@ def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
     monkeypatch.setattr(host, "fire_slot_once", claim)
     monkeypatch.setattr(host.time, "sleep", sleep)
 
+    command_host = fake_host()
     with pytest.raises(_LoopStoppedError):
         module._main_loop(
             inputs=ScheduleInputs(
                 Mock(), Mock(), process_context.loaded_code_image(), machine=machine_identity
-            )
+            ),
+            **({"host": command_host} if filename == "c9-daily-report-schedule.py" else {}),
         )
 
     claim.assert_called_once_with(ANY, slot, None, fire=ANY)
@@ -345,6 +354,7 @@ def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
     if filename == "c9-daily-report-schedule.py":
         assert isinstance(fire, partial)
         assert fire.func is module._fire
+        assert fire.keywords["host"] is command_host
         assert callable(fire.keywords["producer"])
         assert fire.keywords["image"] is process_context.loaded_code_image()
     else:
@@ -392,7 +402,7 @@ def test_restart_does_not_fire_a_slot_inside_the_previous_two_minutes(
         getattr(module, entry)(
             inputs=ScheduleInputs(
                 Mock(), Mock(), process_context.loaded_code_image(), machine=machine_identity
-            )
+            ),
         )
 
     claim.assert_not_called()

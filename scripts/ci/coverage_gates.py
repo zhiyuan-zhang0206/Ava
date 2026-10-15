@@ -27,6 +27,7 @@ import json
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 
 # The 85% gate denominator — must match [tool.coverage.run].source's core
@@ -184,8 +185,9 @@ def check(files: dict[str, dict], threshold: float) -> int:
     return 0
 
 
-def main() -> int:
-    json_path = sys.argv[1] if len(sys.argv) > 1 else "coverage.json"
+def main(argv: Sequence[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    json_path = args[0] if args else "coverage.json"
     threshold = float(os.environ.get("BACKEND_COVERAGE_THRESHOLD", CORE_THRESHOLD_DEFAULT))
     with Path(json_path).open() as f:
         data = json.load(f)

@@ -1,6 +1,3 @@
 [debt.first-party-patch]
 "test_audit_branch_protection.py#monkeypatch.setattr scripts.audit.branch_protection.TRUNK_FILE" = 1
 "test_audit_branch_protection.py#monkeypatch.setattr scripts.audit.branch_protection.run_gh" = 4
-
-[debt.stdlib-patch]
-"test_audit_module_moves.py#monkeypatch.setattr sys.path" = 1

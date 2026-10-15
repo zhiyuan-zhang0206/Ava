@@ -12,11 +12,17 @@ import json
 import subprocess
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
+from base.host.net.ports import UrlOpener
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.pull_requests import status
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
@@ -24,6 +30,23 @@ from scripts.ci.pull_requests import status
 # pyright: reportUnknownArgumentType = warning
 
 CIStatus = status.CIStatus
+TEST_NOW = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
+
+
+def make_clock(*, wall_start: datetime = TEST_NOW) -> Clock:
+    timers = ManualTimers(wall_start=wall_start)
+    return Clock(
+        ClockConfig(
+            timezone="UTC",
+            authoritative_timezone="UTC",
+            message_timestamp_weekday=False,
+        ),
+        timers=timers,
+        now=timers.now,
+    )
+
+
+TEST_CLOCK = make_clock()
 
 
 def status_check_rollup_entry(
@@ -66,10 +89,12 @@ class TrunkResponse:
 def urlopen_sequence(
     responses: list[TrunkResponse | urllib.error.URLError],
     seen_requests: list[urllib.request.Request],
-):
+) -> UrlOpener:
     response_iter = iter(responses)
 
-    def urlopen(request: urllib.request.Request, *, timeout: float) -> TrunkResponse:
+    def urlopen(request: str | urllib.request.Request, timeout: float = 30.0) -> TrunkResponse:
+        del timeout
+        assert isinstance(request, urllib.request.Request)
         seen_requests.append(request)
         response = next(response_iter)
         if isinstance(response, urllib.error.URLError):
@@ -79,16 +104,17 @@ def urlopen_sequence(
     return urlopen
 
 
-def gh_runner(calls: list[list[str]]):
-    def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
+def gh_runner(calls: list[list[str]]) -> Host:
+    def run(argv: Sequence[str], **_: object) -> subprocess.CompletedProcess[str]:
+        argv = list(argv)
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
 
-    return run
+    return fake_host(run)
 
 
 @pytest.fixture
-def gh(monkeypatch: pytest.MonkeyPatch):
+def gh() -> Any:
     """Stub the `gh` subprocess, dispatching on the subcommand.
 
     `check_ci` makes three calls: `gh pr view` for the rollup, `gh api .../actions/runs` for what
@@ -104,7 +130,7 @@ def gh(monkeypatch: pytest.MonkeyPatch):
         scheduled: list[str] | None = None,
         main_completed: bool = True,
         is_draft: bool = False,
-    ) -> None:
+    ) -> Host:
         rollup = json.dumps(
             {
                 "mergeable": mergeable,
@@ -115,15 +141,18 @@ def gh(monkeypatch: pytest.MonkeyPatch):
         )
         runs = json.dumps(scheduled or [])
 
-        def _run(cmd, *_a, **_k):
-            url = cmd[2] if len(cmd) > 2 else ""
-            if "api" not in cmd:
+        def _run(
+            argv: Sequence[str], *_a: object, **_k: object
+        ) -> subprocess.CompletedProcess[str]:
+            argv = list(argv)
+            url = argv[2] if len(argv) > 2 else ""
+            if "api" not in argv:
                 stdout = rollup
             elif "status=completed" in url:
                 # The main-workflow-visibility probe: `length` of the completed
                 # main-workflow runs for this head.
                 stdout = "1" if main_completed else "0"
-            elif "actions/runs?" in url and "--jq" not in cmd:
+            elif "actions/runs?" in url and "--jq" not in argv:
                 # job_rerun reads the raw REST runs payload (issue #1945);
                 # keep its view empty so diagnose tests stay deterministic.
                 stdout = json.dumps({"total_count": 0, "workflow_runs": []})
@@ -131,16 +160,9 @@ def gh(monkeypatch: pytest.MonkeyPatch):
                 stdout = json.dumps({"total_count": 0, "jobs": []})
             else:
                 stdout = runs
+            return subprocess.CompletedProcess(argv, 0, stdout, "")
 
-            class _R:
-                def __init__(self) -> None:
-                    self.returncode = 0
-                    self.stderr = ""
-                    self.stdout = stdout
-
-            return _R()
-
-        monkeypatch.setattr(status.subprocess, "run", _run)
+        return fake_host(_run)
 
     return _install
 
@@ -158,9 +180,9 @@ def has_workflows(monkeypatch: pytest.MonkeyPatch):
 
 def test_app_check_alone_is_not_green(gh: Any, has_workflows: Any) -> None:
     """The 2026-07-28 shape: Actions never ran, an app check passed."""
-    gh([APP_CHECK], scheduled=[])
+    host = gh([APP_CHECK], scheduled=[])
     has_workflows(True)
-    r = status.check_ci("886")
+    r = status.check_ci("886", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.NO_WORKFLOW_RUNS
     assert r.workflow_checks == []
     assert "DID NOT RUN" in r.summary()
@@ -168,16 +190,16 @@ def test_app_check_alone_is_not_green(gh: Any, has_workflows: Any) -> None:
 
 def test_app_check_alone_is_green_when_repo_has_no_workflows(gh: Any, has_workflows: Any) -> None:
     """A repo with no workflow files is legitimately green on app checks alone."""
-    gh([APP_CHECK])
+    host = gh([APP_CHECK])
     has_workflows(False)
-    assert status.check_ci("1").verdict is CIStatus.ALL_PASSED
+    assert status.check_ci("1", host=host, clock=TEST_CLOCK).verdict is CIStatus.ALL_PASSED
 
 
 def test_one_workflow_check_is_enough_to_be_green(gh: Any, has_workflows: Any) -> None:
     """The guard asks whether the suite ran at all — not how many jobs it has."""
-    gh([APP_CHECK, status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS")])
+    host = gh([APP_CHECK, status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS")])
     has_workflows(True)
-    r = status.check_ci("1")
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.ALL_PASSED
     assert r.workflow_checks == ["backend (pytest + pyright)"]
 
@@ -186,7 +208,7 @@ def test_one_workflow_check_is_enough_to_be_green(gh: Any, has_workflows: Any) -
 
 
 def test_full_green_suite(gh: Any, has_workflows: Any) -> None:
-    gh(
+    host = gh(
         [
             status_check_rollup_entry("changes (path filter)", "SUCCESS"),
             status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS"),
@@ -195,40 +217,40 @@ def test_full_green_suite(gh: Any, has_workflows: Any) -> None:
         ]
     )
     has_workflows(True)
-    r = status.check_ci("1")
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.ALL_PASSED
     assert len(r.passed) == 4
 
 
 def test_failure_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> None:
     """A real failure must report FAILED, never the did-not-run verdict."""
-    gh([APP_CHECK, status_check_rollup_entry("backend (pytest + pyright)", "FAILURE")])
+    host = gh([APP_CHECK, status_check_rollup_entry("backend (pytest + pyright)", "FAILURE")])
     has_workflows(True)
-    r = status.check_ci("1")
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.FAILED
     assert r.failed == [{"name": "backend (pytest + pyright)", "conclusion": "FAILURE"}]
 
 
 def test_pending_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> None:
     """Still-running checks mean wait, not did-not-run."""
-    gh([APP_CHECK, status_check_rollup_entry("backend", "", status="IN_PROGRESS")])
+    host = gh([APP_CHECK, status_check_rollup_entry("backend", "", status="IN_PROGRESS")])
     has_workflows(True)
-    assert status.check_ci("1").verdict is CIStatus.PENDING
+    assert status.check_ci("1", host=host, clock=TEST_CLOCK).verdict is CIStatus.PENDING
 
 
 def test_unknown_conclusion_counts_as_pending(gh: Any, has_workflows: Any) -> None:
     """A COMPLETED check with an unrecognized conclusion must not read as green."""
-    gh([status_check_rollup_entry("weird", "SOMETHING_NEW")])
+    host = gh([status_check_rollup_entry("weird", "SOMETHING_NEW")])
     has_workflows(True)
-    r = status.check_ci("1")
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.PENDING
     assert r.pending == ["weird"]
 
 
 def test_merge_conflict_short_circuits(gh: Any, has_workflows: Any) -> None:
-    gh([status_check_rollup_entry("backend", "SUCCESS")], mergeable="CONFLICTING")
+    host = gh([status_check_rollup_entry("backend", "SUCCESS")], mergeable="CONFLICTING")
     has_workflows(True)
-    assert status.check_ci("1").verdict is CIStatus.MERGE_CONFLICT
+    assert status.check_ci("1", host=host, clock=TEST_CLOCK).verdict is CIStatus.MERGE_CONFLICT
 
 
 @pytest.mark.parametrize(
@@ -256,9 +278,9 @@ def test_status_context_bucketing(
         "state": state,
         "targetUrl": "",
     }
-    gh([status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS"), status_ctx])
+    host = gh([status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS"), status_ctx])
     has_workflows(True)
-    result = status.check_ci("1")
+    result = status.check_ci("1", host=host, clock=TEST_CLOCK)
     assert result.verdict is verdict
     assert "?" not in result.pending
     if bucket == "failed":
@@ -287,9 +309,9 @@ def test_stale_cancelled_run_loses_to_newer_success_of_same_name(
         workflow="CI",
         completed_at="2026-09-03T18:04:17Z",
     )
-    gh([status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS"), stale, fresh])
+    host = gh([status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS"), stale, fresh])
     has_workflows(True)
-    r = status.check_ci("1")
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.ALL_PASSED
     assert r.failed == []
     assert r.completed.count("backend serial (flaky)") == 1
@@ -298,9 +320,9 @@ def test_stale_cancelled_run_loses_to_newer_success_of_same_name(
 def test_empty_rollup(gh: Any, has_workflows: Any) -> None:
     """Empty rollup and the runs probe confirms nothing is scheduled: the real
     NO_CHECKS."""
-    gh([])
+    host = gh([])
     has_workflows(True)
-    assert status.check_ci("1").verdict is CIStatus.NO_CHECKS
+    assert status.check_ci("1", host=host, clock=TEST_CLOCK).verdict is CIStatus.NO_CHECKS
 
 
 def test_empty_rollup_with_a_queued_run_is_pending_not_no_checks(gh: Any) -> None:
@@ -309,9 +331,9 @@ def test_empty_rollup_with_a_queued_run_is_pending_not_no_checks(gh: Any) -> Non
     `in_progress` ten seconds later). An empty rollup with a run in flight is the
     just-pushed attach window, not a settled "no checks" — a watcher reading
     NO_CHECKS here exits before the suite has begun."""
-    gh([], scheduled=["CI"])
+    host = gh([], scheduled=["CI"])
 
-    r = status.check_ci("2249")
+    r = status.check_ci("2249", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.PENDING
     assert r.pending == ["CI"]
 
@@ -321,22 +343,19 @@ def test_empty_rollup_with_an_unanswerable_probe_is_error(
 ) -> None:
     """The runs probe failing must not read as a settled NO_CHECKS — the exact
     verdict this probe exists to rule out when checks may still be attaching."""
-    gh([])
+    host = gh([])
     monkeypatch.setattr(status, "runs_not_yet_reporting", lambda *_a, **_k: None)
 
-    r = status.check_ci("2249")
+    r = status.check_ci("2249", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
 
-def test_gh_failure_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _R:
-        returncode = 1
-        stdout = ""
-        stderr = "gh: not authenticated"
-
-    monkeypatch.setattr(status.subprocess, "run", lambda *_a, **_k: _R())
-    r = status.check_ci("1")
+def test_gh_failure_is_an_error() -> None:
+    host = fake_host(
+        lambda argv, **_k: subprocess.CompletedProcess(list(argv), 1, "", "gh: not authenticated")
+    )
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.ERROR
     assert "not authenticated" in r.error_detail
 
@@ -359,10 +378,10 @@ def test_this_repo_has_workflows() -> None:
 def test_queued_run_with_no_check_yet_is_pending_not_did_not_run(
     gh: Any, has_workflows: Any
 ) -> None:
-    gh([APP_CHECK], scheduled=["CI"])
+    host = gh([APP_CHECK], scheduled=["CI"])
     has_workflows(True)
 
-    r = status.check_ci("901")
+    r = status.check_ci("901", host=host, clock=TEST_CLOCK)
     assert r.verdict == CIStatus.PENDING
     assert "CI" in r.pending
     assert "DID NOT RUN" not in r.summary()
@@ -376,7 +395,7 @@ def test_partial_suite_green_with_a_run_still_queued_is_pending(
     rollup alone looked complete and green; only the runs API shows the missing
     remainder. This is the early-green window — part of the suite is in, the
     rest is still coming."""
-    gh(
+    host = gh(
         [
             status_check_rollup_entry("guardrails (impacted)", "SUCCESS"),
             status_check_rollup_entry("e2e (smoke)", "SUCCESS"),
@@ -386,11 +405,11 @@ def test_partial_suite_green_with_a_run_still_queued_is_pending(
     )
     has_workflows(True)
 
-    r = status.check_ci("774")
+    r = status.check_ci("774", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.PENDING
     assert "CI" in r.pending
     assert "guardrails (impacted)" in r.passed
-    gh(
+    host = gh(
         [
             status_check_rollup_entry("guardrails (impacted)", "SUCCESS"),
             status_check_rollup_entry("e2e (smoke)", "SUCCESS"),
@@ -399,7 +418,7 @@ def test_partial_suite_green_with_a_run_still_queued_is_pending(
         scheduled=[],
         main_completed=True,
     )
-    assert status.check_ci("775").verdict is CIStatus.ALL_PASSED
+    assert status.check_ci("775", host=host, clock=TEST_CLOCK).verdict is CIStatus.ALL_PASSED
 
 
 def test_partial_suite_green_with_an_unanswerable_probe_is_error(
@@ -409,7 +428,7 @@ def test_partial_suite_green_with_an_unanswerable_probe_is_error(
     the probe cannot confirm nothing is still queued. None must not read as
     green — ERROR (unknown) makes --wait print the reason and exit 3 when it
     persists, instead of ALL_PASSED or a fabricated PENDING."""
-    gh(
+    host = gh(
         [
             status_check_rollup_entry("guardrails (impacted)", "SUCCESS"),
             status_check_rollup_entry("e2e (smoke)", "SUCCESS"),
@@ -418,7 +437,7 @@ def test_partial_suite_green_with_an_unanswerable_probe_is_error(
     has_workflows(True)
     monkeypatch.setattr(status, "runs_not_yet_reporting", lambda *_a, **_k: None)
 
-    r = status.check_ci("776")
+    r = status.check_ci("776", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
@@ -432,53 +451,48 @@ def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workf
         status_check_rollup_entry("prove-example-b", "SKIPPED", workflow="Example proof B"),
     ]
     has_workflows(True)
-    gh(checks, scheduled=[], main_completed=False)
+    host = gh(checks, scheduled=[], main_completed=False)
 
-    r = status.check_ci("3137")
+    r = status.check_ci("3137", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.PENDING
     assert status.MAIN_CI_WORKFLOW_NAME in r.pending
     assert "all green" not in r.summary()
     assert "pending" in r.summary().lower()
-    gh(checks, scheduled=[], main_completed=True)
-    assert status.check_ci("3137").verdict is CIStatus.ALL_PASSED
+    host = gh(checks, scheduled=[], main_completed=True)
+    assert status.check_ci("3137", host=host, clock=TEST_CLOCK).verdict is CIStatus.ALL_PASSED
 
 
 def test_main_workflow_probe_failure_is_error(
     gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An unanswerable main-workflow probe is unknown, never a green verdict."""
-    gh([status_check_rollup_entry("backend", "SUCCESS")], scheduled=[], main_completed=True)
+    host = gh([status_check_rollup_entry("backend", "SUCCESS")], scheduled=[], main_completed=True)
     has_workflows(True)
     monkeypatch.setattr(status, "main_workflow_run_completed", lambda *_a, **_k: None)
 
-    r = status.check_ci("3137")
+    r = status.check_ci("3137", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
 
-def test_main_workflow_probe_reads_completed_runs_of_the_main_workflow(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_main_workflow_probe_reads_completed_runs_of_the_main_workflow() -> None:
     """The completed-runs query is head-specific and filters for the main workflow."""
     seen: dict[str, list[str]] = {}
+    state = {"stdout": "2"}
 
-    class _R:
-        returncode = 0
-        stdout = "2"
-        stderr = ""
+    def _run(argv: Sequence[str], *_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+        argv = list(argv)
+        seen["cmd"] = argv
+        return subprocess.CompletedProcess(argv, 0, state["stdout"], "")
 
-    def _run(cmd, *_a, **_k):
-        seen["cmd"] = cmd
-        return _R()
-
-    monkeypatch.setattr(status.subprocess, "run", _run)
-    assert status.main_workflow_run_completed("abc123", None) is True
+    host = fake_host(_run)
+    assert status.main_workflow_run_completed("abc123", None, host=host) is True
     joined = " ".join(seen["cmd"])
     assert "head_sha=abc123" in joined
     assert "status=completed" in joined
     assert 'select(.name == "CI" and .conclusion != "skipped")' in joined
-    _R.stdout = "0"
-    assert status.main_workflow_run_completed("abc123", None) is False
+    state["stdout"] = "0"
+    assert status.main_workflow_run_completed("abc123", None, host=host) is False
 
 
 def core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
@@ -493,9 +507,9 @@ def core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
 
 
 def test_draft_pr_with_skipped_core_suite_is_not_ready(gh: Any, has_workflows: Any) -> None:
-    gh(core_rollup("SKIPPED"), is_draft=True, scheduled=[], main_completed=True)
+    host = gh(core_rollup("SKIPPED"), is_draft=True, scheduled=[], main_completed=True)
     has_workflows(True)
-    result = status.check_ci("3313")
+    result = status.check_ci("3313", host=host, clock=TEST_CLOCK)
     assert result.verdict is CIStatus.NOT_READY
     assert "NOT READY" in result.summary() and "draft" in result.summary()
     assert "all green" not in result.summary()
@@ -503,15 +517,15 @@ def test_draft_pr_with_skipped_core_suite_is_not_ready(gh: Any, has_workflows: A
 
 
 def test_draft_pr_whose_core_suite_ran_stays_green(gh: Any, has_workflows: Any) -> None:
-    gh(core_rollup("SUCCESS"), is_draft=True, main_completed=True)
+    host = gh(core_rollup("SUCCESS"), is_draft=True, main_completed=True)
     has_workflows(True)
-    assert status.check_ci("3313").verdict is CIStatus.ALL_PASSED
+    assert status.check_ci("3313", host=host, clock=TEST_CLOCK).verdict is CIStatus.ALL_PASSED
 
 
 def test_ready_transition_with_draft_skipped_core_is_pending(gh: Any, has_workflows: Any) -> None:
-    gh(core_rollup("SKIPPED"), is_draft=False, scheduled=[], main_completed=False)
+    host = gh(core_rollup("SKIPPED"), is_draft=False, scheduled=[], main_completed=False)
     has_workflows(True)
-    result = status.check_ci("3313")
+    result = status.check_ci("3313", host=host, clock=TEST_CLOCK)
     assert result.verdict is CIStatus.PENDING
     assert status.MAIN_CI_WORKFLOW_NAME in result.pending
     assert "skipped by draft gating" in result.summary()
@@ -525,9 +539,9 @@ def test_path_filtered_core_skip_with_a_ran_main_run_stays_green(
         *core_rollup("SKIPPED", classify="SUCCESS"),
         status_check_rollup_entry("repo language (no raw CJK)", "SUCCESS"),
     ]
-    gh(checks, is_draft=False, main_completed=True)
+    host = gh(checks, is_draft=False, main_completed=True)
     has_workflows(True)
-    assert status.check_ci("2505").verdict is CIStatus.ALL_PASSED
+    assert status.check_ci("2505", host=host, clock=TEST_CLOCK).verdict is CIStatus.ALL_PASSED
 
 
 def test_core_suite_skipped_reads_only_the_shard_families() -> None:
@@ -548,21 +562,20 @@ def test_core_suite_skipped_reads_only_the_shard_families() -> None:
     )
 
 
-def test_main_workflow_probe_returns_none_when_unanswerable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_main_workflow_probe_returns_none_when_unanswerable() -> None:
     """A failed or unparseable completed-run query is unknown, not no main run."""
+    state = {"rc": 1, "stdout": ""}
 
-    class _R:
-        returncode = 1
-        stdout = ""
-        stderr = "boom"
+    def _run(argv: Sequence[str], *_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+        returncode = state["rc"]
+        assert isinstance(returncode, int)
+        return subprocess.CompletedProcess(list(argv), returncode, str(state["stdout"]), "boom")
 
-    monkeypatch.setattr(status.subprocess, "run", lambda *_a, **_k: _R())
-    assert status.main_workflow_run_completed("abc123", None) is None
-    _R.returncode = 0
-    _R.stdout = "not a number"
-    assert status.main_workflow_run_completed("abc123", None) is None
+    host = fake_host(_run)
+    assert status.main_workflow_run_completed("abc123", None, host=host) is None
+    state["rc"] = 0
+    state["stdout"] = "not a number"
+    assert status.main_workflow_run_completed("abc123", None, host=host) is None
 
 
 def test_runs_api_failure_keeps_the_conservative_verdict(
@@ -573,20 +586,20 @@ def test_runs_api_failure_keeps_the_conservative_verdict(
     workflow check the not-green NO_WORKFLOW_RUNS verdict is kept, exactly as
     when the probe answered []; only the all-passed path (below) has to tell
     None from []."""
-    gh([APP_CHECK])
+    host = gh([APP_CHECK])
     has_workflows(True)
     monkeypatch.setattr(status, "runs_not_yet_reporting", lambda *_a, **_k: None)
 
-    assert status.check_ci("886").verdict == CIStatus.NO_WORKFLOW_RUNS
+    assert status.check_ci("886", host=host, clock=TEST_CLOCK).verdict == CIStatus.NO_WORKFLOW_RUNS
 
 
 def completed_process_stub(stdout: str = "", returncode: int = 0) -> Any:
-    return status.subprocess.CompletedProcess([], returncode, stdout, "boom")
+    return subprocess.CompletedProcess([], returncode, stdout, "boom")
 
 
 @pytest.fixture
-def no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(status.time, "sleep", lambda _s: None)
+def no_sleep() -> Clock:
+    return make_clock()
 
 
 @pytest.fixture
@@ -597,7 +610,14 @@ def poll(monkeypatch: pytest.MonkeyPatch):
     def _install(*verdicts: CIStatus) -> None:
         calls = {"n": 0}
 
-        def fake_check(pr, *, repo):
+        def fake_check(
+            pr: str | int,
+            *,
+            repo: str | None = None,
+            host: object = None,
+            clock: object = None,
+        ) -> status.CIResult:
+            del pr, repo, host, clock
             i = min(calls["n"], len(verdicts) - 1)
             calls["n"] += 1
             v = verdicts[i]
@@ -634,21 +654,22 @@ def poll(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def diag_gh(monkeypatch):
+def diag_gh() -> Any:
     """Stub the gh/git subprocess for --diagnose: canned responses keyed by a
     substring of the command line, consumed in call order (first entry whose
     key matches the current call)."""
 
-    def _install(responses: list[tuple[str, str]]) -> None:
-        def run(cmd, *_a, **_k):
-            joined = " ".join(str(c) for c in cmd)
+    def _install(responses: list[tuple[str, str]]) -> Host:
+        def run(argv: Sequence[str], *_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+            argv = list(argv)
+            joined = " ".join(str(c) for c in argv)
             for idx, (key, out) in enumerate(responses):
                 if key in joined:
                     responses.pop(idx)
-                    return subprocess.CompletedProcess(cmd, 0, out, "")
-            return subprocess.CompletedProcess(cmd, 1, "", "unmatched: " + joined)
+                    return subprocess.CompletedProcess(argv, 0, out, "")
+            return subprocess.CompletedProcess(argv, 1, "", "unmatched: " + joined)
 
-        monkeypatch.setattr(status.subprocess, "run", run)
+        return fake_host(run)
 
     return _install
 
@@ -706,42 +727,39 @@ def diag_jobs_payload(job: dict) -> str:
 # They held all-green rollups PENDING until a --wait budget silently ran out. ---
 
 
-class _ProbeResponse:
-    def __init__(self, returncode: int, stdout: str) -> None:
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = ""
-
-
 def aged(seconds: float = 900.0) -> str:
     """A GitHub RFC3339 `created_at` that is `seconds` old."""
-    return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
+    return (TEST_NOW - timedelta(seconds=seconds)).isoformat()
 
 
 def install_probe(
-    monkeypatch: pytest.MonkeyPatch,
     runs: object,
     jobs: dict[int, int],
     *,
     calls: list[list[str]] | None = None,
     runs_rc: int = 0,
     jobs_rc: dict[int, int] | None = None,
-) -> None:
+) -> Host:
     """Stub `gh api` for `_limbo_runs`: one runs probe, then one jobs probe per
     aged queued candidate. `runs` is the jq-projected list (or a raw string
     standing in for unreadable output); `jobs` maps a run id to its jq-printed
     total_count."""
 
-    def run(cmd, **_kwargs):
+    def run(argv: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        argv = list(argv)
         if calls is not None:
-            calls.append(list(cmd))
-        url = cmd[2]
+            calls.append(argv)
+        url = argv[2]
         if "/jobs" in url:
             run_id = int(url.split("/")[-2])
-            return _ProbeResponse((jobs_rc or {}).get(run_id, 0), str(jobs[run_id]))
-        return _ProbeResponse(runs_rc, runs if isinstance(runs, str) else json.dumps(runs))
+            return subprocess.CompletedProcess(
+                argv, (jobs_rc or {}).get(run_id, 0), str(jobs[run_id]), ""
+            )
+        return subprocess.CompletedProcess(
+            argv, runs_rc, runs if isinstance(runs, str) else json.dumps(runs), ""
+        )
 
-    monkeypatch.setattr(status.subprocess, "run", run)
+    return fake_host(run)
 
 
 def limbo_result(
@@ -761,7 +779,14 @@ def limbo_result(
 def install_results_poller(monkeypatch: pytest.MonkeyPatch, *results: Any) -> None:
     calls = {"n": 0}
 
-    def fake_check(pr, *, repo):
+    def fake_check(
+        pr: str | int,
+        *,
+        repo: str | None = None,
+        host: object = None,
+        clock: object = None,
+    ) -> Any:
+        del pr, repo, host, clock
         i = min(calls["n"], len(results) - 1)
         calls["n"] += 1
         return results[i]

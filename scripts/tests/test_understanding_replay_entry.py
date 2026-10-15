@@ -1,6 +1,5 @@
 """The preview replay entry owns its captured database admission gate."""
 
-import sys
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -20,7 +19,6 @@ def test_report_uses_one_captured_gated_database(
     database = Mock()
     create = Mock(return_value=database)
     report = Mock()
-    monkeypatch.setattr(sys, "argv", ["replay", "report", "42"])
     monkeypatch.setattr(replay, "require_preview", Mock())
     monkeypatch.setattr(replay, "ConfigBoot", Mock(return_value=Mock()))
     monkeypatch.setattr(LoadedCommit, "capture", capture)
@@ -28,7 +26,7 @@ def test_report_uses_one_captured_gated_database(
     monkeypatch.setattr(replay, "process_name", lambda: "preview")
     monkeypatch.setattr(replay.Database, "from_settings", create)
     monkeypatch.setattr(replay, "print_replay_report", report)
-    replay.main()
+    replay.main(["report", "42"])
     capture.assert_called_once_with()
     create.assert_called_once()
     report.assert_called_once_with(database, 42)
@@ -46,11 +44,10 @@ def test_preview_refusal_precedes_capture_and_database(
 ) -> None:
     capture = Mock()
     create = Mock()
-    monkeypatch.setattr(sys, "argv", ["replay", "report", "42"])
     monkeypatch.setattr(replay, "DOCKERENV", tmp_path / "missing")
     monkeypatch.setattr(LoadedCommit, "capture", capture)
     monkeypatch.setattr(replay.Database, "from_settings", create)
     with pytest.raises(SystemExit, match="preview container only"):
-        replay.main()
+        replay.main(["report", "42"])
     capture.assert_not_called()
     create.assert_not_called()

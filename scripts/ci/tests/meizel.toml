@@ -17,10 +17,3 @@ exports = ["leak_guard_suite.py"]
 "test_refresh_test_durations.py#monkeypatch.setattr scripts.ci.refresh_test_durations.DURATIONS_PATH" = 11
 "test_refresh_test_durations.py#monkeypatch.setattr scripts.ci.refresh_test_durations.run_suite" = 5
 "test_watch_pr.py#monkeypatch.setattr base.paths.workspace_dir" = 1
-
-[debt.stdlib-patch]
-"test_collection_tracebacks.py#monkeypatch.setattr faulthandler.dump_traceback" = 2
-"test_coverage_gates.py#monkeypatch.setattr sys.argv" = 1
-"test_refresh_test_durations.py#monkeypatch.setattr pathlib.Path.replace" = 1
-"test_watch_pr.py#monkeypatch.setattr atexit.register" = 1
-"test_watch_pr.py#monkeypatch.setattr time.sleep" = 1

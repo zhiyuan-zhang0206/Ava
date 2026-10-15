@@ -30,6 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener  # noqa: E402
 from base.native_process.child_env import inherited_process_env  # noqa: E402
 from scripts.post_deploy_visual.matrix import (  # noqa: E402
     SESSION_REJECTED_DETAIL,
@@ -47,24 +48,32 @@ DEFAULT_OUTPUT_ROOT = Path.home() / "post-deploy-visual"
 VISUAL_PASS_TIMEOUT_SECONDS = 28 * 60
 
 
-def _health_payload(base_url: str) -> dict[str, object]:
+def _health_payload(
+    base_url: str,
+    *,
+    open_url: UrlOpener,
+) -> dict[str, object]:
     if urllib.parse.urlsplit(base_url).scheme not in {"http", "https"}:
         raise ValueError("--base-url must use http or https")
     request = urllib.request.Request(  # noqa: S310 - only HTTP(S) survives validation below
         f"{base_url.rstrip('/')}/api/health", method="GET"
     )
     try:
-        response = urllib.request.urlopen(request, timeout=10)  # noqa: S310 - operator URL
+        response = open_url(request, 10)
     except urllib.error.HTTPError as exc:
         response = exc
-    with response:
-        payload = json.load(response)
+    with response as body:
+        payload = json.load(body)
     if not isinstance(payload, dict):
         raise TypeError("gateway health response must be a JSON object")
     return payload
 
 
-def assert_gate_origin(base_url: str) -> None:
+def assert_gate_origin(
+    base_url: str,
+    *,
+    open_url: UrlOpener,
+) -> None:
     """Refuse a --base-url that points at the gateway API origin.
 
     The gateway's /api/health answers JSON with ``name == "gateway"``; the
@@ -73,7 +82,7 @@ def assert_gate_origin(base_url: str) -> None:
     page settle-timeout (20 x 60s) — fail fast instead.
     """
     try:
-        payload = _health_payload(base_url)
+        payload = _health_payload(base_url, open_url=open_url)
     except (TypeError, ValueError, OSError):
         return
     if payload.get("name") == "gateway":
@@ -134,7 +143,7 @@ def resolved_cookie_file(cookie_file: Path) -> Path:
     return cookie_file
 
 
-def session_precheck(base_url: str, cookie_file: Path) -> None:
+def session_precheck(base_url: str, cookie_file: Path, *, open_url: UrlOpener) -> None:
     """Fail fast when the stored session cookie is already dead.
 
     The matrix's control surface exercises the real /api/auth/check, and a
@@ -151,7 +160,7 @@ def session_precheck(base_url: str, cookie_file: Path) -> None:
             headers={"Cookie": cookie_header},
             method="GET",
         )
-        response = urllib.request.urlopen(request, timeout=10)  # noqa: S310 - operator URL
+        response = open_url(request, 10)
     except urllib.error.HTTPError as exc:
         if exc.code in {401, 403}:
             raise RuntimeError(SESSION_REJECTED_DETAIL) from exc
@@ -160,9 +169,9 @@ def session_precheck(base_url: str, cookie_file: Path) -> None:
     except (OSError, ValueError) as exc:
         print(f"warning: auth precheck could not run: {exc}; continuing", file=sys.stderr)
         return
-    with response:
+    with response as body:
         try:
-            payload = json.load(response)
+            payload = json.load(body)
         except ValueError:
             print("warning: auth precheck response is not JSON; continuing", file=sys.stderr)
             return
@@ -325,13 +334,18 @@ def _find_preview_port() -> int:
     raise RuntimeError("no free preview port in 3001..3100")
 
 
-def _wait_for_preview(url: str, process: subprocess.Popen[str]) -> None:
+def _wait_for_preview(
+    url: str,
+    process: subprocess.Popen[str],
+    *,
+    open_url: UrlOpener,
+) -> None:
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise RuntimeError("local preview exited before becoming ready")
         try:
-            with urllib.request.urlopen(url, timeout=2):  # noqa: S310 - loopback only
+            with open_url(url, 2):
                 return
         except (OSError, urllib.error.URLError):
             time.sleep(0.5)
@@ -359,7 +373,7 @@ def _isolated_frontend_preview() -> Generator[Path]:
         yield preview
 
 
-def _run_demo_preview(args: argparse.Namespace, preview: Path) -> int:
+def _run_demo_preview(args: argparse.Namespace, preview: Path, *, open_url: UrlOpener) -> int:
     port = _find_preview_port()
     host_url = f"http://127.0.0.1:{port}"
     validate_demo_target(host_url)
@@ -382,7 +396,7 @@ def _run_demo_preview(args: argparse.Namespace, preview: Path) -> int:
         start_new_session=True,
     )
     try:
-        _wait_for_preview(host_url, process)
+        _wait_for_preview(host_url, process, open_url=open_url)
         args.base_url = host_url
         args.wave_sha = validate_wave_id(f"demo-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}")
         wave_dir = args.output_root.resolve() / args.wave_sha
@@ -408,26 +422,30 @@ def _run_demo_preview(args: argparse.Namespace, preview: Path) -> int:
             process.wait()
 
 
-def _run_demo(args: argparse.Namespace) -> int:
+def _run_demo(args: argparse.Namespace, *, open_url: UrlOpener) -> int:
     with _isolated_frontend_preview() as preview:
-        return _run_demo_preview(args, preview)
+        return _run_demo_preview(args, preview, open_url=open_url)
 
 
-def run_host(args: argparse.Namespace) -> int:
+def run_host(
+    args: argparse.Namespace,
+    *,
+    open_url: UrlOpener,
+) -> int:
     if args.accept_wave:
         return accept_wave(args)
     if args.demo_defect:
-        return _run_demo(args)
+        return _run_demo(args, open_url=open_url)
     if not args.base_url:
         raise ValueError("--base-url is required")
-    assert_gate_origin(args.base_url)
+    assert_gate_origin(args.base_url, open_url=open_url)
     cookie_value = inherited_process_env().get("AVA_VISUAL_GATE_COOKIE_FILE")
     if not cookie_value:
         raise ValueError("AVA_VISUAL_GATE_COOKIE_FILE is required")
     cookie_file = resolved_cookie_file(Path(cookie_value).resolve())
     health_base = args.health_url or args.base_url.rstrip("/")
-    session_precheck(health_base, cookie_file)
-    health = _health_payload(health_base)
+    session_precheck(health_base, cookie_file, open_url=open_url)
+    health = _health_payload(health_base, open_url=open_url)
     started_at = extract_gateway_started_at(health)
     serving_sha = extract_gateway_sha(health)
     output_root = args.output_root.resolve()
@@ -482,7 +500,7 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
-        return run_host(args)
+        return run_host(args, open_url=SYSTEM_URL_OPENER)
     except (
         KeyError,
         OSError,
