@@ -1,9 +1,3 @@
-"""Gateway config — GatewaySettings.
-
-Split out of the former flat Settings god object; each field keeps its exact
-env alias so the .env surface is unchanged. Aggregated by base/config.
-"""
-
 from __future__ import annotations
 
 from typing import Annotated

@@ -1,5 +1,3 @@
-"""Operator commands for host-wide PTY allocation admission."""
-
 from __future__ import annotations
 
 import sys

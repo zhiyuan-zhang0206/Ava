@@ -1,5 +1,3 @@
-"""The errors `ava.web` raises."""
-
 from __future__ import annotations
 
 __all__ = ["FetchError", "SearchError", "WebError"]

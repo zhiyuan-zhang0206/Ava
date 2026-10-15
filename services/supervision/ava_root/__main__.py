@@ -1,5 +1,3 @@
-"""`python -m services.supervision.ava_root` — run the daemon."""
-
 from __future__ import annotations
 
 import sys

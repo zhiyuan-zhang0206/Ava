@@ -1,5 +1,3 @@
-"""`ava pty` — host-wide PTY allocation admission commands."""
-
 from __future__ import annotations
 
 import argparse

@@ -1,10 +1,3 @@
-"""The root owner for one home's application service children.
-
-macOS starts this tree under the stable signed permissions helper. Transport,
-health observation, and service manifests share this owner; there is no service
-session mode or in-place interpreter upgrade.
-"""
-
 from base.native_process.root_control.instance_lock import (
     AlreadyRunningError,
     acquire_instance_lock,

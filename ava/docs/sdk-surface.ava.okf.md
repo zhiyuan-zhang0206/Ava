@@ -13,6 +13,8 @@ An agent has only one tool—`execute_code(code: str)`—but obtains all capabil
 documentation. Reloading a plugin in place updates this view; unavailable source
 is retried on the next discovery instead of being retained as an empty result.
 
+The SDK's pytest parent import boundary is documented in [[test-imports.ava.okf.md]].
+
 ## Module Index
 
 SDK operations read configuration from the `ConfigAuthority` retained by their

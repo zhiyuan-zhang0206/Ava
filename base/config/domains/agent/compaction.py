@@ -1,7 +1,3 @@
-"""Agent compaction policy — AgentCompactionSettings.
-
-Force-compact ceiling (fraction + absolute token cap), the soft wind-down reminder, and reminder controls — the knobs that bound a growing context window. Split out of the former flat AgentSettings schema; each field keeps its exact env alias so the .env surface is unchanged."""
-
 from __future__ import annotations
 
 from typing import Literal

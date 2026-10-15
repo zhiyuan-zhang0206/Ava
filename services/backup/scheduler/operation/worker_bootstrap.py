@@ -1,10 +1,3 @@
-"""Entry of one operation worker process: `python -I -B worker_bootstrap.py ROOT MODULE ARGS...`.
-
-Standard library only, so the code-root check runs before any first-party import. The
-workers `MODULE` can name live in `services/backup/scheduler`. Each required name must
-resolve inside ROOT, then MODULE runs as `__main__` with the remaining arguments.
-"""
-
 import importlib.util
 import pathlib
 import runpy

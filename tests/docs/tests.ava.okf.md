@@ -40,8 +40,9 @@ A package's own tests sit beside the code they prove (`base/packages/plugins/tes
 Component contracts, infrastructure checks and test discovery: [[test-layout.ava.okf.md]].
 
 ### Global fixtures (repo-root `conftest.py` → `tests/fixtures/` plugins)
-- The repo-root `conftest.py` holds only `pytest_plugins`; the suite's global fixtures, host guards and session hooks are plugin modules in `tests/fixtures/`, so they apply to every test file in the repository rather than only the `tests/` tree. Plugin roster, load order and the isolation invariants: [[test-fixtures.ava.okf.md]]
-- Directory-level fixtures (the former `conftest.py` files of `agent` / `ava` / `cli` / `gateway` / `integration` / `services` / `scripts/structure` / `lifecycle/db_authority`) are modules in `tests/path_scoped/`, registered for the paths named by the `path_scopes.toml` files next to the tests (`PATH_SCOPES`, read by `tests/fixtures/path_scopes.py`) so they follow a test into a package's `tests/` directory. A `conftest.py` remains only in `e2e` (package-scoped real processes), `lifecycle/native_root` (it must run without the repo-root conftest); details: [[test-fixtures.ava.okf.md]]
+- The repo-root `conftest.py` loads global fixture plugins and explicitly re-exports shared non-autouse fixtures. Their load order and isolation contracts live in [[test-fixtures.ava.okf.md]] and [[tests/docs/test-fixtures/root-conftest.ava.okf.md]].
+- Component conftests opt into their own fixture capabilities; remaining `path_scopes.toml` declarations mount the legacy fixture modules for their named consumers. See [[tests/fixtures/unit/docs/unit-fixtures.ava.okf.md]] and [[tests/docs/test-fixtures/path-scopes.ava.okf.md]].
+- Some conftests also establish collection or process boundaries. In particular, retain `ava/conftest.py` even without fixtures: it preserves the SDK package's import identity ([[ava/docs/test-imports.ava.okf.md]]). The e2e and native-root conftests retain their own process and configuration roles.
 
 ### CI integration
 

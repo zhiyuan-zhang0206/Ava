@@ -67,6 +67,8 @@ The import boundary is `base < ops < {gateway, cli}`. The supported RPC
 vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
 its `terminate` and `content` submodules. Gateway-only
 schemas stay in `gateway/schemas/`.
+The [content bound](../rpc_schemas/docs/content.ava.okf.md) is a shared character
+constraint for prompts and replies, separate from transport and model budgets.
 The client and daemon reject unknown kinds before machine lookup, maintenance
 admission, dedupe, or dispatch. Callers import live pause, status and recovery
 definitions directly. The maintenance fences enforce admission.

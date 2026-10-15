@@ -1,5 +1,3 @@
-"""Original compact attempt/result CAS under the native work and receiver owners."""
-
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4

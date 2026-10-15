@@ -1,9 +1,3 @@
-"""Strict runtime evidence value types.
-
-Health endpoints share these without importing rollout leases, database fences
-or retired updater orchestration. Nothing here grants startup authority.
-"""
-
 from __future__ import annotations
 
 from typing import Annotated

@@ -1,10 +1,3 @@
-"""Feishu config — FeishuSettings.
-
-Credentials for the Ava IM Bridge feishu adapter (a Feishu enterprise
-self-built app you register). The adapter reads these; empty values mean the feishu
-channel is unavailable and the daemon logs "skipped".
-"""
-
 from __future__ import annotations
 
 from pydantic import Field

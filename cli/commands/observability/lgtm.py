@@ -1,5 +1,3 @@
-"""Observability desired state; all backend lifecycle uses normal start and root."""
-
 from __future__ import annotations
 
 from base.cluster.machine import MachineIdentity, MachineRoles

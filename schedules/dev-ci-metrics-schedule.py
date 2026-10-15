@@ -1,5 +1,3 @@
-"""Daily host for the GitHub Actions run-observability sampler."""
-
 from __future__ import annotations
 
 import json

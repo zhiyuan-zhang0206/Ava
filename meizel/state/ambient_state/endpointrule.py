@@ -1,11 +1,3 @@
-"""The ambient-endpoint rule: only a package's named roots build the endpoint table.
-
-A daemon's port and pidfile come from `base.daemon.endpoints.ServiceEndpoints`, which reads the
-settings and `AVA_HOME` once, in `ServiceEndpoints.from_settings()`. The named modules are every
-daemon root plus the entry points of the commands and probes that read a daemon's row. See
-`rootrule` for the shared shape.
-"""
-
 from __future__ import annotations
 
 from meizel.state.ambient_state.rootrule import FromSettingsRule

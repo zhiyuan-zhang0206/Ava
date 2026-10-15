@@ -1,5 +1,3 @@
-"""Close only the original terminal compact execution before releasing ordinary input."""
-
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 

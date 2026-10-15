@@ -1,5 +1,3 @@
-"""Validated private-ledger schema for the external operator skill bridge."""
-
 from __future__ import annotations
 
 import hashlib

@@ -1,10 +1,3 @@
-"""The start lifecycle's durable desired service set.
-
-An omitted selection retains the prior intent. An allowlist remains an allowlist
-when new plugins appear; --all-services explicitly resets to the complete roster.
-Transient internal omissions never change the desired state.
-"""
-
 from __future__ import annotations
 
 import json

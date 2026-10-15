@@ -53,6 +53,12 @@ login shell, its screen, ring and transcript, its kill), `ledger.py` (the crash
 ledger and its sweep), `daemon.py` (the entry point and instance lock),
 `shutdown_budget.py` (the stop window root derives from).
 
+The service closes the known session and job identities with one shared grace
+wait after hangup/termination, then one shared kill wait for survivors. Its
+20-second shutdown ceiling is a configured budget; the roster test
+`test_pty_sessions_wiring.py` verifies that root receives that ceiling and that
+it exceeds the two declared waits. It does not measure total shutdown latency.
+
 ## Requests
 
 `ping`, `has`, `list` (every live session with pid, birth identity, cwd,
