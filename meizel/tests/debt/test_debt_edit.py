@@ -1,5 +1,3 @@
-"""`debt record` and `debt prune`: the only commands that change a baseline."""
-
 from __future__ import annotations
 
 import tomllib
@@ -22,7 +20,6 @@ DIRTY = {
 
 
 def record(root: Path, *paths: str) -> int:
-    """`debt record`, then stage what it wrote: `check` reads tracked files only."""
     code = run(root, "debt", "record", *paths)
     git(root, "add", "-A")
     return code

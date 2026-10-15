@@ -1,5 +1,3 @@
-"""Agent-to-agent events: who did what to whom is read from `source` and `agent_id`, never `target_agent_id`."""
-
 from __future__ import annotations
 
 import json
@@ -62,7 +60,6 @@ def message(
     hours_ago: float = 1,
     content: str = "hi",
 ) -> int:
-    """A message the way delivery writes it: the inbound row, and the audit event naming it."""
     row = conn.execute(
         "INSERT INTO inbound_messages (agent_id, content, kind, source) "
         "VALUES (%s, %s, %s, %s) RETURNING id",
@@ -101,7 +98,6 @@ def receiver(
 def read(
     *agents: int, kinds: tuple[str, ...] | None = None, database_gate: ProcessDbGate
 ) -> list[links.RunTimelineLink]:
-    """The links of the agents; `kinds` leaves out the user's spawn that creating a test agent records."""
     now = datetime.now(UTC)
     found = links.read(
         Database.from_settings(gate=database_gate), list(agents), now - timedelta(hours=48), now
@@ -112,12 +108,11 @@ def read(
 def test_a_chat_message_goes_from_its_source_to_the_agent_it_was_written_to(
     redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
-    # agent_id is the recipient, target_agent_id repeats the sender.
     inbound_id = message(db_conn, receiver=receiver, sender=405, content="do   the\nthing")
     [link] = read(receiver, kinds=("send_message",), database_gate=database_gate)
     assert (link.kind, link.sender, link.receiver) == ("send_message", 405, receiver)
     assert link.inbound_id == inbound_id
-    assert not hasattr(link, "preview")  # the text is served on demand, not in the list
+    assert not hasattr(link, "preview")
 
 
 def test_only_chat_messages_are_links_a_task_assignment_is_not(
@@ -125,7 +120,6 @@ def test_only_chat_messages_are_links_a_task_assignment_is_not(
 ) -> None:
     chat = message(db_conn, receiver=receiver, sender=405, hours_ago=3)
     message(db_conn, receiver=receiver, sender=405, kind="system_note", hours_ago=2)
-    # An audit row naming no inbound row, or one that does not exist, is not a chat either.
     record(db_conn, "send_message", source="agent:405", agent=receiver, target=405, hours_ago=1)
     record(
         db_conn,
@@ -145,7 +139,6 @@ def test_every_kind_reads_the_sender_from_source(
     db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
     record(db_conn, "spawn", source="agent:405", agent=6657, target=405, hours_ago=6)
-    # A fork is executed by `source`; target_agent_id is the agent it was copied from.
     record(db_conn, "fork", source="agent:405", agent=6658, target=9, hours_ago=5)
     record(
         db_conn,
@@ -189,8 +182,8 @@ def test_events_that_are_not_between_agents_or_with_the_user_are_left_out(
 ) -> None:
     record(db_conn, "resurrect", source="system", agent=6657)
     record(db_conn, "restart", source="schedule:3", agent=6657)
-    record(db_conn, "send_message", source="agent:6657", agent=6657, target=6657)  # to itself
-    record(db_conn, "cancel", source="agent:405", agent=6657)  # not a link kind
+    record(db_conn, "send_message", source="agent:6657", agent=6657, target=6657)
+    record(db_conn, "cancel", source="agent:405", agent=6657)
     assert read(6657, 405, database_gate=database_gate) == []
 
 

@@ -1,9 +1,3 @@
-"""Unit coverage for the ambient-state rule's state shapes (meizel/state/ambient_state/):
-containers, instances, memoized functions, global and foreign rebinding, class-level state — what
-each reports and the known ways around it. Sources are measured directly against a synthetic
-repository root (no lcs.main, no git — see scripts/lint/tests/test_ambient_state_gate.py for the
-gate wiring and test_ambient_effects.py for imports, background work, scope and the closed lists)."""
-
 from __future__ import annotations
 
 import ast
@@ -29,16 +23,12 @@ def _sites(
     rel: str = "base/mod.py",
     files: dict[str, str] | None = None,
 ) -> dict[str, int]:
-    """`rule:name -> site count` for one module; `files` are other repo files it can see."""
     for name, content in (files or {}).items():
         _write(root, name, content)
     path = _write(root, rel, source)
     tree = ast.parse(path.read_text(encoding="utf-8"))
     measured = ambient_state.measure(tree, rel, root)
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
-
-
-# --- containers ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -58,7 +48,6 @@ def test_an_annotated_empty_container_is_ambient_state(tmp_path: pathlib.Path) -
 def test_a_single_element_flag_list_is_ambient_only_when_the_module_flips_it(
     tmp_path: pathlib.Path,
 ) -> None:
-    """`_BUILT = [False]` is the classic way around a bare global: a mutable cell."""
     flipped = """
         _BUILT = [False]
 
@@ -136,11 +125,7 @@ def test_a_global_declared_name_is_still_the_module_table(tmp_path: pathlib.Path
     assert _sites(tmp_path, source) == {"ambient-container:_TABLE": 1}
 
 
-# --- instances, holders, wiring, constants ---------------------------------------------------
-
-
 def test_a_holder_object_is_an_ambient_instance(tmp_path: pathlib.Path) -> None:
-    """`_State()` carrying mutable attributes is a module global in disguise."""
     source = """
         class _State:
             def __init__(self):
@@ -194,8 +179,6 @@ def test_an_instance_of_a_value_class_is_not_ambient(
 def test_a_method_that_fills_a_local_dict_is_still_a_stateless_class(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A subscript write on a local variable changes nothing the instance keeps: the class is
-    stateless, so its module-level instance is a value and not a holder."""
     source = """
         class _Hook:
             def __call__(self, version):
@@ -407,9 +390,6 @@ def test_a_contextvar_is_its_own_rule_not_wiring(tmp_path: pathlib.Path, line: s
     assert _sites(tmp_path, header + line + "\n") == {"contextvar:_V": 1}
 
 
-# --- memoization -------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("decorator", "args", "rule"),
     [
@@ -448,9 +428,6 @@ def test_a_memoized_pure_function_goes_through_the_closed_list(
 
     monkeypatch.setattr(allow, "ALLOWED", {"base/mod.py::hidden-singleton:table": "a static table"})
     assert _sites(tmp_path, source) == {}
-
-
-# --- global rebinding ----------------------------------------------------------------------------
 
 
 def test_a_function_that_rebinds_a_global_is_reported_once_per_function(
@@ -496,9 +473,6 @@ def test_a_local_of_the_same_name_without_a_global_declaration_is_not_a_rebind(
     source = "_N = 0\n\ndef f():\n    _N = 1\n    return _N\n"
 
     assert _sites(tmp_path, source) == {}
-
-
-# --- rebinding another module's attribute --------------------------------------------------------
 
 
 def test_assigning_an_attribute_of_another_first_party_module_is_foreign(
@@ -555,9 +529,6 @@ def test_assigning_to_third_party_modules_objects_or_self_is_not_foreign(
             thing.value = 2
     """
     assert _sites(tmp_path, source) == {}
-
-
-# --- class-level state ----------------------------------------------------------------------------
 
 
 def test_a_mutable_class_attribute_is_shared_state(tmp_path: pathlib.Path) -> None:

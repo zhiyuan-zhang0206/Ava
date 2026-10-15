@@ -1,32 +1,3 @@
-"""Back/forward history state between the home timeline and a shell monitor
-page (task #4585).
-
-User report (2026-09-23): with the browser's forward/back buttons between
-/?agent_id=N and /shell/N/S (1) the reading position was lost -- the timeline
-re-pinned to the newest message and the terminal to its tail -- and (2) the
-shell page visibly re-entered its loading state ("like a full page reload").
-
-The app scrolls inside its own containers (html/body are h-full; the document
-never scrolls), so the browser's native history scroll restoration has
-nothing to restore: a back/forward remounts the page with its container reset.
-The pages remember their positions per history entry and restore them at the
-first paint of a returned entry. What this test pins:
-
-1. back: the timeline viewport sits at the pre-navigation reading position
-   (far from the bottom), and every painted frame of the returned home page
-   shows timeline content -- no blank frame.
-2. forward: the terminal pane sits at the pre-navigation scrollTop (not its
-   tail); no frame paints the params-unresolved "Invalid agent or session id"
-   state, and content is present on every painted frame.
-3. the shell page's 3s poll keeps updating the capture and the manual refresh
-   still fetches after the round trip.
-
-Frames are sampled once per animation frame (the standard proxy for what the
-browser paints) for the whole round trip; the recording lives on ``window``
-and survives the client-side navigations, because a client-side transition
-never replaces the JS context.
-"""
-
 from __future__ import annotations
 
 import re
@@ -54,8 +25,6 @@ class _PaneState(TypedDict):
 
 
 class _Frame(TypedDict):
-    """One animation frame's snapshot (the paint proxy) while armed."""
-
     t: int
     p: str
     n: int
@@ -72,9 +41,6 @@ class _Frame(TypedDict):
     pane: bool
 
 
-# The reading positions the test scrolls to. Both are far from their bottoms,
-# so every "position kept" assertion discriminates against pin-to-bottom
-# behavior.
 TIMELINE_SCROLL_TOP = 700
 PANE_SCROLL_TOP = 400
 
@@ -162,7 +128,6 @@ def _pane_state(page: Page) -> _PaneState:
 
 
 def _settle(page: Page, read_js: str, timeout_s: float = 20.0) -> None:
-    """Wait until two reads 500ms apart agree (the returned page settled)."""
     deadline = time.monotonic() + timeout_s
     prev: object = None
     while time.monotonic() < deadline:
@@ -179,8 +144,6 @@ def _settle(page: Page, read_js: str, timeout_s: float = 20.0) -> None:
 
 
 def _pin_page_settings(gateway_url: str) -> None:
-    """Pin the inspector open (so the shell rows -- the /shell links -- render)
-    and full run expansion; both are DB-backed user settings the page reads."""
     pin_expand_runs_all(gateway_url)
     resp = httpx.put(
         f"{gateway_url}/api/settings/display.inspector_open",
@@ -191,8 +154,6 @@ def _pin_page_settings(gateway_url: str) -> None:
 
 
 def _run_scenario(page: Page, agent_url: str, gateway_url: str, agent_id: int) -> int:
-    """Send the one inbound that runs the scripted scenario and return the
-    shell session id the script created (parsed from its timeline output)."""
     page.goto(agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=15_000)
     page.fill('[data-testid="composer-input"]', "run the script")
@@ -216,8 +177,6 @@ def _run_scenario(page: Page, agent_url: str, gateway_url: str, agent_id: int) -
 
 
 def _place_timeline_reader(page: Page) -> None:
-    """Wait for a scrollable timeline, then put the reader at a mid position
-    far from both edges."""
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
         state = _timeline_state(page)
@@ -242,8 +201,6 @@ def _place_timeline_reader(page: Page) -> None:
 
 
 def _open_shell_row(page: Page, shell_link: str) -> None:
-    """PUSH to the shell page, exactly like clicking the inspector row, and
-    wait until its capture has rendered long enough to scroll."""
     page.click(shell_link)
     page.wait_for_url(re.compile(r"/shell/"))
     page.wait_for_selector('[data-testid="shell-pane"]', timeout=15_000)
@@ -258,7 +215,6 @@ def _open_shell_row(page: Page, shell_link: str) -> None:
 
 
 def _place_pane_reader(page: Page) -> None:
-    """Move the terminal pane away from its tail (reading history)."""
     page.evaluate(
         "(top) => { document.querySelector('[data-testid=\"shell-pane\"]').scrollTop = top; }",
         PANE_SCROLL_TOP,
@@ -270,9 +226,6 @@ def _place_pane_reader(page: Page) -> None:
     )
 
 
-# Frame ownership: a frame belongs to a page when its DOM is that page's (a
-# popstate swaps the URL one task before the new tree commits; in between, the
-# old page's DOM is the ordinary transition, not a blank frame).
 def _is_home_frame(frame: _Frame) -> bool:
     return frame["p"] == "/" and frame["home"]
 
@@ -313,7 +266,6 @@ def _assert_shell_frames_show_capture(page: Page, forward_frames: list[_Frame]) 
 def _assert_returned_pages_painted_content(
     page: Page, back_marker: int, forward_marker: int
 ) -> None:
-    """No blank / wrong-content frame on either return."""
     frames = _frames(page)
     back_frames = [f for f in frames[back_marker:forward_marker] if _is_home_frame(f)]
     forward_frames = [f for f in frames[forward_marker:] if _is_shell_frame(f)]
@@ -323,7 +275,6 @@ def _assert_returned_pages_painted_content(
 
 
 def _assert_poll_and_refresh_alive(page: Page, captures: list[float]) -> None:
-    """The 3s poll still updates the pane and the manual refresh still fetches."""
     pre_len_before = page.evaluate(
         "() => document.querySelector('[data-testid=\"shell-pane\"]').textContent.length"
     )
@@ -375,13 +326,11 @@ def test_back_forward_keeps_scroll_position_without_blank_frames(e2e_env: E2EEnv
 
     _place_timeline_reader(page)
 
-    # Sample every frame (the paint proxy) from here through the round trip.
     page.evaluate(_FRAME_SAMPLER_JS)
 
     _open_shell_row(page, shell_link)
     _place_pane_reader(page)
 
-    # ---- BACK: the home page returns at the timeline reading position ----
     back_marker = len(_frames(page))
     page.go_back()
     page.wait_for_url(re.compile(r"/\?agent_id="))
@@ -394,7 +343,6 @@ def test_back_forward_keeps_scroll_position_without_blank_frames(e2e_env: E2EEnv
         f"frames tail={_frames_tail(page)}"
     )
 
-    # ---- FORWARD: the shell page returns at the pane reading position ----
     forward_marker = len(_frames(page))
     page.go_forward()
     page.wait_for_url(re.compile(r"/shell/"))

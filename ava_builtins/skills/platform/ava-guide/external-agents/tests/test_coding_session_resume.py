@@ -1,12 +1,3 @@
-"""Coding sessions stay resumable: each launch names its tool session, and --resume reopens it.
-
-A cluster stop (or a host reboot, a crash, a TTL expiry) closes the persistent
-shell a Claude Code or Codex session runs in; the tool's own conversation store
-keeps the history. These contracts cover the launch printing the session id,
-the ``--resume`` path reopening exactly that session, and the resumed session
-being told it was interrupted.
-"""
-
 from __future__ import annotations
 
 import importlib.util
@@ -28,8 +19,6 @@ _STATUS_CARD = f"│  Directory:  /ws\n│  Session:                     {_SESSI
 
 @dataclass
 class _FakeShell:
-    """A typed stand-in for ``ava.shell.sessions`` that records what was sent."""
-
     screen: str = ""
     screen_after_enter: str | None = None
     sent: list[str] = field(default_factory=list[str])
@@ -66,9 +55,6 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(codex.time, "sleep", _no_wait)
 
 
-# --- Codex: the session id comes from its own /status card ---------------------
-
-
 def test_codex_session_id_is_read_from_the_status_card(
     monkeypatch: pytest.MonkeyPatch, _no_sleep: None
 ) -> None:
@@ -90,9 +76,6 @@ def test_no_session_id_fails_the_launch(monkeypatch: pytest.MonkeyPatch, _no_sle
 
     with pytest.raises(RuntimeError, match="could not read the Codex session id"):
         codex.read_session_id(7, timeout=0.02)
-
-
-# --- Codex: --resume reopens exactly the recorded session ----------------------
 
 
 def _request(workspace: Path, resume: str | None) -> codex.LaunchRequest:
@@ -146,7 +129,7 @@ def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
         if opened != _SESSION:
             with pytest.raises(RuntimeError, match=f"not the requested {_SESSION}"):
                 codex.start_codex(7, owner.key, owner, "g", request)
-            assert len(sent) == 2  # app-server + TUI line only: nothing reaches the wrong session
+            assert len(sent) == 2
             return
         endpoint, session_id = codex.start_codex(7, owner.key, owner, "g", request)
     finally:
@@ -158,9 +141,6 @@ def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
     assert f"exec codex resume {_SESSION} --remote {endpoint} --dangerously-bypass" in sent[1]
     assert sent[2].startswith("This session was interrupted")
     assert "continue from where you stopped" in sent[2]
-
-
-# --- Claude: the id is chosen up front, --resume reopens it --------------------
 
 
 def test_claude_pins_or_reopens_the_session_id(tmp_path: Path) -> None:
@@ -195,7 +175,7 @@ def test_claude_launch_names_its_session(
     assert resumed is (resume is not None)
     if resume is not None:
         assert session == resume
-    else:  # a fresh launch mints a new UUID
+    else:
         assert _common.session_uuid(session) == session
 
 
@@ -210,15 +190,11 @@ _RESUMED_PANEL = (
 
 
 def test_a_resumed_panel_is_ready_without_the_welcome_banner() -> None:
-    """A resumed session opens on its history; a shell prompt is never ready."""
     shell = "host:cl-b user$ exec claude --dangerously-skip-permissions --resume x\n"
 
     assert not _claude_checks.claude_ui_ready(_RESUMED_PANEL)
     assert _claude_checks.claude_ui_ready(_RESUMED_PANEL, resumed=True)
     assert not _claude_checks.claude_ui_ready(shell, resumed=True)
-
-
-# --- both: the message, the flag ------------------------------------------------
 
 
 def test_a_fresh_worker_message_does_not_mention_an_interruption(tmp_path: Path) -> None:

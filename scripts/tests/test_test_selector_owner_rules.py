@@ -1,10 +1,3 @@
-"""Per-path owner rules of the PR test selector, and the tracked-tree completeness guard.
-
-The synthetic checkout below is sized so a package subset stays under the 80%
-duration guard and a top-level-tests fallback stays under it too, which lets each
-test observe the rule it names instead of the guard.
-"""
-
 from __future__ import annotations
 
 import json
@@ -27,7 +20,6 @@ def _write(repo_root: Path, relative_path: str, content: str = "") -> None:
 
 
 def _repo(tmp_path: Path) -> Path:
-    """A checkout where `base/lm` owns tests, `ops` and `base/empty` own none."""
     _write(
         tmp_path,
         "pyproject.toml",
@@ -60,11 +52,9 @@ def _repo(tmp_path: Path) -> Path:
         "base/empty/tests/helper.py": "",
         "ops/worker.py": "",
         "scripts/tests/test_bulk.py": "def test_bulk(): pass\n",
-        # Tests that read a hidden tool directory by path, in the three quoting styles.
         "scripts/tests/test_reads_github.py": 'WORKFLOW = ".github/workflows/ci.yml"\n',
         "scripts/tests/test_reads_trunk.py": "ROOT = '.trunk'\n",
         "scripts/tests/test_reads_agents.py": 'SKILLS = root / ".agents" / "skills"\n',
-        # A module named base.agents is not the .agents directory.
         "scripts/tests/test_imports_agents_module.py": "from base.agents import runner\n",
         "ui/web/src/App.tsx": "",
         "ui/web/src/bridge.py": "",
@@ -113,7 +103,6 @@ def test_a_source_runs_its_direct_importers_and_its_package_tests(tmp_path: Path
 
 
 def test_a_package_source_without_importers_still_runs_its_package_tests(tmp_path: Path) -> None:
-    """A file no test imports directly is no longer blind: the package owns it."""
     result = _select(_repo(tmp_path), "base/lm/deep/inner.py")
 
     assert (result.decision, result.tests) == ("SELECTED", ("base/lm/tests/test_lm.py", _LINT))
@@ -129,7 +118,6 @@ def test_a_non_python_file_in_a_package_runs_the_package_tests(tmp_path: Path) -
 def test_a_package_without_collectable_tests_falls_back_to_the_top_level_tests(
     tmp_path: Path, path: str
 ) -> None:
-    """A `tests/` directory holding only helpers is not an owner; the walk goes on."""
     result = _select(_repo(tmp_path), path)
 
     assert (result.decision, result.tests) == ("SELECTED", _TOP_LEVEL)
@@ -143,7 +131,6 @@ def test_a_subdirectory_conftest_selects_only_its_subtree(tmp_path: Path) -> Non
 
 
 def test_a_deleted_conftest_still_selects_its_subtree(tmp_path: Path) -> None:
-    """Deleting a conftest drops fixtures without breaking any import."""
     repo_root = _repo(tmp_path)
     (repo_root / "tests/sub/conftest.py").unlink()
 
@@ -157,8 +144,8 @@ def test_a_deleted_conftest_still_selects_its_subtree(tmp_path: Path) -> None:
     [
         "conftest.py",
         "tests/fixtures/env.py",
-        "cli/plugins/guard.py",  # listed in the root conftest's pytest_plugins
-        "cli/plugins/__init__.py",  # the plugin's package inits run in every process
+        "cli/plugins/guard.py",
+        "cli/plugins/__init__.py",
         "cli/__init__.py",
     ],
 )
@@ -215,8 +202,6 @@ def test_a_frontend_file_adds_no_backend_test(tmp_path: Path) -> None:
     ],
 )
 def test_repository_level_inputs_run_only_the_tree_scan_tests(tmp_path: Path, path: str) -> None:
-    """The e2e jobs run the whole e2e package for any non-docs diff, so the
-    backend subset needs only the tree-wide gates for these."""
     result = _select(_repo(tmp_path), path)
 
     assert (result.decision, result.tests) == ("SELECTED", (_LINT,))
@@ -233,8 +218,6 @@ def test_repository_level_inputs_run_only_the_tree_scan_tests(tmp_path: Path, pa
 def test_a_hidden_tool_directory_also_runs_the_tests_that_name_it(
     tmp_path: Path, path: str, reader: str
 ) -> None:
-    """Tests read these directories by path, so no import links them; the readers
-    are found by scanning test sources for the directory as a string literal."""
     repo_root = _repo(tmp_path)
     _write(repo_root, ".trunk/trunk.yaml")
 
@@ -275,8 +258,6 @@ def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> N
 
 
 def _manifest_repo(tmp_path: Path) -> Path:
-    """`_repo` plus meizel: a reader of each root manifest, the tests that import them, and a
-    module that only mentions the file in its docstring."""
     repo_root = _repo(tmp_path)
     _write(
         repo_root,
@@ -313,11 +294,10 @@ def test_a_root_meizel_manifest_runs_its_readers_not_the_full_suite(
     result = _select(_manifest_repo(tmp_path), manifest)
 
     assert (result.decision, result.reason) == ("SELECTED", "owner-tests"), result.as_json()
-    assert "meizel/tests/test_roles.py" in result.tests  # meizel's own tests
-    assert _LINT in result.tests  # the pinned tree-scan family
+    assert "meizel/tests/test_roles.py" in result.tests
+    assert _LINT in result.tests
     if manifest == "meizel.policy.toml":
-        assert "scripts/lint/tests/test_reader.py" in result.tests  # a reader of this file
-    # A docstring that mentions the file reads nothing; unrelated tests stay out.
+        assert "scripts/lint/tests/test_reader.py" in result.tests
     assert "base/lm/tests/test_lm.py" not in result.tests
     assert "tests/unit/test_b.py" not in result.tests
 
@@ -332,7 +312,6 @@ def test_nested_and_root_manifests_are_classified_apart(tmp_path: Path) -> None:
 
 
 def test_a_manifest_change_does_not_launder_a_data_file_change(tmp_path: Path) -> None:
-    """`ui/web/openapi.json`-style data keeps the unanchored-read rule even beside a manifest."""
     repo_root = _manifest_repo(tmp_path)
     _write(repo_root, "tests/support/helper.py", "def load(p):\n    return p.read_text()\n")
     _write(repo_root, "tests/unit/test_b.py", "from tests.support import helper\n")
@@ -345,8 +324,6 @@ def test_a_manifest_change_does_not_launder_a_data_file_change(tmp_path: Path) -
 
 
 def test_a_run_without_timings_keeps_the_full_suite(tmp_path: Path) -> None:
-    """The 80% guard compares two sums of timings; with no timing cache both are zero, so a
-    subset would pass it. It must not."""
     repo_root = _repo(tmp_path)
     assert _select(repo_root, "base/lm/engine.py").decision == "SELECTED"
     (repo_root / ".test_durations").unlink()
@@ -378,12 +355,6 @@ def _tracked_paths() -> list[str]:
 
 
 def test_every_tracked_path_has_an_owner() -> None:
-    """The structural guarantee: no tracked path is unmapped on the trunk.
-
-    A new top-level directory or root file must be given a rule in
-    scripts/ci/test_selector.py; the runtime safety net (a full suite for an
-    unmapped path) is then never taken for a path that already exists.
-    """
     checkout = test_selector.load_checkout(_REPO_ROOT)
 
     unmapped = [

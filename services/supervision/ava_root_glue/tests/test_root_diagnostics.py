@@ -1,5 +1,3 @@
-"""Root observations must distinguish evidence, freshness, and recovery authority."""
-
 from __future__ import annotations
 
 import asyncio
@@ -37,11 +35,6 @@ from services.supervision.ava_root_glue.diagnostics import (
 
 
 class _Events:
-    """The structured log calls so far, as their field dictionaries (read from `loguru_records`).
-
-    Only records logged with an `event=` field count: the diagnostics' own signals, not the
-    incidental lines other code logs while a round runs."""
-
     def __init__(self, records: LogRecords) -> None:
         self._records = records
 
@@ -74,7 +67,6 @@ def events(monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords) -> _Even
 
 
 def _entry(snapshot: dict[str, object], key: str) -> dict[str, object]:
-    """One health-surface entry; every entry is a field mapping."""
     value = snapshot[key]
     assert isinstance(value, dict)
     return cast("dict[str, object]", value)
@@ -151,11 +143,6 @@ async def test_slow_diagnostic_cannot_block_peer_or_duplicate_itself(
 
 
 async def test_reporting_never_races_a_settling_worker(caplog: pytest.LogCaptureFixture) -> None:
-    """The 10-14 echo: a worker whose result is complete but whose thread has not
-    retired made the check's next admission answer 'previous observation worker
-    still completing', and the report step logged that as ERROR every time. The
-    reporter now runs inside the sample's own worker pass, so the round reaches
-    no second admission that could race."""
     entered, release_probe = Event(), Event()
     tail_entered, release_tail = Event(), Event()
 
@@ -178,7 +165,6 @@ async def test_reporting_never_races_a_settling_worker(caplog: pytest.LogCapture
         assert observation is not None
 
         def hold_tail(_future: object) -> None:
-            # The worker's result is already complete; only its thread has not retired.
             tail_entered.set()
             release_tail.wait(5)
 
@@ -195,9 +181,6 @@ async def test_reporting_never_races_a_settling_worker(caplog: pytest.LogCapture
 
 
 async def test_a_hanging_report_retains_its_check_worker_without_overlap() -> None:
-    """An alert backend that hangs retains the check's single worker exactly like
-    a hung probe: later rounds observe the retained worker and start no
-    overlapping sample or report."""
     entered, release, done = Event(), Event(), Event()
     probe_calls = 0
     report_calls = 0
@@ -226,14 +209,14 @@ async def test_a_hanging_report_retains_its_check_worker_without_overlap() -> No
         await monitor.run_round()
         assert report_calls == 1
         await asyncio.to_thread(entered.wait, 2)
-        await monitor.run_round()  # the retained worker admits no replacement
+        await monitor.run_round()
         assert probe_calls == 1 and report_calls == 1
         snapshot = monitor.health_snapshot()
         assert _entry(snapshot, "diagnostic:held")["last_verdict"] == "unavailable"
         assert _entry(snapshot, "diagnostic:peer")["last_verdict"] == "alive"
         release.set()
         await asyncio.to_thread(done.wait, 2)
-        await asyncio.sleep(0.05)  # the retained worker retires
+        await asyncio.sleep(0.05)
         await monitor.run_round()
         assert probe_calls == 2 and report_calls == 2
     finally:
@@ -243,8 +226,6 @@ async def test_a_hanging_report_retains_its_check_worker_without_overlap() -> No
 async def test_a_report_exception_keeps_the_fresh_sample(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A report that raises fails the report, not the sample: the fresh verdict
-    is recorded, and the failure is named as the report's own."""
 
     def broken_report(_result: DaemonProbe) -> None:
         raise RuntimeError("alert backend down")
@@ -288,12 +269,12 @@ async def test_unknown_never_resolves_station_alert_but_extends_the_streak(
     current = DaemonProbe.unavailable("no host baseline")
     await asyncio.sleep(0.002)
     await monitor.run_round()
-    assert len(reported) == 1  # unknown did not fire or recover the external alert
+    assert len(reported) == 1
     state = _entry(monitor.health_snapshot(), "diagnostic:canary")
-    assert state["consecutive_failures"] == 2  # the unknown extended the failure streak
+    assert state["consecutive_failures"] == 2
     assert state["last_verdict"] == "unavailable"
     await asyncio.sleep(0.002)
-    await monitor.run_round()  # a repeated unknown reports again: the condition still holds
+    await monitor.run_round()
     assert [record["consecutive_failures"] for record in events] == [1, 2, 3]
 
 
@@ -310,7 +291,7 @@ async def test_every_failing_sample_reports_and_recovery_reports_once(
     current = DaemonProbe.up("healthy again")
     await monitor.run_round()
     await asyncio.sleep(0.002)
-    await monitor.run_round()  # a healthy sample after a healthy one is silent
+    await monitor.run_round()
     assert [record["consecutive_failures"] for record in events] == [1, 2, 0]
     assert events[-1]["verdict"] == "alive"
     current = DaemonProbe.unavailable("host stalled")
@@ -320,8 +301,6 @@ async def test_every_failing_sample_reports_and_recovery_reports_once(
 
 
 class _NoRevival:
-    """The supervisor slice a round-level fake never reaches."""
-
     async def restart(self, unit_id: str) -> dict[str, object]:
         raise AssertionError(f"unexpected restart of {unit_id}")
 
@@ -336,8 +315,6 @@ class _NoRevival:
 
 
 class _Health(HealthMonitor):
-    """A service health round the test releases (or fails) explicitly."""
-
     def __init__(self) -> None:
         super().__init__(_NoRevival(), ProbeRegistry())
         self.release = asyncio.Event()
@@ -550,7 +527,7 @@ def test_every_root_watches_its_maintenance_hold_with_the_configured_age(
     assert check.report is not None
     pause_owner.begin_maintenance("ava-restart-3", datetime(2026, 10, 12, tzinfo=UTC))
     result = check.probe()
-    assert not result.alive  # the hold is far older than the 60-second configured age
+    assert not result.alive
     check.report(result)
     assert [
         event["holder"] for event in events if event.get("event") == "maintenance_hold_overdue"
@@ -578,7 +555,7 @@ def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(
 
     monkeypatch.setattr(proc, "run_bounded", missing)
     with pytest.raises(FileNotFoundError):
-        probes.brew_pins()  # ProbeRunner maps inspection failure to UNAVAILABLE.
+        probes.brew_pins()
 
 
 def test_redis_acl_uses_runtime_ping_without_native_custody(

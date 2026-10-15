@@ -1,5 +1,3 @@
-"""Gateway process-entry invariants."""
-
 from __future__ import annotations
 
 import logging
@@ -18,14 +16,12 @@ from gateway.cluster import server as _server
 
 
 def _app() -> Any:
-    """The ASGI app `serve` is handed; these tests stub `serve`, so only its `state` is touched."""
     return SimpleNamespace(state=SimpleNamespace())
 
 
 def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Gateway rate-limit state has one authority, so startup fixes uvicorn at one worker."""
     captured: dict[str, object] = {}
 
     def _ignore(*_args: object, **_kwargs: object) -> None:
@@ -51,14 +47,6 @@ def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(
 
 
 def test_gateway_launch_bounds_the_connection_drain(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The launch assembly must hand uvicorn a finite graceful-shutdown budget.
-
-    The 2026-09-17 gateway stall: uvicorn's connection-drain phase has no
-    default timeout, so an unfinished streaming response held it forever. The
-    real child-process regression lives in
-    gateway/tests/bootstrap/test_server_shutdown.py; this pins the value the assembly
-    resolves for uvicorn.
-    """
     monkeypatch.setattr(settings.gateway, "gateway_graceful_shutdown_timeout_seconds", 7.5)
     kwargs = _server.serve_kwargs(
         host="127.0.0.1",
@@ -73,9 +61,6 @@ def test_gateway_launch_bounds_the_connection_drain(monkeypatch: pytest.MonkeyPa
 def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, serves_gateway: bool, raised: int
 ) -> None:
-    """A gateway start raises the cluster's minimum code version, once the schema
-    is asserted (the column exists) and logging is up (a refusal is recorded); a
-    runner's local gateway holds no write on `deployment_state` and never does."""
     steps: list[str] = []
 
     def _ignore(*_args: object, **_kwargs: object) -> None:
@@ -118,7 +103,6 @@ def _stub_process_entry(
     reload: bool = False,
     captured: list[dict[str, object]] | None = None,
 ) -> list[str]:
-    """Stub everything `main()` does besides choosing its secret check and bind host."""
     steps: list[str] = []
 
     def _ignore(*_args: object, **_kwargs: object) -> None:
@@ -153,8 +137,6 @@ def _stub_process_entry(
 def test_a_gateway_without_a_cluster_secret_refuses_to_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The API always authenticates: no secret, no gateway. The refusal comes first,
-    before the database is touched or a pidfile written."""
     steps = _stub_process_entry(monkeypatch, tmp_path, gateway=True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
 
@@ -168,9 +150,9 @@ def test_a_gateway_without_a_cluster_secret_refuses_to_start(
 @pytest.mark.parametrize(
     ("reachable", "gateway", "bind"),
     [
-        ("localhost", True, "127.0.0.1"),  # the single-box default: loopback, secret or not
-        ("10.0.0.5", True, ""),  # a declared private-network address: all interfaces
-        ("10.0.0.5", False, "127.0.0.1"),  # a runner's local gateway never faces the LAN
+        ("localhost", True, "127.0.0.1"),
+        ("10.0.0.5", True, ""),
+        ("10.0.0.5", False, "127.0.0.1"),
     ],
 )
 def test_gateway_bind_follows_the_declared_reachable_address_not_the_secret(
@@ -180,8 +162,6 @@ def test_gateway_bind_follows_the_declared_reachable_address_not_the_secret(
     gateway: bool,
     bind: str,
 ) -> None:
-    """The secret is always set; reach is `AVA_MACHINE_HOST`'s. A secret-bearing gateway
-    with a non-loopback address binds exactly as it always has (all interfaces)."""
     steps = _stub_process_entry(monkeypatch, tmp_path, gateway=gateway)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
     monkeypatch.setattr(settings.general, "machine_host", reachable)

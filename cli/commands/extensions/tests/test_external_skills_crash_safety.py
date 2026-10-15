@@ -1,5 +1,3 @@
-"""Atomic skill publication: unsafe paths refuse before writes; crashes recover."""
-
 from __future__ import annotations
 
 import json
@@ -89,7 +87,6 @@ def _residues(client: Path) -> list[Path]:
 
 
 def _remove_by_hand(client: Path, context: ConvergeCtx) -> None:
-    """What the warning tells a person to do: drop the Ava residue and the ledger."""
     for residue in _residues(client):
         shutil.rmtree(residue)
     ledger_root = context.ava_home / "configs" / "external-agent-skills"
@@ -137,13 +134,11 @@ def test_interrupted_stage_publication_is_reported_and_never_resumed(
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
-    # Nothing is finished, rolled back or retried: the skill is reported and skipped.
     assert "not resumed" in capsys.readouterr().err
     assert not target.exists()
     assert _ledger(context) == ledger_before
     assert sorted(_residues(client)) == residues_before
 
-    # The exit is a person's: with the residue and ledger removed, converge installs afresh.
     _remove_by_hand(client, context)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 

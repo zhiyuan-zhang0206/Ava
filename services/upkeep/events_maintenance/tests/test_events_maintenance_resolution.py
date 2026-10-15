@@ -1,5 +1,3 @@
-"""Regression coverage for immutable event-class resolution (task #1468)."""
-
 from __future__ import annotations
 
 import uuid
@@ -18,8 +16,6 @@ from services.upkeep.events_maintenance.tests.slices import events_maintenance_c
 
 
 class Pool:
-    """Minimal pool seam over the per-test real Postgres connection."""
-
     class _BorrowedConnection:
         def __init__(self, conn: psycopg.Connection[Any]) -> None:
             self._conn = conn
@@ -80,7 +76,6 @@ def _clear_dismissals(db_conn: psycopg.Connection[Any]) -> None:
 def _fake_counts(
     *, unresolved: dict[resolution.EventClass, int], burst: dict[resolution.EventClass, int]
 ) -> Any:
-    """A `class_counts` stand-in that answers the six-hour and the ten-minute window."""
 
     def class_counts(
         _conn: object, *, start: datetime, end: datetime, cluster: str | None = None
@@ -92,12 +87,10 @@ def _fake_counts(
 
 
 def _fresh(conn: psycopg.Connection[Any]) -> None:
-    """One recent row, so the record reads as current."""
     record_maintenance_event(conn, level="info", event_name="heartbeat", minutes_ago=0.1)
 
 
 def _triples(events: EmittedEvents) -> list[tuple[str, str, dict[str, Any]]]:
-    """(category, event_name, attributes) of every event emitted so far."""
     return [(event.category, event.event_name, event.attributes) for event in events]
 
 
@@ -140,10 +133,8 @@ def test_class_counts_group_the_warning_error_and_critical_rows_of_the_window(
     record_maintenance_event(db_conn, level="warning", event_name="a")
     record_maintenance_event(db_conn, level="warning", event_name="a")
     record_maintenance_event(db_conn, level="critical", event_name="b", process="q", category="log")
-    record_maintenance_event(db_conn, level="info", event_name="a")  # not a problem level
-    record_maintenance_event(
-        db_conn, level="error", event_name="old", minutes_ago=400
-    )  # outside the window
+    record_maintenance_event(db_conn, level="info", event_name="a")
+    record_maintenance_event(db_conn, level="error", event_name="old", minutes_ago=400)
 
     start, end = _window(360)
     counts = resolution.class_counts(db_conn, start=start, end=end)
@@ -162,14 +153,12 @@ def test_alert_classes_tally_one_class_per_identity_with_first_and_last_seen(
     record_maintenance_event(db_conn, event_name="a", minutes_ago=5)
     record_maintenance_event(db_conn, event_name="a", process="q", minutes_ago=3)
     record_maintenance_event(db_conn, level="critical", event_name="b", minutes_ago=2)
-    record_maintenance_event(db_conn, level="info", event_name="a")  # not a problem level
-    record_maintenance_event(db_conn, event_name="old", minutes_ago=400)  # outside the window
+    record_maintenance_event(db_conn, level="info", event_name="a")
+    record_maintenance_event(db_conn, event_name="old", minutes_ago=400)
 
     start, end = _window(360)
     classes = resolution.alert_classes(db_conn, start=start, end=end)
 
-    # The emission category is not part of the identity: the log and telemetry rows of "a" are
-    # one class, tallied together, carrying the greater category for a dismissal made from it.
     assert [(c.level, c.event_name, c.process, c.category, c.count) for c in classes] == [
         ("warning", "a", "p", "telemetry", 3),
         ("warning", "a", "q", "telemetry", 1),
@@ -208,9 +197,7 @@ def test_matching_dismissal_prefers_the_exact_process_row_over_the_wildcard() ->
 
     assert resolution.matching_dismissal(event_class(process="agent-host"), active) is exact
     assert resolution.matching_dismissal(event_class(process="gateway"), active) is wildcard
-    # A counted class with no process matches only the wildcard, never an exact row.
     assert resolution.matching_dismissal(event_class(process=""), [exact]) is None
-    # The emission category never takes part in the match.
     assert (
         resolution.matching_dismissal(event_class(category="log", process="gateway"), active)
         is wildcard
@@ -316,7 +303,6 @@ def test_a_stale_record_or_a_failed_read_never_emits_a_gauge(
 ) -> None:
     pool = cast(ConnectionPool, Pool(db_conn))
 
-    # The newest recorded event is an hour old: an empty window may only mean a stalled writer.
     later = datetime.now(UTC) + timedelta(hours=1)
     result = resolution.run_resolution_slice(
         pool,
@@ -358,7 +344,7 @@ def test_auto_dismiss_picks_the_classes_present_in_every_six_hour_slice(
     process_config: ConfigBoot,
     db_conn: psycopg.Connection[Any],
 ) -> None:
-    for slot in range(4):  # one day of six-hour slices
+    for slot in range(4):
         record_maintenance_event(db_conn, event_name="steady", minutes_ago=slot * 360 + 30)
         if slot != 2:
             record_maintenance_event(db_conn, event_name="gappy", minutes_ago=slot * 360 + 30)
@@ -404,8 +390,6 @@ def test_auto_dismiss_is_off_by_default(
 
 
 def test_level_splits_three_way_arithmetic() -> None:
-    """The shared window-agnostic split: total / dismissed / net per level,
-    with critical folding into error (task #1935)."""
     dismissed_warning = event_class(event_name="dismissed-warning")
     remaining_warning = event_class(event_name="remaining-warning")
     dismissed_error = event_class(level="error", event_name="dismissed-error")
@@ -429,8 +413,6 @@ def test_level_splits_three_way_arithmetic() -> None:
 
 
 def test_level_splits_empty_and_unknown_levels() -> None:
-    """No counts -> no levels; a level outside warning/error still buckets
-    by the same rule (anything non-warning is the error family)."""
     assert resolution.level_splits({}, set()) == {}
     odd = event_class(level="critical", event_name="c")
     splits = resolution.level_splits({odd: 5}, set())
@@ -443,8 +425,6 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
     monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
-    """resolution_status carries the dismissed counts so Grafana can render
-    the total / resolved / net trio (task #1935)."""
     dismissed = event_class(event_name="dismissed")
     _insert_dismissal(db_conn, dismissed)
     counts = {dismissed: 4, event_class(event_name="kept"): 1}
@@ -472,13 +452,10 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
 
 
 def test_process_scopes_dismissal_matching() -> None:
-    """Exact rows cancel one process; wildcard rows cancel every process; a
-    mixed-version counted class (no process in its body) matches only the
-    wildcard (task #4329 B5)."""
 
     agent_host = event_class(process="agent_host")
     im_bridge = event_class(process="im_bridge")
-    legacy = event_class()  # pre-dimension body: no process -> ""
+    legacy = event_class()
     counts = {agent_host: 3, im_bridge: 3, legacy: 1}
 
     exact = resolution.level_splits(counts, {agent_host})
@@ -494,8 +471,6 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
     monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
-    """Its own process's burst reopens an exact dismissal; a different
-    process's burst of the same base must not (task #4329 B5)."""
 
     host_class = event_class(process="agent_host")
     bridge_class = event_class(process="im_bridge")
@@ -529,10 +504,8 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
     monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
-    """A wildcard (process="") dismissal — every pre-dimension row's scope —
-    watches the summed ten-minute count across processes."""
 
-    _insert_dismissal(db_conn, event_class())  # process="" wildcard
+    _insert_dismissal(db_conn, event_class())
     counts = {event_class(process="agent_host"): 4, event_class(process="im_bridge"): 2}
 
     monkeypatch.setattr(resolution, "class_counts", _fake_counts(unresolved=counts, burst=counts))
@@ -543,7 +516,6 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
         cadence=resolution.AutoDismissCadence(),
     )
 
-    # 4 + 2 = 6 > 5: the base-wide burst trips the wildcard row's safety valve.
     assert result == resolution.ResolutionResult(6, 0, reopened=1, auto_dismissed=0)
     emitted = _triples(emitted_events)
     assert emitted[0][2]["process"] == ""
@@ -551,9 +523,6 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
 
 
 def test_dismissal_matching_ignores_the_emission_category() -> None:
-    """A row stored from an event's log-era life cancels the same class under
-    its telemetry life, and vice versa (the 2026-08 log->telemetry
-    reclassification left whole rows inert before this; task #4964)."""
 
     telemetry = event_class(category="telemetry", event_name="sse_drop")
     log_row = event_class(category="log", event_name="sse_drop")
@@ -566,8 +535,6 @@ def test_dismissal_matching_ignores_the_emission_category() -> None:
 
 
 def test_category_agnostic_matching_keeps_the_process_rules() -> None:
-    """Dropping category does not loosen the process scope: an exact row
-    cancels only its process; a wildcard row cancels every process."""
 
     exact = event_class(category="log", process="agent_host")
     same_process = event_class(category="telemetry", process="agent_host")
@@ -587,8 +554,6 @@ def test_burst_valve_watches_the_base_across_the_category_split(
     monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
-    """A wildcard row stored from log-era life reopens on the telemetry burst
-    of its base (task #4964)."""
 
     _insert_dismissal(db_conn, event_class(category="log", event_name="sse_drop"))
     counts = {event_class(category="telemetry", event_name="sse_drop"): 6}
@@ -613,8 +578,6 @@ def test_exact_burst_valve_watches_its_process_across_the_category_split(
     monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
-    """An exact row stored from log-era life reopens on its own process's
-    telemetry burst — and not on another process's (task #4964)."""
 
     _insert_dismissal(db_conn, event_class(category="log", process="agent_host"))
     _insert_dismissal(db_conn, event_class(category="log", process="im_bridge"))

@@ -1,11 +1,3 @@
-"""base.native_process.root_control.ipc + server/client: the K1 wire protocol.
-
-One JSON object per line, validated fail-fast on both ends: a malformed
-request or a response that drifts from the agreed shape is rejected at the
-boundary. The client/server pair is exercised over a real unix socket,
-including concurrent callers.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -207,10 +199,6 @@ class TestServerClientRoundtrip:
     async def test_a_failing_handler_answers_and_the_server_survives(
         self, short_tmp: Path, refusal: BaseException
     ) -> None:
-        """A refused restart — one stop refusal or a sibling ExceptionGroup — must
-        reach the operator as an error line and never take the server down with
-        the handler. The 10-14 refusal that killed root escaped through the
-        health path; this pins the transport guard beside it."""
         sock_path = short_tmp / "root.sock"
 
         async def refusing_handler(request: RequestPayload) -> ResponsePayload:
@@ -236,7 +224,6 @@ class TestServerClientRoundtrip:
             client.status()
 
     async def test_oversized_message_is_dropped(self, short_tmp: Path) -> None:
-        """A line over the cap breaks the stream boundary; the server hangs up."""
         sock_path = short_tmp / "root.sock"
         server = ControlServer(sock_path, _echo_handler)
         await server.start()
@@ -246,7 +233,7 @@ class TestServerClientRoundtrip:
                 writer.write(b'{"verb": "status", "pad": "' + b"x" * 70_000 + b'"}\n')
                 await writer.drain()
                 raw = await reader.read()
-            assert raw == b""  # connection dropped without a response
+            assert raw == b""
             writer.close()
         finally:
             await server.close()
@@ -254,7 +241,6 @@ class TestServerClientRoundtrip:
 
 @pytest.mark.parametrize("field", ["pid", "create_time", "starttime"])
 async def test_status_authenticates_exact_kernel_peer(short_tmp: Path, field: str) -> None:
-    """A socket answering the expected protocol cannot substitute another birth."""
 
     async def forged(_request: RequestPayload) -> ResponsePayload:
         row = _root_row()
@@ -281,7 +267,6 @@ async def test_status_authenticates_exact_kernel_peer(short_tmp: Path, field: st
 async def test_serving_reads_bound_runtime_from_native_peer(
     short_tmp: Path, monkeypatch: pytest.MonkeyPatch, bad: str | None
 ) -> None:
-    """Real local transport plus strict local receipt; no application launch."""
     from base.deploy.lifecycle import start_serving
     from base.host.runtime_interpreter import LoadedRuntimeIdentity
 
@@ -380,8 +365,6 @@ def test_ipc_native_birth_rules_preserve_platform_authority(
     from base.native_process import ownership
     from base.native_process.root_control import client
 
-    # Both halves of the rule read the platform: the client's tick requirement
-    # and the identity comparison itself.
     monkeypatch.setattr(client, "sys", SimpleNamespace(platform=platform))
     monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform=platform))
 
@@ -409,8 +392,6 @@ def test_ipc_native_birth_rules_preserve_platform_authority(
 
 
 class _DeadWriter:
-    """A StreamWriter stand-in whose peer is gone: every drain raises."""
-
     def __init__(self, exc: ConnectionError) -> None:
         self._exc = exc
         self.closed = False
@@ -429,8 +410,6 @@ class _DeadWriter:
 
 
 class TestConnectionChurn:
-    """A client disconnecting early is churn, not an unhandled asyncio error."""
-
     async def test_reset_while_reading_returns_quietly(
         self, short_tmp: Path, caplog: pytest.LogCaptureFixture
     ) -> None:

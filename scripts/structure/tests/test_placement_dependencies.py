@@ -1,7 +1,3 @@
-"""The placement rule's dependency step: a home is the deepest package that holds or directly
-depends on every module the file references (within the home unit, below the nearest common
-ancestor of those modules), and the per-file import cache that feeds it."""
-
 from __future__ import annotations
 
 import ast
@@ -26,7 +22,6 @@ _versions = itertools.count(1)
 
 
 def _edit(root: pathlib.Path, rel: str, text: str) -> None:
-    """Write a production file whose (mtime_ns, size) differs from every earlier version."""
     path = write(root, rel, text)
     stamp = 1_800_000_000_000_000_000 + next(_versions) * 1_000_000
     os.utime(path, ns=(stamp, stamp))
@@ -43,14 +38,11 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
     )
 
 
-# ------------------------------------------------------------------ the import cache
-
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TOPS = placement.CODE_TOPS
 
 
 def _edges(cache_root: pathlib.Path) -> dict[str, set[str]]:
-    """Per production file, the modules its resolved imports name (through the shared cache)."""
     index = placement.ModuleIndex(cache_root)
     return {
         rel: {
@@ -93,7 +85,6 @@ def test_it_keeps_the_absolute_first_party_import_statements(cache_root: pathlib
         "from cli.commands import _util",
         "from base.net import retry",
     ]
-    # relative imports are made absolute; `__init__.py` is its own package
     assert set(found["cli/commands/sub/__init__.py"].splitlines()) == {
         "from cli.commands.sub import worker",
         "from cli.commands import run",
@@ -116,7 +107,6 @@ def test_a_damaged_or_foreign_cache_is_rebuilt(cache_root: pathlib.Path, damage:
 
 
 def test_previous_relative_import_semantics_cache_is_rebuilt(cache_root: pathlib.Path) -> None:
-    """Version 2 predates fail-fast normalization of relative imports."""
     rel = "cli/commands/run.py"
     _edit(cache_root, rel, "from ..parsers import args\n")
     _statements(cache_root)
@@ -130,9 +120,6 @@ def test_previous_relative_import_semantics_cache_is_rebuilt(cache_root: pathlib
 
 
 def test_a_cache_hit_still_resolves_against_the_current_tree(cache_root: pathlib.Path) -> None:
-    """`from cli.commands import helper` names the attribute `helper` of `cli.commands` until a
-    module `helper.py` appears next to it. The importing file did not change, so its cached
-    statement is the same; the edge must still follow the tree."""
     _edit(cache_root, "cli/commands/run.py", "from cli.commands import helper\n")
     before = _edges(cache_root)["cli/commands/run.py"]
     assert before == {"cli.commands"}
@@ -147,7 +134,6 @@ def test_a_cache_hit_still_resolves_against_the_current_tree(cache_root: pathlib
 def test_a_cached_graph_is_the_graph_of_a_fresh_read_file_by_file(
     cache_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The real checkout: every file's cached statements equal a fresh parse of the file."""
     monkeypatch.setattr(cache, "CACHE_PATH", str(cache_root / "real-tree-cache.json"))
     cold = cache.production_imports(
         REPO_ROOT, TOPS, read_source=lambda path: path.read_text(encoding="utf-8")

@@ -1,11 +1,3 @@
-"""Mac-specific startup prerequisites for the shared headed browser.
-
-The browser must wait in its supervised session until the logged-in GUI user
-and that user's login Keychain can serve Chrome's encryption material. These
-tests hold the checks to bounded, side-effect-free probes: the wait records no
-state, and the healthcheck names a wait from a direct probe.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,11 +15,6 @@ def _macos_probes(
     managername: str = "Aqua",
     managername_code: int = 0,
 ) -> list[list[str]]:
-    """Make the current uid the active console user and record bounded probes.
-
-    The default `managername="Aqua"` is the GUI login session (the ready case);
-    a "Background" answer is the agent/SSH chain that must be refused.
-    """
     calls: list[list[str]] = []
     monkeypatch.setattr(readiness, "is_macos", lambda: True)
     monkeypatch.setattr(readiness.os, "getuid", lambda: 501)
@@ -101,11 +88,6 @@ def test_macos_refuses_start_when_login_keychain_is_not_ready(
 def test_macos_refuses_start_outside_the_gui_login_session(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A daemon respawned from an agent/SSH chain inherits launchd's
-    "Background" domain, where securityd denies every login-Keychain query no
-    matter how ready the Keychain is. That is not a wait — it is the one case
-    a GUI-domain relaunch must fix, so the readiness names it and the Keychain
-    probe (which can only blame the Keychain) never runs."""
     calls = _macos_probes(monkeypatch, tmp_path, managername="Background")
     result = readiness.probe_startup_readiness()
     assert result.ready is False
@@ -116,8 +98,6 @@ def test_macos_refuses_start_outside_the_gui_login_session(
 def test_macos_domain_probe_failure_falls_through_to_keychain(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An empty or failed `launchctl managername` answer is not evidence about
-    the context; the probe falls through to the Keychain check."""
     calls = _macos_probes(monkeypatch, tmp_path, managername="", managername_code=1)
     assert readiness.probe_startup_readiness().ready is True
     assert any(call[0] == "/usr/bin/security" for call in calls)
@@ -126,7 +106,6 @@ def test_macos_domain_probe_failure_falls_through_to_keychain(
 def test_wait_loop_returns_when_ready_and_records_no_state(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The wait is only a loop on the read-only probe: it leaves nothing in the run dir."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     states = iter(
         [

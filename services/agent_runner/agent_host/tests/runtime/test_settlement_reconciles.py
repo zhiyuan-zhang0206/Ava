@@ -1,5 +1,3 @@
-"""A settlement disposes the inbounds its turn claimed: when each reconcile pass dispatches."""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,16 +37,6 @@ class _Drive(Protocol):
 
 
 class TestSettlementReconciles:
-    """A settlement disposes the inbounds its turn claimed.
-
-    The settled abort disposes them (task #3615); a finished non-crashed
-    turn runs the same pass at its own settlement too (#3999). This locks
-    WHEN each pass dispatches — after the settle, and never for a crash.
-    Their own gates live in `test_agent_host_abort_reconcile.py` /
-    `test_agent_host_turn_reconcile.py`; the row-visible split in
-    `services/agent_runner/agent_host/recovery/tests/test_reconcile_after_abort.py`.
-    """
-
     async def _run_ending(
         self,
         wired: Build,
@@ -106,9 +94,6 @@ class TestSettlementReconciles:
     async def test_unclassified_crash_leaves_the_reconcile_to_the_next_admission(
         self, wired: Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Only the fatal-abort settlement proves the checkpoint settled; an
-        unclassified crash drops the runtime instead, and the next admission
-        (or boot) reconciles."""
 
         async def drive(
             _agent: int,
@@ -129,11 +114,6 @@ class TestSettlementReconciles:
     async def test_finished_turn_reconciles_after_the_settle(
         self, wired: Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The finished turn's flushed checkpoint settles its claimed rows
-        (#3999): the pass runs right after the settle, never for a crash.
-        A cancelled turn carries the same outcome shape without the flush —
-        its unconfirmable claims re-deliver at-least-once (see the pass's
-        docstring)."""
 
         async def drive(
             _agent: int,

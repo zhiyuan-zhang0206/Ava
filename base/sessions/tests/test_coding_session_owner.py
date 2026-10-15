@@ -1,5 +1,3 @@
-"""Generation and cleanup contracts for per-launch coding-session ownership."""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -108,7 +106,6 @@ def _generation(record: owner.CodingSessionOwner) -> str:
 
 
 def _live(record: owner.CodingSessionOwner) -> set[str]:
-    """The live PTY names of a published generation (its supervisor included)."""
     names = {record.session_name, record.supervisor_session_name}
     return {name for name in names if name is not None}
 
@@ -230,7 +227,6 @@ def test_dead_takeover_generation_is_reclaimed_before_the_next_launch(tmp_path: 
 
 
 def test_a_supervised_generation_without_its_supervisor_is_reclaimed(tmp_path: Path) -> None:
-    """An unsupervised worker would never be closed on DONE, so the next launch closes it."""
     key = _key(tmp_path)
     active = _publish(_launch(key, agent_id=41), 3)
     assert active.session_name is not None
@@ -501,7 +497,6 @@ def test_codex_app_server_socket_is_short_and_generation_scoped(tmp_path: Path) 
 
 
 def test_a_long_cluster_home_still_gets_a_socket_under_the_kernel_limit(tmp_path: Path) -> None:
-    """A home under a long directory path pushed <home>/run past sun_path."""
     long_home = tmp_path / ("a-directory-with-a-long-name-" * 4) / "home"
     long_home.mkdir(parents=True)
     workspace = long_home / "workspaces" / "2"

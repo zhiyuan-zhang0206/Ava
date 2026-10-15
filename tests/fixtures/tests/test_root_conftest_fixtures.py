@@ -1,10 +1,3 @@
-"""The root conftest re-exports only plain fixtures of the plugins it names.
-
-The conftest module registers before every plugin, so an autouse fixture imported
-into it would set up ahead of `leak_guard` and be torn down after the guard compares,
-and a name that is not a fixture of its plugin would be dead weight in the export.
-"""
-
 import ast
 from pathlib import Path
 from types import ModuleType
@@ -22,7 +15,6 @@ PLUGINS: dict[str, ModuleType] = {
 
 
 def _module_level(tree: ast.Module) -> tuple[list[tuple[str, str]], list[str]]:
-    """The (plugin, name) pairs imported from the plugins and the names in `__all__`."""
     imported: list[tuple[str, str]] = []
     exported: list[str] = []
     for node in tree.body:

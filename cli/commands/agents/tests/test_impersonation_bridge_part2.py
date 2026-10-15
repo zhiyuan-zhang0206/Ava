@@ -1,10 +1,3 @@
-"""Push delivery with an ACK window: the relay delivers full inbox content
-and retries an unacknowledged message once before pausing its automatic push.
-
-The relay never ACKs work itself and never renews the lease; a failed or
-restarted relay cannot lose a pending message.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -137,8 +130,6 @@ class Listener:
 
 
 class FakeClock:
-    """Monotonic test clock patched onto relay.loop_time and relay.asyncio.sleep."""
-
     def __init__(self) -> None:
         self.t = 0.0
 
@@ -188,30 +179,6 @@ def run(
     )
 
 
-# ── Start message and activation pushes ───────────────────────────────────────
-
-
-# ── Merge window and urgency ───────────────────────────────────────────────────
-
-
-# ── ACK window and re-delivery ─────────────────────────────────────────────────
-
-
-# ── Failure, expiry and lifecycle ──────────────────────────────────────────────
-
-
-# ── Emit rate and envelope bounds ──────────────────────────────────────────────
-
-
-# ── Host emitters ──────────────────────────────────────────────────────────────
-
-
-# ── Snapshot bridging ──────────────────────────────────────────────────────────
-
-
-# ── Command plumbing ───────────────────────────────────────────────────────────
-
-
 def test_two_missed_ack_windows_pause_message_until_explicit_end(clock: FakeClock) -> None:
     inbox = Inbox(11)
     emitted: list[str] = []
@@ -222,7 +189,7 @@ def test_two_missed_ack_windows_pause_message_until_explicit_end(clock: FakeCloc
             clock.advance(inbox.ack_window_seconds + 1)
         else:
             observed.append(inbox.status)
-            inbox.active = False  # Explicit end bounds the paused relay loop.
+            inbox.active = False
 
     listener = Listener(inbox, waited=waited)
     run(inbox, listener, emitted.append)
@@ -231,7 +198,7 @@ def test_two_missed_ack_windows_pause_message_until_explicit_end(clock: FakeCloc
     assert observed == [ImpersonationStatus.ACTIVE]
     assert inbox.status == ImpersonationStatus.RELEASED
     assert inbox.pending == {11}
-    assert len(emitted) == 3  # One start message and exactly two receipt envelopes.
+    assert len(emitted) == 3
     assert listener.closed
 
 
@@ -253,7 +220,6 @@ def test_stdio_notice_uses_immutable_historical_snapshot() -> None:
         terminal_notice_snapshot=terminal,
     )
     emitted: list[str] = []
-    # A delayed old snapshot must not borrow the caller's replacement lease scope.
     assert relay.ended(snapshot, 999, 1, emitted.append)
     assert f"lease 0 ({LEASE_ID}) for agent 42" in emitted[0]
     assert ended_at in emitted[0]
@@ -263,7 +229,7 @@ def test_stdio_notice_uses_immutable_historical_snapshot() -> None:
     assert relay.ended(
         replace(snapshot, status=ImpersonationStatus.RELEASED), 42, 0, emitted.append
     )
-    assert len(emitted) == 1  # A released lease sends no notice: the releaser knows.
+    assert len(emitted) == 1
 
 
 async def test_codex_relay_never_duplicates_the_host_terminal_notice() -> None:

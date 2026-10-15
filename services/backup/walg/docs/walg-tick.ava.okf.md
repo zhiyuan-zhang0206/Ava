@@ -73,3 +73,9 @@ replaced. `test_backups.py` parses that capture.
 were still uploading: overall WARNING with exit status zero. The FAILURE cases
 in `test_verify.py` derive from this capture by changing statuses. These are
 recorded fixture origins, not a new live WAL-G verification run.
+
+`tests/fixtures/retention-dry-run.log` originated from v3.0.9's FULL 2 dry run
+against that backup list. Its WAL lines were reduced from 543 to a sample and
+the count recomputed; other lines were retained. `test_retention.py` adds a
+newer full backup when exercising Ava's FULL 3 retention threshold. The edited
+fixture is not a complete live FULL 3 deletion transcript.

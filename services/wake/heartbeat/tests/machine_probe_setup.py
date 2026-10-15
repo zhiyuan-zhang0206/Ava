@@ -1,5 +1,3 @@
-"""Machine rows, probe responses and pool lifetime for heartbeat liveness tests."""
-
 from __future__ import annotations
 
 import psycopg
@@ -22,7 +20,6 @@ def pool(db_url: str):
 
 
 def register_machine(db: psycopg.Connection, name: str = MACHINE) -> None:
-    """Register an agent-runner machine row (probe target)."""
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO machines (name, gateway_url, role) VALUES (%s, %s, %s) "
@@ -33,8 +30,6 @@ def register_machine(db: psycopg.Connection, name: str = MACHINE) -> None:
 
 
 class FakeProbe:
-    """Injectable probe: returns per-machine reachability."""
-
     def __init__(self, reachable: dict[str, bool]) -> None:
         self.reachable = reachable
         self.calls: list[str] = []

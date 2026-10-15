@@ -1,5 +1,3 @@
-"""Real service lifespan for tests that invoke a hosted turn's private boundary."""
-
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -12,7 +10,6 @@ from base.native_process.turn_identity import HostedServiceResources, HostedTurn
 async def hosted_scope(
     *, expected_error: type[BaseException] | None = None
 ) -> AsyncGenerator[HostedTurnResources, None]:
-    """Join actual retained tasks and verify the one explicitly expected original error."""
     service = HostedServiceResources()
     scope = await service.turn()
     primary: BaseException | None = None

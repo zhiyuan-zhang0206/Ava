@@ -1,5 +1,3 @@
-"""Llm factory cases: validate model config."""
-
 from __future__ import annotations
 
 import pytest
@@ -16,15 +14,6 @@ from base.packages.tests.model_catalog import AddModels
 
 
 class TestValidateModelConfig:
-    """Spawn-time validation tests for validate_model_config.
-
-    Does not run build_chat_model — only verifies config validity checks on the
-    spawn path, including whether the model name is registered and whether the API key
-    is configured.
-    """
-
-    # --- helper -----------------------------------------------------------------
-
     @staticmethod
     def _clear_all_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         for attr in (
@@ -66,12 +55,9 @@ class TestValidateModelConfig:
             },
         )
 
-    # --- model resolution -------------------------------------------------------
-
     def test_model_from_config_wins_over_default(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """config.llm_model takes precedence over the cluster default."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
@@ -85,7 +71,6 @@ class TestValidateModelConfig:
     def test_fallback_to_cluster_default_when_config_omits_model(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When config doesn't have llm_model, use the cluster default."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
@@ -99,7 +84,6 @@ class TestValidateModelConfig:
     def test_fallback_to_cluster_default_when_config_is_none(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When config=None, use the cluster default."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
@@ -108,28 +92,22 @@ class TestValidateModelConfig:
         assert result == "deepseek-flash"
 
     def test_no_model_configured_raises(self, model_catalog: ModelCatalog) -> None:
-        """Neither cluster default nor config has a model → ValueError."""
         with pytest.raises(ValueError, match="no model configured"):
             validate_model_config(model=None, config=None, catalog=model_catalog, llm_override="")
 
     def test_no_model_configured_empty_config(self, model_catalog: ModelCatalog) -> None:
-        """Empty config and model=None → ValueError."""
         with pytest.raises(ValueError, match="no model configured"):
             validate_model_config(model=None, config={}, catalog=model_catalog, llm_override="")
-
-    # --- model name validation --------------------------------------------------
 
     def test_unknown_model_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """model name not in model_catalog.supported_models → ValueError."""
         with pytest.raises(ValueError, match="unknown model 'not-a-real-model'"):
             validate_model_config(model="not-a-real-model", catalog=model_catalog, llm_override="")
 
     def test_known_model_succeeds(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Registered model → returns model name."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
@@ -140,11 +118,9 @@ class TestValidateModelConfig:
     def test_all_supported_models_pass_name_check(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Every model in model_catalog.supported_models passes the name check."""
         self._set_plugin_keys(monkeypatch)
         all_models = [m for models in model_catalog.supported_models.values() for m in models]
         for m in all_models:
-            # Only testing name existence, not key (key validation is separate)
             self._set_plugin_keys(monkeypatch)
             result = validate_model_config(model=m, catalog=model_catalog, llm_override="")
             assert result == m
@@ -152,9 +128,6 @@ class TestValidateModelConfig:
     def test_superseded_model_stays_spawn_valid(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch, add_models: AddModels
     ) -> None:
-        """Supersession is display-only: a registry model carrying
-        ``superseded_by`` (hidden from the picker) must keep passing spawn
-        validation — settings/config switching back to it stays allowed."""
         from dataclasses import replace
 
         self._clear_all_keys(monkeypatch)
@@ -167,8 +140,6 @@ class TestValidateModelConfig:
             model="glm-5.2", config={"llm_model": "glm-5.2"}, catalog=model_catalog, llm_override=""
         )
         assert result == "glm-5.2"
-
-    # --- API key validation -----------------------------------------------------
 
     def test_config_only_validation_keeps_exact_model_effort_checks(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
@@ -201,7 +172,6 @@ class TestValidateModelConfig:
     def test_missing_claude_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ANTHROPIC_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
@@ -210,7 +180,6 @@ class TestValidateModelConfig:
     def test_missing_deepseek_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """DEEPSEEK_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
         with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
@@ -219,7 +188,6 @@ class TestValidateModelConfig:
     def test_missing_gemini_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """GEMINI_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
         with pytest.raises(ValueError, match="GEMINI_API_KEY"):
@@ -228,7 +196,6 @@ class TestValidateModelConfig:
     def test_missing_openai_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """OPENAI_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
         with pytest.raises(ValueError, match="OPENAI_API_KEY"):
@@ -237,7 +204,6 @@ class TestValidateModelConfig:
     def test_missing_mimo_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """MIMO_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("legacy-settings-key"))
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
@@ -247,7 +213,6 @@ class TestValidateModelConfig:
     def test_missing_kimi_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """MOONSHOT_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("legacy-settings-key"))
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
@@ -257,7 +222,6 @@ class TestValidateModelConfig:
     def test_missing_glm_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """GLM_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
         with pytest.raises(ValueError, match="GLM_API_KEY"):
@@ -266,7 +230,6 @@ class TestValidateModelConfig:
     def test_missing_qwen_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """DASHSCOPE_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
         with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
@@ -275,7 +238,6 @@ class TestValidateModelConfig:
     def test_key_present_succeeds(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """key is set → validation passes."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(
             dotenv_file,
@@ -290,7 +252,6 @@ class TestValidateModelConfig:
     def test_config_model_with_missing_key_raises(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """config.llm_model points to a provider with missing key → ValueError (not the cluster default's key)."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(
             dotenv_file,
@@ -300,11 +261,10 @@ class TestValidateModelConfig:
                 "GEMINI_API_KEY": "sk-test",
             },
         )
-        # The cluster default has its plugin key, but config picks claude → fail.
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
             validate_model_config(
-                model="deepseek-flash",  # cluster default
-                config={"llm_model": "claude-sonnet-5"},  # per-agent override
+                model="deepseek-flash",
+                config={"llm_model": "claude-sonnet-5"},
                 catalog=model_catalog,
                 llm_override="",
             )
@@ -312,7 +272,6 @@ class TestValidateModelConfig:
     def test_config_model_with_key_present_succeeds(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """config.llm_model's provider key is set → passes. The cluster default is irrelevant."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(
             dotenv_file,
@@ -320,8 +279,8 @@ class TestValidateModelConfig:
             lambda: {"ANTHROPIC_API_KEY": "sk-ant-123"},
         )
         result = validate_model_config(
-            model="deepseek-flash",  # cluster default (has no deepseek key)
-            config={"llm_model": "claude-sonnet-5"},  # per-agent (has key)
+            model="deepseek-flash",
+            config={"llm_model": "claude-sonnet-5"},
             catalog=model_catalog,
             llm_override="",
         )
@@ -330,12 +289,11 @@ class TestValidateModelConfig:
     def test_config_with_non_string_model_ignores(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """config.llm_model is not a str → ignored, fallback to cluster default."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
             model="deepseek-flash",
-            config={"llm_model": 42},  # not a string
+            config={"llm_model": 42},
             catalog=model_catalog,
             llm_override="",
         )
@@ -344,7 +302,6 @@ class TestValidateModelConfig:
     def test_override_skips_api_key_check(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """AVA_LLM_OVERRIDE is set → skip API key check. e2e tests depend on this behavior."""
         self._clear_all_keys(monkeypatch)
         llm_override = "tests.fakes:build"
         result = validate_model_config(
@@ -399,8 +356,6 @@ class TestValidateModelConfig:
     def test_restored_model_validates_to_itself(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Gemini 3.8 is spawnable again (2026-09-06 user order): validation
-        resolves it to itself, not to the 3.7 fallback."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
 
@@ -412,11 +367,6 @@ class TestValidateModelConfig:
 
 
 class TestThinkingDisabledAcrossRoster:
-    """issue #190: `thinking={"type": "disabled"}` must be expressible — or a
-    no-op — for every model in the supported roster, never a 400. This is the
-    assertion whose absence let gemini-2.5-flash / gemini-3.8-flash become
-    silently unusable as labeler_model."""
-
     _ALL_KEY_FIELDS = (
         "anthropic_api_key",
         "deepseek_api_key",
@@ -446,8 +396,6 @@ class TestThinkingDisabledAcrossRoster:
     def test_roster_model_constructs_with_thinking_disabled(
         self, model_catalog: ModelCatalog, model: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Every spawnable model can be constructed with thinking disabled — a
-        provider that cannot express it must no-op, not 400."""
         self._stub_all_keys(monkeypatch)
         llm = build_chat_model(
             model,
@@ -464,8 +412,6 @@ class TestThinkingDisabledAcrossRoster:
         monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
-        """An intentionally unregistered Gemini id has no thinking_level vocabulary:
-        disabled must send no thinking parameters and warn (issue #190)."""
         model = "gemini-2.5-flash"
         assert model not in model_catalog.models
         monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
@@ -486,8 +432,6 @@ class TestThinkingDisabledAcrossRoster:
     def test_gemini_3_1_thinking_disabled_maps_to_lowest_declared_level(
         self, model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Gemini 3.1 rejects `minimal`, so disabled thinking maps to its
-        lowest declared level while retaining no thought blocks on the wire."""
         monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
         from langchain_google_genai import ChatGoogleGenerativeAI
 

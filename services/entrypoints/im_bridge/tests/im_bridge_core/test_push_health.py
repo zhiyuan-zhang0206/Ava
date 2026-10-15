@@ -1,7 +1,3 @@
-"""The per-leg push-health sample (task #4935): one structured event per
-configured channel per round -- last-delivery age and pending count read off
-the durable outbox ledger."""
-
 from __future__ import annotations
 
 import asyncio
@@ -25,8 +21,6 @@ from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as po
 
 
 class _Store:
-    """The slice `emit_push_health_once` reads; no database."""
-
     def __init__(self, snapshot: dict[str, tuple[int, datetime | None]]) -> None:
         self._snapshot = snapshot
 

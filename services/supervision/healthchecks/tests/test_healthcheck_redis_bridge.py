@@ -1,5 +1,3 @@
-"""The redis-bridge identity probe: a RESP reply through the relay is the only proof."""
-
 from __future__ import annotations
 
 import socket
@@ -12,7 +10,6 @@ from services.supervision.healthchecks.redis_bridge import probe_relay
 
 @contextmanager
 def _listener(reply: bytes | None) -> Generator[int]:
-    """A TCP listener answering the first connection with `reply` (None: close silently)."""
     server = socket.socket()
     server.bind(("127.0.0.1", 0))
     server.listen()

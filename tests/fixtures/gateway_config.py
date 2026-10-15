@@ -1,5 +1,3 @@
-"""Explicit configuration ownership and keyed agent creation for an assembled Gateway."""
-
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager, nullcontext
@@ -42,11 +40,6 @@ def gateway_test_process(
     config: ConfigBoot | None = None,
     process: GatewayProcess | None = None,
 ) -> Generator[GatewayProcess]:
-    """Own one explicit entry, or borrow it across overlapping app lifespans.
-
-    Each lifespan still owns its original pools and tasks. A compatible routing
-    app can borrow the same entry without replacing or closing its writer.
-    """
     owned = process is None
     if owned:
         resolved_config = snapshot_process_config() if config is None else config
@@ -70,7 +63,6 @@ def gateway_test_app(
     machine: MachineIdentity | None = None,
     process_ownership: Literal["borrowed", "owned"] | None = None,
 ) -> FastAPI:
-    """Build one assembled Gateway app for an explicit test process or fresh owned entry."""
     if process is None:
         resolved_boot = snapshot_process_config() if boot is None else boot
         resolved_machine = machine_from_boot(resolved_boot) if machine is None else machine
@@ -94,8 +86,6 @@ def gateway_test_app(
 
 
 class GatewayTestClient(TestClient):
-    """TestClient whose `.app` attribute is narrowed to the assembled `FastAPI` instance."""
-
     app: FastAPI
 
     def __enter__(self) -> Self:
@@ -113,12 +103,6 @@ def gateway_test_client(
     process: GatewayProcess | None = None,
     **kwargs: Any,
 ) -> Generator[GatewayTestClient]:
-    """Run an assembled Gateway with this test's current explicit entry inputs.
-
-    When `application` is provided, borrows that already-assembled app without
-    constructing a second process owner. Otherwise constructs an explicit
-    process owner and assembled app for this client's lifetime.
-    """
     if application is not None:
         if any(arg is not None for arg in (machine, config, boot, process)):
             raise ValueError(
@@ -135,7 +119,6 @@ def gateway_test_client(
 
 
 def spawn_headers(key: str | None = None, extra: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Admission headers for one creation intent (a fresh key unless one is given)."""
     return {
         **(extra or {}),
         "Idempotency-Key": key if key is not None else uuid.uuid4().hex,
@@ -150,15 +133,10 @@ def spawn_via_http(
     key: str | None = None,
     headers: Mapping[str, str] | None = None,
 ) -> httpx2.Response:
-    """POST one creation intent through the in-process gateway; the response is unparsed.
-
-    Each call is a new intent unless the caller passes the same `key` to replay one.
-    """
     return client.post(SPAWN_PATH, json=dict(body or {}), headers=spawn_headers(key, headers))
 
 
 def post_spawn(gateway_url: str, body: Mapping[str, Any], *, timeout: float) -> httpx.Response:
-    """POST one creation intent to a running gateway (e2e stacks)."""
     return httpx.post(
         f"{gateway_url}{SPAWN_PATH}", json=dict(body), headers=spawn_headers(), timeout=timeout
     )
@@ -171,7 +149,6 @@ def create_mcp_client(
     *,
     headers: Mapping[str, str] | None = None,
 ) -> httpx2.Response:
-    """POST one fresh MCP client creation intent; only this first response carries the token."""
     return client.post(
         "/api/keyed/v1/mcp/clients",
         json={"name": name, "scope": scope},

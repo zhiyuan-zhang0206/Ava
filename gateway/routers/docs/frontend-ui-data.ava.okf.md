@@ -18,3 +18,8 @@ tags: []
 Reverse-proxy contracts live in `gateway/tests/routers/proxies/`: Grafana and
 agent page servers preserve authenticated forwarding, streaming, error responses
 and path-traversal rejection.
+
+Traversal tests encode the path so the HTTP client cannot normalize literal
+`..` before it reaches the server. Plugin UI requires 400 for encoded dot
+segments; upload tests use `..%2f..%2fsecret` and accept 400 or 404. That upload
+assertion alone does not establish that a particular resolver ran.

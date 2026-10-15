@@ -1,5 +1,3 @@
-"""Browser-native pixel comparisons for deterministic e2e screenshot references."""
-
 from __future__ import annotations
 
 import base64
@@ -15,8 +13,6 @@ _CHANNEL_DELTA_THRESHOLD = 16
 
 
 class PixelComparison(TypedDict):
-    """The browser's pixel-level comparison result."""
-
     sameDimensions: bool
     differentPixels: int
     totalPixels: int
@@ -102,7 +98,6 @@ def snapshot_path(
     *,
     snapshots_dir: Path = SNAPSHOT_ROOT,
 ) -> Path:
-    """Return the CI artifact path shared by candidate creation and comparison."""
     return snapshots_dir / test_file / test_name / name
 
 
@@ -126,7 +121,6 @@ def assert_visual_snapshot(
     name: str,
     snapshots_dir: Path = SNAPSHOT_ROOT,
 ) -> None:
-    """Fail on missing or materially changed visual references, saving candidates."""
     actual_png = page.screenshot(animations="disabled", caret="hide", full_page=True)
     reference = snapshot_path(test_file, test_name, name, snapshots_dir=snapshots_dir)
     if not reference.exists():

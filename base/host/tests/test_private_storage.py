@@ -1,5 +1,3 @@
-"""Private local-storage permissions and atomic write guarantees."""
-
 from __future__ import annotations
 
 import os
@@ -29,8 +27,6 @@ _SUMMARY = (
 
 
 class _Captured:
-    """`private_storage.logger` replacement recording debug and warning calls."""
-
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.debugs: list[tuple[str, dict[str, object]]] = []
         self.warnings: list[tuple[str, dict[str, object]]] = []
@@ -49,16 +45,15 @@ class _Captured:
 
 
 def test_converge_skips_foreign_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Foreign-owned nodes are debug-logged, summarized, and left unchanged."""
     target = tmp_path / "tree"
     ours_dir = target / "ours"
     ours_dir.mkdir(parents=True)
     foreign_file = ours_dir / "secret"
     foreign_file.write_bytes(b"secret")
-    foreign_file.chmod(0o400)  # marker: reads as foreign
+    foreign_file.chmod(0o400)
     foreign_dir = target / "foreign"
     foreign_dir.mkdir()
-    foreign_dir.chmod(0o500)  # marker: reads as foreign
+    foreign_dir.chmod(0o500)
     cap = _Captured(monkeypatch)
 
     def _foreign(stat_result: os.stat_result) -> bool:
@@ -67,11 +62,9 @@ def test_converge_skips_foreign_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path:
     with patch.object(private_storage, "is_foreign_owned", side_effect=_foreign):
         private_storage.converge_private_tree(target)
 
-    # foreign nodes left untouched, ours dir converged to owner-only mode
     assert _mode(foreign_file) == 0o400
     assert _mode(foreign_dir) == 0o500
     assert _mode(ours_dir) == 0o700
-    # iterdir order is filesystem-dependent: assert the set of skipped nodes.
     assert {(message, str(kwargs["path"])) for message, kwargs in cap.debugs} == {
         ("private storage convergence skipped foreign-owned path {path}", str(foreign_file)),
         ("private storage convergence skipped foreign-owned path {path}", str(foreign_dir)),
@@ -89,7 +82,6 @@ def test_converge_skips_foreign_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 
 def test_private_file_repairs_mode_drift(tmp_path: Path) -> None:
-    """An existing secret file is tightened without changing its content."""
     target = tmp_path / "secret"
     target.write_bytes(b"secret")
     target.chmod(0o644)
@@ -101,7 +93,6 @@ def test_private_file_repairs_mode_drift(tmp_path: Path) -> None:
 
 
 def test_private_file_preserves_owner_execute_permission(tmp_path: Path) -> None:
-    """An executable file remains executable while its mode is tightened."""
     target = tmp_path / "hook"
     target.write_text("#!/bin/sh\nexit 0\n")
     target.chmod(0o744)
@@ -112,7 +103,6 @@ def test_private_file_preserves_owner_execute_permission(tmp_path: Path) -> None
 
 
 def test_private_tree_recursively_repairs_existing_mode_drift(tmp_path: Path) -> None:
-    """Converge makes every existing private-tree node owner-only."""
     root = tmp_path / "private"
     nested = root / "agent" / "artifacts"
     nested.mkdir(parents=True)
@@ -131,7 +121,6 @@ def test_private_tree_recursively_repairs_existing_mode_drift(tmp_path: Path) ->
 
 
 def test_private_tree_skips_nested_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Converge leaves a link and its target untouched while repairing its tree."""
     root = tmp_path / "private"
     root.mkdir()
     target = tmp_path / "outside"
@@ -167,7 +156,6 @@ def test_private_tree_skips_nested_symlink(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_private_write_replaces_existing_content_without_permissive_intermediate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A replacement keeps the prior file intact until a private temp file replaces it."""
     target = tmp_path / "secret"
     target.write_bytes(b"old")
     target.chmod(0o644)
@@ -226,7 +214,6 @@ def test_private_write_fsyncs_payload_and_parent_directory(
 
 
 def test_converge_skips_foreign_owned_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A foreign-owned root is warned about and left untouched with its subtree."""
     root = tmp_path / "private"
     root.mkdir()
     root.chmod(0o755)
@@ -242,10 +229,8 @@ def test_converge_skips_foreign_owned_root(monkeypatch: pytest.MonkeyPatch, tmp_
 
     assert private_storage.converge_private_tree(root) == root
 
-    assert _mode(root) == 0o755  # not converged: the owner alone can chmod
-    assert _mode(child) == 0o644  # subtree not visited either
-    # The root itself is one node, not a flood: the single warning is its own,
-    # never a summary.
+    assert _mode(root) == 0o755
+    assert _mode(child) == 0o644
     assert cap.warnings == [
         ("private storage convergence skipped foreign-owned path {path}", {"path": root})
     ]
@@ -253,12 +238,6 @@ def test_converge_skips_foreign_owned_root(monkeypatch: pytest.MonkeyPatch, tmp_
 
 
 def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A service socket is warned about and left in place; the run completes.
-
-    The 2026-09-12 host outage: a dead workspace socket aborted the whole
-    converge, failing the updater. The tree root sits under /tmp because
-    pytest's tmp_path on macOS breaks the 104-byte AF_UNIX path limit.
-    """
     root = Path(tempfile.mkdtemp(prefix="ava-converge-", dir="/tmp"))
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
@@ -272,9 +251,9 @@ def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) ->
 
         assert private_storage.converge_private_tree(root) == root
 
-        assert stat.S_ISSOCK(socket_path.lstat().st_mode)  # still bound, not unlinked
+        assert stat.S_ISSOCK(socket_path.lstat().st_mode)
         assert _mode(root) == 0o700
-        assert _mode(payload) == 0o600  # the run continued past the socket
+        assert _mode(payload) == 0o600
         assert cap.debugs == [
             ("private storage convergence skipped non-regular file {path}", {"path": socket_path}),
         ]
@@ -298,7 +277,6 @@ def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_private_tree_skips_fifo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A named pipe is warned about and left in place; the run completes."""
     root = tmp_path / "private"
     root.mkdir()
     fifo = root / "queue"
@@ -331,16 +309,13 @@ def test_private_tree_skips_fifo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 def test_converge_does_not_descend_node_modules(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A node_modules subtree is left alone: the directory itself is converged,
-    its contents are neither repaired nor reported, and the pre-stop scan
-    agrees (it does not descend there either)."""
     root = tmp_path / "private"
     modules = root / "pkg" / "node_modules"
     inner = modules / "dep"
     inner.mkdir(parents=True)
     payload = inner / "index.js"
     payload.write_bytes(b"module.exports = {};\n")
-    payload.chmod(0o644)  # stays: nothing under node_modules is walked
+    payload.chmod(0o644)
     (inner / "linked").symlink_to(inner / "index.js")
     fifo = inner / "queue"
     os.mkfifo(fifo)
@@ -351,19 +326,17 @@ def test_converge_does_not_descend_node_modules(
 
     assert private_storage.converge_private_tree(root) == root
 
-    assert _mode(modules) == 0o700  # the directory itself is converged
-    assert _mode(payload) == 0o644  # contents are not walked or repaired
+    assert _mode(modules) == 0o700
+    assert _mode(payload) == 0o644
     assert _mode(top) == 0o600
-    assert cap.debugs == []  # nothing was skipped in the walked tree
-    assert cap.warnings == []  # and a pruned node_modules alone is not noise
+    assert cap.debugs == []
+    assert cap.warnings == []
     assert private_storage.scan_non_regular_nodes(root) == []
 
 
 def test_summary_caps_examples_and_counts_every_skip(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The one summary line carries the full count and only the first few
-    example paths."""
     root = tmp_path / "private"
     root.mkdir()
     links: list[Path] = []
@@ -388,8 +361,6 @@ def test_summary_caps_examples_and_counts_every_skip(
 def test_scan_non_regular_nodes_matches_what_converge_skips(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The pre-stop scan reports exactly what converge would warn about: a nested
-    FIFO is found; a symlink and its target are not (converge does not follow them)."""
     root = tmp_path / "private"
     nested = root / "agent"
     nested.mkdir(parents=True)
@@ -409,7 +380,7 @@ def test_scan_non_regular_nodes_matches_what_converge_skips(
         {"path": fifo},
     ) in cap.debugs
     assert len(cap.warnings) == 1
-    assert cap.warnings[0][1]["symlinks"] == 1  # the symlink is skipped, the FIFO reported
+    assert cap.warnings[0][1]["symlinks"] == 1
     assert cap.warnings[0][1]["non_regular"] == 1
     assert cap.warnings[0][1]["n"] == 2
 
@@ -429,8 +400,6 @@ def test_scan_non_regular_nodes_does_not_follow_a_symlinked_root(tmp_path: Path)
 
 
 def test_private_tree_root_problem_matches_converges_refusals(tmp_path: Path) -> None:
-    """The read-only predicate names converge's own refusal (symlink / not a
-    directory) and, like converge, does not refuse a missing root."""
     root = tmp_path / "root"
     assert private_storage.private_tree_root_problem(root) is None
 

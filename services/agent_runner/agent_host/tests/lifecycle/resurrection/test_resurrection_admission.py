@@ -1,6 +1,3 @@
-"""Resurrection needs proven closure, proven non-admission or an unowned end
-this runtime witnessed, and a refusal is loud."""
-
 from collections.abc import Awaitable, Iterator
 from typing import Any, Protocol
 from uuid import uuid4
@@ -76,8 +73,6 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """No runtime identity plus the unconsumed fresh-INSERT marker proves no
-    predecessor allocation exists: resurrection is a fresh birth."""
     marker = ResourceBirth(birth=uuid4()).model_dump(mode="json")
     aid = terminated(
         db_conn,
@@ -130,8 +125,6 @@ def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The final CAS, not only the earlier read, requires the unconsumed marker
-    or this agent's own unowned termination receipt."""
     aid = terminated(
         db_conn,
         None,
@@ -272,8 +265,6 @@ def _refused_locally(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> tuple[int, int]:
-    """A never-admitted row without the birth marker: unknown, so the real
-    in-process op refuses and the chat stays queued."""
     aid = terminated(
         db,
         None,
@@ -418,12 +409,6 @@ async def test_unknown_auto_resurrect_failure_propagates(
     ).fetchone() == ("pending",)
 
 
-# ── Unowned termination ──────────────────────────────────────────────────────
-# Only a force ends a row that has no runtime identity. When this runtime's own
-# lifecycle left the row unowned (a birth, a resurrection, an applied restart),
-# that force records a receipt and the row resurrects.
-
-
 class _Arrange(Protocol):
     def __call__(
         self,
@@ -476,7 +461,6 @@ async def _spawned(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """(a) a new agent never admitted: its birth epoch is its origin."""
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
@@ -497,7 +481,6 @@ async def _resurrected(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """(b) resurrected from its retained identity, not admitted again yet."""
     aid = legacy_row(
         db,
         config_authority=config_authority,
@@ -532,7 +515,6 @@ async def restarted(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """(c) released by its applied restart, no successor admitted yet."""
     aid = legacy_row(
         db,
         config_authority=config_authority,
@@ -570,7 +552,6 @@ async def managed_restarted(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> int:
-    """An actual fresh birth whose original host applied its restart."""
     aid = await _spawned(
         db,
         pool,
@@ -617,9 +598,6 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Each way this runtime leaves a row unowned, then a force before the next
-    admission: the force records the receipt, the row resurrects as a fresh
-    hosted birth, and admission takes the successor."""
     aid = await arrange(
         db_conn,
         aops_pool,
@@ -667,9 +645,6 @@ async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """(b) with a recorded resource set: resurrection keeps the closed set, the
-    force leaves the terminate receipt alone, and the successor is admitted
-    through it."""
     generation, owner = uuid4(), uuid4()
     closed = IncarnationResources(generation=generation, owner=owner, requests={})
     aid = terminated(

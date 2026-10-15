@@ -1,12 +1,3 @@
-"""The per-agent config lifecycle axis (`base/config`: frozen | live).
-
-The registry's job here is to make an UNDECLARED classification impossible: a new
-per-agent field must be ruled on (is this the agent's identity material, or an
-operational knob?) before it can load at all. These tests drive `build_registry`
-against synthetic sub-models rather than the real ones, so they assert the rule and
-not today's roster.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -17,7 +8,6 @@ from base.config.base import EnvSettings
 
 
 def _registry_with(model: type[EnvSettings]) -> None:
-    """Run `build_registry` over one synthetic domain and nothing else."""
     from base.config import config_registry
 
     domains = (("synthetic", "Synthetic", model, "agent-runner"),)
@@ -59,8 +49,6 @@ class TestRegistryEnforcement:
             _registry_with(Bogus)
 
     def test_non_per_agent_field_declaring_lifecycle_is_rejected(self) -> None:
-        """Cluster-scope config has no per-agent instance to freeze — declaring a
-        lifecycle on one is a category error, not a harmless extra key."""
 
         class Overreach(EnvSettings):
             synthetic_knob: int = Field(
@@ -90,8 +78,6 @@ class TestRegistryEnforcement:
 
 class TestRealRoster:
     def test_every_per_agent_field_is_classified(self) -> None:
-        """Belt-and-braces over the enforcement above: the two classes partition the
-        real per-agent set exactly, so nothing can be silently in neither."""
         per_agent = base_config.per_agent_field_names()
         frozen = base_config.frozen_field_names()
         live = base_config.live_field_names()
@@ -99,9 +85,6 @@ class TestRealRoster:
         assert not frozen & live
 
     def test_identity_material_is_frozen(self) -> None:
-        """The brain + the system-prompt-shaping set. Compact rebuilds the system
-        prompt from current config, so a live default in this set would swap a living
-        agent's identity material mid-life."""
         assert base_config.frozen_field_names() == {
             "llm_model",
             "reasoning_effort",

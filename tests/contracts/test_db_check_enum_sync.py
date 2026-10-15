@@ -1,24 +1,3 @@
-"""Lock every Python enum / Literal that feeds a CHECK-constrained DB column to
-its constraint's allowed-value set in `db/schema.sql`.
-
-The bug class this guards: a Python value-set drifts from the DB `CHECK (col IN
-(...))` it is written to, so a value valid in Python fails the constraint at
-INSERT/UPDATE — a `CheckViolation` that only surfaces against a real database.
-Unit tests that stub the write miss it entirely. Two incidents motivated this:
-
-- `agents_meta.status`: code wrote a status absent from the database CHECK, so a
-  startup UPDATE 500'd and the agent row petrified before it could claim.
-- a cross-machine RPC kind drifting from its CHECK: a kind added to a Python
-  Literal + the agent-runner dispatch but not the matching DB CHECK 500'd at the
-  write in prod while every unit test stubbed the dispatch, so it shipped green.
-
-Each pair below asserts the Python source-of-truth set EQUALS the schema.sql
-CHECK set. A new value on either side without the other fails here. Adding a
-value: (1) add it to the Python enum/Literal, (2) add it to `db/schema.sql`'s
-CHECK, (3) ship a migration ALTERing the live constraint. This test verifies (1)
-and (2) are in sync; the migration + `scripts/content_lint/lint_migrations.py` cover (3).
-"""
-
 from __future__ import annotations
 
 import re
@@ -35,45 +14,26 @@ from base.cluster.machine import MachineRole
 from base.packages.extensions.install_registry import TrustTier
 from base.packages.extensions.registry import ExtensionKind
 
-# Strip `-- ...` line comments first: the CHECK value lists carry inline comments
-# whose prose can contain `)` (e.g. "ava.compact(summary)"), which would otherwise
-# truncate the IN-list capture below.
 _SCHEMA = re.sub(
     r"--[^\n]*",
     "",
     (Path(__file__).resolve().parents[2] / "db" / "schema.sql").read_text(encoding="utf-8"),
 )
 
-# (table, column) -> the Python value-set that is the source of truth for it.
 _CASES: dict[tuple[str, str], set[str]] = {
     ("agents_meta", "status"): {s.value for s in AgentStatus},
     ("agents_meta", "liveness_state"): {s.value for s in LivenessState},
     ("agent_impersonations", "status"): {s.value for s in ImpersonationStatus},
-    # The stamped-by-every-terminated-write source. A value in the enum but not the
-    # CHECK is a CheckViolation at the write site; a value in the CHECK but not the
-    # enum is one scripts/lint/termination_source.py would reject as unknown.
     ("agents_meta", "termination_source"): {s.value for s in TerminationSource},
     ("inbound_messages", "kind"): {s.value for s in InboundKind},
     ("machines", "role"): set(get_args(MachineRole)),
-    # The cluster extension registry (issue #39 S2). `kind` decides which
-    # materializer handles a row, so a value the DB refuses is an install that
-    # fails after the scan has already run; `trust` is the same tier the
-    # per-machine registry records, moved up with the row — two Literals for one
-    # fact is exactly what this test exists to stop.
     ("extensions", "kind"): set(get_args(ExtensionKind)),
     ("extensions", "trust"): set(get_args(TrustTier)),
-    # The task lifecycle status. The SDK validation, the gateway wire schemas,
-    # and the generated frontend types all reference
-    # base.agents.tasks.status.TaskStatus ('ongoing' was removed 2026-09-15); this
-    # locks the DB CHECK to the same set.
     ("agent_tasks", "status"): {s.value for s in TaskStatus},
 }
 
 
 def _check_values(table: str, column: str) -> set[str]:
-    """The allowed-value set of `column`'s CHECK clause, scoped to `table`'s
-    `CREATE TABLE` block in db/schema.sql. Handles both a scalar `CHECK (column IN
-    (...))` and a set-valued `CHECK (column <@ ARRAY[...])` (TEXT[] columns)."""
     block = re.search(
         rf"CREATE TABLE (?:IF NOT EXISTS )?{re.escape(table)}\s*\((.*?)\n\);",
         _SCHEMA,

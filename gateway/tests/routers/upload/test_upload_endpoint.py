@@ -1,11 +1,3 @@
-"""Silent upload endpoint tests — POST /api/agents/{agent_id}/uploads.
-
-Verifies: one or more files saved as immutable objects under the agent's upload
-directory, no inbound queued, key + principal-v1 scope required, `deliver=true`
-refused, agent-not-found -> 404, per-file / per-agent quota limits, and the GET
-route serving a saved file back.
-"""
-
 from __future__ import annotations
 
 import uuid
@@ -29,7 +21,6 @@ def _upload(
     query: str = "",
     headers: dict[str, str] | None = None,
 ) -> httpx.Response:
-    """POST one silent batch under a fresh key and the principal-v1 scope."""
     return client.post(
         f"/api/agents/{agent_id}/uploads{query}",
         headers=headers
@@ -48,11 +39,6 @@ def _inbound_count(db: psycopg.Connection, agent_id: int) -> int:
 
 
 def _spawn_agent() -> int:
-    # Enter the app lifespan (the `with` block) so `app.state.db_pool` is
-    # initialized for this request. A bare `TestClient(app)` skips startup,
-    # leaving the spawn dependent on some earlier test having populated the
-    # shared module-level app — which breaks under xdist worker sharding /
-    # randomized order (same isolation class as #585).
     with gateway_test_client() as client:
         resp = spawn_via_http(client, {})
         assert resp.status_code == 201
@@ -151,8 +137,6 @@ class TestUploadFile:
 
 
 class TestUploadContract:
-    """The route is silent and keyed: nothing is saved without a verified operation identity."""
-
     @pytest.mark.parametrize(
         "headers",
         [
@@ -222,9 +206,6 @@ class TestUploadContract:
 
 
 class TestUploadLimits:
-    """The upload endpoint is bounded — per-file size, per-agent total quota,
-    per-agent file count — before any byte lands."""
-
     def test_per_file_limit_rejected_413(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -245,7 +226,6 @@ class TestUploadLimits:
     def test_agent_quota_rejected_413(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Two batches crossing the total quota: the first lands, the second 413s."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         import gateway.routers.upload.router as uploads_router
@@ -261,7 +241,6 @@ class TestUploadLimits:
     def test_agent_quota_rejects_entire_oversized_batch(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A batch over the byte quota does not leave its earlier files behind."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         import gateway.routers.upload.router as uploads_router
@@ -298,7 +277,6 @@ class TestUploadLimits:
     def test_file_count_cap_rejects_entire_batch(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A batch over the file-count cap does not partially commit."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         import gateway.routers.upload.router as uploads_router
@@ -321,7 +299,6 @@ class TestUploadLimits:
     def test_concurrent_batches_share_agent_quota(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Concurrent uploads serially consume one agent's shared byte quota."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         import gateway.routers.upload.router as uploads_router
@@ -358,8 +335,6 @@ class TestServeUpload:
     def test_renderable_upload_served_as_attachment(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """HTML/SVG uploads are served with attachment + nosniff so a stored
-        payload cannot execute in a browser (stored-XSS surface)."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         with gateway_test_client() as client:
@@ -400,8 +375,6 @@ class TestServeUpload:
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         with gateway_test_client() as client:
-            # %2e%2e%2f = ../ — the router path param decodes it; the resolver
-            # must refuse to escape the agent upload dir.
             resp = client.get(f"/api/agents/{agent_id}/uploads/..%2f..%2fsecret")
         assert resp.status_code in (400, 404)
 

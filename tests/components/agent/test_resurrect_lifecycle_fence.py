@@ -1,15 +1,3 @@
-"""A resurrection supersedes earlier unapplied lifecycle commands (issue #2158).
-
-Pre-fix, a pending terminate created during a rollout drain was adopted by the
-incarnation a later resurrect had just admitted: the resurrect reported
-"spawned", the older command applied seconds later, and the agent was killed
-again (five agents in the 2026-09-10 rollout). The resurrection now records the
-id of the kind='resurrect' inbound it enqueues as an epoch fence and settles
-every earlier unapplied lifecycle command as superseded - visibly, never
-silently - and acceptance settles any row that committed too late for the
-resurrect transaction to see.
-"""
-
 import asyncio
 from uuid import uuid4
 
@@ -53,7 +41,6 @@ def _command(conn: psycopg.Connection, agent_id: int, kind: str) -> int:
 
 
 def _die(conn: psycopg.Connection, agent_id: int) -> None:
-    """The row dies by a route other than the queued command (force / rollout)."""
     conn.execute(
         "UPDATE agents_meta SET status='terminated', termination_source='user' WHERE id=%s",
         (agent_id,),
@@ -94,7 +81,6 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """The incident: a delayed earlier terminate must not kill the new incarnation."""
     agent_id = _agent(db_conn)
     await _admit(aops_pool, agent_id, db=database)
     stale = _command(db_conn, agent_id, "terminate")
@@ -127,11 +113,6 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
 async def test_acceptance_settles_a_command_that_committed_after_the_epoch(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database: Database
 ) -> None:
-    """Commit-order race: inserted before the resurrect, committed after it.
-
-    The resurrect transaction cannot see an uncommitted row, so the epoch fence
-    must also stop acceptance from adopting it later.
-    """
     agent_id = _agent(db_conn)
     stale = _command(db_conn, agent_id, "terminate")
     epoch = db_conn.execute(
@@ -164,7 +145,6 @@ async def test_a_command_created_after_the_resurrect_still_applies(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """The fence supersedes the past, not the future: a later kill still lands."""
     agent_id = _agent(db_conn)
     await _admit(aops_pool, agent_id, db=database)
     _command(db_conn, agent_id, "terminate")
@@ -193,7 +173,6 @@ async def test_an_accepted_but_unapplied_command_is_superseded_not_deferred(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """A claimed command that never applied has no external effect to preserve."""
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id, db=database)
     command = _command(db_conn, agent_id, "terminate")
@@ -223,7 +202,6 @@ async def test_force_on_unadmitted_row_cannot_create_a_hosted_successor(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """A force on an unknown historical runtime cannot authorize its adoption."""
     from base.api_contracts.agent_contract import ResurrectRefused
 
     agent_id = _agent(db_conn)
@@ -250,12 +228,6 @@ async def test_refused_resurrect_leaves_no_fence_or_marker_for_the_retry(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """An applied-but-unobserved terminate still refuses honestly.
-
-    Nothing half-written may remain: no fence, no marker, and the applied command
-    untouched, so the operator's retry (after observation) proceeds cleanly and
-    the already-applied command is never rewritten.
-    """
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id, db=database)
     command = _command(db_conn, agent_id, "terminate")

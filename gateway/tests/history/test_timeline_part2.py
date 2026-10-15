@@ -1,23 +1,3 @@
-"""Contract tests for GET /api/agents/{id}/timeline.
-
-Design (2026-05-04 in-place simplification):
-  - LangGraph state.messages is the sole source of truth
-  - The inbound_messages table does **not** directly enter the timeline (it is already
-    envelope-wrapped into LangGraph state)
-  - AIMessage.content (agent text) / tool_call code / reasoning are all rendered from
-    state; adjacent timestamps within the same LLM turn no longer drift apart
-
-Coverage:
-  - endpoint basic contract (404 / empty agent / no orphaned inbounds displayed)
-  - `_ai_message_items` helper unit (TestAiMessageItems): directly feed AIMessage to test
-    block splitting
-  - dispatch end-to-end (TestTimelineDispatch): truly load mixed state.messages into
-    PostgresSaver checkpoint, run a full GET /timeline, verify that AIMessage / lifecycle /
-    string-content paths all correctly render through the dispatch chain — unit test helpers
-    passing ≠ dispatch routing correct (the bug in refactor 8a3c520 that accidentally deleted
-    the elif header and silently lost AIMessage is exactly this kind of bug)
-"""
-
 from langchain_core.messages import HumanMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
@@ -29,19 +9,12 @@ _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
 )
 
-# Side effect: get_timeline's _log should have had a warning trace (operators can grep)
-# Do not assert log content — avoid coupling with logger implementation details
-
 
 def _items(*ids: str) -> list[TimelineItem]:
     return [TimelineItem(item_id=i, kind="agent_chat", payload=i) for i in ids]
 
 
 class TestBuildTimelineItemsStartOffset:
-    """`build_timeline_items(..., start=N)` — the incremental-snapshot render
-    path. Item ids keep their ABSOLUTE msg_idx; msg_count stays the FULL
-    history length."""
-
     def test_start_offset_keeps_absolute_item_ids_and_full_msg_count(self):
         from langchain_core.messages import AIMessage, SystemMessage
 
@@ -51,7 +24,7 @@ class TestBuildTimelineItemsStartOffset:
             AIMessage(content="second"),
         ]
         items, msg_count = build_timeline_items(messages, start=2, inputs=_TIMELINE_INPUTS)
-        assert msg_count == 3  # full length, never the window length
+        assert msg_count == 3
         assert [it.item_id for it in items] == ["2.0"]
         assert items[0].payload == "second"
 
@@ -66,8 +39,6 @@ class TestBuildTimelineItemsStartOffset:
         assert [it.payload for it in full] == [it.payload for it in sliced]
 
     def test_start_offset_renders_an_inbound_with_its_own_time(self):
-        # A modern inbound inside the incremental window keeps its own
-        # ava_created_at; with no embedded id it renders no inbound_id.
         from langchain_core.messages import SystemMessage
 
         msg = HumanMessage(
@@ -132,8 +103,6 @@ class TestBuildTimelineItemsStartOffset:
 
 
 def test_inbound_item_ts_is_read_time_not_arrival() -> None:
-    """A message that arrived mid-stream (arrival < the AIMessage's stamp) is
-    placed on the timeline at its pickup time, after the AIMessage."""
     from langchain_core.messages import HumanMessage
 
     from base.agents.history.timeline import build_timeline_items

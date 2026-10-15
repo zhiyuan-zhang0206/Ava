@@ -100,9 +100,10 @@ multi-chunk.
   must exit before replacement; readiness requires HTTP plus the new PID/birth's native listener.
   Fixed-port listener diagnostics retain native identities and unknown visibility on failure.
   Next cannot inherit a socket, so its frontend port is a reservation from a block below the kernel's
-  ephemeral range (one candidate per xdist worker slot), held through the build and released only right
-  before `next start` is spawned: no `bind(0)` and no outgoing connection's source port can take it, and
-  workers never share one. Postgres/Redis use base/deploy/tests/containers.py
+  ephemeral range, held through the build and released immediately before `next start`.
+  Worker slots wrap modulo 64; simultaneous holders in the same slot skip candidates
+  still reserved by another socket. Release-to-bind is not an inherited-FD handoff
+  and does not guarantee uninterrupted exclusion. Postgres/Redis use base/deploy/tests/containers.py
   for independent native clusters per worker. This gateway FD path targets the existing POSIX E2E CI.
 - **dev and e2e can run simultaneously** — ports/databases/channels are all separate
   (see `_ports.py` + `conftest.py` env override section).
@@ -217,3 +218,5 @@ which is the intended multi-round anchor-drift scenario. Preserve that history
 length when changing the fake. The helper's `rounds` counter increments before
 confirming page arrival, so `rounds >= 2` alone does not prove two successful
 loads; history availability and the actual page/anchor assertions matter too.
+
+Browser fixture premises: [[tests/docs/e2e-fixture-contracts.ava.okf.md]].

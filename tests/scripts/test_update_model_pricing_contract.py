@@ -1,5 +1,3 @@
-"""Contract: the reconcile tests run against the reviewed catalog base/lm/pricing/pricing_catalog_archive.json, and the update-model-pricing workflow runs only trusted main code with write permissions."""
-
 from __future__ import annotations
 
 import json
@@ -38,7 +36,6 @@ def _reviewed_catalog() -> dict[str, Any]:
 
 
 def _without_recorded_succession(catalog: dict[str, Any]) -> dict[str, Any]:
-    """Drop deepseek-v4-pro's succession period to exercise the generation path."""
     periods = catalog["models"]["deepseek-v4-pro"]["periods"]
     periods.pop()
     periods[-1]["effective_until"] = None
@@ -46,8 +43,6 @@ def _without_recorded_succession(catalog: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_reconcile_is_a_noop_when_the_reviewed_catalog_matches() -> None:
-    """The reviewed ledger already carries the V4.1-Flash bands and the
-    recorded succession, so the daily workflow must see no drift."""
     fetched = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
 
     assert (
@@ -88,15 +83,12 @@ def test_reconcile_appends_a_new_effective_period_without_rewriting_history() ->
     )
 
     assert updated is not None
-    # One flash column prices the canonical id and both legacy names (footnote (1)).
     for model in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
         periods = updated["models"][model]["periods"]
         assert periods[-2]["effective_until"] == "2026-09-15T12:34:56Z"
         assert periods[-1]["effective_from"] == "2026-09-15T12:34:56Z"
         assert periods[-1]["tiers"][0]["rates"]["output"] == "0.64"
         assert periods[-1]["tiers"][0]["utc_daily_overrides"][0]["rates"]["output"] == "1.28"
-    # Reconciliation works on a copy; a failed workflow cannot partially
-    # mutate the catalog object its caller loaded.
     assert catalog["models"]["deepseek-v4-flash"]["periods"][-1]["effective_until"] is None
 
 
@@ -125,8 +117,6 @@ def test_reconcile_appends_a_period_when_peak_windows_change() -> None:
 
 
 def test_reconcile_records_the_pro_succession_as_a_future_period() -> None:
-    """Footnote (2): from 2026-09-14T04:00:00Z deepseek-v4-pro is routed to
-    V4.1 Flash and billed at the Flash price."""
     reviewed = _reviewed_catalog()
     frozen = deepcopy(reviewed["models"]["deepseek-v4-pro"]["periods"][:-1])
     catalog = _without_recorded_succession(_reviewed_catalog())
@@ -140,8 +130,6 @@ def test_reconcile_records_the_pro_succession_as_a_future_period() -> None:
 
     assert updated is not None
     periods = updated["models"]["deepseek-v4-pro"]["periods"]
-    # Own-rate history is preserved; the succession closes it at the published
-    # instant and appends the Flash column's rates as the future period.
     assert periods[:-1] == frozen
     assert periods[-2]["effective_until"] == "2026-09-14T04:00:00Z"
     assert periods[-1]["effective_from"] == "2026-09-14T04:00:00Z"
@@ -165,8 +153,6 @@ def test_reconcile_records_the_pro_succession_as_a_future_period() -> None:
 
 
 def test_reconcile_fails_closed_when_a_retired_column_changes() -> None:
-    """Nothing bills from the retired pro column again: a source change there
-    must stop for review instead of rewriting frozen history."""
     fetched = pricing_updater.parse_deepseek_pricing(
         _DEEPSEEK_TABLE.replace("<td>$0.022</td>", "<td>$0.024</td>").replace(
             "<td>$0.044</td>", "<td>$0.048</td>"

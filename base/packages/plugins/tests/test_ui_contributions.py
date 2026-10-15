@@ -1,12 +1,3 @@
-"""`contributions.ui` validation — the U1 slice of
-`future/frontend-plugin-contributions.md`.
-
-Every check here goes through the manifest validator (`pm.validate`) rather
-than the sub-validator alone: `contributions.ui` is only worth anything if a
-real `ava-plugin.json` carrying it validates, and the closed sets only hold if
-the manifest layer refuses what they exclude.
-"""
-
 import re
 from typing import Any, cast
 
@@ -18,7 +9,6 @@ from base.packages.plugins.surface import ui_contributions as ui
 
 
 def _ui(**contributions: object) -> dict[str, object]:
-    """A manifest carrying one `contributions.ui` declaration, validated."""
     manifest = pm.validate(
         cast(
             dict[str, Any],
@@ -39,17 +29,10 @@ def _rejects(match: str, **contributions: object) -> None:
         _ui(**contributions)
 
 
-# ── the token vocabulary is the console's own ──────────────────────────
-
-
 def test_nav_icons_are_lucide_names() -> None:
-    """Icon names are data — kebab-case lucide spellings the frontend maps."""
     for name in ui.NAV_ICONS:
         assert re.match(r"^[a-z][a-z0-9-]*$", name), name
     assert len(set(ui.NAV_ICONS)) == len(ui.NAV_ICONS)
-
-
-# ── the declaration validates ──────────────────────────────────────────
 
 
 def test_full_declaration_normalizes() -> None:
@@ -79,17 +62,11 @@ def test_ui_is_a_declared_contribution_key() -> None:
 
 
 def test_partial_token_pack_is_allowed() -> None:
-    """Unset tokens keep the console default — a skin need not be exhaustive."""
     parsed = _ui(themes=[{"name": "warm", "tokens": {"--primary": "#a31515"}}])
     assert parsed["themes"] == [{"name": "warm", "tokens": {"--primary": "#a31515"}}]
 
 
-# ── a pack's two halves ────────────────────────────────────────────────
-
-
 def test_dark_tokens_carry_the_packs_dark_half() -> None:
-    """With `darkTokens`, `tokens` is the light half and the skin stays
-    orthogonal to the mode toggle."""
     parsed = _ui(
         themes=[
             {
@@ -109,15 +86,11 @@ def test_dark_tokens_carry_the_packs_dark_half() -> None:
 
 
 def test_omitting_dark_tokens_leaves_the_key_absent() -> None:
-    """Omission is a declaration — the pack pins both modes — so the console
-    has to be able to SEE it was omitted rather than get an empty map."""
     parsed = _ui(themes=[{"name": "warm", "tokens": {"--primary": "#a31515"}}])
     assert "darkTokens" not in cast(list[dict[str, Any]], parsed["themes"])[0]
 
 
 def test_dark_tokens_validate_exactly_like_tokens() -> None:
-    """Same closed vocabulary and same color-literal rule — the dark half is
-    not a looser second door into the stylesheet."""
     base = {"name": "x", "tokens": {"--primary": "#fff"}}
     _rejects("unknown token", themes=[{**base, "darkTokens": {"--wallpaper": "#000"}}])
     _rejects("not themable", themes=[{**base, "darkTokens": {"--radius": "2rem"}}])
@@ -128,8 +101,6 @@ def test_dark_tokens_validate_exactly_like_tokens() -> None:
 
 
 def test_a_misspelled_dark_tokens_is_refused_not_ignored() -> None:
-    """The failure mode of adding an OPTIONAL field: a typo that is silently
-    dropped ships a pack whose dark half never applies, and nothing says so."""
     _rejects(
         "unknown field 'darktokens'",
         themes=[
@@ -145,11 +116,7 @@ def test_every_renderer_and_location_is_accepted() -> None:
         _ui(nav=[{"location": location, "label": "L", "icon": "activity", "page": "p"}])
 
 
-# ── statistics-panel cards ─────────────────────────────────────────────
-
-
 def test_stat_cards_keep_declaration_order() -> None:
-    """Order is the manifest's: the panel renders plugin cards in it."""
     parsed = _ui(
         stats=[
             {"id": "b", "label": "B"},
@@ -160,8 +127,6 @@ def test_stat_cards_keep_declaration_order() -> None:
 
 
 def test_stat_card_id_keys_the_value_row() -> None:
-    """The id shape is enforced, not sanitized: it must be reproducible as a
-    `plugin_stats` primary key by the plugin's own writer."""
     _rejects("must match", stats=[{"id": "Codex A", "label": "x"}])
     _rejects("must match", stats=[{"id": "-lead", "label": "x"}])
     _ui(stats=[{"id": "codex-zhang0206", "label": "x"}, {"id": "a_b-1", "label": "y"}])
@@ -173,9 +138,6 @@ def test_stat_card_duplicate_and_fields() -> None:
     _rejects("unknown field", stats=[{"id": "a", "label": "x", "icon": "zap"}])
     _rejects("expected a list", stats={"id": "a"})
     _rejects("expected an object", stats=["a"])
-
-
-# ── the closed sets are closed ─────────────────────────────────────────
 
 
 def test_unknown_contribution_type_fails() -> None:
@@ -196,11 +158,7 @@ def test_unknown_theme_token_fails() -> None:
 
 
 def test_non_themable_token_fails() -> None:
-    """`--radius` is layout geometry, not a color — a skin may not move it."""
     _rejects("not themable", themes=[{"name": "x", "tokens": {"--radius": "2rem"}}])
-
-
-# ── values are values, never CSS ───────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -239,9 +197,6 @@ def test_color_literal_forms_accepted(value: str) -> None:
     assert cast(list[dict[str, Any]], parsed["themes"])[0]["tokens"]["--background"] == value
 
 
-# ── paths name a place inside the plugin's own mount ───────────────────
-
-
 @pytest.mark.parametrize(
     "path",
     ["/absolute", "../escape", "a/../b", "http://evil.example/x", "a\\b", "a/b?c=1", "a/b#frag"],
@@ -256,9 +211,6 @@ def test_source_path_must_stay_under_the_mount(path: str) -> None:
 @pytest.mark.parametrize("path", ["board/", "api/inspect", "x", "a/b/c.html", "a-b_c.~1"])
 def test_mount_relative_paths_accepted(path: str) -> None:
     _ui(agentInspect=[{"title": "T", "source": path, "render": "markdown"}])
-
-
-# ── entry shape ────────────────────────────────────────────────────────
 
 
 def test_missing_and_unknown_entry_fields_fail() -> None:
@@ -304,7 +256,6 @@ def test_empty_token_pack_fails() -> None:
 
 
 def test_every_problem_is_reported_at_once() -> None:
-    """One report, like the rest of the manifest validator."""
     with pytest.raises(ManifestError) as exc:
         _ui(
             agentInspect=[{"title": "", "source": "../x", "render": "chart"}],

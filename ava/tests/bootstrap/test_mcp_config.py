@@ -1,15 +1,3 @@
-"""`ava.mcps.config` — the shared MCP config loader.
-
-Covers the three concerns the loader factors out of the two `_load_config`
-call sites: reading one file's `mcpServers` section (with fail-fast on bad
-input), discovering plugin-bundled `.mcp.json`, and merging plugin defaults
-under the machine config (machine wins on a name collision).
-
-`unit_home` points `ava_home()` (and therefore `plugins_dir()`) at a tmp dir.
-Merge/precedence tests monkeypatch `plugin_config_paths` so they are isolated
-from whatever the real repo `plugins/` ship.
-"""
-
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -27,14 +15,8 @@ def _write(path: Path, servers: dict[str, dict[str, str]]) -> None:
     path.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
 
 
-# ─── machine_config_path ─────────────────────────────────────────────────
-
-
 def test_machine_config_path_uses_ava_home(unit_home: Path) -> None:
     assert cfg_mod.machine_config_path() == unit_home / "mcp.json"
-
-
-# ─── read_servers ────────────────────────────────────────────────────────
 
 
 def test_read_servers_empty_when_no_file(tmp_path: Path) -> None:
@@ -42,7 +24,6 @@ def test_read_servers_empty_when_no_file(tmp_path: Path) -> None:
 
 
 def test_read_servers_empty_when_no_section(tmp_path: Path) -> None:
-    """A generic settings file lacking `mcpServers` contributes nothing."""
     p = tmp_path / "mcp.json"
     p.write_text(json.dumps({"other": {}}), encoding="utf-8")
     assert cfg_mod.read_servers(p) == {}
@@ -62,7 +43,6 @@ def test_read_servers_raises_on_bad_json(tmp_path: Path) -> None:
 
 
 def test_read_servers_raises_when_section_not_dict(tmp_path: Path) -> None:
-    """`mcpServers` present but not an object → fail fast, don't silently empty."""
     p = tmp_path / "mcp.json"
     p.write_text(json.dumps({"mcpServers": [1, 2, 3]}), encoding="utf-8")
     with pytest.raises(cfg_mod.MCPError, match="mcpServers field is not a dict"):
@@ -70,7 +50,6 @@ def test_read_servers_raises_when_section_not_dict(tmp_path: Path) -> None:
 
 
 def test_read_servers_raises_when_top_level_not_object(tmp_path: Path) -> None:
-    """Valid JSON but not an object (e.g. a list) → MCPError, not a raw AttributeError."""
     p = tmp_path / "mcp.json"
     p.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
     with pytest.raises(cfg_mod.MCPError, match="is not a JSON object"):
@@ -78,30 +57,20 @@ def test_read_servers_raises_when_top_level_not_object(tmp_path: Path) -> None:
 
 
 def test_read_servers_empty_when_section_null(tmp_path: Path) -> None:
-    """Explicit `"mcpServers": null` reads as "no servers" (same as omitting it) —
-    the section is optional, so null collapses to empty rather than raising."""
     p = tmp_path / "mcp.json"
     p.write_text(json.dumps({"mcpServers": None}), encoding="utf-8")
     assert cfg_mod.read_servers(p) == {}
 
 
-# ─── plugin_config_paths (discovery) ────────────────────────────────────
-
-
 def test_plugin_config_paths_finds_installed_plugin(unit_home: Path) -> None:
-    """An installed plugin's `.mcp.json` under `$AVA_HOME/plugins/<name>/` is discovered."""
     mcp_json = unit_home / "plugins" / "myplugin" / ".mcp.json"
     _write(mcp_json, {"fs": {"command": "x"}})
     assert mcp_json in cfg_mod.plugin_config_paths()
 
 
 def test_plugin_config_paths_ignores_plugin_without_mcp_json(unit_home: Path) -> None:
-    """A plugin dir with no `.mcp.json` contributes no path."""
     (unit_home / "plugins" / "noplugin").mkdir(parents=True)
     assert all(p.parent.name != "noplugin" for p in cfg_mod.plugin_config_paths())
-
-
-# ─── load_mcp_config (merge + precedence) ────────────────────────────────
 
 
 def test_load_empty_when_nothing_configured(
@@ -132,8 +101,6 @@ def test_load_returns_plugin_servers_when_no_machine_config(
 def test_machine_overrides_plugin_on_name_collision(
     unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A machine entry wins over a plugin's same-named default; non-colliding
-    plugin servers still surface."""
     plugin_json = tmp_path / "plugin" / ".mcp.json"
     _write(plugin_json, {"fs": {"command": "plugin"}, "extra": {"command": "p"}})
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
@@ -147,7 +114,6 @@ def test_machine_overrides_plugin_on_name_collision(
 def test_later_plugin_overrides_earlier(
     unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Within plugin paths, later entries override earlier ones (apply order)."""
     first = tmp_path / "a" / ".mcp.json"
     second = tmp_path / "b" / ".mcp.json"
     _write(first, {"fs": {"command": "first"}})
@@ -160,40 +126,27 @@ def test_later_plugin_overrides_earlier(
 def test_builtin_mcps_folder_surfaces_chrome(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The repo's mcps/chrome/.mcp.json is scanned as a built-in source."""
     monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     merged = cfg_mod.load_mcp_config()
     assert "chrome" in merged
-    # chrome is served through our per-agent bridge (services.desktop.browser.mcp_wrapper),
-    # which dials the shared chrome MCP daemon's socket (no args: the socket + CDP
-    # port are derived from settings). The interpreter is launched directly by a
-    # relative path — never `uv run`, which would hang a resident wrapper process
-    # on every agent; it resolves because built-ins are spawned with cwd=repo root.
     assert merged["chrome"]["command"] == ".venv/bin/python"
     assert "services.desktop.browser.mcp_wrapper" in merged["chrome"]["args"]
     assert merged["chrome"]["requires"] == {"display": True}
 
 
 def test_builtin_command_is_not_uv(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No built-in server may launch through `uv run` — one resident uv wrapper
-    process per agent per server is pure overhead at high agent density."""
     monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     for name, spec in cfg_mod.load_mcp_config().items():
         assert spec["command"] != "uv", f"built-in {name} still launches via uv"
 
 
 def test_machine_config_overrides_builtin(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A machine mcp.json entry wins over a same-named built-in."""
     monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     _write(unit_home / "mcp.json", {"chrome": {"command": "OVERRIDE"}})
     assert cfg_mod.load_mcp_config()["chrome"] == {"command": "OVERRIDE"}
 
 
-# ─── installed layer ($AVA_HOME/mcps/, registry-gated) ───────────────────
-
-
 def _install_mcp(home: Path, name: str, spec: dict[str, Any]) -> Path:
-    """Register a `type="mcp"` package and write its `$AVA_HOME/mcps/<name>/.mcp.json`."""
     from base.packages.extensions import install_registry as reg
 
     dest = home / "mcps" / name
@@ -215,7 +168,6 @@ def test_installed_mcp_surfaces_when_registered(
 def test_installed_mcp_ignored_without_registry_row(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A stray dir under the load dir with no `type="mcp"` registry row is not loaded."""
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     _write(unit_home / "mcps" / "stray" / ".mcp.json", {"stray": {"command": "x"}})
@@ -223,7 +175,6 @@ def test_installed_mcp_ignored_without_registry_row(
 
 
 def test_machine_overrides_installed(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Machine config is the top layer: it wins over a same-named installed server."""
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     _install_mcp(unit_home, "acme", {"command": "installed"})
@@ -234,7 +185,6 @@ def test_machine_overrides_installed(unit_home: Path, monkeypatch: pytest.Monkey
 def test_installed_overrides_plugin(
     unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Installed layer sits above plugin: an installed server wins over a same-named plugin one."""
     plugin_json = tmp_path / "plugin" / ".mcp.json"
     _write(plugin_json, {"acme": {"command": "plugin"}})
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
@@ -243,33 +193,22 @@ def test_installed_overrides_plugin(
     assert cfg_mod.load_mcp_config()["acme"] == {"command": "installed"}
 
 
-# ─── installed_mcp_dir (subprocess cwd) ──────────────────────────────────
-
-
 def test_installed_mcp_dir_returns_load_dir(unit_home: Path) -> None:
     dest = _install_mcp(unit_home, "acme", {"command": ".venv/bin/python"})
     assert cfg_mod.installed_mcp_dir("acme") == dest
 
 
 def test_installed_mcp_dir_none_for_builtin(unit_home: Path) -> None:
-    """A built-in / unknown server has no install dir — cwd stays the daemon's."""
     assert cfg_mod.installed_mcp_dir("chrome") is None
 
 
 def test_installed_mcp_dir_none_when_machine_shadows(unit_home: Path) -> None:
-    """When a machine entry shadows an installed server, the effective server is the
-    machine one (spawned from the daemon cwd), so no install dir is returned."""
     _install_mcp(unit_home, "acme", {"command": ".venv/bin/python"})
     _write(unit_home / "mcp.json", {"acme": {"command": "machine"}})
     assert cfg_mod.installed_mcp_dir("acme") is None
 
 
-# ─── server_cwd (spawn cwd by winning layer) ─────────────────────────────
-
-
 def test_server_cwd_builtin_is_repo_root(unit_home: Path) -> None:
-    """Built-ins are pinned to the repo root so their relative `.venv/bin/python`
-    resolves to the repo venv and `-m <pkg>` finds repo top-level packages."""
     from base.paths import repo_root
 
     assert cfg_mod.server_cwd("chrome") == repo_root()
@@ -281,7 +220,6 @@ def test_server_cwd_installed_is_package_dir(unit_home: Path) -> None:
 
 
 def test_server_cwd_machine_entry_is_none(unit_home: Path) -> None:
-    """A machine entry carries the user's own command line — don't reinterpret it."""
     _write(unit_home / "mcp.json", {"solo": {"command": "npx"}})
     assert cfg_mod.server_cwd("solo") is None
 
@@ -304,21 +242,16 @@ def test_server_cwd_unknown_is_none(unit_home: Path) -> None:
     assert cfg_mod.server_cwd("nosuchserver") is None
 
 
-# ─── assert_requirements ─────────────────────────────────────────────────
-
-
 def test_assert_requirements_noop_without_requires() -> None:
-    cfg_mod.assert_requirements({"command": "x"}, host=fake_host())  # no raise
+    cfg_mod.assert_requirements({"command": "x"}, host=fake_host())
 
 
 def test_assert_requirements_display_ok_with_display(monkeypatch: pytest.MonkeyPatch) -> None:
-    # display_available is imported into cfg_mod from base.host.system.probes;
-    # patch the bound name (where assert_requirements calls it).
     def fake_display_available(*, host: Host) -> bool:
         return True
 
     monkeypatch.setattr(cfg_mod, "display_available", fake_display_available)
-    cfg_mod.assert_requirements({"requires": {"display": True}}, host=fake_host())  # no raise
+    cfg_mod.assert_requirements({"requires": {"display": True}}, host=fake_host())
 
 
 def test_assert_requirements_display_raises_without_display(
@@ -335,9 +268,6 @@ def test_assert_requirements_display_raises_without_display(
 def test_assert_requirements_unknown_key_fails_fast() -> None:
     with pytest.raises(cfg_mod.MCPError, match="unknown requires key"):
         cfg_mod.assert_requirements({"requires": {"gpu": True}}, host=fake_host())
-
-
-# ─── server_capability ───────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -402,11 +332,7 @@ def test_server_capability_ok_when_host_has_a_display(monkeypatch: pytest.Monkey
     )
 
 
-# ─── server_url ──────────────────────────────────────────────────────────
-
-
 def test_server_url_none_for_stdio_server() -> None:
-    """A command-based server has no url — transport stays stdio."""
     assert cfg_mod.server_url({"command": "npx", "args": ["-y", "x"]}) is None
     assert cfg_mod.server_url({}) is None
 
@@ -419,7 +345,6 @@ def test_server_url_accepts_https_endpoint() -> None:
 
 
 def test_server_url_rejects_non_http_url() -> None:
-    """Fail fast on a url that is not http(s) — never hand it to a transport."""
     with pytest.raises(cfg_mod.MCPError, match=r"http\(s\) endpoint"):
         cfg_mod.server_url({"url": "file:///tmp/x"})
     with pytest.raises(cfg_mod.MCPError, match=r"http\(s\) endpoint"):
@@ -427,7 +352,6 @@ def test_server_url_rejects_non_http_url() -> None:
 
 
 def test_server_url_rejects_url_plus_command() -> None:
-    """A server is either local stdio or remote HTTP — never both."""
     with pytest.raises(cfg_mod.MCPError, match="both 'url' and 'command'"):
         cfg_mod.server_url({"url": "https://mcp.example.com/mcp", "command": "npx"})
 
@@ -449,7 +373,6 @@ def test_server_url_accepts_string_headers() -> None:
 
 
 def test_server_url_accepts_oauth_flag() -> None:
-    """`"oauth": true` is a legal remote-server auth mode."""
     assert (
         cfg_mod.server_url({"url": "https://mcp.example.com/mcp", "oauth": True})
         == "https://mcp.example.com/mcp"
@@ -462,7 +385,6 @@ def test_server_url_rejects_non_bool_oauth() -> None:
 
 
 def test_server_url_rejects_oauth_plus_headers() -> None:
-    """Static headers and the OAuth flow are two auth modes — pick one."""
     with pytest.raises(cfg_mod.MCPError, match="pick one auth mode"):
         cfg_mod.server_url(
             {"url": "https://mcp.example.com/mcp", "oauth": True, "headers": {"k": "v"}}
@@ -472,11 +394,6 @@ def test_server_url_rejects_oauth_plus_headers() -> None:
 def test_builtin_mcps_folder_surfaces_computer_use(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The repo's mcps/computer_use/.mcp.json is scanned as a built-in source.
-
-    The computer_use server is fronted the same way as chrome: shared="computer_use"
-    tells the MCP daemon to dial the per-machine computer-mcp service directly,
-    and the wrapper command supports older daemons."""
     monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     merged = cfg_mod.load_mcp_config()
     assert "computer_use" in merged

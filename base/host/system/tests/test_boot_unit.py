@@ -1,5 +1,3 @@
-"""Linux native boot ownership, rendering and direct root adoption."""
-
 from __future__ import annotations
 
 import subprocess
@@ -57,18 +55,13 @@ def ctx(tmp_path: Path) -> BootUnitContext:
     return _context(tmp_path)
 
 
-# --- rendering ---------------------------------------------------------------
-
-
 def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
     unit = render_unit(ctx)
-    # systemd is the retry supervisor: retry on failure, a finite attempt budget, one
-    # bounded attempt -- the platform-agnostic policy of base/host/system/boot_policy.py.
     assert "Restart=on-failure" in unit
     assert f"RestartSec={BOOT_RETRY_INTERVAL_S}" in unit
     assert f"StartLimitBurst={BOOT_MAX_ATTEMPTS}" in unit
     assert f"StartLimitIntervalSec={START_LIMIT_INTERVAL_S}" in unit
-    assert "StartLimitIntervalSec=0" not in unit  # 0 disables the limit: unbounded restarts
+    assert "StartLimitIntervalSec=0" not in unit
     assert "start" in unit and '"--boot"' in unit
     assert f"TimeoutStartSec={START_TIMEOUT_S}" in unit
     assert "RuntimeMaxSec" not in unit
@@ -79,20 +72,15 @@ def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
 
 def test_render_unit_binds_home_and_checkout(ctx: BootUnitContext) -> None:
     unit = render_unit(ctx)
-    # Boot ordering + identity: the unit runs as the cluster's user, in the
-    # checkout, with the checkout venv on PATH.
     assert "After=network-online.target\n" in unit
     assert "WantedBy=multi-user.target" in unit
     assert f"User={ctx.user}" in unit and f"Group={ctx.group}" in unit
     assert f"WorkingDirectory={ctx.repo}" in unit
-    # Verified on systemd 255: quotes would become part of the path (fatal),
-    # while the literal rest-of-line form keeps spaces working.
     assert f'WorkingDirectory="{ctx.repo}"' not in unit
     assert f'Environment="AVA_HOME={ctx.home}"' in unit
     assert "AVA_HOST_STATE_DIR" not in unit
     assert f'Environment="HOME={ctx.home_dir}"' in unit
     assert f'Environment="PATH={ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"' in unit
-    # `:` disables $-expansion in the Exec line; the script path is quoted.
     assert f'ExecStart=:"{ctx.repo}/.venv/bin/python" "-m" "cli.main" "start"' in unit
 
 
@@ -111,9 +99,6 @@ def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
         render_unit(bad)
 
 
-# --- detection ---------------------------------------------------------------
-
-
 def test_systemd_running_requires_linux_systemctl_and_the_runtime_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -122,8 +107,6 @@ def test_systemd_running_requires_linux_systemctl_and_the_runtime_dir(
     assert systemd_running(host=_linux()) is False
     linux = fake_host(platform=LINUX_X86, programs=programs)
 
-    # /run/systemd/system is the booted-with-systemd marker; pin the path probe
-    # rather than the host so the test reads the same on macOS and in CI.
     def fake_path(_p: str) -> types.SimpleNamespace:
         return types.SimpleNamespace(is_dir=lambda: True)
 
@@ -139,21 +122,15 @@ def test_unit_enabled_reads_the_one_systemctl_seam(monkeypatch: pytest.MonkeyPat
     assert unit_enabled(host=host) is True
     assert commands.argvs == [("systemctl", "is-enabled", "ava-boot.service")]
 
-    # Anything but the literal word "enabled" is not ownership.
     assert unit_enabled(host=host) is False
-    # A host without systemd can never have an enabled unit.
     monkeypatch.setattr(boot_unit, "systemd_running", _systemd_down)
     assert unit_enabled(host=host) is False
     assert len(commands.calls) == 2
 
 
-# --- install / uninstall / status --------------------------------------------
-
-
 def _install_seams(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, enabled: bool
 ) -> tuple[list[list[str]], dict[str, str]]:
-    """Patch the module's seams so install never touches the real host."""
     monkeypatch.setattr(boot_unit, "systemd_running", _systemd_up)
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", tmp_path / "etc-systemd")
 
@@ -172,7 +149,6 @@ def _install_seams(
     ) -> subprocess.CompletedProcess[str]:
         recorded.append(argv)
         if argv and argv[0] == "install":
-            # The unit file travels as a temp holder; capture what was written.
             installed["destination"] = argv[-1]
             installed["content"] = Path(argv[-2]).read_text()
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -212,7 +188,6 @@ def test_uninstall_removes_only_the_boot_units_paths(
     unit.write_text(render_unit(ctx))
     foreign = units / "unrelated.service"
     foreign.write_text("y")
-    # The egress template unit of the gateway host is not ours, and is named in no command.
     template = units / "ava-gateway-egress@.service"
     template.write_text("z")
     steps = uninstall(host=_linux())
@@ -220,17 +195,14 @@ def test_uninstall_removes_only_the_boot_units_paths(
     assert ["systemctl", "disable", "--now", "ava-boot.service"] in recorded
     assert ["rm", "-f", str(unit)] in recorded
     assert ["systemctl", "daemon-reload"] in recorded
-    # Only the exact path; a sibling unit is in no command.
     assert str(foreign) not in str(recorded) and "ava-gateway-egress" not in str(recorded)
     assert foreign.exists() and template.exists()
     assert steps == [f"removed {unit}"]
 
-    # Nothing left to remove -> a no-op (the mocked `rm -f` never ran for real).
     unit.unlink()
     before = list(recorded)
     assert uninstall(host=_linux()) == []
     assert recorded == before
-    # A non-Linux host never touches /etc, whatever is on disk.
     unit.write_text(render_unit(ctx))
     assert uninstall(host=fake_host(platform=DARWIN_ARM64)) == []
     assert unit.exists()
@@ -239,7 +211,6 @@ def test_uninstall_removes_only_the_boot_units_paths(
 def _manager_reports(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, active_state: str
 ) -> tuple[Path, list[list[str]]]:
-    """A systemd host whose manager reports `active_state` for the boot unit."""
     units = tmp_path / "etc-systemd"
     units.mkdir(exist_ok=True)
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", units)
@@ -271,8 +242,6 @@ def _manager_reports(
 def test_uninstall_leaves_no_failed_record_behind(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A boot unit whose stop failed stays listed as `not-found failed` after its
-    file is removed and the manager reloaded (A/B/A run 6's destroy)."""
     units, recorded = _manager_reports(monkeypatch, tmp_path, "failed")
     name = "ava-boot.service"
     (units / name).write_text(render_unit(ctx))
@@ -282,8 +251,7 @@ def test_uninstall_leaves_no_failed_record_behind(
     reset = ["systemctl", "reset-failed", name]
     assert recorded.index(["systemctl", "daemon-reload"]) < recorded.index(reset)
     assert steps[-1] == f"cleared the failed record of {name}"
-    # A residue a previous destroy left (no file any more) is cleared too.
-    (units / name).unlink()  # what the mocked `rm -f` would have done
+    (units / name).unlink()
     recorded.clear()
     assert uninstall(host=_linux()) == [f"cleared the failed record of {name}"]
     assert recorded == [reset]
@@ -298,8 +266,6 @@ def test_uninstall_resets_nothing_it_did_not_leave_failed(
 
 
 def test_privileged_translates_a_missing_sudo() -> None:
-    """A host without sudo must fail actionably (RuntimeError with guidance),
-    not surface a raw FileNotFoundError traceback through the CLI wrappers."""
     commands = FakeCommands()
     commands.on("sudo", FileNotFoundError(2, "No such file or directory", "sudo"))
 
@@ -317,8 +283,6 @@ def test_privileged_runs_a_root_command_directly_and_others_through_sudo() -> No
 
 
 def test_the_boot_unit_carries_no_home() -> None:
-    """One unit per host: its name and path name no home, so the gate of
-    `owns_os_jobs` is what keeps a scratch home off it."""
     assert boot_unit.UNIT_NAME == "ava-boot.service"
     assert boot_unit.unit_path() == boot_unit.SYSTEM_UNIT_DIR / "ava-boot.service"
 
@@ -374,7 +338,7 @@ def test_root_publication_binds_native_custody(
     path = boot_unit.root_pid_path(ctx.home)
     if fault == "none":
         path.parent.mkdir(parents=True)
-        path.write_text("999999\n")  # A stale hint is replaced, never adopted as authority.
+        path.write_text("999999\n")
         boot_unit.publish_root_ready(ctx.home, owner, host=_linux())
         assert path.read_text() == "123\n"
         assert path.stat().st_mode & 0o777 == 0o600

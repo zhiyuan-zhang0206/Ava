@@ -78,3 +78,7 @@ The isolated `dataplane/tests/_orphan_owner_child.py` takes a throwaway base
 and URL-file path, then waits for its parent to kill it. It retains the entered
 context manager as `cm`: dropping that reference can finalize the generator
 and run teardown, invalidating the orphan-sweep scenario before owner death.
+
+The scripted connection in `base/cluster/tests/test_cluster_provision.py` lets
+only its owner thread consume rows; bystander threads receive inert connections.
+The patch is process-wide, so unrelated dials must not advance the test script.

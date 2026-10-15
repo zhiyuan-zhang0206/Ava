@@ -1,13 +1,3 @@
-"""Retention: nothing is deleted unless the audited dry run is structurally safe.
-
-`fixtures/retention-dry-run.log` is what a real WAL-G v3.0.9 printed for `delete retain
-FULL 2 --use-sentinel-time` over `fixtures/backup-list.json` (three full backups and an
-increment of the first): it marks the oldest full backup, its increment and the WAL
-before the second full backup. The WAL lines are cut to a handful of the 543 and the
-count recomputed; every other line is verbatim. The tests that drive `apply_retention`
-add a newer full backup so that more than the retained number exist.
-"""
-
 from __future__ import annotations
 
 import re
@@ -40,7 +30,6 @@ PLANNED = parse_marked(WalgOutput(stdout="", stderr=DRY_RUN), retention.DRY_RUN_
 
 
 def _confirm_log() -> str:
-    """The log of the same run with `--confirm`: the same lines, a different last one."""
     lines = [line for line in DRY_RUN.splitlines() if "Dry run:" not in line]
     return "\n".join([*lines, f"INFO: Objects deleted successfully: count={len(PLANNED)}"]) + "\n"
 
@@ -63,9 +52,6 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     box.put("delete-dry.log", DRY_RUN)
     box.put("delete-confirm.log", _confirm_log())
     return box
-
-
-# ── reading WAL-G's log ──────────────────────────────────────────────────────
 
 
 def test_the_real_dry_run_lists_the_expiring_backups_and_wal() -> None:
@@ -108,9 +94,6 @@ def test_no_marked_objects_is_an_empty_plan() -> None:
         parse_marked(WalgOutput(stdout="", stderr="INFO: Start delete\n"), retention.DRY_RUN_COUNT)
         == []
     )
-
-
-# ── the three invariants ─────────────────────────────────────────────────────
 
 
 def test_the_real_dry_run_satisfies_every_invariant() -> None:
@@ -194,9 +177,6 @@ def test_the_chain_rule_alone_already_refuses_a_plan_that_expires_every_full_bac
 
     with pytest.raises(RetentionAbortedError, match="newest backup depends on"):
         assert_invariants(every_sentinel, listed)
-
-
-# ── the whole procedure ──────────────────────────────────────────────────────
 
 
 def test_a_safe_plan_is_audited_then_confirmed(sandbox: Sandbox) -> None:

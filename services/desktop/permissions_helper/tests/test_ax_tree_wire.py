@@ -1,10 +1,3 @@
-"""The `ax_tree` wire contract between client.py and helper/main.swift.
-
-The live accessibility walk needs a desktop and a granted helper; these tests
-pin the request shape the client sends and the guard rails the Swift source
-must keep (grant gate, capability bit, bounded walk, secure fields).
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,8 +9,6 @@ _SWIFT = (Path(__file__).parents[1] / "helper" / "main.swift").read_text()
 
 
 class _RecordingHelper(PermissionsHelperClient):
-    """The real client with its socket exchange replaced by a record of the requests."""
-
     def __init__(self) -> None:
         super().__init__("/unused.sock")
         self.seen: list[tuple[str, dict[str, Any]]] = []
@@ -83,7 +74,6 @@ def test_swift_ax_act_gates_validates_and_never_echoes_the_value() -> None:
     assert 'case "ax_act": result = try axAct(req)' in _SWIFT
     assert '"ax_act_v1": true' in _SWIFT
     act = _SWIFT.split("func axAct(", 1)[1].split("// MARK: - Root keeper", 1)[0]
-    # A recycled or vanished element answers stale instead of being acted on.
     assert "axSignature(role: role, values: values) == entry.sig" in act
     assert "AXUIElementIsAttributeSettable" in act
     assert "AXUIElementSetMessagingTimeout" in act
@@ -95,7 +85,7 @@ def test_swift_fingerprints_exclude_values_and_chain_from_the_parent() -> None:
     assert 'ordinalKey = parentFp + "/" + segment' in walk
     assert "siblingCounts[ordinalKey" in walk
     discriminator = _SWIFT.split("private func axDiscriminator", 1)[1].split("private func", 1)[0]
-    assert "values[4]" not in discriminator  # index 4 is the value attribute
+    assert "values[4]" not in discriminator
 
 
 def test_swift_enables_chromium_accessibility_narrowly() -> None:
@@ -103,10 +93,10 @@ def test_swift_enables_chromium_accessibility_narrowly() -> None:
         "private func axPickWindow", 1
     )[0]
     assert '"AXManualAccessibility" as CFString' in enable
-    assert "axEnabledPids.contains(pid)" in enable  # sticky: no second set, no second wait
-    assert '"AXEnhancedUserInterface"' not in _SWIFT  # VoiceOver's switch; changes native windows
+    assert "axEnabledPids.contains(pid)" in enable
+    assert '"AXEnhancedUserInterface"' not in _SWIFT
     walk = _SWIFT.split("func axTree(", 1)[1].split("func axAct(", 1)[0]
-    assert '!framework.isEmpty && req["scope"] == nil' in walk  # only unscoped, only Chromium
+    assert '!framework.isEmpty && req["scope"] == nil' in walk
     assert 'req["enable_ax"] as? Bool ?? true' in walk and '"off"' in walk
     for name in ('"chromium"', '"electron"', '"cef"'):
         markers = _SWIFT.split("private let axTreeFrameworkMarkers", 1)[1].split("\n]", 1)[0]

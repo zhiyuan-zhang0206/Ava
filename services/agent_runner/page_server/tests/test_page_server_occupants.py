@@ -1,11 +1,3 @@
-"""The page-server occupant scan survives a process-table read failure.
-
-`page_server_occupants` maps live page-server processes by port before every
-reconcile pass; one process whose cmdline read raises must be skipped, not
-abort the pass (task #4964 — the psutil 7.2.2 macOS cmdline read raised
-SystemError mid-iteration and killed the whole round).
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -18,13 +10,8 @@ import services.agent_runner.page_server.daemon as psd
 def test_occupants_skips_a_process_whose_cmdline_read_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A cmdline read that raises skips that process, not the scan: the other
-    occupants still report."""
 
     class _ReadFails:
-        """Unreadable through both the attrs shape and the direct read, so a
-        regression to `process_iter(attrs)` stays caught."""
-
         pid = 424242
 
         @property

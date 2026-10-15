@@ -1,10 +1,3 @@
-"""The host's bare `ava`: a plain link to the production checkout's CLI.
-
-A production home's converge points `~/.local/bin/ava` at `<checkout>/.venv/bin/ava`
-and writes no per-home CLI link; the home a run acts on is `AVA_HOME`, else
-`~/.ava`, like every CLI. Until a home's first start has run, the hints name the
-checkout's own CLI."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -20,8 +13,6 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-# The converge step through which a first start (`_prepare_cold_start`) wires the
-# CLI, taken from CONVERGE_STEPS with its real host-global gating.
 _CLI_LINK_STEPS = tuple(step for step in converge_host.CONVERGE_STEPS if step.name == "ava on PATH")
 
 
@@ -35,7 +26,6 @@ def _first_start_converge(
     producer: Callable[[], EventPipeline],
     command_runtime: CommandRuntime,
 ) -> tuple[Path, Path, Path]:
-    """Run a scratch home's first-start CLI wiring; returns (checkout, home, bare link)."""
     user_home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(user_home))
     ava_home = user_home / ".ava" if prod else user_home / ".ava-preview"
@@ -87,7 +77,6 @@ def test_prod_start_repoints_the_retired_launcher_link(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A host wired by the launcher is rewritten by its next start, with no manual step."""
     retired = tmp_path / "home" / ".ava" / "source" / "scripts" / "ava-launcher.sh"
     checkout, _, bare_link = _first_start_converge(
         tmp_path,

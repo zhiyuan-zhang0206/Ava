@@ -1,5 +1,3 @@
-"""Fakes and builders shared by the reply-suggestion tests."""
-
 from __future__ import annotations
 
 import json
@@ -48,8 +46,6 @@ def useful_reply(probability: float) -> Mapping[str, Decision]:
 
 
 class Settings:
-    """Mutable stand-ins for the live settings the policy reads."""
-
     def __init__(self) -> None:
         self.enabled = True
         self.model = "chat-model"
@@ -68,8 +64,6 @@ class Settings:
 
 
 class FakeDecide:
-    """Records every call; answers with `result` or raises `error`."""
-
     def __init__(self, result: Mapping[str, Decision] | None = None) -> None:
         self.result = result if result is not None else useful_reply(0.9)
         self.error: Exception | None = None
@@ -85,8 +79,6 @@ class FakeDecide:
 
 
 class FakeChat:
-    """A structured chat double recording schema bindings and model messages."""
-
     def __init__(
         self,
         reply: str = '{"suggestions": ["Yes, go ahead.", "Wait, explain the plan first."]}',
@@ -120,8 +112,6 @@ class FakeChat:
 
 
 class Harness:
-    """A service wired to fakes, with handles to every collaborator."""
-
     def __init__(self, catalog: ModelCatalog) -> None:
         self.settings = Settings()
         self.decide = FakeDecide()

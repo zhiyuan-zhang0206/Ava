@@ -1,28 +1,3 @@
-"""Validation for deploy/lgtm/config/grafana/provisioning/alerting/rules.yml — the Grafana alert rules.
-
-The two rule groups moved from the retired Postgres events read path to the
-LGTM read side (Task #1224): R1-R2, R5-R7 query Loki (the events stream as
-OTLP logs under {service_name="unknown_service"} with event_name/agent_id
-promoted to stream labels since the 2026-08-23 cutover (Task #1467); event
-filters live in the stream selector, `| json` flattens each line for the
-level/category/attributes filters). R4, the gateway-metrics silence rule, and
-the watchdog-tick staleness rule query Prometheus.
-Keeps the rules in sync with the emitter's LogQL/OTLP contract.
-
-R8-R12 (issue #46) are the infrastructure layer and query a DIFFERENT
-Prometheus family: series the per-machine OTel Collector sidecar scrapes
-(host_metrics / postgresql / redis), labelled with both the OS `host` and Ava
-roster `machine_name`; rules group by `machine_name`. The metric names asserted
-below were read off a live Prometheus 3.13.2 — the OTLP-to-
-Prometheus translation adds unit suffixes (`_ratio`, `_bytes`) and `_total` on
-monotonic counters, so they cannot be derived from the OTLP names by eye.
-R14-R16 are the collector delivery layer: current queue pressure, NEW enqueue
-failures in a bounded window, and a recently-seen machine whose collector stopped
-reporting. They use the collector's own Prometheus endpoint, scraped by that
-same sidecar and relayed with the infrastructure pipeline.
-R24 reads the receiving Prometheus's own too-old-samples counter.
-"""
-
 from __future__ import annotations
 
 import re
@@ -44,7 +19,6 @@ RULES = (
 )
 
 _EXPECTED_UIDS = {
-    # application layer — Loki event stream + the LLM latency histogram
     "ava-ops-warning-error-spike",
     "ava-ops-llm-rate-limit",
     "ava-ops-sse-drop-backlog",
@@ -61,13 +35,11 @@ _EXPECTED_UIDS = {
     "ava-ops-checkpoint-blobs-growth",
     "ava-ops-trace-disk-watermark",
     "ava-ops-llm-billing-quota",
-    # slow-request layer (task #1399) — user-visible latency, warning-first
     "ava-ops-gateway-latency-route-warning",
     "ava-ops-gateway-latency-route-error",
     "ava-ops-turn-duration-p95",
     "ava-ops-gw-latency-slow-warning",
     "ava-ops-gw-latency-slow-error",
-    # infrastructure layer (issue #46) — the sidecar's own scrapes
     "ava-ops-host-cpu-saturated",
     "ava-ops-host-memory-pressure",
     "ava-ops-host-disk-watermark",
@@ -75,26 +47,17 @@ _EXPECTED_UIDS = {
     "ava-ops-host-disk-watermark-95",
     "ava-ops-pg-connection-saturation",
     "ava-ops-redis-memory",
-    # collector delivery layer
     "ava-ops-otelcol-queue-pressure",
     "ava-ops-otelcol-enqueue-failures",
     "ava-ops-otelcol-host-silent",
-    # Prometheus OTLP receiver loss (task #4650; focused test in cli/commands/observability/tests/test_lgtm_native.py)
     "ava-ops-prom-too-old-samples",
-    # memory-search growth layer (task #2088/#2090) — OTLP gauge mirror
     "ava-ops-memory-search-rows-warning",
     "ava-ops-memory-search-rows-critical",
-    # recovery posture — scheduled restore-drill failure
     "ava-ops-recovery-drill-failed",
     "ava-ops-backup-dump-failed",
-    # alerting stack health — remote Tempo scrape target (task #3330)
     "ava-ops-tempo-backend-down",
 }
 
-# The infra rules and the metric each one is built on. A rename on the
-# collector side (a receiver swap, a unit change that moves the Prometheus
-# suffix) silently turns a rule into a permanent NoData — which is invisible,
-# because noDataState is OK by design.
 INFRA_RULE_METRICS = {
     "ava-ops-host-cpu-saturated": "system_cpu_utilization_ratio",
     "ava-ops-host-memory-pressure": "system_memory_utilization_ratio",
@@ -124,7 +87,6 @@ def load_rules() -> list[dict[str, Any]]:
 
 
 def rule_query_exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:
-    """The expr strings of one rule's datasource queries (loki/prometheus)."""
     return [
         d["model"]["expr"]
         for d in rule["data"]
@@ -133,8 +95,6 @@ def rule_query_exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:
 
 
 def threshold_params(rule: dict[str, Any]) -> list[list[Any]]:
-    """Keyed on the node TYPE, not on a refId letter — the threshold node is
-    not always `D` and a letter-keyed lookup silently returns nothing."""
     return [
         d["model"]["conditions"][0]["evaluator"]["params"]
         for d in rule["data"]
@@ -148,12 +108,6 @@ def test_rules_have_expected_uids() -> None:
 
 
 def test_rule_uids_fit_grafana_40_char_limit() -> None:
-    """Grafana 13.1.3 rejects alert-rule UIDs longer than 40 chars and the
-    whole provisioning file fails to load — every rule disappears on the next
-    restart. 2026-08-25 incident: `ava-ops-gateway-latency-route-slow-warning`
-    (42 chars) broke Grafana startup after a rollout; the two slow-route UIDs
-    were renamed to `ava-ops-gw-latency-slow-*`. This lock keeps future
-    additions under the limit at review time instead of at deploy time."""
     for rule in load_rules():
         assert len(rule["uid"]) <= 40, (
             f"uid {rule['uid']!r} is {len(rule['uid'])} chars — Grafana caps "
@@ -179,12 +133,10 @@ def test_low_cost_rules_use_the_slow_group() -> None:
 
 
 def test_rules_never_query_postgres() -> None:
-    """The whole point of the migration: no rule may query the `ops` PG
-    datasource — the events-table read path is retired (#1197)."""
     for rule in load_rules():
         for d in rule["data"]:
             if d.get("datasourceUid") == "__expr__":
-                continue  # reduce/math/threshold nodes carry no datasource
+                continue
             assert d["datasourceUid"] in {"loki", "prometheus"}, (
                 f"{rule['uid']}: still queries {d['datasourceUid']!r}"
             )
@@ -195,8 +147,6 @@ def test_rules_never_query_postgres() -> None:
 
 
 def test_severity_is_critical_warning_error() -> None:
-    """severity must be one of critical/warning/error — the alert-system
-    vocabulary (Task #1224): all three push to IM, no gate."""
     for rule in load_rules():
         severity = rule["labels"].get("severity")
         assert severity in {"critical", "warning", "error"}, (
@@ -205,12 +155,6 @@ def test_severity_is_critical_warning_error() -> None:
 
 
 def test_loki_rules_match_event_labels_in_the_selector() -> None:
-    """Since the 2026-08-23 index-label cutover (Task #1467) event_name is a
-    promoted stream label: event-scoped rules must match it inside the stream
-    selector, BEFORE the `| json` stage — the pipeline stage stays for the
-    level/category/attributes filters only. (Legacy chunks without the index
-    labels expired after the cutover's grace (2026-08-26), so a pipeline-form
-    event filter would silently match nothing.)"""
     for rule in load_rules():
         for expr in rule_query_exprs(rule, "loki"):
             assert "| json" in expr, f"{rule['uid']}: no | json stage:\n{expr}"
@@ -218,8 +162,6 @@ def test_loki_rules_match_event_labels_in_the_selector() -> None:
             selector = expr.split("| json")[0]
             assert "{" in selector and "}" in selector
             pipeline = expr.split("| json")[1]
-            # event_name must never be filtered after the json stage; the only
-            # event_name tokens left there would be extracted-field leftovers.
             assert "event_name" not in pipeline, (
                 f"{rule['uid']}: event_name filter after | json (must be a "
                 f"stream-selector matcher):\n{expr}"
@@ -227,8 +169,6 @@ def test_loki_rules_match_event_labels_in_the_selector() -> None:
 
 
 def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
-    """The one LGTM host serves prod; co-located cluster events must never
-    affect its alerts, including the whole-stream freshness probe."""
     for rule in load_rules():
         for expr in rule_query_exprs(rule, "loki"):
             normalized = " ".join(expr.split())
@@ -248,8 +188,6 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
     ],
 )
 def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> None:
-    """The event_name matcher sits in the stream selector (before `| json`);
-    category stays a json-stage filter (it is not a stream label)."""
     rules = {r["uid"]: r for r in load_rules()}
     exprs = rule_query_exprs(rules[uid], "loki")
     assert any(event_filter in e for e in exprs)
@@ -261,11 +199,6 @@ def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> N
 
 
 def test_drop_backlog_rule_unwraps_payload_n() -> None:
-    """R2 must SUM payload.n — the REAL dropped-event count — not count
-    report rows: the publishers report rate-limited aggregates (every
-    5s / per flush) carrying the delta in n, so counting rows understates
-    the backlog by the aggregation factor (audit-round2 events-obs P1; the
-    retired ops_metrics rollup summed the same way)."""
     rules = {r["uid"]: r for r in load_rules()}
     exprs = rule_query_exprs(rules["ava-ops-sse-drop-backlog"], "loki")
     assert any("unwrap attributes_n" in e for e in exprs), (
@@ -275,22 +208,15 @@ def test_drop_backlog_rule_unwraps_payload_n() -> None:
 
 
 def test_level_rule_scopes_to_observability_categories() -> None:
-    """R1 (level-based) must scope to telemetry+log — audit rows are info-only
-    by construction and were never part of the old agent_events alert."""
     rules = {r["uid"]: r for r in load_rules()}
     exprs = rule_query_exprs(rules["ava-ops-warning-error-spike"], "loki")
     assert any('category=~"telemetry|log"' in e for e in exprs)
     assert any('level=~"warning|error|critical"' in e for e in exprs)
-    # the spike shape: current 5m vs prior-15m, offset window for the prior
     assert any("[5m]" in e for e in exprs)
     assert any("[15m] offset 5m" in e for e in exprs)
 
 
 def test_freshness_rule_is_absent_over_time() -> None:
-    """R6 (meta-observability) must probe the whole stream with
-    absent_over_time — the Postgres max(ts) freshness probe is retired with
-    the events table, and the rule now fires when no event of ANY kind
-    reached Loki in 5m (emitter stall or broken export path alike)."""
     rules = {r["uid"]: r for r in load_rules()}
     exprs = rule_query_exprs(rules["ava-ops-events-freshness"], "loki")
     assert any("absent_over_time" in e for e in exprs)
@@ -321,8 +247,6 @@ def test_events_low_water_rule_detects_partial_write_loss() -> None:
 
 
 def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
-    """The gateway-exporter blind spot is watched through Prometheus itself,
-    independently of events reaching Loki."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-gateway-metrics-silent"]
     assert rule_query_exprs(rule, "prometheus") == [
@@ -335,12 +259,6 @@ def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
 
 
 def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
-    """A live process is insufficient when its root round is wedged.
-
-    Keep the root home's ``machine`` / ``home_id`` / ``process`` dimensions through the
-    historical/current set subtraction so one silent gateway or runner is
-    named, while a retired root home naturally leaves the 24-hour set.
-    """
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-root-health-stale"]
     expr = rule_query_exprs(rule, "prometheus")[0]
@@ -357,9 +275,6 @@ def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
 
 
 def test_latency_rule_uses_prometheus_histogram() -> None:
-    """R4's p95 now comes from the OTLP metric mirror: histogram_quantile
-    over the ava_llm_usage_latency_ms histogram (the same read the Ops
-    panel uses), threshold 60000 ms."""
     rules = {r["uid"]: r for r in load_rules()}
     exprs = rule_query_exprs(rules["ava-ops-llm-latency-p95"], "prometheus")
     assert len(exprs) == 1
@@ -371,7 +286,6 @@ def test_latency_rule_uses_prometheus_histogram() -> None:
 
 
 def test_checkpoint_blobs_high_water_rules() -> None:
-    """OTLP table-size gauges warn before bloat reaches the disk emergency."""
     rules = {r["uid"]: r for r in load_rules()}
     expectations: dict[str, tuple[str, int, str]] = {
         "ava-ops-checkpoint-blobs-warning": (
@@ -409,13 +323,6 @@ def test_checkpoint_blobs_high_water_rules() -> None:
 
 
 def test_checkpoint_blobs_freshness_guard() -> None:
-    """The other half of the #4002 silent-NoData class (task #4004): when the
-    emitter stops, the size rules turn NoData and `noDataState: OK` keeps them
-    quiet — this rule is the one that fires on the silence itself. The 2h
-    window clears every daemon-restart gap in the retained history (<= 2h; one
-    8.5h outlier), samples otherwise refresh every export cycle (~15s), and
-    the name-level selector is immune to the per-restart instance label churn.
-    """
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-checkpoint-blobs-freshness"]
     exprs = rule_query_exprs(rule, "prometheus")
@@ -437,10 +344,6 @@ def test_checkpoint_blobs_freshness_guard() -> None:
 
 
 def test_checkpoint_blobs_growth_tier() -> None:
-    """The forward-looking tier (task #4005): the trailing-6h delta of the same
-    gauge, calibrated on the 2026-09-13/15 burst (quiet baseline within MB/6h,
-    peak +10.3 GiB/6h). Warn at +1 GiB/6h with a 1h hold; a vacuum/repack
-    shrink is a negative delta and stays resolved."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-checkpoint-blobs-growth"]
     exprs = rule_query_exprs(rule, "prometheus")
@@ -464,50 +367,22 @@ def test_checkpoint_blobs_growth_tier() -> None:
     assert "repack" in description
 
 
-# ─── metric-name contract (task #4002) ───────────────────────────────────────
-
-# The unit a payload field carries on export, as the Prometheus translation
-# renders it back into the series name: a dimensionless ("1") ObservableGauge
-# becomes `_ratio`; a counter/histogram states a non-"1" unit once. A counter
-# never doubles a `_total` its name already ends with.
 _UNIT_RENDER = {"1": "_ratio", "ms": "_milliseconds", "s": "_seconds"}
 _KIND_EXTENSIONS = {
     "counter": ("_total",),
     "histogram": ("_bucket", "_count", "_sum"),
 }
 
-# Fields where the declared payload type mispredicts the emitted kind. The
-# emitter picks the kind from the runtime value type
-# (`counter if isinstance(value, int)`), so an int-passing emit site renders a
-# Counter despite a `float` declaration — `_bucket/_count/_sum` never exist for
-# it. Each entry pins the kind actually emitted; keep it in step with the emit
-# site. `None` would mark a field whose emit sites pass BOTH ints and floats
-# (first-value-wins per process); the three fields below are all cast to int at
-# their emit sites (task #4011), so every entry pins a single kind.
-#   delivery_stalled.age_s: `round(age_s)` (services/wake/delivery_watchdog) —
-#     `_bucket` never observed (0/72h).
-#   shell_ttl_renewed.ttl_s: whole-second `ttl` (ava/shell/sessions) —
-#     `_bucket` dead since >72h (32 older samples only).
-#   heartbeat_paused.duration_s: int/float callers were both live (24h:
-#     390 vs 320) until the emit cast landed (task #4011) — pinned counter.
 _RUNTIME_KIND_FIELDS: dict[tuple[str, str], str | None] = {
     ("delivery_stalled", "age_s"): "counter",
     ("shell_ttl_renewed", "ttl_s"): "counter",
     ("heartbeat_paused", "duration_s"): "counter",
 }
 
-# Escape hatch for rule references the derivation below cannot produce —
-# metrics from events whose payloads declare no keys, instrumentation outside
-# the telemetry event map, or live series from runtime attributes the payload
-# model does not declare (e.g. "ava_chrome_page_ttl_renewed_page_id_total").
-# Add an entry only after checking the name against live Prometheus
-# (`/api/v1/label/__name__/values`), with a rationale.
-# Empty today: every ava_* reference in the rules derives from the registry.
 _UNLISTED_METRIC_NAMES: dict[str, str] = {}
 
 
 def _strip_optional(hint: Any) -> Any:
-    """Unwrap NotRequired/Required and the None side of an optional hint."""
     while True:
         origin = get_origin(hint)
         if origin in (NotRequired, Required):
@@ -522,9 +397,6 @@ def _strip_optional(hint: Any) -> Any:
 
 
 def _metric_kind(event: str, field: str) -> str | None:
-    """The instrument kind for one payload field: the disposition override,
-    then the runtime-kind pins, else the int->Counter / float->Histogram
-    declared-type default. None = no metric."""
     override = METRIC_DISPOSITION.get((event, field), "default")
     if override != "default":
         return override
@@ -545,8 +417,6 @@ def _metric_kind(event: str, field: str) -> str | None:
 
 
 def _rendered_names(event: str, field: str) -> set[str]:
-    """The Prometheus series names the export translation renders for one
-    payload field."""
     kind = _metric_kind(event, field)
     if kind is None:
         return set()
@@ -562,13 +432,6 @@ def _rendered_names(event: str, field: str) -> set[str]:
 
 
 def _emitted_metric_names() -> dict[str, str]:
-    """Every Prometheus series name derivable from the declared payloads and
-    dispositions, mapped to its `event.field` source.
-
-    Live and derivable can disagree in both directions: the runtime-kind pins
-    (`_RUNTIME_KIND_FIELDS`) and runtime attributes the payload models do not
-    declare ("ava_chrome_page_ttl_renewed_page_id_total") are outside this
-    set — a rule referencing one needs an `_UNLISTED_METRIC_NAMES` entry."""
     names: dict[str, str] = {}
     for event in sorted(telemetry_events()):
         for field in payload_keys(event):
@@ -578,7 +441,6 @@ def _emitted_metric_names() -> dict[str, str]:
 
 
 def _rule_metric_tokens() -> set[str]:
-    """The ava_* metric tokens referenced in the rule query exprs."""
     tokens: set[str] = set()
     for rule in load_rules():
         for query in rule["data"]:
@@ -589,12 +451,6 @@ def _rule_metric_tokens() -> set[str]:
 
 
 def test_rule_metric_references_match_the_prometheus_translation() -> None:
-    """Every metric the rules read must be a name the OTLP export translation
-    can actually render (task #4002). A missing `_ratio` suffix or a renamed
-    instrument makes the query match zero series, and with `noDataState: OK`
-    the rule then never fires — the silent-NoData class behind the 24-day
-    checkpoint_blobs miss. Only expr strings are checked; description prose
-    may use shorthand."""
     emitted = _emitted_metric_names()
     unknown: list[str] = []
     for token in sorted(_rule_metric_tokens()):
@@ -608,10 +464,6 @@ def test_rule_metric_references_match_the_prometheus_translation() -> None:
 
 
 def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
-    """Regression pin for #4002's exact shape: a dimensionless ObservableGauge
-    is exported with `_ratio` appended, so the pre-fix names
-    (`ava_checkpoint_table_sizes_blobs_bytes`,
-    `ava_event_log_drop_last_dropped_at`) can never match a series."""
     assert _rendered_names("checkpoint_table_sizes", "blobs_bytes") == {
         "ava_checkpoint_table_sizes_blobs_bytes_ratio"
     }
@@ -619,8 +471,6 @@ def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
         "ava_event_log_drop_last_dropped_at_ratio"
     }
     assert _rendered_names("memory_search_stats", "rows") == {"ava_memory_search_stats_rows_ratio"}
-    # The other renderings a rule author must get right: counters keep `_total`
-    # (never doubled), durations say `_seconds` once.
     assert _rendered_names("gateway_latency", "count") == {"ava_gateway_latency_count_total"}
     assert _rendered_names("turn_end", "duration_seconds") == {
         "ava_turn_end_duration_seconds_bucket",
@@ -630,12 +480,6 @@ def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
 
 
 def test_runtime_typed_fields_pin_their_emitted_kind() -> None:
-    """Fields whose declared type mispredicts the emitted kind (task #4002
-    review): the emit sites pass ints, so the live series is a Counter and
-    the histogram family either never existed or is dead. Pinning the counter
-    stops a rule from being told a non-existent `_bucket` family is fine —
-    the #4002 silent-NoData shape, mirrored. All three cast to int at their
-    emit sites (task #4011), so each derives its counter name."""
     assert _rendered_names("delivery_stalled", "age_s") == {"ava_delivery_stalled_age_s_total"}
     assert _rendered_names("shell_ttl_renewed", "ttl_s") == {"ava_shell_ttl_renewed_ttl_s_total"}
     assert _rendered_names("heartbeat_paused", "duration_s") == {
@@ -644,26 +488,17 @@ def test_runtime_typed_fields_pin_their_emitted_kind() -> None:
 
 
 def test_unlisted_metric_names_have_no_stale_entries() -> None:
-    """An allowlist entry no rule references anymore must be removed, so the
-    escape hatch cannot rot into a permission wall."""
     stale = sorted(set(_UNLISTED_METRIC_NAMES) - _rule_metric_tokens())
     assert not stale, f"stale _UNLISTED_METRIC_NAMES entries: {stale}"
 
 
 def test_trace_watermark_rule_filters_degradation_action() -> None:
-    """R7 (trace recording auto-degrade) must key on the disk-watermark
-    action, scoped to telemetry — the one event that means the observability
-    pipeline silently stopped recording. Any occurrence in the trailing 24h
-    is the condition (chronic-condition semantics, threshold > 0)."""
     rules = {r["uid"]: r for r in load_rules()}
     exprs = rule_query_exprs(rules["ava-ops-trace-disk-watermark"], "loki")
     assert any('attributes_action="recording_disabled_disk_watermark"' in e for e in exprs)
     assert any('category="telemetry"' in e for e in exprs)
     assert any("[24h]" in e for e in exprs)
     assert threshold_params(rules["ava-ops-trace-disk-watermark"]) == [[0]]
-
-
-# ─── infrastructure rules (issue #46) ────────────────────────────────────────
 
 
 def assert_latency_query_scopes_to_route_class(expr: str, route_class: str) -> None:

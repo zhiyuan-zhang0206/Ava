@@ -1,5 +1,3 @@
-"""Read-side telemetry heartbeat staleness tests."""
-
 from __future__ import annotations
 
 import json
@@ -17,8 +15,6 @@ from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 
 
 class _Pool:
-    """The one connection of a test, behind the pool's `connection()` door."""
-
     def __init__(self, conn: psycopg.Connection) -> None:
         self._conn = conn
 
@@ -38,7 +34,6 @@ def _heartbeat(conn: psycopg.Connection, at: datetime, *, event: str = "gateway_
 
 def test_heartbeat_age_reads_the_newest_heartbeat_row(db_conn: psycopg.Connection) -> None:
     db_conn.autocommit = True
-    # A stretch of time of this test's own: rows of other tests never fall into its window.
     now = datetime(2001, 3, 4, 12, 0, tzinfo=UTC) + timedelta(seconds=uuid.uuid4().int % 100000)
     pool = _Pool(db_conn)
 
@@ -46,10 +41,9 @@ def test_heartbeat_age_reads_the_newest_heartbeat_row(db_conn: psycopg.Connectio
 
     _heartbeat(db_conn, now - timedelta(seconds=90))
     _heartbeat(db_conn, now - timedelta(seconds=30))
-    _heartbeat(db_conn, now - timedelta(seconds=5), event="llm_usage")  # not the heartbeat
+    _heartbeat(db_conn, now - timedelta(seconds=5), event="llm_usage")
     assert telemetry_staleness.heartbeat_age(pool, now=now) == 30.0
 
-    # Older than twice the threshold reads as missing, however many rows exist.
     later = now + timedelta(seconds=2 * telemetry_staleness.STALENESS_THRESHOLD_S + 31)
     assert telemetry_staleness.heartbeat_age(pool, now=later) is None
 

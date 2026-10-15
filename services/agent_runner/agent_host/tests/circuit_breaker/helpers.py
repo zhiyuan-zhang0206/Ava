@@ -1,5 +1,3 @@
-"""Circuit-breaker test helpers: the recording publisher, overflow state and rejection drivers shared by the breaker tests."""
-
 from __future__ import annotations
 
 import json
@@ -30,8 +28,6 @@ from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 class RecordingPublisher:
-    """Minimal typed event sink for fatal-error live-event assertions."""
-
     def __init__(self) -> None:
         self.payloads: list[str] = []
 
@@ -40,8 +36,6 @@ class RecordingPublisher:
 
 
 def overflow_state(breaker_reason: str | None = None) -> AgentState:
-    """An agent state sitting past the provider's context ceiling, with the
-    circuit breaker optionally open (the default closed)."""
     circuit = CircuitState()
     if breaker_reason is not None:
         circuit = CircuitState(
@@ -58,8 +52,6 @@ def overflow_state(breaker_reason: str | None = None) -> AgentState:
 
 
 def breaker_ctx(*, database_gate: ProcessDbGate) -> AvaContext:
-    """An AvaContext for `_handle_fatal_llm_error` — no ops_pool, so the
-    best-effort event-log write is skipped (unit tests have no DB)."""
     return AvaContext(
         ops_pool=None,
         llm=MagicMock(),
@@ -73,8 +65,6 @@ def breaker_ctx(*, database_gate: ProcessDbGate) -> AvaContext:
 
 
 def permanent_rejection() -> FatalProviderError:
-    """A permanent 400 in the 6260 shape; the body is deliberately distinctive
-    so the tests can prove no rejected text reaches the ancestor report."""
     return FatalProviderError(
         "Content Exists Risk: do not replay this rejected history",
         error_class="permanent",
@@ -116,7 +106,6 @@ def spawn_child_under_idling_ancestor(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
 ) -> tuple[int, int]:
-    """A live idling ancestor and its child; returns (ancestor_id, child_id)."""
     ancestor_id = spawn_agent(
         spawner="user",
         catalog=model_catalog,

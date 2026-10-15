@@ -1,18 +1,3 @@
-"""`base/log/tests/stdlib_logging.py::stdlib_logging_isolated` — no stdlib logging state outlives a test.
-
-`base.log.install_stdlib_intercept()` (run for real by the intercept tests) sets the root
-logger to INFO and every first-party logger to DEBUG. The autouse guard used to put the
-root *handlers* back and nothing else, so those levels leaked into every later test in the
-same xdist worker: a stdlib log call that a default-WARNING run never emits (its record is
-dropped at the level gate before formatting) was formatted there, and a bad format string
-in production code surfaced as a `TypeError` in an unrelated test — but only in the
-worker layouts where an intercept test happened to run first.
-
-The guard's teardown runs after a test body, where a self-test cannot observe it, so the
-two halves are pinned separately: the guard is wired onto every test, and its one action
-undoes a *real* `install_stdlib_intercept()`.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -24,7 +9,6 @@ from base.log.tests.stdlib_logging import stdlib_logging_isolated
 
 
 def _all_levels() -> dict[str, int]:
-    """Level of every logger that exists now, the root included."""
     levels = {"": logging.getLogger().level}
     for name, logger in logging.Logger.manager.loggerDict.items():
         if isinstance(logger, logging.Logger):
@@ -42,7 +26,6 @@ def test_a_real_intercept_install_is_undone_level_for_level() -> None:
 
     with stdlib_logging_isolated():
         install_stdlib_intercept()
-        # The leak is real: this is what the next test used to inherit.
         assert logging.getLogger().level == logging.INFO
         assert all(logging.getLogger(n).level == logging.DEBUG for n in FIRST_PARTY_LOGGER_NAMES)
         assert any(isinstance(h, StdlibInterceptHandler) for h in logging.getLogger().handlers)
@@ -56,7 +39,6 @@ def test_a_real_intercept_install_is_undone_level_for_level() -> None:
 
 
 def test_a_first_party_logger_is_back_at_its_original_level_after_the_block() -> None:
-    """The observable form of the leak: what a *later* test's ordinary logger sees."""
     probe = logging.getLogger("services.stdlib_logging_isolation_probe")
     original = probe.getEffectiveLevel()
     with stdlib_logging_isolated():

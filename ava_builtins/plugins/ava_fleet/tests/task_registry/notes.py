@@ -1,5 +1,3 @@
-"""Observe committed task notes while preserving readable call-style assertions."""
-
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
@@ -11,8 +9,6 @@ from base.db import fetch_one
 
 
 class TaskNotes:
-    """Query durable rows, rather than intercepting an HTTP notification call."""
-
     def __init__(self, conn: psycopg.Connection, after: int) -> None:
         self.conn = conn
         self.after = after

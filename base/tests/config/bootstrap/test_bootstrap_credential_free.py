@@ -1,12 +1,3 @@
-"""`GET /api/bootstrap` serves configuration, never a database login.
-
-The served `AVA_DB_URL` is the credential-free endpoint whatever the gateway
-home holds: a local plane's active write generation is not projected, a
-remote-managed plane's provider password is stripped, and the retired runner
-password key is never served. A runner's login arrives only through its
-installed unit capability (`base.host.db_authority.unit`).
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -27,9 +18,6 @@ _DB_URL = "postgresql://ava@127.0.0.1:5433/ava"
 
 
 def _pg_url(pw: str, *, host: str) -> str:
-    """A credentialed postgres URL built from parts, so the source carries no
-    `scheme://user:password@host` literal for a secret scanner to flag (same
-    convention as base/tests/test_url_secret.py)."""
     return f"postgresql://ava:{pw}@{host}/ava"
 
 
@@ -45,7 +33,6 @@ def _write_gateway_env(tmp_path: Path, runner_pw: str | None = None, db_url: str
 
 
 def _served(tmp_path: Path) -> dict[str, str]:
-    """Read the gateway payload through the authority owning this test file."""
     authority = ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
     return config.bootstrap_config_values(authority, provider_key_envs=(), plugin_cluster_config="")
 
@@ -53,8 +40,6 @@ def _served(tmp_path: Path) -> dict[str, str]:
 def test_local_plane_serves_the_endpoint_not_its_active_generation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, seed_write_generation: Callable[[Path], Any]
 ) -> None:
-    """A stale runner holding the bearer can no longer reacquire the current
-    generation here: the ledger's logins never enter the payload."""
     _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW)
     secret = seed_write_generation(tmp_path)
     vals = _served(tmp_path)
@@ -74,8 +59,6 @@ def test_local_plane_serves_the_endpoint_not_its_active_generation(
 def test_home_without_a_ledger_serves_the_endpoint_too(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Serving no login needs no authority: the payload no longer depends on
-    the ledger, so a home without one serves the same credential-free shape."""
     _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW)
     assert urlsplit(_served(tmp_path)["AVA_DB_URL"]).password is None
 
@@ -127,10 +110,6 @@ def test_missing_url_refuses_before_boot_time_fallback(
 def test_served_payload_excludes_the_offsite_backup_destination(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The off-site backup destination is a gateway-local fact: the gateway alone
-    runs the dump and holds the credentials file; the WAL-G config path likewise
-    names a file on the gateway. Whatever the gateway's .env says, neither may ride
-    the bootstrap payload to a runner."""
     _write_gateway_env(tmp_path)
     env_path = tmp_path / ".env"
     env_path.write_text(

@@ -1,10 +1,3 @@
-"""Goal watchers treat lifecycle SSE as a hint and read authoritative status.
-
-No Redis or real gateway is needed: tests serialize the actual event model and
-observe whether the watcher requests the target's current status. The poll
-fallback reads that same status, never the database directly.
-"""
-
 from __future__ import annotations
 
 import importlib.util
@@ -29,12 +22,6 @@ _FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "events" / "agent" / "agent_
 
 
 def _load_snippet(path: str) -> ModuleType:
-    """Import the skill's reference snippet as a module.
-
-    Importing the snippet runs only its top-level definitions (the
-    `if __name__ == "__main__"` block does not fire on import), so this does not
-    start the blocking watcher loop.
-    """
     spec = importlib.util.spec_from_file_location("goal_watch_idle", _REPO_ROOT / path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -97,7 +84,6 @@ def test_other_events_do_not_fetch_status(
 
 @pytest.mark.parametrize("path", _SNIPPET_PATHS)
 def test_poll_fallback_reads_status_until_idle(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
-    """The fallback polls the authoritative status and skips a round on a read error."""
     module = _load_snippet(path)
     replies: list[str | Exception] = [RuntimeError("gateway restarting"), "running", "idling"]
     requested: list[int] = []

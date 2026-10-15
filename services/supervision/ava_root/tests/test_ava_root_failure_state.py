@@ -1,9 +1,3 @@
-"""Failure-state signals: `root_unit_failure_state` and `root_unit_not_revivable`.
-
-Both are STATE signals, so the health monitor emits them on every round while
-the condition holds; the observability rules own the debounce and the paging.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -28,8 +22,6 @@ from services.supervision.ava_root.probes import ProbeRegistry
 
 
 class _Recorder:
-    """The structured log calls so far, as their field dictionaries (read from `loguru_records`)."""
-
     def __init__(self, records: LogRecords) -> None:
         self._records = records
 
@@ -76,8 +68,6 @@ def test_describe_carries_the_kind_evidence() -> None:
 
 
 class _Supervisor:
-    """RevivalHost stand-in for one unit with flippable failure facts."""
-
     def __init__(self) -> None:
         self.generation = (OwnedProcess(42, 100.0, None), 0.0)
         self.facts = UnitFailureFacts(intent_running=True, restart_failed=None)
@@ -135,18 +125,18 @@ async def test_exhausted_attempts_are_reported_every_round_then_clear_on_alive(
 ) -> None:
     probe = _Cell(DaemonProbe.down("no"))
     monitor = _monitor(_Supervisor(), probe)
-    await monitor.run_round()  # 1: first restart attempt
-    await monitor.run_round()  # 2: second restart attempt
+    await monitor.run_round()
+    await monitor.run_round()
     assert recorder.events("root_unit_failure_state") == []
-    await monitor.run_round()  # 3: the final attempt exhausts the budget
-    await monitor.run_round()  # 4: held
+    await monitor.run_round()
+    await monitor.run_round()
     states = recorder.events("root_unit_failure_state")
     assert [(s["unit"], s["kind"], s["level"]) for s in states] == [
         ("svc", "restarts_exhausted", "warning"),
         ("svc", "restarts_exhausted", "warning"),
     ]
     probe.verdict = DaemonProbe.up("ok")
-    await monitor.run_round()  # alive: the budget resets and the signal stops
+    await monitor.run_round()
     assert len(recorder.events("root_unit_failure_state")) == 2
 
 
@@ -164,7 +154,7 @@ async def test_recorded_restart_failure_is_a_state_signal(
     supervisor.facts = UnitFailureFacts(intent_running=True, restart_failed=None)
     await monitor.run_round()
     supervisor.facts = UnitFailureFacts(intent_running=False, restart_failed=None)
-    await monitor.run_round()  # an operator stop is expected, never a failure state
+    await monitor.run_round()
     states = recorder.events("root_unit_failure_state")
     assert [s["kind"] for s in states] == ["restart_failed", "restart_failed"]
     assert states[0]["detail"] == "replacement failed at its down half: stop refused"

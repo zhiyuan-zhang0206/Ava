@@ -1,8 +1,3 @@
-"""The live-tree cost follows its actual nodes, never the unrelated archive.
-
-The effective-model lookup's resolution order is pinned here too (task #4674).
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -57,7 +52,6 @@ def test_live_roster_preserves_ancestor_closure_without_history_growth(
     )
     before_payload = before.model_dump(mode="json")
     after_payload = after.model_dump(mode="json")
-    # Roster content is stable even though each read has a new assessment time.
     for payload in (before_payload, after_payload):
         for card in payload["agents"]:
             card["availability"].pop("observed_at")
@@ -168,10 +162,6 @@ def test_notice_body_cannot_expand_roster_card(
 def test_open_impersonation_status_reflects_lease_phase(
     model_catalog: ModelCatalog, db_conn: psycopg.Connection
 ) -> None:
-    """Only an `active` lease means the agent is actually taken over — a
-    `requested` lease still carries an open session number (so the UI can gate
-    the force-expire action) but the native agent keeps running until
-    activation reaches its next safe boundary."""
     seed(db_conn, [(1, "user", "idling")])
     lease_id = str(uuid4())
     with db_conn.cursor() as cur:
@@ -262,7 +252,6 @@ def test_directory_rejects_invalid_cursor(
 
 
 def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.Connection) -> None:
-    """Count rows actually visited, without pinning PostgreSQL's chosen plan names."""
     seed(db_conn, [(90001, "user", "idling")])
     seed(db_conn, [(i, "user", "terminated") for i in range(90002, 90102)])
     with db_conn.cursor() as cur:
@@ -304,8 +293,6 @@ def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.
 
 
 class _FakeConn:
-    """A connection stand-in serving one `fetchone()` result as a context manager."""
-
     def __init__(self, row: tuple[Any, ...] | None) -> None:
         self.row = row
         self.queries: list[tuple[str, tuple[Any, ...]]] = []
@@ -352,7 +339,6 @@ def test_effective_model_overlay_wins(model_catalog: ModelCatalog) -> None:
 def test_effective_model_is_the_birth_stamp_when_there_is_no_overlay(
     model_catalog: ModelCatalog,
 ) -> None:
-    """`llm_model` is birth-frozen: an agent born under an older default keeps it."""
     db, _ = _install_conn(({}, {"llm_model": "deepseek-v4-pro"}))
     assert (
         snapshot.agent_model_target(
@@ -416,7 +402,6 @@ def test_effective_model_read_failure_returns_the_callers_fallback(
 
 
 def test_model_target_carries_the_agents_tuning_pins(model_catalog: ModelCatalog) -> None:
-    """The overlay's pinned effort wins over the birth stamp's; unpinned fields stay unset."""
     db, _ = _install_conn(
         ({"reasoning_effort": "max"}, {"reasoning_effort": "low", "llm_model": "deepseek-v4-pro"})
     )

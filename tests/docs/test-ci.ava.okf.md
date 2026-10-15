@@ -12,3 +12,9 @@ tags:
 - pre-commit lints what the commit changed; pre-push runs pyright (branch-changed `.py` files only, never full-repo locally — user ruling 2026-09-22), frontend tsc, whole-project eslint, **full frontend vitest**, a branch-diff rerun of the pre-commit stage over `merge-base(origin/main,HEAD)..HEAD` (catches rebase/cherry-pick/merge commits that never ran pre-commit), and a re-check of the artifact hooks whose inputs the branch deleted (a delete-only diff never reaches a `files:`-filtered hook) (`.pre-commit-config.yaml`). Neither stage runs pytest.
 - CI runs all non-e2e tests + e2e + coverage thresholds
 - CI owns every local check except the warn-only hook-installation check: `backend-structure` runs structural lints plus a conditional, explicit codegen segment; `backend-static` owns pyright and the pure unit lane's execution/count/coverage evidence, and `frontend` owns tsc, eslint and vitest. The classify-independent `doc-lints` job covers docs-only PRs too. See the [CI runbook](../../docs/conventions/runbook.md#ci-continuous-integration) for ownership and selector safety nets.
+
+Async stall evidence: [[tests/docs/test-fixtures/stall-diagnostics.ava.okf.md]].
+
+Database cleanup inventory: [[tests/docs/test-fixtures/database-isolation.ava.okf.md]].
+
+Gateway authentication and lifespan evidence: [[tests/docs/test-fixtures/gateway-evidence.ava.okf.md]].

@@ -1,5 +1,3 @@
-"""Hosted application waits for graph return, then uses the durable command."""
-
 import asyncio
 from dataclasses import replace
 from typing import Any
@@ -39,7 +37,6 @@ from services.agent_runner.agent_host.tests.runtime.hosted_resources import host
 def _graph_blocked_until_released(
     kind: str, entered: asyncio.Event, release: asyncio.Event
 ) -> Mock:
-    """A graph whose ainvoke parks until `release`, then returns the lifecycle request."""
 
     async def graph_return(*args: object, **kwargs: object) -> dict[str, bool]:
         entered.set()
@@ -264,7 +261,6 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
         )
         db_conn.commit()
         if crash != "after_commit":
-            # Same admitted continuation can retry; cache absence is not a new owner.
             assert await host._invoke_until_done(
                 agent_id,
                 replace(
@@ -324,12 +320,6 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
     ).fetchone() == (0,)
 
 
-# ─── kill_all_shell_sessions: the at-exit kill ───────────────────────────────
-# docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md: a graceful terminate
-# that asked for it has the agent's shell sessions killed on its home host
-# after the last step returned and the termination commits.
-
-
 def terminate_command(
     conn: psycopg.Connection, agent_id: int, *, source: str = "user", kill: bool = False
 ) -> int:
@@ -346,7 +336,6 @@ def terminate_command(
 def _record_kills(
     monkeypatch: pytest.MonkeyPatch, *, fail: bool = False
 ) -> list[tuple[int, str | None]]:
-    """Patch the host's kill primitive; record (agent id, status at kill time)."""
     calls: list[tuple[int, str | None]] = []
 
     def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
@@ -424,7 +413,6 @@ async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
         model_catalog=model_catalog,
         database_gate=database_gate,
     )
-    # The kill ran after the last step returned, after `terminated` committed.
     assert kills == ([(agent_id, "terminated")] if requested else [])
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
@@ -440,8 +428,6 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """The agent's own terminate won acceptance; the operator's kill-requesting
-    terminate queued behind it still takes the sessions with the death."""
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     own = terminate_command(db_conn, agent_id, source="self")
@@ -471,7 +457,6 @@ async def test_hosted_failed_kill_still_applies_the_termination(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """A session-kill failure is an ERROR, never a crashed turn: the death applies."""
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     terminate_command(db_conn, agent_id, kill=True)
@@ -495,13 +480,11 @@ async def test_hosted_failed_kill_still_applies_the_termination(
 
 
 def _any_model(*, model: str | None = None, config: dict[str, object] | None = None) -> str:
-    """A fake host's wake carries no provider keys; accept the model as given."""
     del config
     return model or "deepseek-v4-flash-vision-exp"
 
 
 def _record_force_sweeps(monkeypatch: pytest.MonkeyPatch, command: int) -> list[tuple[int, object]]:
-    """Patch the host's kill primitive; record (agent id, command observed_at)."""
     calls: list[tuple[int, object]] = []
 
     def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
@@ -527,9 +510,6 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """A step still draining past a force's kill may create a shell; the live
-    host attempts older sessions again after recording its quiescent
-    observation (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md)."""
     monkeypatch.setattr(runtime, "validate_model_config", _any_model)
     agent_id = agent_row(db_conn)
     host = AgentHost(

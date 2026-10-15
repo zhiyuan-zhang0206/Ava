@@ -1,11 +1,3 @@
-"""Tests for base/daemon/schedules/builtin_schedules.py — the built-in schedules manifest
-and its idempotent create-if-missing provisioning.
-
-The provision path is also exercised at the gateway-boot level by
-test_schedules_api.py's TestClient(app) lifespan; these tests pin the
-manifest parsing + DB behavior directly.
-"""
-
 from __future__ import annotations
 
 import json
@@ -17,7 +9,6 @@ from base.daemon.schedules.builtin_schedules import ManifestError, load_manifest
 
 
 def _manifest(tmp_path: Path, entries: list[dict[str, object]]) -> Path:
-    """Write a fixture manifest with one tiny script per entry."""
     for e in entries:
         script = e["script"]
         assert isinstance(script, str)
@@ -30,7 +21,6 @@ def _manifest(tmp_path: Path, entries: list[dict[str, object]]) -> Path:
 
 class TestLoadManifest:
     def test_loads_repo_manifest(self) -> None:
-        """The repo manifest parses: product schedules enabled / operator schedules disabled."""
         scheds = load_manifest()
         by_name = {s.name: s for s in scheds}
         assert set(by_name) == {

@@ -1,17 +1,3 @@
-"""`FakeCommands`: a scripted `CommandRunner` for tests of code that takes a `Host`.
-
-It records every call and answers from a script, shaped like `base.host.proc.run_bounded`: the
-result is a `CompletedProcess` whose streams are `None` unless the caller captured them, and
-text or bytes according to the caller's `text=` / `encoding=`. A command nobody scripted fails
-the test instead of answering with a default, so a test never passes by accident.
-
-    commands = FakeCommands()
-    commands.on("lsof", Reply(stdout="p1109\\n"))
-    host = fake_host(commands, programs={"lsof": "/usr/sbin/lsof"})
-    ...
-    assert commands.argvs == [("lsof", "-nP")]
-"""
-
 from __future__ import annotations
 
 import subprocess
@@ -29,8 +15,6 @@ DARWIN_ARM64 = Platform("darwin", "arm64", "/usr/bin/python3")
 
 @dataclass(frozen=True)
 class Reply:
-    """What a scripted command prints and how it exits."""
-
     stdout: str | bytes = ""
     stderr: str | bytes = ""
     returncode: int = 0
@@ -38,8 +22,6 @@ class Reply:
 
 @dataclass(frozen=True)
 class Call:
-    """One command a component ran: its argv, the timeout it asked for and its other keywords."""
-
     argv: tuple[str, ...]
     timeout: float
     kwargs: Mapping[str, Any]
@@ -77,7 +59,6 @@ def _result(
     capture_output: bool,
     popen_kwargs: Mapping[str, object],
 ) -> subprocess.CompletedProcess[Any]:
-    """The `CompletedProcess` `run_bounded` would return for this reply and these keywords."""
     text = bool(popen_kwargs.get("text") or popen_kwargs.get("encoding"))
     out = err = None
     if _is_piped(capture_output, popen_kwargs, "stdout"):
@@ -88,15 +69,12 @@ def _result(
 
 
 class FakeCommands:
-    """A `CommandRunner` that records calls and replays a script routed by argv prefix."""
-
     def __init__(self) -> None:
         self.calls: list[Call] = []
         self._routes: list[_Route] = []
 
     @property
     def argvs(self) -> list[tuple[str, ...]]:
-        """The argv of every call, in order."""
         return [call.argv for call in self.calls]
 
     def on(
@@ -105,14 +83,6 @@ class FakeCommands:
         *replies: Reply | BaseException,
         repeat: bool = False,
     ) -> None:
-        """Script the commands that `match` selects: an argv prefix (a program name or a list), or
-        a predicate over the whole argv for commands whose first element is not known up front.
-
-        Each matching call consumes the next reply: a `Reply` is returned, an exception is
-        raised (`subprocess.TimeoutExpired`, `FileNotFoundError`). With `repeat=True` the last
-        reply answers every call after the script runs out. The first route that matches wins,
-        so register the more specific prefix first; an empty prefix matches everything.
-        """
         if not replies:
             raise ValueError("a route needs at least one reply")
         if callable(match):
@@ -137,7 +107,7 @@ class FakeCommands:
         *,
         timeout: float,
         capture_output: bool = False,
-        input: bytes | str | None = None,  # mirrors subprocess.run's own parameter name
+        input: bytes | str | None = None,
         **popen_kwargs: object,
     ) -> subprocess.CompletedProcess[Any]:
         command = tuple(argv)
@@ -156,10 +126,6 @@ def fake_host(
     programs: Mapping[str, str] | None = None,
     uid: int = 1000,
 ) -> Host:
-    """A `Host` over `commands` (none scripted by default: any command fails the test).
-
-    `which` finds only the programs in `programs` (name -> path); every other name is absent.
-    """
     found = dict(programs or {})
     return Host(
         run=commands if commands is not None else FakeCommands(),

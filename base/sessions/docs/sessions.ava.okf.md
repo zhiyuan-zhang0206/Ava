@@ -21,3 +21,5 @@ Its component nodes describe the current contracts and implementation.
 - [[base/sessions/pty/docs/liveness.ava.okf.md]] — PTY session liveness.
 - [[base/sessions/pty/docs/pty_sessions/pty_sessions.ava.okf.md]] — PTY sessions — every agent interactive shell lives in the pty-sessions service.
 - [[base/sessions/pty/docs/session-kill.ava.okf.md]] — PTY session kill — bounded best-effort closure.
+
+Native fixture evidence: [[test-process-evidence.ava.okf.md]].

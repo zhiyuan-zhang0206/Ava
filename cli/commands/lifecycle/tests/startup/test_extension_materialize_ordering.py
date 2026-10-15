@@ -1,25 +1,3 @@
-"""Where cluster-extension materialization is invoked from, and why not converge.
-
-The registry read has a precondition: this cluster's Postgres is up AND its
-schema is current. `ava start` satisfies that only late in its sequence:
-
-    1)   converge host state
-    2)   gateway brings up THIS cluster's pg/redis
-    2.5) apply pending migrations
-    2.6) verify schema version
-    2.7) materialize cluster extensions   <- the first point the precondition holds
-
-So a `CONVERGE_STEPS` entry — which the design doc originally described, and
-which #201 shipped — runs before the database exists on a single box, and before
-the `extensions` table exists on the rollout that creates it. It would have
-failed on every start of the most common posture while printing a warning that
-reads like a transient outage.
-
-These pin the placement, because it is invisible at the call site: the function
-looks equally correct in either home, and only the surrounding sequence says
-which one works.
-"""
-
 from __future__ import annotations
 
 import inspect
@@ -40,8 +18,6 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 
 def test_materialization_is_not_a_converge_step() -> None:
-    """Converge runs before the data plane is up (`ava start` step 1 vs step 2),
-    so nothing in `CONVERGE_STEPS` may require the cluster database."""
     from cli.commands.lifecycle.converge_host import CONVERGE_STEPS
 
     offenders = [s.name for s in CONVERGE_STEPS if "extension" in s.name.lower()]
@@ -54,10 +30,6 @@ def test_materialization_is_not_a_converge_step() -> None:
 
 
 def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None:
-    """Stub every `prepare_cold_start` seam, recording the ones this invariant
-    is about. Mirrors the monkeypatched-seam style of
-    `test_release_cold_start_uses_same_storage_readiness_without_source_or_schema_writes`
-    in `cli/tests/bootstrap/test_start_runtime.py` rather than inspecting source text."""
     import cli.commands._repo as _repo_commands
     import cli.commands.lifecycle.start as _start_commands
     from cli.commands.data_plane import bringup
@@ -124,15 +96,6 @@ def test_start_materializes_after_the_schema_check(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The ordering inside `prepare_cold_start`, asserted via monkeypatched seams.
-
-    Brittle-looking on purpose: the invariant IS the order of three calls, and
-    nothing else in the process can observe it. If someone moves the
-    materialization above the migration apply or the schema check, the
-    registry read starts hitting a schema that may predate the `extensions`
-    table, and the symptom is a warning that looks transient rather than a
-    failure.
-    """
     from cli.commands.lifecycle.start import prepare_cold_start
 
     calls: list[str] = []
@@ -160,9 +123,6 @@ def test_start_materializes_after_the_schema_check(
 
 
 def test_standalone_converge_materializes_too() -> None:
-    """`ava converge` is run against a cluster that is already up, so it has the
-    precondition the start path has to wait for — and an operator running it
-    expects the machine to end up caught up."""
     from cli.commands.lifecycle.converge_host import cmd_converge
 
     assert (
@@ -172,9 +132,6 @@ def test_standalone_converge_materializes_too() -> None:
 
 
 def test_the_materializer_lives_beside_its_siblings() -> None:
-    """`extensions/materialize.py`, next to `extensions/skills_sync.py` — a subsystem
-    reader, not another entry in `lifecycle/converge_host.py`'s host-state roster. Extracting
-    it is also what kept `lifecycle/converge_host.py` under the 800-line ceiling."""
     from cli.commands.extensions import materialize
 
     assert hasattr(materialize, "materialize_cluster_extensions")
@@ -187,14 +144,6 @@ def test_start_adopts_before_it_materializes(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """Both orders are correct, and one of them is tidier.
-
-    An unclaimed local name is invisible to the materializer (it has no row) and
-    a freshly adopted one hashes as `unchanged`, so neither order can produce a
-    wrong result. Sweeping first means a single pass leaves this machine and the
-    cluster agreeing; materializing first leaves the machine one converge behind
-    on the names it just uploaded.
-    """
     from cli.commands.lifecycle.start import prepare_cold_start
 
     calls: list[str] = []
@@ -214,8 +163,6 @@ def test_start_adopts_before_it_materializes(
 
 
 def test_standalone_converge_adopts_too() -> None:
-    """`ava converge` is what an operator runs to make a machine correct without
-    restarting it, and a machine holding un-adopted installs is not correct."""
     from cli.commands.lifecycle.converge_host import cmd_converge
 
     source = inspect.getsource(cmd_converge)

@@ -1,5 +1,3 @@
-"""The exec memory guard: when it acts, whom it kills, and what the agent reads."""
-
 from __future__ import annotations
 
 import asyncio
@@ -28,8 +26,6 @@ _GIB = 1024**3
 
 
 class _Source:
-    """Pressure levels are consumed one per read; the last one repeats."""
-
     def __init__(self, *levels: PressureLevel) -> None:
         self.levels = list(levels)
         self.reads = 0
@@ -179,8 +175,6 @@ def test_without_a_notice_a_missing_envelope_keeps_its_generic_error() -> None:
 
 
 class _CriticalOs:
-    """The real OS process table with the pressure level pinned to critical."""
-
     def pressure(self) -> PressureLevel:
         return "critical"
 
@@ -217,9 +211,6 @@ async def _gone(pid: int) -> bool:
 async def test_a_real_exec_is_killed_with_its_reason_and_the_host_keeps_serving(
     tmp_path: Path, *, database_gate: ProcessDbGate
 ) -> None:
-    """At critical pressure the guard finds the real running exec domain by itself,
-    kills it, and the owning run reports why; the descendant is reaped and the next
-    exec runs normally."""
     source = _CriticalOs()
     pid_file = tmp_path / "guard.pid"
     code = (

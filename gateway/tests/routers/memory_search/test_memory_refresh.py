@@ -1,6 +1,3 @@
-"""`POST /api/memory/refresh` endpoint unit tests — trigger gateway checkout
-fast-forward to origin/main, return HEAD sha after pull."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -14,12 +11,9 @@ from tests.fixtures.gateway_config import gateway_test_client
 
 
 class TestRefreshPath:
-    """refresh calls base.deploy.git.memory_repo.pull_main(), passing the returned sha through to the caller."""
-
     def test_refresh_returns_head_sha(
         self, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
     ) -> None:
-        """stub pull_main → verify 200 + head returned, and pull_main called once."""
         import base.deploy.git.memory_repo as _memory_repo
 
         calls = {"n": 0}
@@ -39,10 +33,6 @@ class TestRefreshPath:
 
 
 class TestRefreshOffEventLoop:
-    """P2 #2102: `pull_main` shells out to git (network fetch) — it must run on
-    a worker thread, never the gateway's event loop, or a dead remote freezes
-    the whole gateway until the watchdog kills it (2026-09-10 04:06-04:35)."""
-
     def test_refresh_runs_pull_off_the_event_loop(
         self, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
     ) -> None:
@@ -52,7 +42,7 @@ class TestRefreshOffEventLoop:
         import base.deploy.git.memory_repo as _memory_repo
 
         real_to_thread = cast("Callable[..., object]", _asyncio.to_thread)
-        handoffs: list[tuple[object, int]] = []  # (fn, event-loop thread ident)
+        handoffs: list[tuple[object, int]] = []
         pull_threads: list[int] = []
 
         def _fake_pull_main(*, machine: MachineIdentity) -> str:
@@ -61,8 +51,6 @@ class TestRefreshOffEventLoop:
             return "abc1234"
 
         def _probe_to_thread(fn: Callable[..., object], *args: object, **kwargs: object) -> object:
-            # Runs on the handler's own thread — i.e. the event loop's thread
-            # (the handler is async and awaits this call).
             handoffs.append((fn, threading.get_ident()))
             return real_to_thread(fn, *args, **kwargs)
 
@@ -75,6 +63,4 @@ class TestRefreshOffEventLoop:
         assert resp.json()["head"] == "abc1234"
         assert pull_threads, "pull_main never ran"
         assert handoffs, "the handler never routed pull_main through asyncio.to_thread"
-        # The property under test: the git call ran on a worker thread, NOT on
-        # the event-loop thread the handler awaited from.
         assert pull_threads[0] != handoffs[0][1]

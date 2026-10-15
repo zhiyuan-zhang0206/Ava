@@ -1,5 +1,3 @@
-"""Explicit agent setup and database fixtures for heartbeat behavior tests."""
-
 from __future__ import annotations
 
 from uuid import uuid4
@@ -16,7 +14,6 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 
-# Explicit threshold so the assertions do not ride on the configured default.
 THRESHOLD_S = 300.0
 
 
@@ -41,16 +38,6 @@ def make_idle(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
 ) -> int:
-    """Spawn an agent and park it. `status_changed_s_ago` backdates
-    status_changed_at via a timestamp-only UPDATE (the BEFORE-UPDATE-OF-status
-    trigger fires on the status flip, not on this). `last_active_s_ago` backdates
-    last_active_at — the real-activity clock the daemon actually keys off;
-    defaults to `status_changed_s_ago` so a plain idle agent has the two aligned
-    (the common case: it entered idling right after its last turn). Pass the two
-    independently to model an ops restart, which bumps status_changed_at (fresh)
-    without a real turn (last_active_at stays old). `paused_until_s_ahead` sets
-    heartbeat_paused_until relative to now() — negative = an already-expired pause
-    window. Returns the agent id."""
     if last_active_s_ago is None:
         last_active_s_ago = status_changed_s_ago
     aid = spawn_agent(
@@ -93,12 +80,6 @@ def lease(
     handoff_applied: bool = False,
     local_machine: MachineIdentity,
 ) -> None:
-    """Insert one impersonation lease row for the agent (task #4872).
-
-    Only the columns the heartbeat predicate reads are varied; everything else
-    keeps its schema default (the BEFORE-INSERT trigger allocates `session_id`
-    and the AFTER-INSERT trigger records a lifecycle entry — the same bare
-    insert shape the other lease tests use)."""
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,"

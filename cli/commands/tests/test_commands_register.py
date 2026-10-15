@@ -1,5 +1,3 @@
-"""Gateway probe and machine registration commands; split from tests/components/cli/test_commands.py (task #4554)."""
-
 from __future__ import annotations
 
 import re
@@ -24,11 +22,8 @@ from cli.database.tests.command_fakes import fake_session_backends as fake_sessi
 from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
-# ─── probe gateway via HTTP, not relying on pidfile ───────────────────────────────────
-
 
 def _spec_by_service(service: str) -> _service_spec.ServiceSpec:
-    """Look up a ServiceSpec by bare service name."""
     for spec in _roster.build_services():
         if spec.session == service:
             return spec
@@ -36,22 +31,12 @@ def _spec_by_service(service: str) -> _service_spec.ServiceSpec:
 
 
 def test_gateway_spec_uses_http_probe_not_pidfile() -> None:
-    """Gateway uvicorn(reload=True) makes pidfile-based liveness unreliable — must probe HTTP.
-
-    The gateway carries an identity-bound HTTP probe. A bare responding port or
-    reload supervisor PID cannot certify that this unit owns the endpoint.
-    """
     spec = _spec_by_service("gateway")
     assert spec.curl_url is not None, "gateway must use curl probe (uvicorn reload)"
     assert spec.curl_url.startswith("http://"), f"curl_url shape wrong: {spec.curl_url!r}"
 
 
 def test_probe_gateway_takes_the_identity_path() -> None:
-    """`probe_service(gateway_spec)` asks the identity probe, not a bare curl.
-
-    The gateway declares one (`probe_home` — 2xx AND this unit's `$AVA_HOME`), so
-    the operator surface and the watchdog ask the same question of the same port.
-    A plain 2xx would still be satisfied by another cluster's gateway."""
 
     spec = _spec_by_service("gateway")
     from base.daemon.health import DaemonProbe
@@ -63,9 +48,6 @@ def test_probe_gateway_takes_the_identity_path() -> None:
 
 
 def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A ✗ carries the reason. "down" and "answering, but it is another cluster's
-    home" call for completely different actions, and this row is where an operator
-    learns which one they have."""
 
     spec = _spec_by_service("gateway")
     from base.daemon.health import DaemonProbe
@@ -80,13 +62,6 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
 
 
 def test_probe_survives_an_identity_probe_that_raises() -> None:
-    """A plugin's non-total `identity_probe` reports ✗ — it does not take `ava status`
-    down with it.
-
-    The three built-in probes convert every failure mode into a `DaemonProbe`;
-    a plugin-registered one is under no such obligation. `ava status` is what an
-    operator runs when the unit is ALREADY misbehaving, so one plugin raising must
-    cost that plugin's row and nothing else."""
     import dataclasses
 
     def _boom() -> object:
@@ -96,8 +71,6 @@ def test_probe_survives_an_identity_probe_that_raises() -> None:
     probe = _probe_commands.probe_service(spec)
     assert probe.alive is None
     assert probe.label == "unavailable"
-    # The type AND the message: "the probe is broken" and "the daemon is down" are
-    # different problems, and a fixed string would have made them look alike.
     assert "RuntimeError" in probe.detail
     assert "no socket for you" in probe.detail
 
@@ -115,16 +88,6 @@ def test_register_gateway_advertises_without_gateway_url(
     database_gate: ProcessDbGate,
     command_runtime: CommandRuntime,
 ) -> None:
-    """gateway registration no longer requires AVA_GATEWAY_URL.
-
-    WP4 (docs/conventions/data/reachability-and-credentials.md): the advertised URL is
-    built on `reachable_host()` — the machine's private-network address — not
-    on the bare gateway URL, so a gateway unit with a reachable identity
-    registers a dialable address even before `AVA_GATEWAY_URL` is configured
-    (a loopback gateway_url advertisement was what made the page proxy refuse
-    the host's page servers, the 2026-08-30 serve 400). The port falls back to
-    the gateway bind-port setting.
-    """
 
     calls: list[str | None] = []
 
@@ -165,9 +128,6 @@ def test_register_gateway_only_advertises_reachable_host(
     database_gate: ProcessDbGate,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A gateway-only unit advertises `reachable_host` + the gateway URL's port —
-    NOT the bare gateway URL (WP4: the hostname is what the page proxy's SSRF
-    allowlist consumes; a loopback advertisement breaks page serves)."""
 
     calls: list[str | None] = []
 
@@ -207,8 +167,6 @@ def test_register_agent_runner_advertises_ops_url(
     database_gate: ProcessDbGate,
     command_runtime: CommandRuntime,
 ) -> None:
-    """An agent-runner registers its reachable ops server URL — the exact string the
-    gateway later dials. Shape: http://<reachable-host>:<ops_port>."""
     calls: list[str | None] = []
 
     def fake_register_self(
@@ -247,9 +205,6 @@ def test_register_agent_runner_loopback_host_exits_nonzero(
     database_gate: ProcessDbGate,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A remote agent-runner whose reachable address resolves to loopback must fail
-    loud (exit 1): register_self raises LoopbackDialUrlRefused rather than writing a
-    self-dialing localhost ops URL that a remote gateway would dial itself."""
     from base.cluster.machines import LoopbackDialUrlRefused
 
     calls: list[str | None] = []
@@ -282,17 +237,11 @@ def test_register_agent_runner_loopback_host_exits_nonzero(
         command=command_runtime,
     )
     assert rc == 1
-    # register_self was reached with the loopback URL and rejected it; the caller
-    # translated that into a non-zero exit rather than a persisted dead row.
     assert calls == ["http://127.0.0.1:8106"]
 
 
 def _named_commands(text: str) -> set[str]:
-    """The `ava ...` commands an operator hint names. The parser tests pin that each parses."""
     return set(re.findall(r"`(ava [^`]+)`", text))
-
-
-# ─── remediation hints name commands that exist ──────────────────────────────
 
 
 def test_register_schema_behind_hint_names_working_commands(

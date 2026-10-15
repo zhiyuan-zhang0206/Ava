@@ -1,5 +1,3 @@
-"""Shell sessions and watchers through real gateway, agent, exec and PTY processes."""
-
 from __future__ import annotations
 
 import os
@@ -65,7 +63,6 @@ def _inbounds(agent_id: int, prefix: str) -> list[tuple[str, str, str]]:
 
 @contextmanager
 def _restarted_server(label: str, *, pass_gateway_fd: bool = False) -> Generator[dict[str, str]]:
-    """Replace a fixture process while keeping its PTY service and environment."""
     server = registered_server(label)
     old, log_path = server.process, server.log_path
     assert isinstance(old.args, list)

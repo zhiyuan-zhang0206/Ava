@@ -1,13 +1,3 @@
-"""services.supervision.ava_root.selfcheck: the tree self-check (G2 / B7).
-
-Stub-host tests drive the episode semantics (one event per broken episode,
-gauges + cumulative counts, unverifiable separation, metric slots); two
-integration tests drive it against a real Supervisor whose watch is disarmed
-so the death stays observable: route C reconcile releases a record whose every
-fact is proven gone (the duplicate starts), and a fact the group keeps unproven
-still refuses one.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -34,8 +24,6 @@ from services.supervision.ava_root.supervisor import Supervisor
 
 
 class _Recorder:
-    """The structured log calls so far, as their field dictionaries (read from `loguru_records`)."""
-
     def __init__(self, records: LogRecords) -> None:
         self._records = records
 
@@ -53,8 +41,6 @@ def recorder(loguru_records: LogRecords) -> _Recorder:
 
 
 class _StubHost:
-    """A TreeHost whose units the test scripts directly."""
-
     def __init__(self, units: list[dict[str, object]], root_pid: int | None = None) -> None:
         self.units = units
         self.root_pid = os.getpid() if root_pid is None else root_pid
@@ -64,7 +50,6 @@ class _StubHost:
 
 
 def _broken_unit(unit_id: str) -> dict[str, object]:
-    """A stub unit that claims to run at a pid no live process holds."""
     return {"id": unit_id, "state": "running", "pid": 99999999}
 
 
@@ -85,7 +70,7 @@ def test_walk_checks_every_running_unit_and_skips_acknowledged_states(
         host = _StubHost(
             [
                 {"id": "parent", "state": "running", "pid": sleeper.pid},
-                {"id": "child", "state": "running", "pid": sleeper.pid},  # attach descendant
+                {"id": "child", "state": "running", "pid": sleeper.pid},
                 {"id": "idle", "state": "stopped", "pid": None},
                 {"id": "waiting", "state": "backoff", "pid": None},
             ]
@@ -124,18 +109,18 @@ def test_missing_process_opens_one_event_per_episode(
     check.run_once()
     _assert_first_episode_opened_one_event(check, recorder)
 
-    check.run_once()  # still broken: no second event, a hold line with the age
+    check.run_once()
     assert len(recorder.events("root_chain_broken")) == 1
     assert "still broken" in caplog.text
 
-    host.units = []  # repaired
+    host.units = []
     check.run_once()
     chain = _chain(check)
     assert chain["broken"] is False
     assert chain["broken_total"] == 1
     assert "intact again" in caplog.text
 
-    host.units = [_broken_unit("svc")]  # a new episode
+    host.units = [_broken_unit("svc")]
     check.run_once()
     assert len(recorder.events("root_chain_broken")) == 2
     assert _chain(check)["broken_total"] == 2
@@ -144,7 +129,6 @@ def test_missing_process_opens_one_event_per_episode(
 def test_detached_process_is_broken(recorder: _Recorder) -> None:
     sleeper = _spawn_sleeper()
     try:
-        # `sleeper` is a child of THIS process; claim a different root parent.
         host = _StubHost(
             [{"id": "svc", "state": "running", "pid": sleeper.pid}], root_pid=os.getppid()
         )
@@ -179,7 +163,7 @@ def test_unverifiable_is_separated_from_broken(
     warnings = [r for r in caplog.records if "cannot verify" in str(r.message)]
     assert len(warnings) == 1
 
-    check.run_once()  # steady state is quiet (debug, not a second warning)
+    check.run_once()
     warnings = [r for r in caplog.records if "cannot verify" in str(r.message)]
     assert len(warnings) == 1
 
@@ -204,10 +188,8 @@ async def test_loop_start_stop() -> None:
         await asyncio.sleep(0.06)
         await check.stop()
         assert cast(int, _chain(check)["rounds"]) >= 1
-        await check.stop()  # a second stop is a no-op
+        await check.stop()
 
-
-# -- integration against a real supervisor -------------------------------------
 
 _SLEEP_FOREVER = [sys.executable, "-c", "import time; time.sleep(60)"]
 
@@ -235,7 +217,7 @@ async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
 
     yield factory
     for supervisor in created:
-        if supervisor._running:  # a test may already have proved shutdown refuses
+        if supervisor._running:
             await supervisor.shutdown()
 
 
@@ -250,8 +232,6 @@ async def test_integration_detects_a_disarmed_death_and_allows_replacement(
     check.run_once()
     assert _chain(check)["broken"] is False
 
-    # Disarm the watch, then kill: the tree still claims "running" and the OS
-    # says no such child — the self-check must see the break.
     runtime = supervisor._units["svc"]
     assert runtime.watch_task is not None
     runtime.watch_task.cancel()
@@ -264,7 +244,6 @@ async def test_integration_detects_a_disarmed_death_and_allows_replacement(
     assert chain["broken_units"] == ["svc"]
     assert len(recorder.events("root_chain_broken")) == 1
 
-    # The direct child is gone; no durable record gates a fresh generation.
     result = cast("list[dict[str, object]]", (await supervisor.up("svc"))["units"])
     assert result[0]["action"] == "started"
     new_pid = cast(int, result[0]["pid"])

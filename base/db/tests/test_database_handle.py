@@ -1,6 +1,3 @@
-"""`Database`: a handle dials its own `DbConfig`, and the module-level entry points are the
-same dial built from the live settings at each call."""
-
 from __future__ import annotations
 
 import dataclasses
@@ -29,14 +26,6 @@ def _config(**overrides: Any) -> DbConfig:
 
 
 class _Dialed:
-    """Records the dials made by the test's own thread.
-
-    The monkeypatch sits on the process-wide ``psycopg.connect``, so a dial from
-    another thread sharing the xdist worker can reach the recorder; recording it
-    would break the assertions that index the list (2026-10-03 shard8: a
-    concurrent dial preceded the handle's own, ``kwargs[0]`` KeyError).
-    """
-
     def __init__(self) -> None:
         self.urls: list[str] = []
         self.kwargs: list[dict[str, Any]] = []
@@ -123,7 +112,6 @@ def test_the_config_carries_the_live_value_of_every_field(monkeypatch: pytest.Mo
 def test_all_handle_dials_use_their_retained_authority_refusal(
     database_gate: ProcessDbGate, operation: str
 ) -> None:
-    """Every configured connection entry point refuses before opening a client."""
     from psycopg_pool import AsyncConnectionPool
 
     handle = Database(
