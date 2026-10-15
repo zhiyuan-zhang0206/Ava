@@ -26,7 +26,6 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
-from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -130,7 +129,6 @@ def _expire(
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
             str(lease["id"]),
-            attested_caller(lease),
             local_machine=local_machine,
         )["status"]
         == "expired"
@@ -192,7 +190,6 @@ def test_central_event_commits_with_its_transaction_and_survives_a_lost_emit(
         database,
         event_bus,
         str(lease["id"]),
-        attested_caller(lease),
         "Central work only",
         local_machine=local_machine,
     )
@@ -274,7 +271,6 @@ def test_central_append_stops_once_admission_closes(
             database,
             event_bus,
             participant.lease_id,
-            attested_caller(lease),
             "Held SDK finally",
             local_machine=local_machine,
         )
@@ -318,7 +314,6 @@ def test_local_events_are_recorded_sealed_and_complete_at_release(
         database,
         event_bus,
         participant.lease_id,
-        attested_caller(lease),
         "Local work",
         local_machine=local_machine,
     )
@@ -346,7 +341,6 @@ def test_release_waits_for_an_open_source(
             database,
             event_bus,
             participant.lease_id,
-            attested_caller(lease),
             "Too early",
             local_machine=local_machine,
         )
@@ -436,7 +430,6 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
             database,
             event_bus,
             participant.lease_id,
-            attested_caller(lease),
             "Capture failed",
             local_machine=local_machine,
         )
@@ -527,7 +520,6 @@ def test_the_handoff_lists_events_in_call_order_not_write_order(
         database,
         event_bus,
         participant.lease_id,
-        attested_caller(lease),
         "Three calls in order",
         local_machine=local_machine,
     )

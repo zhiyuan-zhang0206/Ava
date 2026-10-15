@@ -30,7 +30,6 @@
 "test_claim_memory_index.py#monkeypatch.setattr base.config.settings.agent.memory_index_inject_enabled" = 3
 "test_external_integration_memory.py#monkeypatch.setattr ava.__plugin_installation__" = 1
 "test_external_integration_memory.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
-"test_external_integration_memory.py#monkeypatch.setattr ava.impersonation.attachment.process_metadata" = 2
 "test_external_integration_memory.py#monkeypatch.setattr ava_builtins.plugins.ava_memory.notes.workspace_dir" = 1
 "test_external_integration_memory.py#monkeypatch.setattr base.config.settings.agent.memory_per_agent_inject_enabled" = 1
 "test_external_integration_memory.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1

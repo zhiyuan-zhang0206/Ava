@@ -30,10 +30,8 @@ records that a message reached you.
 
 ## Authority
 
-Control commands are attested against the `codex` process that made the
-request. Run them from your own exec tool; that process tree is the authority.
-A command from another terminal, a detached helper, or deeper than 8 process
-levels is refused.
+Control commands are authorized by the `(agent_id, session_id)` lease handle on
+the hosting machine. Run them from your own exec tool, preserving `AVA_HOME`.
 
 ## Traps
 

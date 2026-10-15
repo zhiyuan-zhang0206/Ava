@@ -213,7 +213,6 @@ def say(
     db: Database,
     bus: EventBus,
     lease_id: str,
-    caller: object,
     content: str,
     *,
     phase: str = "commentary",
@@ -231,7 +230,6 @@ def say(
         require_active_locked(
             conn,
             lease,
-            caller,
             local_machine=local_machine,
         )
         seq = append(

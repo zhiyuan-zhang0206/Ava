@@ -23,11 +23,11 @@ it as `claude_session=<uuid>`; the conversation lives in
 it with `claude --resume` after a stop or crash closed the shell — see [Resume
 after an interruption](resume_after_interruption.md).
 
-For a takeover (`--impersonate-self --impersonation-name '…' --brief '<text>'`)
-the script is file-less: no task/work files, nothing to watch, and the session
-relay starts automatically via the bundled `ava-relay` plugin (resident mode;
-`--no-relay-resident` restores the executor-armed flow). The full procedure is
-[Let the coding agent take over your identity](impersonate_self.md).
+For a takeover (`--prompt '<text>'`) the script is file-less: no task/work
+files and nothing to watch. The spawned session reads `impersonator-guide`,
+requests the lease (`ava impersonate request --provider claude ...`), and starts
+its `Monitor` watch. The full procedure is [Let the coding agent take over your
+identity](impersonate_self.md).
 
 Manual launch (for full control):
 

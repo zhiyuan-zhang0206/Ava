@@ -15,12 +15,12 @@ briefing, which arrives inline in your launch message.
 ## Your host
 
 The relay reaches each coding tool differently, so the host-specific half of
-this manual — relay startup, how pushes arrive, where your authority comes
-from, and each tool's traps — has one guide per host. Read yours before the
-request:
+this manual — relay startup, how pushes arrive, and each tool's traps — has one
+guide per host. Read yours before the request:
 
 - Claude Code: [reference/claude_code.md](reference/claude_code.md)
 - Codex: [reference/codex.md](reference/codex.md)
+- Antigravity: [reference/antigravity.md](reference/antigravity.md)
 - DeepSeek Harness (dsh): [reference/deepseek_harness.md](reference/deepseek_harness.md)
 
 ## Operating contract
@@ -39,7 +39,7 @@ request:
   your end message: what you did, what you verified, what remains open and
   where to resume from. Release resumes the Ava agent: one system note wakes it
   with your summary, and it continues from there. The Ava side also stops a
-  lease when your executor is confirmed dead or its original TTL expires. Relay
+  lease when its original TTL expires or the native runtime restarts. Relay
   failure degrades delivery; the lease-scoped end note names the cause. A stopped lease
   is over: do not keep acting, and do not request a new takeover — a fresh one
   is arranged by the Ava side.
@@ -101,12 +101,9 @@ Three values anchor every command in this skill:
 
 - **Agent id and session id** — appears in the activation push and in the ACK command of
   every delivered batch. The session id is an integer scoped to its Ava agent; keep both handy.
-- **Session authority** — no credential exists to hold or pass. Every control
-  command must run from inside this session's own process tree (the executor and
-  its children); the session id plus that presence is the authority. A command
-  from any other process tree is refused — never move control to a helper. Run control
-  commands directly in the executor session's own shell: the caller's ancestor chain must
-  contain the recorded executor anchor within 8 levels — deeper wrapping fails closed.
+- **Session authority** — no controller credential exists to hold or pass. Every
+  control command is authorized by the `(agent_id, session_id)` lease handle on
+  the hosting machine.
 - **The cluster executable** — run the commands as given, with a bare `ava`. It acts
   on the home `AVA_HOME` names, else `~/.ava`: launched by an Ava agent, you
   inherited that agent's `AVA_HOME`; in a terminal of your own on the hosting
@@ -121,9 +118,8 @@ ava impersonate status <session_id> --agent <agent_id>
 
 The response shows the lease status and its expiry. Statuses you will see:
 `preparing` (not yet active), `active` (you may act), and terminal
-`released`, `expired`, `rejected` (`expired` also covers a takeover the Ava
-side stopped after confirmed executor death — the session record names the
-cause).
+`released`, `expired`, `rejected` (`expired` also covers a takeover stopped
+early — the session record names the cause).
 
 ## Messages: receive, acknowledge, process
 

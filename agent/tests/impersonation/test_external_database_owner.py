@@ -92,12 +92,10 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
         dials.append(connection)
         return connection
 
-    def active(
-        db: Database, lease_id: str, attesting: dict[str, Any], *, local_machine: str
-    ) -> dict[str, Any]:
+    def active(db: Database, lease_id: str, *, local_machine: str) -> dict[str, Any]:
         with db.connect(autocommit=True):
             pass
-        return require(db, lease_id, attesting, local_machine=local_machine)
+        return require(db, lease_id, local_machine=local_machine)
 
     checked: list[code_version_gate.ProcessDbGate] = []
     due = code_version_gate.ProcessDbGate.min_read_due

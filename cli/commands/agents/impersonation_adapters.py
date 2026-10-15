@@ -12,7 +12,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
-from base.agents.impersonation.host_transport import live_submit, require_control_endpoint
+from base.agents.impersonation.host_transport import (
+    antigravity_live_submit,
+    live_submit,
+    require_control_endpoint,
+)
 
 
 @dataclass(frozen=True)
@@ -20,7 +24,7 @@ class RelayAdapter:
     """A bound sender and its terminal-notice ownership.
 
     The native host submits a Codex lease's ended notice once, when it observes
-    the end. Controller-session transports send their own notices through stdout.
+    the end. Controller-session transports send their own notices.
     """
 
     send: Callable[[str], None]
@@ -57,6 +61,19 @@ def resolve_adapter(
                 raise RuntimeError(f"Codex Steer delivery failed: {reason}")
 
         return RelayAdapter(send, notify_terminal=False)
+    if provider == "antigravity":
+        if codex_remote is not None:
+            raise ValueError("the antigravity relay does not use --codex-remote")
+        if thread_id is None:
+            raise ValueError("antigravity relay requires --thread-id for an existing conversation")
+        target = UUID(thread_id)
+
+        def send_antigravity(message: str) -> None:
+            reason = antigravity_live_submit(str(target), message)
+            if reason is not None:
+                raise RuntimeError(f"Antigravity SendAgentMessage delivery failed: {reason}")
+
+        return RelayAdapter(send_antigravity, notify_terminal=False)
     if provider in ("claude", "dsh"):
         if codex_remote is not None or thread_id is not None:
             raise ValueError(

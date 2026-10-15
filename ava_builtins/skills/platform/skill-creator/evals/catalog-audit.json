@@ -222,7 +222,7 @@
       "skill": "ava_builtins/skills/platform/ava-guide/external-agents/SKILL.md",
       "request": "I am the current Ava agent. The user authorized Codex to take over my identity for the login fix, with the full briefing supplied inline. Give the concrete launch command and explain activation and release behavior, without launching anything.",
       "checks": [
-        "Uses takeover command with --impersonate-self and --brief",
+        "Uses spawn_codex.py with --prompt",
         "No tasks/work files or supervisor watcher",
         "Ava pauses on activation and resumes from summary/handoff; ACK is receipt not completion"
       ]
@@ -234,7 +234,7 @@
       "checks": [
         "Reads host guide and SDK/instruction reader to recover saved standing context before work",
         "Reads full pushed batch before ACK; ACK not completion and cancellation stops old work",
-        "Acts within lease executor process tree; no polling/background renewal; uses actual supported control sequence"
+        "No polling/background renewal; uses actual supported control sequence"
       ]
     },
     {

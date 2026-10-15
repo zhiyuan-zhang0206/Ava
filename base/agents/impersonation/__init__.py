@@ -33,9 +33,6 @@ from base.agents.impersonation._store import (
     lock_lease as lock_lease,
 )
 from base.agents.impersonation._store import (
-    provider_anchor_states as provider_anchor_states,
-)
-from base.agents.impersonation._store import (
     require_native as require_native,
 )
 from base.agents.impersonation.history import append, capture_pending, set_actor
@@ -202,7 +199,6 @@ def get(
     db: Database,
     bus: EventBus,
     lease_id: str,
-    caller: object,
     *,
     local_machine: str,
 ) -> dict[str, Any]:
@@ -210,7 +206,6 @@ def get(
         lease = lock_lease(conn, lease_id)
         authenticate(
             lease,
-            caller,
             local_machine=local_machine,
         )
         was_open = lease["status"] in OPEN
@@ -223,7 +218,6 @@ def get(
 def require_active(
     db: Database,
     lease_id: str,
-    caller: object,
     *,
     local_machine: str,
 ) -> dict[str, Any]:
@@ -241,7 +235,6 @@ def require_active(
     parsed_lease = parse_lease(lease)
     validate_active(
         parsed_lease,
-        caller,
         fresh=lease.pop("fresh"),
         machine=lease.pop("current_machine"),
         status=AgentStatus(lease.pop("current_status")),
@@ -421,7 +414,6 @@ def renew(
     db: Database,
     bus: EventBus,
     lease_id: str,
-    caller: object,
     *,
     ttl_seconds: int | None = None,
     local_machine: str,
@@ -431,7 +423,6 @@ def renew(
         require_active_locked(
             conn,
             lease,
-            caller,
             local_machine=local_machine,
         )
         set_actor(conn, lease["source"])
@@ -450,7 +441,6 @@ def release(
     db: Database,
     bus: EventBus,
     lease_id: str,
-    caller: object,
     summary: str,
     *,
     local_machine: str,
@@ -465,7 +455,6 @@ def release(
         lease = lock_lease(conn, lease_id)
         authenticate(
             lease,
-            caller,
             local_machine=local_machine,
         )
         if lease["status"] == ImpersonationStatus.RELEASED:
@@ -473,7 +462,6 @@ def release(
         require_active_locked(
             conn,
             lease,
-            caller,
             local_machine=local_machine,
         )
         set_actor(conn, lease["source"])
@@ -484,7 +472,6 @@ def release(
         lease = lock_lease(conn, lease_id)
         authenticate(
             lease,
-            caller,
             local_machine=local_machine,
         )
         if lease["status"] == ImpersonationStatus.RELEASED:
@@ -492,7 +479,6 @@ def release(
         require_active_locked(
             conn,
             lease,
-            caller,
             local_machine=local_machine,
         )
         set_actor(conn, lease["source"])
@@ -526,7 +512,6 @@ def release(
 def inbox(
     db: Database,
     lease_id: str,
-    caller: object,
     *,
     limit: int = 100,
     local_machine: str,
@@ -539,7 +524,6 @@ def inbox(
         require_active_locked(
             conn,
             lease,
-            caller,
             local_machine=local_machine,
         )
         with conn.cursor(row_factory=dict_row) as cur:
@@ -564,7 +548,6 @@ def ack(
     db: Database,
     bus: EventBus,
     lease_id: str,
-    caller: object,
     message_ids: list[int],
     *,
     local_machine: str,
@@ -574,7 +557,6 @@ def ack(
         require_active_locked(
             conn,
             lease,
-            caller,
             local_machine=local_machine,
         )
         rows = conn.execute(
@@ -620,7 +602,6 @@ def ack(
 def merge_plugin_delta(
     db: Database,
     lease_id: str,
-    caller: object,
     delta: dict[str, Any],
     *,
     expected_version: int,
@@ -631,7 +612,6 @@ def merge_plugin_delta(
         require_active_locked(
             conn,
             lease,
-            caller,
             local_machine=local_machine,
         )
         if lease["delta_version"] != expected_version:

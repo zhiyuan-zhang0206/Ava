@@ -50,7 +50,7 @@ Termination also queues ordered native system notes: impersonation interrupted,
 then completed termination. Ordinary claim renders these before the resurrection
 marker. Resurrection and its prompt use the database clock after locking the
 agent; claim orders by creation time and id, including equal-time notes.
-When the host first sees its Codex relay's lease ended, it submits one ended-lease
+When the host first sees its Codex or Antigravity relay's lease ended, it submits one ended-lease
 notice to the recorded thread without reopening expired inbox authority or
 delaying native handoff. A failed submission is reported once through
 `impersonation_terminal_notice_failed` and never retried; a lease that ended while no
@@ -68,21 +68,18 @@ marks the log version applied. Recovery skips checkpoint-receipted versions,
 so a crash between checkpoint and acknowledgement cannot apply an additive
 reducer twice. Core lifecycle fields cannot be changed by plugin deltas.
 
-Tests: `agent/tests/impersonation/test_impersonation.py` covers gates, receipt recovery, the
-executor-death judgments and fenced delivery recovery;
+Tests: `agent/tests/impersonation/test_impersonation.py` covers gates, receipt recovery,
+and fenced delivery recovery;
 `agent/tests/impersonation/test_impersonation_integration.py` exercises PostgreSQL, buffered
 checkpoints, the compiled graph, a real exec child, peer inbox acknowledgement,
-release summary, native resumption with plugin state, and the abort→resume
-chain including the death-caused end note.
+release summary, and native resumption with plugin state.
 `agent/tests/impersonation/test_impersonation_transport_integration.py` combines real
-PostgreSQL and a compiled graph with controlled process-query failures and
-stubbed relay establishment. Repeated unknown/permission-denied executor
-probes preserve the active lease, original expiry, pending input and delivery
-budget without native model calls. Delivery reservations exhaust the push
-budget without preventing a valid late ACK. Successor admission fences the
-previous runtime, aligns the active lease's native binding, and preserves
-unacknowledged input in the handoff record before native resumption. These
-tests do not start or restart a real agent host or Codex relay process.
+PostgreSQL and a compiled graph with stubbed relay establishment. Delivery
+reservations exhaust the push budget without preventing a valid late ACK.
+Successor admission fences the previous runtime, aligns the active lease's
+native binding, and preserves unacknowledged input in the handoff record before
+native resumption. These tests do not start or restart a real agent host or
+Codex relay process.
 
 `agent/impersonation_handoff.py` saves one JSON file under the agent workspace,
 then appends the impersonator summary and path as the first new system note.

@@ -11,7 +11,7 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.impersonation import host_transport, relay, terminal_notices
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -73,7 +73,6 @@ def end(
         database,
         event_bus,
         session["id"],
-        attested_caller(session),
         "Saved unfinished task",
         local_machine=local_machine,
     )
@@ -237,7 +236,6 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
         leases.require_active(
             database,
             replacement["id"],
-            attested_caller(replacement),
             local_machine=machine_identity.name(),
         )["status"]
         == "active"

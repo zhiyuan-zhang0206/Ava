@@ -10,7 +10,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.chat_delivery import insert_chat_inbound_once
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -125,7 +125,6 @@ def peer_chats(
         database,
         event_bus,
         str(session["id"]),
-        attested_caller(session),
         "Sent the peer update",
         local_machine=local_machine,
     )

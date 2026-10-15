@@ -6,7 +6,6 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
-from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -109,7 +108,6 @@ def test_reminder_ack_suppresses_further_reminders(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         [reminder_id],
         local_machine=local_machine,
     )
@@ -187,7 +185,6 @@ def test_release_dismisses_its_pending_reminder(
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         "Done before expiry",
         local_machine=local_machine,
     )
@@ -301,20 +298,18 @@ def test_renewal_recomputes_window_and_allows_a_new_reminder(
         database_gate=database_gate,
         local_machine=machine_identity.name(),
     )
-    caller = attested_caller(lease)
     with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
-        first = leases.inbox(database, lease["id"], caller, local_machine=local_machine)
+        first = leases.inbox(database, lease["id"], local_machine=local_machine)
         leases.ack(
             database,
             event_bus,
             lease["id"],
-            caller,
             [m["id"] for m in first],
             local_machine=local_machine,
         )
         leases.renew(
-            database, event_bus, lease["id"], caller, ttl_seconds=3600, local_machine=local_machine
+            database, event_bus, lease["id"], ttl_seconds=3600, local_machine=local_machine
         )
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
         db_conn.execute(

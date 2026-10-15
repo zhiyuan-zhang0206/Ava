@@ -12,9 +12,7 @@
 "test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.time.sleep" = 1
 "test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.verify_submitted" = 1
 "test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.wait_for_ready" = 1
-"test_impersonation_launch.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_agent_id" = 1
 
 [debt.stdlib-patch]
-"test_coding_session_resume.py#monkeypatch.setattr pathlib.Path.home" = 1
 "test_coding_session_resume.py#monkeypatch.setattr sys.argv" = 1
 "test_impersonation_launch.py#monkeypatch.setattr sys.argv" = 1

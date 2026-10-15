@@ -10,26 +10,28 @@ receipt and processes messages as they arrive.
 All providers use the same relay process and delivery loop in
 `cli/commands/agents/impersonation_relay.py`. Provider adapters in
 `cli/commands/agents/impersonation_adapters.py` bind a destination and send the
-loop's envelopes: Codex uses its app-server socket, Claude flushes text to
-Monitor, and dsh emits one JSON string per stdout line. Adapters also declare
-terminal-notice ownership: the Codex native host submits its notice once when it
-sees the lease end; controller-session adapters deliver theirs through stdout. The shared loop owns
-inbox reads, batching, delivery reservations, retry budgets and exit behavior;
-adapters do not acknowledge messages or renew leases. Process supervision stays
-with the existing owner for each provider, as described below.
+loop's envelopes: Codex uses its app-server socket, Antigravity uses its local
+language-server ConnectRPC endpoint (`SendUserCascadeMessage`), Claude flushes
+text to Monitor, and dsh emits one JSON string per stdout line. Adapters also
+declare terminal-notice ownership: the Codex and Antigravity native hosts submit
+their notice once when they see the lease end; controller-session adapters
+deliver theirs through stdout. The shared loop owns inbox reads, batching,
+delivery reservations, retry budgets and exit behavior; adapters do not
+acknowledge messages or renew leases. Process supervision stays with the
+existing owner for each provider, as described below.
 
 This page is the operator and mechanism side. The executor's side of each host
 is its host guide under `ava_builtins/skills/platform/impersonator-guide/reference/`
-(`claude_code.md`, `codex.md`, `deepseek_harness.md`).
+(`claude_code.md`, `codex.md`, `antigravity.md`, `deepseek_harness.md`).
 
 The relay is part of the takeover, not a manual step. The request records the
 relay endpoint on the lease row (`--provider`, `--thread-id`, `--codex-remote`).
-For codex, the accepting runtime provisions the relay's scoped credential,
-spawns the relay at activation and supervises it; for claude and dsh, the relay
-runs inside the controller session (see below) and the activation gate verifies
-its heartbeat. In both cases a relay that is not live when the takeover would
-activate rolls the acceptance back loudly: the lease ends `rejected` with the
-reason, the native agent receives a system note and keeps running.
+For codex and antigravity, the accepting runtime provisions the relay's scoped
+credential, spawns the relay at activation and supervises it; for claude and dsh,
+the relay runs inside the controller session (see below) and the activation gate
+verifies its heartbeat. In both cases a relay that is not live when the takeover
+would activate rolls the acceptance back loudly: the lease ends `rejected` with
+the reason, the native agent receives a system note and keeps running.
 
 The relay waits natively for preparation and quiescence, then delivers the
 session's start message — the `start_message` recorded on the lease during preparation —
@@ -51,17 +53,13 @@ Ava lease active without a usable Codex session.
 
 ### Control plane — no deliverable credential
 
-Controller authority is the session id plus caller attestation: every control
-command (`say` / `inbox` / `ack` / `renew` / `release` / `exec`) must run from a
-process that descends from the session's recorded controller tree — the
-executor process captured at request time. Nothing travels through the
-environment, argv, or files, so there is no shell environment policy, sentinel
-value, or supervisor-held credential to manage. The old
-`AVA_IMPERSONATION_TOKEN` prescription (with its `shell_environment_policy` /
-`shell_snapshot` settings and presence check) is obsolete: a stale or unrelated
-process gets a classified refusal (no-anchor / anchor-dead / chain-mismatch)
-instead of a credential error. A control-orphaned lease stays parked until the
-native side ends it (restart/stop) or its TTL expires. The attestation anchor set is the supported controller ends — currently `codex`, `claude` and `dsh` (`base/agents/impersonation/_store.verify_caller`); claude's native install layout (`<install>/claude/versions/<version>`, whose process name is the version) is recognized as its controller, and dsh — a Node program — is recognized as a `node` process whose script (recorded by `base/native_process/ownership.process_metadata` for Node processes) is the `dsh` launcher or `@deepseek-ai/dsh/lib/bin.js`. Extending support to a new controller CLI means extending that set and this list together.
+Controller authority is the `(agent_id, session_id)` lease handle on the hosting
+machine: every control command (`say` / `inbox` / `ack` / `renew` / `release` /
+`exec`) validates that the lease is active on this machine. Nothing travels
+through the environment, argv, or files, so there is no shell environment policy,
+sentinel value, or supervisor-held credential to manage. A control-orphaned
+lease stays parked until the native side ends it (restart/stop) or its TTL
+expires.
 
 ### One app server for TUI and relay
 
@@ -81,12 +79,12 @@ Connect the interactive TUI to that exact endpoint:
 codex --remote unix:///path/to/private/run/codex.sock -C /path/to/agent/workspace
 ```
 
-The Ava takeover launcher wires this topology itself for a file-less takeover:
-it starts the app server on a private per-generation socket under the cluster's
-`run/` directory with the hands-off approval and sandbox policy, starts a
+The Ava Codex launcher wires this topology itself for every generation:
+it starts the app server on a private per-generation socket under a private
+per-user temp directory with the hands-off approval and sandbox policy, starts a
 janitor that ends the server when the coding session dies, connects the TUI
-with `--remote`, and passes the endpoint into the launch message so the request
-records it (`--codex-remote`) and the runtime's relay delivers into the same
+with `--remote`, and prints `codex_app_server=<endpoint>` so a takeover request
+can record it (`--codex-remote`) and the runtime's relay delivers into the same
 server with Steer delivery.
 
 The codex relay needs no manual start: the accepting runtime spawns it at
@@ -94,9 +92,7 @@ activation from the recorded spec, handing the scoped relay credential over a
 private stdin pipe (`--token-stdin` — the credential never appears in argv,
 environment variables or files). If it cannot start, the acceptance rolls back.
 A stale heartbeat degrades delivery while executor authority remains bounded
-by its original TTL. A birth-confirmed Codex relay is replaced under the same
-lease; see *Executor authority and relay recovery*. The manual form below
-remains for diagnostics:
+by its original TTL. The manual form below remains for diagnostics:
 
 ```sh
 /path/to/checkout/.venv/bin/ava impersonate relay 42 \
@@ -133,12 +129,32 @@ embedded, and CLI sessions can use different app servers; the same UUID or
 shared queue database does not establish ownership or receipt. A host without
 a reachable control endpoint cannot support this takeover. Moving the current
 conversation to another host is a separate handoff, not a relay fallback.
-`--codex-remote` is rejected for Claude Monitor.
+`--codex-remote` is rejected for non-Codex providers.
 
 Verify receipt on the actual host while it is busy and while idle. Server
 acceptance is not host receipt: only the controller's explicit Ava ACK
 records that the input reached it. A timeout can follow acceptance, so a failed
 transport must not silently resubmit through a second delivery mechanism.
+
+## Google Antigravity (`agy`)
+
+Antigravity runs a local `language_server_macos_*` process on `127.0.0.1` with a
+`--csrf_token` flag and a localhost HTTP ConnectRPC port (`127.0.0.1:<port>`).
+`base/agents/impersonation/host_transport.py:discover_antigravity_server` discovers
+the live language server process via `psutil`, reads its `--csrf_token` and
+listening `127.0.0.1` TCP ports, and probes `GetUserStatus` to select the
+ConnectRPC HTTP port.
+
+`ava impersonate request --provider antigravity` resolves `--thread-id` from the
+explicit flag or from `ANTIGRAVITY_CONVERSATION_ID` in the environment, verifies
+that `discover_antigravity_server()` succeeds, and records the cascade ID on the
+lease. At activation, the accepting runtime provisions the scoped relay
+credential and spawns `ava impersonate relay --provider antigravity --thread-id
+<cascade_id> --token-stdin`. Each relay push calls
+`exa.language_server_pb.LanguageServerService/SendUserCascadeMessage` with
+`cascadeId`, `items=[{"text": message}]`, and `clientType=1` (queue-if-busy /
+steer semantics). When the lease ends, the host terminates the relay child and
+submits the ended-lease notice once via `antigravity_live_submit`.
 
 ## Claude Code Monitor
 
@@ -177,10 +193,6 @@ Background subagents retain Monitor in their
 Stopping the owner or ending the session stops its monitors. An ordinary
 background Bash command does not substitute for Monitor's per-line delivery.
 
-Plugin-declared monitors run for the session lifetime instead of a per-watch
-deadline, but they are an experimental component; evaluate them before relying
-on the mechanism (task #4037).
-
 MCP Channels are another supported push mechanism, but require startup opt-in
 and custom-server preview configuration; this relay uses Monitor directly. See
 the [channel protocol](https://code.claude.com/docs/en/channels-reference).
@@ -218,39 +230,33 @@ nothing for the executor to arm; a missing heartbeat rejects the takeover like
 any controller-session relay at admission. Once active, a stale relay degrades
 delivery without replacement; executor authority keeps its original TTL.
 
-The executor's commands run from dsh's shell tool, a direct child of the `node`
-process, so the attestation anchor is always in reach. Under dsh's default
-`workspace-write` sandbox the control commands (request, say, ack, release)
-ran in verification; work that writes outside the workspace needs a wider
-permission preset. A self-takeover launched by `spawn_dsh.py` runs with
+Under dsh's default `workspace-write` sandbox the control commands (request,
+say, ack, release) ran in verification; work that writes outside the workspace
+needs a wider permission preset. A session launched by `spawn_dsh.py` runs with
 `DSH_PERMISSION_MODE=danger-full-access` because nobody answers approval
 prompts in its PTY. dsh resolves its own model credential (environment,
 `$DSH_HOME/.credentials.yaml`, the working directory's `.env`, `$DSH_HOME/.env`).
 
 ## Executor authority and relay degradation
 
-Confirmed executor death ends authority; relay failure only degrades delivery.
-The accepting runtime re-checks both on the held-controls pass, which the dispatcher's
-database-backed pending scan triggers for held rows every ~30 seconds — the
-check is pull-based and never depends on wake delivery. Worst-case detection is
-the stale window plus one scan interval (≈75 s).
+Relay failure only degrades delivery; executor authority is bounded by explicit
+release, native runtime replacement, or original TTL.
+The accepting runtime re-checks relay liveness on the held-controls pass, which
+the dispatcher's database-backed pending scan triggers for held rows every ~30
+seconds — the check is pull-based and never depends on wake delivery.
 
-- **Executor authority.** Confirmed death/reuse of every recorded provider
-  anchor ends the lease. Unknown or absent evidence is visible degradation,
-  never confirmed death; authority ends at its original TTL if no decision arrives.
-- **Relay transport.** A stale or exited relay, Codex or controller-session, is
-  recorded as degraded (`relay_degraded_reason`, a rate-limited failure stamp and
-  an error log) and never replaced. The lease keeps its first credential and its
-  original TTL; messages stay in the inbox until the controller re-requests or
-  releases. A host or native restart ends the lease, so a relay is never adopted
-  across incarnations.
-- **What stopping does.** The lease goes terminal (`expired`) with the cause
-  recorded as `aborted: <detail>` in `rejection_reason` (the request's own
-  `reason` is preserved), pending renewal reminders are dismissed, a relay
-  process this runtime still holds is terminated, and the native agent
-  resumes: the end-of-session note names the cause ("This session was stopped
-  early: …"), and the `impersonation_aborted` event carries the dead component
-  and its detail. A fresh takeover then needs a fresh request.
+- **Relay transport.** A stale or exited relay, host-supervised or
+  controller-session, is recorded as degraded (`relay_degraded_reason`, a
+  rate-limited failure stamp and an error log) and never replaced. The lease
+  keeps its first credential and its original TTL; messages stay in the inbox
+  until the controller re-requests or releases. A host or native restart ends
+  the lease, so a relay is never adopted across incarnations.
+- **What stopping does.** When a lease ends early (such as native runtime
+  replacement or operator force-expiry), it goes terminal (`expired`) with the
+  cause recorded in `rejection_reason` (the request's own `reason` is preserved),
+  pending renewal reminders are dismissed, a relay process this runtime still
+  holds is terminated, and the native agent resumes: the end-of-session note
+  names the cause. A fresh takeover then needs a fresh request.
 
 ## Delivery and recovery
 

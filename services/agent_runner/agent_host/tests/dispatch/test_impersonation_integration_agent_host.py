@@ -11,7 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent import impersonation_process
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents import impersonation as leases
-from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -99,7 +99,6 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         database,
         event_bus,
         lease["id"],
-        attested_caller(lease),
         local_machine=machine_identity.name(),
     )
     assert ended["status"] == "expired"

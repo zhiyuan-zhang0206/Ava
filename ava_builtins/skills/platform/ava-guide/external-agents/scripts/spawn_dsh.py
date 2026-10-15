@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Launch DeepSeek Harness (dsh) to take over the launching Ava agent, or inspect/stop it.
+"""Launch DeepSeek Harness (dsh) in a persistent shell session, or inspect/stop it.
 
-dsh runs only as a takeover (``--impersonate-self``): file- and supervisor-less,
-with the briefing inlined in the launch message. The launcher boots dsh's
-shipped ``headless`` profile with the Ava relay plugin patched in
+dsh runs headless with the Ava relay plugin patched in
 (``ava-relay-dsh/ava-relay.mjs``). The plugin stands in for the one-shot
-headless runner: it opens one persistent session, submits the launch message,
+headless runner: it opens one persistent session, submits the initial prompt,
 echoes the session to the PTY, and starts the Ava relay from the credential
 stub ``ava impersonate request --provider dsh`` writes. Each launch owns a
 generation record of its own under ``(cluster, workspace, dsh)``;
@@ -13,16 +11,15 @@ generation record of its own under ``(cluster, workspace, dsh)``;
 
 Usage::
 
-    .venv/bin/python spawn_dsh.py <workspace-dir> --impersonate-self \\
-        --impersonation-name 'Fix login' --brief '<the full briefing text>'
+    .venv/bin/python spawn_dsh.py <workspace-dir> --prompt '<initial prompt>'
 
 dsh resolves its model credential itself (inherited environment,
 ``$DSH_HOME/.credentials.yaml``, the workspace ``.env``, then ``$DSH_HOME/.env``).
 The session runs with ``DSH_PERMISSION_MODE=danger-full-access``: nobody
-answers approval prompts in a PTY takeover, the same hands-off posture as the
-Codex and Claude launchers. The launch message and the patch live in the
-generation's private state directory; the plugin deletes the message once read.
-dsh runs under the PTY shell, so a failed boot is reported with its output.
+answers approval prompts in a headless PTY session. The initial prompt and the
+patch live in the generation's private state directory; the plugin deletes the
+message once read. dsh runs under the PTY shell, so a failed boot is reported
+with its output.
 
 Output: owner-record fields (``status`` / ``session_id`` / ``generation`` …),
 one ``key=value`` per line.
@@ -74,7 +71,7 @@ def _executables() -> tuple[str, str]:
 
 
 def _patch(plugin: Path, launch_file: Path) -> str:
-    """Replace the one-shot headless runner with the relay plugin's takeover session.
+    """Replace the one-shot headless runner with the relay plugin's persistent session.
 
     JSON strings are valid YAML scalars, so paths need no further quoting.
     """
@@ -121,17 +118,9 @@ def _wait_for_session(sid: int, timeout: float = 90.0) -> str:
                 return line.removeprefix(_READY_MARKER).split()[0]
             if _EXITED.fullmatch(line.strip()):
                 tail = "\n".join(lines[-20:])
-                raise RuntimeError(f"dsh exited before its takeover session opened:\n{tail}")
+                raise RuntimeError(f"dsh exited before its session opened:\n{tail}")
         time.sleep(1)
-    raise RuntimeError(f"dsh did not open its takeover session in PTY {sid} within {timeout:.0f} s")
-
-
-def _takeover_bootstrap_message(agent_id: int, name: str, brief: str) -> str:
-    """Inline the briefing; a takeover reads no task or work file."""
-    from ava.impersonation.launch import bootstrap_message
-    from ava.shell.coding_tools import impersonator_guide
-
-    return bootstrap_message(agent_id, name, "dsh", brief, impersonator_guide())
+    raise RuntimeError(f"dsh did not open its session in PTY {sid} within {timeout:.0f} s")
 
 
 def _owner_terminated(agent_id: int) -> bool:
@@ -192,7 +181,7 @@ def _new_generation(
     )
 
 
-def _launch(workspace: Path, name: str, brief: str, ttl_seconds: float) -> int:
+def _launch(workspace: Path, prompt: str, ttl_seconds: float) -> int:
     node, dsh = _executables()
     if not _PLUGIN.is_file():
         raise RuntimeError(f"the dsh relay plugin is missing: {_PLUGIN}")
@@ -212,7 +201,7 @@ def _launch(workspace: Path, name: str, brief: str, ttl_seconds: float) -> int:
         owner.state_dir.chmod(0o700)
         launch_file = owner.state_dir / _LAUNCH_FILE
         patch = owner.state_dir / _PATCH_FILE
-        _write_private(launch_file, _takeover_bootstrap_message(owner.owner_agent_id, name, brief))
+        _write_private(launch_file, prompt)
         _write_private(patch, _patch(_PLUGIN, launch_file))
         sid = ava.shell.sessions.new(name=owner.expected_suffix, ttl=ttl_seconds)
         active = coding_session_owner.publish_active(
@@ -244,8 +233,7 @@ def _launch(workspace: Path, name: str, brief: str, ttl_seconds: float) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Launch DeepSeek Harness in a persistent shell session to take over "
-        "the launching Ava agent."
+        description="Launch DeepSeek Harness in a persistent shell session."
     )
     parser.add_argument("workspace", help="Working directory for the dsh session.")
     parser.add_argument(
@@ -264,41 +252,27 @@ def main() -> int:
         help="Stop and terminalize exactly this generation.",
     )
     parser.add_argument(
-        "--impersonate-self", action="store_true", help="replace the launching Ava agent"
-    )
-    parser.add_argument("--impersonation-name", help="display name for the takeover session")
-    parser.add_argument(
-        "--brief",
+        "--prompt",
         default=None,
-        help="Takeover briefing text, inlined verbatim into the launch message.",
+        help="Initial prompt text submitted to the new dsh session.",
     )
     args = parser.parse_args()
-    if args.impersonate_self:
-        from ava.sdk_surface.agent_identity import require_agent_id
-
-        require_agent_id()
-        if args.status or args.cancel_generation:
-            parser.error("--impersonate-self requires a new launch")
-        if args.brief is None or not args.brief.strip():
-            parser.error("--impersonate-self requires a non-empty --brief")
-    elif not (args.status or args.cancel_generation):
-        parser.error("dsh runs only as a takeover: pass --impersonate-self with --brief")
-    elif args.impersonation_name is not None or args.brief is not None:
-        parser.error("--impersonation-name/--brief require --impersonate-self")
-
     if args.status or args.cancel_generation:
+        if args.prompt is not None:
+            parser.error("--prompt requires a new launch")
         key = coding_session_owner.canonical_key(
             Path(args.workspace).expanduser().resolve(), tool="dsh"
         )
         return _status(key) if args.status else _cancel(key, args.cancel_generation)
+    if args.prompt is None or not args.prompt.strip():
+        parser.error("new dsh launch requires a non-empty --prompt")
     workspace = _resolve_dir(args.workspace)
-    # Reaching here means the --impersonate-self branch above validated
-    # --brief as non-empty (the only path that neither errors nor returns
-    # early on --status/--cancel-generation) — pyright cannot see that.
+    from ava.sdk_surface.agent_identity import require_agent_id
+
+    require_agent_id()
     return _launch(
         workspace,
-        args.impersonation_name or workspace.name,
-        args.brief,  # pyright: ignore[reportArgumentType]
+        args.prompt,
         args.ttl_seconds,
     )
 

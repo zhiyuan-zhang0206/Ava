@@ -102,8 +102,7 @@ def _request(workspace: Path, resume: str | None) -> codex.LaunchRequest:
         work_file=workspace / "work.md",
         ttl_seconds=3600,
         caller_instance=None,
-        takeover_name=None,
-        takeover_brief="",
+        prompt=None,
         skill_dir=_SKILL_DIR,
         resume=resume,
     )
@@ -112,14 +111,20 @@ def _request(workspace: Path, resume: str | None) -> codex.LaunchRequest:
 def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
     workspace = tmp_path / "ws"
     workspace.mkdir()
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
     key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=tmp_path / "c")
-    return coding_session_owner.CodingSessionOwner(key=key, status=CodingSessionStatus.LAUNCHING)
+    return coding_session_owner.CodingSessionOwner(
+        key=key, status=CodingSessionStatus.LAUNCHING, state_dir=state_dir
+    )
 
 
 @pytest.mark.parametrize("opened", [_SESSION, _OTHER])
 def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
     opened: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import socket as socket_module
+
     owner = _owner(tmp_path)
     workspace = Path(owner.key.workspace)
     sent = _FakeShell().install(monkeypatch).sent
@@ -131,16 +136,28 @@ def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
     monkeypatch.setattr(codex, "read_session_id", _opened)
     monkeypatch.setattr(codex, "verify_submitted", _nothing)
 
-    request = _request(workspace, _SESSION)
-    if opened != _SESSION:
-        with pytest.raises(RuntimeError, match=f"not the requested {_SESSION}"):
-            codex.start_codex(7, owner.key, owner, "g", 41, request)
-        assert len(sent) == 1  # the TUI line only: nothing reaches the wrong session
-        return
-    assert codex.start_codex(7, owner.key, owner, "g", 41, request) == (None, _SESSION)
-    assert f"exec codex resume {_SESSION} --dangerously-bypass" in sent[0]
-    assert sent[1].startswith("This session was interrupted")
-    assert "continue from where you stopped" in sent[1]
+    sock_path = Path(codex.app_server_endpoint(owner.key, "g").removeprefix("unix://"))
+    sock_path.unlink(missing_ok=True)
+    listener = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    listener.bind(str(sock_path))
+    listener.listen(2)
+    try:
+        request = _request(workspace, _SESSION)
+        if opened != _SESSION:
+            with pytest.raises(RuntimeError, match=f"not the requested {_SESSION}"):
+                codex.start_codex(7, owner.key, owner, "g", request)
+            assert len(sent) == 2  # app-server + TUI line only: nothing reaches the wrong session
+            return
+        endpoint, session_id = codex.start_codex(7, owner.key, owner, "g", request)
+    finally:
+        listener.close()
+        sock_path.unlink(missing_ok=True)
+    assert session_id == _SESSION
+    assert endpoint.startswith("unix://")
+    assert f"codex app-server --listen {endpoint}" in sent[0]
+    assert f"exec codex resume {_SESSION} --remote {endpoint} --dangerously-bypass" in sent[1]
+    assert sent[2].startswith("This session was interrupted")
+    assert "continue from where you stopped" in sent[2]
 
 
 # --- Claude: the id is chosen up front, --resume reopens it --------------------
@@ -160,7 +177,7 @@ def test_claude_launch_names_its_session(
 ) -> None:
     seen: list[tuple[str, bool]] = []
 
-    def _supervised(*args: object, resume: bool) -> int:
+    def _supervised(*args: object, resume: bool, **_kwargs: object) -> int:
         seen.append((str(args[-1]), resume))
         return 0
 
@@ -182,26 +199,6 @@ def test_claude_launch_names_its_session(
         assert _common.session_uuid(session) == session
 
 
-def test_a_resumed_transcript_needs_one_more_bootstrap_to_count(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def _home() -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(Path, "home", _home)
-    transcript = tmp_path / ".claude" / "projects" / "-ws" / f"{_SESSION}.jsonl"
-    transcript.parent.mkdir(parents=True)
-    transcript.write_text('{"text": "You will take over Ava agent 41"}\n', encoding="utf-8")
-
-    baseline = _claude_checks.bootstrap_count(_SESSION)
-    assert baseline == 1
-    assert _claude_checks.bootstrap_count(_OTHER) == 0
-
-    with transcript.open("a", encoding="utf-8") as stream:
-        stream.write('{"text": "You will take over Ava agent 41 again"}\n')
-    assert _claude_checks.bootstrap_count(_SESSION) > baseline
-
-
 _RESUMED_PANEL = (
     "\u23fa takeover active\n"
     "\u273b Crunched for 59s\n"
@@ -219,22 +216,6 @@ def test_a_resumed_panel_is_ready_without_the_welcome_banner() -> None:
     assert not _claude_checks.claude_ui_ready(_RESUMED_PANEL)
     assert _claude_checks.claude_ui_ready(_RESUMED_PANEL, resumed=True)
     assert not _claude_checks.claude_ui_ready(shell, resumed=True)
-
-
-@pytest.mark.parametrize("pasted", [False, True])
-def test_a_pasted_bootstrap_is_followed_by_the_operators_own_words(
-    pasted: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Claude Code will not act on instructions that arrive only inside a paste."""
-    sent = _FakeShell().install(monkeypatch).sent
-    message = "take over Ava agent 41. " * (80 if pasted else 1)
-
-    _claude_checks.send_bootstrap(7, message)
-
-    if pasted:
-        assert sent == [f"\x1b[200~{message}\x1b[201~{_claude_checks.OWN_WORDS}"]
-    else:
-        assert sent == [message]
 
 
 # --- both: the message, the flag ------------------------------------------------

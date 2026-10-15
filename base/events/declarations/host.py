@@ -306,17 +306,6 @@ EVENTS: dict[str, EventSpec] = {
         "retries the disposal of the claimed rows",
         tier="anomaly",
     ),
-    # Impersonation auto-stop (task #3998): close the lease on executor/relay death.
-    "impersonation_aborted": telemetry_event(
-        "impersonation_aborted",
-        "the native impersonation supervisor detected a dead core component "
-        "(the executor's recorded process chain all dead/reused, or the bound "
-        "relay's heartbeat stale past the exception window) and closed the "
-        "lease: carries the agent, lease, session, the dead component "
-        "(executor | relay) and its detail; the end note is delivered through "
-        "the resume chain",
-        tier="anomaly",
-    ),
     "impersonation_terminal_notice_failed": telemetry_event(
         "impersonation_terminal_notice_failed",
         "the host's single submission of an ended impersonation lease's notice to its "

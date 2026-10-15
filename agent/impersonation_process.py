@@ -16,13 +16,15 @@ def spawn_codex_relay(
     thread_id: str,
     codex_remote: str | None,
     codex_home: str | None = None,
+    *,
+    provider: str = "codex",
 ) -> subprocess.Popen[bytes]:
     """Spawn the bound relay; the scoped credential travels over a private pipe.
 
     The token never appears in argv or the environment. The child receives the
     session environment projection and boots its cluster connections. Stdout is
-    discarded because delivery uses the app-server Steer path; stderr flows
-    into this process's log.
+    discarded because delivery uses the host IPC path; stderr flows into this
+    process's log.
     """
     from base.sessions.env_forwarding import forward_env_dict
 
@@ -39,7 +41,7 @@ def spawn_codex_relay(
         "--lease-id",
         lease_id,
         "--provider",
-        "codex",
+        provider,
         "--thread-id",
         thread_id,
         "--token-stdin",
