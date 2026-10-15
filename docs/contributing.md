@@ -92,10 +92,12 @@ violations pass, anything new fails, and the debt may only shrink
 
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes
-to current project and domain rules; another reviewer agent, a reviewer persona,
-a fixed approval comment and a review-publishing step are not required. If the
-review exposes an unresolved design choice, discuss it with the user before
-changing that choice.
+to current project and domain rules. Every contribution also needs an independent
+reviewer (a person or a separate agent) to read the actual diff, documentation
+owners and relevant assertions. Include review findings and resolutions in the
+ongoing task or PR description. This is a contributor requirement, not a CI model
+service, fixed approval comment or signed report. If review exposes an unresolved
+design choice, discuss it with the user before changing that choice.
 
 ## Submit the PR
 

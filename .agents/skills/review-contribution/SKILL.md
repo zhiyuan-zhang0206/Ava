@@ -6,7 +6,8 @@ description: "Reviews Ava contributions against project rules. Use before openin
 # Review your contribution
 
 Review your own diff against the user's goal and the current source of truth.
-This is a contributor self-check, not a separate reviewer role or merge gate.
+Then request an independent person or agent to review the actual contribution.
+This is a contributor workflow requirement, not an automated semantic CI gate.
 Use [docs/contributing.md](../../../docs/contributing.md) for the contribution path.
 
 1. Read [AGENTS.md](../../../AGENTS.md) and the affected component's local `docs/`.
@@ -34,7 +35,13 @@ Use [docs/contributing.md](../../../docs/contributing.md) for the contribution p
    Re-read the final diff for unrelated changes and record material verification
    gaps in the PR description. Discuss unresolved design choices with the user.
 
-Summarize useful findings in the ongoing task or PR description. No reviewer
-agent, fixed report format, approval-SHA comment, external notification or
-review-publication step is required. This check does not authorize merging or
-runtime operations.
+6. Have an independent reviewer check the actual diff and relevant source,
+   documentation and test assertions. For comment migration, follow
+   [structured code comments](../../../docs/conventions/engineering/structured-code-comments.md):
+   distinguish redundant prose from useful rationale, verify retained statements,
+   and check changed behavior against unchanged contracts. Static reference
+   checks do not establish semantic truth or test execution.
+
+Summarize findings and resolutions in the ongoing task or PR description. No
+model service in CI, fixed report format, approval-SHA comment or signed report
+is required. This check does not authorize merging or runtime operations.

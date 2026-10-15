@@ -28,28 +28,23 @@ function webSocketOrigin(gatewayOrigin: string): string {
   return url.origin;
 }
 
-/** Return the origin the browser used, including a reverse proxy's forwarding. */
+// ava:ref ui/web/src/lib/auth/docs/content-security-policy.ava.okf.md#forwarded-origin
 export function browserFacingRequestUrl(request: Request): URL {
   const requestUrl = new URL(request.url);
   const protocol = firstHeaderValue(request.headers.get("x-forwarded-proto"))?.toLowerCase();
   if (protocol === "http" || protocol === "https") requestUrl.protocol = `${protocol}:`;
 
-  // The gate proxies to a loopback Next.js address, so deployment must forward
-  // the browser's host as X-Forwarded-Host (and protocol when TLS terminates
-  // there). API_BASE uses that browser-facing origin too.
   const browserHost =
     firstHeaderValue(request.headers.get("x-forwarded-host")) ?? request.headers.get("host");
   if (browserHost) {
     const browserOrigin = new URL(`${requestUrl.protocol}//${browserHost}`);
     requestUrl.hostname = browserOrigin.hostname;
-    // Assigning .host without a port retains the loopback Next.js port.
-    // Explicitly clear it when the proxy exposes the default HTTPS port.
     requestUrl.port = browserOrigin.port;
   }
   return requestUrl;
 }
 
-/** Build the per-response CSP consumed by Next.js while it renders the request. */
+// ava:ref ui/web/src/lib/auth/docs/content-security-policy.ava.okf.md#production-directives
 export function buildContentSecurityPolicy({
   nonce,
   gatewayOrigin,
@@ -70,14 +65,10 @@ export function buildContentSecurityPolicy({
     "form-action 'self'",
     `script-src ${scriptSources.join(" ")}`,
     `style-src ${styleSources.join(" ")}`,
-    // React's dynamic layout values render as style attributes. Limit the
-    // compatibility exception to those attributes; nonce-only style elements
-    // remain protected by style-src in production.
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' data: http: https:",
     "font-src 'self' data:",
     `connect-src 'self' ${resolvedGatewayOrigin} ${webSocketOrigin(resolvedGatewayOrigin)}`,
-    // Shared context links can open HTTP(S) pages inside the sandboxed reader.
     "frame-src 'self' http: https:",
     "frame-ancestors 'none'",
   ].join("; ");

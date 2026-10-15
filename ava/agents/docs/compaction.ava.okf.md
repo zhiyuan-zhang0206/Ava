@@ -41,3 +41,41 @@ lease renewal. Legacy automatic compaction, SDK self-compaction, UI/CLI/MCP
 consumers and runtime rollout remain separate. Operator compatibility and
 uncertainty/retention boundaries remain with the existing domain owner:
 [[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md]].
+
+## Generated SDK help
+
+```ava-contract
+id = "api-namespace"
+kind = "api"
+statement = "Explicit manual compaction of one retained, closed source history."
+code = ["ava/agents/compaction.py:<module>"]
+tests = ["ava/tests/namespaces/agents/test_compaction.py::test_compaction_namespace_is_discoverable_in_sdk_help"]
+api = "ava.agents.compaction"
+```
+
+```ava-contract
+id = "api-observe"
+kind = "api"
+statement = "Observe one eligible closed source history for manual compaction.\n\nActive, unsupported or stale sources fail. Keep the returned target with\nthe submission key; a later observation may describe different history."
+code = ["ava/agents/compaction.py:observe"]
+tests = ["ava/tests/namespaces/agents/test_compaction.py::test_fixed_routes_keep_original_source_and_distinguish_status"]
+api = "ava.agents.compaction.observe"
+```
+
+```ava-contract
+id = "api-submit"
+kind = "api"
+statement = "Accept manual compaction of the exact observed source history.\n\nReuse the original target/key after uncertainty. Acceptance does not mean\nthe summary was generated or applied; inspect status separately."
+code = ["ava/agents/compaction.py:submit"]
+tests = ["ava/tests/namespaces/agents/test_compaction.py::test_fixed_routes_keep_original_source_and_distinguish_status"]
+api = "ava.agents.compaction.submit"
+```
+
+```ava-contract
+id = "api-status"
+kind = "api"
+statement = "Inspect execution and application evidence for this original acceptance.\n\nAn accepted command may remain unresolved. Application and release of\nits native continuation are separate facts in the returned status."
+code = ["ava/agents/compaction.py:status"]
+tests = ["ava/tests/namespaces/agents/test_compaction.py::test_fixed_routes_keep_original_source_and_distinguish_status"]
+api = "ava.agents.compaction.status"
+```
