@@ -47,6 +47,14 @@ They remain available to `ava.help`; edit the document owner and run `render-api
 The static SDK export resolver must prove the actual exported definition. An
 internal function cannot preserve its prose by declaring itself an API.
 
+Native pytest fixture docstrings are user-facing help consumed by `--fixtures`
+and `--fixtures-per-test`. Keep useful and accurate help on a statically proved
+`pytest.fixture` function; no `api` record or runtime `__doc__` assignment is
+needed. This narrow consumer does not authorize internal helper docstrings or
+body comments. The checker documents its supported decorator and binding proof;
+unproved decorators remain strict. Independent review checks the text's value
+and truth, including whether changed behavior requires updating existing help.
+
 ## Document contracts
 
 A live `ava-contract` fenced block contains TOML with a unique kebab-case `id`,

@@ -149,7 +149,7 @@ def rationale_owners(source: Source, contracts: dict[str, Contract]) -> set[str]
 def unreferenced_note(
     path: str, note: Note, rationales: set[str], *, strict: bool
 ) -> Finding | None:
-    if note.kind == NoteKind.MACHINE:
+    if note.kind in {NoteKind.MACHINE, NoteKind.FIXTURE_HELP}:
         return None
     if note.kind == NoteKind.LINT_DIRECTIVE:
         if strict and note.owner not in rationales:

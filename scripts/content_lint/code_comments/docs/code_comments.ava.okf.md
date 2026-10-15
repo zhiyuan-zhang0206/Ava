@@ -15,7 +15,7 @@ code. `typescript_index.py` validates the compiler output and source hashes.
 
 `render.py` uses the existing static SDK provenance resolver and generates API
 docstrings from documentation. It verifies that executable ASTs are unchanged
-and prepares every file before writing. It does not execute the SDK.
+and prepares every file before writing.
 
 ## Commands
 
@@ -33,8 +33,7 @@ bash scripts/content_lint/code_comments/check.sh changed BASE_REF
 `validate` checks all typed records and references. `check` additionally rejects
 free prose in selected sources; without paths it selects the whole supported
 tree. `inventory` is the full strict scan with failure status while work remains;
-pass `--json` before the command for structured output. These are different
-claims and the CLI prints its strict scope explicitly.
+pass `--json` before the command for structured output. The CLI prints its scope.
 
 `changed` selects staged paths under pre-commit's unstaged-change isolation.
 When pre-commit supplies from/to refs (including the pre-push branch check), it
@@ -77,6 +76,8 @@ Quiesce markers use an exact typed reference; the existing stop-window lint stil
 owns loop placement and stale-marker checks. No rule registry, runtime import or
 path exemption is added. Unchanged directives are not globally migrated by
 reference-only validation.
+
+See [native fixture help](fixtures.ava.okf.md) for the bounded pytest consumer.
 
 The checker proves syntax and reference integrity, not external-source freshness,
 test execution or semantic truth. The contribution's independent review owns
