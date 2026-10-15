@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -602,6 +604,7 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
         allowed_origins=("https://alpha.example",),
         browser_origin="https://alpha.example",
         session_cookie_secure=False,
+        memory_root=Path("/nonexistent/alpha-memory"),
     )
     config_beta = GatewayConfig(
         cluster_secret="secret-beta",  # noqa: S106
@@ -610,6 +613,7 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
         allowed_origins=("http://beta.example:3000",),
         browser_origin="",
         session_cookie_secure=False,
+        memory_root=Path("/nonexistent/beta-memory"),
     )
 
     with gateway_test_process(machine=machine_identity) as process:

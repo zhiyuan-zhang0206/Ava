@@ -60,6 +60,7 @@ import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager, nullcontext
 from functools import partial
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, Request, Response
@@ -731,6 +732,7 @@ def openapi_schema() -> dict[str, Any]:
         allowed_origins=(),
         browser_origin="",
         session_cookie_secure=False,
+        memory_root=Path("/nonexistent/memory"),
     )
     with process.lifetime():
         app = create_app(schema_config, process=process, process_ownership="borrowed")

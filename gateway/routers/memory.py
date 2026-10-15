@@ -33,7 +33,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from base.api_contracts.agent_contract import IndexerUnavailable
 from base.db import Database
 from base.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
-from base.paths import gateway_memory_dir
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.disconnect import run_until_disconnect
 from gateway.schemas.memory import (
@@ -408,7 +407,7 @@ async def _search_and_rank(
         k=body.k,
         limit=limit,
         exclude=exclude,
-        memory_root=gateway_memory_dir(roles=request.app.state.machine.role()),
+        memory_root=request.app.state.gateway_config.memory_root,
     )
 
 
@@ -536,7 +535,7 @@ class MemoryGraphCache:
 @router.get("/api/memory/graph", response_model=MemoryGraphResponse)
 def get_memory_graph(request: Request) -> MemoryGraphResponse:
     """Return concept notes and cross-links from the gateway memory bundle."""
-    root = gateway_memory_dir(roles=request.app.state.machine.role())
+    root = request.app.state.gateway_config.memory_root
     revision = _pool_revision(root)
     if revision is None:
         return _build_memory_graph(root)
@@ -555,7 +554,7 @@ def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
     frontmatter) is not a note either: 404. The response carries the parsed
     fields plus the markdown body with the YAML frontmatter already stripped.
     """
-    root = gateway_memory_dir(roles=request.app.state.machine.role()).resolve()
+    root = request.app.state.gateway_config.memory_root.resolve()
     rel = Path(path)
     if rel.is_absolute() or rel.suffix != ".md":
         raise HTTPException(status_code=404, detail="memory note not found")
@@ -602,7 +601,7 @@ def get_memory_pool(request: Request) -> Response:
     /api route. `X-Pool-Head` carries the checkout's HEAD sha so the receiver
     can verify what it cloned is the advertised snapshot.
     """
-    root = gateway_memory_dir(roles=request.app.state.machine.role())
+    root = request.app.state.gateway_config.memory_root
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="gateway memory pool not initialized")
     try:

@@ -2,15 +2,11 @@
 "test_event_loop_isolation.py#monkeypatch.setattr base.config.settings.services.memory_search_acquire_timeout_seconds" = 1
 "test_event_loop_isolation.py#monkeypatch.setattr base.config.settings.services.memory_search_deadline_seconds" = 1
 "test_event_loop_isolation.py#monkeypatch.setattr base.config.settings.services.memory_search_max_concurrency" = 1
-"test_event_loop_isolation.py#monkeypatch.setattr gateway.routers.memory.gateway_memory_dir" = 8
 "test_event_loop_isolation.py#monkeypatch.setattr services.derived.memory_indexer.backends.factory.get_backend" = 3
-"test_memory_graph.py#monkeypatch.setattr gateway.routers.memory.gateway_memory_dir" = 15
-"test_memory_pool.py#monkeypatch.setattr gateway.routers.memory.gateway_memory_dir" = 2
 "test_memory_refresh.py#monkeypatch.setattr base.deploy.git.memory_repo.pull_main" = 2
 "test_search_budget.py#monkeypatch.setattr base.config.settings.services.memory_dedup_candidates" = 1
 "test_search_budget.py#monkeypatch.setattr base.config.settings.services.memory_rerank_candidates" = 1
 "test_search_budget.py#monkeypatch.setattr base.config.settings.services.memory_search_deadline_seconds" = 2
-"test_search_budget.py#monkeypatch.setattr gateway.routers.memory.gateway_memory_dir" = 1
 "test_search_budget.py#monkeypatch.setattr services.derived.memory_indexer.backends.factory.get_backend" = 1
 "test_search_budget.py#monkeypatch.setattr services.derived.memory_indexer.rerank.ask_relevance" = 4
 

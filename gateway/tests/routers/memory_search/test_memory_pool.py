@@ -4,12 +4,9 @@ for split-runner memory bootstrap (2026-08-27 company-mini incident)."""
 from __future__ import annotations
 
 import subprocess
-from functools import partial
 from pathlib import Path
 
-import pytest
-
-from base.cluster.machine import MachineRoles
+from gateway.tests.routers.test_memory_search import memory_config
 from tests.fixtures.gateway_config import gateway_test_client
 
 
@@ -29,14 +26,10 @@ def _init_repo(root: Path) -> str:
     ).stdout.strip()
 
 
-def test_pool_serves_bundle_of_consolidated_checkout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_pool_serves_bundle_of_consolidated_checkout(tmp_path: Path) -> None:
     """The endpoint serves a git bundle of the gateway checkout's HEAD: the
     tracked tree rides in with real ancestry; untracked machine-local paths
     (.cache/.githooks/__pycache__/.DS_Store) never do."""
-    import gateway.routers.memory as _gw_memory
-
     root = tmp_path / "pool"
     root.mkdir()
     head = _init_repo(root)
@@ -49,9 +42,7 @@ def test_pool_serves_bundle_of_consolidated_checkout(
     (root / "__pycache__" / "c.pyc").write_bytes(b"x")
     (root / ".DS_Store").write_text("x")
 
-    monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, root))
-
-    with gateway_test_client() as client:
+    with gateway_test_client(config=memory_config(root)) as client:
         resp = client.get("/api/memory/pool")
 
     assert resp.status_code == 200
@@ -75,22 +66,10 @@ def test_pool_serves_bundle_of_consolidated_checkout(
     assert not (clone / ".DS_Store").exists()
 
 
-def test_pool_404_when_gateway_checkout_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_pool_404_when_gateway_checkout_missing(tmp_path: Path) -> None:
     """A gateway without an initialized consolidated checkout answers 404 —
     the runner's bootstrap then fails loud, it never installs garbage."""
-    import gateway.routers.memory as _gw_memory
-
-    monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path / "nope"))
-
-    with gateway_test_client() as client:
+    with gateway_test_client(config=memory_config(tmp_path / "nope")) as client:
         resp = client.get("/api/memory/pool")
 
     assert resp.status_code == 404
-
-
-def _memory_root(root: Path, *, roles: MachineRoles) -> Path:
-    """Keep the original test filesystem while accepting the explicit role input."""
-    del roles
-    return root
