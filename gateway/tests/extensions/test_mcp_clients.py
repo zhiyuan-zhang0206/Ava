@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi.testclient import TestClient
-
-from gateway.app import app
-from tests.fixtures.gateway_config import create_mcp_client
+from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 
 
 def _assert_created_client(body: dict[str, Any], *, name: str, scope: str) -> None:
@@ -39,7 +36,7 @@ def _assert_listed_client_row(
 
 
 def test_create_shows_token_once_and_list_redacts_credentials() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         created = create_mcp_client(client, "codex", "write")
         assert created.status_code == 200, created.text
         body = created.json()
@@ -56,7 +53,7 @@ def test_create_shows_token_once_and_list_redacts_credentials() -> None:
 
 
 def test_duplicate_name_returns_conflict() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = create_mcp_client(client, "claude")
         assert first.status_code == 200, first.text
 
@@ -67,7 +64,7 @@ def test_duplicate_name_returns_conflict() -> None:
 
 
 def test_revoke_succeeds_once() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         created = create_mcp_client(client, "readonly")
         assert created.status_code == 200, created.text
         client_id = created.json()["id"]

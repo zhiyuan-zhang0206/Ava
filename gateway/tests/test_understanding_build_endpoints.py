@@ -18,7 +18,6 @@ from unittest.mock import patch
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from psycopg import sql
 
@@ -30,10 +29,11 @@ from base.lm.catalog import ModelCatalog
 from gateway.agents.history import understanding as module
 from gateway.agents.history.configuration import understanding_policy
 from gateway.agents.history.read_inputs import UnderstandingReadPolicy
-from gateway.app import app
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 _T0 = datetime(2026, 10, 5, tzinfo=UTC)
 _MODEL = "deepseek-v4-flash"
+_ACTIVE_CATALOGS: list[ModelCatalog] = []
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:
@@ -107,13 +107,13 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def build_model(
         _db: object, _agent: int, *, catalog: ModelCatalog, policy: UnderstandingReadPolicy
     ) -> str:
-        assert catalog is app.state.catalog
+        assert catalog is _ACTIVE_CATALOGS[-1]
         return _MODEL
 
     def chunk_size(
         _db: object, _agent: int, *, catalog: ModelCatalog, policy: UnderstandingReadPolicy
     ) -> int:
-        assert catalog is app.state.catalog
+        assert catalog is _ACTIVE_CATALOGS[-1]
         return 1000
 
     monkeypatch.setattr(module, "build_model", build_model)
@@ -122,12 +122,16 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 @contextmanager
-def _client() -> Generator[TestClient, None, None]:
-    with patch.dict(os.environ), TestClient(app) as client:
-        yield client
+def _client() -> Generator[GatewayTestClient, None, None]:
+    with patch.dict(os.environ), gateway_test_client() as client:
+        _ACTIVE_CATALOGS.append(client.app.state.catalog)
+        try:
+            yield client
+        finally:
+            _ACTIVE_CATALOGS.pop()
 
 
-def _build(client: TestClient, agent_id: int, **body: Any) -> dict[str, Any]:
+def _build(client: GatewayTestClient, agent_id: int, **body: Any) -> dict[str, Any]:
     resp = client.post(f"/api/agents/{agent_id}/understanding/build", json=body)
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -348,12 +352,12 @@ def test_a_bad_selection_is_422_and_writes_nothing(
 
 
 def test_the_switch_does_not_change_a_dry_run_and_a_build_is_queued_either_way(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     agent = _seed_agent(db_conn)
     with _client() as client:
         off = _build(client, agent, sessions=[2], dry_run=True)
-        monkeypatch.setattr(app.state.config_authority.runtime.agent, "understanding_enabled", True)
+        client.app.state.config_authority.runtime.agent.understanding_enabled = True
         on = _build(client, agent, sessions=[2], dry_run=True)
     assert (off["understanding_enabled"], on["understanding_enabled"]) == (False, True)
     assert off["jobs"] == on["jobs"] and off["estimate"] == on["estimate"]
@@ -475,7 +479,7 @@ def test_a_process_without_the_agent_domain_reads_the_switch_and_chunk_size_from
         config = ConfigBoot()
         authority = ConfigAuthority(config.view, Settings(profile=None), path)
         policy = understanding_policy(config, authority)
-        monkeypatch.setattr(app.state, "understanding_policy", policy)
+        client.app.state.understanding_policy = policy
         body = _build(client, agent, sessions=[1], dry_run=True)
         assert body["understanding_enabled"] is True
         assert policy.chunk_ratio() == 0.25

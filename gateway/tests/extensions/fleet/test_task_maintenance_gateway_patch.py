@@ -11,7 +11,6 @@ import psycopg
 
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
-from gateway.app import app
 from tests.fixtures.gateway_config import gateway_test_client
 
 _TASK_TITLE = count(1)
@@ -78,7 +77,7 @@ def test_gateway_patch_clears_escalation_marker(
             (tid,),
         )
     db_conn.commit()
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.patch(
             f"/api/tasks/{tid}", json={"priority": "P1"}, headers=keyed_headers(str(uuid4()))
         )

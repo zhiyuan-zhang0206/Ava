@@ -31,7 +31,7 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock
 from base.config import settings
 from base.db import create_agent
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
@@ -43,7 +43,7 @@ def test_client(db_conn: psycopg.Connection):
     """TestClient + lifespan. db_conn's TRUNCATE runs before the lifespan —
     the DB pool reuses the same test library (settings.data_plane.db_url is
     already replaced by conftest)."""
-    with patch.dict(os.environ), TestClient(app) as client:
+    with patch.dict(os.environ), gateway_test_client() as client:
         yield client
 
 
@@ -371,7 +371,7 @@ class TestTimelineFailLoud:
             )
 
         monkeypatch.setattr(gateway_timeline, "build_timeline_items", boom)  # pyright: ignore[reportUnknownArgumentType]
-        with patch.dict(os.environ), TestClient(app, raise_server_exceptions=False) as client:
+        with patch.dict(os.environ), gateway_test_client(raise_server_exceptions=False) as client:
             resp = client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 500, (
             f"dispatch error must fail-loud as 500, got {resp.status_code}: {resp.text[:200]}"

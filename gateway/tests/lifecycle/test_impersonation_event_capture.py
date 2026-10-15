@@ -110,10 +110,9 @@ def test_a_label_the_agent_sets_while_borrowed_lands_in_its_lease_log(
     lease: dict[str, Any],
     machine_identity: MachineIdentity,
 ) -> None:
-    from gateway.app import app
     from tests.fixtures.gateway_config import gateway_test_client
 
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         by_agent = client.patch(
             f"/api/agents/{owner.agent_id}", json={"label": "borrowed", "source": "self"}
         )

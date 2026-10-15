@@ -12,7 +12,6 @@ from agent.tests.claim.test_inbound_ownership import insert
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.agents import lifecycle
@@ -26,11 +25,8 @@ from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
-def auth_headers(patch: pytest.MonkeyPatch) -> dict[str, str]:
-    secret = "native-cancel-offline-secret"  # noqa: S105 — isolated fixture credential
-    patch.setattr(settings.data_plane, "cluster_secret", secret)
+def auth_headers(_patch: pytest.MonkeyPatch) -> dict[str, str]:
     return {
-        "Authorization": f"Bearer {secret}",
         "Idempotency-Scope": "principal-v1",
         "Idempotency-Key": "native-original",
     }

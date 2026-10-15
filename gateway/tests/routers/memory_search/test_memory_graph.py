@@ -6,11 +6,10 @@ from functools import partial
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineRoles
-from gateway.app import app
 from gateway.tests.routers.test_memory_search import memory_search_app_db as memory_search_app_db
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 class TestMemoryGraph:
@@ -44,7 +43,7 @@ tags: [tech-ops]
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -82,7 +81,7 @@ tags: [ava-internal]
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -135,7 +134,7 @@ See [Root Note](../root-note.md).
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -199,7 +198,7 @@ tags: [ava-internal]
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -244,7 +243,7 @@ tags: [ava-internal]
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -263,7 +262,7 @@ tags: [ava-internal]
 
         monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -295,7 +294,7 @@ See [Outside](../outside.md) and [Absolute](/etc/passwd).
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -335,7 +334,7 @@ tags: {a: 1}
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -371,7 +370,7 @@ title: Real
 """
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -395,7 +394,7 @@ title: Note
 """
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -411,7 +410,7 @@ title: Note
             _gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path / "nope")
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -438,7 +437,7 @@ title: Good
 """
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -465,7 +464,7 @@ See [Web](https://example.com) and [Anchor](#section).
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -491,7 +490,7 @@ See [Ghost](ghost.md).
             encoding="utf-8",
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -527,7 +526,7 @@ title: Beta
 """
         )
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200

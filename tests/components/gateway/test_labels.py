@@ -13,7 +13,6 @@ import openai
 import psycopg
 import pytest
 import redis.asyncio as aredis
-from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from base.agents.labels import publish_label_updated
@@ -26,11 +25,10 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm import usage
 from base.lm.catalog import ModelCatalog
 from gateway.agents import router
-from gateway.app import app
 from services.derived.labeler.labeler import generate_label_async
 from services.derived.labeler.labeler import normalize as _normalize_to
 from services.derived.labeler.tests.slices import labeler_config, labeler_db
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 def _normalize(raw: str) -> str:
@@ -558,7 +556,7 @@ class TestPatchThread:
     def test_patch_writes_label_and_flips_user_set(self, db_conn: psycopg.Connection) -> None:
         tid = create_agent(db_conn)
         assert _label_user_set(db_conn, tid) is False
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(
                 f"/api/agents/{tid}", json={"label": "\u6211\u81ea\u5df1\u8d77\u7684\u540d"}
             )
@@ -572,7 +570,7 @@ class TestPatchThread:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents SET label='\u4e34\u65f6' WHERE id=%s", (tid,))
         db_conn.commit()
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": ""})
         assert resp.status_code == 204
         assert _label_of(db_conn, tid) is None
@@ -583,7 +581,7 @@ class TestPatchThread:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents SET label='\u4e34\u65f6' WHERE id=%s", (tid,))
         db_conn.commit()
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": ""})
         assert resp.status_code == 204
         assert _label_of(db_conn, tid) is None
@@ -592,7 +590,7 @@ class TestPatchThread:
         self, db_conn: psycopg.Connection
     ) -> None:
         tid = create_agent(db_conn)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             assert client.patch(f"/api/agents/{tid}", json={"label": "ops"}).status_code == 204
         assert _label_audit(db_conn, tid) == [("user", {"new_label": "ops"})]
 
@@ -600,7 +598,7 @@ class TestPatchThread:
         self, db_conn: psycopg.Connection
     ) -> None:
         tid = create_agent(db_conn)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": "lead", "source": "self"})
         assert resp.status_code == 204
         assert _label_audit(db_conn, tid) == [(f"agent:{tid}", {"new_label": "lead"})]
@@ -614,7 +612,7 @@ class TestPatchThread:
             raise RuntimeError("audit write failed")
 
         monkeypatch.setattr(router, "record_audit", refuse)
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with gateway_test_client(raise_server_exceptions=False) as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": "never set"})
         assert resp.status_code == 500
         assert _label_of(db_conn, tid) is None
@@ -623,14 +621,14 @@ class TestPatchThread:
     def test_patch_of_an_unknown_agent_is_404_and_records_nothing(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch("/api/agents/2147483000", json={"label": "ghost"})
         assert resp.status_code == 404
         assert _label_audit(db_conn, 2147483000) == []
 
     def test_patch_strips_whitespace(self, db_conn: psycopg.Connection) -> None:
         tid = create_agent(db_conn)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": "   x   "})
         assert resp.status_code == 204
         # actually written as stripped "x"
@@ -642,20 +640,20 @@ class TestPatchThread:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents SET label='something' WHERE id=%s", (tid,))
         db_conn.commit()
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": "    "})
         assert resp.status_code == 204
         assert _label_of(db_conn, tid) is None
 
     def test_patch_404_when_thread_missing(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch("/api/agents/9999", json={"label": "x"})
         assert resp.status_code == 404
 
     def test_patch_too_long_label_422(self, db_conn: psycopg.Connection) -> None:
         tid = create_agent(db_conn)
         long_label = "x" * 100  # > 64
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": long_label})
         assert resp.status_code == 422
 
@@ -676,7 +674,7 @@ class TestSpawnAgentSchedulesLabelGeneration:
 
         monkeypatch.setattr(aredis.Redis, "publish", _noop_publish, raising=False)
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(
                 client, {"prompt": "\u8fc1\u79fb\u6570\u636e\u5e93 schema", "prompt_source": "user"}
             )
@@ -686,7 +684,7 @@ class TestSpawnAgentSchedulesLabelGeneration:
 
     def test_spawn_without_prompt_leaves_label_null(self, db_conn: psycopg.Connection) -> None:
         """Spawn without prompt → label stays NULL."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = spawn_via_http(client, {})
         assert resp.status_code == 201
         new_id = resp.json()["id"]

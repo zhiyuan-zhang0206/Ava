@@ -6,10 +6,9 @@ import json
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
-from gateway.app import app
-from tests.fixtures.gateway_config import spawn_via_http
+from gateway.app import openapi_schema
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 # Every field of an `/api/agents` directory card; detail-only fields stay off it.
 _DIRECTORY_CARD_KEYS = frozenset(
@@ -43,7 +42,7 @@ class TestList:
     def test_get_agents_returns_page_with_status_and_lineage(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             a_id = spawn_via_http(client, {}).json()["id"]
             b_id = spawn_via_http(client, {"spawner": f"agent:{a_id}"}).json()["id"]
             with db_conn.cursor() as cur:
@@ -72,7 +71,7 @@ class TestList:
         db_conn: psycopg.Connection,
     ) -> None:
         """History is explicit; the default contains all nonterminated states."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             live_id = spawn_via_http(client, {}).json()["id"]
             terminated_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
@@ -97,13 +96,13 @@ class TestList:
         assert [row["agent_id"] for row in terminated_rows] == [terminated_id]
 
     def test_get_agents_rejects_unknown_scope(self) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             response = client.get("/api/agents", params={"scope": "future"})
         assert response.status_code == 422
 
     def test_directory_cards_omit_detail_only_fields(self, db_conn: psycopg.Connection) -> None:
         """List consumers receive only the fields they actually render or parse."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             response = client.get("/api/agents")
             detail = client.get(f"/api/agents/{agent_id}")
@@ -121,7 +120,7 @@ class TestList:
         assert "last_probe_at" in detail.json()
 
     def test_directory_page_search_and_cursor(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             ids = [spawn_via_http(client, {}).json()["id"] for _ in range(4)]
             for agent_id in ids:
                 client.patch(f"/api/agents/{agent_id}", json={"label": "alpha worker"})
@@ -150,12 +149,12 @@ class TestList:
         ],
     )
     def test_directory_rejects_invalid_page_bounds(self, params: dict[str, str | int]) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             response = client.get("/api/agents", params=params)
         assert response.status_code == 422
 
     def test_directory_has_one_card_contract(self) -> None:
-        parameters = app.openapi()["paths"]["/api/agents"]["get"]["parameters"]
+        parameters = openapi_schema()["paths"]["/api/agents"]["get"]["parameters"]
         assert {parameter["name"] for parameter in parameters} == {
             "scope",
             "query",
@@ -165,7 +164,7 @@ class TestList:
 
     def test_get_agents_joins_thread_label(self, db_conn: psycopg.Connection) -> None:
         """label field fetched from agents JOIN — after PATCH write, GET should see it."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             a_id = spawn_via_http(client, {}).json()["id"]
             client.patch(f"/api/agents/{a_id}", json={"label": "\u6211\u7684 agent"})
             resp = client.get("/api/agents")
@@ -174,7 +173,7 @@ class TestList:
         assert by_id[a_id]["label"] == "\u6211\u7684 agent"
 
     def test_get_single_agent_returns_label(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             a_id = spawn_via_http(client, {}).json()["id"]
             client.patch(f"/api/agents/{a_id}", json={"label": "single-x"})
             resp = client.get(f"/api/agents/{a_id}")
@@ -184,7 +183,7 @@ class TestList:
     def test_get_agents_returns_machine_column(self, db_conn: psycopg.Connection) -> None:
         """AgentRow.machine comes from agents_meta.machine — frontend sidebar uses it to display
         machine badge + fork picker default placement."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             a_id = spawn_via_http(client, {}).json()["id"]
             # manually change machine to simulate cross-machine deployment (default spawn_agent writes local machine_name())
             with db_conn.cursor() as cur:
@@ -202,7 +201,7 @@ class TestList:
         self,
         db_conn: psycopg.Connection,
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get("/api/agents")
         assert resp.status_code == 200
         assert resp.json() == {"agents": [], "next_cursor": None}
@@ -230,7 +229,7 @@ class TestGetLastMessage:
             )
         db_conn.commit()
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             # Agent B queries Agent A's last message — should succeed
             resp = client.get(
                 f"/api/agents/{agent_a}/last-message",
@@ -268,7 +267,7 @@ class TestGetLastMessage:
                 )
         db_conn.commit()
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get(
                 f"/api/agents/{target_id}/last-message",
                 params={"caller": f"agent:{caller_id}"},
@@ -289,7 +288,7 @@ class TestGetLastMessage:
             )
         db_conn.commit()
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get(
                 f"/api/agents/{agent_id}/last-message",
                 params={"caller": "agent:99999"},
@@ -310,7 +309,7 @@ class TestGetLastMessage:
             )
         db_conn.commit()
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get(
                 f"/api/agents/{agent_id}/last-message",
                 params={"caller": "agent:99999"},
@@ -335,7 +334,7 @@ class TestGetLastMessage:
 
         # No checkpoint written — simulating post-compact state where
         # checkpoint only has [SystemMessage, summary] (no AIMessage).
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get(
                 f"/api/agents/{agent_id}/last-message",
                 params={"caller": "agent:99999"},
@@ -356,7 +355,7 @@ class TestGetLastMessage:
             )
         db_conn.commit()
 
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get(
                 f"/api/agents/{agent_id}/last-message",
                 params={"caller": "agent:99999"},
@@ -365,7 +364,7 @@ class TestGetLastMessage:
         assert resp.json()["text"] is None
 
     def test_404_for_nonexistent_agent(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             resp = client.get(
                 "/api/agents/99999/last-message",
                 params={"caller": "agent:1"},

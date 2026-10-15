@@ -13,7 +13,6 @@ from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_i
 from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
-from gateway.app import app
 from gateway.routers import tasks
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -37,9 +36,7 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
     def unavailable(*args: object) -> None:
         raise psycopg.OperationalError("queue unavailable")
 
-    with gateway_test_client(
-        app, raise_server_exceptions=False, machine=machine_identity
-    ) as client:
+    with gateway_test_client(raise_server_exceptions=False, machine=machine_identity) as client:
         monkeypatch.setattr(tasks, "enqueue_task_notifications", unavailable)
         assert (
             client.patch(

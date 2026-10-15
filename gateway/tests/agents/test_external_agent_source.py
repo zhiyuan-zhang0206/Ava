@@ -35,7 +35,6 @@ from base.host.net import http_dial
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from cli.commands.agents.control import cmd_agents_send
-from gateway.app import app
 from gateway.tests.agents.gateway_auth import without_credentials
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -77,7 +76,7 @@ def authenticated_gateway(
         "gateway_auth_headers",
         Mock(return_value={"Authorization": f"Bearer {_SECRET}"}),
     )
-    with gateway_test_client(app, machine=machine) as client:
+    with gateway_test_client(machine=machine) as client:
 
         def post(url: str, **kwargs: Any) -> httpx2.Response:
             return client.post(url, **kwargs)

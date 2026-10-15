@@ -17,12 +17,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.db import create_agent
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
 def test_client(db_conn: psycopg.Connection):
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         yield client
 
 

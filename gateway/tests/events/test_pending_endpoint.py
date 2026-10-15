@@ -10,14 +10,13 @@ carries its image reference urls so the strip can render thumbnails.
 from uuid import uuid4
 
 import psycopg
-from fastapi.testclient import TestClient
 
 from base.agents.inbox.compact import insert_compact_request_inbound
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.inbox.rows import list_pending_inbounds
 from base.db import Database
 from base.events.live.bus import EventBus
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:
@@ -62,7 +61,7 @@ def test_pending_returns_only_pending_chat_oldest_first(
     # non-chat control kind (compact_request) is excluded even while pending
     insert_compact_request_inbound(db_conn, tid, bus=event_bus, database=database)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{tid}/pending")
 
     assert resp.status_code == 200
@@ -74,7 +73,7 @@ def test_pending_returns_only_pending_chat_oldest_first(
 
 def test_pending_empty_when_nothing_queued(db_conn: psycopg.Connection) -> None:
     tid = _seed_agent(db_conn)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{tid}/pending")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -82,7 +81,7 @@ def test_pending_empty_when_nothing_queued(db_conn: psycopg.Connection) -> None:
 
 def test_pending_nonexistent_agent_returns_empty(db_conn: psycopg.Connection) -> None:
     # Lenient read: no 404 precondition (same as the timeline GET).
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/agents/999999/pending")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -129,7 +128,7 @@ def test_pending_multimodal_message_carries_image_urls(
         db_conn, tid, "plain text", source="user", bus=event_bus, database=database
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{tid}/pending")
 
     assert resp.status_code == 200
@@ -164,7 +163,7 @@ def test_pending_keeps_only_renderable_image_refs(
         database=database,
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{tid}/pending")
 
     assert resp.status_code == 200
@@ -189,7 +188,7 @@ def test_pending_tolerates_malformed_content_blocks(
         db_conn, tid, "hi", source="user", payload=payload, bus=event_bus, database=database
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{tid}/pending")
 
     assert resp.status_code == 200
@@ -232,7 +231,7 @@ def test_active_takeover_hides_transcribed_chat_from_the_strip(
     ).fetchone()
     assert trail == (1,)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/api/agents/{tid}/pending")
 
     assert resp.status_code == 200
@@ -261,7 +260,7 @@ def test_relay_read_hides_while_live_and_reappears_after_release(
     )
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert client.get(f"/api/agents/{tid}/pending").json() == []
 
     db_conn.execute(
@@ -271,7 +270,7 @@ def test_relay_read_hides_while_live_and_reappears_after_release(
     )
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         items = client.get(f"/api/agents/{tid}/pending").json()
     assert [it["id"] for it in items] == [mid]
 
@@ -333,5 +332,5 @@ def test_acked_message_stays_out_of_the_strip_after_release(
     )
     db_conn.commit()
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert client.get(f"/api/agents/{tid}/pending").json() == []

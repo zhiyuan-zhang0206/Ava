@@ -8,14 +8,12 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config, settings
 from base.host.env import dotenv_file
-from gateway.app import app
 from gateway.tests.routers.test_config_api import REMOTE, seed_machine
 from gateway.tests.routers.test_config_api import (
     clean_overrides as clean_overrides,
@@ -26,6 +24,7 @@ from gateway.tests.routers.test_config_api import (
 from ops import env_audit as audit
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import ConfigAuditReadResult
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_get_explicit_self_is_host_view_not_cluster(
@@ -36,7 +35,7 @@ def test_get_explicit_self_is_host_view_not_cluster(
     (cross_machine_transfer_backend) that the Cluster view exposes is ABSENT here —
     the explicit self selection no longer collapses into the Cluster view."""
     runtime_config.write_fields({"cross_machine_transfer_backend": "none"}, set())
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         cluster = client.get("/api/config").json()["raw_overrides"]
         host = client.get(f"/api/config?machine={machine_identity.name()}").json()["raw_overrides"]
     assert (
@@ -51,7 +50,7 @@ def test_put_remote_rejects_cluster_key(clean_overrides: Path) -> None:
     """PUT ?machine=<remote> carrying a cluster key -> 400 (cluster config is
     machine-independent)."""
     seed_machine(REMOTE)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"llm_model": "x"})
     assert resp.status_code == 400, resp.text
     assert "machine-independent" in resp.json()["detail"]
@@ -73,7 +72,7 @@ def test_put_remote_host_field_dispatches_config_write(
     enqueue = AsyncMock(return_value=stub_result)
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -103,7 +102,7 @@ def test_put_remote_rejects_writable_non_remote_host_field(
     seed_machine(REMOTE)
     dispatched = AsyncMock()
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatched)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put(
             f"/api/config?machine={REMOTE}", json={"cross_machine_transfer_backend": "none"}
         )
@@ -122,7 +121,7 @@ def test_put_remote_rejects_oss_credential_fields(
     seed_machine(REMOTE)
     dispatched = AsyncMock()
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatched)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put(
             f"/api/config?machine={REMOTE}",
             json={
@@ -142,7 +141,7 @@ def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, clean_overrides
     enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
@@ -154,7 +153,7 @@ def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, clean_overrides:
     enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpFailed({"error": "boom"}))
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
@@ -162,7 +161,7 @@ def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, clean_overrides:
 
 def test_put_remote_unknown_machine_404(clean_overrides: Path) -> None:
     """PUT ?machine=<unknown> -> 404 before any dispatch."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put("/api/config?machine=ghost-host", json={"ops_concurrency": 1})
     assert resp.status_code == 404, resp.text
     assert "unknown machine" in resp.json()["detail"]
@@ -209,7 +208,7 @@ def test_request_actor_reads_only_middleware_state() -> None:
 
 def test_put_records_write_audit_with_value_diff(clean_overrides: Path) -> None:
     """A cluster PUT lands an audit record carrying the non-sensitive value diff."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.put("/api/config", json={"llm_model": "audit-model-1"})
     assert resp.status_code == 200, resp.text
     records = [
@@ -224,7 +223,7 @@ def test_put_records_write_audit_with_value_diff(clean_overrides: Path) -> None:
 
 def test_get_config_audit_last_is_bounded() -> None:
     """`last` is a 1..200 query param; out of range is a 422, never a clamped read."""
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert client.get("/api/config/audit?last=0").status_code == 422
         assert client.get("/api/config/audit?last=201").status_code == 422
 
@@ -260,7 +259,7 @@ def test_get_config_audit_default_last_comes_from_display_config(
     )
 
     monkeypatch.setattr(settings.display, "config_audit_default_last", 1)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/config/audit")
     assert resp.status_code == 200, resp.text
     assert len(resp.json()["records"]) == 1
@@ -286,7 +285,7 @@ def test_get_config_audit_reads_own_records(
         changes=[{"alias": "AVA_MODEL", "old": "old", "new": "audit-self"}],
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/config/audit")
 
     assert resp.status_code == 200, resp.text
@@ -333,7 +332,7 @@ async def test_get_config_audit_all_merges_runners_newest_first(
 
     monkeypatch.setattr(machines, "list_agent_runners", _runners)
 
-    with TestClient(app) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         resp = client.get("/api/config/audit?machine=all&last=2")
 
     assert resp.status_code == 200, resp.text

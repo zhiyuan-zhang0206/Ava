@@ -4,7 +4,6 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
@@ -15,10 +14,11 @@ from gateway.tests.lifecycle.test_native_cancel import auth_headers
 from gateway.tests.test_idempotency import client as client
 from ops.lifecycle.native_restart import restart_native_work_op
 from services.agent_runner.agent_host.tests.managed_work import managed_work
+from tests.fixtures.gateway_config import GatewayTestClient
 
 
 async def test_committed_acceptance_response_loss_replays_before_routing(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -26,7 +26,6 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
     database_gate: ProcessDbGate,
 ) -> None:
     from gateway.agents import lifecycle
-    from gateway.app import app
 
     _inc, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
     headers = auth_headers(monkeypatch)
@@ -49,14 +48,14 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
     ) -> Any:
         nonlocal calls, original
         calls += 1
-        assert db is app.state.db
-        assert pool is app.state.db_pool
+        assert db is client.app.state.db
+        assert pool is client.app.state.db_pool
         assert path == f"/api/agents/{agent_id}/restart-work"
         operation = NativeRestartOperation.model_validate(packet)
         assert idempotency_key == operation.operation_key
         original = await restart_native_work_op(
             db,
-            app.state.bus,
+            client.app.state.bus,
             agent_id,
             operation,
             pool,
@@ -98,7 +97,7 @@ async def test_committed_acceptance_response_loss_replays_before_routing(
     "wire", [{"status": "restarting"}, {"status": "accepted", "acceptance": {}}, {}]
 )
 async def test_unknown_executor_wire_fails_closed_without_legacy_fallback(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,

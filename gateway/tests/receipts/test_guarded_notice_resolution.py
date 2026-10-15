@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.agents import notices
-from gateway.app import app
+from gateway.app import openapi_schema
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
 from gateway.tests.receipts.test_current_notice_receipts import HEADERS
 from gateway.tests.receipts.test_current_notice_receipts import client as client
@@ -146,9 +146,9 @@ def test_authentication_is_rechecked_on_replay(
 
 
 def test_openapi_requires_both_identity_headers() -> None:
-    route = app.openapi()["paths"]["/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve"][
-        "post"
-    ]
+    route = openapi_schema()["paths"][
+        "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve"
+    ]["post"]
     headers = {
         param["name"]: param["required"] for param in route["parameters"] if param["in"] == "header"
     }

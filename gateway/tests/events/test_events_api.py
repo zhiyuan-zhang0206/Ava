@@ -16,10 +16,9 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
-from gateway.app import app
 from gateway.events import telemetry_rows
+from tests.fixtures.gateway_config import gateway_test_client
 
 _EVENT_KEYS = {
     "id",
@@ -92,7 +91,7 @@ def fake_events(monkeypatch: pytest.MonkeyPatch) -> _FakeEvents:
 
 class TestEventsApi:
     def test_empty_returns_empty_envelope(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events")
         assert r.status_code == 200
         body = r.json()
@@ -110,14 +109,14 @@ class TestEventsApi:
             raise psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
 
         monkeypatch.setattr(telemetry_rows, "query_events", _boom)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events")
         assert r.status_code == 503
         assert r.json()["detail"] == "events read timed out"
 
     def test_returns_newest_first_with_unified_shape(self, fake_events: _FakeEvents) -> None:
         fake_events.rows.extend([_row(), _row(event_name="llm_usage")])
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events")
         assert r.status_code == 200
         items = r.json()["items"]
@@ -132,7 +131,7 @@ class TestEventsApi:
                 _row(event_name="llm_usage", level="warning"),
             ]
         )
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events")
 
         assert [item["tier"] for item in r.json()["items"]] == [
@@ -143,7 +142,7 @@ class TestEventsApi:
         ]
 
     def test_filter_category_maps_to_categories(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events", params={"category": "telemetry"})
         assert fake_events.calls[0]["categories"] == ["telemetry"]
 
@@ -152,17 +151,17 @@ class TestEventsApi:
     ) -> None:
         # /api/events serves ALL categories: audit rows come from audit_events, so the
         # telemetry side asks for telemetry and log only.
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events")
         assert fake_events.calls[0]["categories"] == ["telemetry", "log"]
 
     def test_filter_event_name(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events", params={"event_name": "llm_usage"})
         assert fake_events.calls[0]["event_names"] == ["llm_usage"]
 
     def test_filter_tier_maps_a_comma_separated_list(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events", params={"tier": "business,anomaly"})
         assert fake_events.calls[0]["tiers"] == ["business", "anomaly"]
 
@@ -170,34 +169,34 @@ class TestEventsApi:
         """Legacy `kind=` alias removed (2026-09-21): an undeclared query
         param is ignored by FastAPI, so the request runs unfiltered — pinned
         deliberately as the post-removal wire semantics."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"kind": "llm_usage"})
         assert r.status_code == 200
         assert fake_events.calls[0]["event_names"] is None
 
     def test_filter_agent_id(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events", params={"agent_id": 42})
         assert fake_events.calls[0]["agent_id"] == 42
 
     def test_filter_trace_id_lowercased(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events", params={"trace_id": "ABCDEF"})
         assert fake_events.calls[0]["trace_id"] == "abcdef"
 
     def test_filter_machine(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events", params={"machine": "machine-1"})
         assert fake_events.calls[0]["machine"] == "machine-1"
 
     def test_filter_level_lowercased_exact(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events", params={"level": "WARNING"})
         assert fake_events.calls[0]["level"] == "warning"
         assert "level_min" not in fake_events.calls[0]
 
     def test_from_to_window_passed_through(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get(
                 "/api/events",
                 params={"from": "2026-08-01T00:00:00Z", "to": "2026-08-02T00:00:00Z"},
@@ -208,7 +207,7 @@ class TestEventsApi:
 
     def test_hours_window(self, fake_events: _FakeEvents) -> None:
         before = datetime.now(UTC)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events", params={"hours": 2})
         after = datetime.now(UTC)
         from_ = fake_events.calls[0]["from_"]
@@ -221,7 +220,7 @@ class TestEventsApi:
 
     def test_default_window_is_24h(self, fake_events: _FakeEvents) -> None:
         before = datetime.now(UTC)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events")
         after = datetime.now(UTC)
         from_ = fake_events.calls[0]["from_"]
@@ -232,7 +231,7 @@ class TestEventsApi:
         """Without with_total the count path never runs — the only telemetry read
         is the list fetch, and meta.total is null."""
         fake_events.rows.extend([_row()])
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events")
         body = r.json()
         assert body["meta"]["total"] is None
@@ -242,7 +241,7 @@ class TestEventsApi:
         fake_events.rows.extend([_row()])
         fake_events.totals.append(3)
         fake_events.has_more = True
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"limit": 1, "with_total": 1})
         body = r.json()
         assert body["meta"]["total"] == 3
@@ -254,12 +253,12 @@ class TestEventsApi:
         aggregation involved."""
         fake_events.rows.extend([_row()])
         fake_events.has_more = True
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events")
         assert r.json()["meta"]["has_more"] is True
 
     def test_limit_offset_paging(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/events", params={"category": "telemetry", "limit": 5, "offset": 10})
         kw = fake_events.calls[0]  # the query call (no count by default)
         assert kw["limit"] == 5
@@ -275,20 +274,20 @@ class TestEventsApi:
         from base.config import settings
 
         monkeypatch.setattr(settings.display, "events_default_limit", 7)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events")
         assert r.status_code == 200
         assert fake_events.calls[0]["limit"] == 7
         assert r.json()["meta"]["limit"] == 7
 
     def test_offset_over_hard_cap_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             response = client.get("/api/events", params={"offset": 10_001})
         assert response.status_code == 422
         assert fake_events.calls == []
 
     def test_filters_compose_and(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get(
                 "/api/events",
                 params={
@@ -307,50 +306,50 @@ class TestEventsApi:
         assert kw["level"] == "info"
 
     def test_no_match_returns_empty(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"event_name": "does_not_exist"})
         body = r.json()
         assert body["items"] == []
         assert body["meta"]["total"] is None
 
     def test_invalid_category_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"category": "bogus"})
         assert r.status_code == 422
 
     def test_invalid_level_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"level": "fatal"})
         assert r.status_code == 422
 
     def test_invalid_tier_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"tier": "business,urgent"})
         assert r.status_code == 422
         assert fake_events.calls == []
 
     def test_invalid_from_timestamp_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"from": "not-a-date"})
         assert r.status_code == 422
 
     def test_naive_from_timestamp_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"from": "2026-08-04T00:00:00"})
         assert r.status_code == 422
 
     def test_naive_to_timestamp_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"to": "2026-08-04T00:00:00"})
         assert r.status_code == 422
 
     def test_limit_over_max_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/events", params={"limit": 1001})
         assert r.status_code == 422
 
     def test_from_and_hours_conflict_422(self, fake_events: _FakeEvents) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get(
                 "/api/events",
                 params={"from": "2026-08-04T00:00:00Z", "hours": 1},

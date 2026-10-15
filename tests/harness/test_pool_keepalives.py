@@ -53,7 +53,6 @@ from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
 from base.db.code_version_gate import ProcessDbGate
 from base.telemetry.delivery.receipts import DrainStatus
-from gateway.app import app
 from services.agent_runner.agent_ops import boot
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -220,8 +219,8 @@ def test_gateway_pool_carries_keepalives(
     """`gateway/app.py`'s request-serving pool, asserted on the object the real
     lifespan builds. Sizing (max_size=8) is the site's own business; the posture
     is not."""
-    with gateway_test_client(app, machine=machine_identity):
-        pool = app.state.db_pool
+    with gateway_test_client(machine=machine_identity) as client:
+        pool = client.app.state.db_pool
         _assert_pool_posture(pool, "gateway/app.py:lifespan")
         assert pool.max_size == 8
 

@@ -6,14 +6,13 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.agents.observation.snapshot import select_one
 from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import insert_notice, pending_rows, seed_agent
+from tests.fixtures.gateway_config import gateway_test_client
 
 # --- POST .../notices/{id}/resolve : read -----------------------------------
 
@@ -23,7 +22,7 @@ def test_read_with_reply_marks_and_delivers_inbound(
 ) -> None:
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "migration done", content="14k rows")  # FYI
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
             json={"action": "read", "reply": "nice, thanks"},
@@ -66,7 +65,7 @@ def test_read_with_reply_marks_and_delivers_inbound(
 def test_read_without_reply_marks_no_inbound(db_conn: psycopg.Connection) -> None:
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "fyi")
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
             json={"action": "read"},
@@ -88,7 +87,7 @@ def test_read_twice_second_is_silent_201(db_conn: psycopg.Connection) -> None:
     the row keeps its original resolution."""
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "fyi")
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
             json={"action": "read"},
@@ -119,7 +118,7 @@ def test_read_with_reply_on_already_resolved_delivers_note(
     dropped, matching the normal read-with-note path."""
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "migration done")
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
             json={"action": "read"},
@@ -154,7 +153,7 @@ def test_read_on_require_response_is_409(
     -> 409 (use answer/dismiss)."""
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "needs answer", require_response=True)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
             json={"action": "read"},
@@ -177,7 +176,7 @@ def test_read_on_require_response_is_409(
 
 def test_resolve_nonexistent_409(db_conn: psycopg.Connection) -> None:
     a = seed_agent(db_conn)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/999999/resolve",
             json={"action": "read"},
@@ -190,7 +189,7 @@ def test_resolve_nonexistent_409(db_conn: psycopg.Connection) -> None:
 def test_resolve_twice_second_is_409_and_delivers_once(db_conn: psycopg.Connection) -> None:
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "q?", require_response=True)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
             json={"action": "answer", "reply": "one"},
@@ -212,7 +211,7 @@ def test_resolve_cross_agent_path_409(
     a = seed_agent(db_conn)
     b = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "for a", require_response=True)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{b}/notices/{nid}/resolve",
             json={"action": "answer", "reply": "x"},
@@ -244,7 +243,7 @@ def test_open_default_limit_comes_from_display_config(
     insert_notice(db_conn, a, "newer")
     insert_notice(db_conn, a, "newest")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         data = client.get("/api/notices/open").json()
     assert [r["title"] for r in data] == ["newest", "newer"]
 
@@ -280,7 +279,7 @@ def test_feed_defaults_come_from_display_config(
         reply="x",
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         feed = client.get("/api/notices").json()
     assert [r["title"] for r in feed["open"]] == ["open newer"]
     assert [r["title"] for r in feed["resolved_page"]] == ["resolved r1"]
@@ -369,7 +368,7 @@ def test_live_returns_new_open_notices_oldest_first(
     n2 = insert_notice(db_conn, a2, "Decision", require_response=True)
     n3 = insert_notice(db_conn, a1, "FYI two", require_response=False)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         # full poll from 0
         r = client.get("/api/notices/live", params={"after": 0})
         assert r.status_code == 200
@@ -399,7 +398,7 @@ def test_live_excludes_resolved(db_conn: psycopg.Connection) -> None:
         resolution="read",
     )
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/notices/live", params={"after": 0})
         assert r.status_code == 200
         assert [it["id"] for it in r.json()] == [n1]
@@ -414,7 +413,7 @@ def test_open_feed_include_awaiting_returns_both_kinds(
     insert_notice(db_conn, a1, "FYI one", require_response=False)
     insert_notice(db_conn, a1, "Decision", require_response=True)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         # default: FYI only
         default = client.get("/api/notices/open").json()
         assert [it["title"] for it in default] == ["FYI one"]
@@ -439,7 +438,7 @@ def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
     a1 = seed_agent(db_conn)
     n1 = insert_notice(db_conn, a1, "Only", require_response=False)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/notices/live", params={"after": n1})
         assert r.status_code == 200
         assert r.json() == []
@@ -498,7 +497,7 @@ def test_supersede_publishes_global_notice_id(
         published.append(notice_id)
 
     monkeypatch.setattr(ops_lifecycle, "publish_notice_resolved", _capture)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/agents/{agent_id}/notices",
             json={"title": "new notice", "content": None},
@@ -521,7 +520,7 @@ def test_post_notice_sets_default_expire_at(db_conn: psycopg.Connection) -> None
     """POST without expire_at sets default expire_at based on daemon setting."""
     aid = seed_agent(db_conn)
     before = datetime.now(UTC)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/agents/{aid}/notices",
             json={"title": "default expiry notice", "content": "detail"},
@@ -547,7 +546,7 @@ def test_post_notice_with_explicit_expire_at(db_conn: psycopg.Connection) -> Non
     """POST with explicit expire_at stores the requested timestamp."""
     aid = seed_agent(db_conn)
     target = datetime.now(UTC) + timedelta(hours=2)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/agents/{aid}/notices",
             json={
@@ -571,7 +570,7 @@ def test_post_notice_clamps_expire_at_when_exceeding_limit(db_conn: psycopg.Conn
     aid = seed_agent(db_conn)
     now = datetime.now(UTC)
     target = now + timedelta(days=10)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/agents/{aid}/notices",
             json={
@@ -595,7 +594,7 @@ def test_post_notice_past_expire_at_is_422(db_conn: psycopg.Connection) -> None:
     """POST with expire_at in the past returns 422."""
     aid = seed_agent(db_conn)
     past = datetime.now(UTC) - timedelta(minutes=10)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post(
             f"/api/agents/{aid}/notices",
             json={

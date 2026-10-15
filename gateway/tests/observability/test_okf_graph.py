@@ -13,18 +13,17 @@ import re
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base import config
 from base.host.net.auth import bearer_header
-from gateway.app import app
 from gateway.tests.agents.gateway_auth import without_credentials
+from tests.fixtures.gateway_config import gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
 
 def test_okf_graph_returns_html_with_injected_data() -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/okf/graph")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
@@ -37,14 +36,14 @@ def test_okf_graph_returns_html_with_injected_data() -> None:
 def test_okf_graph_rejects_no_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Auth is the normal middleware — this route is not in the bypass list."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = without_credentials(client).get("/api/okf/graph")
     assert resp.status_code == 401
 
 
 def test_okf_graph_accepts_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/okf/graph", headers=bearer_header(_SECRET))
     assert resp.status_code == 200
 

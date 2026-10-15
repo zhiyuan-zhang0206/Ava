@@ -27,12 +27,11 @@ from collections.abc import Iterator
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 from base import config
-from gateway.app import app
 from gateway.routers import grafana as grafana_router
 from gateway.tests.agents.gateway_auth import without_credentials
+from tests.fixtures.gateway_config import gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -104,7 +103,7 @@ def test_proxy_disabled_by_default(grafana_server: int, monkeypatch: pytest.Monk
     """The proxy is off unless AVA_GRAFANA_PROXY_ENABLED — a cluster without
     Grafana gets 404 on /grafana/* and nothing else."""
     monkeypatch.setattr(config.settings.gateway, "grafana_proxy_enabled", False)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/grafana/")
     assert resp.status_code == 404
     assert "grafana proxy is disabled" in resp.text
@@ -114,7 +113,7 @@ def test_proxy_serves_content(grafana_server: int, monkeypatch: pytest.MonkeyPat
     """Enabled: GET through the gateway returns Grafana's content — root,
     nested path, and query string all work."""
     _enable(monkeypatch, grafana_server)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         root = client.get("/grafana/")
         assert root.status_code == 200
         assert root.headers["content-type"].startswith("text/html")
@@ -132,7 +131,7 @@ def test_proxy_redirects_root_without_trailing_slash(
     """/grafana (no slash) redirects to /grafana/ so the app's relative asset
     links resolve against the proxy root, not the gateway API root."""
     _enable(monkeypatch, grafana_server)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/grafana", follow_redirects=False)
     assert resp.status_code == 307
     assert resp.headers["location"] == "/grafana/"
@@ -143,7 +142,7 @@ def test_proxy_forwards_post_body(grafana_server: int, monkeypatch: pytest.Monke
     the dashboard frontend queries datasources through this path."""
     _enable(monkeypatch, grafana_server)
     body = {"queries": [{"refId": "A"}]}
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.post("/grafana/api/ds/query", json=body)
     assert resp.status_code == 200
     echo = resp.json()
@@ -154,7 +153,7 @@ def test_proxy_forwards_post_body(grafana_server: int, monkeypatch: pytest.Monke
 def test_proxy_rejects_body_over_cap(grafana_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
     """Forwarded request buffering has a hard cap, unlike streamed responses."""
     _enable(monkeypatch, grafana_server)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.post("/grafana/api/ds/query", content=b"x" * (16 * 1024 * 1024 + 1))
     assert response.status_code == 413
     assert "exceeds 16 MiB" in response.json()["detail"]
@@ -162,7 +161,7 @@ def test_proxy_rejects_body_over_cap(grafana_server: int, monkeypatch: pytest.Mo
 
 def test_proxy_forwards_head(grafana_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
     _enable(monkeypatch, grafana_server)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.head("/grafana/")
     assert resp.status_code == 200
 
@@ -173,7 +172,7 @@ def test_proxy_handles_gzip_upstream(grafana_server: int, monkeypatch: pytest.Mo
     Content-Encoding / Content-Length headers (httpx auto-decodes, and the
     proxy drops the mismatched pair)."""
     _enable(monkeypatch, grafana_server)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/grafana/gzip")
     assert resp.status_code == 200
     assert "content-encoding" not in resp.headers
@@ -188,7 +187,7 @@ def test_proxy_502_when_grafana_unreachable(monkeypatch: pytest.MonkeyPatch) -> 
     free_port = probe.getsockname()[1]
     probe.close()
     _enable(monkeypatch, free_port)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/grafana/")
     assert resp.status_code == 502
 
@@ -209,7 +208,7 @@ def test_proxy_rejects_traversal(
     gateway never forwards a path that could address a different Grafana
     resource than the browser asked for."""
     _enable(monkeypatch, grafana_server)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get(f"/grafana/{bad_path}")
     assert resp.status_code == 400
 
@@ -237,7 +236,7 @@ def test_proxy_cookie_post_from_gateway_origin_passes(
         "http://10.0.0.72:8000",
     )
     body = {"queries": [{"refId": "A"}]}
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         login = client.post("/api/auth/login", json={"password": _SECRET})
         assert login.status_code == 200
         resp = client.post(
@@ -256,7 +255,7 @@ def test_proxy_requires_auth(grafana_server: int, monkeypatch: pytest.MonkeyPatc
     disabled, proving it reached the route)."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     monkeypatch.setattr(config.settings.gateway, "grafana_proxy_enabled", False)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         no_auth = without_credentials(client).get("/grafana/")
         assert no_auth.status_code == 401
 

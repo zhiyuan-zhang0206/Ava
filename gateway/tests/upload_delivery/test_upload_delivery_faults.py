@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,8 @@ from base.db import Database
 from base.host.db_authority.unit import UnitIdentity
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
+    SECRET,
     post,
     proof_for,
     request_for,
@@ -36,11 +37,12 @@ from ops import upload_delivery as receiver
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 
 @pytest.mark.parametrize("stage", ["before", "after"])
 def test_source_ready_commit_failure_or_lost_receipt_recovers(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     stage: str,
@@ -75,7 +77,7 @@ def test_source_ready_commit_failure_or_lost_receipt_recovers(
 
 @pytest.mark.parametrize("stage", ["before", "after"])
 def test_inbound_transaction_rollback_and_commit_ack_loss(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     stage: str,
@@ -84,7 +86,7 @@ def test_inbound_transaction_rollback_and_commit_ack_loss(
 ):
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
@@ -102,14 +104,14 @@ def test_inbound_transaction_rollback_and_commit_ack_loss(
 
     monkeypatch.setattr(source, "write_transaction", faulty)
     with pytest.raises(psycopg.OperationalError):
-        source.complete(app.state.db_pool, request, proof)
+        source.complete(client.app.state.db_pool, request, proof)
     expected = 0 if stage == "before" else 1
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (expected,)
     monkeypatch.setattr(source, "write_transaction", original)
-    iid = source.complete(app.state.db_pool, request, proof)
-    assert source.complete(app.state.db_pool, request, proof) == iid
+    iid = source.complete(client.app.state.db_pool, request, proof)
+    assert source.complete(client.app.state.db_pool, request, proof) == iid
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (1,)
@@ -121,7 +123,7 @@ def test_inbound_transaction_rollback_and_commit_ack_loss(
 
 @pytest.mark.parametrize("version", [None, True, 1.0, 2, "1"])
 def test_explicit_native_request_and_proof_versions_fail_fast(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     version: object,
     *,
@@ -130,7 +132,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
 ):
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
@@ -153,10 +155,10 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
         dispatch_sync(
             "upload-receive-v1",
             payload,
-            pool=app.state.db_pool,
-            db=app.state.db,
+            pool=client.app.state.db_pool,
+            db=client.app.state.db,
             authority=config_authority,
-            image=app.state.process_image,
+            image=client.app.state.process_image,
             local_machine=machine_identity,
             host=fake_host(),
         )
@@ -164,7 +166,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
 
 @pytest.mark.asyncio
 async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -184,7 +186,9 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
     db_conn.commit()
     first = post(client, agent).json()
     request = request_for(
-        app.state.db_pool, first["batch_id"], local_machine=machine_identity.name()
+        client.app.state.db_pool,
+        first["batch_id"],
+        local_machine=machine_identity.name(),
     )
     remote_dir = tmp_path / "remote-disk" / f"AvaAgent-{agent}"
 
@@ -201,7 +205,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
 
     def get(url: str, **_kwargs: Any):
         # A receiver file/network phase has released its own DB connection.
-        with app.state.db_pool.connection(timeout=1) as conn:
+        with client.app.state.db_pool.connection(timeout=1) as conn:
             assert conn.execute("SELECT 1").fetchone() == (1,)
         result = client.get(
             url.removeprefix(receiver.gateway_api_base(settings.gateway.gateway_url).rstrip("/"))
@@ -224,9 +228,9 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
             dispatch_sync,
             kind,
             payload,
-            image=app.state.process_image,
-            pool=app.state.db_pool,
-            db=app.state.db,
+            image=client.app.state.process_image,
+            pool=client.app.state.db_pool,
+            db=client.app.state.db,
             authority=config_authority,
             local_machine=machine_identity,
             host=fake_host(),
@@ -238,15 +242,18 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
 
     monkeypatch.setattr(worker, "dispatch_to_machine", dispatch)
     recovery = worker.UploadRecovery(
-        app.state.db_pool, app.state.db, app.state.bus, machine=machine_identity
+        client.app.state.db_pool,
+        client.app.state.db,
+        client.app.state.bus,
+        machine=machine_identity,
     )
     await recovery.copy(request)
-    assert source.status(app.state.db_pool, agent, first["batch_id"]).state == "pending"
+    assert source.status(client.app.state.db_pool, agent, first["batch_id"]).state == "pending"
     assert db_conn.execute(
         "SELECT count(*) FROM upload_delivery_copies WHERE ready_at IS NOT NULL"
     ).fetchone() == (1,)
     await recovery.copy(request)
-    assert source.status(app.state.db_pool, agent, first["batch_id"]).state == "accepted"
+    assert source.status(client.app.state.db_pool, agent, first["batch_id"]).state == "accepted"
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (1,)
@@ -258,7 +265,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
 
 @pytest.mark.asyncio
 async def test_unknown_remote_kind_holds(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
@@ -269,7 +276,7 @@ async def test_unknown_remote_kind_holds(
 
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
@@ -288,19 +295,22 @@ async def test_unknown_remote_kind_holds(
             request.model_dump(),
             active_ops={},
             workers=set(),
-            pool=app.state.db_pool,
+            pool=client.app.state.db_pool,
             executor=executor,
             authority=config_authority,
             catalog=model_catalog,
-            database=lambda: app.state.db,
-            image=app.state.process_image,
+            database=lambda: client.app.state.db,
+            image=client.app.state.process_image,
             local_machine=machine_identity,
             host=fake_host(),
         )
     assert status == OpStatus.FAILED and "unknown kind" in str(result["error"])
     # Source does not reinterpret an unsupported version as another op kind.
     recovery = worker.UploadRecovery(
-        app.state.db_pool, app.state.db, app.state.bus, machine=machine_identity
+        client.app.state.db_pool,
+        client.app.state.db,
+        client.app.state.bus,
+        machine=machine_identity,
     )
 
     async def dispatch(*_args: Any, **_kwargs: Any):
@@ -313,13 +323,13 @@ async def test_unknown_remote_kind_holds(
 
     monkeypatch.setattr(source, "validate_pending", eligible)
     await recovery.copy(request)
-    assert source.status(app.state.db_pool, agent, request.manifest.batch_id).state == "hold"
+    assert source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state == "hold"
     await recovery.close()
 
 
 @pytest.mark.parametrize("stage", ["before", "after"])
 def test_receiver_ready_commit_boundary_recovers_without_second_copy(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     stage: str,
@@ -328,7 +338,7 @@ def test_receiver_ready_commit_boundary_recovers_without_second_copy(
 ):
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
@@ -349,11 +359,17 @@ def test_receiver_ready_commit_boundary_recovers_without_second_copy(
 
     monkeypatch.setattr(receiver, "write_transaction", faulty)
     with pytest.raises(psycopg.OperationalError):
-        receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name())
+        receiver.receive(client.app.state.db_pool, request, local_machine=machine_identity.name())
     monkeypatch.setattr(receiver, "write_transaction", original)
-    proof = receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name())
+    proof = receiver.receive(
+        client.app.state.db_pool,
+        request,
+        local_machine=machine_identity.name(),
+    )
     assert proof == receiver.receive(
-        app.state.db_pool, request, local_machine=machine_identity.name()
+        client.app.state.db_pool,
+        request,
+        local_machine=machine_identity.name(),
     )
     assert db_conn.execute(
         "SELECT count(*) FROM upload_delivery_copies WHERE ready_at IS NOT NULL"
@@ -361,7 +377,7 @@ def test_receiver_ready_commit_boundary_recovers_without_second_copy(
 
 
 def test_concurrent_receivers_and_inbound_acceptance_one_identity(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
     machine_identity: MachineIdentity,
@@ -370,16 +386,20 @@ def test_concurrent_receivers_and_inbound_acceptance_one_identity(
 
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
 
     def copied(_index: int) -> CopyProof:
-        return receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name())
+        return receiver.receive(
+            client.app.state.db_pool,
+            request,
+            local_machine=machine_identity.name(),
+        )
 
     def completed(proof: CopyProof) -> int:
-        return source.complete(app.state.db_pool, request, proof)
+        return source.complete(client.app.state.db_pool, request, proof)
 
     with ThreadPoolExecutor(max_workers=3) as executor:
         proofs = list(executor.map(copied, range(3)))
@@ -393,7 +413,7 @@ def test_concurrent_receivers_and_inbound_acceptance_one_identity(
 
 
 def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_ready(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
@@ -401,11 +421,15 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
 ):
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    proof = receiver.receive(app.state.db_pool, request, local_machine=machine_identity.name())
+    proof = receiver.receive(
+        client.app.state.db_pool,
+        request,
+        local_machine=machine_identity.name(),
+    )
     item = request.manifest.objects[0]
     changed = request.model_copy(
         update={
@@ -417,7 +441,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
     from base.agents.upload_delivery.models import UploadDeliveryConflictError
 
     with pytest.raises(UploadDeliveryConflictError):
-        receiver.receive(app.state.db_pool, changed, local_machine=machine_identity.name())
+        receiver.receive(client.app.state.db_pool, changed, local_machine=machine_identity.name())
     path = Path(proof.directory) / item.name
     path.unlink()
 
@@ -428,10 +452,10 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
     status, result = dispatch_sync(
         "upload-receive-v1",
         request.model_dump(),
-        pool=app.state.db_pool,
-        db=app.state.db,
+        pool=client.app.state.db_pool,
+        db=client.app.state.db,
         authority=config_authority,
-        image=app.state.process_image,
+        image=client.app.state.process_image,
         local_machine=machine_identity,
         host=fake_host(),
     )
@@ -440,10 +464,9 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
 
 
 def test_actual_old_gateway_has_no_guarded_upload_admission(
-    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection[Any]
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
 ):
     from fastapi import FastAPI
-    from fastapi.testclient import TestClient
 
     from gateway.routers.upload.router import router as old_routes
 
@@ -457,7 +480,7 @@ def test_actual_old_gateway_has_no_guarded_upload_admission(
 
 
 def test_single_connection_receiver_releases_pool_across_http(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
@@ -465,7 +488,7 @@ def test_single_connection_receiver_releases_pool_across_http(
 ):
     client, agent = uploaded_agent
     request = request_for(
-        app.state.db_pool,
+        client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
@@ -475,7 +498,7 @@ def test_single_connection_receiver_releases_pool_across_http(
         return remote_dir
 
     monkeypatch.setattr(receiver, "agent_upload_dir", directory)
-    with app.state.db.pool(min_size=1, max_size=1) as pool:
+    with client.app.state.db.pool(min_size=1, max_size=1) as pool:
 
         def get(url: str, **_kwargs: Any):
             with pool.connection(timeout=0.5) as conn:
@@ -495,7 +518,7 @@ def test_single_connection_receiver_releases_pool_across_http(
 
 
 def test_auth_revocation_and_missing_target_never_recover_by_bypassing_admission(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -506,14 +529,23 @@ def test_auth_revocation_and_missing_target_never_recover_by_bypassing_admission
     assert response.status_code == 202
     assert post(client, agent + 999).status_code == 404
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "new-test-secret")
-    assert post(client, agent).status_code in (401, 403)
-    assert client.get(response.json()["status_url"]).status_code in (401, 403)
+    with gateway_test_client(
+        process=client.app.state.gateway_process,
+        config=replace(
+            client.app.state.gateway_config,
+            cluster_secret="new-test-secret",  # noqa: S106 -- isolated test credential
+        ),
+        headers={"Authorization": f"Bearer {SECRET}"},
+        raise_server_exceptions=False,
+    ) as rotated:
+        assert post(rotated, agent).status_code in (401, 403)
+        assert rotated.get(response.json()["status_url"]).status_code in (401, 403)
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (1,)
 
 
 @pytest.mark.asyncio
 async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -533,7 +565,9 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
     response = post(client, agent)
     assert response.status_code == 202
     request = request_for(
-        app.state.db_pool, response.json()["batch_id"], local_machine=machine_identity.name()
+        client.app.state.db_pool,
+        response.json()["batch_id"],
+        local_machine=machine_identity.name(),
     )
     assert request.source != request.target and request.target == target
 
@@ -553,9 +587,9 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
             dispatch_sync,
             kind,
             payload,
-            image=app.state.process_image,
-            pool=app.state.db_pool,
-            db=app.state.db,
+            image=client.app.state.process_image,
+            pool=client.app.state.db_pool,
+            db=client.app.state.db,
             authority=config_authority,
             local_machine=machine_identity,
             host=fake_host(),
@@ -565,9 +599,15 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
 
     monkeypatch.setattr(worker, "dispatch_to_machine", dispatch)
     recovery = worker.UploadRecovery(
-        app.state.db_pool, app.state.db, app.state.bus, machine=machine_identity
+        client.app.state.db_pool,
+        client.app.state.db,
+        client.app.state.bus,
+        machine=machine_identity,
     )
     await recovery.copy(request)
     assert len(calls) == 1 and calls[0][0] == unit.machine
-    assert source.status(app.state.db_pool, agent, request.manifest.batch_id).state == "accepted"
+    assert (
+        source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state
+        == "accepted"
+    )
     await recovery.close()

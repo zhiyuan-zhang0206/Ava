@@ -14,7 +14,7 @@ from typing import Any
 import psycopg
 from fastapi.testclient import TestClient
 
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _seed_agent(
@@ -54,7 +54,7 @@ def test_born_chain_walks_nearest_first_with_machine_label_status(
     )
     child = _seed_agent(db_conn, born_spawner=f"agent:{parent}", machine="host-b")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _born_chain(client, child)
 
     assert [r["agent_id"] for r in rows] == [parent, grandparent]
@@ -74,13 +74,13 @@ def test_born_chain_stops_at_a_non_agent_spawner(db_conn: psycopg.Connection) ->
     user_spawned = _seed_agent(db_conn, born_spawner="user", machine="host-a")
     child = _seed_agent(db_conn, born_spawner=f"agent:{user_spawned}", machine="host-a")
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         rows = _born_chain(client, child)
         assert [r["agent_id"] for r in rows] == [user_spawned]
         assert _born_chain(client, user_spawned) == []
 
 
 def test_born_chain_unknown_agent_404(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/agents/99999999/born-chain")
     assert resp.status_code == 404

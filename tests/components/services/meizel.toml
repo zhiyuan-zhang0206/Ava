@@ -14,8 +14,6 @@ exports = ["test_maintenance_readiness.py"]
 "test_maintenance_readiness.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
 "test_maintenance_readiness.py#monkeypatch.setattr base.host.db_authority.unit.install_bundle" = 1
 "test_maintenance_readiness.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 1
-"test_maintenance_readiness.py#monkeypatch.setattr gateway.app.ConfigBoot" = 1
-"test_maintenance_readiness.py#monkeypatch.setattr gateway.app.app.state.control_db_pool.connection" = 1
 "test_maintenance_readiness.py#monkeypatch.setattr ops.agent_pause.host_identity" = 1
 "test_maintenance_readiness.py#monkeypatch.setattr ops.agent_pause.host_running" = 1
 

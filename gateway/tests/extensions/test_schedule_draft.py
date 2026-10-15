@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
 from gateway.schedules import router
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
@@ -31,8 +30,8 @@ def test_draft_spawns_writer_agent(
         creation_key: str,
         creation_identity: dict[str, object],
     ) -> SpawnedAgent:
-        assert catalog is app.state.catalog
-        assert authority is app.state.config_authority
+        assert catalog is client.app.state.catalog  # type: ignore[union-attr]
+        assert authority is client.app.state.config_authority  # type: ignore[union-attr]
         calls["label"] = body.label
         calls["prompt"] = body.prompt
         calls["target"] = target

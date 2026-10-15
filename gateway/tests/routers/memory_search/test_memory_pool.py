@@ -8,10 +8,9 @@ from functools import partial
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineRoles
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _init_repo(root: Path) -> str:
@@ -52,7 +51,7 @@ def test_pool_serves_bundle_of_consolidated_checkout(
 
     monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, root))
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/memory/pool")
 
     assert resp.status_code == 200
@@ -85,7 +84,7 @@ def test_pool_404_when_gateway_checkout_missing(
 
     monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path / "nope"))
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         resp = client.get("/api/memory/pool")
 
     assert resp.status_code == 404

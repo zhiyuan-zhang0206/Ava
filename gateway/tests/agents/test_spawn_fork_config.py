@@ -11,10 +11,8 @@ the fork inbound payload through db_conn.
 from __future__ import annotations
 
 import psycopg
-from fastapi.testclient import TestClient
 
-from gateway.app import app
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 
 def _checkpoint(conn: psycopg.Connection, agent_id: int) -> str:
@@ -57,7 +55,7 @@ class TestForkConfigStability:
         """The pre-ruling fork dropped the source's overlay (silent re-brain);
         now a bare fork copies overlay + preset_name verbatim — the fork runs
         exactly what the source ran, so the cached prefix survives."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.post(
                 "/api/presets",
                 json={
@@ -84,7 +82,7 @@ class TestForkConfigStability:
     def test_fork_with_identical_explicit_config_is_allowed(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             src = spawn_via_http(
                 client, {"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}}
             ).json()["id"]
@@ -104,7 +102,7 @@ class TestForkConfigStability:
         assert overlay == {"llm_model": "claude-sonnet-5"}
 
     def test_fork_model_change_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             src = spawn_via_http(
                 client, {"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}}
             ).json()["id"]
@@ -123,7 +121,7 @@ class TestForkConfigStability:
         assert "llm_model" in body["detail"]
 
     def test_fork_skill_removal_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             src = spawn_via_http(
                 client,
                 {
@@ -146,7 +144,7 @@ class TestForkConfigStability:
     def test_fork_skill_addition_superset_is_allowed_and_carries_delta(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             src = spawn_via_http(
                 client,
                 {
@@ -184,7 +182,7 @@ class TestForkConfigStability:
     def test_fork_inject_only_addition_carries_tail_delta(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             src = spawn_via_http(
                 client,
                 {"spawner": "user", "config": {"skills_to_inject_into_system_prompt": ["a"]}},
@@ -208,7 +206,7 @@ class TestForkConfigStability:
         """The user's scenario 2b: fork passes a preset that adds a skill the
         source never had — allowed, and the skill rides the fork inbound
         payload for the tail graft (prefix + cache untouched)."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.post(
                 "/api/presets",
                 json={
@@ -247,7 +245,7 @@ class TestForkConfigStability:
     def test_fork_preset_with_model_change_is_rejected(self, db_conn: psycopg.Connection) -> None:
         """A preset that changes a non-skill field is still a config change —
         the fork rule applies to the RESOLVED overlay."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.post(
                 "/api/presets",
                 json={
@@ -267,7 +265,7 @@ class TestForkConfigStability:
         assert r.json()["reason"] == "fork_config_change_not_allowed"
 
     def test_fork_source_row_missing_is_404(self, db_conn: psycopg.Connection) -> None:
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = spawn_via_http(client, {"spawner": "user", "fork_from": 99999})
         assert r.status_code == 404
         assert r.json()["reason"] == "agent_not_found"

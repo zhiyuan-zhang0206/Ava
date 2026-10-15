@@ -17,11 +17,10 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base import telemetry
-from gateway.app import app
 from gateway.routers import frontend_telemetry as ft_router
+from tests.fixtures.gateway_config import gateway_test_client
 
 # One valid interaction as the browser sends it.
 PAGE = "fleet"
@@ -84,7 +83,7 @@ def _session() -> str:
 class TestFrontendTelemetryIngest:
     def test_valid_batch_lands_events(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post(
                 "/api/frontend-telemetry",
                 json=_payload(
@@ -127,7 +126,7 @@ class TestFrontendTelemetryIngest:
     def test_missing_key_value_omitted_not_null(self) -> None:  # type: ignore[no-untyped-def]
         """Non-setting events must not carry key/value at all."""
         session = _session()
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post(
                 "/api/frontend-telemetry",
                 json=_payload([_one(element="composer-send")], session=session),
@@ -153,7 +152,7 @@ class TestFrontendTelemetryIngest:
             # value too long (free text smuggled as a value)
             _payload([_one(element="setting-change", value="v" * 200)]),
         ]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             for body in cases:
                 r = client.post("/api/frontend-telemetry", json=body)
                 assert r.status_code == 422, body
@@ -163,7 +162,7 @@ class TestFrontendTelemetryIngest:
 
     def test_oversized_body_413(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post(
                 "/api/frontend-telemetry",
                 content=b"x" * (ft_router.MAX_BODY_BYTES + 1),
@@ -181,7 +180,7 @@ class TestFrontendTelemetryIngest:
         dropped — the event stream cannot be flooded by one tab."""
         session = _session()
         events = [_one(element=f"e{i}") for i in range(ft_router.MAX_EVENTS_PER_MINUTE + 10)]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post("/api/frontend-telemetry", json=_payload(events, session=session))
         assert r.status_code == 204
         rows = _rows(session)
@@ -190,7 +189,7 @@ class TestFrontendTelemetryIngest:
     def test_second_session_gets_own_budget(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
         other = _session()
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r1 = client.post(
                 "/api/frontend-telemetry",
                 json=_payload([_one()] * (ft_router.MAX_EVENTS_PER_MINUTE + 5), session=session),

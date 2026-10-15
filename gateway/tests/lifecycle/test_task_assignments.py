@@ -3,6 +3,7 @@
 import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from typing import Any
 from unittest.mock import patch
 from uuid import UUID
@@ -16,9 +17,8 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import settings
 from gateway.agents import creation as agent_creation
 from gateway.agents.task_assignment import router as task_assignments
-from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.gateway_config import gateway_test_client
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 PATH = "/api/keyed/v1/task-assignments"
 HEADERS = {"Idempotency-Key": "compound", "Idempotency-Scope": "principal-v1"}
@@ -32,7 +32,7 @@ def client(
     set_machine_identity: Any,
     *,
     machine_identity: MachineIdentity,
-) -> Iterator[TestClient]:
+) -> Iterator[GatewayTestClient]:
     set_machine_identity(role="agent-runner", name="local-test")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
 
@@ -41,7 +41,7 @@ def client(
 
     monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
     with gateway_test_client(
-        app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
     ) as value:
         yield value
 
@@ -267,15 +267,21 @@ def test_missing_or_wrong_admission_headers_cannot_write(
 
 
 def test_revoked_principals_cannot_replay(
-    client: TestClient,
+    client: GatewayTestClient,
     db_conn: psycopg.Connection,
     body: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert client.post(PATH, json=body, headers=HEADERS).status_code == 201
     before = _counts(db_conn)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-compound-secret")
-    assert client.post(PATH, json=body, headers=HEADERS).status_code == 401
+    with gateway_test_client(
+        process=client.app.state.gateway_process,
+        config=replace(
+            client.app.state.gateway_config,
+            cluster_secret="rotated-compound-secret",  # noqa: S106 -- isolated test credential
+        ),
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as rotated:
+        assert rotated.post(PATH, json=body, headers=HEADERS).status_code == 401
     assert _counts(db_conn) == before
 
 

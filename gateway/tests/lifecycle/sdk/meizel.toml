@@ -5,7 +5,6 @@
 "test_external_integration_agent.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
 
 [debt.first-party-patch]
-"test_core.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_external_integration_agent.py#monkeypatch.setattr ava.__plugin_installation__" = 1
 "test_external_integration_agent.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
 "test_external_integration_agent.py#monkeypatch.setattr ava.impersonation.attachment.process_metadata" = 3

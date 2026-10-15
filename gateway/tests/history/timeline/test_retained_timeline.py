@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, BaseMessage
 
 from base.agents.history.checkpoint import CheckpointReadError
@@ -16,9 +15,9 @@ from base.config import settings
 from base.db import create_agent
 from base.host.net.auth import bearer_header
 from gateway.agents.history import timeline
-from gateway.app import app
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.history.test_timeline import test_client as test_client
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 
 def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(
@@ -27,7 +26,7 @@ def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(
     secret = secrets.token_urlsafe(24)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     tid = create_agent(db_conn)
-    with patch.dict(os.environ), TestClient(app) as client:
+    with patch.dict(os.environ), gateway_test_client() as client:
         rejected = without_credentials(client).get(f"/api/agents/{tid}/timeline/retained")
         assert rejected.status_code == 401
         accepted = client.get(f"/api/agents/{tid}/timeline/retained", headers=bearer_header(secret))
@@ -36,10 +35,10 @@ def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(
 
 
 def test_retained_history_can_start_and_page_without_reading_broken_live_head(
-    db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, test_client: GatewayTestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tid = create_agent(db_conn)
-    monkeypatch.setattr(app.state.config_authority.runtime.gateway, "timeline_compact_history", -1)
+    test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
     boundaries = ["retained-newer", "retained-older"]
     reads: list[str] = []
 
@@ -87,19 +86,18 @@ def test_retained_history_can_start_and_page_without_reading_broken_live_head(
 )
 def test_retained_entry_never_guesses_a_boundary_or_current_cursor(
     db_conn: psycopg.Connection,
-    test_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    test_client: GatewayTestClient,
     params: dict[str, str],
     status: int,
 ) -> None:
     tid = create_agent(db_conn)
-    monkeypatch.setattr(app.state.config_authority.runtime.gateway, "timeline_compact_history", -1)
+    test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
     response = test_client.get(f"/api/agents/{tid}/timeline/retained", params=params)
     assert response.status_code == status
 
 
 def test_retained_empty_agent_remains_successful_empty(
-    db_conn: psycopg.Connection, test_client: TestClient
+    db_conn: psycopg.Connection, test_client: GatewayTestClient
 ) -> None:
     tid = create_agent(db_conn)
     response = test_client.get(f"/api/agents/{tid}/timeline/retained")

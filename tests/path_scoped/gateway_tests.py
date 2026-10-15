@@ -10,7 +10,7 @@ the router anymore.
 In a unit test there is no live ops server listening, so a real
 `dispatch_to_machine` would fail with 502. The autouse fixtures below stand in
 for the local runner's ops daemon: they dispatch `launch_agent_op` /
-`lifecycle_op` in-process against `app.state.db_pool` — exactly what the
+`lifecycle_op` in-process against the test database — exactly what the
 runner's ops daemon does after receiving the forwarded op — so a plain
 `client.post("/api/agents")` (or `/terminate` etc.) executes against the test
 DB again.
@@ -22,56 +22,29 @@ over the same attribute, which runs after these autouse fixtures and wins.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import ExitStack
 from typing import Any, cast
 
 import pytest
+from psycopg_pool import ConnectionPool
 
 from base.cluster import machines as _machines
 from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 
 # One definition shared with the ava and integration modules; imported here so it
 # registers for this module's paths.
 from base.config.tests.api_keys import mock_api_keys as mock_api_keys
-from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
-from base.native_process.loaded_commit import LoadedCommit
+from base.packages.tests.model_catalog import model_catalog as model_catalog
 from gateway.agents import creation as _agents_creation
 from gateway.agents import forward as _agents_forward_router
-from gateway.app import app
-from gateway.cluster.process_boot import GatewayProcess
 from ops.lifecycle import launch_agent_op, lifecycle_op
 from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
-
-
-@pytest.fixture(autouse=True)
-def gateway_config_owner(
-    monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
-) -> None:
-    """Give each in-process gateway the inputs its test explicitly configured.
-
-    Bare unit homes have no delivery file. Preparing their gateway owner is a
-    process bootstrap operation, so restore that delivery before running SDK
-    clients and install the test's existing settings pins through the public API.
-    """
-    from gateway import app as gateway_app
-
-    def build_process(
-        *, config: ConfigBoot, image: LoadedCommit, machine: MachineIdentity, host: Host
-    ) -> GatewayProcess:
-        return GatewayProcess(
-            config=config, image=image, machine=machine_identity, host=fake_host()
-        )
-
-    # Capture configuration at each real lifespan entry, after the test's pins.
-    # Borrowed process inputs bypass this constructor and keep their writer.
-    monkeypatch.setattr(gateway_app, "ConfigBoot", snapshot_process_config)
-    monkeypatch.setattr(gateway_app, "GatewayProcess", build_process)
 
 
 @pytest.fixture(autouse=True)
@@ -80,84 +53,112 @@ def local_spawn_in_process(
     database: Database,
     event_bus: EventBus,
     machine_identity: MachineIdentity,
-) -> None:
+    model_catalog: ModelCatalog,
+) -> Iterator[None]:
     # The integration tests take this fixture from here (imported into their module).
-    async def _in_process_forward(
-        _db: object, target: str, body: LaunchAgentRequest
-    ) -> SpawnedAgent:
-        # The gateway creates the agent row in-process (create_agent_row, real
-        # DB); the runner's ops daemon dispatches launch_agent_op in-process —
-        # mirror that here so a forwarded local launch produces a real child.
-        return await launch_agent_op(
-            database,
-            event_bus,
-            body,
-            app.state.db_pool,
-            catalog=cast(ModelCatalog, app.state.catalog),
-            local_machine=machine_identity.name(),
-        )
+    with ExitStack() as stack:
+        pool: ConnectionPool | None = None
 
-    monkeypatch.setattr(_agents_creation, "forward_spawn_to_remote", _in_process_forward)
+        def _runner_pool() -> ConnectionPool:
+            nonlocal pool
+            if pool is None:
+                pool = stack.enter_context(database.pool(max_size=4))
+            return pool
 
-    # `POST /api/agents` reads the target's capability from the registry (the same
-    # source the forward resolves the ops URL from) for every target, local
-    # included — the gateway never introspects its own role. So a co-located
-    # runner must resolve to agent-runner, as `ava start`'s register_self would
-    # register the local machine. Names other than the local one fall through to
-    # the real registry lookup, so the not-registered (404) and gateway-only (400)
-    # guard tests still exercise it; a test wanting a different local capability
-    # monkeypatches lookup_role itself (runs after this, wins).
-    real_lookup_role = _machines.lookup_role
+        async def _in_process_forward(
+            _db: object, target: str, body: LaunchAgentRequest
+        ) -> SpawnedAgent:
+            # The gateway creates the agent row in-process (create_agent_row, real
+            # DB); the runner's ops daemon dispatches launch_agent_op in-process —
+            # mirror that here so a forwarded local launch produces a real child.
+            return await launch_agent_op(
+                database,
+                event_bus,
+                body,
+                _runner_pool(),
+                catalog=model_catalog,
+                local_machine=machine_identity.name(),
+            )
 
-    def _lookup_role(_db: Database, name: str) -> list[str]:
-        if name == machine_identity.name():
-            return ["gateway", "agent-runner"]
-        return real_lookup_role(_db, name)
+        monkeypatch.setattr(_agents_creation, "forward_spawn_to_remote", _in_process_forward)
 
-    monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
+        # `POST /api/agents` reads the target's capability from the registry (the same
+        # source the forward resolves the ops URL from) for every target, local
+        # included — the gateway never introspects its own role. So a co-located
+        # runner must resolve to agent-runner, as `ava start`'s register_self would
+        # register the local machine. Names other than the local one fall through to
+        # the real registry lookup, so the not-registered (404) and gateway-only (400)
+        # guard tests still exercise it; a test wanting a different local capability
+        # monkeypatches lookup_role itself (runs after this, wins).
+        real_lookup_role = _machines.lookup_role
 
-    # The spawn preflight also reads the pause latch (`is_paused`) for the
-    # same target. The local machine is never paused in tests (the pause
-    # endpoint refuses the gateway host itself), so stub it alongside the
-    # role; remote names fall through to the real registry read.
-    real_is_paused = _machines.is_paused
+        def _lookup_role(_db: Database, name: str) -> list[str]:
+            if name == machine_identity.name():
+                return ["gateway", "agent-runner"]
+            return real_lookup_role(_db, name)
 
-    def _is_paused(_db: Database, name: str) -> bool:
-        if name == machine_identity.name():
-            return False
-        return real_is_paused(_db, name)
+        monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
 
-    monkeypatch.setattr(_machines, "is_paused", _is_paused)
+        # The spawn preflight also reads the pause latch (`is_paused`) for the
+        # same target. The local machine is never paused in tests (the pause
+        # endpoint refuses the gateway host itself), so stub it alongside the
+        # role; remote names fall through to the real registry read.
+        real_is_paused = _machines.is_paused
+
+        def _is_paused(_db: Database, name: str) -> bool:
+            if name == machine_identity.name():
+                return False
+            return real_is_paused(_db, name)
+
+        monkeypatch.setattr(_machines, "is_paused", _is_paused)
+        yield
 
 
 @pytest.fixture(autouse=True)
 def _local_lifecycle_in_process(
+    request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     machine_identity: MachineIdentity,
-) -> None:
-    async def _in_process_lifecycle(
-        _db: object, target: str, path: str, json_body: dict[str, Any]
-    ) -> dict[str, Any]:
-        # The runner's ops daemon dispatches lifecycle_op in-process; mirror
-        # that here so a forwarded local terminate/resurrect/restart executes
-        # against the test DB. AvaAgentError raises propagate directly — the
-        # same exception types the wire round-trip would reconstruct. model_dump
-        # mirrors the daemon serializing the response model onto the wire dict.
-        return (
-            await lifecycle_op(
-                database,
-                event_bus,
-                path,
-                json_body,
-                app.state.db_pool,
-                catalog=cast(ModelCatalog, app.state.catalog),
-                local_machine=machine_identity.name(),
-            )  # pyright: ignore[reportUnknownArgumentType]
-        ).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
+    model_catalog: ModelCatalog,
+) -> Iterator[None]:
+    with ExitStack() as stack:
+        pool: ConnectionPool | None = None
 
-    monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
+        def _runner_pool() -> ConnectionPool:
+            nonlocal pool
+            if pool is None:
+                pool = stack.enter_context(database.pool(max_size=4))
+            return pool
+
+        async def _in_process_lifecycle(
+            _db: object, target: str, path: str, json_body: dict[str, Any]
+        ) -> dict[str, Any]:
+            # The runner's ops daemon dispatches lifecycle_op in-process; mirror
+            # that here so a forwarded local terminate/resurrect/restart executes
+            # against the test DB. AvaAgentError raises propagate directly — the
+            # same exception types the wire round-trip would reconstruct. model_dump
+            # mirrors the daemon serializing the response model onto the wire dict.
+            active_catalog = (
+                cast(tuple[str, ModelCatalog], request.getfixturevalue("withdrawn_model"))[1]
+                if "withdrawn_model" in request.fixturenames
+                else model_catalog
+            )
+            return (
+                await lifecycle_op(
+                    database,
+                    event_bus,
+                    path,
+                    json_body,
+                    _runner_pool(),
+                    catalog=active_catalog,
+                    local_machine=machine_identity.name(),
+                )  # pyright: ignore[reportUnknownArgumentType]
+            ).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
+
+        monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
+        yield
 
 
 @pytest.fixture(autouse=True)

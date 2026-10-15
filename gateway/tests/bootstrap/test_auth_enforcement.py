@@ -577,14 +577,18 @@ def _assert_session_cookie_isolation(
         headers={**session_cookie(cookie), "Origin": other_origin},
     ).status_code
     logout_resp = client.post("/api/auth/logout", headers=session_cookie(cookie))
+    after_logout = client.get("/api/auth/check", headers=session_cookie(cookie)).json()[
+        "authenticated"
+    ]
     assert (
         check_ok,
         sessions_status,
         own_post,
         other_post,
         logout_resp.status_code,
-        ("; Secure" in logout_resp.headers["Set-Cookie"]) is secure,
-    ) == (True, 200, 422, 403, 200, True)
+        "Max-Age=0" in logout_resp.headers["Set-Cookie"],
+        after_logout,
+    ) == (True, 200, 422, 403, 200, True, False)
 
 
 def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(

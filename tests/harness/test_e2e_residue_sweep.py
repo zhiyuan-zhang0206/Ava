@@ -28,7 +28,7 @@ from tests.e2e import process_support as processes
     ("command", "environment"),
     [
         (
-            "uv run uvicorn gateway.app:app --port 60758",
+            "uv run uvicorn gateway.app:create_app_from_environment --factory --port 60758",
             "AVA_HOME=/x/ava_e2e_home_1_2 AVA_DB_URL=postgresql://u@h/db",
         ),
         ("npm run start -p 60759", ""),
@@ -100,9 +100,17 @@ def test_frontend_cwd_observation_keeps_path_with_spaces(monkeypatch: pytest.Mon
 
 def _fake_ps_rows() -> list[tuple[int, str, str]]:
     return [
-        (100, "uv run uvicorn gateway.app:app", "AVA_HOME=/r/tmp/ava_e2e_home_1_2"),
+        (
+            100,
+            "uv run uvicorn gateway.app:create_app_from_environment --factory",
+            "AVA_HOME=/r/tmp/ava_e2e_home_1_2",
+        ),
         (200, "next-server (v16.2.7)", ""),
-        (300, "uv run uvicorn gateway.app:app", "AVA_HOME=/real/home"),
+        (
+            300,
+            "uv run uvicorn gateway.app:create_app_from_environment --factory",
+            "AVA_HOME=/real/home",
+        ),
         (400, "python -m agent --agent-id 1003", "AVA_HOME=/r/tmp/ava_e2e_home_1_2"),
     ]
 
@@ -255,7 +263,7 @@ def _cmd_none(_pid: int) -> str | None:
 
 
 def _cmd_gateway(_pid: int) -> str:
-    return "uv run uvicorn gateway.app:app --port 49397"
+    return "uv run uvicorn gateway.app:create_app_from_environment --factory --port 49397"
 
 
 def _cmd_other(_pid: int) -> str:
@@ -374,9 +382,17 @@ def test_dead_owner_is_not_live() -> None:
 @pytest.mark.parametrize(
     ("command", "observed", "matches"),
     [
-        (_cmd_gateway, "uv run uvicorn gateway.app:app --port 49397", True),
-        (_cmd_gateway, "uv  run uvicorn gateway.app:app --port 49397", True),
-        (_cmd_other, "uv run uvicorn gateway.app:app", False),
+        (
+            _cmd_gateway,
+            "uv run uvicorn gateway.app:create_app_from_environment --factory --port 49397",
+            True,
+        ),
+        (
+            _cmd_gateway,
+            "uv  run uvicorn gateway.app:create_app_from_environment --factory --port 49397",
+            True,
+        ),
+        (_cmd_other, "uv run uvicorn gateway.app:create_app_from_environment --factory", False),
         (_cmd_none, "x", False),
     ],
 )

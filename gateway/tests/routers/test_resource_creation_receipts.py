@@ -5,16 +5,15 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg import sql
 
 import base.db
 from base.api_contracts.idempotency import keyed_headers
 from base.db.code_version_gate import ProcessDbGate
-from gateway.app import app
 from gateway.routers import presets
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import router as schedules
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture(params=["preset", "schedule"])
@@ -36,7 +35,7 @@ def test_lost_response_retry_replays_original_created_resource(
     db_conn: psycopg.Connection, resource: tuple[str, dict[str, Any], str]
 ) -> None:
     path, body, table = resource
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         headers = keyed_headers("one-create")
         first = client.post(path, json=body, headers=headers)
         second = client.post(path, json=body, headers=headers)
@@ -53,7 +52,7 @@ def test_creation_receipt_ignores_later_rename_delete_and_name_reuse(
     db_conn: psycopg.Connection, resource: tuple[str, dict[str, Any], str]
 ) -> None:
     path, body, _table = resource
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         headers = keyed_headers("original")
         first = client.post(path, json=body, headers=headers)
         sid = first.json()["id"]
@@ -75,7 +74,7 @@ def test_same_creation_key_with_changed_valid_body_conflicts(
     db_conn: psycopg.Connection, resource: tuple[str, dict[str, Any], str]
 ) -> None:
     path, body, _table = resource
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         headers = keyed_headers("immutable")
         assert client.post(path, json=body, headers=headers).status_code == 201
         assert (
@@ -112,7 +111,7 @@ def test_concurrent_creation_commits_one_resource_and_receipt(
 
 def test_receipt_contains_no_raw_opaque_config_request(db_conn: psycopg.Connection) -> None:
     value_marker = "private-test-value"
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert (
             client.post(
                 "/api/presets",
@@ -194,7 +193,7 @@ def test_creation_identity_is_bound_to_verified_principal(
 def test_invalid_creation_identity_cannot_reserve_resource(
     db_conn: psycopg.Connection, headers: dict[str, str]
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert (
             client.post(
                 "/api/presets", json={"name": "invalid", "label": "worker"}, headers=headers

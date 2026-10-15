@@ -5,19 +5,18 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 import gateway.agents.notices as agents_notices
 from base.api_contracts.idempotency import keyed_headers
-from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "question", require_response=True)
     path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
-    with TestClient(app) as client, ThreadPoolExecutor(max_workers=4) as executor:
+    with gateway_test_client() as client, ThreadPoolExecutor(max_workers=4) as executor:
 
         def resolve() -> dict[str, object]:
             response = client.post(
@@ -45,7 +44,7 @@ def test_distinct_later_read_replies_remain_distinct(db_conn: psycopg.Connection
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "FYI")
     path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = {"action": "read", "reply": "thanks"}
         first = client.post(
             path,
@@ -72,7 +71,7 @@ def test_creation_replay_preserves_original_result_after_superseding(
 ) -> None:
     agent = seed_agent(db_conn)
     path = f"/api/agents/{agent}/notices"
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = {"title": "original"}
         first = client.post(path, json=body, headers=keyed_headers("create-1"))
         later = client.post(path, json={"title": "later"}, headers=keyed_headers("create-2"))
@@ -90,7 +89,7 @@ def test_creation_replay_preserves_original_result_after_superseding(
 
 def test_creation_key_requires_the_principal_scope(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         response = client.post(
             f"/api/agents/{agent}/notices",
             json={"title": "unscoped"},
@@ -117,7 +116,7 @@ def test_resolution_recovers_after_committed_wake_failure(
     def unavailable(*args: object) -> bool:
         raise RuntimeError("process lost after commit")
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with gateway_test_client(raise_server_exceptions=False) as client:
         monkeypatch.setattr(notices, "publish_inbound_wake", unavailable)
         first = client.post(
             path,
@@ -143,7 +142,7 @@ def test_create_receipt_survives_expiration(
     agent = seed_agent(db_conn)
     path = f"/api/agents/{agent}/notices"
     deadline = datetime.now(UTC) + timedelta(hours=1)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         body = {"title": "expiring", "expire_at": deadline.isoformat()}
         first = client.post(path, json=body, headers=keyed_headers("expires"))
 
@@ -167,7 +166,7 @@ def test_missing_key_cannot_mutate_notice(db_conn: psycopg.Connection, resolve: 
     if resolve:
         path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
         body = {"action": "answer", "reply": "yes"}
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert client.post(path, json=body).status_code == 422
     assert db_conn.execute(
         "SELECT title, resolved_at FROM agent_notices WHERE agent_id=%s", (agent,)

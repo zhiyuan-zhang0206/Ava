@@ -8,7 +8,6 @@ from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
-from gateway.app import app
 from gateway.schedules import receipts, router, session_control
 from tests.fixtures.gateway_config import gateway_test_client
 
@@ -21,7 +20,7 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = client.post("/api/schedules", json={"name": "rollback", "script": "pass"}).json()[
             "id"
         ]
@@ -45,7 +44,7 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
 def test_receipt_replays_after_schedule_deletion(
     gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = client.post("/api/schedules", json={"name": "deleted", "script": "pass"}).json()["id"]
         path = f"/api/schedules/{sid}/restart"
         headers = keyed_headers("before-delete")
@@ -64,7 +63,7 @@ def test_delete_cleanup_enqueue_failure_preserves_schedule(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         sid = client.post(
             "/api/schedules", json={"name": "delete-rollback", "script": "pass"}
         ).json()["id"]

@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
-from gateway.app import app
 from gateway.tests.mcp_calls import initialize, tool_call, tool_result
 from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 
@@ -47,7 +46,7 @@ def _stored(db: psycopg.Connection, agent_id: int, content: str) -> list[tuple[A
 def test_send_message_defaults_to_the_user(
     db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         credential, agent_id = _client_and_agent(client)
         args = {"agent_id": agent_id, "content": "as the user"}
         assert not _failed(tool_call(client, credential["token"], "send_message", args))
@@ -59,7 +58,7 @@ def test_send_message_as_external_agent_uses_the_client_identity(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         credential, agent_id = _client_and_agent(client)
         args = {"agent_id": agent_id, "content": "as a peer", "as_external_agent": True}
         assert not _failed(tool_call(client, credential["token"], "send_message", args))
@@ -86,7 +85,7 @@ def test_the_caller_cannot_choose_the_source(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         credential, agent_id = _client_and_agent(client)
         args: dict[str, Any] = {
             "agent_id": agent_id,

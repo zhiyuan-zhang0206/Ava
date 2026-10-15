@@ -12,11 +12,10 @@ from functools import partial
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineRoles
 from base.packages.docs.notes import Note
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _init_repo(root: Path) -> None:
@@ -61,7 +60,7 @@ def test_graph_builds_once_per_pool_revision(
     monkeypatch.setattr(gw_memory, "gateway_memory_dir", partial(_memory_root, root))
     calls = _track_builds(monkeypatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = client.get("/api/memory/graph")
         second = client.get("/api/memory/graph")
     assert first.status_code == second.status_code == 200
@@ -78,7 +77,7 @@ def test_graph_builds_once_per_pool_revision(
     ):
         subprocess.run(cmd, cwd=root, check=True, capture_output=True)  # noqa: S603
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         third = client.get("/api/memory/graph")
     assert third.status_code == 200
     assert len(calls) == 2
@@ -97,7 +96,7 @@ def test_graph_uncached_without_a_git_revision(
     monkeypatch.setattr(gw_memory, "gateway_memory_dir", partial(_memory_root, root))
     calls = _track_builds(monkeypatch)
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert client.get("/api/memory/graph").status_code == 200
         assert client.get("/api/memory/graph").status_code == 200
     assert len(calls) == 2

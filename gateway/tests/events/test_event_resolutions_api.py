@@ -9,9 +9,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.config import settings
 from base.telemetry.tests.capture.event_capture import EmittedEvents, capturing_events
-from gateway.app import app
+from gateway.tests.agents.gateway_auth import without_credentials
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def client(db_conn: psycopg.Connection) -> Any:
     with db_conn.cursor() as cur:
         cur.execute("TRUNCATE event_dismissals RESTART IDENTITY")
     db_conn.commit()
-    with TestClient(app) as test_client:
+    with gateway_test_client() as test_client:
         yield test_client
 
 
@@ -121,10 +121,8 @@ def test_agent_specific_dismissal_is_rejected(client: TestClient) -> None:
     assert "agent_id-specific" in response.text
 
 
-def test_gateway_auth_protects_resolution_routes(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "resolution-test-secret")
+def test_gateway_auth_protects_resolution_routes(client: TestClient) -> None:
+    without_credentials(client)
 
     response = client.post("/api/event-resolutions", json=_body())
 

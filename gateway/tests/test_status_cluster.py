@@ -14,19 +14,17 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
-import gateway.app as gateway_app
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from gateway.app import app
 from gateway.cluster import roster_probe
 from gateway.cluster import status as status_router
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import StatusCache
 from ops.cluster import rpc as cluster_rpc
+from tests.fixtures.gateway_config import gateway_test_client
 
 _OPS_URL = "http://runner-a:18121"
 
@@ -62,11 +60,11 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def stub_machine_identity(set_machine_identity) -> None:
+def stub_machine_identity(set_machine_identity) -> MachineIdentity:
     """Set this unit's identity (gateway, name 'cloud-test') at the source
     so every machine_name() / machine_role() call site resolves it without
     per-module patching."""
-    set_machine_identity(role="gateway", name="cloud-test")
+    return set_machine_identity(role="gateway", name="cloud-test")
 
 
 @pytest.fixture
@@ -145,13 +143,13 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         stub_remote_probe: dict[str, tuple[bool, bool | None]],
     ) -> None:
         """current_* fields reflect local machine perspective."""
-        _ = fake_flag, stub_machine_identity, db_conn
+        _ = fake_flag, db_conn
         del stub_remote_probe
-        with TestClient(app) as client:
+        with gateway_test_client(machine=stub_machine_identity) as client:
             r = client.get("/api/status")
         assert r.status_code == 200
         data = r.json()
@@ -169,7 +167,7 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         stub_remote_probe: dict[str, tuple[bool, bool | None]],
         database: Database,
         *,
@@ -194,19 +192,19 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         stub_remote_probe: dict[str, tuple[bool, bool | None]],
     ) -> None:
         """gateway row → status_snapshot() (always online);
         agent-runner row → stub_remote_probe lookup."""
-        _ = fake_flag, stub_machine_identity
+        _ = fake_flag
         _insert_machine(db_conn, "cloud-test", "https://ava.example.com", "gateway", "central node")
         _insert_machine(db_conn, "test-host", "http://test-host:18121", "agent-runner")
         _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
         stub_remote_probe["test-host"] = (True, False)
         stub_remote_probe["runner-test"] = (False, None)  # probe failed
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=stub_machine_identity) as client:
             r = client.get("/api/status")
         assert r.status_code == 200
         machines = r.json()["cluster"]["machines"]
@@ -219,14 +217,14 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         stub_remote_probe: dict[str, tuple[bool, bool | None]],
     ) -> None:
         """A pure observability-station row (machines.role carries only the
         station token) renders serve_observability_station=True and the two
         legacy flags False — the roster must not lose the station capability
         when deriving the flag triple from the role column."""
-        _ = fake_flag, stub_machine_identity
+        _ = fake_flag
         _insert_machine(db_conn, "station-a", None, "observability-station")
         _insert_machine(
             db_conn, "combo", "https://ava.example.com", "gateway,observability-station"
@@ -234,7 +232,7 @@ class TestClusterPanel:
         stub_remote_probe["station-a"] = (True, False)
         stub_remote_probe["combo"] = (True, False)
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=stub_machine_identity) as client:
             r = client.get("/api/status")
         assert r.status_code == 200
         by_name = {m["name"]: m for m in r.json()["cluster"]["machines"]}
@@ -249,17 +247,17 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         stub_remote_probe: _RemoteProbeResults,
     ) -> None:
         """Regression: PR #466 made machines.gateway_url nullable for agent-runner;
         pre-fix `_probe_machine(url.rstrip(...))` crashed with AttributeError
         and the outer try/except masked it as cluster.machines=[]."""
-        _ = fake_flag, stub_machine_identity
+        _ = fake_flag
         _insert_machine(db_conn, "runner-test", None, "agent-runner")
         stub_remote_probe["runner-test"] = (True, False)
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=stub_machine_identity) as client:
             r = client.get("/api/status")
         assert r.status_code == 200
         machines = r.json()["cluster"]["machines"]
@@ -274,12 +272,12 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         stub_remote_probe: dict[str, tuple[bool, bool | None]],
     ) -> None:
         del stub_remote_probe
-        _ = fake_flag, stub_machine_identity
-        with TestClient(app) as client:
+        _ = fake_flag
+        with gateway_test_client(machine=stub_machine_identity) as client:
             r = client.get("/api/status")
         assert r.status_code == 200
         assert r.json()["cluster"]["machines"] == []
@@ -288,14 +286,14 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         stub_remote_probe: _RemoteProbeResults,
     ) -> None:
-        _ = fake_flag, stub_machine_identity
+        _ = fake_flag
         _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
         stub_remote_probe["runner-test"] = (True, False)
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=stub_machine_identity) as client:
             first = client.get("/api/status")
             second = client.get("/api/status")
 
@@ -307,16 +305,15 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         stub_remote_probe: _RemoteProbeResults,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        _ = fake_flag, stub_machine_identity
-        monkeypatch.setattr(gateway_app, "StatusCache", lambda: StatusCache(ttl_s=0.0))
+        _ = fake_flag
         _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
         stub_remote_probe["runner-test"] = (True, False)
 
-        with TestClient(app) as client:
+        with gateway_test_client(machine=stub_machine_identity) as client:
+            client.app.state.status_cache = StatusCache(ttl_s=0.0)
             first = client.get("/api/status")
             second = client.get("/api/status")
 
@@ -328,12 +325,12 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A transport reset recovered by the roster's retry is cached as the
         successful final verdict, not as a transient offline row."""
-        _ = fake_flag, stub_machine_identity
+        _ = fake_flag
         _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
         calls: list[dict[str, object]] = []
 
@@ -350,7 +347,7 @@ class TestClusterPanel:
             }
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", retry_aware_dispatch)
-        with TestClient(app) as client:
+        with gateway_test_client(machine=stub_machine_identity) as client:
             first = client.get("/api/status")
             second = client.get("/api/status")
 
@@ -583,7 +580,7 @@ class TestPanelCarriesNoFrozenPin:
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
-        stub_machine_identity: None,
+        stub_machine_identity: MachineIdentity,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         *,

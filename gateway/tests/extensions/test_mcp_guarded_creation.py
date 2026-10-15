@@ -6,14 +6,12 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg import sql
 
 from gateway.agents import creation
-from gateway.app import app
 from gateway.tests.mcp_calls import ACCEPT, create_token, tool_call, tool_result
 from gateway.tests.mcp_calls import enable_endpoint as enable_endpoint
-from tests.fixtures.gateway_config import create_mcp_client
+from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 
 TOOL = "spawn_agent_guarded_v1"
 ARGS = {"prompt": "one original goal", "idempotency_key": "original"}
@@ -29,7 +27,7 @@ def test_response_loss_replays_one_original_birth(
         raise RuntimeError("committed MCP response lost")
 
     monkeypatch.setattr(creation, "create_and_launch_agent", lose_response)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         lost = tool_call(client, token, TOOL, ARGS)
         assert lost["result"].get("isError") is True
@@ -53,7 +51,7 @@ def test_historical_replay_never_wakes_successor_work(
         "deleted": "DELETE FROM agents_meta WHERE id=%s",
         "placed": "UPDATE agents_meta SET machine='later-placement' WHERE id=%s",
     }
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         original = tool_result(tool_call(client, token, TOOL, ARGS))
         agent_id = original["id"]
@@ -82,7 +80,7 @@ def test_historical_replay_never_wakes_successor_work(
 
 
 def test_concurrent_retries_accept_one_agent_and_prompt(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
 
         def submit(index: int) -> int:
@@ -104,7 +102,7 @@ def test_concurrent_retries_accept_one_agent_and_prompt(db_conn: psycopg.Connect
 def test_missing_or_invalid_key_is_rejected_before_birth(
     db_conn: psycopg.Connection, args: dict[str, str]
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         response = tool_call(client, token, TOOL, args)
     assert response["result"].get("isError") is True
@@ -112,7 +110,7 @@ def test_missing_or_invalid_key_is_rejected_before_birth(
 
 
 def test_keys_are_scoped_to_tool_and_verified_client(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         first = create_token(client, name="first")
         second = create_token(client, name="second")
         guarded = tool_result(tool_call(client, first, TOOL, ARGS))
@@ -129,7 +127,7 @@ def test_keys_are_scoped_to_tool_and_verified_client(db_conn: psycopg.Connection
 
 
 def test_read_scope_cannot_create_or_recover_a_birth(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client, scope="read")
         response = tool_call(client, token, TOOL, ARGS)
     assert response["result"].get("isError") is True
@@ -142,7 +140,7 @@ def test_read_scope_cannot_create_or_recover_a_birth(db_conn: psycopg.Connection
 def test_identity_arguments_cannot_override_verified_client(
     db_conn: psycopg.Connection, field: str
 ) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         token = create_token(client)
         response = tool_call(client, token, TOOL, {**ARGS, field: "pretend-client"})
     assert "error" in response
@@ -150,7 +148,7 @@ def test_identity_arguments_cannot_override_verified_client(
 
 
 def test_revoked_credential_cannot_recover_original_birth(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         credential = create_mcp_client(client, "revoked", "write").json()
         original = tool_result(tool_call(client, credential["token"], TOOL, ARGS))
         assert client.post(f"/api/mcp/clients/{credential['id']}/revoke").status_code == 200

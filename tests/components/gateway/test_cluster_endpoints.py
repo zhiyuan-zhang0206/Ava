@@ -13,13 +13,13 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 import base.sessions.backend as sessions_backend
 import gateway.app as gateway_app
 import gateway.cluster.status as gateway_cluster_status
 from base import cluster
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -33,13 +33,13 @@ from base.lm.catalog import ModelCatalog
 from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.root_control import client as root_client
-from gateway.app import app
+from gateway.app import openapi_schema
 from gateway.cluster import router
 from gateway.events import telemetry_rows
-from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.tests.agents.gateway_auth import without_credentials
 from ops import agent_pause, cluster_status
 from ops.cluster_status import pause as cluster_pause
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def pinned_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
 class TestPauseMiddleware:
     def test_sdk_path_returns_503_when_paused(self, fake_flag: Path) -> None:
         fake_flag.write_text("")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/agents")
         assert r.status_code == 503
         assert "updating" in r.json()["detail"]
@@ -130,18 +130,20 @@ class TestPauseMiddleware:
         headers — CORSMiddleware is the OUTERMOST middleware, so a browser
         caller sees the real 503 instead of "Failed to fetch" (#187)."""
         fake_flag.write_text("")
-        allowed_origin = cors_allowed_origins()[0]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
+            allowed_origin = client.app.state.gateway_config.allowed_origins[0]  # type: ignore[union-attr]
             r = client.get("/api/agents", headers={"Origin": allowed_origin})
         assert r.status_code == 503
         assert r.headers["access-control-allow-origin"] == allowed_origin
         assert r.headers["access-control-allow-credentials"] == "true"
 
-    def test_cluster_status_bypasses_503(self, fake_flag: Path, set_machine_identity) -> None:
+    def test_cluster_status_bypasses_503(
+        self, fake_flag: Path, set_machine_identity: MachineIdentitySetter
+    ) -> None:
         """`/api/cluster/status` still returns 200 while paused — it is the observability + control path."""
         fake_flag.write_text("")
-        set_machine_identity(role="gateway", name="test-mc")
-        with TestClient(app) as client:
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="test-mc")
+        with gateway_test_client(machine=machine) as client:
             r = client.get("/api/cluster/status")
         assert r.status_code == 200
         body = r.json()
@@ -159,7 +161,7 @@ class TestPauseMiddleware:
     def test_no_503_when_unpaused(self, fake_flag: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Flag absent → middleware does not block; /api/agents follows normal business path."""
         # flag absent by default
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/agents")
         # just not 503 (business logic may return 200 / other, but must not be our paused middleware)
         assert r.status_code != 503
@@ -170,7 +172,7 @@ class TestPauseMiddleware:
         (no webhook token configured in this test env) proves the request
         reached the router instead of the pause short-circuit."""
         fake_flag.write_text("")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = without_credentials(client).post(
                 "/api/alerts",
                 json={"status": "firing", "alerts": []},
@@ -181,7 +183,7 @@ class TestPauseMiddleware:
         """Only the webhook bypasses the pause — the read/stream paths stay
         503 like every other path (read-only, not needed mid-rollout)."""
         fake_flag.write_text("")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/alerts")
         assert r.status_code == 503
 
@@ -191,7 +193,7 @@ class TestPauseMiddleware:
         the route is FastAPI 404; paused, /api/cluster/* is the only bypass
         and metadata returns 503 along with everything else (correct — there's
         nothing to serve and no caller depends on this path)."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/openapi.json")
         assert r.status_code == 404
 
@@ -215,7 +217,7 @@ class TestPauseMiddleware:
             cur.execute("INSERT INTO agents_meta (id, status) VALUES (%s, 'running')", (aid,))
         db_conn.commit()
         fake_flag.write_text("")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post(
                 f"/api/agents/{aid}/messages",
                 json={"content": "during pause", "source": "user"},
@@ -227,7 +229,7 @@ class TestPauseMiddleware:
             row = cur.fetchone()
             assert row is not None and row[0] == 0, "dedup must not claim while paused"
         fake_flag.write_text("")
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post("/api/agents/123/terminate", json={"source": "user"})
         assert r.status_code == 503
 
@@ -302,7 +304,7 @@ class TestPauseAgents:
         current = admission.snapshot()
         assert current is not None and current.maintenance is not None
         assert current.maintenance.phase == MaintenancePhase.DRAINED
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             assert client.get("/api/agents").status_code == 200
         assert not cluster_pause.is_paused(database, machine_name=machine_identity.name)
         assert pause_backend.killed == []
@@ -385,9 +387,9 @@ class TestRetiredDeploymentEndpoints:
             pytest.fail("retired HTTP ingress reached the old updater")
 
         monkeypatch.setattr(agent_pause, "pause_agents", forbidden)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             assert client.request(method, path).status_code == 404
-        assert path not in app.openapi()["paths"]
+        assert path not in openapi_schema()["paths"]
 
 
 class TestStatusSnapshot:
@@ -395,7 +397,7 @@ class TestStatusSnapshot:
         self,
         serving_root: RootBirth,
         fake_flag: Path,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         *,
@@ -429,7 +431,7 @@ class TestStatusSnapshot:
 
     def test_snapshot_includes_head_sha(
         self,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         *,
@@ -451,7 +453,7 @@ class TestStatusSnapshot:
     @pytest.mark.parametrize("sha", ["def5678", None])
     def test_snapshot_includes_running_sha(
         self,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         sha: str | None,
@@ -479,7 +481,7 @@ class TestStatusSnapshot:
 
     def test_snapshot_ignores_the_start_bookmark(
         self,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
         database: Database,
         *,
@@ -514,7 +516,7 @@ class TestStatusSnapshot:
     def test_supervisor_status_preserves_unavailable_inspection(
         self,
         fake_flag: Path,
-        set_machine_identity,
+        set_machine_identity: MachineIdentitySetter,
         monkeypatch: pytest.MonkeyPatch,
         online: bool | None,
         database: Database,
@@ -547,7 +549,7 @@ class TestClusterEndpoints:
     @pytest.mark.parametrize("route", ["/api/cluster/stop", "/api/cluster/resume"])
     def test_the_legacy_deploy_lease_transition_is_gone(self, route: str) -> None:
         """The legacy lease-bound stop/resume routes and their ops kinds no longer exist."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post(
                 route,
                 json={"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
@@ -564,7 +566,7 @@ class TestClusterEndpoints:
             "mark_stopping",
             lambda _db, name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType]
         )
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.post(
                 "/api/cluster/stopping", params={"machine": "runner-a", "home": "~/.ava"}
             )

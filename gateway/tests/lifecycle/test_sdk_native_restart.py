@@ -6,7 +6,6 @@ from uuid import uuid4
 import httpx
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from ava.agents import work
@@ -19,15 +18,13 @@ from base.db.code_version_gate import ProcessDbGate
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from base.packages.plugin_providers import build_model_catalog
 from gateway.agents import lifecycle
-from gateway.app import app
-from gateway.tests.test_idempotency import client as client
 from ops.lifecycle.native_restart import restart_native_work_op
 from services.agent_runner.agent_host.tests.managed_work import managed_work
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.mark.usefixtures("retry_waits")
 async def test_sdk_recovers_original_restart_after_lost_response_and_source_cleanup(
-    client: TestClient,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
@@ -39,91 +36,97 @@ async def test_sdk_recovers_original_restart_after_lost_response_and_source_clea
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     calls: list[str] = []
 
-    async def forward(
-        agent_id: int,
-        path: str,
-        packet: dict[str, object],
-        *,
-        db: Database,
-        pool: ConnectionPool,
-        idempotency_key: str,
-    ) -> dict[str, object]:
-        assert db is app.state.db
-        assert pool is app.state.db_pool
-        calls.append(path)
-        assert path == f"/api/agents/{agent_id}/restart-work"
-        operation = NativeRestartOperation.model_validate(packet)
-        assert operation.operation_key == idempotency_key
-        result = await restart_native_work_op(
-            app.state.db,
-            app.state.bus,
-            agent_id,
-            operation,
-            app.state.db_pool,
-            catalog=build_model_catalog(),
-        )
-        return result.model_dump(mode="json")
+    with gateway_test_client() as client:
+        app = client.app
 
-    monkeypatch.setattr(lifecycle, "forward_to_home_machine", forward)
-    posts: list[httpx.Request] = []
-    lose = True
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET":
-            result = client.get(request.url.path, headers=dict(request.headers))
-        else:
-            posts.append(request)
-            result = client.post(
-                request.url.path, json=json.loads(request.content), headers=dict(request.headers)
+        async def forward(
+            agent_id: int,
+            path: str,
+            packet: dict[str, object],
+            *,
+            db: Database,
+            pool: ConnectionPool,
+            idempotency_key: str,
+        ) -> dict[str, object]:
+            assert db is app.state.db  # type: ignore[union-attr]
+            assert pool is app.state.db_pool  # type: ignore[union-attr]
+            calls.append(path)
+            assert path == f"/api/agents/{agent_id}/restart-work"
+            operation = NativeRestartOperation.model_validate(packet)
+            assert operation.operation_key == idempotency_key
+            result = await restart_native_work_op(
+                app.state.db,  # type: ignore[union-attr]
+                app.state.bus,  # type: ignore[union-attr]
+                agent_id,
+                operation,
+                app.state.db_pool,  # type: ignore[union-attr]
+                catalog=build_model_catalog(),
             )
-            if lose:
-                assert result.status_code == 200, result.text
-                raise httpx.ReadTimeout("committed response lost", request=request)
-        return httpx.Response(
-            result.status_code, content=result.content, headers=dict(result.headers)
-        )
+            return result.model_dump(mode="json")
 
-    overlay: dict[str, object] = {"completion_notice_policy": "hourly"}
-    with (
-        httpx.Client(
-            base_url="http://gateway",
-            headers={"Authorization": f"Bearer {secret}"},
-            transport=httpx.MockTransport(handle),
-        ) as http,
-        use_client(http),
-    ):
-        observed = work.observe(target.agent_id)
-        with pytest.raises(GatewayUnavailable):
-            work.restart(observed, idempotency_key="intent", config_overlay=overlay)
-        assert len(posts) > 1
-        assert len(calls) == 1
-        lose = False
-        original = db_conn.execute(
-            "SELECT command_id FROM native_restart_commands WHERE agent_id=%s", (target.agent_id,)
-        ).fetchone()
-        assert original is not None
-        db_conn.execute(
-            "UPDATE agents_meta SET lifecycle_command_id=NULL,native_work_id=NULL,runtime_owner=%s,config_overlay='{}' WHERE id=%s",
-            (uuid4(), target.agent_id),
-        )
-        db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (original[0],))
-        db_conn.commit()
-        recovered = work.restart(observed, idempotency_key="intent", config_overlay=overlay)
-        assert recovered.command_id == original[0] and recovered.target == observed
-        progress = work.restart_status(recovered)
-        assert (
-            progress.acceptance == recovered
-            and progress.applied_at is None
-            and progress.observed_at is None
-        )
-        assert len(calls) == 1
-        with pytest.raises(httpx.HTTPStatusError) as conflict:
-            work.restart(
-                observed,
-                idempotency_key="intent",
-                config_overlay={"completion_notice_policy": "never"},
+        monkeypatch.setattr(lifecycle, "forward_to_home_machine", forward)
+        posts: list[httpx.Request] = []
+        lose = True
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                result = client.get(request.url.path, headers=dict(request.headers))
+            else:
+                posts.append(request)
+                result = client.post(
+                    request.url.path,
+                    json=json.loads(request.content),
+                    headers=dict(request.headers),
+                )
+                if lose:
+                    assert result.status_code == 200, result.text
+                    raise httpx.ReadTimeout("committed response lost", request=request)
+            return httpx.Response(
+                result.status_code, content=result.content, headers=dict(result.headers)
             )
-        assert conflict.value.response.status_code == 409 and len(calls) == 1
+
+        overlay: dict[str, object] = {"completion_notice_policy": "hourly"}
+        with (
+            httpx.Client(
+                base_url="http://gateway",
+                headers={"Authorization": f"Bearer {secret}"},
+                transport=httpx.MockTransport(handle),
+            ) as http,
+            use_client(http),
+        ):
+            observed = work.observe(target.agent_id)
+            with pytest.raises(GatewayUnavailable):
+                work.restart(observed, idempotency_key="intent", config_overlay=overlay)
+            assert len(posts) > 1
+            assert len(calls) == 1
+            lose = False
+            original = db_conn.execute(
+                "SELECT command_id FROM native_restart_commands WHERE agent_id=%s",
+                (target.agent_id,),
+            ).fetchone()
+            assert original is not None
+            db_conn.execute(
+                "UPDATE agents_meta SET lifecycle_command_id=NULL,native_work_id=NULL,runtime_owner=%s,config_overlay='{}' WHERE id=%s",
+                (uuid4(), target.agent_id),
+            )
+            db_conn.execute("DELETE FROM inbound_messages WHERE id=%s", (original[0],))
+            db_conn.commit()
+            recovered = work.restart(observed, idempotency_key="intent", config_overlay=overlay)
+            assert recovered.command_id == original[0] and recovered.target == observed
+            progress = work.restart_status(recovered)
+            assert (
+                progress.acceptance == recovered
+                and progress.applied_at is None
+                and progress.observed_at is None
+            )
+            assert len(calls) == 1
+            with pytest.raises(httpx.HTTPStatusError) as conflict:
+                work.restart(
+                    observed,
+                    idempotency_key="intent",
+                    config_overlay={"completion_notice_policy": "never"},
+                )
+            assert conflict.value.response.status_code == 409 and len(calls) == 1
     assert db_conn.execute(
         "SELECT count(*) FROM native_restart_commands WHERE agent_id=%s", (target.agent_id,)
     ).fetchone() == (1,)

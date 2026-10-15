@@ -7,7 +7,6 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import insert
@@ -24,15 +23,15 @@ from gateway.tests.lifecycle.guarded_compact.host.restart.child_fixture import (
     read_child,
     start_child,
 )
-from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel, make_host
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.mark.parametrize("fence", ["target_replaced", "resurrect", "force_terminate"])
 async def test_released_sigkill_original_restart_is_no_effect_not_successor_restart(
+    gateway_data_plane: None,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     add_bindings: AddBindings,
     fence: str,
@@ -40,6 +39,7 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
     *,
     database_gate: ProcessDbGate,
 ) -> None:
+    del gateway_data_plane
     agent = prepare_agent(db_conn)
     secret = "guarded-compact-test-secret"  # noqa: S105 -- isolated credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
@@ -51,72 +51,73 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
     path = f"/api/keyed/v1/agents/{agent}"
     child = start_child(db_conn.info.dsn, agent, "released")
     try:
-        target = await read_child(child)
-        compact = client.post(path + "/compact-history", json=target, headers=headers)
-        assert compact.status_code == 202, compact.text
-        assert child.stdin is not None
-        child.stdin.write("compact\n")
-        child.stdin.flush()
-        assert await read_child(child) == {"stage": "prepared", "provider_calls": 1}
-        active = client.get(path + "/native-work", headers=headers)
-        assert active.status_code == 200, active.text
-        original = NativeWorkTarget.model_validate(active.json())
-        with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
-            restart = await asyncio.to_thread(
-                accept_native_restart,
-                pool,
-                "closed-restart",
-                agent,
-                NativeRestartRequest(target=original),
-                lambda _: None,
-                catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
-                default_model=settings.lm.llm_model,
-            )
-            child.stdin.write("close\n")
+        with gateway_test_client() as client:
+            target = await read_child(child)
+            compact = client.post(path + "/compact-history", json=target, headers=headers)
+            assert compact.status_code == 202, compact.text
+            assert child.stdin is not None
+            child.stdin.write("compact\n")
             child.stdin.flush()
-            assert await read_child(child) == {"stage": "released", "provider_calls": 1}
-            status = client.get(
-                path + "/compact-commands/" + compact.json()["command_id"], headers=headers
-            ).json()
-            assert status["outcome"] == "applied" and status["continuation_released"]
-            if fence != "target_replaced":
-                supersede_original(db_conn, agent, fence)
-            assert db_conn.execute(
-                "SELECT native_work_id FROM agents_meta WHERE id=%s", (agent,)
-            ).fetchone() == (original.work_id,)
-            child.kill()
-            await asyncio.wait_for(asyncio.to_thread(child.wait), 10)
-            chat = insert(db_conn, agent)
-            model = SummaryModel(responses=["MUST NOT GENERATE" * 100])
-            binding = model_catalog.bindings["gpt-"]
-            model_catalog = add_bindings(
-                model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
-            )
-            ordinary: list[object] = []
-            host, _, _ = await make_host(
-                aops_pool,
-                agent,
-                100,
-                ordinary,
-                monkeypatch,
-                seed_history=False,
-                catalog=model_catalog,
-                database_gate=database_gate,
-            )
-            if fence == "target_replaced":
-                with pytest.raises(CompactHeldError, match="requires inspection"):
-                    await host.run_turn(agent)
-                assert model.calls == 0 and ordinary == []
+            assert await read_child(child) == {"stage": "prepared", "provider_calls": 1}
+            active = client.get(path + "/native-work", headers=headers)
+            assert active.status_code == 200, active.text
+            original = NativeWorkTarget.model_validate(active.json())
+            with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
+                restart = await asyncio.to_thread(
+                    accept_native_restart,
+                    pool,
+                    "closed-restart",
+                    agent,
+                    NativeRestartRequest(target=original),
+                    lambda _: None,
+                    catalog=model_catalog,
+                    llm_override=settings.lm.llm_override,
+                    default_model=settings.lm.llm_model,
+                )
+                child.stdin.write("close\n")
+                child.stdin.flush()
+                assert await read_child(child) == {"stage": "released", "provider_calls": 1}
+                status = client.get(
+                    path + "/compact-commands/" + compact.json()["command_id"], headers=headers
+                ).json()
+                assert status["outcome"] == "applied" and status["continuation_released"]
+                if fence != "target_replaced":
+                    supersede_original(db_conn, agent, fence)
                 assert db_conn.execute(
-                    "SELECT status FROM inbound_messages WHERE id=%s", (chat,)
-                ).fetchone() == ("pending",)
-                return
-            await host.run_turn(agent)
-            progress = await asyncio.to_thread(
-                native_restart_progress, pool, agent, restart.command_id
-            )
-            assert_no_effect(db_conn, progress, fence, original, model, ordinary, chat, agent)
+                    "SELECT native_work_id FROM agents_meta WHERE id=%s", (agent,)
+                ).fetchone() == (original.work_id,)
+                child.kill()
+                await asyncio.wait_for(asyncio.to_thread(child.wait), 10)
+                chat = insert(db_conn, agent)
+                model = SummaryModel(responses=["MUST NOT GENERATE" * 100])
+                binding = model_catalog.bindings["gpt-"]
+                model_catalog = add_bindings(
+                    model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+                )
+                ordinary: list[object] = []
+                host, _, _ = await make_host(
+                    aops_pool,
+                    agent,
+                    100,
+                    ordinary,
+                    monkeypatch,
+                    seed_history=False,
+                    catalog=model_catalog,
+                    database_gate=database_gate,
+                )
+                if fence == "target_replaced":
+                    with pytest.raises(CompactHeldError, match="requires inspection"):
+                        await host.run_turn(agent)
+                    assert model.calls == 0 and ordinary == []
+                    assert db_conn.execute(
+                        "SELECT status FROM inbound_messages WHERE id=%s", (chat,)
+                    ).fetchone() == ("pending",)
+                    return
+                await host.run_turn(agent)
+                progress = await asyncio.to_thread(
+                    native_restart_progress, pool, agent, restart.command_id
+                )
+                assert_no_effect(db_conn, progress, fence, original, model, ordinary, chat, agent)
     finally:
         if child.poll() is None:
             child.kill()

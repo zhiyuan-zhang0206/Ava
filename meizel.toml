@@ -156,6 +156,7 @@ frontend = ["ui"]
 "tests/components/services/test_maintenance_readiness.py -> cli/commands/cluster/unit_join.py" = 2
 "tests/components/services/test_maintenance_readiness.py -> gateway/tests/agents/gateway_auth.py" = 1
 "tests/components/services/test_maintenance_readiness.py -> ops/agent_pause/__init__.py" = 4
+"tests/components/test_process_config_snapshot.py -> gateway/http/config.py" = 1
 "tests/contracts/test_lint_event_kinds.py -> scripts/codegen/gen_event_registry.py" = 1
 "tests/contracts/test_lint_fixture_scope_contract.py -> scripts/lint/fixture_scope.py" = 5
 "tests/e2e/fakes/scenarios/message_flow.py -> scripts/verify/scripted_reply.py" = 1

@@ -8,14 +8,12 @@ from typing import Any
 import httpx2 as httpx
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.agents.messages.inbound_images import image_mime_for, parse_upload_url
 from base.lm.catalog import ModelCatalog
-from gateway.app import app
 from gateway.routers.upload import batches as upload_batches
 from gateway.routers.upload.batches import UploadItem
-from tests.fixtures.gateway_config import spawn_via_http
+from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 
 
 def _headers(key: str) -> dict[str, str]:
@@ -23,7 +21,12 @@ def _headers(key: str) -> dict[str, str]:
 
 
 def _post(
-    client: TestClient, agent: int, key: str, *, body: bytes = b"image", name: str = "photo.png"
+    client: GatewayTestClient,
+    agent: int,
+    key: str,
+    *,
+    body: bytes = b"image",
+    name: str = "photo.png",
 ) -> httpx.Response:
     return client.post(
         f"/api/agents/{agent}/uploads",
@@ -35,15 +38,15 @@ def _post(
 @pytest.fixture
 def uploaded_agent(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[tuple[TestClient, int]]:
+) -> Iterator[tuple[GatewayTestClient, int]]:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         agent = spawn_via_http(client, {}).json()["id"]
         yield client, agent
 
 
 def test_lost_response_replays_receipt_and_preserves_old_image(
-    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection
 ) -> None:
     client, agent = uploaded_agent
     first = _post(client, agent, "first")
@@ -71,7 +74,7 @@ def test_lost_response_replays_receipt_and_preserves_old_image(
 
 @pytest.mark.parametrize("change", ["bytes", "name", "type"])
 def test_manifest_conflict_before_file_effect(
-    uploaded_agent: tuple[TestClient, int], change: str
+    uploaded_agent: tuple[GatewayTestClient, int], change: str
 ) -> None:
     client, agent = uploaded_agent
     first = _post(client, agent, "fixed")
@@ -96,7 +99,7 @@ def test_manifest_conflict_before_file_effect(
 
 
 def test_delivery_request_and_invalid_suffix_do_not_claim(
-    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection
 ) -> None:
     client, agent = uploaded_agent
     unsupported = client.post(
@@ -111,7 +114,7 @@ def test_delivery_request_and_invalid_suffix_do_not_claim(
 
 
 def test_long_display_name_keeps_bounded_object_name(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
 ) -> None:
     client, agent = uploaded_agent
     name = "x" * 300 + ".png"
@@ -124,7 +127,7 @@ def test_long_display_name_keeps_bounded_object_name(
 
 
 def test_ready_receipt_survives_deleted_target(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection,
 ) -> None:
     client, _ = uploaded_agent
@@ -142,7 +145,7 @@ def test_ready_receipt_survives_deleted_target(
 
 
 def test_immutable_url_passes_native_image_message_validation(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from base.lm import factory
@@ -150,7 +153,7 @@ def test_immutable_url_passes_native_image_message_validation(
     client, agent = uploaded_agent
 
     def supports_vision(model: str, *, catalog: ModelCatalog) -> bool:
-        assert catalog is app.state.catalog
+        assert catalog is client.app.state.catalog
         return True
 
     monkeypatch.setattr(factory, "model_supports_vision", supports_vision)
@@ -166,7 +169,7 @@ def test_immutable_url_passes_native_image_message_validation(
 
 
 def test_concurrent_same_key_one_reservation(
-    uploaded_agent: tuple[TestClient, int], db_conn: psycopg.Connection
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection
 ) -> None:
     client, agent = uploaded_agent
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -179,7 +182,7 @@ def test_concurrent_same_key_one_reservation(
 
 
 def test_receiving_reservation_survives_partial_publish_and_recovery(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -207,7 +210,7 @@ def test_receiving_reservation_survives_partial_publish_and_recovery(
 
 
 def test_shared_quota_counts_receiving_once(
-    uploaded_agent: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
+    uploaded_agent: tuple[GatewayTestClient, int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, agent = uploaded_agent
     from gateway.routers.upload import router
@@ -231,7 +234,7 @@ def test_shared_quota_counts_receiving_once(
 
 
 def test_duplicate_display_names_have_distinct_objects_and_order_is_identity(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
 ) -> None:
     client, agent = uploaded_agent
     files = [("files", ("same.png", body, "image/png")) for body in (b"a", b"b")]
@@ -266,7 +269,7 @@ def test_duplicate_display_names_have_distinct_objects_and_order_is_identity(
     ],
 )
 def test_invalid_identity_before_claim(
-    uploaded_agent: tuple[TestClient, int],
+    uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection,
     headers: dict[str, str],
 ) -> None:

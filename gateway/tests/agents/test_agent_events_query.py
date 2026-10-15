@@ -13,10 +13,9 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
-from gateway.app import app
 from gateway.events import telemetry_rows
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 def _row(
@@ -66,7 +65,7 @@ class TestAgentEventsQuery:
                 _row(msg="newest", ts="2026-08-12T00:01:00Z"),
             ]
         )
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/agents/7/events")
         assert r.status_code == 200
         items = r.json()
@@ -78,7 +77,7 @@ class TestAgentEventsQuery:
         assert set(items[0]) == {"id", "line_sha256", "ts", "agent_id", "level", "event", "payload"}
 
     def test_scopes_to_agent(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/agents/42/events")
         assert fake_query["calls"][0]["agent_id"] == 42
 
@@ -88,20 +87,20 @@ class TestAgentEventsQuery:
         """The old PG contract was category IN (telemetry, log) — audit rows
         (spawn/send_message/...) must not leak into the feed. The route passes
         the category set to the reader."""
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/agents/7/events")
         assert fake_query["calls"][0]["categories"] == ["telemetry", "log"]
 
     def test_filter_event_maps_to_event_names(
         self, fake_query: dict[str, list[dict[str, Any]]]
     ) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/agents/7/events", params={"event": "llm_usage"})
         assert fake_query["calls"][0]["event_names"] == ["llm_usage"]
 
     def test_filter_level_is_exact(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
         # exact level (case-insensitive) — NOT a minimum threshold
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/agents/7/events", params={"level": "WARNING"})
         assert fake_query["calls"][0]["level"] == "WARNING"
         assert "level_min" not in fake_query["calls"][0]
@@ -109,7 +108,7 @@ class TestAgentEventsQuery:
     def test_from_to_window_passed_through(
         self, fake_query: dict[str, list[dict[str, Any]]]
     ) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get(
                 "/api/agents/7/events",
                 params={"from": "2026-08-01T00:00:00Z", "to": "2026-08-02T00:00:00Z"},
@@ -123,7 +122,7 @@ class TestAgentEventsQuery:
     ) -> None:  # type: ignore[no-untyped-def]
         # the 24h default lower bound is the route's
         before = datetime.now(UTC)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/agents/7/events")
         from_ = fake_query["calls"][0]["from_"]
         assert before - timedelta(hours=24, seconds=5) <= from_ <= before - timedelta(hours=23)
@@ -131,7 +130,7 @@ class TestAgentEventsQuery:
     def test_limit_and_offset_passed_through(
         self, fake_query: dict[str, list[dict[str, Any]]]
     ) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/agents/7/events", params={"limit": 5, "offset": 10})
         kw = fake_query["calls"][0]
         assert kw["limit"] == 5
@@ -146,12 +145,12 @@ class TestAgentEventsQuery:
         from base.config import settings
 
         monkeypatch.setattr(settings.display, "events_default_limit", 7)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             client.get("/api/agents/7/events")
         assert fake_query["calls"][0]["limit"] == 7
 
     def test_offset_over_hard_cap_422(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             response = client.get("/api/agents/7/events", params={"offset": 10_001})
         assert response.status_code == 422
         assert fake_query["calls"] == []
@@ -163,23 +162,23 @@ class TestAgentEventsQuery:
             raise psycopg.errors.QueryCanceled("statement timeout")
 
         monkeypatch.setattr(telemetry_rows, "query_events", cancelled)
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             response = client.get("/api/agents/7/events")
         assert response.status_code == 503
         assert response.json()["detail"] == "events read timed out"
 
     def test_unknown_agent_returns_empty(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/agents/999999/events")
         assert r.status_code == 200
         assert r.json() == []
 
     def test_limit_over_max_422(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/agents/7/events", params={"limit": 1001})
         assert r.status_code == 422
 
     def test_invalid_from_timestamp_422(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
-        with TestClient(app) as client:
+        with gateway_test_client() as client:
             r = client.get("/api/agents/7/events", params={"from": "not-a-date"})
         assert r.status_code == 422

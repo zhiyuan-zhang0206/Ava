@@ -20,7 +20,6 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from gateway.app import app
 from gateway.cluster import snapshots
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster_probe import IdentityMismatchLog
@@ -329,7 +328,7 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
         return _status(target_machine, running_sha="from-a-dial")
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         default = client.get("/api/cluster/roster").json()
         assert dialed == []
         fresh = client.get("/api/cluster/roster?fresh=true").json()
@@ -358,7 +357,7 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
         return _status(target_machine)
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_url", dispatch)
-    with gateway_test_client(app, machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity) as client:
         assert client.get("/api/cluster/machines").json()[0]["live"] is True
         assert dialed == []
         assert client.get("/api/cluster/machines?fresh=true").json()[0]["live"] is True

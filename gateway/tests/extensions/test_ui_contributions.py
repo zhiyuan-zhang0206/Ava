@@ -16,7 +16,7 @@ import gateway.app as gateway_app
 from base import paths
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.enable_config import write_local
-from gateway.app import app
+from tests.fixtures.gateway_config import gateway_test_client
 
 
 @pytest.fixture(autouse=True)
@@ -73,7 +73,7 @@ def test_declared_theme_reaches_the_console_attributed() -> None:
     )
     write_local({"plugins": {"skins": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert _themes(client) == [
             {
                 "plugin": "skins",
@@ -103,7 +103,7 @@ def test_a_packs_dark_half_reaches_the_console() -> None:
     )
     write_local({"plugins": {"skins": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert _themes(client) == [
             {
                 "plugin": "skins",
@@ -119,7 +119,7 @@ def test_disabled_plugin_contributes_nothing() -> None:
     _write_plugin("skins", {"themes": [{"name": "solarized", "tokens": {"--primary": "#111111"}}]})
     write_local({"plugins": {"skins": {"enabled": False}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert _themes(client) == []
 
 
@@ -129,7 +129,7 @@ def test_two_plugins_merge_and_same_name_stays_distinguishable() -> None:
     _write_plugin("other", {"themes": [{"name": "solarized", "tokens": {"--primary": "#222222"}}]})
     write_local({"plugins": {"skins": {"enabled": True}, "other": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         by_plugin = {t["plugin"]: t for t in _themes(client)}
     assert set(by_plugin) == {"skins", "other"}
     assert by_plugin["skins"]["tokens"] == {"--primary": "#111111"}
@@ -142,7 +142,7 @@ def test_plugin_without_ui_is_skipped() -> None:
     _write_plugin("declares_other", {})
     write_local({"plugins": {"plain": {"enabled": True}, "declares_other": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert _themes(client) == []
 
 
@@ -151,7 +151,7 @@ def test_plugin_without_a_manifest_fails_the_endpoint_naming_it() -> None:
     _write_plugin("plain", None, manifest=False)
     write_local({"plugins": {"plain": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/ui/contributions")
     assert r.status_code == 500, r.text
     assert "plain" in r.text
@@ -181,7 +181,7 @@ def test_stat_cards_reach_the_console_attributed() -> None:
     )
     write_local({"plugins": {"usage": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert _stats(client) == [
             {"plugin": "usage", "id": "codex-zhang0206", "label": "Codex zhiyuan0206"},
             {"plugin": "usage", "id": "deepseek-balance", "label": "DeepSeek balance"},
@@ -193,7 +193,7 @@ def test_stat_cards_from_two_plugins_merge_in_plugin_order() -> None:
     _write_plugin("codex", {"stats": [{"id": "codex-a", "label": "Codex A"}]})
     write_local({"plugins": {"deepseek": {"enabled": True}, "codex": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert [(s["plugin"], s["id"]) for s in _stats(client)] == [
             ("codex", "codex-a"),
             ("deepseek", "balance"),
@@ -206,7 +206,7 @@ def test_plugin_without_stat_cards_yields_an_empty_list() -> None:
     _write_plugin("skins", {"themes": [{"name": "x", "tokens": {"--primary": "#111111"}}]})
     write_local({"plugins": {"skins": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         assert _stats(client) == []
 
 
@@ -228,7 +228,7 @@ def test_invalid_manifest_names_the_plugin() -> None:
     )
     write_local({"plugins": {"broken": {"enabled": True}}})
 
-    with TestClient(app) as client:
+    with gateway_test_client() as client:
         r = client.get("/api/ui/contributions")
     assert r.status_code == 500, r.text
     assert "broken" in r.text
