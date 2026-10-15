@@ -1,58 +1,155 @@
 ---
 type: doc
-title: "Session backend & process supervision"
-description: "How Ava supervises long-lived processes: the `base/sessions/backend.py` interface, its three entry points (`get_backend()` for services + orchestration, `get_shell_backend()` for agent shells/watchers, `native_proc()` for agent processes), the POSIX backends, and the macOS firewall audit. Stopping is its own node."
-tags:
-- base
-- process
-- supervision
+title: Session backend and process supervision
+description: The native named-session and persistent PTY backends, their routing and caller contracts.
+tags: [base, process, supervision]
 ---
 
-# Session backend & process supervision
+# Session backend and process supervision
 
-## What it is
+`base/sessions/protocol.py:SessionBackend` defines the named-session interface.
+`base/sessions/backend.py` provides two entry points:
 
-`base/sessions/protocol.py:SessionBackend` is the interface every long-running named session goes through (`base/sessions/backend.py` selects and implements the backends). It unifies **posixproc** (`base/sessions/posixproc.py`, native service sessions), the macOS permissions-helper backend, and the **pty-sessions service** (`services/agent_runner/pty_sessions/`, client in `base/sessions/pty/`) behind one protocol. The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
+- `get_backend()` selects `PosixProcSessionBackend` or the configured macOS
+  permissions-helper backend. Surviving pause probes and cold-maintenance
+  consumers use this native named-session interface. Current root-supervised
+  service custody is separate.
+- `get_shell_backend()` selects `PtySessionBackend` for interactive agent shells,
+  watchers and their session consumers. The pty-sessions service owns these
+  shells, so agent exits and agent-host restarts do not end them; stopping the
+  owning service does.
 
-Three entry points, three session classes:
+Native sessions use `base/sessions/record.py:SessionRecord` under the home's
+`run/sessions/` and logs under `logs/`. No PTY is allocated. Native backends
+raise `NotImplementedError` for terminal operations. The protocol's default
+bulk timestamp method falls back to individual reads; backends without a
+source return None rather than inventing uptime.
 
-- `get_backend()` — the **service/daemon + orchestration** backend: `ava start` launches, healthcheck respawns, pause/unpause, and the updater / rollout / cluster-restart orchestration sessions (S7 moved them onto this backend). `PosixProcSessionBackend`, with the macOS helper backend when configured.
-- `get_shell_backend()` — **agent interactive shells / watchers**: `PtySessionBackend` (the pty-sessions service). Never addresses service or orchestration sessions.
-- `native_proc()` — **agent processes** (non-interactive, no PTY needed): the posixproc module, used by the agent launch (spawn / kill-stale) and the reap / force-terminate / status consumers.
+`base/sessions/env_forwarding.py` supplies child environments and virtualenv
+activation. Native login shells rebuild PATH before the virtualenv prefix is
+restored. Complete child environments travel separately from argv. Compound
+commands must carry their own exec on the supervised stage (`build && exec
+serve`); `exec_into` rejects commands it cannot safely rewrite. The shell-layer
+contract below explains why the outer exec is also required.
 
-**Platform-supervisor imports are method-local** so selecting one backend does
-not import every platform implementation. Current native service custody belongs
-to the root service runtime; the backend remains for its surviving session users.
+PTY operations use short requests through `base/sessions/pty/client.py`; a
+restarted caller dials the service again. Environment and command travel in
+the request body of its 0600 socket, never an argv prefix. The service's base
+environment excludes `AVA_PROCESS_PROFILE` and `VIRTUAL_ENV` before overlaying
+caller values. The command is submitted once the login shell is ready. See
+[[base/sessions/pty/docs/pty_sessions/pty_sessions.ava.okf.md|pty sessions]].
 
-## Core responsibilities
-
-### new_session contract
-
-`env` is the **complete** child environment dict — the caller builds it (`base.sessions.env_forwarding.forward_env_dict` is the shared builder every current caller uses); secrets ride the environment (or, for pty shells, the request body of the service's 0600 socket), **never argv** (#974). `login_shell=True` (POSIX) wraps the command in `exec bash -lc 'cd <cwd> && <venv-prefix>exec <cmd>'` so user-local PATH additions are visible and the venv is re-activated inside the command. There are **two** shell layers to collapse — the supervisor runs a string command as `/bin/sh -c <cmd>`, and that `sh` sits in front of the login shell — so there are two `exec`s: the outer one (unconditional) hands the `sh` layer over, the inner one (`session_env.exec_into`) hands the login shell over to the command. bash-as-`/bin/sh` (macOS) execs into a lone simple command by itself, but dash (Linux) does not, so omitting the outer one leaves every Linux host recording that `sh`. The `exec` is load-bearing, not tidiness: without it the wrapper shell stays alive as the pid the supervisor records, and a graceful stop's SIGTERM lands on the shell — which, waiting on a foreground child, neither forwards it nor exits first — so the daemon never sees the signal and every graceful stop runs its full timeout into the SIGKILL fallback. A command that is compound must carry its own `exec` on the stage to supervise (`build && exec serve`); `exec_into` raises rather than silently returning to that stall. An existing live session of the same name is left untouched (idempotent).
-
-### Backends
-
-- **PosixProcSessionBackend** — the native supervisor for services: double-fork reparent to init, `SessionRecord` + logs under `$AVA_HOME/run/sessions/` / `$AVA_HOME/logs/`. No PTY is allocated, so the per-box PTY ceiling (`kern.tty.ptmx_max`) does not bound service count.
-- **PtySessionBackend** — agent shells / watchers. Each op is one short JSON-line request to the service's unix socket (`base.sessions.pty.client`), whose answer maps to the interface shape; enumeration and bulk launch timestamps are one `list` request. A service that is not running holds no sessions: queries answer none and `kill` is a noop, while `new`, `send` and `capture` raise. Env and the launch command ride the request body of the 0600 socket (never argv), and the service submits the command only once the login shell's prompt is ready. The shell's base env is the service's own (minus `AVA_PROCESS_PROFILE` and `VIRTUAL_ENV`) overlaid with the caller's env. `login_shell=False` raises `NotImplementedError` (interactive login shells only); the kill timeout is owned by the service. See [[base/sessions/pty/docs/pty_sessions/pty_sessions.ava.okf.md|pty sessions]].
-
-### Stopping a session
-
-`kill_session(name, graceful=...)` → `(ok, mode)`, and the platform-neutral `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions, live in [[stopping.ava.okf.md|stopping]].
-
-### macOS firewall manifest
-The Application Firewall allow-list manifest, reconciliation, status rendering,
-and off-box reachability attribution (issue #949):
+Each home owns its named-session namespace. `base/cluster/derive.py:session_name`
+derives service names; agent shells use `ava-agent-<id>-shell-<n>[-<name>]`.
+The session's lifetime belongs to its supervisor, not to the agent that created it.
+Stopping and native process identity remain in [[stopping.ava.okf.md|stopping]].
+The macOS firewall audit has its own owner:
 [[base/sessions/docs/firewall-audit.ava.okf.md]].
 
-## Entry points
+## Backend implementation contracts
 
-- `base/sessions/backend.py:get_backend()` / `get_shell_backend()` / `native_proc()` — the three dispatch points
-- `base/sessions/posixproc.py` — the native supervisor (agent processes + services)
-- `base/sessions/pty/` — the client of the pty-sessions service (`services/agent_runner/pty_sessions/`), which holds agent shells
-- `base/sessions/record.py:SessionRecord` — single shape for persisted background session records (`.read()`/`.write()`)
-- `base/sessions/env_forwarding.py` — env forwarding shared by both POSIX backends
+### Native shell launch
 
-## Notes
+```ava-contract
+id = "native-shell-launch"
+kind = "invariant"
+statement = "Login-shell native sessions always exec the outer shell and exec the inner shell only when exec_cmd=True. They pass the caller's complete environment separately from argv. Without login_shell the command is forwarded unchanged."
+code = ["base/sessions/backend.py:PosixProcSessionBackend.new_session"]
+tests = [
+  "base/sessions/tests/test_posix_backend.py::test_new_session_login_shell_wraps",
+  "base/sessions/tests/test_posix_backend.py::test_new_session_no_login_shell_passthrough",
+  "base/sessions/tests/test_posix_backend.py::test_login_shell_rebuilds_path_with_venv_prefix",
+  "base/sessions/tests/test_posix_backend.py::test_no_login_shell_preserves_env_path_exactly",
+]
+```
 
-- Session naming: `base/cluster/derive.py:session_name(service)` → `ava-<service>`. Each unit's session namespace is its own `$AVA_HOME`, so same-named sessions on different homes never collide; agent shells are prefix-isolated as `ava-agent-<id>-shell-<n>[-<name>]`.
-- Shell sub-sessions are deliberately NOT torn down when the agent exits (background work outlives the process); the backends keep running even if every agent exits.
+The outer exec is unconditional because `/bin/sh` may be dash, which does not
+replace itself for a lone command as macOS bash does. The inner exec is controlled
+by `exec_cmd`: a caller that retains its login shell still needs the supervisor's
+outer shell replaced. Local `posixproc` imports keep backend selection from loading
+that implementation for PTY-only callers.
+
+### Native kill parity
+
+```ava-contract
+id = "native-kill-parity"
+kind = "invariant"
+statement = "The native backend accepts the shared expected keyword without changing its supervisor's kill verdict. It has no separate force-escalation warning to quiet."
+code = ["base/sessions/backend.py:PosixProcSessionBackend.kill_session"]
+tests = ["base/sessions/tests/test_posix_backend.py::test_kill_session_accepts_expected_for_interface_parity"]
+```
+
+### Backend routing
+
+```ava-contract
+id = "backend-routing"
+kind = "invariant"
+statement = "The named-session backend selects the helper only on macOS with both helper flags enabled; unreadable settings retain the POSIX route. Interactive shells select the PTY backend independently."
+code = [
+  "base/sessions/backend.py:helper_spawn_enabled",
+  "base/sessions/backend.py:get_backend",
+  "base/sessions/backend.py:get_shell_backend",
+]
+tests = [
+  "tests/harness/test_helperproc.py::test_backend_route_matrix",
+  "tests/harness/test_helperproc.py::test_backend_route_fails_closed_when_settings_are_unreadable",
+  "base/sessions/tests/test_backend.py::test_get_shell_backend_returns_platform_appropriate_backend",
+]
+```
+
+The settings-read fallback precedes spawn selection. Once a helper launch is
+selected, a failed helper call remains loud instead of silently changing the
+process's macOS permission ancestry; the helper failure test covers that separate
+contract.
+
+### PTY allocation
+
+```ava-contract
+id = "pty-allocation"
+kind = "invariant"
+statement = "PTY sessions require a login shell, carry the child environment through the service request, and report service allocation refusal as False. The shared exec_cmd parameter is intentionally unused because an interactive shell stays alive."
+code = ["base/sessions/backend.py:PtySessionBackend.new_session"]
+tests = [
+  "base/sessions/tests/test_pty_backend.py::test_new_session_login_shell_false_raises",
+  "base/sessions/tests/test_pty_backend.py::test_the_creator_env_reaches_the_shell_in_the_request_not_on_an_argv",
+  "base/sessions/tests/test_pty_backend.py::test_new_session_refused_by_the_service_returns_false_and_warns",
+  "base/sessions/tests/test_backend.py::test_pty_child_virtual_env_projection",
+]
+```
+
+`ARG002` is limited to the inherited `exec_cmd` keyword. The parameter stays in
+place so callers can use the common SessionBackend shape without changing the
+interactive shell lifetime.
+
+### PTY failure verdict
+
+```ava-contract
+id = "pty-failure-verdict"
+kind = "invariant"
+statement = "A missing PTY service has no sessions, so kill is a no-op. A service that accepts a connection but does not answer has an unknown kill outcome: the backend returns failure and conservatively reports interruption. Send and capture failures raise RuntimeError naming the operation and session."
+code = [
+  "base/sessions/backend.py:PtySessionBackend._call",
+  "base/sessions/backend.py:PtySessionBackend.kill_session_with_verdict",
+]
+tests = [
+  "base/sessions/tests/test_pty_backend.py::test_a_home_without_a_service_holds_no_sessions",
+  "base/sessions/tests/test_pty_backend.py::test_a_service_that_does_not_answer_fails_loudly_not_as_empty",
+]
+```
+
+The service owns graceful-stop timing; client-side `timeout` and `expected` do
+not override that authority. An unconfirmed kill cannot prove the session idle.
+
+### PTY timestamp batch
+
+```ava-contract
+id = "pty-timestamp-batch"
+kind = "invariant"
+statement = "A timestamp batch answers every requested name from one service listing; absent names map to None and an empty request returns an empty mapping."
+code = ["base/sessions/backend.py:PtySessionBackend.session_started_ats"]
+tests = ["base/sessions/tests/test_pty_backend.py::test_started_ats_answers_every_name_from_the_service_epochs"]
+```
+
+One listing avoids a separate round trip per session in a status snapshot. The
+bound test checks the returned epochs and absent/empty cases; it does not count
+network calls.
