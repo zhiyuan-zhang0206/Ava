@@ -23,7 +23,7 @@ class ParserSymbol(ParserRecord):
 
 
 class ParserNote(ParserRecord):
-    kind: NoteKind
+    kind: Literal[NoteKind.COMMENT, NoteKind.DOCSTRING, NoteKind.UNUSED_STRING]
     line: int = Field(ge=1)
     end_line: int = Field(ge=1)
     text: str

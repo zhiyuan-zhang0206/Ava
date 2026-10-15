@@ -17,13 +17,30 @@ trailing prose:
 JavaScript/TypeScript uses the same payload after `//`. Place it immediately
 before the owning definition or within that definition. The tool checks the
 resolved owner, not just the document's existence. Ordinary comments, section
-banners, commented-out code, suppression comments, internal docstrings and unused
-standalone strings fail the strict source check. There is no suppression syntax,
-file allowlist or stored legacy baseline. Machine syntax such as a Python entry
+banners, commented-out code, unbounded suppression comments, internal docstrings
+and unused standalone strings fail the strict source check. There is no file
+allowlist or stored legacy baseline. Machine syntax such as a Python entry
 shebang or a JavaScript directive remains syntax, not an explanatory comment.
 An exact `/** @deprecated */` attached to a TypeScript-recognized declaration
 is also machine syntax: the compiler and existing deprecation lint consume it.
 Additional prose, other JSDoc tags and unattached markers still fail.
+
+Python line directives have a closed syntax: `# noqa: CODE[, CODE...]` and
+`# pyright: ignore[reportRule[, reportRule...]]`. Bare ignores, file-wide settings,
+`type: ignore` and trailing prose are not accepted. A strict directive needs an
+exact `ava:ref` bound to its enclosing function, method, class or module. Local
+assignments do not own the directive rationale, and an outer or sibling
+definition cannot supply it. The document states the actual constraint or trust
+boundary; naming a lint rule is not an explanation. Ruff, Pyright and the existing
+unused-directive checks retain responsibility for rule validity and necessity.
+
+`# ambient: BATCH` is machine data only on the actual
+`gateway_access_from_settings` call line in the ambient audit's non-test scope.
+That audit owns the accepted batches and caller inventory; this syntax does not
+authorize a new ambient dependency. A stop-window exemption uses exactly
+`# quiesce-exempt: ava:ref path/to/owner.ava.okf.md#id`, with its reason in that
+definition's typed owner. The existing quiesce check still rejects wrong placement
+and stale markers. Neither form accepts a free-text explanation in source.
 
 Agent-visible Python SDK docstrings are generated projections of `api` records.
 They remain available to `ava.help`; edit the document owner and run `render-api`.
