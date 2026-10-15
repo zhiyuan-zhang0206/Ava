@@ -1,11 +1,3 @@
-"""Exec node drains pending attachments into a media message right after the output.
-
-User ruling 2026-08-26 (Task #1668): the attach message must land immediately
-after the ``execute_code`` output of the turn that registered the files — the
-model sees them on its very next step of the same turn — instead of being
-appended at the next turn boundary by the claim node.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -58,9 +50,6 @@ def _make_runtime(
     *,
     database_gate: ProcessDbGate,
 ) -> Runtime[AvaContext]:
-    """Minimal runtime with fake ops_pool + event_publisher (mirrors
-    agent/graph/exec/tests/test_exec_node_timeout.py). A model_name selects the media
-    capability gate for attachment packing (None = configured turn model)."""
     from types import SimpleNamespace
     from typing import cast
 
@@ -120,19 +109,13 @@ async def test_exec_drains_attachment_right_after_output(
     assert update is not None
     msgs = update.get("messages", [])
     assert len(msgs) == 2
-    # exec output ToolMessage first, attach HumanMessage immediately after
     assert isinstance(msgs[0], ToolMessage)
-    # the run's SDK-call tally rides the exec output ToolMessage metadata
     assert msgs[0].additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]
     assert isinstance(msgs[1], HumanMessage)
     assert msgs[1].additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value
-    # pending attachments are drained (cleared) in the same update
-    assert update["attach"] == AttachState()  # type: ignore[index]
-    # the attach message carries the caption + the native image block
+    assert update["attach"] == AttachState()
     content = msgs[1].content
     assert isinstance(content, list)
-    # Interleaved pack: [text(notice), text(caption line), image_url, ...] —
-    # the file's own caption line sits directly before its media block.
     assert content[0]["type"] == "text"
     assert "Files attached during this turn" in content[0]["text"]
     assert content[1]["type"] == "text"
@@ -168,6 +151,5 @@ async def test_exec_without_attachments_appends_no_attach_message(
     msgs = update.get("messages", [])
     assert len(msgs) == 1
     assert isinstance(msgs[0], ToolMessage)
-    assert "sdk_calls" not in msgs[0].additional_kwargs  # unknown (no tally) -> omitted
-    # attach channel stays an empty state, no attach message appended
-    assert update["attach"] == AttachState()  # type: ignore[index]
+    assert "sdk_calls" not in msgs[0].additional_kwargs
+    assert update["attach"] == AttachState()

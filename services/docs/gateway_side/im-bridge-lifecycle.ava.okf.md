@@ -64,3 +64,25 @@ The executable captures one loaded image and retains its `CodeVersion` and
 `ProcessDbGate`. The work database and lazy telemetry producer share that gate;
 logging and health receive the same image. Adapter startup, auth digests,
 extra routes, primary faults and bounded cleanup keep their existing contracts.
+
+## Retry and cursor test premises
+
+`services/entrypoints/im_bridge/tests/im_bridge_core/test_send_message_retries_through_gateway_rollout.py`
+uses fake adapters/gateways and HTTP mock transport; it does not perform a live
+gateway rollout or real IM delivery. Zero jitter makes the configured retry
+delay deterministic. The SSE regression injects a first-stream failure and
+checks that logging leaves the subscription waiting to reconnect; it stops
+before proving a successful second connection.
+
+The numeric watermark case crosses `9.5` to `10.1` without `created_at` but
+supplies stable source message/block identities. It tests position ordering
+under those conditions, not permission to accept unqualified legacy sources.
+
+For adapters supporting typing, one loop per chat refreshes the indicator until
+a reply is accepted or its time limit expires. Other adapters receive no typing
+calls. Disabled channels are excluded when restoring subscriptions.
+
+Button-capable channels render `/list` as a one-line header with agent buttons
+and `/commands` as command buttons; plain channels keep text lists. Command
+descriptions are shortened for display. Tests check the rendered output, not a
+platform's ability to render a particular punctuation character.

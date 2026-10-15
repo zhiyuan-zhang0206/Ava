@@ -68,3 +68,10 @@ launch payloads reject `prompt`, `prompt_source`, `label`, and unknown fields.
 
 
 Guarded creation: [[gateway/agents/docs/guarded-creation.ava.okf.md]].
+
+`gateway/tests/test_agents_endpoints.py` exercises HTTP routes with real database
+rows and in-process home-runner operation dispatch; it starts no host task.
+Its unknown post-commit launch failure case overrides the normal dispatch
+fixture at the forwarding boundary and checks that the response retains the
+committed identity and CORS headers. This is request/receipt evidence, not proof
+that an agent turn started.

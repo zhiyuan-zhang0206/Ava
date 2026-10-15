@@ -25,3 +25,10 @@ boundary and pages using historical item cursors without loading the live head.
 Its boundary identity and lack of a live message count distinguish retained
 history from execution state. An independently readable retained boundary
 does not prove the current turn can resume safely.
+
+`tests/test_checkpoint_postgres_walks.py` places 1,023 then 1,024 newer
+checkpoints ahead of a target to cross the history reader's page boundary. The
+retained-segment read exercises that older target, including its writes and seed.
+Its serializer test also checks that instrumenting cold readers leaves a shared
+serializer's decode method unchanged; timing one read must not install
+process-wide instrumentation on other readers.

@@ -1,9 +1,3 @@
-"""Writes an exec request envelope and dies at a chosen kill point; never imported by a production entry.
-
-Run as ``python _envelope_crash_child.py <request-path> <os.replace|os.fsync>``; the process
-exits 9 at the kill point, so a surviving envelope would mean the commit was not atomic.
-"""
-
 from __future__ import annotations
 
 import os
@@ -18,9 +12,9 @@ def die(*_args: object, **_kwargs: object) -> None:
 
 
 if sys.argv[2] == "os.replace":
-    os.replace = die  # type: ignore[assignment]
+    os.replace = die
 elif sys.argv[2] == "os.fsync":
-    os.fsync = die  # type: ignore[assignment]
+    os.fsync = die
 else:
     raise ValueError("Unknown envelope kill point")
 protocol.write_request(

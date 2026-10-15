@@ -1,5 +1,3 @@
-"""Stored identity provenance survives every history representation and projection."""
-
 from copy import deepcopy
 from typing import Any, cast
 
@@ -117,8 +115,6 @@ def test_durable_source_coordinates_survive_compact_renumbering_and_json() -> No
 
 
 def test_only_explicit_inbound_id_qualifies_legacy_source() -> None:
-    # An inbound without an embedded id renders no inbound id at all: nothing
-    # matches it to a queue row, so none is invented.
     legacy = HumanMessage(content="chat", additional_kwargs={"ava_msg_type": "inbound"})
     unidentified, _ = build_timeline_items([legacy], inputs=_TIMELINE_INPUTS)
     assert unidentified[0].inbound_id is None
@@ -170,7 +166,6 @@ async def test_real_postgres_plain_checkpoint_sync_async_provenance(
         assert result.pending_writes is not None
         pending = cast(AIMessage, result.pending_writes[0][2][0])
         assert pending.additional_kwargs.get("ava_ephemeral_message_id") is True
-    # Normalization is read-only: the stored payload remains legacy raw data.
     raw = saver.get_tuple(config)
     assert raw is not None
     assert raw.checkpoint["channel_values"]["messages"][0].additional_kwargs == {}
@@ -214,8 +209,8 @@ async def test_history_iterators_preserve_laziness_arguments_and_source_marker()
         for value in tuples(*args, **kwargs):
             yield value
 
-    saver.list = tuples  # type: ignore[method-assign]
-    saver.alist = atuples  # type: ignore[method-assign]
+    saver.list = tuples
+    saver.alist = atuples
     wrap_history_identity_reads(saver)
     it = saver.list(None, limit=2)
     assert events == []
@@ -253,7 +248,7 @@ async def test_recovery_cache_hit_normalizes_newly_decoded_pending_writes() -> N
         walks.append(1)
         return {"messages": {"writes": [(0, "task", [AIMessage(content="legacy")])]}}
 
-    saver.aget_delta_channel_history = history  # type: ignore[method-assign]
+    saver.aget_delta_channel_history = history
     wrap_saver_reads_with_delta_reconstruction(saver)
 
     def checkpoint() -> CheckpointTuple:
@@ -292,8 +287,6 @@ def test_reserved_provenance_is_not_serialized_into_provider_messages() -> None:
     messages = normalize_stored_message_ids(
         [HumanMessage(content="question"), AIMessage(content="answer")]
     )
-    # SDK payload formatters expose bare dict annotations; only the wire
-    # payload is relevant here, so narrow the third-party module at this seam.
     anthropic = cast(Any, anthropic_models)._format_messages(messages)
     google = cast(Any, google_models)._parse_chat_history(messages)
     openai = [cast(Any, openai_models)._convert_message_to_dict(message) for message in messages]

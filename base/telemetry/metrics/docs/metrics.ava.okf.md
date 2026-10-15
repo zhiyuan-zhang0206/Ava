@@ -73,3 +73,16 @@ loss of detail: sampled events cannot reconstruct a complete call history.
 30-day read window, so different slots separate their fixture windows. The
 sampling is with replacement; two streams can choose the same slot. This setup
 reduces interference but does not guarantee unique windows or absolute isolation.
+
+## Plugin query validation tests
+
+`base/packages/tests/test_plugin_metrics.py` checks registry admission and the
+SQL validator in `plugin_metrics.py` and `plugin_metrics_sql.py`. Table checks
+recurse into scalar subqueries, including function arguments: nesting a
+`pg_class` read inside a permitted function must not bypass validation. Legal
+subqueries over `agents_meta` remain accepted. SQL templates are static, without
+Grafana macros or template placeholders; event names are separate data and may
+contain hyphens. Literal rendering escapes embedded quotes.
+
+These tests validate query structure and registry rules. They do not execute
+the sample SQL or establish that its referenced columns exist in the database.
