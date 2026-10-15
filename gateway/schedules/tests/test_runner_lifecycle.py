@@ -1,5 +1,3 @@
-"""Real watchdog interleavings and original-error collection."""
-
 from __future__ import annotations
 
 import runpy
@@ -28,7 +26,7 @@ def _log_text(records: list[dict[str, Any]]) -> str:
 
 
 class WorkerFailure(BaseException):
-    """An unexpected failure outside the recoverable Exception boundaries."""
+    pass
 
 
 def _fast_guard(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,7 +156,7 @@ def test_script_failure_stays_primary_when_guard_close_fails(
     failed = threading.Event()
     secondary = WorkerFailure("guard failed")
     guards: list[sr.StallGuard] = []
-    original_start = sr.StallGuard  # captured before the factory replaces it
+    original_start = sr.StallGuard
     argv = sys.argv
     sleep = sr.time.sleep
 
@@ -258,7 +256,6 @@ def test_stall_action_keeps_hard_exit_when_cleanup_fails(
 def test_stall_action_arms_one_deadline_before_the_failure_writes(
     monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    """The interpreter-level deadline (dump stacks, exit 1) is armed before any DB write."""
     order: list[str] = []
     armed: list[tuple[float, bool]] = []
 
@@ -287,7 +284,6 @@ def test_frame_read_failure_is_a_guard_failure_not_a_skipped_sample(
     loguru_records: list[dict[str, Any]],
     database_gate: ProcessDbGate,
 ) -> None:
-    """The frame reader has no recovery branch: any failure ends the guard and is raised at close."""
     _fast_guard(monkeypatch)
     failed = threading.Event()
     error = RuntimeError("frame reader failed")
@@ -323,7 +319,7 @@ def test_successful_script_exit_cannot_complete_after_guard_close_failure(
     release = threading.Event()
     error = WorkerFailure("original unknown guard failure")
     guards: list[sr.StallGuard] = []
-    original_start = sr.StallGuard  # captured before the factory replaces it
+    original_start = sr.StallGuard
 
     def sample(_guard: sr.StallGuard) -> None:
         failed.set()

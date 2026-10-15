@@ -43,3 +43,13 @@ identified: OCR subprocess runs (the swiftc build and the recognition) go
 through `base.host.proc.run_bounded`, whose timeout kills the whole process
 tree and bounds its own post-kill drain (`services/desktop/computer/ocr/__init__.py`). The
 watchdog remains the guarantee — either serving, or gone.
+
+## Test evidence
+
+The loop-beat test puts the watchdog check interval beyond its observation
+window so a fresh beat witnesses the loop callback, independently of the checker.
+The exit stand-in raises instead of returning, preserving the production
+non-returning boundary. The `finally` block releases the cancellation-resistant
+handler after the cleanup call returns or raises, including assertion failures,
+so it cannot pin subsequent event-loop teardown. It cannot rescue a cleanup call
+that never returns. These controlled callbacks do not execute a real process exit.

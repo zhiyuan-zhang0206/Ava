@@ -59,3 +59,8 @@ does not want to be woken again kills its watchers
 
 ## Notes
 Generated watcher scripts (`watcher_<session_id>.py` + `_boot.py` + `_launch.sh`) land under `$TMPDIR/ava/<cluster>/<agent>/watchers/` (`ava/watcher/files.py:watchers_dir`) — temp storage because they are read exactly once at launch; the per-cluster + per-agent path segments keep co-located clusters (each with its own DB-assigned session ids, which may overlap) from colliding. The generated script files only need to survive launch — there is no other persistence, and liveness is the session itself. While running, a watcher is a normal shell session—visible in `ava.shell.sessions.list()`. Timeout parameter supports seconds, `timedelta`, or `"<n>{s,m,h,d}"` strings. When a watcher stops (self-exit / crash / timeout), the shell layer sends the policy-selected completion notification (exit code + log path of full output + output tail), then the session auto-closes—even if the child process gets SIGKILL, an eligible notification is not lost. The dedicated `remind` primitive has been removed: waking yourself = sending yourself a message (generic `ava.agents.send_message`); at/cron generated scripts internally use the same delivery path (source marked `watcher:N`).
+
+Generated-file tests replace send without executing the scripts. A live
+session's files must survive sibling launches because asynchronous shell startup
+may not have read them yet; only dead-session files are eligible for pruning.
+These tests establish file retention, not successful watcher execution.

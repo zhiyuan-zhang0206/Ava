@@ -1,12 +1,3 @@
-"""An in-process `MemorySearchBackend` over the real `MemoryStore`.
-
-The daemon tests run the indexer's reconcile / chunk-commit logic against the
-production numpy storage core (`services.derived.memory_search.store.MemoryStore`)
-without the HTTP hop: the adapter only adds the lifecycle and async members the
-protocol requires, plus a read-only row view for assertions the protocol does
-not expose.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -19,8 +10,6 @@ from services.derived.memory_search.store import MemoryStore
 
 
 class StoreBackend:
-    """Protocol-compliant backend that delegates every call to a `MemoryStore`."""
-
     name = "store"
 
     def __init__(self, data_file: Path, *, dim: int, fingerprint: str) -> None:
@@ -29,16 +18,12 @@ class StoreBackend:
         self.store = MemoryStore(data_file, dim=dim, fingerprint=fingerprint)
 
     def reopen(self, fingerprint: str) -> StoreBackend:
-        """A fresh backend over the persisted npz, built for another provider —
-        what a service restart under a switched provider looks like."""
         self.store.save()
         reopened = StoreBackend(self._data_file, dim=self._dim, fingerprint=fingerprint)
         reopened.store.load()
         return reopened
 
     def rows(self, path: Path) -> set[tuple[str, int]]:
-        """The (kind, chunk_idx) of every row stored for `path` (resolved, as
-        the daemon keys rows)."""
         target = str(path.resolve())
         return {
             (kind, idx)
@@ -49,10 +34,10 @@ class StoreBackend:
         }
 
     def connect(self) -> None:
-        """No-op: the store lives in this process."""
+        pass
 
     def close(self) -> None:
-        """No-op: nothing to release."""
+        pass
 
     def upsert(
         self,
