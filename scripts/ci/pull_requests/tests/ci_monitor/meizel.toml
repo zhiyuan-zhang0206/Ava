@@ -9,15 +9,7 @@
 "test_queue_ops_exclusive_with_merge_wait.py#monkeypatch.setattr scripts.ci.pull_requests.owner_operations.submit_trunk" = 2
 "test_queue_ops_exclusive_with_merge_wait.py#monkeypatch.setattr scripts.ci.pull_requests.status.check_ci" = 2
 "test_queue_ops_exclusive_with_merge_wait.py#monkeypatch.setattr scripts.ci.pull_requests.status.limbo_runs" = 3
-"test_queue_ops_exclusive_with_merge_wait.py#monkeypatch.setattr scripts.ci.pull_requests.status.time.monotonic" = 1
 "test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.owner_operations.last_head_update" = 1
 "test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.owner_operations.list_failed_jobs" = 3
 "test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.owner_operations.queue_cooldown_seconds" = 3
 "test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.owner_operations.rerun_failed_jobs" = 5
-"test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.status.subprocess.run" = 6
-"test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.status.time.sleep" = 1
-"test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.status.time.time" = 1
-
-[debt.stdlib-patch]
-"test_queue_ops_exclusive_with_merge_wait.py#monkeypatch.setattr urllib.request.urlopen" = 1
-"test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr urllib.request.urlopen" = 10

@@ -103,7 +103,7 @@ def _marker_reference(
 
 def _marker_mutated(tree: ast.Module) -> bool:
     scope = bindings.Scope(tree, "")
-    for node in bindings.local_nodes(tree):
+    for node in bindings.local_nodes(tree, iter_children=ast.iter_child_nodes):
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -273,7 +273,7 @@ def _top_bound(tree: ast.Module, path: str, name: str) -> bool:
 def _deleted(tree: ast.Module, name: str) -> bool:
     return any(
         isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Del)
-        for node in bindings.local_nodes(tree)
+        for node in bindings.local_nodes(tree, iter_children=ast.iter_child_nodes)
     )
 
 

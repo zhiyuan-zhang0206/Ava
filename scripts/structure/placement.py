@@ -148,7 +148,9 @@ class ModuleIndex:
         edges only, function-level imports included; resolved against this checkout.
         """
         found: dict[str, set[str]] = collections.defaultdict(set)
-        for rel, statements in cache.production_imports(self.repo_root, CODE_TOPS).items():
+        for rel, statements in cache.production_imports(
+            self.repo_root, CODE_TOPS, read_source=lambda path: path.read_text(encoding="utf-8")
+        ).items():
             parts = rel.split("/")[:-1]
             directories = {"/".join(parts[:depth]) for depth in range(1, len(parts) + 1)}
             for ref in collect_references(ast.parse(statements), self):

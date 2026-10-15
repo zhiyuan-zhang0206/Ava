@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from itertools import product
 from pathlib import Path
 from typing import cast
@@ -200,13 +200,18 @@ def module_name(path: str) -> str:
     return ".".join(parts)
 
 
-def local_nodes(tree: ast.AST, *, bindings_only: bool = False) -> Iterator[ast.AST]:
+def local_nodes(
+    tree: ast.AST,
+    *,
+    bindings_only: bool = False,
+    iter_children: Callable[[ast.AST], Iterator[ast.AST]],
+) -> Iterator[ast.AST]:
     """Walk one lexical scope, excluding nested bodies and preserving AST order.
 
     The default yields every child. ``bindings_only`` projects this same walk
     onto calls and binding inputs; it never prunes an expression's children.
     """
-    children = ast.iter_child_nodes(tree)
+    children = iter_children(tree)
     if isinstance(tree, _SCOPE_NODES):
         children = iter(scope_parts(tree)[1])
     pending = [(children, False)]
@@ -230,7 +235,7 @@ def local_nodes(tree: ast.AST, *, bindings_only: bool = False) -> Iterator[ast.A
             # Definition-time expressions are separate roots, including lambda decorators.
             pending.append((iter(inner if scope_root else outer), not scope_root))
         elif child._fields:
-            pending.append((ast.iter_child_nodes(child), False))
+            pending.append((iter_children(child), False))
 
 
 def _binding_input(node: ast.AST) -> bool:
@@ -265,7 +270,7 @@ class Scope:
         self.stores: Counter[str] = Counter()
         self.domains: dict[str, tuple[str, ...]] = {}
         self.calls: list[ast.Call] = []
-        for node in local_nodes(tree, bindings_only=True):
+        for node in local_nodes(tree, bindings_only=True, iter_children=ast.iter_child_nodes):
             if isinstance(node, ast.Call):
                 self.calls.append(node)
             elif isinstance(node, _BINDING_NODES):

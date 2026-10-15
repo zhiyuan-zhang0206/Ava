@@ -1,6 +1,8 @@
 """Module-move CLI audits use tracked scratch repositories and real imports."""
 
+import importlib
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,7 +13,7 @@ from scripts.audit import module_moves as gate
 
 
 @pytest.fixture
-def move_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
+def move_checkout(tmp_path: Path) -> Iterator[tuple[Path, str]]:
     package = f"audit_move_{uuid4().hex}"
     source = tmp_path / package
     source.mkdir()
@@ -20,8 +22,13 @@ def move_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
     run_bounded(
         ["git", "init", "--quiet"], timeout=10, capture_output=True, cwd=tmp_path
     ).check_returncode()
-    monkeypatch.setattr(sys, "path", [str(tmp_path), *sys.path])
-    return tmp_path, package
+    owned_path = str(tmp_path)
+    sys.path.insert(0, owned_path)
+    importlib.invalidate_caches()
+    try:
+        yield tmp_path, package
+    finally:
+        sys.path.remove(owned_path)
 
 
 def _audit(checkout: tuple[Path, str], files: dict[str, str], *, target: str | None = None) -> int:

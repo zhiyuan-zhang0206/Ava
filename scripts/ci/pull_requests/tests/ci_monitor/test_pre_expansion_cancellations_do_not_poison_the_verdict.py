@@ -8,6 +8,7 @@ from typing import Any
 
 from scripts.ci.pull_requests import status
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
+    TEST_CLOCK,
     CIStatus,
     status_check_rollup_entry,
 )
@@ -26,7 +27,7 @@ def test_pre_expansion_cancelled_run_does_not_poison_the_head(gh: Any, has_workf
     head reads FAILED forever and every channel depending on the verdict stalls silently."""
     cancelled_at = "2026-10-12T15:45:03Z"
     succeeded_at = "2026-10-12T15:58:00Z"
-    gh(
+    host = gh(
         [
             status_check_rollup_entry(
                 "backend shard (${{ matrix.group }}/16)", "CANCELLED", completed_at=cancelled_at
@@ -45,7 +46,7 @@ def test_pre_expansion_cancelled_run_does_not_poison_the_head(gh: Any, has_workf
         ]
     )
     has_workflows(True)
-    r = status.check_ci("5262")
+    r = status.check_ci("5262", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.ALL_PASSED
     assert r.failed == []
     assert r.completed == [
@@ -60,13 +61,13 @@ def test_named_cancellation_without_a_successor_stays_red(gh: Any, has_workflows
     expression, not on "no same-named successor". A real job cancelled without a settled rerun
     is missing evidence — red is visible and a rerun clears it; green there would merge
     unverified code."""
-    gh(
+    host = gh(
         [
             status_check_rollup_entry("backend shard (3/16)", "CANCELLED"),
             status_check_rollup_entry("backend shard (1/16)", "SUCCESS"),
         ]
     )
     has_workflows(True)
-    r = status.check_ci("1")
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
     assert r.verdict is CIStatus.FAILED
     assert r.failed == [{"name": "backend shard (3/16)", "conclusion": "CANCELLED"}]

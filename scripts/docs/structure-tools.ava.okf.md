@@ -66,3 +66,10 @@ lint from then on) live in the sweeper's own repo skill:
 `docs/conventions/engineering/tech-debt.md`, locality inspection guidance.
 
 Parent: [[scripts/docs/scripts.ava.okf.md|scripts]].
+
+AST and filesystem observations are explicit inputs: `local_nodes` takes its
+child iterator, `production_imports` takes its UTF-8 source reader, and the code
+structure gate takes its parser. The callers supply the standard operations;
+tests can count reads or parses without changing process-wide stdlib behavior.
+The AST and quality checks still share one parse, and unchanged cached files
+are not read again.

@@ -23,7 +23,7 @@ def test_invalid_interval_starts_no_worker(tmp_path: Path, interval: float) -> N
     with (
         (tmp_path / "stacks.log").open("w") as stacks,
         pytest.raises(ValueError, match="finite and positive"),
-        periodic_tracebacks(stacks, interval=interval),
+        periodic_tracebacks(stacks, interval=interval, dump_traceback=faulthandler.dump_traceback),
     ):
         pytest.fail("Invalid interval reached collection")
     assert_worker_stopped()
@@ -32,16 +32,17 @@ def test_invalid_interval_starts_no_worker(tmp_path: Path, interval: float) -> N
 def test_early_completion_cancels_wait_without_dumping(tmp_path: Path) -> None:
     output = tmp_path / "stacks.log"
     enabled = faulthandler.is_enabled()
-    with output.open("w") as stacks, periodic_tracebacks(stacks, interval=600):
+    with (
+        output.open("w") as stacks,
+        periodic_tracebacks(stacks, interval=600, dump_traceback=faulthandler.dump_traceback),
+    ):
         pass
     assert output.read_text() == ""
     assert faulthandler.is_enabled() is enabled
     assert_worker_stopped()
 
 
-def test_repeating_dumps_stop_before_file_closes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_repeating_dumps_stop_before_file_closes(tmp_path: Path) -> None:
     twice = threading.Event()
     calls: list[tuple[int, bool]] = []
 
@@ -51,9 +52,8 @@ def test_repeating_dumps_stop_before_file_closes(
         if len(calls) >= 2:
             twice.set()
 
-    monkeypatch.setattr(faulthandler, "dump_traceback", dump)
     with (tmp_path / "stacks.log").open("w") as stacks:
-        with periodic_tracebacks(stacks, interval=0.001):
+        with periodic_tracebacks(stacks, interval=0.001, dump_traceback=dump):
             assert twice.wait(2)
         count = len(calls)
         assert_worker_stopped()
@@ -61,18 +61,17 @@ def test_repeating_dumps_stop_before_file_closes(
     assert all(tid != threading.get_ident() and all_threads for tid, all_threads in calls)
 
 
-def test_diagnostic_failure_reaches_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_diagnostic_failure_reaches_owner(tmp_path: Path) -> None:
     attempted = threading.Event()
 
     def dump(*, file: TextIO, all_threads: bool) -> None:
         attempted.set()
         raise OSError("Diagnostic output unavailable")
 
-    monkeypatch.setattr(faulthandler, "dump_traceback", dump)
     with (
         (tmp_path / "stacks.log").open("w") as stacks,
         pytest.raises(RuntimeError, match="diagnostic failed") as failure,
-        periodic_tracebacks(stacks, interval=0.001),
+        periodic_tracebacks(stacks, interval=0.001, dump_traceback=dump),
     ):
         assert attempted.wait(2)
     assert isinstance(failure.value.__cause__, OSError)
@@ -98,10 +97,10 @@ def test_collection_exit_preserved_and_worker_joined(
 ) -> None:
     result = run_isolated(
         pytester,
-        "import threading\n"
+        "import faulthandler, threading\n"
         "from scripts.ci.collection_tracebacks import periodic_tracebacks\n"
         f"with open({str(tmp_path / 'stacks.log')!r}, 'w') as stacks:\n"
-        "    with periodic_tracebacks(stacks):\n"
+        "    with periodic_tracebacks(stacks, dump_traceback=faulthandler.dump_traceback):\n"
         f"        raise SystemExit({exit_code})\n",
     )
     assert result.ret == exit_code, str(result.stderr)
@@ -113,7 +112,7 @@ def test_frame_churn_finishes_with_complete_tracebacks(
     output = tmp_path / "stacks.log"
     result = run_isolated(
         pytester,
-        "import threading, time\n"
+        "import faulthandler, threading, time\n"
         "from scripts.ci.collection_tracebacks import periodic_tracebacks\n"
         "def recurse(depth):\n"
         "    a, b, c = 1, 2, 3\n"
@@ -123,7 +122,7 @@ def test_frame_churn_finishes_with_complete_tracebacks(
         "    while time.monotonic() < end:\n"
         "        assert recurse(123) == 6\n"
         f"with open({str(output)!r}, 'w') as stacks:\n"
-        "    with periodic_tracebacks(stacks, interval=0.001):\n"
+        "    with periodic_tracebacks(stacks, interval=0.001, dump_traceback=faulthandler.dump_traceback):\n"
         "        worker = threading.Thread(target=churn)\n"
         "        worker.start()\n"
         "        worker.join()\n"

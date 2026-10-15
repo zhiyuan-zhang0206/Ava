@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
+from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
@@ -128,11 +129,12 @@ def _fire(
     producer: Callable[[], Any],
     image: LoadedCommit,
     machine_reader: Callable[[], str],
+    host: Host,
 ) -> None:
     try:
         accounting = _load_accounting()
         since, until, day = window_bounds(slot_end)
-        entries = accounting.collect(accounting.DEFAULT_REPO, since, until)
+        entries = accounting.collect(accounting.DEFAULT_REPO, since, until, host=host)
         appended = accounting.append_ledger(accounting.DEFAULT_LEDGER, entries)
         init_gateway_process(
             name=_PROCESS_NAME, producer=producer, machine_reader=machine_reader, image=image
@@ -160,10 +162,14 @@ def _fire(
         _report_failure(f"{type(exc).__name__}: {exc}")
 
 
-def _main_loop(*, inputs: ScheduleInputs) -> None:
+def _main_loop(*, inputs: ScheduleInputs, host: Host) -> None:
     db = inputs.database()
     fire = partial(
-        _fire, producer=inputs.producer, image=inputs.image, machine_reader=inputs.machine.name
+        _fire,
+        producer=inputs.producer,
+        image=inputs.image,
+        machine_reader=inputs.machine.name,
+        host=host,
     )
     run_daily_loop(db, CRON, cluster_timezone(), fire)
 
@@ -180,4 +186,4 @@ if __name__ == "__main__":
 
         prepare_process_logging()
     with fresh_schedule_entry() if entry_inputs is None else schedule_entry(entry_inputs) as inputs:
-        _main_loop(inputs=inputs)
+        _main_loop(inputs=inputs, host=Host.system())

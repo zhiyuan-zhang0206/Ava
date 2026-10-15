@@ -90,18 +90,13 @@ def test_write_durations_is_atomic_when_replace_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / ".test_durations"
+    target.mkdir()
     monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
-    refresh.write_durations({"tests/a::test_x": 1.5})
-
-    def _boom(src: str, dst: str) -> None:
-        raise OSError("simulated interrupted write")
-
-    monkeypatch.setattr(Path, "replace", _boom)
-    with pytest.raises(OSError, match="interrupted"):
+    with pytest.raises(IsADirectoryError):
         refresh.write_durations({"tests/a::test_y": 2.5})
 
-    # The committed file is untouched and no temp file is left behind.
-    assert target.read_text() == '{"tests/a::test_x":1.5}\n'
+    # The existing target is untouched and no temp file is left behind.
+    assert target.is_dir()
     assert list(tmp_path.iterdir()) == [target]
 
 

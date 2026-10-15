@@ -1,6 +1,5 @@
 [debt.first-party-patch]
 "test_check_cross_branch_migrations.py#monkeypatch.setattr scripts.content_lint.check_cross_branch_migrations.remote_branches" = 3
-"test_check_cross_branch_migrations.py#monkeypatch.setattr scripts.content_lint.check_cross_branch_migrations.subprocess.run" = 2
 "test_check_doc_references.py#monkeypatch.setattr scripts.content_lint.check_doc_references.okf_nodes" = 1
 "test_lint_ava_okf_concatenation.py#monkeypatch.setattr scripts.content_lint.lint_ava_okf.layer_error" = 1
 "test_lint_ava_okf_headroom.py#monkeypatch.setattr scripts.content_lint.lint_ava_okf.layer_error" = 1
@@ -25,12 +24,6 @@
 "test_lint_migrations.py#monkeypatch.setattr scripts.content_lint.lint_migrations.SCHEMA_SQL" = 1
 "test_lint_migrations.py#monkeypatch.setattr scripts.content_lint.lint_migrations.immutability_base" = 1
 "test_lint_skill_descriptions.py#monkeypatch.setattr scripts.content_lint.lint_skill_descriptions._REPO_ROOT" = 1
-
-[debt.stdlib-patch]
-"test_lint_ava_okf.py#monkeypatch.setattr sys.argv" = 3
-"test_lint_ava_okf_concatenation.py#monkeypatch.setattr sys.argv" = 1
-"test_lint_ava_okf_headroom.py#monkeypatch.setattr sys.argv" = 1
-"test_lint_ava_okf_wikilinks.py#monkeypatch.setattr sys.argv" = 1
 
 [debt.unresolved-patch]
 "test_lint_doc_symbols.py#monkeypatch.setattr mod._EXEMPT" = 1
