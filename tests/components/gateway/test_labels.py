@@ -1,6 +1,6 @@
 """Tests for thread label auto-generation + PATCH endpoint.
 
-`generate_label_async` monkeypatches `build_chat_model` to use a fake LLM,
+`generate_label_async` receives a fake `build_chat_model` factory directly,
 avoiding real DeepSeek calls. Covers CAS / fail-soft on failure / publish event.
 """
 
@@ -16,7 +16,6 @@ import redis.asyncio as aredis
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
-import services.derived.labeler.labeler as labels_module
 from base.agents.labels import publish_label_updated
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -104,6 +103,13 @@ class _FakeLLMWithThinking:
         )
 
 
+def _fake_builder(llm: Any) -> Any:
+    def _build(_model: str, **_kwargs: object) -> Any:
+        return llm
+
+    return _build
+
+
 class TestNormalize:
     def test_strip_quotes_and_truncate(self) -> None:
         assert _normalize('  "abc"  ') == "abc"
@@ -169,11 +175,6 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
             )
         )
 
-    monkeypatch.setattr(
-        labels_module,
-        "build_chat_model",
-        lambda _model, **_kwargs: _ResponseLLM(),  # pyright: ignore[reportUnknownArgumentType]
-    )
     monkeypatch.setattr(usage, "log_usage_from_message", _emit)
 
     assert (
@@ -183,6 +184,7 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(_ResponseLLM()),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -214,11 +216,6 @@ class TestGenerateLabelAsync:
         database_gate: ProcessDbGate,
     ) -> None:
         tid = create_agent(db_conn)  # label NULL + label_user_set FALSE by default
-        monkeypatch.setattr(
-            labels_module,
-            "build_chat_model",
-            lambda _m, **_: _FakeLLM("\u67e5 X \u6a21\u5757"),  # pyright: ignore[reportUnknownArgumentType]
-        )
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
@@ -236,6 +233,7 @@ class TestGenerateLabelAsync:
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(_FakeLLM("\u67e5 X \u6a21\u5757")),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -267,11 +265,6 @@ class TestGenerateLabelAsync:
                 (tid,),
             )
         db_conn.commit()
-        monkeypatch.setattr(
-            labels_module,
-            "build_chat_model",
-            lambda _m, **_: _FakeLLM("LLM \u8d77\u7684"),  # pyright: ignore[reportUnknownArgumentType]
-        )
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
@@ -287,6 +280,7 @@ class TestGenerateLabelAsync:
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(_FakeLLM("LLM \u8d77\u7684")),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -317,11 +311,6 @@ class TestGenerateLabelAsync:
                 (tid,),
             )
         db_conn.commit()
-        monkeypatch.setattr(
-            labels_module,
-            "build_chat_model",
-            lambda _m, **_: _FakeLLM("LLM \u8d77\u7684"),  # pyright: ignore[reportUnknownArgumentType]
-        )
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
@@ -337,6 +326,7 @@ class TestGenerateLabelAsync:
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(_FakeLLM("LLM \u8d77\u7684")),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -363,7 +353,6 @@ class TestGenerateLabelAsync:
                     request=httpx2.Request("POST", "https://audit.invalid")
                 )
 
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _ExplodingLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
@@ -380,6 +369,7 @@ class TestGenerateLabelAsync:
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(_ExplodingLLM()),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -400,7 +390,6 @@ class TestGenerateLabelAsync:
     ) -> None:
         """LLM returns blank / only quotes → normalize returns "" → do not write to DB, do not publish."""
         tid = create_agent(db_conn)
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _FakeLLM('"   "'))  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
@@ -416,6 +405,7 @@ class TestGenerateLabelAsync:
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(_FakeLLM('"   "')),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -436,11 +426,6 @@ class TestGenerateLabelAsync:
     ) -> None:
         """content is list [thinking, text] -> only text block extracted, signature NOT in label."""
         tid = create_agent(db_conn)
-        monkeypatch.setattr(
-            labels_module,
-            "build_chat_model",
-            lambda _m, **_: _FakeLLMWithThinking("migrate data"),  # pyright: ignore[reportUnknownArgumentType]
-        )
         published: list[str] = []
 
         async def _capture(_self: Any, _channel: str, payload: str, *, auth_retry: bool) -> int:
@@ -456,6 +441,7 @@ class TestGenerateLabelAsync:
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(_FakeLLMWithThinking("migrate data")),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -494,7 +480,6 @@ class TestGenerateLabelAsync:
                     ]
                 )
 
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _ThinkingOnlyLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
         async def _capture(_self: Any, _channel: str, payload: str, *, auth_retry: bool) -> int:
@@ -510,6 +495,7 @@ class TestGenerateLabelAsync:
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(_ThinkingOnlyLLM()),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -545,7 +531,6 @@ class TestGenerateLabelAsync:
                     ]
                 )
 
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _MultiTextLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
         async def _capture(_self: Any, _channel: str, payload: str, *, auth_retry: bool) -> int:
@@ -561,6 +546,7 @@ class TestGenerateLabelAsync:
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(database_gate=database_gate),
             event_bus,
+            build_chat_model=_fake_builder(_MultiTextLLM()),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
@@ -683,11 +669,6 @@ class TestSpawnAgentSchedulesLabelGeneration:
         Label auto-generation has been moved from the Gateway BackgroundTask to a separate services/derived/labeler daemon.
         The Gateway spawn endpoint no longer triggers label generation — the labeler daemon asynchronously polls
         the agents table and discovers new agents to generate labels."""
-        monkeypatch.setattr(
-            labels_module,
-            "build_chat_model",
-            lambda _m, **_: _FakeLLM("\u8fc1\u79fb\u6570\u636e"),  # pyright: ignore[reportUnknownArgumentType]
-        )
 
         async def _noop_publish(_self: Any, channel: str, payload: str, *, auth_retry: bool) -> int:
             assert auth_retry is False
@@ -703,17 +684,8 @@ class TestSpawnAgentSchedulesLabelGeneration:
         new_id = resp.json()["id"]
         assert _label_of(db_conn, new_id) is None
 
-    def test_spawn_without_prompt_leaves_label_null(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Spawn without prompt → does not run LLM, label stays NULL."""
-
-        # any build_chat_model call is considered a failure (confirm the task was not triggered)
-        def _no_llm(_m: str, **_: Any) -> Any:
-            raise AssertionError("LLM should not be invoked when prompt is None")
-
-        monkeypatch.setattr(labels_module, "build_chat_model", _no_llm)
-
+    def test_spawn_without_prompt_leaves_label_null(self, db_conn: psycopg.Connection) -> None:
+        """Spawn without prompt → label stays NULL."""
         with TestClient(app) as client:
             resp = spawn_via_http(client, {})
         assert resp.status_code == 201

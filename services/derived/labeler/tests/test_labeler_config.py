@@ -23,6 +23,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.factory import build_chat_model as real_build_chat_model
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from services.derived.labeler import daemon
@@ -74,10 +75,12 @@ def _assert_run_lifecycle(
         _liveness: object,
         config: object,
         *,
+        build_chat_model: Callable[..., Any],
         catalog: ModelCatalog,
         llm_override: str,
         overrides: ModelOverrides,
     ) -> None:
+        assert build_chat_model is real_build_chat_model
         assert catalog is model_catalog
         assert llm_override == settings.lm.llm_override
         assert overrides == daemon.labeler_model_overrides(profile=settings.profile, lm=settings.lm)

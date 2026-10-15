@@ -40,11 +40,9 @@ exports = ["slices.py"]
 "test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.daemon.POLL_INTERVAL_S" = 2
 "test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.daemon.generate_label_async" = 1
 "test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.daemon.select_unlabeled" = 2
-"test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.labeler.build_chat_model" = 2
 "test_labeler_failure_boundary.py#monkeypatch.setattr services.derived.labeler.labeler.publish_label_updated" = 1
 "test_labeler_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
 "test_labeler_quiesced.py#monkeypatch.setattr services.derived.labeler.daemon.POLL_INTERVAL_S" = 1
-"test_labeler_validity.py#monkeypatch.setattr services.derived.labeler.labeler.build_chat_model" = 5
 
 [debt.third-party-patch]
 "test_labeler_validity.py#monkeypatch.setattr redis.asyncio.Redis.publish" = 1

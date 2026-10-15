@@ -3,8 +3,8 @@
 Lightweight autouse fixtures forbid real host effects at their execution
 boundaries (helper converge, os.exec* and bootstrap fetch) or restore
 process-global state (metering, existing telemetry and stdlib logger state).
-CLI and Gateway owners request their heavier readiness, native helper,
-schedule-control and label-LLM guards through ordinary fixture dependencies.
+CLI and Gateway owners request their heavier readiness, native helper and
+schedule-control guards through ordinary fixture dependencies.
 A leaked environment key,
 `AVA_HOME` included, is the root leak guard's: `tests/fixtures/leak_guard.py`. Opt-outs are per-test
 markers documented on the fixture that honours them.
@@ -119,31 +119,6 @@ def _restore_metering(sdk_metering: None) -> None:
     """
     # The ordinary yield-fixture dependency owns the recorder teardown.
     # Its consumer-local override reads the real installation ledger.
-
-
-@pytest.fixture
-def stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Spawn with prompt runs `generate_label_async` in gateway BackgroundTasks, which
-    calls `build_chat_model` and really hits the DeepSeek API — polluting network,
-    slowing the suite, making it unstable. The Gateway owner's stub returns a fake that
-    raises RuntimeError; a triggered BackgroundTask just writes the error into
-    loguru (label stays NULL, spawn unaffected). `tests/components/gateway/test_labels.py`
-    monkeypatches a new fake LLM, overriding this default.
-    """
-
-    def _fake_factory(_model: str, **_: object) -> object:
-        class _RaiseLLM:
-            async def ainvoke(self, _msgs: object) -> object:
-                raise RuntimeError(
-                    "label LLM disabled in tests — see tests/fixtures/guards.py:stub_label_llm"
-                )
-
-        return _RaiseLLM()
-
-    # `services.derived.labeler.labeler` is where `generate_label_async` actually resides;
-    from services.derived.labeler import labeler
-
-    monkeypatch.setattr(labeler, "build_chat_model", _fake_factory)
 
 
 # The old `_stub_os_cron` patched only pytest; registration leaked in the e2e

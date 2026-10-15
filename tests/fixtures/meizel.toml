@@ -20,7 +20,6 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 "guards.py#monkeypatch.setattr base.host.proc.hosting_exec_domain" = 1
 "guards.py#monkeypatch.setattr gateway.schedules.session_control.capture" = 1
 "guards.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 1
-"guards.py#monkeypatch.setattr services.derived.labeler.labeler.build_chat_model" = 1
 "guards.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.run_bounded" = 1
 "guards.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_bounded" = 1
 "provisioning.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
