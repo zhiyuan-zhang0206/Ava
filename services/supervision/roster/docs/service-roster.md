@@ -49,8 +49,8 @@ daemon and cleanup began, independently of zombie-reaping timing. The forced
 verdict is tested separately with a real deaf child and native backend.
 
 `agent-host` explicitly selects the `agent` configuration profile; an explicit
-profile takes precedence over `no_profile_marker`. Among gateway services,
+profile takes precedence over `no_profile_marker`. Among gateway-only services,
 `labeler` alone omits the gateway marker to retain provider credentials that
-gateway boot otherwise removes. Other gateway services retain that marker.
+gateway boot otherwise removes. Other gateway-only services retain that marker.
 Roster probe tests check declared identity arguments with injected probes;
 they do not establish live service reachability.
