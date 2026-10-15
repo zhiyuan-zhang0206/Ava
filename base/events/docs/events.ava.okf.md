@@ -23,3 +23,13 @@ it. `base.telemetry.emit` rejects undeclared event names.
 `tests/test_emit_sites_declared.py` inventories recognized callee spellings with
 literal category/name arguments. Dynamic or f-string names, pass-through values
 and renamed callees it does not resolve remain outside this static census.
+
+## Shared wire fixtures
+
+`scripts/codegen/dump_event_fixtures.py` writes `tests/fixtures/events/` for both
+`tests/harness/test_event_fixtures.py` and the frontend's
+`ui/web/src/lib/contracts/event-fixtures.test.ts`. Python checks adapter validation,
+filename/role agreement, complete role coverage and model-equal roundtrips;
+roundtrips compare models rather than JSON whitespace or field order. Frontend
+checks cover roles and required-field presence, not full runtime value types.
+Schema changes must update the shared fixtures and frontend field expectations.
