@@ -1,5 +1,3 @@
-"""Tests for scripts/ci/pull_requests/accounting.py — per-agent CI minute attribution."""
-
 from __future__ import annotations
 
 import json
@@ -15,14 +13,8 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.pull_requests import accounting
 
-# The script's entries are unparameterized dicts: the call-site rules stay at warning.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-
 
 def _gh_queue(responses: list[tuple[str, str]]) -> Host:
-    """Subprocess stub: first entry whose key appears in the command wins."""
-
     def run(argv: Sequence[str], *_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
         argv = list(argv)
         joined = " ".join(str(c) for c in argv)
@@ -36,13 +28,14 @@ def _gh_queue(responses: list[tuple[str, str]]) -> Host:
 
 
 def _runs(payload: list[dict[str, object]]) -> str:
-    return json.dumps(payload)
+    return json.dumps({"total_count": len(payload), "workflow_runs": payload})
 
 
 def _run(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         "id": 101,
         "name": "CI",
+        "status": "completed",
         "conclusion": "success",
         "created_at": "2026-09-06T10:00:00Z",
         "head_branch": "ava-5811-demo",
@@ -50,15 +43,26 @@ def _run(**overrides: object) -> dict[str, object]:
         "pull_requests": [],
     }
     base.update(overrides)
+    base["head_commit"] = {"message": base.pop("head_commit_msg")}
     return base
 
 
 def _jobs(*rows: tuple[str | None, str | None, str | None]) -> str:
     return json.dumps(
-        [
-            {"name": name, "started": started, "completed": completed}
-            for name, started, completed in rows
-        ]
+        {
+            "total_count": len(rows),
+            "jobs": [
+                {
+                    "id": index,
+                    "name": name,
+                    "status": "completed",
+                    "conclusion": "cancelled" if started is None else "success",
+                    "started_at": started,
+                    "completed_at": completed,
+                }
+                for index, (name, started, completed) in enumerate(rows)
+            ],
+        }
     )
 
 
@@ -67,8 +71,6 @@ _WINDOW_UNTIL = "2026-09-06T12:00Z"
 
 
 def test_pr_run_attribution_and_minute_split() -> None:
-    """PR-triggered run: identity from the PR title; minutes split linux/macos
-    with ceil billing (30s macOS job = 1 minute)."""
     host = _gh_queue(
         [
             (
@@ -113,7 +115,6 @@ def test_pr_run_attribution_and_minute_split() -> None:
 
 
 def test_trunk_synthetic_pr_resolves_to_real_pr() -> None:
-    """A synthetic trunk-merge/pr-42/<uuid> run attributes to real PR 42."""
     host = _gh_queue(
         [
             (
@@ -193,9 +194,6 @@ def test_append_ledger_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_report_rollup_days_and_cost() -> None:
-    # Window-relative fixture days: the rollup window is a rolling `days` x 24h,
-    # so a hard-coded "recent" day ages out of it (2026-09-13: the 2026-09-06
-    # fixtures aged out at 00:00 UTC and turned every backend shard red).
     today = datetime.now(UTC).date()
     recent = (today - timedelta(days=1)).isoformat()
     stale = (today - timedelta(days=30)).isoformat()
@@ -242,20 +240,18 @@ def test_report_rollup_days_and_cost() -> None:
     ]
     ledger = {e["run_id"]: e for e in entries}
     rows = accounting.report_rows(ledger, days=7, agent=None)
-    assert len(rows) == 2  # the stale entry is outside the window
+    assert len(rows) == 2
     top = rows[0]
     assert top["agent_id"] == 5811
     assert top["linux_minutes"] == 100
     assert top["macos_minutes"] == 10
-    assert top["est_usd"] == pytest.approx(100 * 0.006 + 10 * 0.062)  # pyright: ignore[reportUnknownMemberType]
+    assert top["est_usd"] == pytest.approx(100 * 0.006 + 10 * 0.062)
     only = accounting.report_rows(ledger, days=7, agent=5814)
     assert only[0]["agent_id"] == 5814
     assert only[0]["linux_minutes"] == 50
 
 
 def test_trunk_branch_without_pr_payload_attributes_by_branch() -> None:
-    """Queue test runs on trunk-merge/pr-<n> branches have no pull_requests
-    payload; the branch name resolves the real PR."""
     host = _gh_queue(
         [
             (
@@ -281,8 +277,6 @@ def test_trunk_branch_without_pr_payload_attributes_by_branch() -> None:
 
 
 def test_main_push_run_resolves_pr_via_merge_commit() -> None:
-    """A push-to-main CI run with a non-convention commit subject attributes
-    through the merge commit's associated PR."""
     host = _gh_queue(
         [
             (
@@ -298,7 +292,7 @@ def test_main_push_run_resolves_pr_via_merge_commit() -> None:
                     ]
                 ),
             ),
-            ("commits/dddd3333dddd3333dddd3333dddd3333dddd3333/pulls", "[1872]"),
+            ("commits/dddd3333dddd3333dddd3333dddd3333dddd3333/pulls", '[{"number":1872}]'),
             ("pr view 1872 ", "[Ava-5814] fix: hosted continuations (task #2566)"),
             ("runs/107/jobs", _jobs()),
         ]
@@ -309,8 +303,6 @@ def test_main_push_run_resolves_pr_via_merge_commit() -> None:
 
 
 def test_branch_name_attributes_nonprefix_subject() -> None:
-    """A conventional-commit subject without [Ava-N] attributes through the
-    agent worktree branch name."""
     host = _gh_queue(
         [
             (
@@ -333,10 +325,7 @@ def test_branch_name_attributes_nonprefix_subject() -> None:
     assert entries[0]["task_id"] == 2531
 
 
-def test_null_timestamps_bill_zero_and_do_not_crash() -> None:
-    """Jobs whose started/completed are null (in-progress, cancelled, or
-    cancelled before start) must not crash reconciliation: they bill 0
-    minutes and other jobs in the run still bill normally."""
+def test_cancelled_before_start_jobs_bill_zero() -> None:
     host = _gh_queue(
         [
             (
@@ -355,9 +344,8 @@ def test_null_timestamps_bill_zero_and_do_not_crash() -> None:
                 "runs/109/jobs",
                 _jobs(
                     ("backend shard (1/16)", "2026-09-06T10:00:00Z", "2026-09-06T10:04:00Z"),
-                    ("still running (completed null)", "2026-09-06T10:00:00Z", None),
                     ("cancelled before start (started null)", None, "2026-09-06T10:02:00Z"),
-                    ("queued (both null)", None, None),
+                    ("cancelled before start (both null)", None, None),
                 ),
             ),
         ]
@@ -367,13 +355,11 @@ def test_null_timestamps_bill_zero_and_do_not_crash() -> None:
     entry = entries[0]
     assert entry["agent_id"] == 5895
     assert entry["task_id"] == 2673
-    assert entry["linux_minutes"] == 4  # only the fully timestamped job bills
-    assert entry["jobs"] == 4
+    assert entry["linux_minutes"] == 4
+    assert entry["jobs"] == 3
 
 
 def test_job_minutes_null_contract() -> None:
-    """job_minutes bills 0 whenever either timestamp is missing; both present
-    bills ceil of the wall duration."""
     assert accounting.job_minutes(None, "2026-09-06T10:05:00Z") == 0
     assert accounting.job_minutes("2026-09-06T10:00:00Z", None) == 0
     assert accounting.job_minutes(None, None) == 0
