@@ -1,30 +1,4 @@
-"""The ordered registry of standing context notes + the framework's own.
-
-A context note is a short system-styled message that sits behind the
-SystemMessage for the life of a context window. `init_context` lays the whole
-set down at the two moments a window is established — an agent's first wake, and
-the turn after any compaction — so a note is written once here rather than at
-each of those call sites.
-
-The framework's own notes are the constant `FRAMEWORK_NOTES` below; a plugin declares its notes
-in `contribute()` (`base.packages.plugins.extensions`), and the notes it contributes arrive here
-through the `ExtensionRegistry` the caller holds — nothing registers at import.
-
-Rendering order is by `rank`, not declaration order: the reading order the
-head is supposed to have — exec timeout, then the shared memory index, then the
-agent id, then the per-agent memory index, then preloaded skills — spans the
-framework/plugin boundary, so "framework notes first, then plugin notes in load
-order" cannot express it. Lower ranks sit closer to the SystemMessage; equal
-ranks keep declaration order (the sort is stable). Notes declared without an
-explicit rank default to `DEFAULT_NOTE_RANK` and land after every ranked note, still
-in declaration order among themselves.
-
-`on_fork` marks the notes a forked agent also needs. A fork inherits the source
-agent's whole conversation, so its window is never established from empty and
-`init_context` never runs for it; what it needs instead is the subset of notes
-the inherited history gets *wrong* — see `fork_notes`.
-"""
-
+# ava:ref agent/graph/prompt/docs/composition.ava.okf.md#context-order
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -42,23 +16,6 @@ from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from base.packages.skills.tree import identifier, target
 from base.paths import workspace_dir
 
-# The rank scale for the standing head — the reading order, lowest first:
-# the operational constants (exec timeout, then the cluster clock), then the
-# shared world (cluster memory index), then identity (agent id with label +
-# machine + workspace), then the
-# personal store (per-agent memory index, then the inheritable blocks read
-# from the chain above), then preloaded skill bodies. The
-# ava_memory plugin pins the two memory ranks; everything else registered
-# without a rank defaults to `DEFAULT_RANK` and renders after all ranked notes.
-#
-# Ranks 10-19 are the stable band, and that is a prompt-cache decision, not a
-# reading-order one. Both providers cache on a byte prefix, so what a note costs
-# depends on what sits in front of it: everything from rank 20 on is behind the
-# cluster memory index, which is re-read off disk at every window establishment
-# and changes whenever any agent writes memory. A note placed after it re-caches
-# on someone else's memory write. The 10-19 band is cluster-identical (same
-# bytes for every agent on the API key, so they share one cached prefix) and
-# changes only on a config edit that already forces an agent restart.
 RANK_EXEC_TIMEOUT = 10
 RANK_TIMEZONE = 15
 RANK_CLUSTER_MEMORY = 20
@@ -69,26 +26,18 @@ RANK_PRELOADED_SKILLS = 50
 
 
 def _ordered(extensions: ExtensionRegistry, *, fork_only: bool) -> list[ContextNote]:
-    """The framework's notes then every plugin's, in declaration order."""
+
     plugin_notes = [note for _plugin, note in extensions.context_notes()]
     return [n for n in (*FRAMEWORK_NOTES, *plugin_notes) if n.on_fork or not fork_only]
 
 
 def context_notes(extensions: ExtensionRegistry, ctx: AvaContext) -> list[HumanMessage]:
-    """Every note in rank order (ties: declaration order), skipping
-    the ones with nothing to say.
 
-    Built fresh at each call: notes that read state off disk (the memory
-    indexes) then pick up whatever was written during the window just compacted
-    away.
-    """
     return _rendered(_ordered(extensions, fork_only=False), ctx)
 
 
 def fork_notes(extensions: ExtensionRegistry, ctx: AvaContext) -> list[HumanMessage]:
-    """The `on_fork` subset, in the same rank order as `context_notes` — what a
-    freshly forked agent needs grafted onto the history it inherited from the
-    agent it was forked from."""
+
     return _rendered(_ordered(extensions, fork_only=True), ctx)
 
 
@@ -107,11 +56,8 @@ def _rendered(entries: list[ContextNote], ctx: AvaContext) -> list[HumanMessage]
     return [note for _, note in sorted(built, key=lambda pair: pair[0])]
 
 
-# ── Framework-owned notes ──
-
-
 def _established_agent_id(ctx: AvaContext, note: str) -> int | None:
-    """The identity carried explicitly by this invocation, or None for a snapshot render."""
+
     from ava.sdk_surface.agent_identity import agent_id
 
     aid = agent_id(ctx)
@@ -128,7 +74,7 @@ _EXEC_TIMEOUT_FRAMING = (
 
 
 def _format_timeout_display(timeout_s: float) -> str:
-    """Format the timeout for display, e.g. '5 minutes' or '300 seconds'."""
+
     minutes = timeout_s / 60
     if minutes == int(minutes):
         n = int(minutes)
@@ -137,9 +83,7 @@ def _format_timeout_display(timeout_s: float) -> str:
 
 
 def exec_timeout_note(ctx: AvaContext) -> HumanMessage | None:
-    """A context note stating the execute_code hard timeout.
 
-    Returns ``None`` when this invocation has no established agent identity."""
     if _established_agent_id(ctx, "exec-timeout") is None:
         return None
     timeout_s = ctx.require_agent().read("sandbox", "exec_timeout_seconds")
@@ -163,31 +107,13 @@ _TIMEZONE_FRAMING = (
 
 
 def _utc_offset(moment: datetime) -> str:
-    """`moment`'s UTC offset as ``+08:00`` / ``-07:00`` (strftime gives ``+0800``)."""
+
     raw = moment.strftime("%z")
     return f"{raw[:3]}:{raw[3:]}"
 
 
 def timezone_note(ctx: AvaContext) -> HumanMessage | None:
-    """A context note declaring the cluster's timezone once, so the timestamps
-    themselves don't have to carry it.
 
-    `settings.general.timezone` is cluster-pinned, so the timezone is a
-    constant across every timestamp an agent will ever see — repeating it on
-    each one bought nothing and cost ambiguity (`%Z` renders `PDT` in June and
-    `PST` in December for one unchanged setting, and `CST` names two different
-    zones). Declared here, the IANA name is unambiguous and the numeric offset
-    is spelled out beside it.
-
-    Not an `on_fork` note: a fork inherits its source agent's history, and both
-    agents are in the same cluster, so the inherited declaration is correct.
-
-    The offset is resolved when the window is established. Across a DST
-    boundary within one long-lived window the numeric half can go stale; the
-    IANA name beside it stays authoritative, and a `AVA_TIMEZONE` edit is
-    `restart_required: agent`, which re-establishes the head.
-
-    Returns ``None`` when this invocation has no established agent identity."""
     if _established_agent_id(ctx, "timezone") is None:
         return None
     clock = ctx.require_clock()
@@ -200,13 +126,7 @@ def timezone_note(ctx: AvaContext) -> HumanMessage | None:
 
 
 def own_label(ctx: AvaContext, agent_id: int) -> str | None:
-    """The agent's current label, whitespace-normalized, or None.
 
-    A missing row or empty label omits the optional clause. SQL and programming
-    errors propagate to the context-building caller. A label is free text (set
-    by the agent via `ava.self.set_label` or by the gateway), so its whitespace
-    is collapsed before it enters the one-line note.
-    """
     with ctx.sql.cursor() as cur:
         cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
         row = cur.fetchone()
@@ -216,29 +136,20 @@ def own_label(ctx: AvaContext, agent_id: int) -> str | None:
 
 
 def machine_clause(ctx: AvaContext) -> str | None:
-    """The host's machine name, whitespace-normalized, or None when unset.
 
-    An unset machine name omits this optional clause; other failures propagate."""
     from base.cluster.machine import MachineNameMissing
 
     if ctx.machine is None:
         return None
     try:
         name = ctx.machine.name()
-    except MachineNameMissing:  # an unset machine name only drops the machine clause
+    except MachineNameMissing:
         return None
     return " ".join(name.split()) or None
 
 
 def _workspace_path(agent_id: int, *, enabled: bool) -> str | None:
-    """The agent's concrete workspace path, or None when the section is off.
 
-    This is where the concrete path lives: the `# Workspace` prompt section is
-    deliberately id-free (a fork copies the SystemMessage verbatim, so a
-    baked-in path would name the source agent's folder), so the per-agent path
-    rides this note instead — regrafted by a fork. Same on/off gate as the
-    section: bench runners that turn the section off keep their prompts free of
-    workspace chatter."""
     if not enabled:
         return None
     ws = workspace_dir(agent_id)
@@ -249,18 +160,7 @@ def _workspace_path(agent_id: int, *, enabled: bool) -> str | None:
 
 
 def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
-    """A context note stating the agent's own identity: id, label, machine,
-    workspace path. Missing optional values omit their clauses; failed label
-    reads propagate.
 
-    It lives outside the SystemMessage (as a system-styled HumanMessage) so a
-    fork — which copies the source agent's full conversation including the
-    SystemMessage — does not carry a stale identity into the new agent. That is
-    also why it is an `on_fork` note: the inherited SystemMessage names the
-    source. The note is also where the `# Workspace` section points for the
-    concrete path, for the same fork-safety reason.
-
-    Returns ``None`` when this invocation has no established agent identity."""
     aid = _established_agent_id(ctx, "agent-id")
     if aid is None:
         return None
@@ -278,7 +178,7 @@ def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
     tail = f" Your workspace is {workspace}." if workspace else ""
     if workspace:
         try:
-            document = read_document(workspace_dir(aid), ctx.require_agent().prompt.to_user_format)
+            document = read_document(workspace_dir(aid))
         except (OSError, ValueError) as exc:
             tail += (
                 f"\nThe shared context file could not be read: {exc}. Repair it in your workspace."
@@ -296,9 +196,6 @@ def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
     )
 
 
-# Agent-visible framing for the preloaded-skills note. Same carrier and lifetime
-# as the other context notes, so the framing mirrors them: standing guidance the
-# agent has already read, not something to go open.
 _PRELOADED_SKILLS_FRAMING = (
     "Preloaded skills — each section below contains a skill's complete SKILL.md. "
     "Follow these instructions as standing guidance; you do not need to reload "
@@ -308,19 +205,7 @@ _PRELOADED_SKILLS_FRAMING = (
 
 
 def preloaded_skills_note(ctx: AvaContext) -> HumanMessage | None:
-    """The full SKILL.md body of every skill named in
-    `Prompt.skills_to_expand_at_start`, concatenated into one note.
 
-    Resolution (wildcard, identifier-then-name, warn-and-skip) is shared with
-    the capabilities index via `resolve_prompt_skills`. Returns ``None`` — no
-    empty note — when the list is empty, `skills` is SDK-disabled, or nothing
-    resolves. Skips (with a warning) any resolved skill whose SKILL.md has since
-    become unreadable rather than aborting the whole note.
-
-    `on_fork`: the inherited history carries the SOURCE agent's preloaded
-    skills (its own `skills_to_expand_at_start`); the fork grafts the new
-    agent's own set after `_handle_fork` strips the inherited note — exactly
-    one copy, owned by the agent reading it (issue #1320)."""
     from agent.graph.prompt.capabilities import resolve_prompt_skills
 
     slices = ctx.require_agent()
@@ -341,11 +226,6 @@ def preloaded_skills_note(ctx: AvaContext) -> HumanMessage | None:
     )
 
 
-# Agent-visible framing for the fork tail-graft note — skills a fork's config
-# added that the inherited context does not carry. Appended at the very TAIL of
-# the rebuilt head (after the fork marker and the on_fork notes), so nothing in
-# front of it changes: the inherited prefix stays byte-identical for the
-# provider's prefix cache (docs/decisions/2026-09-10-preset-in-config-overlay-fork-cache).
 _FORK_TAIL_SKILLS_FRAMING = (
     "Additional skills for you — each section below contains a skill's complete "
     "SKILL.md. Follow these instructions as standing guidance alongside the "
@@ -354,12 +234,6 @@ _FORK_TAIL_SKILLS_FRAMING = (
 
 
 def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], list[str]] | None:
-    """Read each resolved skill's SKILL.md into a `## ava.skills.<path>` section,
-    spelled as the loadable attribute path (`ava.skills.target`).
-
-    Returns ``(sections, injected_identifiers)``, or None when every skill is
-    unreadable. Unreadable bodies warn + skip (same posture as the whole-note
-    builder) rather than aborting the note."""
 
     sections: list[str] = []
     injected: list[str] = []
@@ -384,16 +258,7 @@ def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], l
 
 
 def fork_tail_skills_note(names: list[str], sdk_disable: Sequence[str]) -> HumanMessage | None:
-    """The full SKILL.md bodies of the fork's skill ADDITIONS, for grafting at
-    the context tail.
 
-    `names` is the delta the gateway computed at spawn —
-    `(fork_inject - source_inject) - fork_expand` — carried in the fork
-    inbound's payload. Resolution (identifier-then-name, warn-and-skip) is
-    shared with the capabilities index and the preloaded-skills note. Tagged
-    `preloaded_skills` so the NEXT fork strips it with the other skill notes
-    and grafts its own. Returns None when the list is empty or nothing resolves.
-    """
     if not names:
         return None
     from agent.graph.prompt.capabilities import resolve_prompt_skills
@@ -409,8 +274,6 @@ def fork_tail_skills_note(names: list[str], sdk_disable: Sequence[str]) -> Human
     )
 
 
-# The framework-owned standing notes. Plugins declare theirs in `contribute()`; both kinds meet in
-# `context_notes` / `fork_notes`, which order them by rank.
 FRAMEWORK_NOTES: tuple[ContextNote, ...] = (
     ContextNote(build=exec_timeout_note, rank=RANK_EXEC_TIMEOUT),
     ContextNote(build=timezone_note, rank=RANK_TIMEZONE),

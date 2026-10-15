@@ -1,11 +1,4 @@
-// Thin fetch wrapper over FastAPI endpoints.
-//
-// API_BASE is resolved in api-base.ts so telemetry can share it without an
-// api.ts ↔ telemetry.ts import cycle.
-//
-// The gateway is reachable only on the cluster's private network (one trust group)
-// Authentication is via session cookie (browser) or Bearer token (SDK).
-
+// ava:ref ui/web/src/docs/frontend-state/api-requests.ava.okf.md#request-budget
 import { API_BASE } from "./api-base";
 import { track } from "../telemetry/telemetry";
 import type { ToUserDocument, NoticesFeed,
@@ -96,12 +89,6 @@ import { keyedHeaders, newOperationKey } from "./operation-key";
 export { MessageDeliveryUnknownError } from "../agents/message-delivery";
 export { API_BASE } from "./api-base";
 
-// Thrown by `ok()` for any non-2xx response. Carries the HTTP status so
-// callers can distinguish "the server answered but rejected the request"
-// (e.g. 401 bad credentials) from a network-level failure (fetch reject —
-// connection refused, DNS failure, timeout, CORS), which never reaches here
-// at all and surfaces as a plain TypeError instead. See auth-context.tsx's
-// `login()` for the canonical consumer of this distinction.
 export class ApiError extends Error {
   status: number;
   agentId?: number;
@@ -130,7 +117,7 @@ async function ok<T>(res: Response): Promise<T> {
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         body = parsed as Record<string, unknown>;
       }
-    } catch { /* A non-JSON error keeps its HTTP status and raw text. */ }
+    } catch { body = undefined; }
     throw new ApiError(
       res.status,
       typeof body?.detail === "string" ? body.detail : `HTTP ${res.status}: ${text || res.statusText}`,
@@ -142,24 +129,17 @@ async function ok<T>(res: Response): Promise<T> {
 
 const url = (path: string): string => `${API_BASE}${path}`;
 
-// Absolute url for a gateway-served asset (e.g. an uploaded image's reference
-// path) — the frontend (:3000) and gateway (:8000) are different origins, so an
-// <img src> needs the gateway base prepended.
 export const assetUrl = (path: string): string => `${API_BASE}${path}`;
 
 function apiTimingKey(path: string): string {
   const pathname = path.split("?", 1)[0].replace(/^\/api\/?/, "");
-  // Numeric route segments use the schema-safe literal `id`. Dot separators
-  // keep keys within the gateway's lowercase letters, digits, dots, dashes,
-  // and underscores alphabet: `^[a-z0-9._-]{1,128}$` (no slashes or braces).
+
   return pathname
     .split("/")
     .map((segment) => (/^\d+$/.test(segment) ? "id" : segment))
     .join(".");
 }
 
-// All fetch calls go through this. ``credentials: "include"`` sends the
-// session cookie on cross-origin requests (frontend :3000 -> gateway :8000).
 async function f(path: string, init?: RequestInit): Promise<Response> {
   const startedAt = performance.now();
   try {
@@ -195,8 +175,7 @@ async function jsonWithTimeout<T>(
     }, timeoutMs);
   });
   try {
-    // The bound covers BOTH fetch and body consumption. Clearing the timer when
-    // headers arrive leaves `res.json()` able to hang the Composer forever.
+
     return await Promise.race([
       f(path, { ...init, signal: controller.signal }).then(ok<T>),
       timeout,
@@ -207,9 +186,6 @@ async function jsonWithTimeout<T>(
   }
 }
 
-// The backend's aggregate deadline is 30s. This wider client bound adds
-// serialization/network transit margin while still bounding a dead gateway
-// or a response body that never completes.
 const INSPECT_REQUEST_TIMEOUT_MS = 35_000;
 
 function isAmbiguousDeliveryError(error: unknown): boolean {
@@ -262,9 +238,6 @@ const PUT_JSON = (body: unknown): RequestInit => ({
 export const api = {
   head: (path: string): Promise<Response> => f(path, { method: "HEAD" }),
 
-  // Returns one tail window of the timeline (newest `limit` items). Pass
-  // `before` = the oldest item_id currently held to page further back for
-  // scroll-up history; `has_more` reports whether older items remain.
   getTimeline: (
     agentId: number,
     opts?: { limit?: number; before?: string; signal?: AbortSignal },
@@ -282,19 +255,12 @@ export const api = {
     return f(`/api/agents/${agentId}/token-usage`, { signal }).then(ok<TokenUsageResponse>);
   },
 
-  // A drafted reply to the agent's last message (or `suggestion: null` plus a
-  // `reason`). The gateway cancels its model calls when this request is aborted.
   getReplySuggestion: (agentId: number, signal: AbortSignal): Promise<ReplySuggestionResponse> => {
     return f(`/api/agents/${agentId}/reply-suggestion`, { ...POST, signal }).then(
       ok<ReplySuggestionResponse>,
     );
   },
 
-  // One switch-refresh read of the selected agent's three conversation
-  // models (task #3900 batch 2): head timeline window + token usage +
-  // pending inbounds in a single round trip. The three sections are written
-  // into the same query keys the standalone readers use (agent-reconcile.ts);
-  // those endpoints stay authoritative for first paint and their own readers.
   getConversationSnapshot: (
     agentId: number,
     signal?: AbortSignal,
@@ -308,8 +274,6 @@ export const api = {
     return f(`/api/agents/${agentId}/context-breakdown`).then(ok<ContextBreakdownResponse>);
   },
 
-  // The understanding tree and the layer-0 message units in a window; no
-  // window means the agent's whole lifetime.
   getRunTimeline: (
     agentId: number,
     options?: { from?: string; to?: string; signal?: AbortSignal },
@@ -327,8 +291,6 @@ export const api = {
     );
   },
 
-  // The agent-to-agent events (messages, spawns, forks, terminations, restarts,
-  // resurrections) in a window with an end among `agents`.
   getRunTimelineLinks: (
     agents: readonly number[],
     window: { from: string; to: string },
@@ -337,7 +299,6 @@ export const api = {
     return f(`/api/insights/run-timeline/links?${params.toString()}`).then(ok<RunTimelineLinks>);
   },
 
-  // The full text of the chat message or notice behind a selected arrow.
   getRunTimelineLinkContent: (
     ref: { inbound_id: number } | { notice_id: number },
   ): Promise<RunTimelineLinkContent> => {
@@ -345,16 +306,10 @@ export const api = {
     return f(`/api/insights/run-timeline/link-content?${params.toString()}`).then(ok<RunTimelineLinkContent>);
   },
 
-  // The context breakdown of the LLM request at (or next after) message `at`:
-  // what that request's context held, with its session and time.
   getRunTimelineContext: (agentId: number, at: number): Promise<RunTimelineContext> => {
     return f(`/api/agents/${agentId}/run-timeline/context?at=${at}`).then(ok<RunTimelineContext>);
   },
 
-  // Raw messages `start..end` (inclusive stitched indices, the spans nodes and
-  // units carry), at most `limit` of them; `next_start` continues a cut range.
-  // Parts clipped by the per-read budget report `text_truncated`; `full`
-  // returns them uncut.
   getRunTimelineMessages: (
     agentId: number,
     range: { start: number; end: number; limit?: number; full?: boolean },
@@ -367,8 +322,6 @@ export const api = {
     );
   },
 
-  // Persisted observed statistics with explicit window, source precision, and
-  // coverage. `hours` selects the window (0 = 5m); omitted = since spawn.
   getAgentInspectStatistics: (
     agentId: number,
     hours?: number | null,
@@ -386,8 +339,6 @@ export const api = {
     );
   },
 
-  // Window-independent current state: shells, liveness, configuration, notice,
-  // timestamps, and heartbeat. Independent from persisted statistics.
   getAgentInspectLive: (
     agentId: number,
     signal?: AbortSignal,
@@ -401,9 +352,6 @@ export const api = {
     );
   },
 
-  // The panel's plugin widgets (task #2909) — what the enabled plugins embed
-  // for this agent, with the notice/task targets already resolved kernel-side.
-  // Same cheap, window-independent shape as the live half.
   getAgentInspectWidgets: (
     agentId: number,
     signal?: AbortSignal,
@@ -417,10 +365,6 @@ export const api = {
     );
   },
 
-  // A recent tail of one of the agent's persistent shells — the terminal
-  // output the /shell/{agentId}/{sessionId} page fetches on demand. `lines`
-  // controls how many trailing lines to capture (50–2000, default 200).
-  // 404 if the agent or the live shell session is gone.
   getAgentShell: (agentId: number, sessionId: number, lines?: number): Promise<ShellCapture> => {
     const qs = lines != null ? `?lines=${lines}` : "";
     return f(`/api/agents/${agentId}/shell/${sessionId}${qs}`).then(ok<ShellCapture>);
@@ -435,8 +379,6 @@ export const api = {
     return f(`/api/commands${qs}`).then(ok<CommandItem[]>);
   },
 
-  // `content` is a plain string, or a list of OpenAI-shaped content blocks for
-  // a multimodal message (text + image_url referencing an upload of this agent).
   sendMessage: (
     agentId: number,
     content: string | ContentBlock[],
@@ -451,12 +393,6 @@ export const api = {
     );
   },
 
-  // The unified inbox feed (Task #1024, R4 layer 2, decision Q1=A): one
-  // request carries the whole Inbox panel — the open queue split by kind
-  // (open = FYI, awaiting = require_response) plus one keyset page of the
-  // resolved history and its next_cursor. The frontend's Inbox consumes
-  // ONLY this endpoint now; the standalone /open + /resolved endpoints stay
-  // for the IM bridge and CLI.
   getNotices: (params?: {
     limit?: number;
     resolvedLimit?: number;
@@ -472,13 +408,6 @@ export const api = {
     return f(`/api/notices${qs ? `?${qs}` : ""}`).then(ok<NoticesFeed>);
   },
 
-  // Resolve one open notice. `action` is the explicit close verb: 'answer' /
-  // 'dismiss' on a require_response notice ('answer' needs a reply), 'read' on an
-  // FYI notice. A non-empty reply (and a dismissed require_response notice) wakes
-  // the agent with a chat inbound. A 'read' on an already-resolved notice is an
-  // idempotent success (user ruling 2026-08-28 — no "already read" error).
-  // Answer/dismiss on an already-resolved row conflict. The fixed keyed path
-  // requires verified principal scope; an unsupported server cannot execute it.
   resolveNotice: (
     agentId: number,
     noticeId: number,
@@ -505,11 +434,6 @@ export const api = {
     f(`/api/keyed/v1/agents/${target.agent_id}/cancel-work`, keyedJson(target, operationKey))
       .then(ok<NativeCancelAcceptance>),
 
-  // --- lifecycle ---
-  //
-  // Selecting a sidebar row = selecting the agent to view;
-  // spawn / terminate all operate by agent_id.
-
   getAgentRoster: (signal?: AbortSignal): Promise<AgentRoster> =>
     f("/api/agents/roster", { signal }).then(ok<WireAgentRoster>).then((roster) => ({
       agents: roster.agents.map(projectAgentStatus), ancestors: roster.ancestors,
@@ -532,11 +456,6 @@ export const api = {
     f(`/api/keyed/v1/agents/${agentId}/retry-launch`, keyedJson({ expected_prior_attempt_id: priorAttempt }, operationKey))
       .then(ok<RetryLaunchAccepted>),
 
-  // force=false (default) → graceful path: backend inserts a terminate
-  // inbound and the agent exits after its current turn. force=true → backend
-  // skips the inbound path and directly kills the OS process + force-marks
-  // status='terminated'; for agents stuck in a loop / hung call that never
-  // reach the point where the graceful signal is consumed.
   terminateAgent: (agentId: number, force = false): Promise<TerminateAgentResponse> => {
     return f(
       `/api/agents/${agentId}/terminate`,
@@ -556,25 +475,12 @@ export const api = {
     agentId: number,
     prompt?: string,
   ): Promise<ResurrectAgentResponse> => {
-    // The resurrect button is a pure lifecycle event — no prompt; the agent
-    // just wakes (it still gets the "you have been resurrected" marker). A
-    // prompt, when given (the "with prompt..." path), is inserted as a chat
-    // inbound in the same transaction as the resurrect lifecycle inbound.
-    // resurrected_by is left to the backend default ("user").
+
     return f(
       `/api/agents/${agentId}/resurrect`,
       POST_JSON(prompt !== undefined ? { prompt } : {}),
     ).then(ok<ResurrectAgentResponse>);
   },
-
-  // --- agent label ---
-  //
-  // The label is auto-generated by a gateway BackgroundTask running a
-  // backend LLM whenever spawn carries a prompt (<=12 chars, language
-  // follows the prompt). Users can also override / reset it via PATCH.
-  // An empty string resets back to NULL, and the frontend falls back to
-  // showing `#N`. After the DB write, the backend publishes a
-  // LabelUpdated SSE event to push every client.
 
   patchAgentLabel: (agentId: number, label: string): Promise<void> => {
     return f(`/api/agents/${agentId}`, PATCH_JSON({ label })).then(async (res) => {
@@ -585,33 +491,20 @@ export const api = {
     });
   },
 
-  // --- ava.ui.show pages ---
-  //
-  // page-load fetches open pages; SSE page_opened / page_closed prompt
-  // coalesced list refetches. PageRow.url is a gateway reverse-proxy URL
-  // (shape: /pages/<agent_id>-<name>/); the frontend opens it in a new
-  // tab.
-
-  getToUser: (agentId: number, signal?: AbortSignal): Promise<ToUserDocument> =>
-    f(`/api/agents/${agentId}/to-user`, { signal }).then(ok<ToUserDocument>),
+  getToUser: (agentId: number, signal?: AbortSignal, references: string[] = []): Promise<ToUserDocument> => {
+    const query = new URLSearchParams();
+    for (const reference of references) query.append("reference", reference);
+    return f(`/api/agents/${agentId}/to-user${query.size ? `?${query}` : ""}`, { signal }).then(ok<ToUserDocument>);
+  },
 
   listPages: (agentId: number): Promise<PageRow[]> => {
     return f(`/api/agents/${agentId}/pages`).then(ok<PageRow[]>);
   },
 
-  // Every agent's currently-open pages in one fetch — the fleet-wide twin of
-  // listPages, so a many-agent view (the inbox) can surface each agent's live
-  // page without a per-agent request. SSE page events prompt list refetches.
   listAllPages: (): Promise<PageRow[]> => {
     return f(`/api/pages`).then(ok<PageRow[]>);
   },
 
-  // --- fleet graph ---
-  // The weighted agent-relationship graph for the fleet Graph View
-  // (spawn/fork lineage + aggregated message edges + dynamic weights).
-  // `hours` windows both node score and edge events (whitelisted backend-side,
-  // 0 = 5m; 1/6/24/72/168 = hours; omitted = all-time). `decayLambda` is the per-day edge-weight
-  // decay constant (default 0.5 backend-side).
   getFleetGraph: (opts?: { hours?: number; decayLambda?: number }): Promise<WireFleetGraph> => {
     const params = new URLSearchParams();
     if (opts?.hours != null) params.set("hours", String(opts.hours));
@@ -620,9 +513,6 @@ export const api = {
     return f(`/api/fleet/graph${qs ? `?${qs}` : ""}`).then(ok<WireFleetGraph>);
   },
 
-  // --- tasks ---
-  // The task registry (GET /api/tasks). `fields` chooses the full or metadata
-  // projection; `window` narrows the list by last activity on the backend.
   getTasks: <T extends TaskFields = "full">(
     opts?: { window?: string; fields?: T },
   ): Promise<TaskListResponse<T extends "full" ? TaskRow : TaskSummaryRow>> => {
@@ -635,24 +525,15 @@ export const api = {
     );
   },
 
-  // --- memory graph ---
-  // OKF concept-note graph rendered by /okf.
   getMemoryGraph: (): Promise<MemoryGraphResponse> => {
     return f("/api/memory/graph").then(ok<MemoryGraphResponse>);
   },
 
-  // One parsed memory note (markdown body with frontmatter stripped) by its
-  // graph-carried relative path — the click-to-view side panel's data source.
   getMemoryNote: (path: string): Promise<MemoryNoteResponse> => {
     const q = new URLSearchParams({ path });
     return f(`/api/memory/note?${q.toString()}`).then(ok<MemoryNoteResponse>);
   },
 
-  // --- stats ---
-  // One endpoint loads all the stat cards at the top of the sidebar in a
-  // single request (live count / tokens / avg turn / warnings+errors).
-  // `hours` selects the aggregation window — whitelisted backend-side
-  // (0 = 5m; 1/6/24/72/168 = hours), anything else 422s.
   getStatsDashboard: (hours: number, signal?: AbortSignal): Promise<StatsDashboard> => {
     return jsonWithTimeout<StatsDashboard>(
       `/api/stats/dashboard?hours=${hours}`,
@@ -663,8 +544,6 @@ export const api = {
     );
   },
 
-  // The same window's warning/error classes, most frequent first — each row says
-  // whether an active dismissal cancels it (`dismissal_id`).
   getAlertClasses: (hours: number, signal?: AbortSignal): Promise<AlertClassesResponse> => {
     return jsonWithTimeout<AlertClassesResponse>(
       `/api/stats/alert-classes?hours=${hours}`,
@@ -675,7 +554,6 @@ export const api = {
     );
   },
 
-  // The newest events of one class in the window (the row's expanded detail).
   getAlertClassSamples: (
     cls: Pick<AlertClassRow, "level" | "event_name" | "source" | "process">,
     hours: number,
@@ -693,8 +571,6 @@ export const api = {
       .then((body) => body.samples);
   },
 
-  // Dismiss one class (the identity is the row's own, process included), and
-  // reopen it by the dismissal id the row carries.
   dismissAlertClass: (
     cls: Pick<AlertClassRow, "category" | "level" | "event_name" | "source" | "process">,
   ): Promise<EventResolutionRow> =>
@@ -703,16 +579,6 @@ export const api = {
   reopenAlertClass: (dismissalId: number): Promise<EventResolutionRow> =>
     f(`/api/event-resolutions/${dismissalId}/reopen`, POST).then(ok<EventResolutionRow>),
 
-  // --- ops monitor (Insights Ops tab) ---
-  // Time-bucketed ops series from the LGTM stack (Loki + Prometheus) —
-  // SSE/event-log backlog, LLM latency + TPS, process restart counts — one
-  // round trip per window.
-  // Polled at 60s while the Ops section is visible (useSectionVisible).
-
-  // --- alerts (the system→human alert store, Task #1224) ---
-  // Alert instances in the Alertmanager webhook shape, separate from Notice.
-  // The SSE live tail (/api/alerts/stream) invalidates the ["alerts"] snapshots;
-  // this fetch is the initial load + refetch fallback.
   getAlerts: (params: {
     window?: AlertsWindow;
     status?: string;
@@ -728,62 +594,34 @@ export const api = {
     return f(`/api/alerts${qs ? `?${qs}` : ""}`).then(ok<AlertsResponse>);
   },
 
-  // --- config (runtime config panel) ---
-  //
-  // `machine` targets a specific host's view; omitted = this gateway
-  // (cluster + this host's own host fields). For a remote machine the host
-  // fields carry that machine's values + capability hints, while cluster /
-  // agent fields are the gateway's own (machine-independent).
-
   getConfig: (machine?: string): Promise<ConfigView> => {
     const qs = machine != null ? `?machine=${encodeURIComponent(machine)}` : "";
     return f(`/api/config${qs}`).then(ok<ConfigView>);
   },
 
-  // Per-model resolution of the settings that have per-model defaults, each row
-  // naming the layer its effective value came from. No `machine` — every
-  // per-model-defaultable field is cluster-scope. Omitting `model` resolves
-  // against the cluster's own model.
   getResolvedConfig: (model?: string): Promise<ResolvedConfigView> => {
     const qs = model != null ? `?model=${encodeURIComponent(model)}` : "";
     return f(`/api/config/resolved${qs}`).then(ok<ResolvedConfigView>);
   },
 
-  // Every registered machine + its live status (name / description / live).
-  // Backs the config-page machine selector and ava.agents.list_machines().
   getMachines: (): Promise<AgentMachineRow[]> => {
     return f("/api/cluster/machines").then(ok<AgentMachineRow[]>);
   },
-
-  // --- system status ---
 
   getModels: (): Promise<ModelsResponse> => {
     return f("/api/models").then(ok<ModelsResponse>);
   },
 
-  // The model a NEW agent is born on, and which layer produced it ("cluster" =
-  // the DB row set here, "config" = the .env / code default showing through).
-  // Its own narrow endpoint, not a field on PUT /api/config.
   getDefaultModel: (): Promise<DefaultModelView> => {
     return f("/api/config/default-model").then(ok<DefaultModelView>);
   },
 
-  // Set the cluster's default model. 400s on an id outside the spawnable roster.
-  // Applies to agents born after the write — every existing agent keeps the model
-  // frozen on its own row.
   putDefaultModel: (model: string): Promise<DefaultModelView> => {
     return f("/api/config/default-model", PUT_JSON({ model })).then(ok<DefaultModelView>);
   },
 
-  // --- File Upload ---
-
   submitUploadedFiles,
 
-  // Saves the files silently and returns their reference urls without notifying
-  // the agent — the native-image-attachment path, where the caller carries the
-  // returned url into the next multimodal message. Each call is one keyed
-  // operation (a fresh key unless the caller retries with its own); delivering
-  // arbitrary files to the agent is `submitUploadedFiles`.
   uploadFiles: (
     agentId: number,
     files: File[],
@@ -810,7 +648,7 @@ export const api = {
           resolve(JSON.parse(xhr.responseText) as UploadedBatch);
         } else {
           let msg = `HTTP ${xhr.status}`;
-          try { const err = JSON.parse(xhr.responseText) as { detail?: string }; if (err.detail) msg = err.detail; } catch { /* */ }
+          try { const err = JSON.parse(xhr.responseText) as { detail?: string }; if (err.detail) msg = err.detail; } catch { msg = `HTTP ${xhr.status}`; }
           reject(new Error(msg));
         }
       };
@@ -823,19 +661,10 @@ export const api = {
     return f("/api/status").then(ok<SystemStatus>);
   },
 
-  // This host's cluster snapshot. Unlike /api/status, this path bypasses the
-  // cluster-paused 503 middleware, so it is the one status source readable while
-  // the cluster is paused.
   getClusterStatus: (): Promise<ClusterStatus> => {
     return f("/api/cluster/status").then(ok<ClusterStatus>);
   },
 
-  // Full-replace of the override layer. `machine` targets a host's overrides
-  // (host-scope keys only — a cluster key on a remote PUT is rejected 400);
-  // omitted = this gateway. Returns per-field verdicts: `applied` is true
-  // iff every field passed (atomic — one bad field writes nothing), `results`
-  // carries the per-field ok/reason, `restart_required` the union of written
-  // fields' restart targets for the per-machine banner.
   async putConfig(
     body: Record<string, unknown>,
     machine?: string,
@@ -853,21 +682,10 @@ export const api = {
     return res.json() as Promise<ConfigWriteResult>;
   },
 
-  // --- inventory (Plugins & MCP, cross-machine matrix) ---
-  //
-  // GET /api/inventory (no machine arg) returns the collapsed cross-machine
-  // matrix: every machine considered + per plugin/MCP-server its per-host
-  // state. The single-machine ?machine= view exists on the backend but the UI
-  // drives entirely off the aggregate, so only the matrix getter is exposed.
   getInventory: (): Promise<InventoryAggregate> => {
     return f("/api/inventory").then(ok<InventoryAggregate>);
   },
 
-  // Enable/disable plugins + MCP servers on ONE host. `machine` targets that
-  // host's inventory; the body carries the desired on/off per item name.
-  // Returns per-item verdicts: `applied` is true iff every item passed (atomic
-  // — one rejected item writes nothing), `plugin_results` / `mcp_results` carry
-  // the per-item ok/reason.
   async putInventory(
     body: { plugins?: Record<string, boolean>; mcp_servers?: Record<string, boolean> },
     machine: string,
@@ -884,25 +702,14 @@ export const api = {
     return res.json() as Promise<InventoryWriteResult>;
   },
 
-  // This gateway host's installed skills — name / source layer (core/plugin/
-  // machine) / enabled / local drift. Read-only, single-host (skills are
-  // per-machine; there is no cross-machine matrix like inventory).
   getSkills: (): Promise<SkillsView> => {
     return f("/api/skills").then(ok<SkillsView>);
   },
 
-  // Toggle one skill's enabled flag in the install registry. The change is
-  // immediate; the skill scanner picks it up on the next agent spawn.
   putSkillEnabled: (name: string, enabled: boolean): Promise<SkillView> => {
     return f("/api/skills", PUT_JSON({ name, enabled })).then(ok<SkillView>);
   },
 
-  // ── Auth ───────────────────────────────────────────────────────────
-
-  // Authenticate with the cluster password. The username field is accepted
-  // for Chrome password-manager compatibility but not validated — only the
-  // password (cluster secret) matters. On success the gateway sets a session
-  // cookie; subsequent requests carry it automatically.
   login: (username: string, password: string): Promise<{ ok: boolean }> => {
     return f("/api/auth/login", {
       method: "POST",
@@ -911,19 +718,15 @@ export const api = {
     }).then(ok<{ ok: boolean }>);
   },
 
-  // Clear the session cookie. Idempotent — always succeeds.
   logout: (): Promise<{ ok: boolean }> => {
     return f("/api/auth/logout", { method: "POST" }).then(
       ok<{ ok: boolean }>,
     );
   },
 
-  // Check whether the current request carries a valid session cookie.
   checkAuth: (): Promise<{ authenticated: boolean }> => {
     return f("/api/auth/check").then(ok<{ authenticated: boolean }>);
   },
-
-  // --- Schedules (GET /api/schedules) ---
 
   listSchedules: (): Promise<ScheduleSummary[]> => {
     return f("/api/schedules").then(ok<ScheduleSummary[]>);
@@ -973,29 +776,13 @@ export const api = {
     return draftAgent("/api/keyed/v1/schedules/draft", { nl }, operationKey);
   },
 
-  // Spawn an ava-guide agent for a natural-language ops request; returns its id
-  // so the Control page's Guide entry can open the conversation.
   draftGuide: (nl: string, operationKey: string = newOperationKey()): Promise<GuideDraftResponse> => {
     return draftAgent("/api/keyed/v1/guide/draft", { nl }, operationKey);
   },
 
-  // Spawn an ava-package-installer agent to find, install, and verify a skill /
-  // plugin / MCP server; returns its id so the Control page can open the
-  // conversation. The whole lifecycle happens in that session — there is no
-  // install-by-URL endpoint on purpose.
   draftPackage: (kind: PackageKind, nl: string, operationKey: string = newOperationKey()): Promise<PackageDraftResponse> => {
     return draftAgent("/api/keyed/v1/packages/draft", { kind, nl }, operationKey);
   },
-
-  // --- Presets (config templates; GET /api/presets) ---
-  //
-  // A preset bundles a per-agent config overlay under a name; selecting one at
-  // spawn time seeds the new agent's config from it (an explicit config wins
-  // per field). Managed on the /presets page; picked in the spawn dialog.
-  // Creation is natural-language only — the presets page composes a prompt
-  // pointing a plain spawnAgent() call at ava.skills.ava_guide.presets, which
-  // designs the config and creates it directly; this client has no raw
-  // createPreset and no dedicated draft endpoint.
 
   listPresets: (): Promise<PresetView[]> => {
     return f("/api/presets").then(ok<PresetView[]>);
@@ -1009,12 +796,6 @@ export const api = {
     return f(`/api/presets/${id}`, { method: "DELETE" }).then(ok<{ status: string }>);
   },
 
-  // --- User settings (GET /api/settings, PUT /api/settings/{key}) ---
-  //
-  // Persistent key-value preferences stored server-side (user_settings DB
-  // table). Each key maps to an opaque JSONB value; the frontend owns the
-  // shape and validation of its own keys. Defaults live in USER_SETTING_DEFAULTS.
-
   getSettings: (): Promise<UserSettingListResponse> => {
     return f("/api/settings").then(ok<UserSettingListResponse>);
   },
@@ -1024,12 +805,6 @@ export const api = {
       ok<UserSettingRow>,
     );
   },
-
-  // --- Plugin console contributions (GET /api/ui/contributions) ---
-  //
-  // The merged, plugin-attributed declaration set of the cluster's enabled
-  // plugins. Read like any other server data; it changes only when a plugin is
-  // installed, enabled, or upgraded.
 
   getUiContributions: (): Promise<UiContributionsResponse> => {
     return f("/api/ui/contributions").then(ok<UiContributionsResponse>);

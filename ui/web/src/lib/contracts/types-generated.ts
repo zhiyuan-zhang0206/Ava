@@ -239,14 +239,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/to-user/document": {
+    "/api/agents/{agent_id}/to-user/resource": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["to_user_document_api_agents__agent_id__to_user_document_get"];
+        get: operations["get_resource_api_agents__agent_id__to_user_resource_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3978,10 +3978,19 @@ export interface components {
             has_more: boolean;
         };
         ToUserDocument: {
-            format: "html" | "markdown";
             content: string | null;
             version: string | null;
             modified_at: string | null;
+            resources?: {
+                [key: string]: components["schemas"]["ToUserResource"];
+            };
+            legacy_html: boolean;
+        };
+        ToUserResource: {
+            id: string;
+            name: string;
+            markdown: boolean;
+            version: string | null;
         };
         TokenUsageResponse: {
             input_tokens: number;
@@ -4463,7 +4472,9 @@ export interface operations {
     };
     get_to_user_api_agents__agent_id__to_user_get: {
         parameters: {
-            query?: never;
+            query?: {
+                reference?: string[] | null;
+            };
             header?: never;
             path: {
                 agent_id: number;
@@ -4490,9 +4501,11 @@ export interface operations {
             };
         };
     };
-    to_user_document_api_agents__agent_id__to_user_document_get: {
+    get_resource_api_agents__agent_id__to_user_resource_get: {
         parameters: {
-            query?: never;
+            query: {
+                reference: string[];
+            };
             header?: never;
             path: {
                 agent_id: number;
@@ -4506,7 +4519,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/html": string;
+                    "application/json": unknown;
                 };
             };
             422: {

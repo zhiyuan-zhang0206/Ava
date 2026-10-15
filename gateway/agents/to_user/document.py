@@ -1,34 +1,21 @@
-"""Read the workspace document through its home machine; never copy it to the DB."""
-
 import asyncio
+import mimetypes
+from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+import httpx
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
+from pydantic import ValidationError
 
-from base.agents.to_user import ToUserDocument
+from base.agents.to_user import MAX_RESOURCE_BYTES, ToUserDocument, ToUserReadRequest
+from base.cluster.machine import gateway_auth_headers
+from base.cluster.machine.boot import gateway_access_from_boot
+from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from gateway.agents.eval_guard import deny_isolated_result_read
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, dispatch_to_machine
 
 router = APIRouter()
-
-# Let the authenticated shell initiate frame navigation. A navigation originating
-# in an opaque sandbox otherwise loses SameSite cookies on private Ava links.
-# This bridge carries only a URL; it never receives credentials or replies.
-NAVIGATION_BRIDGE = """<script>
-document.addEventListener('click', function(event) {
-  if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
-      event.ctrlKey || event.shiftKey || event.altKey) return;
-  const link = event.target.closest && event.target.closest('a[href]');
-  if (!link || link.hasAttribute('download')) return;
-  const href = link.getAttribute('href');
-  if (href.startsWith('#')) return;
-  const url = new URL(link.href);
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
-  if (window.parent === window) return;
-  event.preventDefault();
-  window.parent.postMessage({type: 'ava:to-user:navigate', href: url.href}, '*');
-});
-</script>"""
 
 
 def home_machine(request: Request, agent_id: int) -> str:
@@ -41,15 +28,20 @@ def home_machine(request: Request, agent_id: int) -> str:
     return row[0]
 
 
-@router.get("/api/agents/{agent_id}/to-user")
-async def get_to_user(agent_id: int, request: Request) -> ToUserDocument:
-    machine = await asyncio.to_thread(home_machine, request, agent_id)
+def resource_request(agent_id: int, references: list[str]) -> ToUserReadRequest:
+    try:
+        return ToUserReadRequest(agent_id=agent_id, references=references)
+    except ValidationError as exc:
+        raise HTTPException(422, "Invalid document reference") from exc
+
+
+async def read_snapshot(request: Request, query: ToUserReadRequest, machine: str) -> ToUserDocument:
     try:
         result = await dispatch_to_machine(
             request.app.state.db,
             target_machine=machine,
             kind="to_user_read",
-            payload={"agent_id": agent_id},
+            payload=query.model_dump(),
             timeout_s=3,
             retries=0,
         )
@@ -60,30 +52,79 @@ async def get_to_user(agent_id: int, request: Request) -> ToUserDocument:
     return ToUserDocument.model_validate(result)
 
 
-@router.get("/api/agents/{agent_id}/to-user/document", response_class=HTMLResponse)
-async def to_user_document(agent_id: int, request: Request) -> HTMLResponse:
-    document = await get_to_user(agent_id, request)
-    return html_document_response(document)
+@router.get("/api/agents/{agent_id}/to-user")
+async def get_to_user(
+    agent_id: int,
+    request: Request,
+    reference: Annotated[list[str] | None, Query()] = None,
+) -> ToUserDocument:
+    machine = await asyncio.to_thread(home_machine, request, agent_id)
+    return await read_snapshot(request, resource_request(agent_id, reference or []), machine)
 
 
-def html_document_response(document: ToUserDocument) -> HTMLResponse:
-    """Apply the same trust boundary to embedded and directly-opened documents."""
-    if document.content is None or document.format != "html":
-        raise HTTPException(404, "No HTML document")
-    # The response sandbox also applies when opened directly in a new tab.
-    # Scripts have an opaque origin, no Ava cookies/storage or gateway tokens.
-    return HTMLResponse(
-        document.content + NAVIGATION_BRIDGE,
+def attachment_response(content: bytes, name: str) -> Response:
+
+    media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    inline = (
+        media_type.startswith(("image/", "audio/", "video/")) or media_type == "application/pdf"
+    )
+    disposition = "inline" if inline else "attachment"
+    return Response(
+        content,
+        media_type=media_type,
         headers={
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(name, safe='')}",
             "Cache-Control": "no-store",
-            "Content-Security-Policy": (
-                "sandbox allow-scripts allow-forms allow-popups; "
-                "default-src 'none'; script-src 'unsafe-inline' https:; "
-                "style-src 'unsafe-inline' https:; img-src https: http: data:; "
-                "font-src https: data:; media-src https:; frame-src https: http:; "
-                "connect-src 'none'; form-action 'none'; base-uri 'none'"
-            ),
-            "Referrer-Policy": "no-referrer",
             "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+            "Referrer-Policy": "no-referrer",
         },
     )
+
+
+async def fetch_resource(
+    client: httpx.AsyncClient, url: str, query: ToUserReadRequest, headers: dict[str, str]
+) -> bytes:
+
+    async with client.stream("POST", url, json=query.model_dump(), headers=headers) as response:
+        if response.status_code != 200:
+            status = response.status_code if response.status_code in (404, 422, 503) else 502
+            raise HTTPException(status, "Referenced file could not be read")
+        content = bytearray()
+        async for chunk in response.aiter_bytes():
+            content.extend(chunk)
+            if len(content) > MAX_RESOURCE_BYTES:
+                raise HTTPException(413, "Referenced file exceeds the resource limit")
+        return bytes(content)
+
+
+@router.get("/api/agents/{agent_id}/to-user/resource")
+async def get_resource(
+    agent_id: int,
+    request: Request,
+    reference: Annotated[list[str], Query(min_length=1, max_length=8)],
+) -> Response:
+    machine = await asyncio.to_thread(home_machine, request, agent_id)
+    query = resource_request(agent_id, reference)
+    parent = resource_request(agent_id, query.references[:-1])
+    document = await read_snapshot(request, parent, machine)
+    resource = next(
+        (value for value in document.resources.values() if value.id == reference[-1]), None
+    )
+    if resource is None:
+        raise HTTPException(404, "The document no longer references this resource")
+    access = gateway_access_from_boot(request.app.state.gateway_process.config)
+    try:
+        ops_url = await asyncio.to_thread(lookup, request.app.state.db, machine)
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30, connect=3), trust_env=False
+        ) as client:
+            content = await fetch_resource(
+                client,
+                f"{ops_url.rstrip('/')}/to-user/resource",
+                query,
+                gateway_auth_headers(access),
+            )
+    except (httpx.HTTPError, MachineGatewayUrlMissing, MachineNotRegistered) as exc:
+        raise HTTPException(503, "The agent's machine is unavailable") from exc
+    return attachment_response(content, resource.name)

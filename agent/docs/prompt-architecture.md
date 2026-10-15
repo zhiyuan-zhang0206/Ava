@@ -74,8 +74,8 @@ Capabilities rather than standing as its own section.
   (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. ava_code's `cwd`) first, then
   `settings.sdk_expand_in_system_prompt` (env `AVA_SDK_EXPAND`, default `shell,files,agents,tasks`),
   deduped keep-first — full `ava.help(ava.<path>)` stubs right after the
-  overview. `*` expands to every top-level public namespace (discovered from
-  `help(ava)`, sorted; top-level functions like `help`/`understand` are skipped
+  overview. `*` recursively expands public namespaces (discovered from
+  `__all_for_ava__`, sorted; top-level functions like `help`/`understand` are skipped
   — the overview already prints them in full; `skills` / `mcps` are skipped as
   capability surfaces, `_CAPABILITY_SURFACES`; naming a surface explicitly
   overrides, but a path INSIDE one — `skills.gmail`, `mcps.chrome` — is refused
@@ -83,7 +83,7 @@ Capabilities rather than standing as its own section.
   SKILL.md body / that server's tool schemas into every prompt and records a
   bogus `loaded` attribution; a skill body belongs in
   `skills_to_expand_at_start`) and merges with any explicit
-  entries, so `*,shell.sessions` reaches a nested path `*` cannot. AVA_SDK_DISABLE
+  entries; an explicit nested path already included by `*` is deduplicated. AVA_SDK_DISABLE
   is consulted before resolution (a disabled entry is skipped unconditionally
   and silently, and excluded from `*`); any other resolution miss warns. The
   `ava_code` plugin's `_coding_tools_section` consults the same effective view
@@ -518,8 +518,10 @@ ablation design is TBD, but the on/off surface is already in place to run it.
 
 ### Shared user context
 
-The workspace guidance explains that `to_user.html` (or `to_user.md` when the
-agent's `to_user_format` is `markdown`) is continuously displayed beside messages.
+The workspace guidance explains that `to_user.md` is continuously displayed beside messages.
+Markdown links may refer to relative, absolute or home-relative files on the agent's machine;
+Ava serves those references without a publication step. Legacy HTML context must be
+rewritten into Markdown, and raw HTML is not rendered.
 It imposes no document schema. The agent-ID context note includes the current file
 contents when a context is created or compacted; forks read their own workspace.
 Invalid or unreadable documents produce a repair note rather than preventing the

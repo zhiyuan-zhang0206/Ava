@@ -1,13 +1,3 @@
-"""The agent-ID context note — the identity line of the context head.
-
-Policy: every window states the agent's own id — plus label / machine /
-workspace when available — as a system-styled HumanMessage outside the
-SystemMessage, so a fork does not carry a stale identity (issue #1320). The
-note reads the explicit host context because many agents share one process.
-Missing optional values do not cost the identity line; label-read failures
-propagate to the caller.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -30,8 +20,7 @@ from base.packages.plugin_providers import build_model_catalog
 
 @pytest.fixture(autouse=True)
 def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The note opts out without an established process identity, like every
-    other framework note; give it one so the content is what is under test."""
+
     pin_agent(29)
 
 
@@ -56,9 +45,7 @@ def _no_machine(_ctx: AvaContext) -> str | None:
 
 @pytest.fixture(autouse=True)
 def _no_optional_clauses(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default the label / machine clauses to absent; tests opt them back in.
-    The workspace clause stays real but its section gate is off by default here,
-    so a test that does not exercise it never touches the filesystem."""
+
     monkeypatch.setattr(context_notes, "own_label", _no_label)
     monkeypatch.setattr(context_notes, "machine_clause", _no_machine)
     monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", False)
@@ -73,18 +60,17 @@ def _runner_machine(_ctx: AvaContext) -> str | None:
 
 
 def _content() -> str:
-    """The note's body with its `[system]` carrier prefix stripped — the
-    assertions are about what the note says, not its framing."""
+
     note = agent_id_note(_context())
     assert note is not None
-    assert note.additional_kwargs["ava_note_tag"] == NoteTag.AGENT_ID  # pyright: ignore[reportUnknownMemberType]
-    content = str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert note.additional_kwargs["ava_note_tag"] == NoteTag.AGENT_ID
+    content = str(note.content)
     assert content.startswith("[system] ")
     return content[len("[system] ") :]
 
 
 def test_states_the_id_label_and_machine(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The identity line carries id + label + machine."""
+
     monkeypatch.setattr(context_notes, "own_label", _steward_label)
     monkeypatch.setattr(context_notes, "machine_clause", _runner_machine)
 
@@ -92,7 +78,7 @@ def test_states_the_id_label_and_machine(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_id_only_when_no_optional_clauses() -> None:
-    """A missing clause is omitted, never rendered empty — and never costs the id."""
+
     assert _content() == "Your Agent ID is 29."
 
 
@@ -108,8 +94,7 @@ def test_partial_clauses_render_alone(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_workspace_clause_carries_the_concrete_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The concrete workspace path lives HERE — the `# Workspace` prompt section
-    is id-free for fork safety and points at this note."""
+
     monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", True)
     ws = tmp_path / "workspaces" / "29"
 
@@ -119,7 +104,7 @@ def test_workspace_clause_carries_the_concrete_path(
     monkeypatch.setattr(context_notes, "workspace_dir", _fake_workspace_dir)
     assert _content().endswith(f" Your workspace is {ws}.")
     ws.mkdir(parents=True)
-    document = ws / "to_user.html"
+    document = ws / "to_user.md"
     document.write_text("<p>Waiting on a decision</p>")
     assert document.read_text() in _content()
     document.write_text("<p>The decision has arrived</p>")
@@ -130,8 +115,7 @@ def test_workspace_clause_carries_the_concrete_path(
 def test_workspace_clause_respects_the_section_gate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Bench runners that turn the `# Workspace` section off keep their prompts
-    free of workspace chatter — the note's path clause honours the same gate."""
+
     monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", False)
 
     def _fake_workspace_dir(_agent_id: int) -> Path:
@@ -142,25 +126,22 @@ def test_workspace_clause_respects_the_section_gate(
 
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit host context wins over unrelated native turn identity."""
+
     context = _context(31)
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     note = agent_id_note(context)
 
     assert note is not None
-    assert "Your Agent ID is 31" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert "Your Agent ID is 31" in str(note.content)
 
 
 def test_opts_out_without_any_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Snapshot renders / dev REPL: no slot, no turn, no env — decline."""
+
     context = _context(None)
     pin_no_identity()
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     assert agent_id_note(context) is None
-
-
-# ── clause readers ──
 
 
 class _FakeCursor:
@@ -189,14 +170,14 @@ class _FakeDB:
 
 
 def _fake_sql(monkeypatch: pytest.MonkeyPatch, fake: object) -> AvaContext:
-    """Supply this note's SQL connection without binding the shared SDK."""
+
     ctx = _context()
     monkeypatch.setattr(ctx.clients, "_sql", fake)
     return ctx
 
 
 def test_own_label_normalizes_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A label is free text; the one-line note gets it whitespace-collapsed."""
+
     ctx = _fake_sql(monkeypatch, _FakeDB(("  memory\n  steward ",)))
     assert own_label(ctx, 29) == "memory steward"
 
@@ -244,7 +225,7 @@ def test_agent_id_note_propagates_query_failure(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_unset_machine_name_drops_only_the_machine_clause(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unset machine name is an expected condition; any other failure reading it surfaces."""
+
     from base.cluster import machine
 
     def _unset() -> str:
