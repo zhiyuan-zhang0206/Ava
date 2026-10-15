@@ -7,10 +7,15 @@ class ScopeBindings(ast.NodeVisitor):
         self.names: Counter[str] = Counter()
         self.attribute_writes: set[str] = set()
         self.star_import = False
+        self.native_fixture_mutated = False
+        self.globals: set[str] = set()
 
     def visit_Name(self, node: ast.Name) -> None:
         if isinstance(node.ctx, ast.Store | ast.Del):
             self.names[node.id] += 1
+
+    def visit_Global(self, node: ast.Global) -> None:
+        self.globals.update(node.names)
 
     def visit_Import(self, node: ast.Import) -> None:
         self.names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
@@ -19,14 +24,39 @@ class ScopeBindings(ast.NodeVisitor):
         self.star_import |= any(alias.name == "*" for alias in node.names)
         self.names.update(alias.asname or alias.name for alias in node.names)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+    def function_header(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         self.names[node.name] += 1
+        self.visit(node.args)
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        if node.returns is not None:
+            self.visit(node.returns)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.function_header(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self.names[node.name] += 1
+        self.function_header(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.names[node.name] += 1
+        for expression in [
+            *node.bases,
+            *node.decorator_list,
+            *(keyword.value for keyword in node.keywords),
+        ]:
+            self.visit(expression)
+        nested = scope_bindings(node.body)
+        self.names.update({name: nested.names[name] for name in nested.globals})
+        self.attribute_writes.update(nested.attribute_writes)
+        imports = {
+            name: kind
+            for statement in node.body
+            for name, kind in pytest_imports(statement).items()
+        }
+        self.native_fixture_mutated |= nested.native_fixture_mutated or any(
+            imports.get(name) == "module" for name in nested.attribute_writes
+        )
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         if node.name is not None:
@@ -89,7 +119,7 @@ def pytest_imports(node: ast.stmt) -> dict[str, str]:
 def imported_fixture_names(
     body: list[ast.stmt], inherited: dict[str, str], bindings: ScopeBindings
 ) -> dict[str, str]:
-    if bindings.star_import:
+    if bindings.star_import or bindings.native_fixture_mutated:
         return {}
     imports = {name: kind for name, kind in inherited.items() if name not in bindings.names}
     for node in body:

@@ -120,3 +120,28 @@ def test_late_import_does_not_prove_decorator_identity(
     source += imports + "\n"
     repo = repository(tmp_path, {"pkg/tests/test_client.py": source})
     assert any(f.code == "free-comment" for f in check(repo, strict_paths=repo.files).findings)
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "class Configure:\n    pytest.fixture = replacement",
+        "class Configure:\n    del pytest.fixture",
+        "class Configure:\n    global pytest\n    pytest = replacement",
+        "class Configure:\n    import pytest as local_testing\n    local_testing.fixture = replacement",
+        "def configure(value=(pytest := replacement)): pass",
+        "@(pytest := replacement)\ndef configure(): pass",
+        "class Configure((pytest := replacement)): pass",
+    ],
+)
+def test_declaration_time_writes_invalidate_fixture_proof(tmp_path: Path, declaration: str) -> None:
+    source = f"import pytest\n{declaration}\n@pytest.fixture\ndef client():\n{HELP}    yield 1\n"
+    repo = repository(tmp_path, {"pkg/tests/test_client.py": source})
+    assert any(f.code == "free-comment" for f in check(repo, strict_paths=repo.files).findings)
+
+
+def test_class_local_name_does_not_shadow_the_module_import(tmp_path: Path) -> None:
+    source = "import pytest\nclass Configure:\n    pytest = replacement\n"
+    source += "@pytest.fixture\ndef client():\n" + HELP + "    yield 1\n"
+    repo = repository(tmp_path, {"pkg/tests/test_client.py": source})
+    assert not check(repo, strict_paths=repo.files).findings
