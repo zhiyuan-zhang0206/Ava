@@ -13,7 +13,6 @@ directory counts as existing when any node's logical path lies under it. E014
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -22,20 +21,18 @@ from scripts.content_lint import lint_ava_okf as gate
 
 
 def test_explicit_missing_target_is_an_error(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A typo'd explicit path must fail, not exit 0 with a confusing message."""
     good = tmp_path / "ok.ava.okf.md"
     good.write_text("# placeholder\n", encoding="utf-8")
     missing = tmp_path / "typo.ava.okf.md"
-    monkeypatch.setattr(sys, "argv", ["lint_ava_okf.py", str(missing)])
     with pytest.raises(SystemExit) as exc:
-        gate.main()
+        gate.main([str(missing)])
     assert exc.value.code == 1
     assert str(missing) in capsys.readouterr().err
-    monkeypatch.setattr(sys, "argv", ["lint_ava_okf.py", str(good), str(missing)])
     with pytest.raises(SystemExit) as exc2:
-        gate.main()
+        gate.main([str(good), str(missing)])
     assert exc2.value.code == 1
 
 
@@ -174,13 +171,12 @@ def test_e014_blocks_the_gate(
     (tmp_path / "agent" / "docs" / "ok.ava.okf.md").write_text(_NODE, encoding="utf-8")
     (tmp_path / "agent" / "stray.ava.okf.md").write_text(_NODE, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["lint_ava_okf.py"])
     with pytest.raises(SystemExit) as exc:
-        gate.main()
+        gate.main([])
     assert exc.value.code == 1
     assert "E014" in capsys.readouterr().out
     (tmp_path / "agent" / "stray.ava.okf.md").unlink()
-    gate.main()  # clean tree: returns without exiting non-zero
+    gate.main([])  # clean tree: returns without exiting non-zero
 
 
 def _oversized(repo_root: Path, rel: str) -> str:

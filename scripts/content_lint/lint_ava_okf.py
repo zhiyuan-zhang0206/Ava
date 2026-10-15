@@ -75,6 +75,7 @@ import posixpath
 import re
 import sys
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -662,7 +663,7 @@ def _report(all_errors: dict[str, list[LintError]], repo_root: Path, n_files: in
     return error_count
 
 
-def main():
+def main(argv: Sequence[str] | None = None):
     parser = argparse.ArgumentParser(description="Lint Ava OKF document format")
     parser.add_argument(
         "paths", nargs="*", help="Files or directories to lint (default: repo root)"
@@ -670,7 +671,7 @@ def main():
     parser.add_argument(
         "--fix", action="store_true", help="Auto-fix where possible (not yet implemented)"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     missing = [p for p in args.paths if not Path(p).exists()]
     if missing:

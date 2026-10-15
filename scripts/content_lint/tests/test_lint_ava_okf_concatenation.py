@@ -17,7 +17,6 @@ Everything is asserted against constructed trees, never the real doc tree.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -55,10 +54,9 @@ def _node(tmp_path: Path, rel: str, body: str = "") -> Path:
 def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
     """Lint `tmp_path` as the repo root; return (effective exit code, stdout)."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["lint_ava_okf.py"])
     code = 0
     try:
-        _lint.main()
+        _lint.main([])
     except SystemExit as exc:
         code = int(exc.code or 0)
     return code, capsys.readouterr().out

@@ -51,7 +51,11 @@ def test_local_names_follow_scope_boundaries(
     if isinstance(scope, ast.Assign):
         scope = scope.value
 
-    found = [node.id for node in bindings.local_nodes(scope) if isinstance(node, ast.Name)]
+    found = [
+        node.id
+        for node in bindings.local_nodes(scope, iter_children=ast.iter_child_nodes)
+        if isinstance(node, ast.Name)
+    ]
 
     assert found == names
 
@@ -61,7 +65,7 @@ def test_deep_expressions_do_not_need_recursive_generator_frames() -> None:
     for _ in range(2000):
         expression = ast.UnaryOp(op=ast.Not(), operand=expression)
 
-    nodes = list(bindings.local_nodes(expression))
+    nodes = list(bindings.local_nodes(expression, iter_children=ast.iter_child_nodes))
 
     assert len(nodes) == 4001
     assert isinstance(nodes[-2], ast.Name)
@@ -122,7 +126,9 @@ def test_binding_projection_preserves_calls_and_actual_writes_in_lexical_order()
         "def launch(arg=default()):\n hidden = body()\n"
         "result = [item() for name in iterable() if check()]\n"
     )
-    projected = list(bindings.local_nodes(tree, bindings_only=True))
+    projected = list(
+        bindings.local_nodes(tree, bindings_only=True, iter_children=ast.iter_child_nodes)
+    )
     assert [ast.unparse(n.func) for n in projected if isinstance(n, ast.Call)] == [
         "receiver",
         "default",
@@ -175,9 +181,7 @@ def test_binding_projection_retains_stores_and_definition_time_annotation_calls(
     ]
 
 
-def test_binding_projection_does_not_expand_inert_leaf_fields(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_binding_projection_does_not_expand_inert_leaf_fields() -> None:
     tree = ast.parse("target = sink([name, *range(1000), 'literal'])\n")
     original = ast.iter_child_nodes
     expanded_leaves: list[ast.AST] = []
@@ -187,12 +191,10 @@ def test_binding_projection_does_not_expand_inert_leaf_fields(
             expanded_leaves.append(node)
         return original(node)
 
-    monkeypatch.setattr(ast, "iter_child_nodes", observe)
-
-    projected = list(bindings.local_nodes(tree, bindings_only=True))
+    projected = list(bindings.local_nodes(tree, bindings_only=True, iter_children=observe))
 
     assert [n.id for n in projected if isinstance(n, ast.Name)] == ["target"]
     assert [ast.unparse(n.func) for n in projected if isinstance(n, ast.Call)] == ["sink", "range"]
     assert expanded_leaves == []
-    list(bindings.local_nodes(tree))
+    list(bindings.local_nodes(tree, iter_children=observe))
     assert expanded_leaves  # The default public walk still visits these fields.

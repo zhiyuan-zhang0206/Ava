@@ -18,6 +18,8 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import fire_slot_once
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -69,12 +71,16 @@ class _FakeAccounting(SimpleNamespace):
         super().__init__()
         self.module = module
         self.windows: list[tuple[str, str]] = []
+        self.hosts: list[Host] = []
         self.DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
         self.DEFAULT_LEDGER = Path("ledger.jsonl")
         self.entries = [_entry(5811, linux=10, macos=0)]
 
-    def collect(self, repo: str, since: str, until: str) -> list[dict[str, int | None]]:
+    def collect(
+        self, repo: str, since: str, until: str, *, host: Host
+    ) -> list[dict[str, int | None]]:
         del repo
+        self.hosts.append(host)
         self.windows.append((since, until))
         return self.entries
 
@@ -192,6 +198,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
 
     monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
+    command_host = fake_host()
     accounting = _FakeAccounting(module)
     monkeypatch.setattr(accounting.module, "_load_accounting", lambda: accounting)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)  # 05:00 cluster
@@ -207,10 +214,12 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
             producer=lambda: None,
             image=LoadedCommit(REPO_ROOT, None),
             machine_reader=machine_identity.name,
+            host=command_host,
         ),
     )
 
     assert accounting.windows == [("2026-09-05T21:00:00Z", "2026-09-06T21:00:00Z")]
+    assert accounting.hosts == [command_host]
     [event] = emitted_events
     assert event.category == "telemetry"
     assert event.event_name == "ci_usage_daily"
@@ -229,8 +238,10 @@ def test_fire_reports_failure_without_raising(
     module = _load_schedule_module()
     accounting = _FakeAccounting(module)
 
-    def broken_collect(repo: str, since: str, until: str) -> list[dict[str, int | None]]:
-        del repo, since, until
+    def broken_collect(
+        repo: str, since: str, until: str, *, host: Host
+    ) -> list[dict[str, int | None]]:
+        del repo, since, until, host
         raise RuntimeError("gh api down")
 
     monkeypatch.setattr(accounting, "collect", broken_collect)
@@ -250,6 +261,7 @@ def test_fire_reports_failure_without_raising(
             producer=lambda: None,
             image=LoadedCommit(REPO_ROOT, None),
             machine_reader=machine_identity.name,
+            host=fake_host(),
         ),
     )
 

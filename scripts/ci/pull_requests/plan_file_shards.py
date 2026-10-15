@@ -6,6 +6,7 @@ collection to `--stacks`; the exit status is pytest's.
 """
 
 import argparse
+import faulthandler
 import sys
 from pathlib import Path
 
@@ -18,7 +19,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--plan", required=True, help="where pytest writes the plan (JSON)")
     parser.add_argument("--stacks", required=True, help="where periodic tracebacks are written")
     args = parser.parse_args(argv)
-    with Path(args.stacks).open("w") as stacks, periodic_tracebacks(stacks):
+    with (
+        Path(args.stacks).open("w") as stacks,
+        periodic_tracebacks(stacks, dump_traceback=faulthandler.dump_traceback),
+    ):
         import pytest
 
         return int(

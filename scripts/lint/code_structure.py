@@ -92,6 +92,7 @@ import ast
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -118,7 +119,13 @@ _AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9
 _STRUCTURE_DIRS = packages("application", "tests", "tooling")
 
 
-def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> list[tuple[int, str]]:
+def _scan_file(
+    path: Path,
+    rel_path: str,
+    tree: ast.Module | None = None,
+    *,
+    parse_ast: Callable[..., ast.Module],
+) -> list[tuple[int, str]]:
     """Return AST violations as [(lineno, message), ...]."""
     if lint_common.is_test_path(rel_path):
         return []  # tests are outside the AST rules (module docstring)
@@ -127,7 +134,7 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return []  # unreadable entry (e.g. a dangling symlink) or binary content
-        tree = ast.parse(text, filename=rel_path)
+        tree = parse_ast(text, filename=rel_path)
     out: list[tuple[int, str]] = []
     out.extend(type_checking.violations(tree, rel_path))
     out.extend(machine_role.violations(tree))
@@ -334,6 +341,7 @@ def _check_ast_and_quality(
     full: bool,
     repo_root: Path,
     renames: dict[str, str] | None = None,
+    parse_ast: Callable[..., ast.Module],
 ) -> list[str]:
     files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
     ast_files = _ast_rule_files(argv, repo_root)
@@ -353,10 +361,11 @@ def _check_ast_and_quality(
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        tree = ast.parse(text, filename=rel)
+        tree = parse_ast(text, filename=rel)
         if ast_rules:
             errors.extend(
-                f"{rel}:{line}: {message}" for line, message in _scan_file(path, rel, tree)
+                f"{rel}:{line}: {message}"
+                for line, message in _scan_file(path, rel, tree, parse_ast=parse_ast)
             )
             _collect_locality(tree, rel, sites, scanned)
         if ambient:
@@ -402,6 +411,7 @@ def main(
     *,
     repo_root: Path | None = None,
     baseline_base: str | None = None,
+    parse_ast: Callable[..., ast.Module],
 ) -> int:
     """Run the gate for CLI arguments against an explicit checkout and comparison commit.
 
@@ -438,7 +448,13 @@ def main(
         return 1
     errors.extend(
         _check_ast_and_quality(
-            argv, targets, baseline, full=full, repo_root=repo_root, renames=renames
+            argv,
+            targets,
+            baseline,
+            full=full,
+            repo_root=repo_root,
+            renames=renames,
+            parse_ast=parse_ast,
         )
     )
     for error in errors:
@@ -453,4 +469,4 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(parse_ast=ast.parse))

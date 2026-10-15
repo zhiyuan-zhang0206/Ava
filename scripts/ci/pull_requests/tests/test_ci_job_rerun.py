@@ -15,10 +15,13 @@ a failed GitHub query raises instead of reading as "no failed jobs".
 from __future__ import annotations
 
 import json
-from typing import Any
+import subprocess
+from collections.abc import Sequence
 
 import pytest
 
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.pull_requests import job_rerun as rerun
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
@@ -33,15 +36,17 @@ class _R:
         self.returncode = returncode
 
 
-def _fake_gh(responses: list[Any]) -> Any:
-    """subprocess.run stub that pops one canned response per call."""
+def _fake_gh(responses: list[_R]) -> tuple[Host, list[list[str]]]:
+    """Host stub that pops one canned response per call."""
     calls: list[list[str]] = []
 
-    def _run(cmd: list[str], **_k) -> _R:
-        calls.append(cmd)
-        return responses.pop(0)
+    def _run(argv: Sequence[str], **_k: object) -> subprocess.CompletedProcess[str]:
+        argv = list(argv)
+        calls.append(argv)
+        resp = responses.pop(0)
+        return subprocess.CompletedProcess(argv, resp.returncode, resp.stdout, resp.stderr)
 
-    return _run, calls
+    return fake_host(_run), calls
 
 
 def _sha_response() -> _R:
@@ -81,10 +86,10 @@ _CI_RUN = _run(11, "CI", "2026-09-09T10:00:00Z")
 _QA_RUN = _run(12, "qa-review-signal", "2026-09-09T10:01:00Z")
 
 
-def test_list_failed_jobs_returns_only_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_failed_jobs_returns_only_failed() -> None:
     """REST conclusions are lowercase; only completed failures are returned —
     passing, skipped, and still-running siblings are not."""
-    fake, _calls = _fake_gh(
+    host, _calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
@@ -96,17 +101,16 @@ def test_list_failed_jobs_returns_only_failed(monkeypatch: pytest.MonkeyPatch) -
             ),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    jobs = rerun.list_failed_jobs(42, "owner/repo")
+    jobs = rerun.list_failed_jobs(42, "owner/repo", host=host)
     assert [(j["name"], j["job_id"]) for j in jobs] == [("e2e shard (3/4)", 102)]
     assert jobs[0]["run_id"] == 11
     assert jobs[0]["run_status"] == "completed"
 
 
-def test_list_failed_jobs_keeps_rest_numeric_id(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_failed_jobs_keeps_rest_numeric_id() -> None:
     """The rerun URL needs the REST numeric id (`.id`), not GraphQL's
     `.databaseId`, which REST job objects do not carry (issue #1945)."""
-    fake, calls = _fake_gh(
+    host, calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
@@ -114,8 +118,7 @@ def test_list_failed_jobs_keeps_rest_numeric_id(monkeypatch: pytest.MonkeyPatch)
             _R(stdout="{}"),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo")
+    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo", host=host)
     assert [j["job_id"] for j in reran] == [101695155877]
     assert waiting == []
     assert errors == []
@@ -125,25 +128,22 @@ def test_list_failed_jobs_keeps_rest_numeric_id(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "timed_out", "cancelled"])
-def test_list_failed_jobs_normalizes_each_failing_conclusion(
-    monkeypatch: pytest.MonkeyPatch, conclusion: str
-) -> None:
+def test_list_failed_jobs_normalizes_each_failing_conclusion(conclusion: str) -> None:
     """Every lowercase failing conclusion is recognized (issue #1945)."""
-    fake, _calls = _fake_gh(
+    host, _calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
             _jobs_response(_job("shard", 102, 11, conclusion)),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    jobs = rerun.list_failed_jobs(42, "owner/repo")
+    jobs = rerun.list_failed_jobs(42, "owner/repo", host=host)
     assert [(j["job_id"], j["conclusion"]) for j in jobs] == [(102, conclusion)]
 
 
-def test_list_failed_jobs_spans_multiple_workflows(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_failed_jobs_spans_multiple_workflows() -> None:
     """Distinct workflows on the head are each consulted once."""
-    fake, _calls = _fake_gh(
+    host, _calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN, _QA_RUN),
@@ -151,89 +151,76 @@ def test_list_failed_jobs_spans_multiple_workflows(monkeypatch: pytest.MonkeyPat
             _jobs_response(_job("qa-review", 102, 12, "failure")),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    jobs = rerun.list_failed_jobs(42, "owner/repo")
+    jobs = rerun.list_failed_jobs(42, "owner/repo", host=host)
     assert sorted(j["job_id"] for j in jobs) == [101, 102]
 
 
-def test_list_failed_jobs_ignores_superseded_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_failed_jobs_ignores_superseded_runs() -> None:
     """A failed job in an older run of the same workflow is stale — the newer
     run settled the check — so only the newest run per workflow is listed
     (issue #1945, stale QA checks)."""
     stale = _run(11, "CI", "2026-09-09T09:00:00Z")
     current = _run(13, "CI", "2026-09-09T11:00:00Z")
-    fake, _calls = _fake_gh(
+    host, _calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(stale, current),
             _jobs_response(_job("backend", 101, 13, "success")),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    assert rerun.list_failed_jobs(42, "owner/repo") == []
+    assert rerun.list_failed_jobs(42, "owner/repo", host=host) == []
 
 
-def test_list_failed_jobs_raises_when_sha_query_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_failed_jobs_raises_when_sha_query_fails() -> None:
     """A failed head-sha query is an error, never an empty list (issue #1945)."""
-    fake, _calls = _fake_gh([_R(returncode=1, stderr="gh: not found")])
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
+    host, _calls = _fake_gh([_R(returncode=1, stderr="gh: not found")])
     with pytest.raises(rerun.CiJobRerunError, match="not found"):
-        rerun.list_failed_jobs(42, "owner/repo")
+        rerun.list_failed_jobs(42, "owner/repo", host=host)
 
 
-def test_list_failed_jobs_raises_when_runs_query_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake, _calls = _fake_gh(
+def test_list_failed_jobs_raises_when_runs_query_fails() -> None:
+    host, _calls = _fake_gh(
         [
             _sha_response(),
             _R(returncode=1, stderr="gh: rate limited"),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
     with pytest.raises(rerun.CiJobRerunError, match="rate limited"):
-        rerun.list_failed_jobs(42, "owner/repo")
+        rerun.list_failed_jobs(42, "owner/repo", host=host)
 
 
-def test_list_failed_jobs_raises_on_unparseable_runs_output(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake, _calls = _fake_gh([_sha_response(), _R(stdout="not json")])
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
+def test_list_failed_jobs_raises_on_unparseable_runs_output() -> None:
+    host, _calls = _fake_gh([_sha_response(), _R(stdout="not json")])
     with pytest.raises(rerun.CiJobRerunError, match="unparseable"):
-        rerun.list_failed_jobs(42, "owner/repo")
+        rerun.list_failed_jobs(42, "owner/repo", host=host)
 
 
-def test_list_failed_jobs_raises_when_jobs_query_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake, _calls = _fake_gh(
+def test_list_failed_jobs_raises_when_jobs_query_fails() -> None:
+    host, _calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
             _R(returncode=1, stderr="gh: 502"),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
     with pytest.raises(rerun.CiJobRerunError, match="502"):
-        rerun.list_failed_jobs(42, "owner/repo")
+        rerun.list_failed_jobs(42, "owner/repo", host=host)
 
 
-def test_list_failed_jobs_empty_is_only_a_successful_query(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_list_failed_jobs_empty_is_only_a_successful_query() -> None:
     """A successful query with no failing jobs is the only empty result."""
-    fake, _calls = _fake_gh(
+    host, _calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
             _jobs_response(_job("backend", 101, 11, "success")),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    assert rerun.list_failed_jobs(42, "owner/repo") == []
+    assert rerun.list_failed_jobs(42, "owner/repo", host=host) == []
 
 
-def test_rerun_failed_jobs_posts_one_rerun_per_failed_job(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake, calls = _fake_gh(
+def test_rerun_failed_jobs_posts_one_rerun_per_failed_job() -> None:
+    host, calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
@@ -244,8 +231,7 @@ def test_rerun_failed_jobs_posts_one_rerun_per_failed_job(
             _R(stdout="{}"),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo")
+    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo", host=host)
     assert [j["job_id"] for j in reran] == [102]
     assert waiting == []
     assert errors == []
@@ -254,9 +240,9 @@ def test_rerun_failed_jobs_posts_one_rerun_per_failed_job(
     assert "actions/jobs/102/rerun" in posts[0][-1]
 
 
-def test_rerun_failed_jobs_reports_rejected_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rerun_failed_jobs_reports_rejected_jobs() -> None:
     """A rerun request gh rejects lands in errors, not in the re-ran list."""
-    fake, _calls = _fake_gh(
+    host, _calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
@@ -264,20 +250,17 @@ def test_rerun_failed_jobs_reports_rejected_jobs(monkeypatch: pytest.MonkeyPatch
             _R(returncode=1, stderr="gh: rate limited"),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo")
+    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo", host=host)
     assert reran == [] and waiting == []
     assert any("lint" in e and "rate limited" in e for e in errors)
 
 
-def test_rerun_failed_jobs_waits_on_a_still_running_run(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_rerun_failed_jobs_waits_on_a_still_running_run() -> None:
     """A failed job whose run is still going cannot be re-run yet (GitHub
     refuses both flavors with 403): it lands in `waiting` and no POST is even
     attempted, so the caller reports the recovery action (task #3764)."""
     still_running = _run(11, "CI", "2026-09-09T10:00:00Z", status="in_progress")
-    fake, calls = _fake_gh(
+    host, calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(still_running),
@@ -287,8 +270,7 @@ def test_rerun_failed_jobs_waits_on_a_still_running_run(
             ),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo")
+    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo", host=host)
     assert reran == []
     assert errors == []
     assert [j["job_id"] for j in waiting] == [102]
@@ -296,13 +278,11 @@ def test_rerun_failed_jobs_waits_on_a_still_running_run(
     assert not [c for c in calls if "POST" in c]
 
 
-def test_rerun_failed_jobs_uses_run_level_for_multiple_failed_jobs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_rerun_failed_jobs_uses_run_level_for_multiple_failed_jobs() -> None:
     """Several failed jobs in one completed run re-run with one atomic
     run-level call: a second job-level rerun of the same run is refused while
     the first's new attempt runs (probed 2026-09-17, task #3764)."""
-    fake, calls = _fake_gh(
+    host, calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
@@ -313,8 +293,7 @@ def test_rerun_failed_jobs_uses_run_level_for_multiple_failed_jobs(
             _R(stdout="{}"),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo")
+    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo", host=host)
     assert [j["job_id"] for j in reran] == [101, 102]
     assert waiting == [] and errors == []
     posts = [c for c in calls if "POST" in c]
@@ -322,12 +301,10 @@ def test_rerun_failed_jobs_uses_run_level_for_multiple_failed_jobs(
     assert "actions/runs/11/rerun-failed-jobs" in posts[0][-1]
 
 
-def test_rerun_failed_jobs_reports_rejected_run_level_call(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_rerun_failed_jobs_reports_rejected_run_level_call() -> None:
     """A rejected run-level rerun request (the multi-failed-job path) lands in
     `errors` with the run and its job count — never in `reran` (task #3764)."""
-    fake, _calls = _fake_gh(
+    host, _calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
@@ -338,7 +315,6 @@ def test_rerun_failed_jobs_reports_rejected_run_level_call(
             _R(returncode=1, stderr="gh: rate limited"),
         ]
     )
-    monkeypatch.setattr(rerun.subprocess, "run", fake)
-    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo")
+    reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo", host=host)
     assert reran == [] and waiting == []
     assert any("run 11" in e and "2 failed jobs" in e and "rate limited" in e for e in errors)

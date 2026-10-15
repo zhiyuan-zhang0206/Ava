@@ -11,11 +11,19 @@ import sys
 import tempfile
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT))
+
+from base.host.git.gitenv import git_env  # noqa: E402
+from base.host.system.hostport import Host  # noqa: E402
+
+# The visual-baselines workflow already bounds the whole job to 45 minutes.
+_REFRESH_TIMEOUT_SECONDS = 45 * 60
+
 # Pytest reserves exit codes 0-5, so the workflow can distinguish drift from
 # every native pytest outcome without inspecting prose itself.
 VISUAL_DRIFT_EXIT_CODE = 10
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
 _VISUAL_TEST_MODULE = "tests/e2e/visual/test_visual_regression.py"
 VISUAL_TEST_COMMAND = ["uv", "run", "pytest", _VISUAL_TEST_MODULE]
 GIT_STATUS_COMMAND = ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"]
@@ -47,19 +55,20 @@ class BaselineRefreshError(Exception):
         self.exit_code = exit_code
 
 
-def _capture(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 - fixed argv contains no untrusted input
+def _capture(command: list[str], *, host: Host) -> subprocess.CompletedProcess[str]:
+    return host.run(
         command,
         cwd=_REPO_ROOT,
-        check=False,
+        timeout=_REFRESH_TIMEOUT_SECONDS,
+        env=git_env() if command[0] == "git" else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
 
 
-def _run_visual_tests() -> subprocess.CompletedProcess[str]:
-    result = _capture(VISUAL_TEST_COMMAND)
+def _run_visual_tests(*, host: Host) -> subprocess.CompletedProcess[str]:
+    result = _capture(VISUAL_TEST_COMMAND, host=host)
     if result.stdout:
         sys.stdout.write(result.stdout)
     return result
@@ -94,8 +103,8 @@ def _is_pixel_drift(result: subprocess.CompletedProcess[str]) -> bool:
     )
 
 
-def _check_only() -> int:
-    result = _run_visual_tests()
+def _check_only(*, host: Host) -> int:
+    result = _run_visual_tests(host=host)
     if result.returncode == 0:
         return 0
     if _is_pixel_drift(result):
@@ -184,7 +193,7 @@ def _require_png_only_status(status: subprocess.CompletedProcess[str]) -> None:
         raise BaselineRefreshError(f"non-PNG paths changed: {changed}")
 
 
-def _regenerate() -> int:
+def _regenerate(*, host: Host) -> int:
     references = [_REPO_ROOT / path for path in BASELINE_PATHS_BY_TEST.values()]
     missing_originals = [path for path in references if not path.is_file()]
     if missing_originals:
@@ -200,9 +209,9 @@ def _regenerate() -> int:
                 shutil.move(str(reference), str(backup))
                 backups[reference] = backup
 
-            result = _run_visual_tests()
+            result = _run_visual_tests(host=host)
             _require_complete_candidate_generation(result, references)
-            _require_png_only_status(_capture(GIT_STATUS_COMMAND))
+            _require_png_only_status(_capture(GIT_STATUS_COMMAND, host=host))
         except BaseException:
             _restore_originals(backups)
             raise
@@ -219,16 +228,21 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, host: Host) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.check_only:
-            return _check_only()
-        return _regenerate()
+            return _check_only(host=host)
+        return _regenerate(host=host)
+    except subprocess.TimeoutExpired:
+        print(
+            "error: visual baseline command exceeded the 45 minute workflow budget", file=sys.stderr
+        )
+        return 1
     except BaselineRefreshError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return exc.exit_code
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(host=Host.system()))

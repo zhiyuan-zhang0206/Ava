@@ -336,7 +336,7 @@ def print_replay_report(db: Database, agent_id: int) -> None:
         )
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -350,7 +350,7 @@ def main() -> None:
         type=int,
         help="explicit chunk threshold in tokens (overrides --ratio)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     require_preview()
     config = ConfigBoot()
     config.boot()

@@ -23,3 +23,8 @@ CI-run sampler. The sampler borrows that writer without capturing another image,
 creating another gate, or closing the schedule's resources. Both invocation paths
 retain the exporter process dimension. Dry runs create neither image nor writer;
 failed authoritative collection still aborts before persistence and emission.
+
+PR-flow cache and snapshot replacement use the shared atomic writer. Each new
+file is private to the Ava user (0600); interrupted or failed replacement leaves
+no partial report. Consumers run as that same user. This tightens the earlier
+umask-dependent temporary-file mode without changing the JSON representation.

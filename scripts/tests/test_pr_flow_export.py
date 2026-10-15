@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
-import types
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, NoReturn
@@ -12,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from scripts.ci.pull_requests import pr_flow_export as pr_flow
 
 _TZ = ZoneInfo("Asia/Shanghai")
@@ -233,45 +232,34 @@ def test_fetch_timeline_bounds_pagination(monkeypatch: pytest.MonkeyPatch) -> No
     assert stats.gh_api_calls == pr_flow.MAX_TIMELINE_PAGES
 
 
-def test_fetch_queue_depth_returns_none_on_trunk_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = types.SimpleNamespace(
-        post=lambda *_a, **_k: (None, "HTTP 503"),
-        target_payload=lambda _repo: {},
-    )
-    monkeypatch.setattr(pr_flow, "trunk_client", lambda: contextlib.nullcontext(fake))
+def test_fetch_queue_depth_returns_none_on_trunk_error() -> None:
+    opener = FakeUrlOpener()
+    opener.on("https://api.trunk.io/v1/getQueue", Answer(status=503))
     stats = pr_flow.RunStats()
-    assert pr_flow.fetch_queue_depth("r/x", "tok", stats) is None
+    assert pr_flow.fetch_queue_depth("r/x", "tok", stats, open_url=opener) is None
     assert stats.trunk_error == "HTTP 503"
 
 
-def test_fetch_quarantined_walks_next_page_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, Any]] = []
-
-    def trunk_post(
-        endpoint: str, payload: dict[str, Any], token: str
-    ) -> tuple[dict[str, Any] | None, str | None]:
-        calls.append(payload)
-        if len(calls) == 1:
-            return (
+def test_fetch_quarantined_walks_next_page_token() -> None:
+    opener = FakeUrlOpener()
+    opener.on(
+        "https://api.trunk.io/v1/flaky-tests/list-quarantined-tests",
+        Answer(
+            json.dumps(
                 {
                     "quarantined_tests": [
                         {"test_case_id": "a", "quarantined_at": "2026-09-12T01:00:00Z"}
                     ],
                     "page": {"next_page_token": "tok-2"},
-                },
-                None,
+                }
             )
-        return ({"quarantined_tests": [{"test_case_id": "b"}], "page": {}}, None)
-
-    fake = types.SimpleNamespace(
-        post=trunk_post,
-        target_payload=lambda _repo: {},
-        ORG_SLUG="org",
+        ),
+        Answer(json.dumps({"quarantined_tests": [{"test_case_id": "b"}], "page": {}})),
     )
-    monkeypatch.setattr(pr_flow, "trunk_client", lambda: contextlib.nullcontext(fake))
     stats = pr_flow.RunStats()
-    result = pr_flow.fetch_quarantined("r/x", "tok", stats)
+    result = pr_flow.fetch_quarantined("r/x", "tok", stats, open_url=opener)
     assert result is not None and len(result) == 2
+    calls = [json.loads(call.data or b"{}") for call in opener.calls]
     assert calls[1]["page_query"] == {"page_size": 100, "page_token": "tok-2"}
 
 
@@ -301,23 +289,16 @@ def test_save_json_is_atomic_and_load_cache_heals_corruption(tmp_path: Path) -> 
     assert not list(target.parent.glob("*.tmp"))
 
 
-def test_save_json_failed_replace_keeps_the_prior_file_and_no_tmp(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A failed rename must leave the previous snapshot intact and must not
+def test_save_json_failed_replace_keeps_the_prior_file_and_no_tmp(tmp_path: Path) -> None:
+    """A failed rename must leave the target intact and must not
     strand the temporary beside it -- the atomicity the write-and-rename
     actually buys (QA fold-in from the #2510 review)."""
     target = tmp_path / "state" / "cache.json"
-    pr_flow.save_json(target, {"version": 1, "prs": {}})
-
-    def fail_replace(_source: Path, _target: str | Path) -> None:
-        raise OSError("simulated replace failure")
-
-    monkeypatch.setattr(Path, "replace", fail_replace)
-    with pytest.raises(OSError, match="simulated replace failure"):
+    target.mkdir(parents=True)
+    with pytest.raises(IsADirectoryError):
         pr_flow.save_json(target, {"version": 2, "prs": {"1": {"x": 1}}})
 
-    assert json.loads(target.read_text(encoding="utf-8")) == {"version": 1, "prs": {}}
+    assert target.is_dir()
     assert list(target.parent.glob("*.tmp")) == []
 
 

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Callable
+import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from scripts.post_deploy_visual import refresh_visual_baselines as refresh
 
 RunResult = subprocess.CompletedProcess[str]
@@ -25,14 +28,16 @@ def _prepare_references(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
     return originals
 
 
-def _completed(command: list[str], returncode: int, stdout: str = "") -> RunResult:
-    return subprocess.CompletedProcess(command, returncode, stdout=stdout)
+def _completed(argv: Sequence[str], returncode: int, stdout: str = "") -> RunResult:
+    return subprocess.CompletedProcess(list(argv), returncode, stdout=stdout)
 
 
 def _assert_run_options(options: dict[str, object], tmp_path: Path) -> None:
+    env = options.pop("env")
+    assert env is None or (isinstance(env, dict) and env["GIT_TERMINAL_PROMPT"] == "0")
     assert options == {
         "cwd": tmp_path,
-        "check": False,
+        "timeout": 45 * 60,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,
         "text": True,
@@ -56,26 +61,17 @@ def _candidate_failures(tmp_path: Path) -> str:
     )
 
 
-def _install_runner(
-    monkeypatch: pytest.MonkeyPatch,
-    runner: Callable[..., RunResult],
-) -> None:
-    monkeypatch.setattr(refresh.subprocess, "run", runner)
-
-
 def test_check_only_returns_success_when_visual_tests_pass(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(refresh, "_REPO_ROOT", tmp_path)
 
-    def run(command: list[str], **options: object) -> RunResult:
-        assert command == refresh.VISUAL_TEST_COMMAND
+    def run(argv: Sequence[str], **options: object) -> RunResult:
+        assert list(argv) == refresh.VISUAL_TEST_COMMAND
         _assert_run_options(options, tmp_path)
-        return _completed(command, 0, "3 passed\n")
+        return _completed(argv, 0, "3 passed\n")
 
-    _install_runner(monkeypatch, run)
-
-    assert refresh.main(["--check-only"]) == 0
+    assert refresh.main(["--check-only"], host=fake_host(run)) == 0
 
 
 def test_check_only_maps_pixel_drift_to_distinct_exit_code(
@@ -83,13 +79,11 @@ def test_check_only_maps_pixel_drift_to_distinct_exit_code(
 ) -> None:
     monkeypatch.setattr(refresh, "_REPO_ROOT", tmp_path)
 
-    def run(command: list[str], **options: object) -> RunResult:
+    def run(argv: Sequence[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
-        return _completed(command, 1, _drift_failure("test_home_visual_regression"))
+        return _completed(argv, 1, _drift_failure("test_home_visual_regression"))
 
-    _install_runner(monkeypatch, run)
-
-    assert refresh.main(["--check-only"]) == refresh.VISUAL_DRIFT_EXIT_CODE
+    assert refresh.main(["--check-only"], host=fake_host(run)) == refresh.VISUAL_DRIFT_EXIT_CODE
 
 
 @pytest.mark.parametrize("returncode", [1, 2, 3, 4, 5])
@@ -98,13 +92,11 @@ def test_check_only_propagates_non_drift_failures(
 ) -> None:
     monkeypatch.setattr(refresh, "_REPO_ROOT", tmp_path)
 
-    def run(command: list[str], **options: object) -> RunResult:
+    def run(argv: Sequence[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
-        return _completed(command, returncode, "ERROR visual test setup failed\n")
+        return _completed(argv, returncode, "ERROR visual test setup failed\n")
 
-    _install_runner(monkeypatch, run)
-
-    assert refresh.main(["--check-only"]) == returncode
+    assert refresh.main(["--check-only"], host=fake_host(run)) == returncode
 
 
 def test_check_only_does_not_mask_a_failure_mixed_with_pixel_drift(
@@ -116,13 +108,11 @@ def test_check_only_does_not_mask_a_failure_mixed_with_pixel_drift(
         "playwright.sync_api.TimeoutError: page did not load\n"
     )
 
-    def run(command: list[str], **options: object) -> RunResult:
+    def run(argv: Sequence[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
-        return _completed(command, 1, output)
+        return _completed(argv, 1, output)
 
-    _install_runner(monkeypatch, run)
-
-    assert refresh.main(["--check-only"]) == 1
+    assert refresh.main(["--check-only"], host=fake_host(run)) == 1
 
 
 def test_regenerate_replaces_all_references_after_exact_candidate_failures(
@@ -131,24 +121,23 @@ def test_regenerate_replaces_all_references_after_exact_candidate_failures(
     _prepare_references(tmp_path, monkeypatch)
     calls: list[list[str]] = []
 
-    def run(command: list[str], **options: object) -> RunResult:
-        calls.append(command)
+    def run(argv: Sequence[str], **options: object) -> RunResult:
+        cmd = list(argv)
+        calls.append(cmd)
         _assert_run_options(options, tmp_path)
-        if command == refresh.VISUAL_TEST_COMMAND:
+        if cmd == refresh.VISUAL_TEST_COMMAND:
             for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
                 reference = tmp_path / relative_path
                 assert not reference.exists()
                 reference.write_bytes(f"new-{test_name}".encode())
-            return _completed(command, 1, _candidate_failures(tmp_path))
-        assert command == refresh.GIT_STATUS_COMMAND
+            return _completed(cmd, 1, _candidate_failures(tmp_path))
+        assert cmd == refresh.GIT_STATUS_COMMAND
         status = "".join(
             f" M {relative_path}\0" for relative_path in refresh.BASELINE_PATHS_BY_TEST.values()
         )
-        return _completed(command, 0, status)
+        return _completed(cmd, 0, status)
 
-    _install_runner(monkeypatch, run)
-
-    assert refresh.main(["--regenerate"]) == 0
+    assert refresh.main(["--regenerate"], host=fake_host(run)) == 0
     assert calls == [refresh.VISUAL_TEST_COMMAND, refresh.GIT_STATUS_COMMAND]
     for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
         assert (tmp_path / relative_path).read_bytes() == f"new-{test_name}".encode()
@@ -159,7 +148,7 @@ def test_regenerate_restores_references_when_candidate_generation_is_incomplete(
 ) -> None:
     originals = _prepare_references(tmp_path, monkeypatch)
 
-    def run(command: list[str], **options: object) -> RunResult:
+    def run(argv: Sequence[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
         first_test, first_path = next(iter(refresh.BASELINE_PATHS_BY_TEST.items()))
         (tmp_path / first_path).write_bytes(b"partial-candidate")
@@ -168,11 +157,9 @@ def test_regenerate_restores_references_when_candidate_generation_is_incomplete(
             f"Generated visual baseline candidate at {tmp_path / first_path}. "
             "Review and commit it before rerunning the test.\n"
         )
-        return _completed(command, 1, output)
+        return _completed(argv, 1, output)
 
-    _install_runner(monkeypatch, run)
-
-    assert refresh.main(["--regenerate"]) == 1
+    assert refresh.main(["--regenerate"], host=fake_host(run)) == 1
     for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
         assert (tmp_path / relative_path).read_bytes() == originals[test_name]
 
@@ -182,21 +169,19 @@ def test_regenerate_restores_references_when_non_png_file_changed(
 ) -> None:
     originals = _prepare_references(tmp_path, monkeypatch)
 
-    def run(command: list[str], **options: object) -> RunResult:
+    def run(argv: Sequence[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
-        if command == refresh.VISUAL_TEST_COMMAND:
+        if list(argv) == refresh.VISUAL_TEST_COMMAND:
             for relative_path in refresh.BASELINE_PATHS_BY_TEST.values():
                 (tmp_path / relative_path).write_bytes(b"new")
-            return _completed(command, 1, _candidate_failures(tmp_path))
+            return _completed(argv, 1, _candidate_failures(tmp_path))
         return _completed(
-            command,
+            argv,
             0,
             " M tests/e2e/visual/__snapshots__/test_visual_regression/home.png\0?? unexpected.txt\0",
         )
 
-    _install_runner(monkeypatch, run)
-
-    assert refresh.main(["--regenerate"]) == 1
+    assert refresh.main(["--regenerate"], host=fake_host(run)) == 1
     assert "non-PNG paths changed: unexpected.txt" in capsys.readouterr().err
     for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
         assert (tmp_path / relative_path).read_bytes() == originals[test_name]
@@ -207,16 +192,61 @@ def test_regenerate_propagates_git_status_failure_and_restores_references(
 ) -> None:
     originals = _prepare_references(tmp_path, monkeypatch)
 
-    def run(command: list[str], **options: object) -> RunResult:
+    def run(argv: Sequence[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
-        if command == refresh.VISUAL_TEST_COMMAND:
+        if list(argv) == refresh.VISUAL_TEST_COMMAND:
             for relative_path in refresh.BASELINE_PATHS_BY_TEST.values():
                 (tmp_path / relative_path).write_bytes(b"new")
-            return _completed(command, 1, _candidate_failures(tmp_path))
-        return _completed(command, 128, "fatal: not a git repository\n")
+            return _completed(argv, 1, _candidate_failures(tmp_path))
+        return _completed(argv, 128, "fatal: not a git repository\n")
 
-    _install_runner(monkeypatch, run)
-
-    assert refresh.main(["--regenerate"]) == 128
+    assert refresh.main(["--regenerate"], host=fake_host(run)) == 128
     for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
         assert (tmp_path / relative_path).read_bytes() == originals[test_name]
+
+
+def test_capture_uses_the_real_bounded_process_adapter() -> None:
+    real_host = Host.system()
+
+    def run(
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        capture_output: bool = False,
+        input: bytes | str | None = None,
+        **options: object,
+    ) -> RunResult:
+        assert list(argv) == refresh.VISUAL_TEST_COMMAND
+        result = real_host.run(
+            [sys.executable, "--version"],
+            timeout=timeout,
+            capture_output=capture_output,
+            input=input,
+            **options,
+        )
+        assert result.stdout.startswith("Python ")
+        return result
+
+    assert refresh.main(["--check-only"], host=fake_host(run)) == 0
+
+
+@pytest.mark.parametrize("regenerate", [False, True])
+def test_timeout_fails_and_restores_any_moved_references(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    regenerate: bool,
+) -> None:
+    originals = _prepare_references(tmp_path, monkeypatch)
+
+    def run(argv: Sequence[str], *, timeout: float, **_options: object) -> RunResult:
+        assert timeout == 45 * 60
+        if regenerate:
+            assert all(not (tmp_path / p).exists() for p in refresh.BASELINE_PATHS_BY_TEST.values())
+        raise subprocess.TimeoutExpired(list(argv), timeout)
+
+    flag = "--regenerate" if regenerate else "--check-only"
+    assert refresh.main([flag], host=fake_host(run)) == 1
+    assert "workflow budget" in capsys.readouterr().err
+    for name, path in refresh.BASELINE_PATHS_BY_TEST.items():
+        assert (tmp_path / path).read_bytes() == originals[name]
