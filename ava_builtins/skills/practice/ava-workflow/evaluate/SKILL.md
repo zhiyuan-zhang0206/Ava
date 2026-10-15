@@ -34,6 +34,14 @@ evidence. If further evaluation is unlikely to change the next action, stop
 and state what remains unknown. Continuing work may need another checkpoint
 when the environment, distribution, instructions, or evaluator changes.
 
+When a result changes what AI or tools can reliably accomplish, feed it into
+[Capability–Timescale](../capability-timescale/SKILL.md). It uses the evidence
+to revise feasible scope, approach, resources, and pace. Distinguish production
+capacity from verification capacity; an unreliable evaluator can itself limit
+the automation we can responsibly trust. Use
+[Define Goal](../define-goal/SKILL.md) when the next learning or delivery outcome
+and its stopping condition need clarification.
+
 ## Separate Discovery from Measurement
 
 **Discovery** asks what can go wrong, what "good" means in practice, and which

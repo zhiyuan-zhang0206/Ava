@@ -25,6 +25,14 @@ real path through outcome and feedback before expanding an untested approach.
 The software pattern motivates this extension; its use beyond engineering
 is an explicit design choice.
 
+Capability–Timescale is promoted to a first-class working dimension. Current
+capability can change which goals are feasible, which approach to choose, and
+what resources or schedule are defensible. Its evidence feeds Align, Define
+Goal, Plan, and Evaluate; it is not subordinate to planning or a one-time
+estimate. The existing skill identity and system-prompt route remain valid.
+Define Goal supports anchored qualitative and learning outcomes, while Plan
+supports small serial dependencies and omits unsupported or unrequested times.
+
 ## Consequences
 
 There is one owner for shared alignment and evaluation methods. The guides
@@ -45,5 +53,7 @@ but obscure that both participants need continuous calibration. Placing
 Evaluate under serious engineering would make other domains depend on an
 engineering-specific entry for a general method. A fixed evaluation pipeline
 would add unnecessary process to tasks that need only a direct check.
+Leaving capability calibration as an incidental planning reference would keep
+stale capability assumptions upstream of goal and strategy selection.
 
 Current guidance lives in [Workflow](../../../../ava_builtins/skills/practice/ava-workflow/SKILL.md).

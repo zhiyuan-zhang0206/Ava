@@ -103,9 +103,19 @@ authority questions before dependent work.
 
 ### Plan when execution demands it
 
-Record a roadmap when dependencies, duration, or coordination make it useful.
+Record a roadmap when dependencies, checkpoints, duration, or coordination make
+it useful, including a short sequence for a small serial task.
 A few independent peer briefs or a dynamic workflow script can express the plan;
 parallel work alone does not require a separate document or confirmation phase.
+
+### Recalibrate capability as a working dimension
+
+Use [Capability–Timescale](../capability-timescale/SKILL.md) before an uncertain
+AI/tool capability drives scope, approach, rejection, resources, or a schedule.
+Current evidence can reveal new possibilities as well as limits. Distinguish
+production speed from verified completion, including human attention and waits.
+Feed the observed bottleneck into Align, Define Goal, Plan, and Evaluate rather
+than treating capability calibration as a one-time estimate.
 
 ### Evaluate while doing the work
 
