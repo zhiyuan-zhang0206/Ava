@@ -1,5 +1,3 @@
-"""Plugin configuration bindings and SDK installation ownership."""
-
 import json
 from pathlib import Path
 
@@ -25,13 +23,8 @@ from base.packages.tests.plugin_config.test_plugin_config import (
 
 
 def test_syntax_fix_ruff_format_overlay_is_accepted(model_catalog: ModelCatalog) -> None:
-    """Per-agent A/B of the ruff format gate (task #1858 follow-up, user chose
-    a paired experiment): the field must accept a spawn config_overlay, like
-    prompt_codeact_enabled after #719."""
 
-    validate_config_overlay(
-        {"syntax_fix_ruff_format": True}, models=model_catalog.models
-    )  # must not raise
+    validate_config_overlay({"syntax_fix_ruff_format": True}, models=model_catalog.models)
     validate_config_overlay({"syntax_fix_ruff_format": False}, models=model_catalog.models)
 
 
@@ -42,17 +35,12 @@ def test_bind_undo_drops_the_binding(isolated_registry: dict[str, BaseModel], un
 
     assert "test_plugin" not in isolated_registry
     assert is_per_agent_field("test_plugin", "marker", configs=isolated_registry) is False
-    bind_plugin_config(
-        "test_plugin", FixtureConfig, configs=isolated_registry
-    )  # a rebind after the undo is legal
+    bind_plugin_config("test_plugin", FixtureConfig, configs=isolated_registry)
 
 
 def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_rest(
     isolated_registry: dict[str, BaseModel], unit_home, monkeypatch: pytest.MonkeyPatch
 ):
-    """A config that cannot bind (SchemaDriftError) is a load failure of that plugin alone: it is
-    rolled back whole (its earlier namespace too), reported, and absent from the returned registry,
-    while the plugins around it install."""
     from types import SimpleNamespace
 
     import ava

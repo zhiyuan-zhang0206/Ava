@@ -1,5 +1,3 @@
-"""A login shell that cannot start says why on its own terminal."""
-
 from __future__ import annotations
 
 import contextlib
@@ -13,7 +11,7 @@ def test_a_failed_shell_start_reports_its_cause_on_the_pty(tmp_path: Path) -> No
     pid, master = session.fork_shell(str(tmp_path / "missing"), {}, 80, 24)
     out = b""
     try:
-        with contextlib.suppress(OSError):  # Linux reports the slave's close as EIO
+        with contextlib.suppress(OSError):
             while chunk := os.read(master, 4096):
                 out += chunk
     finally:

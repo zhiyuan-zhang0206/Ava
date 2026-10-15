@@ -1,14 +1,3 @@
-"""Alerts have one way in: Grafana -> webhook -> the gateway's `POST /api/alerts` ingest.
-
-No process other than that ingest writes the `alerts` table, calls the IM alert fan-out or posts
-to the ingest endpoint. A new in-code alert path (a probe writing its own row, a direct IM push
-shaped like an alert) fails here and belongs in `rules.yml` as a rule over a signal instead.
-
-Deletion sentinel (task #4996): the fields, modules and symbols the alerting migration removed
-must stay removed. A stale-branch merge (#4207 over #4245) silently restored four of them once —
-these tests fail when any of them comes back, before a deploy can carry the resurrection.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -20,7 +9,6 @@ from meizel.roles import packages
 _REPO = Path(__file__).resolve().parents[2]
 _ROOTS = packages("application", "templates")
 
-# The only module that writes alert rows and fans them out: the ingest core and its one router.
 _INGEST = {"base/telemetry/alerts/__init__.py", "gateway/alerts/router.py"}
 _WRITERS = {"upsert_alert"}
 
@@ -59,9 +47,9 @@ def test_nothing_but_grafana_posts_to_the_ingest_endpoint() -> None:
     for path in _production_modules():
         rel = path.relative_to(_REPO).as_posix()
         if rel in {
-            "gateway/alerts/router.py",  # the route itself
-            "gateway/app.py",  # its pause-policy route table
-            "cli/commands/observability/observatory_urls.py",  # the URL rendered into Grafana
+            "gateway/alerts/router.py",
+            "gateway/app.py",
+            "cli/commands/observability/observatory_urls.py",
         }:
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -71,8 +59,6 @@ def test_nothing_but_grafana_posts_to_the_ingest_endpoint() -> None:
                 offenders.append(f"{rel}:{number}")
     assert offenders == []
 
-
-# ── the deletion sentinel (task #4996): what #4245 (and the SDK-buffer removal) deleted ──
 
 _DELETED_FIELDS = (
     "db_pool_slow_acquire_warn_cooldown_seconds",
@@ -94,7 +80,6 @@ _DELETED_ALIASES = (
     "AVA_VENV_PROBE_FAILURE_THRESHOLD",
     "AVA_BREW_PIN_PROBE_FAILURE_THRESHOLD",
 )
-# Paths as they read after the #4207 reorg (the old services/ paths map onto the groups).
 _DELETED_MODULES = (
     "agent/graph/exec/_alerts.py",
     "agent/graph/exec/tests/test_exec_alerts.py",
@@ -121,7 +106,6 @@ _DELETED_SYMBOLS = (
 
 
 def test_deleted_config_fields_stay_unregistered(config_authority: ConfigAuthority) -> None:
-    """The removed keys must not re-enter the settings registry (a merge restored one once)."""
     from base.config import FIELD_INFOS, get_config_metadata
 
     for name in _DELETED_FIELDS:
@@ -132,13 +116,11 @@ def test_deleted_config_fields_stay_unregistered(config_authority: ConfigAuthori
 
 
 def test_deleted_modules_stay_deleted() -> None:
-    """The modules the alerting migration removed must not come back as files."""
     for rel in _DELETED_MODULES:
         assert not (_REPO / rel).exists(), f"{rel} was deleted and must not return"
 
 
 def test_deleted_symbols_absent_from_production_code() -> None:
-    """The removed symbols must not appear as identifiers in production code."""
     offenders: list[str] = []
     for path in _production_modules():
         rel = path.relative_to(_REPO).as_posix()

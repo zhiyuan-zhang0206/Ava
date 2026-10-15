@@ -1,9 +1,3 @@
-"""Unit tests for the 2026-06-10 prompt-slim additions to
-scripts/lint/agent_docstrings.py: module-docstring child-name restating,
-SDK<->skill coupling, and the new impl/reverse-reference keywords. The
-pre-existing CJK / keyword machinery is exercised implicitly (same code path).
-"""
-
 from __future__ import annotations
 
 import ast
@@ -32,9 +26,6 @@ def _module_violations(source: str) -> list[str]:
     return [reason for _, reason in module_doc_child_reference_violations(tree, lines)]
 
 
-# ── module docstring restating its own children ─────────────────────────────
-
-
 def test_child_name_in_code_span_is_flagged() -> None:
     out = _module_violations(
         '''
@@ -47,8 +38,6 @@ def test_child_name_in_code_span_is_flagged() -> None:
 
 
 def test_child_name_in_plain_prose_passes() -> None:
-    # The zero-false-positive core: a child's name used as an English word
-    # (no backticks) is never flagged — "semantic search" vs `search()`.
     out = _module_violations(
         '''
         """Long-term notes, with semantic search to find them."""
@@ -60,8 +49,6 @@ def test_child_name_in_plain_prose_passes() -> None:
 
 
 def test_cross_module_reference_passes() -> None:
-    # `ava.shell.run` mentions another module's function — `run` is not a
-    # child of this module, so the span is fine.
     out = _module_violations(
         '''
         """Persistent sessions. For one-shot commands use `ava.shell.run`."""
@@ -84,8 +71,6 @@ def test_private_child_not_counted() -> None:
 
 
 def test_function_docstring_may_reference_siblings() -> None:
-    # The rule covers the MODULE docstring only — a function explaining its
-    # relationship to a sibling (cron -> launch) is legitimate and untouched.
     tree, lines = _parse(
         '''
         """Watch things."""
@@ -97,9 +82,6 @@ def test_function_docstring_may_reference_siblings() -> None:
         '''
     )
     assert module_doc_child_reference_violations(tree, lines) == []
-
-
-# ── SDK<->skill coupling keyword ─────────────────────────────────────────────
 
 
 def _function_violations(source: str, *, with_skill_rule: bool) -> list[str]:
@@ -124,8 +106,6 @@ def test_skill_reference_flagged_outside_skills_module() -> None:
 
 
 def test_skill_reference_allowed_when_rule_absent() -> None:
-    # _check_file drops the rule for every module in the ava/skills/ package — modeled here by passing
-    # no extra patterns.
     out = _function_violations(
         '''
         def names():
@@ -134,9 +114,6 @@ def test_skill_reference_allowed_when_rule_absent() -> None:
         with_skill_rule=False,
     )
     assert out == []
-
-
-# ── Markdown emphasis ────────────────────────────────────────────────────────
 
 
 def test_markdown_bold_flagged() -> None:
@@ -151,7 +128,6 @@ def test_markdown_bold_flagged() -> None:
 
 
 def test_double_star_kwargs_passes() -> None:
-    # Signature-style `**kwargs` has no closing pair — not emphasis.
     out = _function_violations(
         '''
         def call(**kwargs):
@@ -160,9 +136,6 @@ def test_double_star_kwargs_passes() -> None:
         with_skill_rule=False,
     )
     assert out == []
-
-
-# ── new keywords ride the existing pipeline ──────────────────────────────────
 
 
 def test_new_impl_keywords_flagged() -> None:
@@ -180,16 +153,6 @@ def test_new_impl_keywords_flagged() -> None:
     assert "reverse reference" in joined
 
 
-# ── agent-surface whitelist scope (2026-09) ──────────────────────────────────
-#
-# Which `ava/` files get agent-docstring linting used to be decided by the `_`
-# prefix (any underscore path segment => out of scope, which accidentally also
-# excluded every `__init__.py`). It's now decided by the agent-surface
-# whitelist: a module declares `__all_for_ava__` itself, or it is the
-# `ava/<name>.py` / `ava/<name>/__init__.py` for a `<name>` listed in
-# `ava/__init__.py`'s `__all_for_ava__`. The underscore plays no part.
-
-
 def _write(path: Path, source: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(source))
@@ -199,11 +162,8 @@ def test_discover_agent_surface_modules(tmp_path: Path) -> None:
     ava_dir = tmp_path / "ava"
 
     _write(ava_dir / "__init__.py", '__all_for_ava__ = ["files", "shell"]\n')
-    # Top-level namespace module (no marker of its own) -> IN.
     _write(ava_dir / "files.py", '"""Files stub."""\n')
-    # Namespace package `__init__` (no marker) -> IN.
     _write(ava_dir / "shell" / "__init__.py", '"""Shell namespace."""\n')
-    # Declares its own marker -> IN, regardless of not being a namespace.
     _write(
         ava_dir / "shell" / "sessions.py",
         '''
@@ -214,14 +174,9 @@ def test_discover_agent_surface_modules(tmp_path: Path) -> None:
             """Start a session."""
         ''',
     )
-    # The key regression: a framework module with a public name, no marker,
-    # and not listed as a namespace -> OUT.
     _write(ava_dir / "framework_core.py", '"""Framework module with a public name."""\n')
-    # Private-prefixed, no marker -> OUT (underscore alone proves nothing).
     _write(ava_dir / "_internal.py", '"""Private framework module."""\n')
-    # Annotated assignment form of the marker -> IN.
     _write(ava_dir / "_x.py", "__all_for_ava__: list[str] = []\n")
-    # Property form of the marker -> IN.
     _write(
         ava_dir / "mcps_like.py",
         """
@@ -269,15 +224,12 @@ def test_is_in_scope_plugin_paths_unchanged(
     namespace_helper = (tmp_path / "ava_builtins/plugins/x/_walk.py").resolve()
     plugin_namespace_files = {namespace_helper}
 
-    # plugin.py itself is always scanned (dev-facing wrap-target check).
     assert (
         is_in_scope(Path("ava_builtins/plugins/x/plugin.py"), plugin_namespace_files, set()) is True
     )
-    # A helper bound to a namespace -> in scope.
     assert (
         is_in_scope(Path("ava_builtins/plugins/x/_walk.py"), plugin_namespace_files, set()) is True
     )
-    # A helper NOT bound to any namespace -> out of scope.
     assert (
         is_in_scope(Path("ava_builtins/plugins/x/other_helper.py"), plugin_namespace_files, set())
         is False
@@ -285,12 +237,6 @@ def test_is_in_scope_plugin_paths_unchanged(
 
 
 def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> None:
-    # Regression check against the actual repo tree: `ava/agents/__init__.py`
-    # and `ava/shell/__init__.py` were previously excluded by the `_` rule
-    # (`__init__.py` itself starts with an underscore); `ava/sdk_surface/agent_identity.py`,
-    # `ava/sdk_surface/wraps.py`, and `base/packages/plugins/loading/plugin_loader.py`
-    # declare no marker and are not listed as a namespace, so they stay out
-    # under the new rule too — a public name is not by itself agent-visible.
     repo_root = Path(__file__).resolve().parents[3]
 
     surface = discover_agent_surface_modules(repo_root)

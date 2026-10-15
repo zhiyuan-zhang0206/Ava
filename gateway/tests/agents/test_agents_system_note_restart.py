@@ -1,5 +1,3 @@
-"""System-note and restart endpoints: inbound insertion, task-note tagging, config-overlay merge, delivery and resurrection behavior; split from gateway/tests/test_agents_endpoints.py (task #4922)."""
-
 from __future__ import annotations
 
 import json
@@ -23,8 +21,6 @@ from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
 
 class TestSystemNote:
     def test_system_note_inserts_system_note_inbound(self, db_conn: psycopg.Connection) -> None:
-        """POST /system-note → kind='system_note' inbound with the task note tag
-        (no peer-chat row), delivered to a live agent without resurrection."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
@@ -48,13 +44,11 @@ class TestSystemNote:
         assert source == "system"
         assert "assigned to you" in content
         assert payload == {"note_tag": "task", "delivery_resurrect": True}
-        # No resurrect row for a live agent.
         assert all(r[1] != "resurrect" for r in rows)
 
     def test_system_note_to_terminated_agent_resurrects_when_requested(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """resurrect=True (task assignment) revives a terminated target, like chat."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             terminate_hosted(db_conn, agent_id)
@@ -65,15 +59,12 @@ class TestSystemNote:
             )
         assert resp.status_code == 201
         rows = inbound_rows(db_conn, agent_id)
-        # Auto-resurrect inserts its 'resurrect' lifecycle inbound before the note
         assert ("", "resurrect", "system") in rows
         assert any(kind == "system_note" for _, kind, _ in rows)
 
     def test_system_note_to_terminated_agent_no_resurrect_when_denied(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """resurrect=False (plain update / reminder notice) never revives a
-        terminated owner — the note stays queued (user ruling 2026-08-27)."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             terminate_hosted(db_conn, agent_id)
@@ -88,7 +79,6 @@ class TestSystemNote:
         assert all(r[1] != "resurrect" for r in rows)
 
     def test_system_note_unknown_tag_rejected_422(self, db_conn: psycopg.Connection) -> None:
-        """note_tag outside the closed NoteTag set → 422 (fail loud)."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
@@ -99,7 +89,6 @@ class TestSystemNote:
         assert resp.status_code == 422
 
     def test_system_note_task_id_requires_task_tag(self, db_conn: psycopg.Connection) -> None:
-        """Task attribution cannot silently ride an unrelated system-note kind."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
@@ -113,7 +102,6 @@ class TestSystemNote:
     def test_system_note_task_id_must_name_an_existing_task(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """A task note must link to an existing task."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
@@ -127,7 +115,6 @@ class TestSystemNote:
     def test_system_note_task_id_must_belong_to_the_recipient(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """A task note cannot charge one agent's task for another agent's turn."""
         with gateway_test_client() as client:
             owner_id = spawn_via_http(client, {}).json()["id"]
             recipient_id = spawn_via_http(client, {}).json()["id"]
@@ -157,7 +144,6 @@ class TestSystemNote:
         *,
         database_gate: ProcessDbGate,
     ) -> None:
-        """A reassignment cannot land after validation but before task-note enqueueing."""
         from base.db import connect, pool
         from gateway.agents import system_note
 
@@ -243,7 +229,6 @@ class TestSystemNote:
         assert errors == []
 
     def test_system_note_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
-        """source not in envelope allowlist → 422."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
@@ -301,7 +286,6 @@ class TestRestart:
     def test_restart_merges_config_overlay_and_records_it_in_the_inbound(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """The persisted overlay and restart marker payload advance together."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
@@ -331,9 +315,6 @@ class TestRestart:
         withdrawn_model: tuple[str, ModelCatalog],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """The ops restart channel (the provider-outage model switch) settles a
-        withdrawn llm_model to its registered fallback in both the persisted
-        overlay and the restart payload (task #4306)."""
         import gateway.app as gateway_app
 
         model, catalog = withdrawn_model
@@ -358,7 +339,6 @@ class TestRestart:
     def test_restart_empty_config_overlay_keeps_legacy_restart_shape(
         self, db_conn: psycopg.Connection, config_overlay: dict[str, object] | None
     ) -> None:
-        """None and {} do not change persistent config or add a payload sidecar."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
@@ -406,7 +386,7 @@ class TestRestart:
             resp = client.post(f"/api/agents/{agent_id}/restart")
         assert resp.status_code == 200
         assert resp.json() == {"status": "already_terminated"}
-        assert inbound_rows(db_conn, agent_id) == []  # not delivered
+        assert inbound_rows(db_conn, agent_id) == []
 
     def test_restart_nonexistent_404(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:

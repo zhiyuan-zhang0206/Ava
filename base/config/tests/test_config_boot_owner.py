@@ -1,5 +1,3 @@
-"""Explicit configuration owners keep overlays, views and build gates separate."""
-
 from __future__ import annotations
 
 import os
@@ -22,7 +20,6 @@ _CHILD = Path(__file__).with_name("_boot_owner_child.py")
 
 @pytest.fixture(autouse=True)
 def _isolated_owner_environment(tmp_path: Path) -> Iterator[None]:
-    # The real delivery pass updates/drops env aliases; restore its whole input.
     with patch.dict(os.environ):
         os.environ["AVA_HOME"] = str(tmp_path)
         (tmp_path / ".env").write_text(
@@ -276,7 +273,6 @@ def test_skip_agent_profile_selects_deferred_authority_for_other_domains(
         builds += 1
         return _full.Settings(profile=None)
 
-    # The real root selects this branch before any field has prepared the owner.
     if owner.view.profile is None:
         authority = ConfigAuthority(owner.view, owner.view, tmp_path / ".env")
     else:

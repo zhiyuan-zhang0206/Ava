@@ -88,3 +88,11 @@ return and finite best-effort stop cannot await an unconditional TaskGroup
 exit. If those contracts change to require cooperative complete draining, use
 a lexical TaskGroup instead. A second component needing this same handoff
 mechanism triggers extraction or selection of an established owner abstraction.
+
+## Scheduling windows in regression tests
+
+`test_redis_listener_cancellation.py` cancels after a child has returned and
+attached its handles, but before `asyncio.wait` wakes the parent. The ownership
+tests also observe after the listener's completion callback and before the
+caller claims the completed open result. Keeping these distinct handoff windows
+is necessary to test retained ownership rather than only unfinished operations.

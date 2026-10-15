@@ -1,5 +1,3 @@
-"""Diagnostic owners preserve bounded native work and honest process exit."""
-
 from __future__ import annotations
 
 import asyncio
@@ -53,7 +51,7 @@ async def test_probe_deadline_discards_late_report_and_allows_a_fresh_round(
         assert isinstance(state, dict) and state["last_verdict"] == "unavailable"
         release.set()
         await _joined(workers[0])
-        assert reported == []  # no stop: only the expired observation closes admission
+        assert reported == []
         await monitor.run_round()
         assert [result.detail for result in reported] == ["fresh sample"]
     finally:
@@ -112,7 +110,7 @@ async def test_cancelled_round_closes_reporting_without_stopping_the_monitor() -
             await round_task
         release.set()
         await _joined(workers[0])
-        assert reported == []  # before deadline, and monitor.stop has not run
+        assert reported == []
         await asyncio.sleep(0.002)
         await monitor.run_round()
         assert [result.detail for result in reported] == ["fresh sample"]

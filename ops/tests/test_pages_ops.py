@@ -1,5 +1,3 @@
-"""`ops.pages`: an expired row is revived, a re-register upserts the serve dir, and a raced conflict is a domain error."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -11,7 +9,7 @@ import pytest
 from base.db import create_agent
 from ops.pages import PageRow, register_page_in_transaction
 
-_HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
+_HOST = "127.0.0.1"
 
 
 def _register(
@@ -78,11 +76,10 @@ def test_register_page_revives_expired_row_and_resets_deadline(
 
 
 def test_register_page_upsert_updates_serve_dir(db_conn: psycopg.Connection) -> None:
-    """Re-registering a name is an UPDATE: port, title and serve_dir change together and the row id is stable."""
     aid = create_agent(db_conn)
     r1 = _register(db_conn, aid, "p", 8001, _HOST, None, serve_dir="/data/a")
     r2 = _register(db_conn, aid, "p", 8002, "10.0.0.2", "v2", serve_dir="/data/b")
-    assert r2.id == r1.id  # UPDATE, not INSERT
+    assert r2.id == r1.id
     assert r2.port == 8002
     assert r2.title == "v2"
     assert r2.serve_dir == "/data/b"
@@ -94,8 +91,6 @@ def test_register_page_upsert_updates_serve_dir(db_conn: psycopg.Connection) -> 
 def test_register_page_raced_conflict_raises_domain_error(
     db_conn: psycopg.Connection,
 ) -> None:
-    """ops.pages.register_page_in_transaction (the path behind the router's pre-check) refuses a
-    port a live row holds and names the occupant — the index backstop."""
     from ops.pages import PagePortConflictError
 
     owner = create_agent(db_conn)

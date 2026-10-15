@@ -1,7 +1,3 @@
-"""The gateway excludes WAL-G while the CLI owner supplies its configured path.
-
-Split out of `base/config/tests/test_config_boot_owner.py`."""
-
 from __future__ import annotations
 
 import os
@@ -16,7 +12,6 @@ from base.config import ConfigBoot
 
 @pytest.fixture(autouse=True)
 def _isolated_owner_environment(tmp_path: Path) -> Iterator[None]:
-    # The real delivery pass updates/drops env aliases; restore its whole input.
     with patch.dict(os.environ):
         os.environ["AVA_HOME"] = str(tmp_path)
         (tmp_path / ".env").write_text(

@@ -1,5 +1,3 @@
-"""A replacement host's admission ends the takeover of the host it replaced."""
-
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -69,7 +67,6 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    # A real codex relay process must never start inside the test environment.
     spawn = MagicMock(return_value=MagicMock(poll=MagicMock(return_value=None)))
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     graph = MagicMock()
@@ -84,7 +81,6 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         catalog=model_catalog,
         commands=CommandCatalog(skills=list),
     )
-    # The original host has stopped renewing; admission uses its ordinary ownership fence.
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
         (agent_id,),
@@ -103,5 +99,4 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
     )
     assert ended["status"] == "expired"
     assert ended["rejection_reason"] == "aborted: native runtime restarted"
-    # Nothing re-provisions the previous host's relay for the ended lease.
     spawn.assert_not_called()

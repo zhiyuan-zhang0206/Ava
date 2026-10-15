@@ -1,5 +1,3 @@
-"""`debt` (the read-only summary) and `debt diff` (growth against a git ref)."""
-
 from __future__ import annotations
 
 import json
@@ -63,7 +61,6 @@ def test_summary_text_names_the_modes_and_the_counts(
 
 def test_summary_reads_manifests_only_and_runs_no_analysis(make_repo: RepoFactory) -> None:
     root = make_repo(TREE)
-    # `broken/bad.py` cannot be parsed: any analysis stops the tool with exit code 2.
     assert run(root, "check") == 2
     assert run(root, "debt") == 0
 

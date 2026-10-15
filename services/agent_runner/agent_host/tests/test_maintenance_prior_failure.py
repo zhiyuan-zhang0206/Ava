@@ -1,5 +1,3 @@
-"""A prior ordinary crash cannot poison a later durable maintenance generation."""
-
 from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -124,10 +122,6 @@ async def _failed_turn(
     wrap_saver_reads_with_delta_reconstruction(reader)
     cold = await reader.aget_tuple(config)
     assert cold is not None
-    # Delta write model (#3180): the nstep throttle retires once a thread
-    # shows a DeltaChannel, so a failed superstep's writes are durable at
-    # once — the crash shape is "tail persisted, turn failed" (the buffered
-    # and unflushed shape no longer exists for delta threads).
     assert tail in cold.checkpoint["channel_values"]["messages"]
     return host, saver, config, tail, calls
 
@@ -247,8 +241,6 @@ async def test_prior_tail_flush_outage_ends_the_restart_once_and_the_stop_fails_
         acquired_at=WHEN,
     )
     await _run_turn_whose_tail_flush_hits_a_database_outage(host, agent, monkeypatch)
-    # The outage is alerted once and its restart command is ended (the effect
-    # never started); the journal is untouched and the tail is still durable.
     assert [(row["event"], row["agent_id"]) for row in alerts.rows] == [
         ("agent_continuation_lost", agent)
     ]
@@ -259,14 +251,12 @@ async def test_prior_tail_flush_outage_ends_the_restart_once_and_the_stop_fails_
         "SELECT status,applied_at,payload->'lifecycle_result' FROM inbound_messages WHERE id=%s",
         (hold.commands[agent],),
     ).fetchone() == ("done", None, {"outcome": "failed", "reason": "continuation_failed"})
-    # No later scan drives it again, and further wakes alert nothing more.
     for _scan in range(3):
         assert await host.pending_inbound_wakes() == []
     await host.run_turn(agent)
     assert len(alerts.rows) == 1
     drained = admission.require_operation("failed-flush", WHEN).maintenance
     assert drained is not None and drained.drained == ()
-    # `ava stop` does not wait forever: its drain ends at the deadline with the report.
     with pytest.raises(TimeoutError, match="drain timed out without force"):
         agent_pause.drain(database, "failed-flush", WHEN, 0.5, local_machine=machine_identity)
     assert calls == ["save", "fail"]

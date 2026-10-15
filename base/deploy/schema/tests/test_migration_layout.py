@@ -1,5 +1,3 @@
-"""Tracked migration layout and preflight validation."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,9 +24,6 @@ from base.deploy.schema.tests.migration_support import (
 
 
 def test_migrations_dir_resolves_beside_the_checkout_root() -> None:
-    """`MIGRATIONS_DIR` is re-anchored from `base/deploy/schema/migrations.py`
-    (four levels below the checkout root, not two) — a regression here would
-    make every unmocked migration lookup silently see an empty/missing dir."""
     repo_root = Path(__file__).resolve().parents[4]
     assert repo_root / "migrations" == MIGRATIONS_DIR
     assert MIGRATIONS_DIR.is_dir()
@@ -42,8 +37,8 @@ class TestLayoutValidation:
 
     def test_bad_filename_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / f"{SYN}.sql").write_text("-- noop")
-        (tmp_path / "0001_legacy.sql").write_text("-- noop")  # old integer format
-        init_repo(tmp_path)  # tracked: layout validation applies to git-tracked files
+        (tmp_path / "0001_legacy.sql").write_text("-- noop")
+        init_repo(tmp_path)
         monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
         with pytest.raises(MigrationLayoutError, match="does not match"):
             list_migration_files()
@@ -96,7 +91,6 @@ class TestValidateMigrationsAtRef:
 
     def test_duplicate_in_ref_raises(self, tmp_path: Path) -> None:
         self._init_repo(tmp_path, [f"{SYN}.sql", "sub_dir_placeholder.sql"])
-        # a malformed name at the ref is refused before any service is stopped
         with pytest.raises(MigrationLayoutError, match="does not match"):
             validate_migrations_at_ref("HEAD", repo_root=tmp_path)
 

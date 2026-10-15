@@ -1,5 +1,3 @@
-"""Attachments keep the explicit machine owner's cache and borrow boundaries."""
-
 import os
 from typing import Any
 from unittest.mock import patch
@@ -17,7 +15,6 @@ def test_attachment_borrows_same_machine_without_resetting_prior_cache(
     prior = ava.context
     machine = prior.require_machine()
     assert machine.name() == "local-runner"
-    # The attachment captures its own process input, not the Settings singleton.
     with (
         patch.dict(os.environ, {"AVA_MACHINE_NAME": "unrelated-process-change"}),
         impersonation.attach("lease"),
@@ -38,7 +35,6 @@ def test_independent_attachments_own_fresh_machine_caches(
     try:
         for name in ("first-attachment", "second-attachment"):
             lease["machine"] = name
-            # Each independent root captures this input before lease validation.
             with patch.dict(os.environ, {"AVA_MACHINE_NAME": name}), impersonation.attach("lease"):
                 machine = ava.context.require_machine()
                 assert machine.name() == name

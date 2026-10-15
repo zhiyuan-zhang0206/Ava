@@ -56,3 +56,5 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 - Hosted resource completion: [[hosted-quiescence.ava.okf.md]].
 - Process bootstrap ownership: [[bootstrap.ava.okf.md]].
 - Long-running operations should not go through `execute_code`: one-time long commands use `ava.shell.run_background` (auto-reports on completion), interactive/long-lived processes use `ava.shell.sessions` persistent sessions
+
+Related test premise: [Subprocess test assumptions](subprocess-tests.ava.okf.md).

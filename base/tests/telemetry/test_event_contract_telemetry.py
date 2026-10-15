@@ -1,13 +1,9 @@
-"""The telemetry whitelist is the event contract's telemetry projection."""
-
 from __future__ import annotations
 
 from base.events.contract import payload_keys, telemetry_events
 
 
 def test_category_projection_matches_telemetry_whitelist() -> None:
-    """The derived `TELEMETRY_KINDS` (telemetry.py) must equal the registry's
-    telemetry projection; the registry is the only place a name is counted."""
     from base.telemetry import TELEMETRY_KINDS
 
     assert telemetry_events() == frozenset(TELEMETRY_KINDS)
@@ -20,7 +16,6 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
         "host_held_wake_truncated",
     ):
         assert retired not in TELEMETRY_KINDS
-    # The suffix diagnostic adds one; retiring tool-call concatenation removes one.
     assert "multiple_tool_calls_merged" not in TELEMETRY_KINDS
     assert payload_keys("debt_sweep_daily") == (
         "day",

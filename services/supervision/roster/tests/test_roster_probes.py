@@ -1,6 +1,3 @@
-"""The roster's probe wiring: protocol availability needs no native listener proof, and the browser
-verdict comes from the profile-anchored probe rather than a curl."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -40,13 +37,9 @@ def test_roster_uses_healthy_protocol_without_native_listener_proof(
 
 
 def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
-    """The browser's `curl_url` stays (the CDP endpoint is still what gets
-    dialled), but the verdict comes from the profile-anchored probe — CDP itself
-    carries no field we control, so a 200 there says nothing about whose Chrome
-    answered."""
     from services.desktop.browser.probe import probe_browser
 
     browser = next(s for s in roster.build_services() if s.session == "browser")
     probe = browser.identity_probe
     assert probe is roster.browser_probe
-    assert probe_browser is not None  # the lazy import target exists
+    assert probe_browser is not None

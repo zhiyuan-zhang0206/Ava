@@ -1,5 +1,3 @@
-"""SDK emission failures preserve the body outcome and explicit sampling owner."""
-
 import asyncio
 from typing import Any
 
@@ -109,7 +107,6 @@ async def test_emit_secondary_failure_keeps_body_identity_cause_and_tally(
     async def async_body() -> None:
         body()
 
-    # Reach the cleanup seam independently of emit()'s own former blanket catch.
     monkeypatch.setattr(sdk_usage_telemetry, "emit", broken)
     with pytest.raises(primary_type) as raised:
         if async_call:

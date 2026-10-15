@@ -1,5 +1,3 @@
-"""Reminder lifecycle: insertion with wake, ack suppression, window skipping, dismissal on release and expiry; split from base/tests/impersonation/test_impersonation.py (task #4922)."""
-
 from __future__ import annotations
 
 import psycopg
@@ -42,7 +40,6 @@ def test_reminder_is_inserted_once_per_lease_and_wakes(
     db_conn.commit()
     with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
-        # Idempotent: a second scan in the same window inserts nothing new.
         assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
     reminder = db_conn.execute(
         "SELECT content,kind,source,status,payload FROM inbound_messages "
@@ -66,13 +63,6 @@ def test_reminder_ack_suppresses_further_reminders(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Issue #2054: an ACKed reminder still counts for the once-per-lease rule.
-
-    A controller that ACKs the reminder without renewing or releasing must not
-    get a fresh reminder row on every reaper cycle while the lease stays inside
-    the window (the old NOT EXISTS only excluded 'pending' rows, so each cycle
-    re-inserted — a nag storm with urgent pushes and re-delivery on top).
-    """
     local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
@@ -98,7 +88,6 @@ def test_reminder_ack_suppresses_further_reminders(
     ).fetchone()
     assert reminder_row is not None
     reminder_id = reminder_row[0]
-    # The relay binds each pushed page to the lease before the controller ACKs.
     db_conn.execute(
         "INSERT INTO agent_impersonation_messages(lease_id,inbound_id) VALUES(%s,%s)",
         (lease["id"], reminder_id),

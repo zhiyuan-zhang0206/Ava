@@ -1,5 +1,3 @@
-"""Real hosted self-termination and automatic/explicit resurrection on the same ID."""
-
 from __future__ import annotations
 
 import asyncio
@@ -47,9 +45,6 @@ def test_resurrect_brings_back_terminated_agent(
     assert original is not None and original[0] is not None
     assert command == [("done", True, True)]
     if explicit:
-        # Keep Playwright's event loop separate from the async ops RPC. The dial is the
-        # gateway's: /ops accepts the write generation's machine tokens, never the human
-        # secret, so this test process presents the gateway-class token the gateway holds.
         monkeypatch.setenv(API_TOKEN_ENV, current_credentials().gateway_token)
         with ThreadPoolExecutor(max_workers=1) as executor:
             response = executor.submit(

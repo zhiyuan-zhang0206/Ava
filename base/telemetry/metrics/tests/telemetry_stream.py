@@ -1,12 +1,3 @@
-"""Writes telemetry events into the real `telemetry_events` table for the metrics read tests.
-
-`telemetry_events` is append-only, so a test cannot clear what earlier tests wrote. Each
-`TelemetryStream` therefore owns its own stretch of time: its `now` is a distinct instant (a
-random slot, spaced wider than the longest metrics window), the rows it writes sit at offsets
-before that instant, and the test hands `now` to the read under test, so the rows of other tests
-never fall into its window.
-"""
-
 from __future__ import annotations
 
 import json
@@ -17,7 +8,6 @@ from typing import Any
 
 import psycopg
 
-# Wider than the longest metrics window (30 days), so two streams' windows never overlap.
 _SPACING_DAYS = 40
 
 

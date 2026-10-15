@@ -1,5 +1,3 @@
-"""The pending scan never kills a running turn or hides an expired owner."""
-
 import asyncio
 import subprocess
 import sys
@@ -149,8 +147,6 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
         await asyncio.wait_for(entered.wait(), 3)
         assert await host.pending_inbound_wakes() == [agent]
         if silent_turn:
-            # A progress clock silent for a day is the stall guard's to judge;
-            # the scan has no cancellation path left.
             host.turn_progress._marks[agent] = [time.monotonic() - 86400]
         await dispatcher.scan_once()
         assert agent in scheduler.active_agents

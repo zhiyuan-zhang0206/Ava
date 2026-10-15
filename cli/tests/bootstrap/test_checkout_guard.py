@@ -1,14 +1,3 @@
-"""A home that carries its own `<home>/source` checkout is operated only by that checkout.
-
-The rule (`base.paths.home.home_checkout_error`) is shared by the CLI's
-pre-Settings gate (`cli.preflight.require_own_checkout`), the identity
-boundaries of `ava init` and `ava start` (`cli.init_intent`, `cli.start_intent`) and the service-launch guard
-(`base.paths.prod_service_checkout_error`). A home with no `source` of its own (a
-test or scratch home) accepts any checkout. HOME points at a temporary directory
-wherever the default home is involved, so none of this can touch the operator's
-real `~/.ava`.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -59,7 +48,6 @@ def test_another_checkout_is_refused_with_both_paths_and_the_way_out(
 def test_a_symlinked_spelling_of_the_same_checkout_is_the_same_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The comparison resolves both sides: on macOS /tmp is itself a symlink."""
     home = _home_with_source(tmp_path, monkeypatch)
     alias = tmp_path / "alias"
     alias.symlink_to(home / "source")
@@ -69,8 +57,6 @@ def test_a_symlinked_spelling_of_the_same_checkout_is_the_same_checkout(
 def test_the_default_home_is_guarded_when_it_has_a_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With AVA_HOME unset the home is `~/.ava` (here under a fake HOME): the
-    production shape, where every other checkout is refused."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("AVA_HOME", raising=False)
     (tmp_path / ".ava" / "source").mkdir(parents=True)
@@ -78,20 +64,15 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
     assert home_checkout_error(tmp_path / "Ava") is not None
 
 
-# ── the CLI gate: every command refused, bare `ava` and a lone help flag parsed ──
-
-
 @pytest.mark.parametrize(
     "argv",
     [
-        # Commands that only read are refused like the rest.
         ["status"],
         ["status", "--json"],
         ["cluster", "status"],
         ["agents", "ls"],
         ["config", "get", "AVA_TIMEZONE"],
         ["mcp", "ls"],
-        # Commands that start, stop or reconfigure a home, and one nobody has named yet.
         ["start"],
         ["stop"],
         ["restart"],
@@ -101,13 +82,10 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
         ["config", "set", "A=B"],
         ["config", "unset", "A"],
         ["some-verb-nobody-has-heard-of"],
-        # Help of a verb is a command like any other: a development checkout that
-        # wants to read it names a temporary AVA_HOME.
         ["start", "--help"],
         ["status", "-h"],
         ["--help", "start"],
         ["-h", "--help"],
-        # `--help` as data after `--`.
         ["config", "unset", "--", "--help"],
     ],
 )
@@ -117,9 +95,6 @@ def test_gate_refuses_every_command_from_a_foreign_checkout(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Fail closed with no list to keep: a verb added later is refused without
-    anyone having to decide that it changes something. The message names both
-    ways out."""
     home = _home_with_source(tmp_path, monkeypatch)
     assert preflight.require_own_checkout(argv, tmp_path / "dev") == 1
     err = capsys.readouterr().err
@@ -140,7 +115,6 @@ def test_gate_does_not_echo_the_argv(
 def test_gate_passes_bare_ava_and_a_lone_help_flag(
     argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Argparse answers these without running a verb: nothing to protect."""
     _home_with_source(tmp_path, monkeypatch)
     assert preflight.require_own_checkout(argv, tmp_path / "dev") is None
 
@@ -163,9 +137,6 @@ def test_gate_passes_everything_for_a_home_without_a_source(
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     assert preflight.require_own_checkout(argv, tmp_path / "dev") is None
-
-
-# ── init and start ──
 
 
 def test_start_refuses_a_foreign_checkout_before_reading_the_home(
@@ -223,11 +194,6 @@ def test_a_test_home_is_taken_from_any_checkout(
     assert start_intent._home() == (tmp_path / "home").resolve()
 
 
-# ── the fleet updater already drives each host's own checkout ──
-
-
 def test_the_fleet_updater_runs_the_homes_own_cli_on_every_host() -> None:
-    """`cli.fleet_update` stops and starts each unit through `$H/source/.venv/bin/ava`
-    with `AVA_HOME="$H"`: the home's own checkout, so the gate never blocks it."""
     assert 'S="$H/source"' in fleet_update.HOME
     assert fleet_update.AVA == 'AVA_HOME="$H" "$S/.venv/bin/ava"'

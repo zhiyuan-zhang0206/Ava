@@ -1,12 +1,3 @@
-"""The callers of `gateway_access_from_settings`: a list that only shrinks.
-
-Each caller is a component that still reads the process-wide settings for its gateway access and
-says which batch gives it a configuration root (`# ambient: <batch>` on the call). New code takes a
-`GatewayAccess` from its composition root (`gateway_access_from_boot`), never from here, so this
-list never grows. A caller that moved to a root leaves the list in the same change; the change that
-empties it deletes `base/cluster/machine/ambient.py` and this test.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -17,7 +8,6 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[4]
 _AMBIENT = "base/cluster/machine/ambient.py"
 
-# path -> (batch that removes it, number of calls). Only ever removes entries or lowers counts.
 CALLERS: dict[str, tuple[str, int]] = {
     "ava_builtins/skills/platform/ava-self-evolution/scripts/collect.py": ("O", 1),
     "base/agents/upload_delivery/paths.py": ("B2", 1),

@@ -1,7 +1,3 @@
-"""The heartbeat service's loop structure: the TaskGroup that owns the three loops,
-a crash that ends the process, per-loop progress, and the completion digest as a
-loop of the service rather than of the gateway."""
-
 from __future__ import annotations
 
 import asyncio
@@ -217,7 +213,7 @@ async def test_the_digest_loop_flushes_at_once_then_paces(
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    assert flushed == [pool]  # a flush at once; the 60 s wait never elapses
+    assert flushed == [pool]
 
 
 async def test_a_failing_flush_ends_the_digest_loop(

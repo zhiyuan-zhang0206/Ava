@@ -1,5 +1,3 @@
-"""The shared browser entry binds one image and its explicit logging database."""
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -68,7 +66,7 @@ def test_entry_keeps_the_config_owner_and_captured_image(
 
     def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
         stages.append("producer")
-        assert gates == []  # Pipeline construction must not dial or resolve the image.
+        assert gates == []
         factories.append((database, machine))
         return pipeline
 

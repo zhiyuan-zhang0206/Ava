@@ -432,7 +432,6 @@ def _write_deploy_source(repo: Path) -> Path:
     source = repo / "ava_builtins" / "skills" / "platform" / "deploy-ava-cluster"
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text("deployment v1\n")
-    # A historical regular source lets the regression exercise the old installer.
     legacy = repo / ".agents" / "skills" / SKILL_NAME
     legacy.mkdir(parents=True)
     (legacy / "SKILL.md").write_text("operator v1\n")
@@ -552,7 +551,7 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
         operator_database=operator_database,
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
-    )  # Legacy one-skill installation, with its original ledger filename.
+    )
     operator_before = _tree_snapshot(_target(home / ".codex"))
     monkeypatch.setattr(bridge, "_SKILL_NAMES", _DISTRIBUTED_SKILLS)
     original_rename = bridge.rename_no_replace
@@ -629,7 +628,7 @@ def test_builtin_guide_installs_with_the_core_update_channel(
         source = sources / name / "SKILL.md"
         source.write_bytes(original + b"\nUpdated product guidance.\n")
         converge_skills(repo, unit_home)
-        assert installed.read_bytes() == original  # Built-ins update explicitly.
+        assert installed.read_bytes() == original
         policy = install_registry.resolved_policy(
             entry, defaults_reader=lambda: process_config.view.packages
         )

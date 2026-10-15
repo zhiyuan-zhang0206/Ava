@@ -1,11 +1,3 @@
-"""Unit tests for services/desktop/computer/session.py — screen ownership.
-
-Covers the holder/lease/FIFO-queue state machine: implicit acquisition,
-same-agent pass-through, queued wait + takeover, queue timeout, lease
-expiry, lease renewal, explicit release, and the operator kick. Times are
-kept short (millisecond-scale leases) so the async tests stay fast.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +28,7 @@ async def test_waiter_takes_over_after_release() -> None:
         return await s.acquire(8)
 
     task = asyncio.create_task(waiter())
-    await asyncio.sleep(0.05)  # let 8 queue up
+    await asyncio.sleep(0.05)
     assert s.holder == 7
     assert await s.release(7) == 7
     assert await task is True
@@ -62,7 +54,7 @@ async def test_fifo_order() -> None:
 
     t8 = asyncio.create_task(waiter(8))
     t9 = asyncio.create_task(waiter(9))
-    await asyncio.sleep(0.05)  # both queue: [8, 9]
+    await asyncio.sleep(0.05)
     await s.release(7)
     await asyncio.gather(t8, t9)
     assert order == [8, 9]
@@ -72,7 +64,7 @@ async def test_lease_expiry_frees_the_screen() -> None:
     s = ScreenSession(lease_s=0.05)
     await s.acquire(7)
     assert s.holder == 7
-    await asyncio.sleep(0.1)  # lease expires
+    await asyncio.sleep(0.1)
     assert await s.acquire(8) is True
     assert s.holder == 8
 
@@ -83,7 +75,6 @@ async def test_touch_renews_lease() -> None:
     await asyncio.sleep(0.06)
     await s.touch(7)
     await asyncio.sleep(0.06)
-    # lease renewed at 0.06 -> expires at ~0.26; the waiter times out at ~0.17
     assert await s.acquire(8) is False
     assert s.holder == 7
 
@@ -100,7 +91,6 @@ async def test_operator_kick_releases_any_holder() -> None:
     await s.acquire(7)
     assert await s.release(None) == 7
     assert s.holder is None
-    # second kick on a free screen is a no-op
     assert await s.release(None) is None
 
 
@@ -108,7 +98,7 @@ async def test_expired_holder_is_replaced_by_first_waiter() -> None:
     s = ScreenSession(lease_s=0.05)
     await s.acquire(7)
     t8 = asyncio.create_task(s.acquire(8))
-    await asyncio.sleep(0.1)  # lease expires while 8 waits
+    await asyncio.sleep(0.1)
     assert await t8 is True
     assert s.holder == 8
 
@@ -121,7 +111,6 @@ async def test_cancelled_waiter_cleans_its_queue_slot() -> None:
     t8.cancel()
     with pytest.raises(asyncio.CancelledError):
         await t8
-    # the queue is empty again — a fresh waiter gets the screen after release
     t9 = asyncio.create_task(s.acquire(9))
     await asyncio.sleep(0.05)
     await s.release(7)
@@ -139,8 +128,8 @@ async def test_high_priority_jumps_normal_waiters() -> None:
         order.append(aid)
         await s.release(aid)
 
-    t8 = asyncio.create_task(waiter(8))  # normal, queues first
-    t9 = asyncio.create_task(waiter(9, "high"))  # high, jumps ahead
+    t8 = asyncio.create_task(waiter(8))
+    t9 = asyncio.create_task(waiter(9, "high"))
     await asyncio.sleep(0.05)
     await s.release(7)
     await asyncio.gather(t8, t9)
@@ -162,7 +151,7 @@ async def test_high_priority_fifo_among_highs() -> None:
     await asyncio.sleep(0.05)
     await s.release(7)
     await asyncio.gather(t8, t9)
-    assert order == [8, 9]  # high waiters keep FIFO among themselves
+    assert order == [8, 9]
 
 
 async def test_high_waiter_timeout_still_fails() -> None:

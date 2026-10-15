@@ -1,5 +1,3 @@
-"""Run the single copied module under the actual installed stdlib interpreter."""
-
 from __future__ import annotations
 
 import json
@@ -43,7 +41,6 @@ def test_installed_source_forwards_and_sigterm_reclaims_idle_connection(tmp_path
             stderr=subprocess.PIPE,
             text=True,
             cwd=tmp_path,
-            # Do not permit repository packages or its virtualenv to help imports.
             env={"PATH": "/usr/bin:/bin", "RELAY_TEST_ARGV": json.dumps(argv)},
         )
         try:

@@ -1,16 +1,3 @@
-"""Doorplate lint (R3 doors ① + ②): the contract wall is machine-supervised.
-
-Every gateway route must declare a contract (`base/api_contracts/contracts.py` — the
-single fact source), every declaration must be used, the pause-exempt
-surface must be exactly the audited CONTROL_PLANE set (a new exemption is
-a deliberate, reviewed change, not an incident patch), and the middleware
-decision function must agree with the surface.
-
-Invariant 1 (declared at the boundary definition) and invariant 2 (server
-promises, clients inherit) are only as strong as this test — it is the
-"tests supervise" row of the doorplate table.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -18,14 +5,8 @@ import pytest
 from base.api_contracts import contracts
 from base.api_contracts.contracts import Idempotency, PauseSemantics
 
-# The audited exempt surface: exactly the surfaces that must stay reachable
-# mid-migration. Adding a route here is a deliberate control-plane decision
-# (it survives a migration and skips the pause 503); anything else is
-# data-plane by default.
-
 
 def test_sdk_inherits_idempotency_from_contracts() -> None:
-    """The three semantics resolve where the SDK looks them up."""
     assert (
         contracts.idempotency_for("POST", "/api/keyed/v1/agents")
         is Idempotency.AT_LEAST_ONCE_WITH_KEY
@@ -44,22 +25,9 @@ def test_sdk_inherits_idempotency_from_contracts() -> None:
 
 
 def test_unknown_route_defaults_to_non_idempotent() -> None:
-    """An undeclared / misspelled path must never be blindly retried.
-
-    R3 door ① ruling (2026-08-10): unknown routes default to
-    NON_IDEMPOTENT — a retry could duplicate the side effect of a POST the
-    doorplate never promised to dedup (#698 spawn-duplicate class). The
-    previous IDEMPOTENT default made a typo'd path silently retryable.
-    """
-    assert (
-        contracts.idempotency_for("POST", "/api/agenst")  # typo
-        is Idempotency.NON_IDEMPOTENT
-    )
+    assert contracts.idempotency_for("POST", "/api/agenst") is Idempotency.NON_IDEMPOTENT
     assert contracts.idempotency_for("POST", "/api/no-such-route") is Idempotency.NON_IDEMPOTENT
-    assert (
-        contracts.idempotency_for("DELETE", "/api/agents/7")  # undeclared method
-        is Idempotency.NON_IDEMPOTENT
-    )
+    assert contracts.idempotency_for("DELETE", "/api/agents/7") is Idempotency.NON_IDEMPOTENT
 
 
 @pytest.mark.parametrize(
@@ -80,7 +48,6 @@ def test_template_matching(template: str, path: str, expected: bool) -> None:
 
 
 def test_contracts_have_no_unknown_semantics() -> None:
-    """Sanity: every declared contract uses known enum values."""
     for (method, _path), c in contracts.ROUTE_CONTRACTS.items():
         assert c.idempotency in Idempotency, f"bad idempotency on {method} {_path}"
         assert c.pause in PauseSemantics, f"bad pause on {method} {_path}"

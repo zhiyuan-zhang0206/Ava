@@ -1,5 +1,3 @@
-"""A painted compact transition keeps re-served history present in every frame."""
-
 from __future__ import annotations
 
 import os
@@ -29,8 +27,6 @@ from tests.e2e.fixture_environment import E2EEnv
 
 @pytest.fixture
 def transition_env(request: pytest.FixtureRequest) -> Iterator[E2EEnv]:
-    # Package setup has already written the throwaway cluster's authoritative
-    # .env. The gateway enforces that file over its inherited process env.
     env_path = Path(os.environ["AVA_HOME"]) / ".env"
     original = env_path.read_text()
     lines = [

@@ -1,12 +1,3 @@
-"""Path-only cluster identity primitives.
-
-Identity IS the home path: the display label is the basename, the OS-artifact
-slug is basename + path hash, and the data-plane identifiers (db / role / ACL
-user) travel inside the connection URLs as data (`identity_from_url`) — nothing
-derives them from a name. These replace the retired name machinery
-(cluster_name / db_name / gateway_home_for / cluster_from_home).
-"""
-
 from pathlib import Path
 
 import pytest
@@ -28,8 +19,6 @@ def test_home_slug_strips_leading_dots_and_hashes_path():
 
 
 def test_home_slug_distinguishes_same_basename():
-    """Two homes sharing a basename (two worktrees named alike) must get distinct
-    OS-artifact slugs — the path hash is the disambiguator."""
     a = cluster.home_slug(Path("/a/.ava-task"))
     b = cluster.home_slug(Path("/b/.ava-task"))
     assert a != b
@@ -39,18 +28,12 @@ def test_home_slug_is_deterministic():
     assert cluster.home_slug(Path("/a/.ava-task")) == cluster.home_slug(Path("/a/.ava-task"))
 
 
-# ── identity_from_url: db/role/ACL identifiers are DATA carried by the URLs ──────
-
-
 def test_identity_from_url_reads_username():
     assert cluster.identity_from_url("postgresql://ava_main:pw@h:5433/ava_main") == "ava_main"
     assert cluster.identity_from_url("redis://ava:pw@h:6380/0") == "ava"
 
 
 def test_identity_from_url_refuses_usernameless_url():
-    """Identity is READ, never guessed: a URL with no username (a wiped or
-    malformed .env) must fail loudly here — a silent fallback would send the
-    ensure machinery off re-affirming a wrong role/ACL user."""
     with pytest.raises(ValueError, match="carries no username"):
         cluster.identity_from_url("redis://h:6379/0")
     with pytest.raises(ValueError, match="carries no username"):
@@ -59,8 +42,6 @@ def test_identity_from_url_refuses_usernameless_url():
 
 
 def test_identity_from_url_error_redacts_password():
-    """The ValueError must never serialize the URL's password — the failing
-    input can be a full credential-bearing URL (#2046)."""
     with pytest.raises(ValueError, match="carries no username") as excinfo:
         cluster.identity_from_url("redis://:FICTIONAL_CREDENTIAL_DO_NOT_USE@127.0.0.1:20028/0")
     assert "FICTIONAL_CREDENTIAL_DO_NOT_USE" not in str(excinfo.value)
@@ -73,22 +54,15 @@ def test_db_identity_refuses_a_url_without_database():
 
 
 def test_db_identity_reads_the_database_not_a_delivered_login() -> None:
-    """A delivered write-generation login replaces the URL's username; the
-    schema-owner identity is the database it names."""
     assert (
         cluster.db_identity("postgresql://ava_g3_gateway:pw@127.0.0.1:6433/ava_main") == "ava_main"
     )
 
 
 def test_db_and_redis_identity_read_supplied_urls():
-    """The runtime accessors read THIS cluster's own URLs — a historical
-    identifier (prod's ava_main) keeps working until an ops rename edits the
-    URLs; nothing recomputes it."""
     assert cluster.db_identity("postgresql://ava_main:pw@127.0.0.1:5433/ava_main") == "ava_main"
     assert cluster.redis_identity("redis://ava_main:pw@127.0.0.1:6380/0") == "ava_main"
 
 
 def test_session_name_has_no_cluster_segment():
-    """Sessions are `ava-<service>` — the per-home session backend already scopes
-    them, so no cluster token is encoded."""
     assert cluster.session_name("gateway") == "ava-gateway"

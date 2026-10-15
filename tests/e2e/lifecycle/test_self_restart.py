@@ -1,5 +1,3 @@
-"""Real UI self-restart preserves agent identity and admits a fresh runtime."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -53,7 +51,6 @@ def test_self_restart_admits_successor_and_answers_on_same_agent(e2e_env: E2EEnv
     )
     assert original_generation is not None
 
-    # A distinct subsequent UI request proves the successor actually executes.
     page.fill('[data-testid="composer-input"]', "continue after verified restart")
     page.click('[data-testid="composer-send"]')
 

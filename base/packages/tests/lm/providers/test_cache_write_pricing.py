@@ -1,5 +1,3 @@
-"""Cache writes are input subdivisions billed at their served TTL rates."""
-
 from datetime import UTC, datetime
 from typing import Any
 
@@ -47,7 +45,6 @@ def test_mixed_ttl_usage_from_pinned_sdk_prices_each_input_token_once(
         prices=prices,
     )
     assert priced is not None
-    # 100 ordinary input + 200 cache reads + 300 five-minute writes + 400 hour writes.
     assert priced.cost_usd == pytest.approx(
         (100 * 4 + 200 * 0.2 + 300 * 5 + 400 * 8 + 50 * 20) / 1_000_000
     )

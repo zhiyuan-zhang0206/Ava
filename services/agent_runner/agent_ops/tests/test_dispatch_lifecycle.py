@@ -1,5 +1,3 @@
-"""Lifecycle dispatch keeps the domain result and failure wire contracts."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -33,7 +31,6 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """lifecycle kind -> ops.lifecycle_op with parsed path."""
     dispatch_pool: ConnectionPool = stub_pool()
     captured: dict[str, object] = {}
 
@@ -79,7 +76,6 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
         host=fake_host(),
     )
     assert status == "completed"
-    # _dispatch serializes the lifecycle response model to a JSON dict for the wire.
     assert result == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
     assert captured["path"] == "/api/agents/42/resurrect-if-pending-work"
     assert captured["body"] == {"resurrected_by": "system"}
@@ -98,7 +94,6 @@ async def test_dispatch_lifecycle_missing_path_fails(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """lifecycle payload without 'path' returns failed without invoking ops."""
     dispatch_pool: ConnectionPool = stub_pool()
 
     async def _should_not_be_called(_db: object, _bus: object, *_a: object, **_kw: object):
@@ -120,7 +115,6 @@ async def test_dispatch_lifecycle_missing_path_fails(
         host=fake_host(),
     )
     assert status == "failed"
-    # LifecyclePayload validation rejects a missing 'path' before lifecycle_op runs.
     assert "path" in str(result["error"])
 
 
@@ -135,7 +129,6 @@ async def test_dispatch_unparseable_lifecycle_path(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """ops.lifecycle_op raising ValueError lands as failed result, not a crash."""
     dispatch_pool: ConnectionPool = stub_pool()
 
     async def _raises(
@@ -183,8 +176,6 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A resurrection refusal is a durable verdict, returned in the wire form
-    the caller classifies (`ResurrectRefused: <reason>`), not a dispatch crash."""
     from base.api_contracts.agent_contract import ResurrectRefused
 
     dispatch_pool: ConnectionPool = stub_pool()
@@ -233,8 +224,6 @@ async def test_dispatch_wire_error_carries_reason(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """AvaAgentError raised by an op is converted to a failed result with reason field
-    so the gateway's _raise_proxied_wire_error_from_payload can re-emit."""
     dispatch_pool: ConnectionPool = stub_pool()
 
     from base.api_contracts.agent_contract import AgentNotFound

@@ -1,5 +1,3 @@
-"""Necessary Task ownership wiring, and independent lifecycle counterexamples."""
-
 from __future__ import annotations
 
 import ast
@@ -388,7 +386,7 @@ class DiscardReceipt:
         release.set()
         await asyncio.wait_for(reported.wait(), timeout=1)
         assert reports == [original]
-        assert await service.stop() == ()  # The decorative sink erased the stop receipt.
+        assert await service.stop() == ()
         with pytest.raises(RuntimeError) as caught:
             task.result()
         assert caught.value is original

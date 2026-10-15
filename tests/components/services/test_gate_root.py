@@ -1,9 +1,3 @@
-"""Gate as a native root child, using only isolated pytest home and sockets.
-
-This exercises ordinary Supervisor child lifecycle and the real Gate process.
-It is not a macOS helper or full deployed-root acceptance proof.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -81,7 +75,6 @@ async def test_gate_native_child_readiness_restart_and_stop(
         assert not (run_dir / "custody").exists()
         result = await asyncio.to_thread(spec.identity_probe)
         assert result.verdict.value == "down", result.detail
-        # A bare listener without a Gate protocol response cannot prove readiness.
         with socket.socket() as foreign:
             foreign.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             foreign.bind(("127.0.0.1", port))

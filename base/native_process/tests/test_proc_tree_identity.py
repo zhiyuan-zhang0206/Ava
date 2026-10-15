@@ -1,5 +1,3 @@
-"""Captured process comparisons use Linux ticks, never drifting boot wall time."""
-
 from __future__ import annotations
 
 import ctypes
@@ -100,7 +98,6 @@ def test_native_signal_keeps_exact_birth_and_preserves_sibling(
         owner = OwnedProcess.capture(psutil.Process(children[0].pid))
         sibling = OwnedProcess.capture(psutil.Process(children[1].pid))
         if sys.platform == "linux":
-            # The pinned managed interpreter omits these optional Python APIs.
             monkeypatch.delattr(os, "pidfd_open", raising=False)
             monkeypatch.delattr(signal, "pidfd_send_signal", raising=False)
             original = proc_tree.stable_create_time
@@ -195,7 +192,6 @@ def test_recapture_retains_original_receipt_per_native_birth(
 def test_tree_capture_does_not_adopt_stale_child_listing(
     monkeypatch: pytest.MonkeyPatch, cached_birth: float | None
 ) -> None:
-    """A stale PID map, with either an old or fresh Process, grants no custody."""
     children = [
         subprocess.Popen([sys.executable, "-I", "-c", "import time;time.sleep(30)"])
         for _ in range(2)

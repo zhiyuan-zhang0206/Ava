@@ -1,6 +1,3 @@
-"""The graph runs every node on the state class built from the registry — not on what a node's
-first-parameter annotation names (the static base class, which has none of the plugins' channels)."""
-
 from pydantic import BaseModel
 
 import agent.state as agent_state
@@ -23,5 +20,4 @@ def test_every_node_receives_the_plugins_state_channels() -> None:
     assert graph.builder.nodes, "the graph has nodes"
     for name, spec in graph.builder.nodes.items():
         assert spec.input_schema is state_cls, name
-    # Building it rebinds nothing: the static name stays the base class.
     assert agent_state.AgentState is agent_state.BaseAgentState

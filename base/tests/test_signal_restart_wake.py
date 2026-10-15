@@ -1,5 +1,3 @@
-"""The bulk restart signal wakes a parked listener over Redis."""
-
 from __future__ import annotations
 
 import asyncio
@@ -20,16 +18,11 @@ async def test_signal_live_agents_restart_publishes_redis_wake(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """The bulk restart wakes each signalled agent over Redis — the same
-    per-agent publish as insert_inbound_message — so an idling agent restarts now
-    instead of stalling to its SELECT recheck (the quiesce step's convergence
-    depends on live agents draining promptly). Park a per-agent listener on the
-    agent's channel, fire the bulk signal, assert the parked wait wakes."""
     tid = seed_agent(db_conn, "idling")
     listener = RedisInboundListener(settings.data_plane.redis_url, tid)
     try:
         wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
-        await asyncio.sleep(0.2)  # let the subscribe take effect before the publish
+        await asyncio.sleep(0.2)
         t0 = time.monotonic()
         ids = await asyncio.to_thread(
             signal_live_agents_restart, database, event_bus, source="system:update"

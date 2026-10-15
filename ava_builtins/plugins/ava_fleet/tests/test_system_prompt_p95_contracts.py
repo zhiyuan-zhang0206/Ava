@@ -1,9 +1,3 @@
-"""The fleet plugin's namespaces stay on demand under the p95 `sdk_expand_in_system_prompt` default.
-
-Split out of `agent/graph/tests/prompt/test_system_prompt.py`: it installs the built-in
-`ava_fleet` plugin (which owns `ava.tasks`), so it lives with the plugin.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -28,8 +22,6 @@ from base.packages.tests.model_catalog import set_prices as set_prices
 
 @pytest.fixture(autouse=True)
 def _no_plugin_expansions() -> Iterator[None]:
-    # Reason about the framework expand list alone: take any installed plugin surface out
-    # so a leak from another test cannot prepend stray paths, and put it back after.
     prior = installed()
     install.uninstall()
     yield
@@ -74,7 +66,6 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         assert f"## ava.{module}\n" not in text
     import ava
 
-    # A module omitted from the standing reference remains available.
     ava.help(ava.watcher)
     assert "def launch(" in capsys.readouterr().out
     ava.help(ava.shell.sessions)

@@ -1,5 +1,3 @@
-"""Log-native leases (protocol v2) record their SDK/audit events at the source."""
-
 from __future__ import annotations
 
 import json
@@ -182,7 +180,6 @@ def test_central_event_commits_with_its_transaction_and_survives_a_lost_emit(
     with db_conn.transaction():
         tagged = record_central_event(db_conn, event)
     db_conn.commit()
-    # The post-commit emit is never called here: the record needs no second store.
     assert tagged.attributes["impersonation_session"] == f"{owner.agent_id}:0"
     assert _rows(db_conn, lease["id"], event_log.CENTRAL_SOURCE) == 1
 
@@ -218,7 +215,6 @@ def test_central_entry_references_its_audit_row_and_entries_resolve_the_body(
         (lease["id"], event_log.CENTRAL_SOURCE),
     ).fetchone()
     assert stored is not None
-    # The entry holds the reference only, no second copy of the body.
     assert set(stored[0]) == {"event_uid", "id", "line_sha256"}
     row = db_conn.execute(
         "SELECT event_uid,event_name,attributes FROM audit_events WHERE event_uid=%s",
@@ -462,10 +458,10 @@ def test_an_ended_lease_with_an_open_source_signals_by_state_until_it_seals(
 ) -> None:
     local_machine = machine_identity.name()
     participant = _participant(owner, lease, "stuck", database_gate=database_gate)
-    assert emit_incomplete_event_logs(db_conn) == 0  # a live lease is not stuck
+    assert emit_incomplete_event_logs(db_conn) == 0
     _expire(db_conn, lease, database_gate=database_gate, local_machine=local_machine)
     assert emit_incomplete_event_logs(db_conn) == 1
-    assert emit_incomplete_event_logs(db_conn) == 1  # state, not edge: re-emitted while it holds
+    assert emit_incomplete_event_logs(db_conn) == 1
     events = _incomplete_events(loguru_records)
     assert [e["condition"] for e in events] == ["seal_stuck", "seal_stuck"]
     assert events[0]["lease_id"] == participant.lease_id
@@ -489,7 +485,6 @@ def test_agent_termination_completes_a_fully_sealed_lease(
     participant = _participant(owner, lease, "terminated", database_gate=database_gate)
     _capture(participant, [_sdk_event(owner.agent_id, "before-termination")])
     seal_local_participant(LocalCaptureGate(participant))
-    # SQL ends the lease, then closes admission: the close must finish the lease too.
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     ended = history.resolve(database, owner.agent_id, 0, local_machine=local_machine)
@@ -590,7 +585,7 @@ def test_the_reaper_pass_signals_a_stuck_source_until_it_seals(
 
     with pool(max_size=2, gate=database_gate) as reaper_pool:
         assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1
-        assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1  # state, not edge
+        assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1
         seal_local_participant(LocalCaptureGate(participant))
         assert maintenance.signal_incomplete_event_logs(reaper_pool) == 0
     assert [e["condition"] for e in _incomplete_events(loguru_records)] == [

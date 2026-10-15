@@ -1,5 +1,3 @@
-"""Escalation acceptance survives competing workers, writers and notice creators."""
-
 from concurrent.futures import ThreadPoolExecutor
 from time import monotonic, sleep
 from typing import Any
@@ -46,7 +44,6 @@ def test_locked_parent_change_defers_and_uses_current_state(
     parent = row[0]
     db_conn.execute("UPDATE agent_tasks SET owner=%s WHERE id=%s", (new_delegator, parent))
     if close:
-        # A parent closes with its child, following the registry close guard.
         db_conn.execute("UPDATE agent_tasks SET status='done' WHERE id=ANY(%s)", ([parent, task],))
     with ThreadPoolExecutor(max_workers=1) as workers:
         future = workers.submit(accept_escalations, pool, 3)
@@ -99,22 +96,17 @@ def test_human_notice_shares_creator_lock(
     db_conn: psycopg.Connection,
 ) -> None:
     owner = make_agent(db_conn)
-    # The ownerless root is the existing human-escalation policy boundary.
     root = db_conn.execute(
         "INSERT INTO agent_tasks (title,description,status,created_by,is_root) "
         "VALUES ('root','root','in_progress','user',TRUE) RETURNING id"
     ).fetchone()
     assert root is not None
     task = make_task(db_conn, owner=owner, parent_id=root[0], reminder_count=3)
-    # Model gateway creation's real identity lock and uncommitted notice. The
-    # competing daemon must wait before its open check/local-id allocation.
     db_conn.execute("SELECT id FROM agents WHERE id=%s FOR UPDATE", (owner,))
     with ThreadPoolExecutor(max_workers=1) as workers:
         future = workers.submit(accept_escalations, pool, 3)
         try:
             _wait_for_blocker(pool, db_conn.info.backend_pid)
-            # Escalation now holds task rows while waiting on the identity.
-            # Gateway must still be able to take the FK key-share lock.
             db_conn.execute("SET LOCAL statement_timeout = '2s'")
             db_conn.execute(
                 "INSERT INTO agent_notices (agent_id,local_id,task_id,title,priority,require_response,expire_at) "

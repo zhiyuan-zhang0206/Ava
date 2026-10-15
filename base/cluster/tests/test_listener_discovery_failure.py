@@ -1,5 +1,3 @@
-"""Inspection failures cannot certify absent collectors or authorize restarts."""
-
 from __future__ import annotations
 
 import os
@@ -52,8 +50,6 @@ def test_successful_lsof_distinguishes_listeners_from_absence(
 
     monkeypatch.setattr(psutil, "net_connections", denied)
     monkeypatch.setattr(proc, "run_bounded", lsof)
-    # Resolution is deterministic here: the fixture host may or may not have
-    # lsof installed, and neither case should change what is asserted.
     monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
     assert port_preflight.strict_listeners_on(4319) == expected
 
@@ -61,9 +57,6 @@ def test_successful_lsof_distinguishes_listeners_from_absence(
 def test_probe_resolves_lsof_through_candidates_in_restricted_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The company-air regression: a context whose PATH hides lsof (macOS
-    keeps it in /usr/sbin) must still resolve the supervised listener and
-    report it alive instead of "nothing listening"."""
 
     def denied(*, kind: str) -> None:
         raise psutil.AccessDenied

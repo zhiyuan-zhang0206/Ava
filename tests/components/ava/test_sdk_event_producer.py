@@ -1,5 +1,3 @@
-"""SDK recorders capture cold producers with their call-local identity."""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -202,7 +200,6 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         clock_factory: object,
         validate_state: object,
     ) -> None:
-        # Capture the production root inputs without installing unrelated plugins.
         captured.append(producer)
 
     captured: list[object] = []

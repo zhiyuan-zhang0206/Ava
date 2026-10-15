@@ -1,14 +1,3 @@
-"""Managed E2E process diagnostics and stale-run residue tests (`tests/e2e/process_support.py`).
-
-The reaper finds processes an e2e run left behind (identified by the
-`ava_e2e_home_<pid>_<ts>` AVA_HOME most of them inherit, or, for the
-session-scoped frontend whose env snapshot predates the e2e env layering, by
-its `.builds/build-<pid>_<ts>` cwd) whose owning pytest process is gone, and
-kills them. These tests cover the parsing and the live-run-protection
-partitioning through the public support component. Native child proofs exercise
-guarded signals without offering any unrelated host process to the sweep.
-"""
-
 from __future__ import annotations
 
 import json
@@ -164,10 +153,10 @@ def _proc_for(pid: int, pgid: int, owner: int, cmdline: str = "uv") -> processes
 
 def test_sweep_targets_kills_dead_owner_and_protects_live() -> None:
     procs = [
-        _proc_for(10, 10, 1),  # group leader, dead owner -> group kill
-        _proc_for(11, 10, 1),  # member of that group -> deduped into it
-        _proc_for(20, 99, 1),  # non-leader, dead owner -> individual
-        _proc_for(30, 30, 2, "npm"),  # leader, LIVE owner -> untouched
+        _proc_for(10, 10, 1),
+        _proc_for(11, 10, 1),
+        _proc_for(20, 99, 1),
+        _proc_for(30, 30, 2, "npm"),
     ]
     plan = processes.ResidueSweepPlan.from_processes(
         procs,
@@ -183,9 +172,9 @@ def test_sweep_targets_kills_dead_owner_and_protects_live() -> None:
 
 def test_sweep_targets_include_own() -> None:
     procs = [
-        _proc_for(10, 10, 99999),  # own run leader
-        _proc_for(11, 11, 99999, "npm"),  # own run leader
-        _proc_for(12, 12, 1),  # dead-run leader
+        _proc_for(10, 10, 99999),
+        _proc_for(11, 11, 99999, "npm"),
+        _proc_for(12, 12, 1),
     ]
     plan = processes.ResidueSweepPlan.from_processes(
         procs,
@@ -200,8 +189,6 @@ def test_sweep_targets_include_own() -> None:
 
 
 def test_sweep_targets_never_killpgs_own_pgrp() -> None:
-    """A leader process whose pgid IS our own pgrp (a browser worker started
-    by pytest in the same session) must go to singles, never to killpg."""
     procs = [_proc_for(10, 77777, 1, "chrome-headless-shell")]
     plan = processes.ResidueSweepPlan.from_processes(
         procs,
@@ -227,13 +214,6 @@ def test_sweep_targets_skips_own_run_when_not_included() -> None:
 
 
 def test_cwd_of_returns_str_or_none_for_real_process() -> None:
-    """Platform ground truth, unmonkeypatched: `_cwd_of` must return
-    `str | None` on every platform (re.Pattern.search rejects a Path). The
-    Linux branch satisfies the contract via Path.readlink() — which returns a
-    PosixPath, not a str — and the macOS branch via lsof output; the other
-    tests monkeypatch `_cwd_of` and would mask exactly that regression (this
-    one surfaced as CI e2e failures, not on the macOS dev box).
-    """
     cwd = processes.ProcessInspection().working_directory(os.getpid())
     assert cwd is None or isinstance(cwd, str)
 
@@ -283,7 +263,6 @@ def test_owner_liveness_preserves_live_pids_regardless_of_command(
 
 @pytest.mark.parametrize("owner_state", ["unknown", "live", "dead", "opaque", "permission"])
 def test_native_sweep_preserves_an_unreadable_live_owner(tmp_path: Path, owner_state: str) -> None:
-    """The real sweep sees only this test's birth-owned child, never host strangers."""
     owner_pid = 99999999
     with processes.managed_proc(
         [sys.executable, "-c", "import time; time.sleep(60)"],
@@ -446,7 +425,6 @@ def test_registered_server_query_exposes_only_the_active_fixture(tmp_path: Path)
 
 
 def test_native_sweep_preserves_live_run_and_recycled_command(tmp_path: Path) -> None:
-    """Only these three birth-owned fixture groups may be candidates in this proof."""
     from contextlib import ExitStack
 
     with ExitStack() as stack:
@@ -482,10 +460,10 @@ def test_native_sweep_preserves_live_run_and_recycled_command(tmp_path: Path) ->
         assert (
             processes.sweep_stale_e2e_processes(inspection=processes.ProcessInspection(rows=rows))
             == 2
-        )  # Existing return contract counts planned targets, including guarded skips.
+        )
         assert children[0].wait(timeout=5) != 0
-        assert children[1].poll() is None  # Command identity changed: never signalled.
-        assert children[2].poll() is None  # This live concurrent run: never targeted.
+        assert children[1].poll() is None
+        assert children[2].poll() is None
 
 
 def _ignore_cleanup_delay(_seconds: float) -> None:
@@ -646,7 +624,6 @@ def test_managed_frontend_receipt_identifies_its_exact_owner(tmp_path: Path) -> 
 def test_public_module_entry_launches_with_only_the_explicit_fixture_gate(
     tmp_path: Path, serving: bool
 ) -> None:
-    """Exercise the real -m entry used by gateway, agent-host, and ops fixtures."""
     gate = tmp_path / "serving"
     if serving:
         gate.write_text("ready\n")

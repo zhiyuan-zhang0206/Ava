@@ -112,7 +112,7 @@ def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
     )
     assert not admission.business_paused()
     admission.set_phase("migration", WHEN, MaintenancePhase.DRAINED)
-    assert not admission.business_paused()  # Other hosts may still need this gateway's SDK.
+    assert not admission.business_paused()
     for phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED):
         admission.set_phase("migration", WHEN, phase)
         assert admission.business_paused(), phase

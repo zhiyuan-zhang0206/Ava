@@ -1,5 +1,3 @@
-"""Open cancellation rolls back pending handles and preserves completed ownership."""
-
 import asyncio
 
 import pytest
@@ -25,8 +23,6 @@ class _PubSub:
             self.cancelled.set()
             raise
         if self.parent is not None:
-            # Run after this child has returned and attached the handles, but
-            # before asyncio.wait's child-completion callback wakes the parent.
             asyncio.get_running_loop().call_soon(self.parent.cancel)
 
     async def aclose(self) -> None:
@@ -73,7 +69,6 @@ async def test_cancelling_open_wait_cancels_child_without_waiting_for_rollback(
             await asyncio.wait_for(parent, 1)
         await asyncio.wait_for(pubsub.cancelled.wait(), 1)
         await asyncio.wait_for(redis.close_entered.wait(), 1)
-        # The existing abandon contract never waits for cancellation cleanup.
         assert parent.done()
         assert not redis.closed
         assert listener._pubsub is None

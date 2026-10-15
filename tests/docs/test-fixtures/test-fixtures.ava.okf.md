@@ -63,3 +63,5 @@ Additional cases live in responsibility subdirectories, import those helpers
 explicitly, and carry the same `path_scopes.toml` fixture dependencies. Module
 marks and repository-root lookups follow the moved cases; no size baseline is
 needed to collect or execute them.
+
+Related test premise: [Additional agent fixture cleanup](agent-cleanup.ava.okf.md).

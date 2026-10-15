@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Package Commands (plugins / skill / mcp / packages)
-description: The operator surface for installing external skills, Claude Code plugins, and MCP servers on one machine — `cli/commands/extensions/plugins.py`, `skill.py`, `mcp.py`, `packages.py` (update policy + channels). Installs are always local to the host the command runs on.
+description: Operator commands for external skills, plugins, MCP servers and package updates.
 tags:
 - cli
 - tool
@@ -12,9 +12,11 @@ tags:
 
 ## What it is
 
-The CLI surface over the [[install_registry.ava.okf.md|install registry]]. Every
-verb here acts on **the machine it runs on** — to install elsewhere, spawn an
-agent there (`ava.agents.spawn(machine=...)`).
+The CLI surface over the [[install_registry.ava.okf.md|install registry]]. Skill
+installation publishes to the cluster registry before writing its local copy;
+another home can materialize that content without seeing the original source.
+The [two-home test](two-home-chain.ava.okf.md) explains the
+shared-database proof and its concurrency and credential limitations.
 
 There is deliberately **no install form in the UI**. The Skills / Plugins / MCP
 sections of `/control` take a natural-language request; `POST

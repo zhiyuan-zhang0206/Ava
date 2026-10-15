@@ -1,5 +1,3 @@
-"""Process composition supplies lazy, child-local resources to ClientSet."""
-
 import os
 import sys
 from collections.abc import Iterator
@@ -20,7 +18,6 @@ from base.db.code_version_gate import ProcessDbGate
 
 @pytest.fixture
 def config_boot() -> Iterator[ConfigBoot]:
-    # An independent boot owns delivery environment mutations in this test scope.
     with patch.dict(os.environ):
         owner = ConfigBoot()
         owner.boot()

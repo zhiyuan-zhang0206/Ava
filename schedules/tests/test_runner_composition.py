@@ -1,5 +1,3 @@
-"""The schedule process composes SDK inputs at the execution boundaries."""
-
 from base.paths.tests.homes import unit_home as unit_home
 import sys
 import threading
@@ -136,7 +134,6 @@ def test_process_owns_one_gate_and_closes_its_pipeline(
         context.clients.database()
         pipelines.append(context.clients.event_pipeline())
         assert not pipelines[0].stopped
-        # A later source fact must not replace the entry's captured image.
         monkeypatch.setattr(
             process_context, "loaded_code_image", lambda: LoadedCommit(Path("/late"), "b")
         )

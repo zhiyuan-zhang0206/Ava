@@ -1,9 +1,3 @@
-"""Integration tests for the alert-class reads behind the sidebar's warning/error card.
-
-Real SQL on the throwaway test database: the events are INSERTed into `telemetry_events`, the
-dismissals into `event_dismissals`, and the HTTP surface reads them back.
-"""
-
 from __future__ import annotations
 
 import json
@@ -123,8 +117,6 @@ def test_the_window_selects_which_events_form_classes(
 def test_dismissed_classes_carry_the_cancelling_dismissal(
     db_conn: psycopg.Connection, client: TestClient
 ) -> None:
-    """A wildcard row cancels every process of its class; an exact row only its own process,
-    and the exact row is the one reported when both match. A reopened row cancels nothing."""
     wildcard = _dismiss(db_conn, "wild")
     exact = _dismiss(db_conn, "scoped", process="agent-host")
     _event(db_conn, "wild", process="gateway")
@@ -151,8 +143,6 @@ def test_dismissed_classes_carry_the_cancelling_dismissal(
 def test_dismissing_through_the_api_moves_the_class_out_of_the_active_count(
     db_conn: psycopg.Connection, client: TestClient
 ) -> None:
-    """The create call the console makes from a class row, then the reopen call from its
-    dismissal id, round-trip through both the list and the dashboard count."""
     _event(db_conn, "noisy", process="gateway", category="log", minutes_ago=2)
     _event(db_conn, "noisy", process="gateway", category="log", minutes_ago=1)
     db_conn.commit()
@@ -169,7 +159,7 @@ def test_dismissing_through_the_api_moves_the_class_out_of_the_active_count(
     assert after["dismissal_id"] == created.json()["id"]
     dashboard = client.get("/api/stats/dashboard").json()
     assert (dashboard["alert_classes_active"], dashboard["alert_classes_dismissed"]) == (0, 1)
-    assert dashboard["warnings"] == 2  # the event total does not move; the class does
+    assert dashboard["warnings"] == 2
 
     reopened = client.post(f"/api/event-resolutions/{after['dismissal_id']}/reopen")
     assert reopened.status_code == 200

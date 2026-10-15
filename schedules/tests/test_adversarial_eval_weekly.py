@@ -1,5 +1,3 @@
-"""Contract tests for the weekly adversarial-evaluation schedule."""
-
 import importlib.util
 import json
 import sys
@@ -238,7 +236,7 @@ def test_stale_batch_marker_is_indexed_alerted_and_its_workers_terminated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _load_schedule_module()
-    schedule = cast(Any, module)  # Dynamically loaded because the filename has hyphens.
+    schedule = cast(Any, module)
     marker = tmp_path / "cases" / ".batch.json"
     marker.parent.mkdir()
     marker.write_text(
@@ -287,9 +285,7 @@ def test_stale_batch_marker_is_indexed_alerted_and_its_workers_terminated(
 def test_worker_sweep_terminates_only_workers_outside_the_current_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    schedule = cast(
-        Any, _load_schedule_module()
-    )  # Dynamically loaded because the filename has hyphens.
+    schedule = cast(Any, _load_schedule_module())
     agents = [
         SimpleNamespace(agent_id=101, label="doc-worker", status=schedule.S.RUNNING),
         SimpleNamespace(agent_id=102, label="doc-colleague", status=schedule.S.IDLING),

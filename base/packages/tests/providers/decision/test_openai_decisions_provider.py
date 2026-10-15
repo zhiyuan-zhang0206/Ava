@@ -1,5 +1,3 @@
-"""OpenAI Decisions API request and response mapping against a mock HTTP transport."""
-
 from __future__ import annotations
 
 import json
@@ -162,7 +160,6 @@ async def test_a_refusal_is_an_error_not_a_distribution(
 
     with pytest.raises(DecisionResponseError, match="refused question 'inj'"):
         await _decide(catalog, _Server(httpx.Response(200, json=body)))
-    # The request was billed, so it is still accounted.
     assert [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
 
 

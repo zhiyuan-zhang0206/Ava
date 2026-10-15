@@ -1,5 +1,3 @@
-"""Sandbox schema owns output defaults and limit validation."""
-
 import pytest
 from pydantic import ValidationError
 
@@ -49,16 +47,7 @@ def test_crop_size_triggers_must_not_sit_below_the_hard_cap():
     assert config.exec_output_crop_after_bytes == 30_000
 
 
-# ---------------------------------------------------------------------------
-# The budget is a validated settings field
-# ---------------------------------------------------------------------------
-
-
 def test_budget_below_the_inline_cap_is_refused_at_startup() -> None:
-    """A budget under `exec_output_max_chars` would hand the envelope less than
-    it slices, so its "head" would reach into the accumulator's dropped middle.
-    Fail the operator's config loudly instead of rendering an incoherent
-    envelope."""
     from pydantic import ValidationError
 
     from base.config.domains.sandbox import SandboxSettings

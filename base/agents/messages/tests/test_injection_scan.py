@@ -1,5 +1,3 @@
-"""The pure prompt-injection scan: which text carries a known pattern, and the inbound finding."""
-
 import pytest
 
 from base.agents.messages.injection_scan import is_flagged, scan_inbound_content, triggers
@@ -50,8 +48,6 @@ def test_injection_patterns_flag(text: str) -> None:
     ],
 )
 def test_dropped_broad_patterns_stay_clean(text: str) -> None:
-    # Regression guard on the false-positive tightening: broad role-framing that
-    # fires on ordinary first-party text must NOT flag.
     assert triggers(text) == []
 
 

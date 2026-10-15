@@ -1,5 +1,3 @@
-"""Replay receipts recover acceptance without undoing a later chat selection."""
-
 import asyncio
 from threading import Event
 from typing import Any, cast
@@ -29,7 +27,7 @@ async def test_old_replay_cannot_undo_later_selection_or_depend_on_old_liveness(
         state = core._get_or_create_state("telegram", "chat")
         await core._cmd_switch(state, "7", replay_id="A")
         await core._cmd_switch(state, "8", replay_id="B")
-        upstream.agents = [row(8)]  # Accepted A must recover even when its target vanished.
+        upstream.agents = [row(8)]
         assert await core._cmd_switch(state, "7", replay_id="A") == []
         assert state.current_agent_id == 8
         assert core.outbound_store.selections() == {("telegram", "chat"): 8}
@@ -150,7 +148,6 @@ async def test_legacy_json_choice_bootstraps_once_without_reviving_old_cursor(
             assert conn.execute(
                 "SELECT push_agent_id,push_item_id,push_initialized,push_account_id FROM im_bridge_cursors"
             ).fetchone() == (json_agent, None, False, "test-account")
-        # A stale JSON cache cannot override the bound owner on a later restart.
         save_switch_state({"telegram:chat": 7})
         again = create_test_core(gateway(), tasks=_owned_tasks)
         await again.restore_subscriptions()
@@ -228,7 +225,7 @@ async def test_live_sse_snapshot_is_only_a_wakeup_and_periodic_pull_catches_comm
         await core._push_snapshot(("telegram", "chat"), state, {"items": [live]})
         assert core.outbound_store.pending_streams({"telegram": "test-account"}) == []
         upstream.timeline = [dict(live, payload="committed")]
-        await core.poll_timeline_outbound()  # No second SSE event is required.
+        await core.poll_timeline_outbound()
         assert cast(FakePlainAdapter, core.adapters["telegram"]).sent == [
             ("chat", "[Ava #7] committed")
         ]

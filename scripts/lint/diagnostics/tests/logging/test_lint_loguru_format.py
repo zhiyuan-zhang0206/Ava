@@ -1,21 +1,3 @@
-"""`scripts/lint/diagnostics/loguru_format.py` — every log call's message format matches its logger.
-
-loguru formats with `str.format`, so a stdlib-style `%s` message logs the
-literal placeholder and loses every argument. These cases pin what the lint
-flags (printf placeholders on each way a module reaches the loguru logger,
-arguments with no `{}` field) and what it must leave alone: `{}` messages, a
-stdlib `logging` logger (for which `%s` is correct), ambiguous names, and the
-inline exemption.
-
-The mirror rule: stdlib logging formats with `%`, so a loguru-style `{}` message
-with positional arguments raises `TypeError` while the record is formatted. The
-two loggers are told apart by where each name comes from, never by the file, so
-the mixed-module cases below are the ones that matter.
-
-Rule 3: loguru has no `exc_info` parameter — the kwarg is flagged on loguru log
-calls (the traceback would be lost) and left alone on stdlib ones (task #4979).
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -81,7 +63,6 @@ def test_correct_or_unverifiable_calls_are_clean(src: str) -> None:
         'import logging\nlogger = logging.getLogger(__name__)\nlogger.info("x %s", x)\n',
         'import logging\n_log = logging.getLogger("svc")\n_log.warning("x %s", x)\n',
         'import logging\ndef f(log: logging.Logger):\n    log.info("x %s", x)\n',
-        # The same name bound both ways is ambiguous — never flagged.
         "from base.log import logger\nimport logging\n"
         'def f():\n    logger = logging.getLogger("x")\n    logger.info("x %s", x)\n',
         'from base.log import logger\ndef f(logger):\n    logger.info("x %s", x)\n',
@@ -122,9 +103,6 @@ def test_explicit_directory_target_is_scanned(tmp_path: Path) -> None:
     assert _lint.main([str(tmp_path)]) == 1
 
 
-# ── Rule 2: stdlib loggers take `%`, not `{}` ─────────────────────────────────
-
-
 @pytest.mark.parametrize(
     "src",
     [
@@ -138,8 +116,6 @@ def test_explicit_directory_target_is_scanned(tmp_path: Path) -> None:
         'from logging import getLogger\n_log = getLogger("svc")\n_log.info("n={}", n)\n',
         'from logging import getLogger as make\n_log = make("svc")\n_log.info("n={}", n)\n',
         'import logging.handlers\n_log = logging.getLogger("svc")\n_log.info("n={}", n)\n',
-        # No module-level name at all: the call expression itself, a child, an alias,
-        # the `.log(level, ...)` form, the deprecated `warn`, the root-logger shortcut.
         'import logging\nlogging.getLogger(__name__).warning("n={}", n)\n',
         'import logging\n_log = logging.getLogger("a")\nchild = _log.getChild("b")\nchild.info("n={}", n)\n',
         'import logging\n_log = logging.getLogger("a")\nalias = _log\nalias.info("n={}", n)\n',
@@ -147,7 +123,6 @@ def test_explicit_directory_target_is_scanned(tmp_path: Path) -> None:
         'import logging\n_log = logging.getLogger("a")\n_log.warn("n={}", n)\n',
         'import logging\nlogging.warning("n={}", n)\n',
         'import logging\n_log = logging.getLogger("a")\n_log.info("n={}", *rest)\n',
-        # A keyword such as exc_info= is not a format argument; the positional one is.
         'import logging\n_log = logging.getLogger("a")\n_log.info("n={}", n, exc_info=True)\n',
         "import logging\ndef f():\n    _log = logging.getLogger('a')\n    _log.info('n={}', n)\n",
     ],
@@ -179,16 +154,12 @@ def test_the_stdlib_message_names_the_field_and_the_line() -> None:
     [
         'import logging\n_log = logging.getLogger("a")\n_log.info("n=%s", n)\n',
         'import logging\n_log = logging.getLogger("a")\n_log.info("n=%d rate=%.1f", n, r)\n',
-        # No positional argument: the braces are just text.
         'import logging\n_log = logging.getLogger("a")\n_log.info("n={}")\n',
         'import logging\n_log = logging.getLogger("a")\n_log.info("payload {}", extra={"k": 1})\n',
         'import logging\n_log = logging.getLogger("a")\n_log.info("json {\\"k\\": 1}")\n',
-        # A printf conversion consumes the argument; the braces are literal text.
         'import logging\n_log = logging.getLogger("a")\n_log.info("{} then %s", n)\n',
         'import logging\n_log = logging.getLogger("a")\n_log.info("{name}: %(k)s", {"k": 1})\n',
-        # `{{` / `}}` are escapes, not fields.
         'import logging\n_log = logging.getLogger("a")\n_log.info("use {{}} for %s", n)\n',
-        # Not a literal message, or not a stdlib logger.
         'import logging\n_log = logging.getLogger("a")\n_log.info(template, n)\n',
         'import logging\n_log = logging.getLogger("a")\n_log.setLevel("{}", n)\n',
         'import logging\nlogging.basicConfig(format="{message}", style="{")\n',
@@ -217,10 +188,10 @@ def test_a_module_with_both_loggers_is_judged_per_variable() -> None:
         "import logging\n"
         "from base.log import logger\n"
         '_log = logging.getLogger("svc")\n'
-        'logger.info("a={}", a)\n'  # 4: loguru, braces: fine
-        '_log.info("a=%s", a)\n'  # 5: stdlib, printf: fine
-        '_log.info("a={}", a)\n'  # 6: stdlib, braces: flagged
-        'logger.info("a=%s", a)\n'  # 7: loguru, printf: flagged
+        'logger.info("a={}", a)\n'
+        '_log.info("a=%s", a)\n'
+        '_log.info("a={}", a)\n'
+        'logger.info("a=%s", a)\n'
     )
     violations = _lint.violations_in_source(src)
     assert [lineno for lineno, _ in violations] == [6, 7]
@@ -254,7 +225,6 @@ def test_a_name_bound_as_both_stdlib_and_loguru_is_ambiguous_for_both_rules() ->
 @pytest.mark.parametrize(
     "src",
     [
-        # A rebinding, a parameter or a loop target makes the stdlib name unverifiable.
         'import logging\n_log = logging.getLogger("a")\n_log = make()\n_log.info("n={}", n)\n',
         'import logging\n_log = logging.getLogger("a")\ndef f(_log):\n    _log.info("n={}", n)\n',
         'import logging\n_log = logging.getLogger("a")\nfor _log in many:\n    _log.info("n={}", n)\n',
@@ -290,9 +260,6 @@ def test_a_stdlib_violation_fails_the_cli_and_names_both_formatters(
     assert "`{}`" in captured.err and "`%s`" in captured.err
 
 
-# ── Rule 3: loguru has no `exc_info` ──────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     "src",
     [
@@ -315,13 +282,10 @@ def test_exc_info_on_a_loguru_call_is_flagged(src: str) -> None:
 @pytest.mark.parametrize(
     "src",
     [
-        # stdlib logging accepts exc_info — the same kwarg is correct there.
         'import logging\n_log = logging.getLogger("svc")\n_log.warning("failed", exc_info=True)\n',
-        # loguru's own forms carry the exception; calls without the kwarg are clean.
         'from base.log import logger\nlogger.opt(exception=True).warning("failed")\n',
         'from base.log import logger\nlogger.opt(exception=exc).warning("failed")\n',
         'from base.log import logger\nlogger.warning("failed", event="x", agent_id=1)\n',
-        # A name bound both ways is ambiguous — never flagged.
         "from base.log import logger\nimport logging\ndef f():\n"
         '    logger = logging.getLogger("x")\n    logger.warning("failed", exc_info=True)\n',
     ],

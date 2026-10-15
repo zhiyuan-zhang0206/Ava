@@ -1,5 +1,3 @@
-"""Provider retry budgets cover every attempt, gap, and deadline."""
-
 from dataclasses import replace
 
 import pytest
@@ -13,7 +11,6 @@ def test_batch_budget_covers_retry_policy(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(settings.services, "embedding_backend", "gemini")
 
     def assert_coverage() -> float:
-        # Recompute each retry gap and the cancellation deadline per attempt.
         policy = gemini.EMBED_POLICY
         worst_batch = policy.max_attempts * settings.services.memory_embed_timeout_seconds
         worst_batch += sum(
@@ -33,7 +30,7 @@ def test_batch_budget_covers_retry_policy(monkeypatch: pytest.MonkeyPatch) -> No
         "EMBED_POLICY",
         replace(gemini.EMBED_POLICY, backoff=ExponentialBackoff(base=100, factor=2, cap=1000)),
     )
-    assert_coverage()  # Later backoffs exceed Retry-After: wrong indices now fail.
+    assert_coverage()
     monkeypatch.setattr(
         settings.services,
         "memory_embed_timeout_seconds",

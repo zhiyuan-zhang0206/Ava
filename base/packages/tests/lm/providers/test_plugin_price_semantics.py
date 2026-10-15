@@ -1,5 +1,3 @@
-"""Runtime locks for complete provider-plugin pricing semantics."""
-
 from __future__ import annotations
 
 import json
@@ -117,7 +115,6 @@ def test_haiku_5_5_whole_request_price_boundary_includes_cached_input(
     high = Rates(0.50, 0.05, 2.50, cache_write_5m=0.625, cache_write_1h=1.0)
     assert rates_at("claude-haiku-5-5", _FUTURE, 100_000, prices=model_catalog.prices) == low
     assert rates_at("claude-haiku-5-5", _FUTURE, 100_001, prices=model_catalog.prices) == high
-    # Cache reads and both cache-write TTLs count toward the input threshold.
     for total, rates in ((100_000, low), (100_001, high)):
         expected = (
             (total - 90_000) * rates.cache_miss

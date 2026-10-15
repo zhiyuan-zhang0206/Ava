@@ -1,18 +1,9 @@
-"""Scripted peer decisions exercising the documented budget-handoff procedure.
-
-The model chooses to pause by construction. Real telemetry, observer delivery,
-SDK calls, checkpoints and recovery are exercised; model judgment is not.
-All peers explicitly use the same fixed-price model, so a real UTC tariff
-transition cannot move the threshold away from the scripted six-call budget.
-"""
-
 from __future__ import annotations
 
 import json
 
 from tests.e2e.fakes.scenario_recording import RecordingModel, exec_call, say, scratch_root
 
-# This accounting scenario must not cross a real UTC daily price boundary.
 BUDGET_MODEL = "qwen3.8-max"
 
 
@@ -107,8 +98,6 @@ def build(model: str, *, agent_id: int | None) -> RecordingModel:
     role = scratch_root("budget").joinpath("role").read_text()
     path = scratch_root("budget") / f"{agent_id}.json"
     if path.exists() and json.loads(path.read_text())["status"] == "paused":
-        # Cold reconstruction must not rerun initial dispatch. The next message
-        # (including a late checkpoint) reads the saved pause before any work.
         return RecordingModel(
             agent_id=agent_id,
             script=(exec_call(4, _recover_code(role, agent_id)), say("Still paused.")),

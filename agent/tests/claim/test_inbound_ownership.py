@@ -1,5 +1,3 @@
-"""A stale consumer cannot steal durable work from the admitted owner."""
-
 import asyncio
 from uuid import uuid4
 
@@ -199,8 +197,6 @@ async def test_lock_wait_past_unchanged_lease_expiry_refuses_claim(
         waiter = asyncio.create_task(
             claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
         )
-        # Hold the unchanged tuple past expiry; statement-time predicates
-        # can be true before blocking and must not authorize after waking.
         await asyncio.sleep(1.1)
         assert not waiter.done()
     with pytest.raises(RuntimeOwnershipLostError):
@@ -216,10 +212,7 @@ async def test_claim_lock_timeout_releases_connection_for_retry(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """A blocked owner row aborts promptly and returns its pool connection."""
-    monkeypatch.setattr(
-        settings.agent, "db_pool_acquire_timeout_seconds", 0.05
-    )  # lock timeout 50ms
+    monkeypatch.setattr(settings.agent, "db_pool_acquire_timeout_seconds", 0.05)
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = insert(db_conn, agent_id)
@@ -228,8 +221,6 @@ async def test_claim_lock_timeout_releases_connection_for_retry(
         with pytest.raises(psycopg.errors.LockNotAvailable):
             await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
 
-        # The blocker holds one of the two pool slots. This borrow can only
-        # succeed if the failed claim returned the other connection.
         async with aops_pool.connection(timeout=0.5) as conn:
             assert await (await conn.execute("SELECT 1")).fetchone() == (1,)
 
@@ -244,7 +235,6 @@ async def test_missing_redis_publish_recovers_from_durable_pg(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    # Direct SQL deliberately omits all Redis notifications.
     inbound = insert(db_conn, agent_id)
     assert [
         r.id for r in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)

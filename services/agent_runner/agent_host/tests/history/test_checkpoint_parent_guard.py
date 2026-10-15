@@ -1,5 +1,3 @@
-"""Real PostgreSQL proofs for the hosted saver's exact parent write boundary."""
-
 import asyncio
 from types import SimpleNamespace
 from typing import Annotated, Any, Literal, TypedDict, cast
@@ -134,7 +132,7 @@ async def test_child_insert_failure_rolls_back_already_written_blob(
         _config(), _checkpoint(), {"source": "input", "step": -1}, {"value": "1"}
     )
     child = _checkpoint("2")
-    cast(Any, child)["id"] = None  # The blob insert precedes this real NOT NULL violation.
+    cast(Any, child)["id"] = None
     with pytest.raises(errors.NotNullViolation):
         await saver.aput(parent, child, {"source": "loop", "step": 0}, {"value": "2"})
     await _assert_unwritten(adb_conn, "901", child)
@@ -182,7 +180,7 @@ async def test_actual_delta_graph_with_production_nstep_replays_committed_messag
         aops_pool,
         read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
     )
-    builder = cast(Any, StateGraph(_DeltaState))  # Pinned graph overloads contain Unknown types.
+    builder = cast(Any, StateGraph(_DeltaState))
     builder.add_node("append", _delta_append)
     builder.add_edge(START, "append")
     builder.add_edge("append", END)
@@ -197,7 +195,6 @@ async def test_actual_delta_graph_with_production_nstep_replays_committed_messag
         "user",
         "reply",
     ]
-    # Delta retires the interval: input, dispatch and completion all persisted.
     checkpoints = [checkpoint async for checkpoint in saver.alist(_config())]
     assert [checkpoint.metadata.get("step") for checkpoint in reversed(checkpoints)] == [-1, 0, 1]
 
@@ -225,7 +222,6 @@ async def test_parent_deletion_waits_until_the_guarded_child_transaction_commits
     )
     child = _checkpoint("2")
     await saver.aput(parent, child, {"source": "loop", "step": 0}, {"value": "2"})
-    # Block the retry's child UPSERT after it has locked its exact parent.
     await adb_conn.execute(
         "SELECT 1 FROM checkpoints WHERE thread_id='901' AND checkpoint_id=%s FOR UPDATE",
         (child["id"],),
@@ -254,7 +250,6 @@ async def test_parent_deletion_waits_until_the_guarded_child_transaction_commits
         await asyncio.wait_for(writing, timeout=5)
         if deleting is not None:
             await asyncio.wait_for(deleting, timeout=5)
-    # The guarantee ends at commit, rather than claiming a permanent foreign key.
     stored = await saver.aget_tuple(_config())
     assert stored is not None
     assert stored.checkpoint["id"] == child["id"]
@@ -267,7 +262,7 @@ async def test_pinned_previous_save_failure_cannot_commit_dangling_successor(
     saver = _saver(aops_pool)
     previous = _checkpoint("1")
     if failure == "error":
-        versions = cast(Any, {"value": None})  # Real PostgreSQL blob NOT NULL failure.
+        versions = cast(Any, {"value": None})
         prev = asyncio.create_task(
             saver.aput(_config(), previous, {"source": "input", "step": -1}, versions)
         )
@@ -275,7 +270,6 @@ async def test_pinned_previous_save_failure_cannot_commit_dangling_successor(
         original = prev.exception()
         assert isinstance(original, errors.NotNullViolation)
     else:
-        # This exclusive pool lease makes the previous real save wait for admission.
         async with AsyncConnectionPool[AsyncConnection[DictRow]](
             aops_pool.conninfo,
             min_size=1,
@@ -312,7 +306,6 @@ async def _failed_successor(
     with pytest.raises(
         MissingCheckpointParentError, match="checkpoint parent is missing"
     ) as caught:
-        # Run the pinned library method itself, including its finally: aput.
         await cast(Any, AsyncPregelLoop)._checkpointer_put_after_previous(
             cast(Any, owner),
             prev,

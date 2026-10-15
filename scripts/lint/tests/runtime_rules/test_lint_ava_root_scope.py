@@ -1,12 +1,3 @@
-"""scripts/lint/ava_root_scope.py: the root supervisor's scope gate.
-
-The gate keeps services/supervision/ava_root/ free of permission-domain and
-platform-specific names (ruling 2026-09-12: the privileged helper program is a
-separate codebase by design, so the root supervisor's own code may not couple
-to it). These tests pin the three symbol groups, the inline opt-out marker,
-the skip rules (binary / non-UTF-8 / __pycache__), and the default scan root.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -55,7 +46,6 @@ def test_docstring_cannot_hide_executable_statement_on_same_line(tmp_path: Path)
 @pytest.mark.parametrize(
     "symbol",
     [
-        # permission-domain group
         "permissions_helper",
         "permissions-helper",
         "permissions helper",
@@ -78,7 +68,6 @@ def test_docstring_cannot_hide_executable_statement_on_same_line(tmp_path: Path)
         "entitlements",
         "security find-generic-password",
         "Security.framework",
-        # macOS-specific group
         "launchd",
         "launchctl",
         "LaunchAgents",
@@ -91,7 +80,6 @@ def test_docstring_cannot_hide_executable_statement_on_same_line(tmp_path: Path)
         "macOS",
         "Mac OS X",
         "Mach",
-        # other platform-mechanism group
         "systemd",
     ],
 )
@@ -100,8 +88,6 @@ def test_forbidden_symbol_is_flagged(tmp_path: Path, symbol: str) -> None:
     hits = gate.scan_file(path)
     assert len(hits) == 1
     assert hits[0][0] == 1
-    # A pattern may match a prefix of the written symbol (e.g. "Mac OS" inside
-    # "Mac OS X"); what matters is that the forbidden name was caught.
     assert symbol.lower().startswith(hits[0][1].lower())
 
 
@@ -144,8 +130,6 @@ def test_inline_marker_in_string_literal_does_not_exempt(tmp_path: Path) -> None
 
 
 def test_unparseable_text_falls_back_to_substring_marker(tmp_path: Path) -> None:
-    """Tokenizing failure falls back to a per-line substring match, mirroring
-    no_emoji.py's permissive fallback."""
     path = _write(
         tmp_path,
         "mod.py",
@@ -188,7 +172,6 @@ def test_main_returns_zero_on_clean_file(tmp_path: Path) -> None:
 def test_explicit_missing_target_is_an_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
     good = _write(tmp_path, "mod.py", "value = 1\n")
     missing = tmp_path / "typo.py"
     assert gate.main([str(missing)]) == 1
@@ -205,7 +188,6 @@ def test_default_scan_root_is_ava_root(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_other_services_are_not_scanned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The gate's scope is the root supervisor's own code, not siblings."""
     monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
     _write(tmp_path, "services/other/neighbour.py", "value = 'launchd'\n")
     assert gate.main([]) == 0

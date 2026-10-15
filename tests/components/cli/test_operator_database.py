@@ -1,5 +1,3 @@
-"""CLI composition owns admission without changing a service's posture."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -53,7 +51,6 @@ def test_operator_handles_share_the_command_gate_without_git(
     factory()
     assert len(seen) == 2
     assert seen[0] is seen[1]
-    # Creating an operator never changes the independently supplied service gate.
     service = ProcessDbGate(version=lambda: 12, process="service")
     assert service.min_read_due()
     assert service.application_name() == "ava:service:v12"

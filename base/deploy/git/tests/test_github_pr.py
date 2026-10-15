@@ -1,12 +1,3 @@
-"""base.deploy.git.github_pr: derive the memory repo slug + gate on gh PR capability.
-
-`memory_repo_slug()` reads the remote URL through `base.deploy.git.memory_repo.memory_remote`,
-which `github_pr` re-imports into its own namespace; tests patch
-`gp.memory_remote`. `github_pr_blocker(host=...)` finds and runs `gh` through the `Host`
-it is given; the tests hand it a `Host` whose `run` is a `FakeCommands` script, so no
-network / gh install is required.
-"""
-
 import subprocess
 
 import pytest
@@ -14,8 +5,6 @@ import pytest
 import base.deploy.git.github_pr as gp
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
-
-# ── memory_repo_slug ──────────────────────────────────────────────────────
 
 
 def test_slug_parses_ssh_form(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,9 +26,6 @@ def test_slug_raises_on_non_github_remote(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(gp, "memory_remote", lambda: "git@gitlab.com:owner/name.git")
     with pytest.raises(ValueError, match="not a GitHub remote"):
         gp.memory_repo_slug()
-
-
-# ── github_pr_blocker ─────────────────────────────────────────────────────
 
 
 def _host(commands: FakeCommands, *, gh: str | None = "/usr/bin/gh") -> Host:
@@ -74,13 +60,13 @@ def test_blocker_none_when_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> N
             ".viewerPermission",
         ),
     ]
-    assert [call.timeout for call in commands.calls] == [20, 20]  # each gh call is bounded
+    assert [call.timeout for call in commands.calls] == [20, 20]
 
 
 def test_blocker_gh_missing() -> None:
     commands = FakeCommands()
     assert gp.github_pr_blocker(host=_host(commands, gh=None)) == "gh CLI not installed"
-    assert commands.calls == []  # nothing is run without gh
+    assert commands.calls == []
 
 
 def test_blocker_not_authenticated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,7 +76,7 @@ def test_blocker_not_authenticated(monkeypatch: pytest.MonkeyPatch) -> None:
     reason = gp.github_pr_blocker(host=_host(commands))
     assert reason is not None
     assert "not authenticated" in reason
-    assert commands.argvs == [("gh", "auth", "status")]  # the permission read never runs
+    assert commands.argvs == [("gh", "auth", "status")]
 
 
 def test_blocker_read_only_permission(monkeypatch: pytest.MonkeyPatch) -> None:

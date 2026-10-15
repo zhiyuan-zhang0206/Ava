@@ -1,5 +1,3 @@
-"""Schedule writes preserve no-op identity and transactionally enqueue work."""
-
 from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
@@ -120,7 +118,6 @@ def test_response_failure_leaves_committed_convergence_work(
         sid = _create(client)
         with pytest.raises(RuntimeError, match="response lost"):
             client.put(f"/api/schedules/{sid}", json={"script": "print(2)\n"})
-        # The retry is a no-op; it must preserve the pending original delivery.
         assert client.put(f"/api/schedules/{sid}", json={"script": "print(2)\n"}).status_code == 200
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
     assert db_conn.execute(

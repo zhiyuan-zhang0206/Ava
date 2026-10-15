@@ -1,10 +1,3 @@
-"""Memory search API endpoint tests — the HTTP contract NumPyBackend dials.
-
-FastAPI TestClient against the real app + store (no socket), so the wire
-contract is pinned: request/response shapes, status codes, and the
-persist-before-ack guarantee.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -74,8 +67,6 @@ def test_upsert_delete_meta_roundtrip(tmp_path: Path) -> None:
 
 
 def test_delete_stale_batch_removes_tail_and_persists(tmp_path: Path) -> None:
-    """The /delete_stale_batch endpoint removes tail rows (issue #1946) and
-    persists before ack."""
     with _client(tmp_path) as client:
         for idx in range(3):
             client.post(
@@ -91,7 +82,6 @@ def test_delete_stale_batch_removes_tail_and_persists(tmp_path: Path) -> None:
         assert client.get("/stats").json()["rows"] == 1
         assert client.get("/meta").json() == {"/a.md": [1.0, "hash-0", _FP]}
 
-        # Persistence: a fresh store over the same npz sees the same rows.
         from services.derived.memory_search.store import MemoryStore as _Store
 
         reloaded = _Store(tmp_path / "vectors.npz", dim=_DIM, fingerprint=_FP)
@@ -128,7 +118,6 @@ def test_search_returns_ordered_hits(tmp_path: Path) -> None:
 
 
 def test_upsert_persists_before_ack(tmp_path: Path) -> None:
-    """A row acked by the API must survive a store rebuild from disk."""
     with _client(tmp_path) as client:
         ones = np.ones(_DIM, dtype=np.float32)
         assert (
@@ -215,8 +204,6 @@ def test_upsert_batch_saves_once_while_single_upserts_save_each_row(
 
 
 def test_batch_rows_cap_is_the_one_the_app_was_built_with(tmp_path: Path) -> None:
-    """The wire batch bound is cluster config handed to `build_app` by the daemon (task
-    #3696): a shorter cap rejects a batch the default cap accepts, on both batch endpoints."""
     rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(3)]
     entries = [{"path": row["path"], "kind_limits": {}} for row in rows]
     with TestClient(build_app(_store(tmp_path), 2, embedding_dim=_DIM)) as small:
@@ -242,14 +229,11 @@ def test_upsert_batch_rejects_empty_oversized_and_wrong_dim(tmp_path: Path) -> N
 
 
 def test_stats_empty_fresh_store(tmp_path: Path) -> None:
-    """/stats on a never-saved store: zero rows, no save duration yet."""
     with _client(tmp_path) as client:
         assert client.get("/stats").json() == {"rows": 0, "last_save_seconds": None}
 
 
 def test_stats_after_upsert(tmp_path: Path) -> None:
-    """/stats mirrors the store's absolute state after a persist: row count
-    up, last save duration a non-negative float."""
     with _client(tmp_path) as client:
         for path, seed in [("/a.md", 0), ("/b.md", 1)]:
             assert (
@@ -275,8 +259,6 @@ def test_stats_after_upsert(tmp_path: Path) -> None:
 
 
 def test_emit_memory_search_stats(emitted_events: EmittedEvents) -> None:
-    """The 60s flusher's emit step: one `memory_search_stats` telemetry
-    event; `last_save_seconds` rides along only once a save has happened."""
     import services.derived.memory_search.app as app_module
 
     app_module.emit_memory_search_stats(5, None)
@@ -304,8 +286,6 @@ def test_upsert_rejects_wrong_dim_vector(tmp_path: Path) -> None:
 
 
 def test_upsert_rejects_oversized_vector(tmp_path: Path) -> None:
-    """A vector longer than the provider dim is rejected by the model bound before numpy
-    ever allocates (loopback hardening — the wire models carry size caps)."""
     with _client(tmp_path) as client:
         resp = client.post(
             "/upsert",

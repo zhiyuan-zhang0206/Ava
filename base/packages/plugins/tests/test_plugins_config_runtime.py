@@ -1,13 +1,3 @@
-"""plugins_config.load_for_runtime — dangling config entries degrade, never raise.
-
-QA nit 2 from PR #878: `load()` stayed fail-fast at every consumer other than
-`load_extensions`. `load_for_runtime` is the shared runtime wrapper those
-consumers use; strict `load()` (interactive CLI paths) keeps raising. Dangling
-names route through the one canonical reporter (`base.packages.plugins.load_report`,
-on each failed load) — the 2026-09-11 macmini incident ran for days on a plain
-warning no alert surface carried.
-"""
-
 from pathlib import Path
 
 import pytest
@@ -50,7 +40,7 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
 
     monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
 
-    config = load_for_runtime({"real"})  # must not raise
+    config = load_for_runtime({"real"})
 
     assert set(config.plugins) == {"real"}
     assert config.plugins["real"].enabled
@@ -61,7 +51,6 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
 def test_load_for_runtime_reports_each_failed_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Repeated failures stay visible without process-wide warning state."""
     write_local({"plugins": {"real": {"enabled": True}, "vanished": {"enabled": False}}})
     reported: list[str] = []
 
@@ -71,7 +60,7 @@ def test_load_for_runtime_reports_each_failed_load(
     monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
 
     load_for_runtime({"real"})
-    load_for_runtime({"real"})  # a later request re-reads the same config
+    load_for_runtime({"real"})
 
     assert reported == ["vanished", "vanished"]
 
@@ -85,8 +74,6 @@ def test_load_for_runtime_keeps_enabled_flags() -> None:
 
 
 def test_strict_load_still_raises_on_dangling() -> None:
-    """Interactive CLI paths keep fail-fast: `ava plugins enable` on a plugin
-    that is not on disk must keep its DanglingPlugin error."""
     write_local({"plugins": {"vanished": {"enabled": True}}})
 
     with pytest.raises(DanglingPlugin):

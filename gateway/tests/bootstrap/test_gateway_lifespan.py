@@ -1,5 +1,3 @@
-"""Gateway lifespan joins its own flushers before closing their database pools."""
-
 import asyncio
 from collections.abc import Callable
 from contextlib import AsyncExitStack
@@ -33,7 +31,6 @@ def flusher_tasks(
         try:
             await asyncio.Event().wait()
         finally:
-            # Joining must include asynchronous cleanup, not just cancel().
             await asyncio.sleep(0)
 
     monkeypatch.setattr(gateway_app.latency, "latency_flusher", flush)
@@ -52,7 +49,7 @@ async def test_overlapping_lifespans_join_their_original_flushers(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    del db_conn  # Provision the native, isolated database for the real lifespan.
+    del db_conn
     app = FastAPI()
     with gateway_test_process(machine=machine_identity) as process:
         app.state.gateway_config = gateway_config_from_boot(process.config)
@@ -63,8 +60,6 @@ async def test_overlapping_lifespans_join_their_original_flushers(
                 assert app.state.machine is machine_identity
                 assert app.state.process_image is process.image
                 original = [await flusher_tasks.get(), await flusher_tasks.get()]
-                # Other app.state resources retain their current nested-lifespan
-                # behavior; release the original handles after the lifespan joins.
                 cleanup.callback(app.state.runtime_metrics.stop)
                 cleanup.push_async_callback(app.state.grafana_client.aclose)
                 cleanup.push_async_callback(app.state.insights_client.aclose)

@@ -1,5 +1,3 @@
-"""Shared native queries outlive HTTP waiters and remain owned through shutdown."""
-
 import asyncio
 import threading
 from typing import Any
@@ -40,7 +38,6 @@ async def test_cancelled_leader_keeps_one_shared_native_load_until_close() -> No
         release.set()
         assert await follower is expected
         assert calls == 1
-        # Production's zero TTL does not retain a successful snapshot.
         assert await cache.get_or_load_async("same", load, ttl_s=0, now=lambda: 0) is expected
         assert calls == 2
     finally:

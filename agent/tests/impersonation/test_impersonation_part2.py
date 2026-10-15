@@ -1,5 +1,3 @@
-"""Takeover barriers: consent, resource closure, checkpoint ordering and replay."""
-
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -74,9 +72,6 @@ def _session(status: str = "active", **values: Any) -> dict[str, Any]:
     }
 
 
-# ── Relay establishment gate and supervision ────────────────────────────────
-
-
 def _relay_session(
     status: str = "accepted", *, provider: str = "codex", **values: Any
 ) -> dict[str, Any]:
@@ -103,8 +98,6 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An accepted (not yet active) lease whose accepting incarnation died does not
-    survive the successor's admission: it is closed, not re-asked."""
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases
     from base.agents.tests.units import spawn_agent
@@ -158,15 +151,12 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
         "FROM agent_impersonations WHERE id=%s",
         (lease["id"],),
     ).fetchone() == ("expired", True, "aborted: native runtime restarted", 1)
-    # Closing the lease must not write the dead predecessor back over the live row.
     assert db_conn.execute(
         "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (successor.generation, successor.owner)
 
 
 def test_resume_note_pending_tracks_the_trailing_end_note() -> None:
-    """The claim's fresh-window waiver keys on the newest message being the
-    delivered end-of-session note; any newer message ends the pending resume."""
     from agent.impersonation_handoff import resume_note_pending
 
     note = HumanMessage(content="session ended", id="impersonation-handoff:7:0")

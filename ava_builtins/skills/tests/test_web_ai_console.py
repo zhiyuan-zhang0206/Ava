@@ -1,12 +1,3 @@
-"""Unit tests for the web-ai console child (ava_builtins/skills/integrations/web-ai/console/scripts/ask.py).
-
-The browser-driving half lives in webchat (covered by test_web_ai_webchat.py);
-this locks the console-only mapping from a webchat `ask_many` row to the result
-row the agent reads — specifically the error-row pass-through and the `ok` rule
-(a timed-out partial is not `ok`). Loading ask.py also execs webchat via its own
-__file__-derived sys.path guard; no browser is driven.
-"""
-
 from __future__ import annotations
 
 from ava_builtins.skills.tests.skill_script import load_skill_script
@@ -46,8 +37,6 @@ def test_to_row_completed_answer_is_ok() -> None:
 
 
 def test_to_row_incomplete_partial_is_not_ok() -> None:
-    # A timed-out run can hand back a transient placeholder as the partial; `ok`
-    # requires completion, not just text.
     row = ask._to_row(
         {
             "site": "chatgpt",

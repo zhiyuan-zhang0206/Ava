@@ -1,5 +1,3 @@
-"""The chunk call's group envelope: parsing, unit numbers resolved to units, the tiling rules."""
-
 from __future__ import annotations
 
 import pytest
@@ -49,7 +47,6 @@ def inbound(second: int, text: str) -> HumanMessage:
     )
 
 
-# unit 1 inbound, 2 text, 3 work (shares message 1 with the text), 4 work, 5 inbound, 6 work
 MESSAGES: list[BaseMessage] = [
     inbound(1, "fix the flaky test"),
     ai(2, text="I will look at it", code="ls -la"),
@@ -140,9 +137,6 @@ def test_the_first_group_starts_at_one_and_the_last_ends_at_the_catalogs_end() -
 
 
 def test_numbering_the_groups_instead_of_the_units_is_refused() -> None:
-    """The regression of job 149: n = 61 units, a reply that counts its ten groups 1..10 as
-    `first` (and, for the model's own idea of a span, last = first). Before the envelope carried
-    both ends, those numbers passed every check and every node's span was shifted."""
     count = 61
     units = [MessageUnit("text", i, i, None, None, None, f"u{i}") for i in range(count)]
     catalog = [f"[{n}] text: unit {n}" for n in range(1, count + 1)]
@@ -153,7 +147,6 @@ def test_numbering_the_groups_instead_of_the_units_is_refused() -> None:
     assert "the last group ends at 10, but the catalog ends at unit 61" in text
     assert "not the position of the group in the reply" in text
     assert "(your group: [10] text: unit 10 .. [10] text: unit 10)" in text
-    # The same numbers as a faithful reply would write them are accepted.
     firsts = [1, 7, 13, 19, 25, 31, 37, 43, 49, 55]
     ok = "".join(
         group(f"g{k}", f, (firsts[k + 1] - 1) if k + 1 < len(firsts) else count)
@@ -164,7 +157,6 @@ def test_numbering_the_groups_instead_of_the_units_is_refused() -> None:
 
 
 def test_a_start_on_a_turns_tool_calls_moves_to_its_text_without_complaint() -> None:
-    # unit 3 is the work unit of the message whose text is unit 2: the boundary moves one earlier
     assert resolve(group("a", 1, 2) + group("b", 3, 6)) == [
         UnitGroup(0, 0, "a"),
         UnitGroup(1, 5, "b"),
@@ -236,8 +228,6 @@ def test_summaries_keep_their_text_including_other_markup() -> None:
 
 
 def test_a_missing_close_tag_is_refused_not_merged_into_one_group() -> None:
-    # The model left out </group> on the first two groups: the lazy match would take everything
-    # up to the last close tag as one summary.
     reply = (
         '<group first="1" last="2">a<group first="3" last="4">b<group first="5" last="6">c</group>'
     )

@@ -1,5 +1,3 @@
-"""A pure runner's launcher delivers the installed unit capability."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,7 +24,6 @@ def test_a_pure_runners_launcher_delivers_the_installed_capability(
     }
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
         bringup.db_delivery("gateway", remote_data_plane=False)
-    # The launch digest binds the capability's non-secret reference.
     assert write_generation(runner_home) == runner_boot.reference
     unit.unit_capability_path(runner_home).unlink()
     assert write_generation(runner_home) is None

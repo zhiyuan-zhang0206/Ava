@@ -1,5 +1,3 @@
-"""Alert rules cases: billing rule fires on the first occurrence."""
-
 from __future__ import annotations
 
 import pytest
@@ -17,10 +15,6 @@ from tests.scripts.test_alert_rules import (
 
 
 def test_billing_rule_fires_on_the_first_occurrence() -> None:
-    """R13 is the one rule with no spike threshold: an out-of-credit key fails
-    every turn and only a human can clear it, so `> 0` over a 15m window and
-    `for: 0m` are the point of the rule, not an oversight. A threshold or a
-    `for` window creeping in here would re-hide the incident R1 already hides."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-llm-billing-quota"]
     assert threshold_params(rule) == [[0]]
@@ -30,7 +24,6 @@ def test_billing_rule_fires_on_the_first_occurrence() -> None:
 
 
 def test_rate_limit_rule_groups_http_429s_by_provider() -> None:
-    """The warning is a provider-level burst, not a page per affected model."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-llm-rate-limit"]
     expr = rule_query_exprs(rule, "loki")[0]
@@ -45,10 +38,6 @@ def test_rate_limit_rule_groups_http_429s_by_provider() -> None:
 
 
 def test_billing_rule_keys_on_the_billing_flag_not_a_status_list() -> None:
-    """The discriminator is the emitted `billing` verdict
-    (base/lm/errors.py's cross-provider predicate), never a status list
-    re-spelled in LogQL: a provider added to that vocabulary must be covered
-    here without touching this file."""
     rules = {r["uid"]: r for r in load_rules()}
     expr = rule_query_exprs(rules["ava-ops-llm-billing-quota"], "loki")[0]
     assert 'attributes_billing="true"' in expr
@@ -56,23 +45,16 @@ def test_billing_rule_keys_on_the_billing_flag_not_a_status_list() -> None:
 
 
 def test_billing_rule_names_vendor_and_model_in_the_notification() -> None:
-    """The IM message is one line and has to be self-explanatory, so the alert
-    instance is grouped by (vendor, model) and both are interpolated into the
-    summary — a bare count would not say whose key to top up."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-llm-billing-quota"]
     assert "sum by (attributes_vendor, attributes_model)" in rule_query_exprs(rule, "loki")[0]
     summary = rule["annotations"]["summary"]
     assert "{{ $labels.attributes_vendor }}" in summary
     assert "{{ $labels.attributes_model }}" in summary
-    # base/telemetry/alerts/__init__.py:notify_text truncates the summary at 200 chars; the
-    # template must still say what happened once the labels expand.
     assert len(summary) <= 200, f"summary is {len(summary)} chars, IM truncates at 200"
 
 
 def test_delivery_stalled_rule_filters_fresh_by_age() -> None:
-    """R5's "fresh" discriminator is attributes.age_s < 600 — a numeric
-    comparison on the json-flattened label (numbers parse as numbers)."""
     rules = {r["uid"]: r for r in load_rules()}
     exprs = rule_query_exprs(rules["ava-ops-delivery-stalled-backlog"], "loki")
     assert any("attributes_age_s < 600" in e for e in exprs)
@@ -80,8 +62,6 @@ def test_delivery_stalled_rule_filters_fresh_by_age() -> None:
 
 @pytest.mark.parametrize(("uid", "metric"), sorted(INFRA_RULE_METRICS.items()))
 def test_infra_rule_queries_its_scraped_metric(uid: str, metric: str) -> None:
-    """Each infra rule reads Prometheus, and reads the series name the sidecar
-    actually produces."""
     rules = {r["uid"]: r for r in load_rules()}
     exprs = rule_query_exprs(rules[uid], "prometheus")
     assert len(exprs) == 1, f"{uid}: expected exactly one Prometheus query"
@@ -91,8 +71,6 @@ def test_infra_rule_queries_its_scraped_metric(uid: str, metric: str) -> None:
 
 @pytest.mark.parametrize("uid", sorted(INFRA_RULE_METRICS))
 def test_infra_rule_groups_by_machine_name(uid: str) -> None:
-    """Per the 2026-08-24 user ruling, aggregation keeps the Ava roster
-    `machine_name`, so units on one host remain distinct alert instances."""
     rules = {r["uid"]: r for r in load_rules()}
     expr = rule_query_exprs(rules[uid], "prometheus")[0]
     assert "by (machine_name" in expr, f"{uid}: aggregates away the machine name:\n{expr}"
@@ -108,9 +86,6 @@ def test_infra_rule_groups_by_machine_name(uid: str) -> None:
     ],
 )
 def test_disk_watermark_rule_is_per_mountpoint(uid: str) -> None:
-    """The volume is the actionable unit: pg data, the traces mirror and the
-    LGTM volumes can sit on different filesystems, and a max over all of them
-    would name no path to clear."""
     rules = {r["uid"]: r for r in load_rules()}
     expr = rule_query_exprs(rules[uid], "prometheus")[0]
     assert "by (machine_name, mountpoint)" in expr
@@ -126,27 +101,16 @@ def test_disk_watermark_rule_is_per_mountpoint(uid: str) -> None:
     ],
 )
 def test_disk_watermark_rule_excludes_non_asset_mounts(uid: str) -> None:
-    """Non-asset mounts report a foreign or transient fullness and must never
-    alert: macOS /Volumes/* (removable, external and network volumes plus mounted
-    DMG installers — internal volumes live under /System/Volumes/*); and
-    scratch mounts under /private/tmp/* and /private/var/folders/* (2026-09-18,
-    task #3958). The Ava data plane (root volume, /System/Volumes/Data,
-    /Users/*/OrbStack on macOS; / on Linux) stays under the watermark."""
     rules = {r["uid"]: r for r in load_rules()}
     expr = rule_query_exprs(rules[uid], "prometheus")[0]
     assert 'mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"' in expr
-    # Read-only installer ISOs can mount under /Users, outside the path exclusion.
     assert 'mode!="ro"' in expr
     assert 'type!~"iso9660|udf|cd9660"' in expr
-    assert "WindowsRunner" not in expr  # filesystem metadata, never a machine-specific path
-    # the grouping contract survives the matcher: still per-machine, per-mount
+    assert "WindowsRunner" not in expr
     assert "by (machine_name, mountpoint)" in expr
 
 
 def test_infra_ratio_rules_round_for_readability() -> None:
-    """The value is interpolated into the summary that reaches IM, and a raw
-    float renders as 0.927223987411. Rounding to 0.001 cannot flip a verdict:
-    every ratio threshold is two decimals wide."""
     rules = {r["uid"]: r for r in load_rules()}
     for uid in (
         "ava-ops-host-cpu-saturated",
@@ -163,8 +127,6 @@ def test_infra_ratio_rules_round_for_readability() -> None:
 
 
 def test_infra_rule_thresholds() -> None:
-    """The shipped defaults, in one place: they are deployment-tunable rule
-    config, so a change here should be a deliberate edit, not a drift."""
     rules = {r["uid"]: r for r in load_rules()}
     assert threshold_params(rules["ava-ops-host-cpu-saturated"]) == [[0.9]]
     assert threshold_params(rules["ava-ops-host-memory-pressure"]) == [[0.9]]
@@ -199,9 +161,6 @@ def test_disk_watermark_escalation_tiers() -> None:
 
 
 def test_collector_queue_pressure_is_current_and_per_exporter() -> None:
-    """A lifetime failure counter never resolves after recovery. Queue
-    pressure must instead compare the CURRENT size/capacity gauges and retain
-    both machine_name and exporter so the alert names the blocked route."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-otelcol-queue-pressure"]
     expr = rule_query_exprs(rule, "prometheus")[0]
@@ -214,8 +173,6 @@ def test_collector_queue_pressure_is_current_and_per_exporter() -> None:
 
 
 def test_collector_enqueue_failure_rule_uses_window_delta() -> None:
-    """The enqueue-failed families are process-lifetime monotonic counters;
-    alerting on their absolute value would warn forever after one outage."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-otelcol-enqueue-failures"]
     expr = rule_query_exprs(rule, "prometheus")[0]
@@ -227,8 +184,6 @@ def test_collector_enqueue_failure_rule_uses_window_delta() -> None:
 
 
 def test_collector_silence_rule_tracks_recently_seen_machines() -> None:
-    """NoDataState=OK cannot detect one vanished machine by itself. Compare
-    historical/current sets and retain `machine_name` per the 2026-08-24 ruling."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-otelcol-host-silent"]
     expr = rule_query_exprs(rule, "prometheus")[0]
@@ -243,8 +198,6 @@ def test_collector_silence_rule_tracks_recently_seen_machines() -> None:
 
 
 def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:
-    """A backend outage during maintenance must not fire every rule at once —
-    the health-probe chain covers a dead datasource, not these."""
     for rule in load_rules():
         assert rule["noDataState"] == "OK", rule["uid"]
         assert rule["execErrState"] == "OK", rule["uid"]
@@ -272,7 +225,6 @@ def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:
 def test_gateway_latency_rules_scope_to_route_class(
     uid: str, route_class: str, threshold: int, metric: str
 ) -> None:
-    """R17 and R19 keep fast/slow routes in separately calibrated tiers."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules[uid]
     assert_latency_query_scopes_to_route_class(rule_query_exprs(rule, "loki")[0], route_class)
@@ -284,10 +236,6 @@ def test_gateway_latency_rules_scope_to_route_class(
 
 
 def test_turn_duration_rule_uses_prometheus_histogram() -> None:
-    """R18 reads the OTLP-mirrored turn-end histogram (ava_turn_end_duration_seconds)
-    — the Loki cross-stream quantile hit the per-query series cap, so the
-    turn p95 lives on Prometheus. Threshold 75s = 2x the 24h baseline p95
-    (37.6s on 2026-08-23), sustained 10m, warning-first without IM."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-turn-duration-p95"]
     exprs = rule_query_exprs(rule, "prometheus")
@@ -301,10 +249,6 @@ def test_turn_duration_rule_uses_prometheus_histogram() -> None:
 
 
 def test_memory_search_rows_rules() -> None:
-    """Row-growth tiers (task #2088/#2090): the store's absolute row-count
-    gauge warns at the 30k soft threshold and fires critical at the 100k
-    hard cap; the 50k mark is the backend-switch evaluation point (on the
-    dashboard, not an alert)."""
     rules = {r["uid"]: r for r in load_rules()}
     expectations: dict[str, tuple[str, int]] = {
         "ava-ops-memory-search-rows-warning": ("warning", 30000),
@@ -375,11 +319,6 @@ def test_backup_dump_failure_rule_fires_on_any_event_in_a_day() -> None:
 
 
 def test_tempo_backend_down_rule_tracks_the_remote_scrape() -> None:
-    """The silence guard for the remote Tempo backend (task #3330): the rule
-    fires on `up{job="tempo"}` below 1 held for 1h. A drift in the scrape job
-    name, the comparison direction, or the labels would silently disable the
-    only signal for the remote trace store - it is deliberately outside the
-    station healthcheck repair loop."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-tempo-backend-down"]
 
@@ -414,8 +353,6 @@ def test_telemetry_queue_loss_is_an_immediate_error_on_independent_metrics() -> 
 
 
 def test_delete_rules_tombstones_never_name_live_rules() -> None:
-    """The retired-rule tombstones must stay listed (orgId 1) and never name a live rule;
-    a dropped entry silently re-orphans the retire (README "Retired rules")."""
     doc = yaml.safe_load((RULES.parent / "delete-rules.yml").read_text(encoding="utf-8"))
     assert doc["apiVersion"] == 1
     entries = doc["deleteRules"]

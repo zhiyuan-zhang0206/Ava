@@ -1,5 +1,3 @@
-"""Timeline cases: timeline compact history head notes."""
-
 from __future__ import annotations
 
 import psycopg
@@ -204,13 +202,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     def test_long_conversation_keeps_standing_head_notes(
         self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:
-        """Head context notes (exec timeout / timezone / cluster memory / agent
-        id / agent memory — agent/graph/prompt/context_notes.py) fall off the tail
-        window in a long conversation; GET must re-attach them right after the
-        prompt so the head reads like a fresh window (user report 2026-08-27:
-        agent 2992's head showed only "system prompt · compact summary" while a
-        fresh agent shows "system prompt · 2 memories · 3 system notes").
-        Not counted against `limit`; has_more recomputed."""
         from langchain_core.messages import HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
@@ -242,7 +233,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
         data = resp.json()
-        # 60 inbounds + 5 notes + 1 system prompt = 66 items; window = 50 + prompt + 5 notes
         assert [item["item_id"] for item in data["items"][:6]] == [
             "0.0",
             "1.0",
@@ -259,8 +249,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             "agent_memory",
         ]
         assert len(data["items"]) == 56
-        # The newest window follows the standing context in order (16.0 is the
-        # first item of the 50-item tail).
         assert data["items"][6]["item_id"] == "16.0"
         assert data["items"][-1]["item_id"] == "65.0"
         assert data["has_more"] is True
@@ -268,7 +256,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
     def test_short_conversation_head_notes_not_duplicated(
         self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:
-        """Head notes inside the tail window are not re-attached a second time."""
         from langchain_core.messages import HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
@@ -320,8 +307,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         db_conn: psycopg.Connection,
         test_client: GatewayTestClient,
     ) -> None:
-        """A paging cursor on the first real item past the re-attached head
-        notes crosses to the older segment instead of looping on the head."""
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
@@ -355,10 +340,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             f"/api/agents/{tid}/timeline", params={"before": "7.0", "limit": 50}
         ).json()
 
-        # The head (prompt + notes + compact summary) is returned once more for
-        # frontend de-duplication, then the next older segment's tail follows.
-        # The segment's SystemMessage is stripped by the segment loader, so the
-        # _segment fixture renders as s1.0.0 (compact summary) + s1.1.0 (chat).
         assert [item["item_id"] for item in page["items"]] == [
             "0.0",
             "1.0",
@@ -377,11 +358,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         db_conn: psycopg.Connection,
         test_client: GatewayTestClient,
     ) -> None:
-        """A cursor on a historical segment's own standing head note crosses
-        to the next older segment. The frontend never guards historical head
-        notes (segment-prefixed ids), so the backend cross must recognize them
-        as standing context or paging would loop on the segment head (review
-        nit, PR #787)."""
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
         tid = create_agent(db_conn)
@@ -422,11 +398,6 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         )
         test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
 
-        # Cursor on s1's third standing head note (0.0 = exec_timeout,
-        # 1.0 = timezone, 2.0 = memory — the segment's SystemMessage is
-        # stripped, so its notes start at 0.0): everything before it is
-        # standing context, so the response crosses to s2 instead of looping
-        # on the segment head.
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s1.{boundary_1}.2.0", "limit": 50},

@@ -1,5 +1,3 @@
-"""Exec child signals retain timeout envelopes and initialize handlers before request decoding."""
-
 import os
 import signal
 import subprocess
@@ -23,8 +21,6 @@ from ava.tests.fixtures.pin_agent import exec_context
 
 
 def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
-    """SIGTERM -> TimeoutError inside the child -> kind=timed_out envelope with
-    partial output preserved."""
     exec_dir = tmp_path / "exec"
     request_path = make_request_path(exec_dir, agent_id=AGENT_ID)
     result_path = make_result_path(exec_dir, agent_id=AGENT_ID)
@@ -44,7 +40,6 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
         text=True,
         env=env,
     )
-    # Wait for the child to reach the sleep (line-buffered pipe), then signal.
     assert proc.stdout is not None
     deadline = time.monotonic() + 30
     out = ""
@@ -65,8 +60,6 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch: pytest.MonkeyPatch,
     model_installation: Installation,
 ) -> None:
-    """A signal arriving during request decoding must become an in-band result,
-    so SIGTERM's child handler is installed before the read begins."""
     from agent.execution import child as exec_child
     from agent.graph.exec import protocol
     from agent.graph.exec.protocol import RequestPayload, ResultPayload
@@ -108,7 +101,6 @@ def test_child_installs_signal_handlers_before_reading_request(
         producer: Callable[[], object],
         machine: object,
     ) -> None:
-        # Stateless request (fake_read_request: state=None) -> the surface load.
         assert surface is True
         assert context is ava.context
         assert callable(producer)

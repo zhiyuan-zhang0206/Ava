@@ -1,10 +1,3 @@
-"""Execute actual axAct logic with inert AX IPC and real opaque-ref equality.
-
-AXUIElementCreateApplication only allocates local opaque refs. Every AX IPC
-read/write in the extracted production functions is replaced before execution;
-AXValue and CFEqual operations inspect local values, never the user desktop.
-"""
-
 from __future__ import annotations
 
 import re
@@ -55,7 +48,6 @@ def test_native_ax_actions_window_identity_selection_and_reported_actions(tmp_pa
         "AXUIElementIsAttributeSettable": "inertSettable",
         "AXUIElementSetAttributeValue": "inertSetAttribute",
     }
-    # Fail before Swift execution if production adds an unhandled AX IPC call.
     calls = set(re.findall(r"\b(AXUIElement\w+)\s*\(", actual))
     assert calls <= replacements.keys() | {"AXUIElementGetTypeID"}, calls
     for name, replacement in replacements.items():

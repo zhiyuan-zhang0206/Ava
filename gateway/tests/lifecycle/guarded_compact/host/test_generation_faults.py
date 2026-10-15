@@ -1,5 +1,3 @@
-"""Unknown provider results never regenerate or resume; unusable results close native execution."""
-
 from dataclasses import replace
 from typing import Any
 
@@ -100,9 +98,6 @@ async def test_later_wake_holds_a_retained_result_without_resuming_or_crashing(
     install(monkeypatch, "after_result")
     with pytest.raises(psycopg.OperationalError):
         await accepted.host.run_turn(accepted.agent)
-    # The interrupted attempt's diagnostic UNCERTAIN write may itself be lost
-    # (a crash, or the database still failing): leave the stored result in the
-    # state it had when the original executor stopped.
     db_conn.execute(
         "UPDATE native_compact_commands SET outcome=%s WHERE id=%s",
         (retained, accepted.acceptance["command_id"]),
@@ -124,6 +119,4 @@ async def test_later_wake_holds_a_retained_result_without_resuming_or_crashing(
 
     assert model.calls == 1 and len(accepted.ordinary) == 1
     assert accepted.status(client) == before
-    # A retained compact result exempts nothing: the wake still consults native
-    # cancel recovery before the held compact stops ordinary work.
     assert recoveries == [1]

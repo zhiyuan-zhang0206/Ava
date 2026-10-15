@@ -1,5 +1,3 @@
-"""The real execution child receives the configuration of its owning turn."""
-
 import asyncio
 import json
 import os
@@ -67,9 +65,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     database: Database,
 ) -> None:
     _plugin(unit_home)
-    # The real child builds its own configuration owner from this isolated home.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(unit_home))
-    # Ambient carrier leftovers must not become an unbound child's pins.
     monkeypatch.setenv("AVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "deepseek-v4-pro"}))
     monkeypatch.setenv(
         "AVA_AGENT_BIRTH_CONFIG",
@@ -232,8 +228,6 @@ async def test_exec_shield_reads_each_owner_at_the_existing_timeout_points(
             return await wait_for(awaitable, timeout)
         except TimeoutError:
             if timeout == 0.002:
-                # The real framework wait has already requested and joined cancellation.
-                # A changed owner must be read afresh at timeout logging and feedback.
                 first.set_field("exec_node_timeout_seconds", 5)
             raise
 

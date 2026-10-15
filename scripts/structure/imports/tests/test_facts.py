@@ -1,5 +1,3 @@
-"""Unpruned dependency facts retain bounded inputs and precise lexical origins."""
-
 import ast
 import gc
 import weakref
@@ -427,7 +425,7 @@ def test_module_name_and_literal_tables_bound_dynamic_imports(tmp_path: Path) ->
         "ava.agents.api",
         "base.net",
     ]
-    assert len(found.unknown) == 2  # Method calls on a resolved name stay opaque.
+    assert len(found.unknown) == 2
 
 
 def test_mutated_or_spread_tables_stay_unknown(tmp_path: Path) -> None:
@@ -454,7 +452,7 @@ def test_python_c_source_has_main_module_name(tmp_path: Path) -> None:
         "import subprocess, sys\n"
         "subprocess.run([sys.executable, '-c', 'import importlib\\nimportlib.import_module(__name__)'])\n",
     )
-    assert found.records == ()  # ``__main__`` is not a repository module.
+    assert found.records == ()
     assert found.unknown == ()
 
 

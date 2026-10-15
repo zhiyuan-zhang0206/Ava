@@ -1,8 +1,3 @@
-"""Unit coverage for scripts/structure/locality.py: the measuring and baseline layer around single
-decision owners (Rule 5), exercised directly against the module's functions (no lcs.main, no git;
-see test_locality_gate.py for that). Reaching another package's private names is no longer measured
-here: meizel reports it (`meizel/tests/codes/test_replaced_mechanisms.py`)."""
-
 from __future__ import annotations
 
 import ast
@@ -15,9 +10,6 @@ from scripts.structure import locality
 
 def _parse(source: str) -> ast.Module:
     return ast.parse(source)
-
-
-# --- measure: test *directories* are exempt, test-prefixed files are not ----
 
 
 def test_test_directory_is_exempt_but_a_test_prefixed_governed_file_is_scanned() -> None:
@@ -34,9 +26,6 @@ def test_measure_scans_a_non_test_file_for_the_decision_owner_rule() -> None:
     measured = locality.measure(_parse(source), "gateway/db.py", ("a",))
 
     assert measured == {"owner_bypasses": {"gateway/db.py::postgres-dial": [2]}}
-
-
-# --- strict site diagnostics: all measured occurrences fail -----------------
 
 
 def test_site_errors_reports_every_occurrence_in_line_order(tmp_path: pathlib.Path) -> None:
@@ -65,9 +54,6 @@ def test_site_errors_gives_no_rename_allowance(tmp_path: pathlib.Path) -> None:
     assert "migrate" not in errors[0]
 
 
-# --- validate_entries: baseline schema rejections ----------------------------
-
-
 def test_validate_entries_rejects_a_non_dict_section() -> None:
     with pytest.raises(ValueError, match="'owner_bypasses' must be an object"):
         locality.validate_entries("owner_bypasses", [], ("a",))
@@ -76,13 +62,13 @@ def test_validate_entries_rejects_a_non_dict_section() -> None:
 @pytest.mark.parametrize(
     "entry",
     [
-        "a/mod.py",  # missing "::"
-        "a/mod.py::",  # empty target
-        "a/mod.py::not-a-decision",  # unknown decision name
-        "/a/mod.py::postgres-dial",  # absolute path
-        "a/../mod.py::postgres-dial",  # ".." escapes scope
-        "c/mod.py::postgres-dial",  # out of scope
-        "a/mod.txt::postgres-dial",  # non-.py suffix
+        "a/mod.py",
+        "a/mod.py::",
+        "a/mod.py::not-a-decision",
+        "/a/mod.py::postgres-dial",
+        "a/../mod.py::postgres-dial",
+        "c/mod.py::postgres-dial",
+        "a/mod.txt::postgres-dial",
     ],
 )
 def test_validate_owner_bypasses_rejects_malformed_entries(entry: str) -> None:
@@ -97,5 +83,4 @@ def test_validate_owner_bypasses_rejects_bad_counts(count: object) -> None:
 
 
 def test_validate_owner_bypasses_accepts_a_known_decision_name() -> None:
-    # Exercises the real registry: "postgres-dial" is the one decision it names today.
     locality.validate_entries("owner_bypasses", {"a/mod.py::postgres-dial": 1}, ("a",))

@@ -1,5 +1,3 @@
-"""Durable control claims across external and replaced native incarnations."""
-
 from typing import Any
 from uuid import uuid4
 
@@ -52,8 +50,6 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
     ).fetchall() == [("cancel",), ("chat",), ("compact_request",)]
     db_conn.commit()
     assert not await impersonation.lifecycle_ready(aops_pool, agent_id)
-    # If the external holder never acknowledges cancellation, the ordinary
-    # native claim after release/expiry still receives the durable request.
     resumed = await claim_inbound_batch(aops_pool, agent_id, incarnation=None, work=None)
     assert {item.kind for item in resumed} == {"cancel", "chat", "compact_request"}
     assert db_conn.execute(
