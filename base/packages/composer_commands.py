@@ -1,75 +1,3 @@
-"""Composer commands — registered prompt templates + their expansion.
-
-A *command* is a `commands/<name>.md` file: optional `description` +
-`instruction-hint` frontmatter, body = a fixed prompt. Skills, plugins, the
-built-ins, and the user overlay all contribute commands. A command takes exactly one
-argument — the free-text natural-language instruction typed after `/name`; the
-`instruction-hint` is the placeholder for it (Claude Code's `argument-hint` key
-is also read, for imported CC-plugin commands).
-
-This module is framework-internal and is never registered on the `ava.*`
-namespace; the expansion machinery is an implementation detail. The web Composer sends the
-raw `/<name> <free text>` a human typed; `expand_command` rewrites it (in
-the agent's claim node, before the message is wrapped for the model) into the
-final prompt. The model only ever sees that expanded string. The gateway reuses
-`discover_commands` to feed the `/`-autocomplete.
-
-The module never reads the installed skills itself: every function that needs them takes the
-`Skill` list as an argument, and `CommandCatalog` binds one source of that list (the process's
-`ava.skills.names`, handed over by the composition root) to `discover` and `expand`. The agent's
-claim node receives the catalog through `AvaContext.commands`.
-
-**One send is one message.** A caller may invoke several commands at once
-(`/recap the week /compact`), and the whole chain expands *inside that single
-message* — in the order typed, each command keeping the free text that followed
-it. Splitting the send into one message per command is what this deliberately
-does not do: separate messages are claimed as separate turns, so the model
-would answer each command in ignorance of the rest, with no ordering or
-atomicity guarantee.
-
-Every command is **the same kind of thing to this module** — a named prompt
-template. Expansion never classifies them, never treats a combination as
-special, and never refuses one. A chain is exactly the concatenation of what
-each command expands to alone. Whether two prompts make sense together is a
-question about the prompts, and the agent reading them answers it: `/compact`
-tells the agent to replace its own context, so instructions after it lapse —
-that is the prompt's meaning playing out, not a case for the mechanism to
-predict, intercept, or warn about.
-
-Commands are also sendable **agent-to-agent**: any chat inbound runs through
-`CommandCatalog.expand` in the receiver's claim node (`agent/graph/claim/node.py`), so
-`ava.agents.send_message(peer, "/demo:brainstorming …")` (or
-`spawn(prompt=…)`) delivers a *named, described* intent — a command is an
-addressable prompt function, not just a human UI macro. Peers discover the
-catalog via the read-only `ava.agents.commands()` (name + description +
-instruction-hint, no body). Because of this dual audience, `expand_command` is
-**source-neutral**: it never names the actor — `wrap_inbound` already frames the
-message ("Agent 5:" for peers; the bare "[ts]" header for the user).
-
-Namespace: the composer identifier mirrors the skill namespace tree
-(`ava/skills/__init__.py`) — bare for built-ins, `plugin:name` for a plugin's, `a:b:name`
-for deeper folder nesting (`:`-joined, like `tree.identifier`). A skill-as-command's name is
-`identifier(skill)` and its `skill_target` is `target(skill)`.
-
-Discovery sources (later overrides earlier on name collision):
-  0. every active skill, as `/[ns.]<skill>`      — skill-as-command (lowest)
-  1. `<repo>/ava_builtins/commands/<name>.md`    — built-in (bare)
-  2. `~/.ava/commands/<name>.md`                 — user (bare)
-  3. `<repo>/ava_builtins/plugins/<p>/commands/<name>.md`     — built-in plugin → `/p.name`
-  4. `~/.ava/plugins/<p>/commands/<name>.md`     — installed plugin → `/p.name`
-  5. `<skill-dir>/commands/<name>.md`            — skill-carried (under the
-                                                   carrying skill's namespace path)
-
-Sources 5 and 0 walk the *active* skill set the caller passes (`ava.skills.names()` in the
-processes that serve commands), inheriting its install-registry gating. Source 0 gives every skill a same-named
-`/`-command for free; an explicit command file overrides it.
-
-A skill-as-command expands *differently* from a prompt-template command: rather
-than inlining a body, it tells the agent to load and follow the skill via
-`ava.help` (see `expand_command`) — so the skill stays the single source of
-truth, references and all.
-"""
-
 from __future__ import annotations
 
 import re
@@ -87,23 +15,8 @@ from base.packages.skills.tree import Skill, identifier, target
 from base.paths import ava_home, repo_plugins_dir, repo_root
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#catalog-lazy-boundary
 def _commands_enabled() -> bool:
-    """Whether the `/<name>` command module is enabled — profile-safe.
-
-    `commands_enabled` lives in the agent config domain, which the gateway
-    process profile does not construct (per-process config, Task #856) — yet
-    the gateway serves the Composer's `/`-autocomplete
-    (`gateway/routers/commands.py` -> `discover_commands`) and needs the
-    value. On a profile without the agent domain, read the cluster value from
-    the .env FILE (the authoritative source; same fallback pattern as
-    `base/lm/factory.py` after the gateway pop) and default to True. On an
-    agent process the ordinary `settings.agent.commands_enabled` read is used,
-    unchanged.
-
-    The `settings.has_domain` guard is the sanctioned cross-profile pattern:
-    the consumption-matrix guard test treats a read under such a guard as
-    legitimate (see cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py).
-    """
     if settings.has_domain("agent"):
         return settings.agent.commands_enabled
     from base.host.env.dotenv_file import read_env_aliases
@@ -114,20 +27,8 @@ def _commands_enabled() -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
 class Command(TypedDict):
-    """One composer command. `name` is the `/`-invocation identifier — bare for
-    built-ins, `:`-joined for namespaced ones (`plugin:item`, `a:b:item`).
-    `description` and `instruction_hint` come from frontmatter (empty when
-    absent); `body` is the prompt template (empty for a skill-as-command).
-    `skill_target` is the `ava.skills.<…>` access path when this is a
-    skill-as-command (e.g. `demo.brainstorming`), else None —
-    `expand_command` branches on it.
-
-    A command takes exactly one argument: the free-text natural-language
-    instruction a caller types after `/name`. `instruction_hint` is the
-    placeholder describing what that instruction should be — not a list of
-    parsed args, so there is no delimiter/parsing."""
-
     name: str
     description: str
     instruction_hint: str
@@ -135,11 +36,8 @@ class Command(TypedDict):
     skill_target: str | None
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-discovery
 def command_dirs(skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
-    """`(commands_dir, base_namespace)` pairs in override order (see module
-    docstring). `base_namespace` is `()` for built-ins / overlay, `(plugin,)` for a
-    plugin's bundled dir, and the carrying skill's full namespace path for a
-    skill-carried dir."""
     dirs: list[tuple[Path, tuple[str, ...]]] = [
         (repo_root() / "ava_builtins" / "commands", ()),
         (ava_home() / "commands", ()),
@@ -156,14 +54,8 @@ def command_dirs(skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
     return dirs
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-discovery
 def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
-    """Scan `<d>/*.md` into `{name: Command}`, prefixing each name with the
-    `:`-joined base namespace.
-
-    A file without frontmatter is valid — the whole file is the prompt body.
-    A file with an opener but malformed frontmatter is an authoring error;
-    it is logged and skipped so one bad file can't break the whole picker.
-    """
     out: dict[str, Command] = {}
     if not d.is_dir():
         return out
@@ -177,19 +69,11 @@ def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
                 continue
         else:
             fields, body = {}, content
-        # Canonical display spelling: dash for every segment (a plugin's
-        # namespace is its directory name — `ava_fleet`, a Python package dir —
-        # and the skill tree may hold legacy underscore folders), and `:`
-        # between segments, exactly like tree.identifier() renders
-        # skill-as-commands (`ava-memory:consolidation`, `web-ai:deep-research`). Inbound
-        # matching still folds either spelling (split_commands -> match_key),
-        # so nothing breaks.
+
         name = ":".join(display_name(seg) for seg in (*base_ns, f.stem))
         out[name] = {
             "name": name,
             "description": fields.get("description", ""),
-            # Accept Claude Code's `argument-hint` key too, so commands imported
-            # from a CC plugin keep their hint (vendor interop, not back-compat).
             "instruction_hint": fields.get("instruction-hint") or fields.get("argument-hint", ""),
             "body": body.strip(),
             "skill_target": None,
@@ -197,13 +81,8 @@ def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     return out
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-discovery
 def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
-    """Every active skill as a same-named command (source 0, lowest priority).
-
-    The command name is the skill's `:`-identifier (e.g. `demo:brainstorming`);
-    `skill_target` is its `ava.skills` access path, so `expand_command` rewrites
-    it into a load-and-follow instruction rather than inlining a body.
-    """
     out: dict[str, Command] = {}
     for sk in skills:
         ident = identifier(sk)
@@ -217,12 +96,8 @@ def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
     return out
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-discovery
 def discover_commands(skills: Sequence[Skill]) -> list[Command]:
-    """All composer commands across every source, deduped by name (later
-    source wins) and sorted by name. Skill-as-commands (source 0) seed the map
-    first, so an explicit command file overrides a same-named skill.
-
-    Empty when the command module is disabled (settings.agent.commands_enabled)."""
     if not _commands_enabled():
         return []
     out: dict[str, Command] = skill_commands(skills)
@@ -231,39 +106,18 @@ def discover_commands(skills: Sequence[Skill]) -> list[Command]:
     return [out[name] for name in sorted(out)]
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
 class Invocation(NamedTuple):
-    """One command inside a message: the resolved `command`, the `typed_name`
-    exactly as spelled (`demo.brainstorming` and `demo:brainstorming` resolve to
-    the same command but each expands under the spelling used), and the
-    free-text `argument` that followed it up to the next command."""
-
     command: Command
     typed_name: str
     argument: str
 
 
-# A command starts at the very beginning of the message or after whitespace.
-# `\S+` takes the whole token, so `/compact/update` is one (unknown) name
-# rather than two commands — a missing space is a typo, not a chain.
 _INVOCATION = re.compile(r"(?:\A|(?<=\s))/(\S+)")
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
 def split_commands(content: str, commands: Sequence[Command]) -> list[Invocation] | None:
-    """Split a raw `/`-message into the chain of commands it invokes.
-
-    A message enters command parsing only when it *starts* with a known command
-    — the long-standing precondition, now applied to the head of a chain. From
-    there, each later `/token` that resolves to a registered command opens the
-    next segment; a slash that is not a known command name stays inside the
-    preceding command's free text, so `/recap check /path/to/file` is one
-    command whose argument holds a path, not two commands.
-
-    Returns None when the message does not begin with a known command, which
-    tells the caller to pass the text through untouched.
-    """
-    # Match through the dash/underscore/colon fold so every spelling of a
-    # command name resolves (`/demo.brainstorming` and `/demo:brainstorming`
-    # both hit the `demo:brainstorming` command).
     catalog = {match_key(c["name"]): c for c in commands}
     hits = [
         (m.start(), m.group(1), catalog[match_key(m.group(1))])
@@ -279,14 +133,8 @@ def split_commands(content: str, commands: Sequence[Command]) -> list[Invocation
     return chain
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
 def _expand_one(inv: Invocation) -> str:
-    """Expand a single invocation into its prompt text.
-
-    Source-neutral: the envelope (base.agents.messages.envelope.wrap_inbound) already frames
-    the message ("Agent 5:" for peers; the bare "[ts]" header for the user), so
-    the expansion must not re-name an actor — a `/command` sent by a peer agent
-    reads correctly without the old "User invoked …" phrasing.
-    """
     name = inv.typed_name
     if inv.command["skill_target"]:
         out = (
@@ -300,20 +148,8 @@ def _expand_one(inv: Invocation) -> str:
     return out
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#command-expansion
 def expand_command(content: str, commands: Sequence[Command]) -> str:
-    """Rewrite a raw `/<name> <free text>` composer message into the prompt the
-    model sees, given the `commands` that are registered.
-
-    One message may invoke several commands (`/recap the week /compact`).
-    Each is expanded exactly as it would be alone — in the order typed, with
-    the free text that followed it — and the results are concatenated into this
-    one message. No command is treated as special and no combination is
-    refused: what two prompts mean together is for the agent reading them to
-    work out.
-
-    Leaves the text untouched when it isn't a `/`-command, or when the leading
-    name doesn't match a known command (so a stray leading slash is harmless).
-    """
     if not content.startswith("/"):
         return content
     chain = split_commands(content, commands)
@@ -322,22 +158,17 @@ def expand_command(content: str, commands: Sequence[Command]) -> str:
     return "\n\n".join(_expand_one(inv) for inv in chain)
 
 
+# ava:ref base/packages/docs/composer-commands.ava.okf.md#catalog-lazy-boundary
 @dataclass(frozen=True)
 class CommandCatalog:
-    """The composer commands one process serves, over the installed skills its `skills` returns.
-
-    A composition root builds it (`CommandCatalog(skills=ava.skills.names)`) and hands it to
-    whoever lists or expands commands; `discover` and `expand` read the skill list and the command
-    files afresh on each call. Both are empty and pass-through when the command module is
-    disabled (`settings.agent.commands_enabled`).
-    """
-
     skills: Callable[[], Sequence[Skill]]
 
     def discover(self) -> list[Command]:
-        """All composer commands, deduped by name and sorted; see `discover_commands`."""
+        if not _commands_enabled():
+            return []
         return discover_commands(self.skills())
 
     def expand(self, content: str) -> str:
-        """The prompt a raw composer message expands to; see `expand_command`."""
+        if not content.startswith("/"):
+            return content
         return expand_command(content, self.discover())

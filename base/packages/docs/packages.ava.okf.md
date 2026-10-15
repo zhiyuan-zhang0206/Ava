@@ -34,6 +34,7 @@ gateway and the ops runner). The agent's claim node receives the catalog through
 
 ## Documented components
 
+- [[base/packages/docs/composer-commands.ava.okf.md]] — Composer command discovery and expansion.
 - [[base/packages/extensions/docs/install_registry/install_registry.ava.okf.md]] — Install Registry (`installed.json`).
 - [[base/packages/extensions/docs/write-path.ava.okf.md]] — Install Registry Write Path.
 - [[base/packages/plugins/docs/enable_config.ava.okf.md]] — Plugin Enable Config.
