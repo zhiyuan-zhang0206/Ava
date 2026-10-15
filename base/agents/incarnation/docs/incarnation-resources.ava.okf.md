@@ -9,8 +9,9 @@ description: Nullable server-owned resource evidence and conservative schema ret
 `agents_meta.incarnation_resources` is separate from configuration. NULL means
 unknown, not an empty resource set. The additive migration does not initialize
 historical owners or grant resource admission. Actual admission must
-establish ownership and positive retirement of its predecessor before creating
-a complete empty set; a dead PID, expired lease or absent file is insufficient.
+establish ownership and close any recorded exec allocations before creating
+a complete empty set; a dead PID, expired lease or absent file cannot discharge
+an exec allocation.
 
 Registration and force acceptance must serialize on the same metadata row.
 An exec must be registered before its user-code permit; once force freezes the
@@ -27,12 +28,18 @@ all-writer retirement operation; this slice provides no automatic evidence
 clearing or legacy rollback permission.
 
 Process and hosted admission preserve legacy NULL/protocol zero and refuse
-malformed evidence. A managed successor requires a closed exact predecessor
-resource set plus its applied lifecycle decision. A same-machine hosted process
-restart is the narrow exception: while holding the metadata lock, it may transfer
-an empty, unfrozen set only after the admission-captured host native birth is proven
-ended. A live exact host, an expired lease, a missing host identity, a frozen set,
-or any request refuses that handoff. A legacy NULL row keeps its unknown set
+malformed evidence. The metadata row owns runtime admission: once its generation,
+owner, kind and per-agent PID are released, a successor may transfer the empty
+resource set under the same row lock as its ownership claim. Admission does not
+query historical restart or terminate receipts. A failed model turn can be reaped
+and resurrected in the same live shared host; it needs no synthetic lifecycle
+receipt and no host restart. Resurrection refuses unresolved exec allocations
+before releasing the identity, so exact receipt recovery retains its target.
+
+An unreleased managed owner can be replaced only when its admission-captured
+host native birth is proven ended, with an empty, unfrozen resource set. A live
+host, an expired lease alone, a missing host identity, a frozen set, or any request
+refuses that takeover. A legacy NULL row keeps its unknown set
 (admission never mints an empty one) and is replaced only after its lease
 expires; NULL evidence never authorizes an earlier takeover. Fresh `base.agents.birth.transaction.insert_agent_birth` metadata INSERTs stamp
 one server-owned `ResourceBirth` in the same birth transaction. Real hosted
@@ -97,7 +104,7 @@ recorded boot or exact native PID reuse proves the prior process ended without
 authorizing work on its replacement. Failed identity observation remains unknown.
 Fresh host and ready-handshake captures compare native births; database CAS and
 terminal receipts retain exact model equality, including the original timestamp.
-Same-host admission preserves the stored receipt rather than rewriting its facts.
+Same-incarnation admission preserves the stored receipt rather than rewriting its facts.
 
 Owner domain closure:
 [[domain-closure.ava.okf.md|domain closure]].

@@ -5,7 +5,12 @@ from uuid import UUID
 import psycopg
 from pydantic import ValidationError
 
-from base.agents.incarnation.resources import ResourceBirth, ResourceShapeError, decode_resources
+from base.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceBirth,
+    ResourceShapeError,
+    decode_resources,
+)
 from base.api_contracts.agent_contract import (
     AgentNotFound,
     MachinePaused,
@@ -41,8 +46,8 @@ def hosted_resurrection_target(
 ) -> RuntimeIncarnation | None:
     """Require retained hosted authority, proven non-admission or an unowned end.
 
-    A retained hosted identity resumes that incarnation; its settled command
-    and resource set close it at the successor's admission. Every other
+    Release a retained hosted identity only after its exec set is closed;
+    otherwise recovery must retain that identity to discharge its receipts. Every other
     accepted row has all runtime identity fields empty and resurrects as a
     fresh hosted birth, returned as None, in two cases:
 
@@ -63,6 +68,8 @@ def hosted_resurrection_target(
         state = None if resources is None else decode_resources(resources)
     except ResourceShapeError:
         raise ResurrectRefused("runtime_cutover_required") from None
+    if isinstance(state, IncarnationResources) and state.requests:
+        raise ResurrectSettlementDeferredError("managed exec resources remain unresolved")
     if (kind, generation, owner, pid) == (None,) * 4 and (
         isinstance(state, ResourceBirth) or unowned_termination is not None
     ):
