@@ -1,13 +1,3 @@
-"""Tests for base/lm/factory.py build_chat_model prefix dispatch.
-
-Does not hit API — only verifies the contract: "given the correct model name,
-the factory returns the corresponding provider class + correct base_url / api_key
-configuration".
-
-deepseek-* uses ChatAnthropic + DeepSeek anthropic-compatible endpoint
-(no longer using langchain-deepseek).
-"""
-
 from __future__ import annotations
 
 import os
@@ -56,11 +46,7 @@ class TestProviderConstruction:
     def test_gpt_enables_responses_api_reasoning_summary(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """gpt-* must go through the Responses API with an explicit reasoning
-        effort + summary — Chat Completions returns zero reasoning, and the
-        model's default effort is too low to emit a summary, so effort must be
-        set. summary='auto' surfaces the reasoning summary as a `reasoning`
-        content block (folded to the canonical `thinking` shape downstream)."""
+        # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#reasoning-visibility
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
@@ -89,9 +75,6 @@ class TestProviderConstruction:
     def test_gpt_thinking_disabled_drops_to_effort_none(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """thinking={'type':'disabled'} (short-text paths) → effort 'none', no
-        summary requested. Symmetric with gemini include_thoughts=False and the
-        deepseek effort skip: a caller disabling thinking gets no reasoning."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
@@ -112,9 +95,6 @@ class TestProviderConstruction:
     def test_mimo_returns_reasoning_content_model(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
     ) -> None:
-        """mimo-* returns ReasoningContentChatModel (not bare ChatOpenAI) — the
-        subclass recovers the `reasoning_content` delta that the base drops.
-        base_url + api-key header target the Xiaomi OpenAI-compatible endpoint."""
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
@@ -143,9 +123,6 @@ class TestProviderConstruction:
     def test_kimi_returns_chat_moonshot(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """kimi-* (Moonshot) returns ChatMoonshot from langchain-moonshot.
-        Reasoning streams in `additional_kwargs["reasoning_content"]` — the
-        streaming fan-out and timeline handle both styles."""
         monkeypatch.setenv("MOONSHOT_API_KEY", "sk-kimi")
         from langchain_moonshot import ChatMoonshot
 
@@ -182,8 +159,6 @@ class TestProviderConstruction:
     def test_unknown_prefix_error_hints_at_adding_branch(
         self, *, model_catalog: ModelCatalog
     ) -> None:
-        """The error message should indicate which prefix branch to add — the caller
-        can know how to expand without reading the factory source code."""
         with pytest.raises(ValueError) as exc_info:
             build_chat_model(
                 "mistral-large",
@@ -196,9 +171,6 @@ class TestProviderConstruction:
     def test_glm_returns_reasoning_content_model(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """glm-* (Zhipu) returns ReasoningContentChatModel pointed at the
-        Zhipu OpenAI-compatible endpoint — GLM 5.2 streams its thinking in the
-        `reasoning_content` delta, which the subclass recovers into thinking blocks."""
         monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
@@ -214,8 +186,6 @@ class TestProviderConstruction:
     def test_glm_5_3_flash_returns_reasoning_content_model(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """glm-5.3-flash dispatches through the same glm branch — Zhipu
-        OpenAI-compatible endpoint, ReasoningContentChatModel."""
         monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
@@ -244,10 +214,6 @@ class TestProviderConstruction:
     def test_qwen_returns_reasoning_content_model(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """qwen* (Alibaba DashScope) returns ReasoningContentChatModel pointed at
-        the default public compatible-mode endpoint — Qwen streams its thinking in
-        the `reasoning_content` delta, which the subclass recovers into thinking
-        blocks."""
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
@@ -263,8 +229,6 @@ class TestProviderConstruction:
     def test_qwen3_8_flash_returns_reasoning_content_model(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """qwen3.8-flash dispatches through the same qwen branch — DashScope
-        compatible-mode endpoint, ReasoningContentChatModel."""
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
@@ -281,9 +245,6 @@ class TestProviderConstruction:
     def test_qwen_honors_the_configured_base_url(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """A dedicated Model Studio workspace serves the same API on its own host,
-        which the public default cannot reach at all — so the endpoint has to be
-        config, not a constant. Hardcoding it locked those accounts out entirely."""
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         workspace = "https://ws-example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
         monkeypatch.setattr(settings.lm, "dashscope_base_url", workspace)
@@ -301,11 +262,6 @@ class TestProviderConstruction:
     def test_qwen_requests_stream_usage(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """stream_usage sends `stream_options.include_usage`, without which the
-        stream carries no final usage frame at all — and DashScope reports its
-        implicit context-cache hits in that frame
-        (`prompt_tokens_details.cached_tokens`). Drop it and every qwen turn
-        bills as a full cache miss."""
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
@@ -331,15 +287,9 @@ class TestProviderConstruction:
                 overrides=model_overrides(),
             )
 
-    # ── per-model default streaming ─────────────────────────────────────
-
     def test_kimi_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """kimi-* models default to streaming=True — _consume_llm's
-        fatal-provider-error fallback automatically retries non-streaming on
-        engine_overloaded_error (K3 measured: streaming ~40% 429 → non-streaming
-        0% 429), so the construction-time default streams for progressive display."""
         monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
         from langchain_moonshot import ChatMoonshot
 
@@ -355,9 +305,6 @@ class TestProviderConstruction:
     def test_kimi_k2_7_code_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """kimi-k2.7-code should also default to streaming — same provider, same
-        _consume_llm fallback. Model-level granularity lets us add or remove
-        individual models without changing the prefix-wide logic."""
         monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
         from langchain_moonshot import ChatMoonshot
 
@@ -377,7 +324,6 @@ class TestProviderConstruction:
     def test_mimo_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
     ) -> None:
-        """mimo-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setenv("MIMO_API_KEY", "sk-test")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
@@ -393,7 +339,6 @@ class TestProviderConstruction:
     def test_glm_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """glm-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setenv("GLM_API_KEY", "sk-test")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
@@ -409,7 +354,6 @@ class TestProviderConstruction:
     def test_qwen_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """qwen* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
         from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
@@ -425,9 +369,6 @@ class TestProviderConstruction:
     def test_claude_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """claude-* carries no registry streaming opt-out → default streaming=True.
-        Verifying the Anthropic path separately since it uses a different
-        constructor (ChatAnthropic)."""
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         m = build_chat_model(
@@ -442,7 +383,6 @@ class TestProviderConstruction:
     def test_deepseek_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """deepseek-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
 
         m = build_chat_model(
@@ -457,13 +397,7 @@ class TestProviderConstruction:
     def test_deepseek_gateway_popped_key_falls_back_to_env_file(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """A gateway profile pops DEEPSEEK_API_KEY from os.environ (Task #856).
-
-        The gateway-side draft model (reply-suggestion, deepseek-flash) builds in
-        that process; the build must consume the unit's `.env` file fallback — the
-        same channel spawn validation reads (Task #1562) — and must not write the
-        key back into os.environ. Regression for #5079.
-        """
+        # ava:ref base/packages/tests/lm/docs/contracts.ava.okf.md#provider-key-channel
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.setattr(
             dotenv_file,
@@ -485,7 +419,6 @@ class TestProviderConstruction:
     def test_deepseek_env_var_still_wins_over_env_file(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """os.environ stays first in the channel: a set env var is used as-is."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env-value")
         monkeypatch.setattr(
             dotenv_file,
@@ -506,7 +439,6 @@ class TestProviderConstruction:
     def test_deepseek_missing_key_in_both_channels_still_raises(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """Neither channel carries the key → the fail-fast RuntimeError holds."""
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
@@ -521,7 +453,6 @@ class TestProviderConstruction:
     def test_gemini_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """gemini-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -537,7 +468,6 @@ class TestProviderConstruction:
     def test_gpt_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """gpt-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
@@ -553,9 +483,6 @@ class TestProviderConstruction:
     def test_explicit_streaming_false_on_non_kimi(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """Explicit streaming=False overrides the model default (True for
-        non-Kimi). The caller should be able to force non-streaming
-        regardless of the model catalog."""
         monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -572,8 +499,6 @@ class TestProviderConstruction:
     def test_explicit_streaming_true_overrides_kimi_default(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        """Explicit streaming=True overrides the Kimi default (False).
-        A caller that knows the endpoint is healthy can opt back in."""
         monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
         from langchain_moonshot import ChatMoonshot
 

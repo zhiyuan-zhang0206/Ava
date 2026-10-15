@@ -1,11 +1,3 @@
-"""An agent's explicit tuning values reach the model layering, the context budget and the model build.
-
-The eight per-model-defaultable settings an agent can pin (stream timeouts, reasoning effort,
-thinking budget, compaction thresholds) used to resolve against the cluster's value alone, so an
-agent's pin was ignored. They now resolve against the agent's `overrides` slice; with no override
-the result is what it always was.
-"""
-
 from __future__ import annotations
 
 from dataclasses import fields
@@ -24,7 +16,6 @@ from base.lm.registry import resolve_setting
 
 _MODEL = "deepseek-flash"
 
-# One pin per overridable setting, each different from the model's own default.
 _PINS: dict[str, Any] = {
     "llm_stream_ttft_timeout_seconds": 11.5,
     "llm_stream_total_timeout_seconds": 222.5,

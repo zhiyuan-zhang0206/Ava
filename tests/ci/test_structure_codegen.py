@@ -456,6 +456,10 @@ def test_manual_structure_guard_resolves_shallow_source_ancestry(tmp_path: Path)
 
 def test_every_codegen_input_family_selects_freshness() -> None:
     paths = (
+        "scripts/codegen/typescript-types.mjs",
+        "scripts/codegen/codegen-types.sh",
+        "scripts/codegen/check-types-fresh.sh",
+        "scripts/codegen/dump_openapi.py",
         "gateway/schemas/tasks.py",
         "gateway/agents/schemas.py",
         "gateway/app.py",

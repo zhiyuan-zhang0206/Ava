@@ -15,6 +15,7 @@ export function scanSource(file, text) {
   }
   const symbols = { '<module>': { name: '<module>', line: 1, end_line: text.split('\n').length, parameters: [], ambiguous: false, callable: false } };
   const spans = new Map();
+  const machineComments = new Set();
   const options = { noLib: true, noResolve: true, allowJs: true };
   const host = ts.createCompilerHost(options);
   host.getSourceFile = name => name === file ? tree : undefined;
@@ -50,6 +51,10 @@ export function scanSource(file, text) {
   };
   const walk = (node, scope = [], describes = [], active = true) => {
     for (const range of [...(ts.getLeadingCommentRanges(text, node.pos) ?? []), ...(ts.getTrailingCommentRanges(text, node.end) ?? [])]) spans.set(range.pos, range);
+    const deprecated = node.name && binding(node.name)?.declarations?.includes(node) ? ts.getJSDocDeprecatedTag(node) : undefined;
+    if (deprecated && ts.isJSDoc(deprecated.parent) && text.slice(deprecated.parent.pos, deprecated.parent.end) === '/** @deprecated */') {
+      machineComments.add(deprecated.parent.pos);
+    }
     let nestedScope = scope;
     let nestedDescribes = describes;
     let nestedActive = active;
@@ -89,7 +94,7 @@ export function scanSource(file, text) {
     const following = Object.values(symbols).filter(s => s.line === line + 1);
     return following.length === 1 ? following[0].name : '<module>';
   };
-  const notes = [...spans.values()].sort((a, b) => a.pos - b.pos).map(span => {
+  const notes = [...spans.values()].filter(span => !machineComments.has(span.pos)).sort((a, b) => a.pos - b.pos).map(span => {
     const value = text.slice(span.pos, span.end);
     const line = lineAt(span.pos);
     return { kind: value.startsWith('/**') ? 'docstring' : 'comment', line, end_line: lineAt(span.end - 1), text: value, owner: owner(line) };

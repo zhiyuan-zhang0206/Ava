@@ -56,7 +56,9 @@ dynamic attributes remain blocked when the provenance resolver cannot prove them
 preserve their existing help and extend the resolver before migrating that file.
 JavaScript/TypeScript bindings include named declarations and literal test labels
 from imported Vitest, Playwright and node:test runners. Unsupported dynamic test
-labels and wrappers do not resolve; use a concrete test definition.
+labels and wrappers do not resolve; use a concrete test definition. An exact
+`/** @deprecated */` is machine syntax only when TypeScript attaches it to a
+named declaration symbol. Prose-bearing or unattached JSDoc remains a finding.
 
 The checker proves syntax and reference integrity, not external-source freshness,
 test execution or semantic truth. The contribution's independent review owns

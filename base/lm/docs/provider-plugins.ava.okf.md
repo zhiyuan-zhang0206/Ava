@@ -78,7 +78,8 @@ both literal rate tables without executing plugin code.
   history, or routing is exposed. The builder validates `resolved_effort` with
   `validate_effort`; `require_key(key_env)` fails at build time if the bootstrap
   environment lacks the key.
-- The spawn boundary reads a plugin key from the cluster `.env`; split runners
+- The spawn boundary reads a plugin key from `os.environ` first, then the local
+  cluster `.env` fallback; split runners
   receive enabled bindings' present keys through bootstrap plugin-secrets, and
   a single-box agent child receives only those declared keys from its parent's
   env. A provider-plugin key is deliberately not a Settings field. `build_chat_model`,
@@ -109,3 +110,5 @@ Known declaration violations raise their typed registration error. Unexpected
 Python errors from import, contribution, installation or final construction
 propagate with their original object and traceback; no partial catalog is
 published. A failed provider module is removed from `sys.modules` before rethrow.
+
+Regression assertions: [test contracts](../../packages/tests/lm/docs/contracts.ava.okf.md#provider-key-channel).

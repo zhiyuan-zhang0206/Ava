@@ -55,3 +55,21 @@ test('Playwright suites keep their labels and disabled suites supply no evidence
   assert.ok(source.symbols['test:suite::works']);
   assert.deepEqual(Object.keys(source.symbols).filter(n => n.startsWith('test:')), ['test:suite::works']);
 });
+
+test('only compiler-attached exact deprecation markers are machine syntax', () => {
+  assert.deepEqual(scanSource('api.ts', '/** @deprecated */\nexport const oldValue = 1;').notes, []);
+  assert.equal(scanSource('api.ts', '/** @deprecated */\nvoid 0;').notes.length, 1);
+  const source = [
+    'export interface Item {',
+    '  /** @deprecated */',
+    '  oldValue: string;',
+    '  /** @deprecated Use newValue instead. */',
+    '  described: string;',
+    '  /** @deprecated @description free prose */',
+    '  mixed: string;',
+    '}',
+    '/** @deprecated */',
+  ].join('\n');
+  const result = scanSource('probe.ts', source);
+  assert.deepEqual(result.notes.map(note => note.line), [4, 6, 9]);
+});
