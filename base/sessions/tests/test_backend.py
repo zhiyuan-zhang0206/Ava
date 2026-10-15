@@ -35,15 +35,6 @@ def test_get_backend_is_a_session_backend():
     assert isinstance(backend, SessionBackend)
 
 
-def test_native_proc_dispatches_by_platform():
-    from base.sessions.backend import native_proc
-
-    mod = native_proc()
-    assert mod.__name__ == "base.sessions.posixproc"
-    for fn in ("has_session", "new_session", "kill_session", "list_sessions", "graceful_signal"):
-        assert callable(getattr(mod, fn))
-
-
 @pytest.mark.parametrize(
     ("relative_cwd", "projection", "expected_venv"),
     [

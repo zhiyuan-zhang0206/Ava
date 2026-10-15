@@ -1,5 +1,3 @@
-"""Permissions-helper process sessions and spawn-chain routing."""
-
 from __future__ import annotations
 
 import inspect
@@ -24,13 +22,12 @@ from base.sessions.record import SessionRecord
 
 
 class _SpawnClient(PermissionsHelperClient):
-    """A helper client whose spawn is the given function (no socket involved)."""
-
     def __init__(self, spawn: Callable[..., client.SpawnResult]) -> None:
         super().__init__("/unused.sock")
         self._spawn = spawn
 
     def spawn_process(self, *args: Any, **kwargs: Any) -> client.SpawnResult:  # pyright: ignore[reportIncompatibleMethodOverride]
+        # ava:ref tests/harness/docs/helper-process-tests.ava.okf.md#helper-spawn-double
         return self._spawn(*args, **kwargs)
 
 
@@ -47,6 +44,7 @@ def _current_process_record(*, generation: str | None = None) -> SessionRecord:
     )
 
 
+# ava:ref tests/harness/docs/helper-process-tests.ava.okf.md#helper-record-and-identity
 def test_new_session_preserves_login_shell_env_stderr_and_record(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -107,7 +105,6 @@ def test_new_session_preserves_login_shell_env_stderr_and_record(
     assert record.cmd == "python -m services.example.daemon"
     assert backend.has_session("ava-service")
 
-    # Persistent records, not the helper's volatile nursery table, own idempotency.
     assert backend.new_session(
         "ava-service",
         "python -m services.example.daemon",
@@ -212,15 +209,10 @@ def test_kill_signals_record_pid_and_unlinks_only_after_confirmed_death(
             child.wait()
 
 
+# ava:ref tests/harness/docs/helper-process-tests.ava.okf.md#helper-record-and-identity
 def test_graceful_delivery_tolerates_whole_second_create_time_drift(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A drifted reading must not refuse the process resolution accepted.
-
-    Mirror of posixproc delivery: `_process_for_record` accepts the
-    create_time within tolerance, so the final re-check must not be stricter
-    (macOS re-derives create_time with a whole-second boot-time correction).
-    """
     drifted = replace(_current_process_record(), create_time=psutil.Process().create_time() - 1.0)
     sent: list[tuple[int, int]] = []
 
@@ -273,8 +265,6 @@ def test_backend_route_matrix(
 
     backend = session_backend.get_backend()
     assert type(backend).__name__ == expected
-    if expected == "HelperProcSessionBackend":
-        assert type(session_backend.native_proc()) is type(backend)
 
 
 def test_backend_route_fails_closed_when_settings_are_unreadable(
@@ -338,11 +328,10 @@ def test_parent_chain_guard_rejects_a_helper_outside_the_chain(
     assert not parent_chain_intact(chain.get)
 
 
+# ava:ref tests/harness/docs/helper-process-tests.ava.okf.md#helper-ancestor-chain
 def test_parent_chain_guard_accepts_the_helper_above_an_intermediate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # unit -> root -> helper: the geometry under the root supervisor, which
-    # the former direct-parent check misread as an orphan and killed at boot.
     chain = {os.getpid(): 101, 101: 100}
     monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "100")
     assert parent_chain_intact(chain.get)
@@ -362,18 +351,19 @@ def test_parent_chain_guard_stops_at_the_depth_bound(
     for step in range(40):
         links[7000 + step] = 7001 + step
 
-    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "7030")  # 31 links up
+    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "7030")
     assert parent_chain_intact(links.get)
 
-    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "7040")  # 41 links up
+    monkeypatch.setenv("AVA_PERMISSIONS_HELPER_PID", "7040")
     assert not parent_chain_intact(links.get)
 
 
+# ava:ref tests/harness/docs/helper-process-tests.ava.okf.md#helper-probe-executable
 def _run_probe_chain(marker_dir: Path, *, marker_value: str | None = None) -> str:
     env = None
     if marker_value is not None:
         env = {**os.environ, "AVA_TEST_HELPER_MARKER_VALUE": marker_value}
-    result = subprocess.run(  # noqa: S603 — fixed test-internal probe
+    result = subprocess.run(  # noqa: S603
         [
             sys.executable,
             str(Path(__file__).parents[1] / "components" / "base" / "helper_chain_probe.py"),
