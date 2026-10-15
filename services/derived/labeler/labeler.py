@@ -5,6 +5,8 @@ reverse dependency.
 """
 
 import re
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
@@ -16,7 +18,6 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks, message_content
 from base.lm.errors import is_retryable_provider_error, normalize_provider_transport_error
-from base.lm.factory import build_chat_model
 from services.derived.labeler.config import LabelerConfig
 
 _LABEL_SYSTEM_PROMPT_TEMPLATE = (
@@ -154,6 +155,7 @@ async def generate_label_async(
     db: Database,
     bus: EventBus,
     *,
+    build_chat_model: Callable[..., Any],
     catalog: ModelCatalog,
     llm_override: str,
     overrides: ModelOverrides,
@@ -165,7 +167,8 @@ async def generate_label_async(
     None when CAS skipped a user-owned label or one already set by another
     writer. An empty string is treated as unset only when it is not user-owned.
 
-    Unknown and permanent provider failures propagate unchanged, as do model
+    The composition root (`daemon.run`) supplies `build_chat_model`. Unknown and
+    permanent provider failures propagate unchanged, as do model
     construction, usage, parsing and DB errors. Only the invocation boundary
     normalizes raw HTTP transport failures for the shared retry classification.
     A committed label is not rolled back or selected again if its best-effort

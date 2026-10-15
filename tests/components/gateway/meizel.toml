@@ -27,7 +27,6 @@ exports = ["test_alerts_api.py", "test_cluster_endpoints.py"]
 "test_delivery_publish.py#monkeypatch.setattr ops.lifecycle.delivery.publish_agent_updated_sync" = 2
 "test_labels.py#monkeypatch.setattr base.lm.usage.log_usage_from_message" = 1
 "test_labels.py#monkeypatch.setattr gateway.agents.router.record_audit" = 1
-"test_labels.py#monkeypatch.setattr services.derived.labeler.labeler.build_chat_model" = 11
 
 [debt.third-party-patch]
 "test_labels.py#monkeypatch.setattr redis.asyncio.Redis.publish" = 10

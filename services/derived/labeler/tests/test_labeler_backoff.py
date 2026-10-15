@@ -54,6 +54,9 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
 
     captured: list[str] = []
 
+    def _reject_build(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("stubbed generate_label_async must not call build_chat_model")
+
     async def _capture(
         _tid: int,
         _prompt: str,
@@ -61,10 +64,12 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
         _db: object,
         _bus: EventBus,
         *,
+        build_chat_model: object,
         catalog: ModelCatalog,
         llm_override: str,
         overrides: ModelOverrides,
     ) -> None:
+        assert build_chat_model is _reject_build
         assert catalog is model_catalog
         captured.append(cfg.labeler_model)
         # Break the otherwise-infinite poll loop after the first dispatch.
@@ -81,6 +86,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
                 event_bus,
                 Liveness(daemon.LIVENESS_TIMEOUT_S),
                 config,
+                build_chat_model=_reject_build,
                 catalog=model_catalog,
                 llm_override=config_authority.runtime.lm.llm_override,
                 overrides=ModelOverrides.from_pins({}),
@@ -189,6 +195,9 @@ async def test_failed_label_is_not_retried_but_new_agents_are_processed(
     fresh: list[int] = []
     ticks = 0
 
+    def _reject_build(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("stubbed generate_label_async must not call build_chat_model")
+
     async def poll(_delay: float) -> None:
         nonlocal ticks
         ticks += 1
@@ -199,7 +208,8 @@ async def test_failed_label_is_not_retried_but_new_agents_are_processed(
         if ticks == 5:
             raise asyncio.CancelledError
 
-    async def failed_generation(tid: int, *_args: Any, **_kwargs: Any) -> bool:
+    async def failed_generation(tid: int, *_args: Any, **kwargs: Any) -> bool:
+        assert kwargs["build_chat_model"] is _reject_build
         calls.append(tid)
         return False
 
@@ -214,6 +224,7 @@ async def test_failed_label_is_not_retried_but_new_agents_are_processed(
                 event_bus,
                 Liveness(120),
                 daemon.labeler_config(),
+                build_chat_model=_reject_build,
                 catalog=model_catalog,
                 llm_override=config_authority.runtime.lm.llm_override,
                 overrides=ModelOverrides.from_pins({}),
@@ -224,3 +235,48 @@ async def test_failed_label_is_not_retried_but_new_agents_are_processed(
     assert db_conn.execute("SELECT label FROM agents WHERE id = %s", (failed,)).fetchone() == (
         None,
     )
+
+
+async def test_dispatch_loop_hands_injected_factory_to_real_generate_label(
+    db_conn: psycopg.Connection,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+) -> None:
+    tid = create_agent(db_conn)
+    _seed_chat(db_conn, tid)
+    db_conn.commit()
+    config = daemon.labeler_config()
+    overrides = ModelOverrides.from_pins({})
+    stop = RuntimeError("stop after factory call")
+    built: list[str] = []
+
+    def build(model: str, **kwargs: object) -> object:
+        built.append(model)
+        assert kwargs["thinking"] == {"type": "disabled"}
+        assert kwargs["catalog"] is model_catalog
+        assert kwargs["llm_override"] == config_authority.runtime.lm.llm_override
+        assert kwargs["overrides"] is overrides
+        raise stop
+
+    p = pool(gate=database_gate)
+    try:
+        with pytest.raises(RuntimeError) as caught:
+            await daemon.dispatch_loop(
+                p,
+                labeler_db(database_gate=database_gate),
+                event_bus,
+                Liveness(daemon.LIVENESS_TIMEOUT_S),
+                config,
+                build_chat_model=build,
+                catalog=model_catalog,
+                llm_override=config_authority.runtime.lm.llm_override,
+                overrides=overrides,
+            )
+        assert caught.value is stop
+    finally:
+        p.close()
+
+    assert built == [config.labeler_model]
