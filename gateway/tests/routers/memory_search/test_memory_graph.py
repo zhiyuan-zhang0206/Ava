@@ -2,24 +2,19 @@
 
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path
 
-import pytest
-
-from base.cluster.machine import MachineRoles
-from gateway.tests.routers.test_memory_search import memory_search_app_db as memory_search_app_db
+from gateway.tests.routers.test_memory_search import (
+    memory_config,
+)
+from gateway.tests.routers.test_memory_search import (
+    memory_search_app_db as memory_search_app_db,
+)
 from tests.fixtures.gateway_config import gateway_test_client
 
 
 class TestMemoryGraph:
-    def test_graph_endpoint_reads_memory_root(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
+    def test_graph_endpoint_reads_memory_root(self, tmp_path: Path) -> None:
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -43,7 +38,7 @@ tags: [tech-ops]
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -62,13 +57,8 @@ tags: [tech-ops]
             {"source": "alpha", "target": "beta", "kind": "reference"},
         ]
 
-    def test_graph_folder_pseudo_node_shape(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_folder_pseudo_node_shape(self, tmp_path: Path) -> None:
         """The folder pseudo node carries only structure — display fields stay empty."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -81,7 +71,7 @@ tags: [ava-internal]
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -99,14 +89,8 @@ tags: [ava-internal]
             "ava_machine": None,
         }
 
-    def test_graph_scans_subdirectories(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_scans_subdirectories(self, tmp_path: Path) -> None:
         """Recursive rglob picks up notes in subdirectories."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
-
         # Root-level file
         (tmp_path / "root-note.md").write_text(
             """---
@@ -134,7 +118,7 @@ See [Root Note](../root-note.md).
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -154,14 +138,9 @@ See [Root Note](../root-note.md).
         assert ("subdir/sub-note", "subdir/", "containment") in edges
         assert ("subdir/", "/", "containment") in edges
 
-    def test_graph_nested_folder_tree_gets_one_pseudo_node_each(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_nested_folder_tree_gets_one_pseudo_node_each(self, tmp_path: Path) -> None:
         """One pseudo node per folder, closed under parent directories, with
         folder → parent-folder containment edges forming a rooted tree."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "root.md").write_text(
             """---
 type: Memory
@@ -198,7 +177,7 @@ tags: [ava-internal]
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -222,14 +201,9 @@ tags: [ava-internal]
             {"source": "a/b/", "target": "a/", "kind": "containment"},
         ]
 
-    def test_graph_root_folder_present_even_without_root_level_notes(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_root_folder_present_even_without_root_level_notes(self, tmp_path: Path) -> None:
         """The pool root is always a pseudo node so the skeleton stays one
         connected tree even when every note lives in a subdirectory."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / "only.md").write_text(
             """---
@@ -243,7 +217,7 @@ tags: [ava-internal]
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -254,15 +228,9 @@ tags: [ava-internal]
             (e["source"], e["target"], e["kind"]) for e in body["edges"]
         }
 
-    def test_graph_empty_pool_has_no_nodes_or_edges(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_empty_pool_has_no_nodes_or_edges(self, tmp_path: Path) -> None:
         """An existing but empty pool yields an empty graph — no lone root folder."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
-
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -273,15 +241,10 @@ tags: [ava-internal]
 
     # ── behavior locks (audit #2448: out-of-root links / bad tags used to 500) ──
 
-    def test_graph_out_of_root_link_is_skipped_not_500(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_out_of_root_link_is_skipped_not_500(self, tmp_path: Path) -> None:
         """A link escaping memory_root (../ or absolute) must not 500 the whole
         endpoint — the edge is dropped instead (one bad note must not kill the
         graph page)."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -294,7 +257,7 @@ See [Outside](../outside.md) and [Absolute](/etc/passwd).
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -302,15 +265,10 @@ See [Outside](../outside.md) and [Absolute](/etc/passwd).
         assert [node["id"] for node in body["nodes"]] == ["/", "alpha"]
         assert body["edges"] == [{"source": "alpha", "target": "/", "kind": "containment"}]
 
-    def test_graph_non_list_tags_do_not_500(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_non_list_tags_do_not_500(self, tmp_path: Path) -> None:
         """`tags: 5` used to TypeError (500); `tags: {a: 1}` used to smuggle
         dict keys in as tags. Both now yield an empty tag list — tags are a
         string list, nothing else."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -334,7 +292,7 @@ tags: {a: 1}
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -342,13 +300,8 @@ tags: {a: 1}
         assert [node["id"] for node in body["nodes"]] == ["/", "alpha", "beta"]
         assert all(node["tags"] == [] for node in body["nodes"])
 
-    def test_graph_skips_reserved_names(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_skips_reserved_names(self, tmp_path: Path) -> None:
         """OKF-reserved files (index.md / log.md / MEMORY.md) never become nodes."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         for name in ("index.md", "log.md", "MEMORY.md"):
             (tmp_path / name).write_text(
                 """---
@@ -370,19 +323,14 @@ title: Real
 """
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
         assert [node["id"] for node in resp.json()["nodes"]] == ["/", "real"]
 
-    def test_graph_skips_files_without_frontmatter(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_skips_files_without_frontmatter(self, tmp_path: Path) -> None:
         """A file without `---` frontmatter is not a note and never becomes a node."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "plain.md").write_text("# Just a heading\n\nNo YAML.\n", encoding="utf-8")
         (tmp_path / "note.md").write_text(
             """---
@@ -394,23 +342,15 @@ title: Note
 """
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
         assert [node["id"] for node in resp.json()["nodes"]] == ["/", "note"]
 
-    def test_graph_missing_root_returns_warning(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_missing_root_returns_warning(self, tmp_path: Path) -> None:
         """memory_root missing → 200 + a warning, not a 500."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(
-            _gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path / "nope")
-        )
-
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path / "nope")) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -418,14 +358,9 @@ title: Note
         assert body["nodes"] == [] and body["edges"] == []
         assert body["warnings"] == ["memory_root not found"]
 
-    def test_graph_unreadable_file_warns_and_skips(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_unreadable_file_warns_and_skips(self, tmp_path: Path) -> None:
         """An unreadable file (here: a directory named `x.md/`) produces a
         warning and is skipped instead of 500-ing."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "x.md").mkdir()
         (tmp_path / "good.md").write_text(
             """---
@@ -437,7 +372,7 @@ title: Good
 """
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -445,13 +380,8 @@ title: Good
         assert [node["id"] for node in body["nodes"]] == ["/", "good"]
         assert any("cannot read" in w for w in body["warnings"])
 
-    def test_graph_url_and_anchor_links_do_not_create_edges(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_url_and_anchor_links_do_not_create_edges(self, tmp_path: Path) -> None:
         """http(s):// and # links are not concept edges."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -464,20 +394,15 @@ See [Web](https://example.com) and [Anchor](#section).
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
         assert resp.json()["edges"] == [{"source": "alpha", "target": "/", "kind": "containment"}]
 
-    def test_graph_dangling_edges_are_filtered(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_dangling_edges_are_filtered(self, tmp_path: Path) -> None:
         """A reference edge pointing at a note that does not exist in the pool
         is dropped; containment edges are unaffected."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -490,19 +415,14 @@ See [Ghost](ghost.md).
             encoding="utf-8",
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
         assert resp.json()["edges"] == [{"source": "alpha", "target": "/", "kind": "containment"}]
 
-    def test_graph_stringifies_timestamp_and_agent(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_graph_stringifies_timestamp_and_agent(self, tmp_path: Path) -> None:
         """timestamp / ava_agent: truthy → str(), falsy/missing → None."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(_memory_root, tmp_path))
         (tmp_path / "alpha.md").write_text(
             """---
 type: Memory
@@ -526,7 +446,7 @@ title: Beta
 """
         )
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.get("/api/memory/graph")
 
         assert resp.status_code == 200
@@ -554,9 +474,3 @@ def test_primary_tag_falls_back_to_the_type_tag_when_it_is_all_there_is() -> Non
 
     assert primary_tag(["type/user"]) == "type/user"
     assert primary_tag([]) == ""
-
-
-def _memory_root(root: Path, *, roles: MachineRoles) -> Path:
-    """Keep the original test filesystem while accepting the explicit role input."""
-    del roles
-    return root

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.paths import gateway_memory_dir
 from gateway.http.middleware.cors import cors_allowed_origins
 
 
@@ -19,6 +22,7 @@ class GatewayConfig:
     allowed_origins: tuple[str, ...]
     browser_origin: str
     session_cookie_secure: bool
+    memory_root: Path
 
 
 def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
@@ -46,4 +50,5 @@ def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
             if explicit_secure is not None
             else urlsplit(gateway_url).scheme == "https"
         ),
+        memory_root=gateway_memory_dir(roles=machine_from_boot(config).role()),
     )

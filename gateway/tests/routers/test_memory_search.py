@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
-from functools import partial
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +14,13 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from base.cluster.machine import MachineIdentity, MachineRoles
-from base.config import settings
+from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot, settings
+from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
 from base.lm import usage
 from base.lm.catalog import ModelCatalog
+from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.routers.memory import MemorySearchInputs
 from gateway.tests.agents.gateway_auth import gateway_credentials
 from services.derived.memory_indexer import rerank
@@ -28,6 +30,11 @@ from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from tests.fixtures.gateway_config import gateway_test_app, gateway_test_client
 
 _active_app: list[FastAPI] = []
+
+
+def memory_config(root: Path, *, boot: ConfigBoot | None = None) -> GatewayConfig:
+    resolved_boot = snapshot_process_config() if boot is None else boot
+    return replace(gateway_config_from_boot(resolved_boot), memory_root=root)
 
 
 def memory_search_app() -> FastAPI:
@@ -151,11 +158,6 @@ class TestPrimaryPath:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Primary path: stub embedder + index → verify returned paths are relative to memory_root."""
-
-        # Use gateway_memory_dir() as the memory root for relative path resolution
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(memory_root, tmp_path))
         # create a few fake markdown files in tmp so relative_to doesn't raise
         (tmp_path / "notes").mkdir()
         (tmp_path / "notes" / "foo.md").write_text("x")
@@ -178,7 +180,7 @@ class TestPrimaryPath:
 
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "test", "k": 5, "purpose": "search"}
             )
@@ -201,9 +203,6 @@ class TestPrimaryPath:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """When files have a YAML frontmatter description, results include it."""
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(memory_root, tmp_path))
         (tmp_path / "with_desc.md").write_text(
             """---
 type: Memory
@@ -247,7 +246,7 @@ title: No Description
 
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "test", "k": 3, "purpose": "search"}
             )
@@ -353,10 +352,7 @@ class TestRerank:
         monkeypatch.setattr(_factory, "get_backend", _FakeBackend)
         return asked
 
-    def _pool(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        import gateway.routers.memory as _gw_memory
-
-        monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(memory_root, tmp_path))
+    def _pool(self, tmp_path: Path) -> None:
         for name in ("a", "b", "c"):
             (tmp_path / f"{name}.md").write_text(
                 f"---\ntype: Memory\ndescription: about {name}\ntags:\n- type/reference\n---\n\npassage {name}\n",
@@ -366,11 +362,11 @@ class TestRerank:
     def test_results_follow_the_decision_probability_not_vector_order(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: Judge
     ) -> None:
-        self._pool(monkeypatch, tmp_path)
+        self._pool(tmp_path)
         self._backend(monkeypatch, [_hit(tmp_path / n) for n in ("a.md", "b.md", "c.md")])
         judge.rules = {"passage a": 0.1, "passage b": 0.6, "passage c": 0.95}
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "what about c", "k": 2, "purpose": "search"}
             )
@@ -389,12 +385,12 @@ class TestRerank:
     def test_purpose_selects_the_relevance_question(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: Judge
     ) -> None:
-        self._pool(monkeypatch, tmp_path)
+        self._pool(tmp_path)
         self._backend(monkeypatch, [_hit(tmp_path / "a.md")])
         questions: dict[str, Any] = {}
         for purpose in ("recall", "search", "dedup"):
             judge.calls.clear()
-            with gateway_test_client() as client:
+            with gateway_test_client(config=memory_config(tmp_path)) as client:
                 resp = client.post(
                     "/api/memory/search", json={"query": "q", "k": 1, "purpose": purpose}
                 )
@@ -405,11 +401,11 @@ class TestRerank:
     def test_backend_is_asked_for_the_configured_candidate_count(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        self._pool(monkeypatch, tmp_path)
+        self._pool(tmp_path)
         asked = self._backend(monkeypatch, [])
         monkeypatch.setattr(settings.services, "memory_rerank_candidates", 40)
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             assert client.post(
                 "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
             ).json() == {"results": []}
@@ -420,12 +416,12 @@ class TestRerank:
     def test_dedup_asks_for_its_own_candidate_count(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        self._pool(monkeypatch, tmp_path)
+        self._pool(tmp_path)
         asked = self._backend(monkeypatch, [])
         monkeypatch.setattr(settings.services, "memory_rerank_candidates", 40)
         monkeypatch.setattr(settings.services, "memory_dedup_candidates", 7)
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             for purpose, k in (("dedup", 5), ("dedup", 9), ("recall", 5), ("search", 5)):
                 client.post("/api/memory/search", json={"query": "q", "k": k, "purpose": purpose})
         # dedup ranks its own count whatever `k` is; recall and search keep the shared one
@@ -437,12 +433,12 @@ class TestRerank:
     def test_stale_vector_hits_are_dropped_before_ranking(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: Judge
     ) -> None:
-        self._pool(monkeypatch, tmp_path)
+        self._pool(tmp_path)
         self._backend(
             monkeypatch,
             [_hit(tmp_path / "gone.md"), _hit(tmp_path / "a.md", idx=9), _hit(tmp_path / "b.md")],
         )
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
             )
@@ -454,11 +450,11 @@ class TestRerank:
     ) -> None:
         from base.api_contracts.agent_contract import IndexerUnavailable
 
-        self._pool(monkeypatch, tmp_path)
+        self._pool(tmp_path)
         self._backend(monkeypatch, [_hit(tmp_path / "a.md")])
         judge.failure = IndexerUnavailable("memory rerank failed (jev): upstream 503")
 
-        with gateway_test_client() as client:
+        with gateway_test_client(config=memory_config(tmp_path)) as client:
             resp = client.post(
                 "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
             )
@@ -535,11 +531,11 @@ def stub_search_backend(
 
     Returns the fresh per-test semaphore so tests can assert on permit state.
     """
-    import gateway.routers.memory as _gw_memory
     import services.derived.memory_indexer.backends.factory as _factory
     from base.config import settings
 
-    monkeypatch.setattr(_gw_memory, "gateway_memory_dir", partial(memory_root, tmp_path))
+    app = memory_search_app()
+    app.state.gateway_config = replace(app.state.gateway_config, memory_root=tmp_path)
     (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n", encoding="utf-8")
 
     # A fresh semaphore per test. asyncio.Semaphore binds itself to the event
@@ -548,7 +544,7 @@ def stub_search_backend(
     # across two contended tests would fail on the second. The handler reads it
     # from `app.state.memory_search_gate`, so the stub installs a fresh instance there.
     fresh = asyncio.Semaphore(permits)
-    memory_search_app().state.memory_search_gate = fresh
+    app.state.memory_search_gate = fresh
     monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", _TEST_DEADLINE_S)
 
     class _StubBackend:
@@ -632,9 +628,3 @@ async def test_query_usage_failure_propagates_without_network_replay(
     assert seen[0] is model_catalog
     assert fake.call_count == 1
     assert state.memory_search_gate._value == 1
-
-
-def memory_root(root: Path, *, roles: MachineRoles) -> Path:
-    """Keep the original test filesystem while accepting the explicit role input."""
-    del roles
-    return root
