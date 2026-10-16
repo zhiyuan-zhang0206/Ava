@@ -168,3 +168,74 @@ def _oversized(repo_root: Path, rel: str) -> str:
 def test_split_hint_names_the_child_directory_inside_the_layer(tmp_path: Path) -> None:
     assert "'agent/docs/big/'" in _oversized(tmp_path, "agent/docs/big.ava.okf.md")
     assert "'agent/graph/docs/'" in _oversized(tmp_path, "agent/graph/docs/graph.ava.okf.md")
+
+
+def test_e001_rejects_a_non_node_extension(tmp_path: Path) -> None:
+    path = tmp_path / "probe.md"
+    path.write_text(_NODE, encoding="utf-8")
+    root = tmp_path.resolve()
+    codes = [e.code for e in gate.lint_file(path.resolve(), gate.collect_all_paths(root), root)]
+    assert codes == ["E001"]
+
+
+def _schema_codes(tmp_path: Path, text: str) -> list[str]:
+    path = tmp_path / "agent" / "docs" / "probe.ava.okf.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    root = tmp_path.resolve()
+    return [e.code for e in gate.lint_file(path.resolve(), gate.collect_all_paths(root), root)]
+
+
+def test_a_missing_frontmatter_fails_before_any_field_check(tmp_path: Path) -> None:
+    assert _schema_codes(tmp_path, "# no frontmatter\n") == ["E002"]
+
+
+def test_type_must_be_doc_or_memory(tmp_path: Path) -> None:
+    assert _schema_codes(tmp_path, _NODE.replace("type: doc", "type: page")) == ["E002"]
+
+
+def test_title_and_description_are_required(tmp_path: Path) -> None:
+    assert _schema_codes(tmp_path, "---\ntype: doc\ndescription: D\n---\n\n# T\n") == ["E003"]
+    assert _schema_codes(tmp_path, "---\ntype: doc\ntitle: T\n---\n\n# T\n") == ["E004"]
+
+
+def test_tags_must_be_a_list_of_strings(tmp_path: Path) -> None:
+    tags_object = "---\ntype: doc\ntitle: T\ndescription: D\ntags: {}\n---\n\n# T\n"
+    assert _schema_codes(tmp_path, tags_object) == ["E005"]
+    tags_int = "---\ntype: doc\ntitle: T\ndescription: D\ntags: [1]\n---\n\n# T\n"
+    assert _schema_codes(tmp_path, tags_int) == ["E005"]
+
+
+def test_forbidden_frontmatter_keys_are_reported(tmp_path: Path) -> None:
+    text = "---\ntype: doc\ntitle: T\ndescription: D\nowner: x\n---\n\n# T\n"
+    assert _schema_codes(tmp_path, text) == ["E006"]
+
+
+def test_a_many_short_lines_node_hits_the_line_backstop(tmp_path: Path) -> None:
+    path = tmp_path / "agent" / "docs" / "probe.ava.okf.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_NODE + "x\n" * (gate.MAX_LINES + 50), encoding="utf-8")
+    root = tmp_path.resolve()
+    errors = gate.lint_file(path.resolve(), gate.collect_all_paths(root), root)
+    assert [e.code for e in errors] == ["E007"]
+    assert "File too long" in errors[0].msg
+    assert str(gate.MAX_LINES) in errors[0].msg
+
+
+def test_find_files_skips_hidden_dirs_except_github(tmp_path: Path) -> None:
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / ".hidden" / "x.ava.okf.md").write_text(_NODE, encoding="utf-8")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / ".github.ava.okf.md").write_text(_NODE, encoding="utf-8")
+    (tmp_path / "visible.ava.okf.md").write_text(_NODE, encoding="utf-8")
+    names = sorted(p.name for p in gate.find_files([str(tmp_path)]))
+    assert names == [".github.ava.okf.md", "visible.ava.okf.md"]
+
+
+def test_type_error_names_the_allowed_types_deterministically(tmp_path: Path) -> None:
+    path = tmp_path / "agent" / "docs" / "probe.ava.okf.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_NODE.replace("type: doc", "type: page"), encoding="utf-8")
+    root = tmp_path.resolve()
+    messages = [e.msg for e in gate.lint_file(path.resolve(), gate.collect_all_paths(root), root)]
+    assert messages == ["type must be one of ['doc', 'memory'], got 'page'"]
