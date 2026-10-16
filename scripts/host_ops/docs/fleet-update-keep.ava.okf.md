@@ -25,7 +25,9 @@ definitions.
 `python scripts/host_ops/fleet_update_keep.py --repo R --old SHA --new SHA`
 prints one line of JSON on stdout (`keep_services` plus a per-component
 verdict); anything else prints to stderr and exits non-zero, and the caller
-then restarts everything rather than guess. Run it with the checkout's own
+then restarts everything rather than guess. In a judged window, a component
+whose dirs or watch entries match nothing at either revision also restarts:
+the table is out of date. Run it with the checkout's own
 interpreter: it imports `meizel.contracts.analysis` from that checkout, as
 the locality gate does.
 
@@ -59,9 +61,9 @@ tests = ["scripts/host_ops/tests/test_fleet_update_keep.py::test_tests_and_docs_
 ```ava-contract
 id = "keep-decision-fail-closed"
 kind = "invariant"
-statement = "Every failure — an unresolvable revision, a git or worktree failure — prints one message on stderr and exits non-zero, and a component whose dirs match no tracked file at either revision restarts; the caller must then restart everything rather than guess a keep."
+statement = "In a judged window (OLD != NEW) every failure — an unresolvable revision, a git or worktree failure — prints one message on stderr and exits non-zero, and a component whose dirs or watch entries match no tracked file at either revision restarts; the caller must then restart everything rather than guess a keep."
 code = ["scripts/host_ops/fleet_update_keep.py:main", "scripts/host_ops/fleet_update_keep.py:decide"]
-tests = ["scripts/host_ops/tests/test_fleet_update_keep.py::test_a_component_with_no_matching_root_restarts_conservatively", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_bad_revision_fails"]
+tests = ["scripts/host_ops/tests/test_fleet_update_keep.py::test_a_component_with_no_matching_root_restarts_conservatively", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_watch_file_absent_at_both_revisions_restarts_conservatively", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_bad_revision_fails"]
 ```
 
 ```ava-contract

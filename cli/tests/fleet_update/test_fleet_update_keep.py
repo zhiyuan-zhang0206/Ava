@@ -8,6 +8,7 @@ import pytest
 
 from cli import fleet_update
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, decision_argvs, stub_decision
+from scripts.host_ops import fleet_update_keep as keep
 
 _KEEP_PARTIAL: dict[str, Any] = {
     "changed_files": 3,
@@ -118,6 +119,8 @@ def test_a_missing_decision_script_stops_everything(
         ("import sys; sys.stderr.write('boom: not a repo\\n'); sys.exit(1)", "boom: not a repo"),
         ("print('not json at all')", "not usable"),
         ("import json; print(json.dumps({'components': []}))", "not usable"),
+        ("import sys; sys.exit(0)", "not usable"),
+        ("print('[1, 2]')", "not usable"),
     ],
 )
 def test_a_decision_that_cannot_judge_stops_everything(
@@ -131,6 +134,20 @@ def test_a_decision_that_cannot_judge_stops_everything(
     assert run("down") == 0
     out = capsys.readouterr().out
     assert "WARNING: keep decision" in out and detail in out
+    assert all("--keep-service" not in c for c in _stop_commands(cluster))
+
+
+def test_a_decision_timeout_stops_everything(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    script = fleet_update.REPO / "scripts" / "host_ops" / "fleet_update_keep.py"
+    script.write_text("import time; time.sleep(30)\n")
+    assert run("down", "--keep-timeout", "0.5") == 0
+    assert (
+        "WARNING: keep decision timed out after 0.5s; restarting every service"
+        in capsys.readouterr().out
+    )
     assert all("--keep-service" not in c for c in _stop_commands(cluster))
 
 
@@ -155,3 +172,15 @@ def test_the_dry_run_prints_the_decision_and_the_flagged_stops(
     assert "keep decision: pty-sessions=keep" in out
     assert "stop -y --timeout 600 --keep-service pty-sessions" in out
     assert [k for k, _ in cluster.effects] == ["pre-verify"]
+
+
+def test_the_reader_consumes_a_payload_the_real_writer_produced(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    payload = keep.decide(fleet_update.REPO, cluster.old, cluster.new)
+    stub_decision(fleet_update.REPO, payload)
+    assert run("down") == 0
+    out = capsys.readouterr().out
+    assert "keep decision: pty-sessions=keep" in out
+    assert all("--keep-service pty-sessions" in c for c in _stop_commands(cluster))

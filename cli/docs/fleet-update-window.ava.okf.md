@@ -32,7 +32,8 @@ visible.
 ## The keep decision
 
 The decision runs as a subprocess of the operator's interpreter with a
-300-second budget (two scratch worktrees, two whole-repo analyses). Every
+`--keep-timeout` budget (default 300 seconds: two scratch worktrees, two
+whole-repo analyses). Every
 failure returns no keeps with one WARNING, and the stops then restart
 everything — never a guess.
 
@@ -76,7 +77,7 @@ id = "keep-decision-subprocess"
 kind = "invariant"
 statement = "down runs the keep decision as a subprocess of scripts/host_ops/fleet_update_keep.py on this interpreter; every failure — missing script, timeout, non-zero exit, unusable output — returns no keeps with one WARNING and the stops restart everything; the verdicts ride every stop as --keep-service flags; --restart-all skips the decision; a rerun over hosts already on NEW passes NEW as both revisions."
 code = ["cli/fleet_update.py:keep_decision", "cli/fleet_update.py:down"]
-tests = ["cli/tests/fleet_update/test_fleet_update_keep.py::test_the_kept_services_ride_every_stop_command", "cli/tests/fleet_update/test_fleet_update_keep.py::test_the_decision_judges_the_unswitched_head_and_a_rerun_judges_nothing", "cli/tests/fleet_update/test_fleet_update_keep.py::test_a_missing_decision_script_stops_everything", "cli/tests/fleet_update/test_fleet_update_keep.py::test_a_decision_that_cannot_judge_stops_everything", "cli/tests/fleet_update/test_fleet_update_keep.py::test_restart_all_skips_the_decision"]
+tests = ["cli/tests/fleet_update/test_fleet_update_keep.py::test_the_kept_services_ride_every_stop_command", "cli/tests/fleet_update/test_fleet_update_keep.py::test_the_decision_judges_the_unswitched_head_and_a_rerun_judges_nothing", "cli/tests/fleet_update/test_fleet_update_keep.py::test_a_missing_decision_script_stops_everything", "cli/tests/fleet_update/test_fleet_update_keep.py::test_a_decision_that_cannot_judge_stops_everything", "cli/tests/fleet_update/test_fleet_update_keep.py::test_a_decision_timeout_stops_everything", "cli/tests/fleet_update/test_fleet_update_keep.py::test_restart_all_skips_the_decision"]
 ```
 
 ```ava-contract

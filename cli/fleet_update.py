@@ -287,7 +287,7 @@ def down(s: Session, args: argparse.Namespace) -> None:
         keeps: list[str] = []
         s.say("keep decision: skipped (--restart-all): every service stops")
     else:
-        keeps = keep_decision(s, old, new)
+        keeps = keep_decision(s, old, new, timeout=args.keep_timeout)
     keep_flags = "".join(f" --keep-service {name}" for name in keeps)
     _silence(
         s, args, "open", f"fleet update to {new[:12]}: planned outage; `up` expires this silence"
@@ -445,6 +445,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--new", required=True, help="commit to switch every host to")
             p.add_argument("--allow-python-change", action="store_true")
             p.add_argument("--stop-timeout", type=int, default=600)
+            p.add_argument("--keep-timeout", type=float, default=KEEP_TIMEOUT_S)
             p.add_argument(
                 "--silence-hours",
                 type=float,

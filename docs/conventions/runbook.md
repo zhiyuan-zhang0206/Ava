@@ -406,8 +406,9 @@ load-bearing:
   daily log maintenance, and its ability to come back after a reboot.
 
 `ava stop`, restart and update use the native maintenance primitives.
-Restart retains infrastructure and persistent PTYs; default stop closes those local
-resources. Durable agent identity and work remain on disk.
+Restart retains infrastructure and the shared browser, but closes persistent PTYs
+exactly as a stop does; default stop closes those local resources too. Durable
+agent identity and work remain on disk.
 A stop timeout is a failure; force escalation requires an explicit option.
 Normal `ava start` resumes only after readiness. See the
 [stop procedure](operations/graceful-maintenance.md) for partial stop, coordinated
