@@ -5,19 +5,23 @@ from pathlib import Path
 
 import pytest
 
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.sessions.pty import allocation_freeze, client
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import new, output_until, type_line, wait_for
 
 pytestmark = pytest.mark.usefixtures("pty_service")
+WRITER = AtomicWriter(SYSTEM_FS)
 
 
 def test_a_frozen_allocation_reuses_a_live_name_but_refuses_a_missing_one_until_resume(
     unit_home: Path,
 ) -> None:
     assert new("ava-agent-1-shell-0-existing", unit_home) is True
-    frozen = allocation_freeze.freeze(holder="operator", reason="manifest and cleanup")
+    frozen = allocation_freeze.freeze(
+        holder="operator", reason="manifest and cleanup", writer=WRITER
+    )
     assert frozen.generation is not None
 
     assert new("ava-agent-1-shell-0-existing", unit_home) is False, "a live name stays usable"
@@ -26,7 +30,7 @@ def test_a_frozen_allocation_reuses_a_live_name_but_refuses_a_missing_one_until_
     assert frozen.generation in str(refused.value)
     assert not client.has_session("ava-agent-1-shell-1-missing")
 
-    assert allocation_freeze.resume(frozen.generation)
+    assert allocation_freeze.resume(frozen.generation, writer=WRITER)
     assert new("ava-agent-1-shell-1-missing", unit_home) is True
 
 
@@ -44,9 +48,9 @@ def test_the_active_generation_rejects_a_live_name_from_a_prior_generation(
     new(name, unit_home)
     (before,) = client.list_sessions()
     assert before.generation is None
-    frozen = allocation_freeze.freeze(holder="operator", reason="generation flip")
+    frozen = allocation_freeze.freeze(holder="operator", reason="generation flip", writer=WRITER)
     assert frozen.generation is not None
-    assert allocation_freeze.resume(frozen.generation)
+    assert allocation_freeze.resume(frozen.generation, writer=WRITER)
 
     with pytest.raises(client.ServiceError, match="belongs to a prior generation"):
         new(name, unit_home)
@@ -54,9 +58,11 @@ def test_the_active_generation_rejects_a_live_name_from_a_prior_generation(
 
 
 def test_a_session_carries_the_generation_it_was_admitted_under(unit_home: Path) -> None:
-    frozen = allocation_freeze.freeze(holder="operator", reason="desired-state cleanup")
+    frozen = allocation_freeze.freeze(
+        holder="operator", reason="desired-state cleanup", writer=WRITER
+    )
     assert frozen.generation is not None
-    assert allocation_freeze.resume(frozen.generation)
+    assert allocation_freeze.resume(frozen.generation, writer=WRITER)
     names = ("ava-agent-41-shell-2-page-dashboard", "ava-schedule-7")
     for name in names:
         assert new(name, unit_home) is True
@@ -100,7 +106,9 @@ def test_freeze_acknowledgement_has_no_later_session_start_during_concurrent_all
     frozen: allocation_freeze.PtyAllocationFreeze | None = None
     try:
         wait_for(allocation_lock_is_held, timeout=10.0, interval=0.001)
-        frozen = allocation_freeze.freeze(holder="ci-race", reason="prove freeze acknowledgement")
+        frozen = allocation_freeze.freeze(
+            holder="ci-race", reason="prove freeze acknowledgement", writer=WRITER
+        )
         assert frozen.generation is not None and frozen.created_at is not None
         for thread in threads:
             thread.join(timeout=60)
@@ -119,16 +127,16 @@ def test_freeze_acknowledgement_has_no_later_session_start_during_concurrent_all
         for thread in threads:
             thread.join(timeout=60)
         if frozen is not None and frozen.generation is not None:
-            assert allocation_freeze.resume(frozen.generation)
+            assert allocation_freeze.resume(frozen.generation, writer=WRITER)
 
 
 def test_a_frozen_session_still_serves_input(unit_home: Path) -> None:
     name = "ava-test-frozen-use-1"
     new(name, unit_home)
-    frozen = allocation_freeze.freeze(holder="operator", reason="inspection")
+    frozen = allocation_freeze.freeze(holder="operator", reason="inspection", writer=WRITER)
     try:
         type_line(name, "echo still-usable")
         output_until(name, "still-usable")
     finally:
         assert frozen.generation is not None
-        assert allocation_freeze.resume(frozen.generation)
+        assert allocation_freeze.resume(frozen.generation, writer=WRITER)
