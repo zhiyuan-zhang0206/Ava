@@ -119,27 +119,6 @@ def test_diagnose_lint_hard_limit(diag_gh: Any, capsys: pytest.CaptureFixture[st
     assert "split the file" in out
 
 
-def test_diagnose_first_load_budget(diag_gh: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    check = "Production build + first-load JavaScript budget"
-    host = diag_gh(
-        [
-            ("--json mergeable", diag_pr_view(checks=[diag_check(check)])),
-            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
-            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
-            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", diag_runs()),
-            ("/jobs", diag_jobs_payload(diag_job(check))),
-            ("/logs", "First Load JS shared by all is 512 kB (budget 500 kB)"),
-            ("state=all", "[]"),
-        ]
-    )
-    assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
-        == 0
-    )
-    assert "first-load JavaScript budget" in capsys.readouterr().out
-
-
 def test_diagnose_visual_regression(diag_gh: Any, capsys: pytest.CaptureFixture[str]) -> None:
     check = "e2e shard (3/4)"
     host = diag_gh(

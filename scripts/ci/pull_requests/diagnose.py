@@ -24,11 +24,6 @@ _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
         "split the file into focused modules, fix, resubmit",
     ),
     (
-        r"First Load JS shared by all",
-        "frontend first-load JavaScript budget",
-        "reduce the bundle or update the budget baseline, fix, resubmit",
-    ),
-    (
         r"toMatchImageSnapshot|visual regression|baseline image|snapshot baseline",
         "e2e visual regression (stale snapshot baseline)",
         "UI change: refresh the visual snapshot baseline, resubmit",

@@ -35,7 +35,6 @@ _DISK_CONSUMERS = (
         "base/packages/plugins/surface/ui_contributions.py",
         "src/components/plugins/plugin-nav-icon.test.ts",
     ),
-    ("ui/web/scripts/fixtures/route-bundle-stats.json", "scripts/check-first-load-js.test.ts"),
 )
 
 
