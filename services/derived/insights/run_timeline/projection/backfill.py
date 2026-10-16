@@ -5,7 +5,8 @@ import argparse
 
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
