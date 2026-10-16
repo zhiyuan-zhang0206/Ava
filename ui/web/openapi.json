@@ -15595,8 +15595,7 @@
           "source_checked_at",
           "note"
         ],
-        "title": "ReferenceTps",
-        "description": "Vendor-published output speed, preserving its qualifier and conditions."
+        "title": "ReferenceTps"
       },
       "ReplySuggestionResponse": {
         "properties": {
