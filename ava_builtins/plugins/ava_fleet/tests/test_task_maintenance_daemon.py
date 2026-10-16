@@ -216,8 +216,13 @@ class TestRemind:
         assert len(deliver) == 1
         delivered_owner, message = deliver[0]
         assert delivered_owner == owner
-        assert "Task reminders — you have 1 overdue task(s)." in message
-        assert "report your current status and advance the next step" in message
+        assert message.splitlines()[0] == (
+            "Task check-in — 1 task(s) reached their reminder interval; "
+            "check whether each needs a progress update or should be pushed forward:"
+        )
+        assert "no update for 1.0h" in message
+        assert "if you cannot advance it, state why and adjust the reminder interval" in message
+        assert "overdue" not in message
         assert f"#{tid}" in message
         assert _maintenance_events(emitted_events) == [
             (
@@ -260,7 +265,7 @@ class TestRemind:
         assert len(deliver) == 1
         delivered_owner, message = deliver[0]
         assert delivered_owner == owner
-        assert "Task reminders — you have 3 overdue task(s)." in message
+        assert "Task check-in — 3 task(s) reached their reminder interval" in message
         assert all(f"#{task_id}" in message for task_id in task_ids)
         for task_id in task_ids:
             row = _task_row(db_conn, task_id)
@@ -311,8 +316,8 @@ class TestRemind:
         ids_in_order = [int(line.split(" ")[1].lstrip("#")) for line in message.splitlines()[1:]]
         assert ids_in_order == [p0, p1, p2]
         # The imperative instruction rides each line.
-        assert "report your current status and advance the next step" in message
-        assert "raise the reminder interval to wait explicitly" in message
+        assert "if you cannot advance it, state why and adjust the reminder interval" in message
+        assert "overdue" not in message
         # The reminder interval stays on the line.
         assert "reminder interval: 30min" in message
 
@@ -334,8 +339,8 @@ class TestRemind:
         assert run_reminders(pool, database, event_bus, 3600.0) == 2
         messages_by_owner = dict(deliver)
         assert set(messages_by_owner) == {first_owner, second_owner}
-        assert "2 overdue task(s)" in messages_by_owner[first_owner]
-        assert "1 overdue task(s)" in messages_by_owner[second_owner]
+        assert "2 task(s) reached their reminder interval" in messages_by_owner[first_owner]
+        assert "1 task(s) reached their reminder interval" in messages_by_owner[second_owner]
 
     def test_not_yet_overdue_is_skipped(
         self,
