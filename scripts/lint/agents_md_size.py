@@ -3,6 +3,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from base.host.env.dotenv_boot import enter_scratch_home
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
 from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
