@@ -6,16 +6,19 @@ import os
 import stat
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner as owner
 from base.sessions import coding_session_owner_record as record_codec
 
 NOW = dt.datetime(2026, 9, 2, 0, 0, tzinfo=dt.UTC)
+WRITER = AtomicWriter(SYSTEM_FS)
 
 
 @pytest.fixture(autouse=True)
@@ -61,6 +64,7 @@ def _launch(
         tasks_file=None if takeover else workspace / "tasks.md",
         work_file=None if takeover else workspace / "work.md",
         ttl_seconds=3600,
+        writer=WRITER,
         now=now,
         list_sessions=_list_sessions,
         session_live=_is_live,
@@ -91,12 +95,14 @@ def _publish(
                 supervisor_id,
                 owner.supervisor_suffix(record.key, generation),
             ),
+            writer=WRITER,
         )
     return owner.publish_active(
         record.key,
         generation,
         session_id=session_id,
         session_name=owner.full_session_name(owner_agent_id, session_id, expected_suffix),
+        writer=WRITER,
     )
 
 
@@ -248,6 +254,7 @@ def test_takeover_never_attaches_a_supervisor(tmp_path: Path) -> None:
             _generation(record),
             session_id=99,
             session_name="ava-agent-41-shell-99-ignored",
+            writer=WRITER,
         )
 
 
@@ -331,6 +338,7 @@ def test_terminal_cleanup_is_generation_scoped_and_removes_state(tmp_path: Path)
         key,
         "7b1f6a0e-0000-4000-8000-000000000000",
         reason="explicit-cancel",
+        writer=WRITER,
         list_sessions=lambda: sorted(live),
         session_live=live.__contains__,
         terminate_session=_unexpected_stop,
@@ -339,6 +347,7 @@ def test_terminal_cleanup_is_generation_scoped_and_removes_state(tmp_path: Path)
         key,
         _generation(active),
         reason="explicit-cancel",
+        writer=WRITER,
         now=NOW + dt.timedelta(minutes=1),
         list_sessions=lambda: sorted(live),
         session_live=live.__contains__,
@@ -360,6 +369,7 @@ def test_a_terminal_generation_is_dropped_by_the_next_launch(tmp_path: Path) -> 
         key,
         _generation(first),
         reason="collaboration-handoff",
+        writer=WRITER,
         list_sessions=lambda: sorted(live),
         session_live=live.__contains__,
         terminate_session=lambda name: live.discard(name) is None,
@@ -404,7 +414,9 @@ def test_a_corrupt_record_fails_closed_without_blocking_other_launches(tmp_path:
     assert owner.read(key, _generation(corrupt)).status == "invalid"
     assert owner.read(key, _generation(second)).status == "launching"
     with pytest.raises(owner.InvalidCodingSessionOwnerError):
-        owner.terminate_generation(key, _generation(corrupt), reason="explicit-cancel")
+        owner.terminate_generation(
+            key, _generation(corrupt), reason="explicit-cancel", writer=WRITER
+        )
 
 
 def test_misdirected_full_handle_fails_closed_and_is_never_stopped(tmp_path: Path) -> None:
@@ -542,16 +554,55 @@ def test_a_socket_path_that_cannot_fit_fails_before_launch(
 
 @pytest.mark.parametrize("status", ["inactive", "invalid"])
 def test_observation_outcomes_cannot_be_written(tmp_path: Path, status: str) -> None:
-    from dataclasses import replace
-
     key = _key(tmp_path)
     launched = _launch(key, agent_id=7)
     projected = replace(launched, status=record_codec.CodingSessionStatus(status))
     with pytest.raises(ValueError, match="only lifecycle states"):
-        record_codec.write_unlocked(projected)
+        record_codec.write_unlocked(projected, writer=WRITER)
     assert (
         owner.read(key, _generation(launched)).status is record_codec.CodingSessionStatus.LAUNCHING
     )
+
+
+def test_write_unlocked_propagates_a_real_target_directory_failure(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    launched = _launch(key, agent_id=7)
+    path = owner.state_path(key, _generation(launched))
+    path.unlink()
+    path.mkdir()
+    retained = path / "existing"
+    retained.write_bytes(b"old")
+
+    with pytest.raises(OSError):
+        record_codec.write_unlocked(launched, writer=WRITER)
+    assert retained.read_bytes() == b"old"
+
+
+def test_write_unlocked_survives_directory_sync_failure_and_cleans_temps(
+    tmp_path: Path,
+) -> None:
+    key = _key(tmp_path)
+    launched = _launch(key, agent_id=7)
+    path = owner.state_path(key, _generation(launched))
+    path.write_bytes(b"old")
+
+    synced: list[str] = []
+
+    def sync_files_only(fd: int) -> None:
+        is_directory = stat.S_ISDIR(os.fstat(fd).st_mode)
+        synced.append("directory" if is_directory else "file")
+        if is_directory:
+            raise OSError("directory sync failure")
+        os.fsync(fd)
+
+    record_codec.write_unlocked(
+        launched,
+        writer=AtomicWriter(replace(SYSTEM_FS, fsync=sync_files_only)),
+    )
+    assert synced == ["file", "directory"]
+    assert owner.read(key, _generation(launched)) == launched
+    assert sorted(path.parent.iterdir()) == [path]
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_owner_snapshot_rejects_unknown_status(tmp_path: Path) -> None:

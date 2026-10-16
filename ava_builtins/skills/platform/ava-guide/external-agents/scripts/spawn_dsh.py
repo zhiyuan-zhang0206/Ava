@@ -38,6 +38,7 @@ from pathlib import Path
 
 import ava
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 
@@ -160,7 +161,9 @@ def _status(key: coding_session_owner.CodingSessionKey) -> int:
 
 
 def _cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:
-    if not coding_session_owner.terminate_generation(key, generation, reason="explicit-cancel"):
+    if not coding_session_owner.terminate_generation(
+        key, generation, reason="explicit-cancel", writer=AtomicWriter(SYSTEM_FS)
+    ):
         print(f"cancel refused: no generation {generation} is recorded here", file=sys.stderr)
         return 1
     _print_owner(coding_session_owner.read(key, generation))
@@ -177,6 +180,7 @@ def _new_generation(
         tasks_file=None,
         work_file=None,
         ttl_seconds=ttl_seconds,
+        writer=AtomicWriter(SYSTEM_FS),
         owner_terminated=_owner_terminated,
     )
 
@@ -211,6 +215,7 @@ def _launch(workspace: Path, prompt: str, ttl_seconds: float) -> int:
             session_name=coding_session_owner.full_session_name(
                 owner.owner_agent_id, sid, owner.expected_suffix
             ),
+            writer=AtomicWriter(SYSTEM_FS),
         )
         ava.shell.sessions.send(sid, _dsh_command(workspace, node, dsh, patch))
         dsh_session = _wait_for_session(sid)
@@ -221,7 +226,9 @@ def _launch(workspace: Path, prompt: str, ttl_seconds: float) -> int:
             except Exception as kill_exc:
                 print(f"could not reclaim shell session {sid}: {kill_exc!r}", file=sys.stderr)
         try:
-            coding_session_owner.terminate_generation(key, generation, reason="launch-failed")
+            coding_session_owner.terminate_generation(
+                key, generation, reason="launch-failed", writer=AtomicWriter(SYSTEM_FS)
+            )
         except Exception as term_exc:
             print(f"could not roll back generation {generation}: {term_exc!r}", file=sys.stderr)
         raise

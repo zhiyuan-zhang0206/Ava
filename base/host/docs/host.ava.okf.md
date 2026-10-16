@@ -34,10 +34,13 @@ is a reviewed addition, not a field that appears on its own.
 renaming it over the target and, when asked, syncing the directory. The three calls whose failure
 a test must cause are the fields of `Fs` (`replace`, `fsync`, `fchmod`), and an `AtomicWriter`
 runs every write through one. `write_text_atomic`, `write_bytes_atomic` and `fsync_parent` are the
-writer over `SYSTEM_FS`; every component calls them. The module's own tests build
+writer over `SYSTEM_FS`; a caller with no policy of its own calls them, while a caller whose own
+policy warns, suppresses or never syncs takes a required `AtomicWriter` ([python
+conventions](../../../docs/conventions/python-conventions.md)). The module's own tests build
 `AtomicWriter(Fs(...))` with the failure they need (a failed replace keeps the old content, a
 failed file sync never commits, a failed directory sync leaves the new content committed); other
-components' tests use real files and patch none of these calls.
+components' tests use real files and patch none of these calls. A converted caller proves its own
+policy with the one `AtomicWriter` its test builds.
 
 `base/host/net/resilience.py` owns immutable `Policy` parameters and the shared
 `retry` / `aretry` executors, including backoff, jitter, classification and

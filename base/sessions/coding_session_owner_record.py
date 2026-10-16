@@ -18,7 +18,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Never, cast, get_args
 
-from base.host.atomic_io import fsync_parent, write_text_atomic
+from base.host.atomic_io import AtomicWriter
 
 SCHEMA_VERSION = 1
 _TOOL_RE = re.compile(r"[a-z][a-z0-9-]*")
@@ -418,17 +418,13 @@ def owner_payload(owner: CodingSessionOwner) -> dict[str, object]:
     }
 
 
-def _fsync_parent(path: Path) -> None:
-    fsync_parent(path)
-
-
-def write_unlocked(owner: CodingSessionOwner) -> None:
+def write_unlocked(owner: CodingSessionOwner, *, writer: AtomicWriter) -> None:
     if owner.status not in PERSISTED_STATUSES:
         raise ValueError("only lifecycle states may be persisted")
     if owner.generation is None:
         raise ValueError("an owner record is written under its generation")
     path = state_path(owner.key, owner.generation)
-    write_text_atomic(
+    writer.write_text(
         path,
         json.dumps(owner_payload(owner), separators=(",", ":"), sort_keys=True),
         encoding="utf-8",
@@ -436,4 +432,4 @@ def write_unlocked(owner: CodingSessionOwner) -> None:
         prefix=".coding-owner-",
     )
     with contextlib.suppress(OSError):
-        _fsync_parent(path)
+        writer.fsync_parent(path)
