@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("./python-code", () => ({
@@ -7,6 +7,7 @@ vi.mock("./python-code", () => ({
   ),
 }));
 
+import { __resetMarkdownMathForTests, __setMarkdownMathImportForTests, type MarkdownMath } from "@/lib/markdown/math";
 import { ChatMarkdown, preloadChatMarkdown } from "./markdown";
 
 beforeAll(async () => {
@@ -123,12 +124,11 @@ describe("ChatMarkdown", () => {
     expect(a.getAttribute("href")).toBe("#foo");
   });
 
-  it("javascript: URL rewritten to about:blank by urlTransform (XSS guard)", () => {
-    render(
-      <ChatMarkdown content="[evil](javascript:alert(1))" />,
-    );
-    const a = screen.getByRole("link", { name: "evil" });
-    expect(a.getAttribute("href")).toBe("about:blank");
+  it("javascript: URL never reaches the DOM (XSS guard)", () => {
+    const { container } = render(<ChatMarkdown content="[evil](javascript:alert(1))" />);
+    const anchor = container.querySelector("a");
+    expect(anchor?.textContent).toBe("evil");
+    expect(anchor?.getAttribute("href")).toBeNull();
   });
 
   it("fenced ```python``` block routes to PythonCode component", () => {
@@ -273,5 +273,105 @@ describe("single tilde stays literal (task #3653)", () => {
     expect(Array.from(codes).map((c) => c.textContent).join("|")).toBe(
       "~/work|~61G|~/.ava",
     );
+  });
+});
+
+describe("raw HTML safe subset", () => {
+  it("renders the allowed subset: details, figure, mark, kbd, br, img", () => {
+    const { container } = render(
+      <ChatMarkdown content={`<details><summary>More</summary>hidden body</details>
+
+<img src="https://example.com/chart.png" alt="chart" width="120">
+
+line<br>break <mark>m</mark> <kbd>K</kbd>
+
+<figure><img src="https://example.com/f.png" alt="f"><figcaption>cap</figcaption></figure>`} />,
+    );
+    expect(container.querySelector("details")?.textContent).toContain("hidden body");
+    expect(container.querySelector("details > summary")?.textContent).toBe("More");
+    const images = container.querySelectorAll("img");
+    expect(images[0].getAttribute("src")).toBe("https://example.com/chart.png");
+    expect(images[0].getAttribute("alt")).toBe("chart");
+    expect(images[0].getAttribute("width")).toBe("120");
+    expect(container.querySelector("mark")?.textContent).toBe("m");
+    expect(container.querySelector("kbd")?.textContent).toBe("K");
+    expect(container.querySelector("figure > figcaption")?.textContent).toBe("cap");
+  });
+
+  it("strips scripts, styles, iframes, templates and event or style attributes", () => {
+    const { container } = render(
+      <ChatMarkdown content={`<script>alert(1)</script><style>body{color:red}</style><iframe src="https://x.test">fallback</iframe><template><i>t</i></template><div onclick="alert(2)" style="color:red">d</div>`} />,
+    );
+    expect(container.querySelector("script,style,iframe,template")).toBeNull();
+    const text = container.textContent;
+    expect(text).not.toContain("alert(1)");
+    expect(text).not.toContain("body{color:red}");
+    expect(text).not.toContain("fallback");
+    const inner = container.querySelector("div.chat-md > div");
+    expect(inner?.hasAttribute("onclick")).toBe(false);
+    expect(inner?.hasAttribute("style")).toBe(false);
+  });
+
+  it("rewrites javascript: and data: URLs before they reach the DOM", () => {
+    const { container } = render(
+      <ChatMarkdown content={`<a href="javascript:alert(1)">j</a> <img src="data:image/svg+xml,boom" alt="d">`} />,
+    );
+    expect(container.querySelector("a")?.getAttribute("href") ?? "").not.toContain("javascript");
+    expect(container.querySelector("img")?.getAttribute("src") ?? "").not.toContain("data:");
+  });
+});
+
+describe("math through the lazy KaTeX surface", () => {
+  afterEach(() => {
+    __resetMarkdownMathForTests();
+    __setMarkdownMathImportForTests(null);
+  });
+
+  it("never loads the math chunk for content without $", () => {
+    const load = vi.fn((): Promise<MarkdownMath> => Promise.resolve({ remark: [], rehype: [] }));
+    __setMarkdownMathImportForTests(load);
+    render(<ChatMarkdown content="no formulas here" />);
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it("renders inline and display math once the math chunk loads", async () => {
+    const { container } = render(<ChatMarkdown content={`inline $x^2$ math
+
+$$\\int_0^1 x dx$$`} />);
+    await waitFor(() => expect(container.querySelectorAll(".katex").length).toBe(2), { timeout: 5000 });
+    expect(container.querySelector("annotation")?.textContent).toBe("x^2");
+  });
+});
+
+describe("document anchors", () => {
+  it("gives headings stable slug ids and keeps same-document links", () => {
+    const { container } = render(<ChatMarkdown content={`## Section One
+
+[go](#section-one)
+
+## Section One
+
+## \u4e2d\u6587\u6807\u9898`} />);
+    const headings = container.querySelectorAll("h2");
+    expect(headings[0].getAttribute("id")).toBe("section-one");
+    expect(headings[1].getAttribute("id")).toBe("section-one-1");
+    expect(headings[2].getAttribute("id")).toBeTruthy();
+    expect(container.querySelector("a")?.getAttribute("href")).toBe("#section-one");
+  });
+});
+
+describe("GFM footnotes", () => {
+  it("keeps every footnote anchor pair matching after sanitizing", () => {
+    const { container } = render(<ChatMarkdown content={`Text[^1].
+
+[^1]: Note body.`} />);
+    const reference = container.querySelector("a[data-footnote-ref]");
+    const item = container.querySelector("section.footnotes li");
+    const backref = container.querySelector("section.footnotes a[data-footnote-backref]");
+    const itemId = item?.getAttribute("id") ?? "";
+    expect(itemId).toBeTruthy();
+    expect(itemId.startsWith("user-content-user-content-")).toBe(false);
+    expect(reference?.getAttribute("href")).toBe(`#${itemId}`);
+    expect(backref?.getAttribute("href")).toBe(`#${reference?.getAttribute("id")}`);
   });
 });

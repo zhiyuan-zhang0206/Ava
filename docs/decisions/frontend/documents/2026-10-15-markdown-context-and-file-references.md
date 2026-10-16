@@ -1,3 +1,8 @@
+> **Revised 2026-10-17** — the "without raw HTML" clause is replaced by the
+> safe HTML subset decision; scripts and styles stay stripped and the file
+> references and bounds clauses stand. See
+> [`2026-10-17-markdown-safe-subset-math-anchors.md`](2026-10-17-markdown-safe-subset-math-anchors.md).
+
 # Markdown shared context with source-machine file references
 
 ## Context

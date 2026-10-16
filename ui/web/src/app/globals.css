@@ -284,6 +284,16 @@
   }
   .chat-md th { @apply bg-muted font-semibold; }
   .chat-md hr { @apply my-3 border-border; }
+  .chat-md sup { @apply align-super text-[0.75em] leading-none; }
+  .chat-md sup a { @apply no-underline; }
+  .chat-md .footnotes { @apply mt-4 border-t border-border pt-2 text-xs text-muted-foreground; }
+  .chat-md .footnotes h2 { @apply sr-only; }
+  .chat-md .footnotes ol { @apply mt-1 mb-0; }
+  .chat-md .footnotes li { @apply my-1; }
+  .chat-md .footnotes a[data-footnote-backref] { @apply ml-1 no-underline; }
+  .chat-md .footnotes li:target,
+  .chat-md :is(h1, h2, h3, h4, h5, h6):target { @apply rounded-sm bg-accent/60; }
+  .chat-md :is(h1, h2, h3, h4, h5, h6) { @apply scroll-mt-2; }
 }
 
 
