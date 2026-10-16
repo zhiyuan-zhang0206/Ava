@@ -6,7 +6,7 @@ description: Current ownership boundaries and their executable evidence.
 
 # Scheduler timing and exit
 
-The scheduler calculates due times on the cluster Clock supplied by its boot owner. Failed dumps wait until the next scheduled hour; failure alone does not ask the supervisor for a restart/retry loop. Health evaluates successful-backup freshness after boot grace. The current chunked sleep implementation is retained by this change; its chunk-count test does not independently prove signal responsiveness.
+The scheduler calculates due times on the cluster Clock supplied by its boot owner. Failed dumps wait until the next scheduled hour; failure alone does not ask the supervisor for a restart/retry loop. Health evaluates successful-backup freshness after boot grace. The scheduler waits with a single `clock.asleep` call (task #5241): the earlier chunked sleep and its chunk-count test are gone; the count did not prove signal responsiveness, and the bounded-exit test above carries that evidence.
 
 The maintenance pause does not stop direct read-only pg_dump backups: they use the direct URL rather than the pooled business-admission path. SIGTERM raises KeyboardInterrupt and explicit task cancellation drains application cleanup. The Runner is not closed as a context manager because that would wait for wedged default-executor work. Further SIGTERM is ignored during the bounded exit; the process hard-exits after its drain.
 

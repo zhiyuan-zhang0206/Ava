@@ -107,8 +107,7 @@ class Verdict(StrEnum):
 
     LIVE = "live"  # a live process cannot be excluded from the request's domain
     STALE = "stale"  # attributed, unreferenced, and its host is provably gone
-    DISPOSABLE = "disposable"  # unreadable bytes, unreferenced, old, host gone
-    UNKNOWN = "unknown"  # not provably disposable: retained
+    UNKNOWN = "unknown"
 
 
 class HostState(StrEnum):
@@ -143,7 +142,7 @@ class RequestEvidence:
     @property
     def retained(self) -> bool:
         """True when the evidence must keep deferring recovery."""
-        return self.verdict not in {Verdict.STALE, Verdict.DISPOSABLE}
+        return self.verdict is not Verdict.STALE
 
     def describe(self) -> str:
         """A one-line diagnostic: file, attribution, proof and refusal."""
@@ -253,16 +252,6 @@ def classify_request(
     incumbent: RuntimeIncarnation | None,
     host: HostEvidence,
 ) -> RequestEvidence:
-    """Classify one request envelope against its attribution and process proof.
-
-    ``incumbent`` is the incarnation the row still names — the retired owner in
-    both recovery paths; it is reported, not trusted. The callers own the
-    premise that this host ended (exclusive boot / absent host), and the stored
-    host identity vetoes the verdict whenever it contradicts that premise. An
-    envelope whose own bytes cannot be read has no attribution to judge; when
-    the bounded-disposition switch is on, the legs that need no content decide
-    between ``DISPOSABLE`` and retained (see ``_bounded_unreadable``).
-    """
     try:
         mtime = path.stat().st_mtime
     except OSError as exc:
@@ -375,20 +364,9 @@ def disposition_hint(agent_id: int) -> str:
 
 @dataclass(frozen=True)
 class _Attribution:
-    """What one envelope's bytes could be read to say.
-
-    ``content_unreadable`` marks the bounded-disposition class (task #3619
-    D-2): the file's own bytes could not be read or parsed at all, so no field
-    can be trusted and nothing about it can be attributed. Every other refusal
-    describes a structurally readable envelope and retains unconditionally.
-    ``timeout_s`` is None whenever the bytes that would declare it were not
-    read; the callers substitute the protocol ceiling for it.
-    """
-
     incarnation: RuntimeIncarnation | None
     refusal: str | None
     timeout_s: float | None
-    content_unreadable: bool
 
 
 def _read_attribution(path: Path, agent_id: int) -> _Attribution:
@@ -400,13 +378,12 @@ def _read_attribution(path: Path, agent_id: int) -> _Attribution:
                 None,
                 f"envelope is {size} bytes, over the {_MAX_ENVELOPE_BYTES} ceiling",
                 None,
-                content_unreadable=False,
             )
         parsed: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        return _Attribution(None, f"envelope is unreadable: {exc}", None, content_unreadable=True)
+        return _Attribution(None, f"envelope is unreadable: {exc}", None)
     if not isinstance(parsed, dict):
-        return _Attribution(None, "envelope is not a JSON object", None, content_unreadable=False)
+        return _Attribution(None, "envelope is not a JSON object", None)
     envelope = cast("dict[str, Any]", parsed)
     version = envelope.get("v")
     if version != _REQUEST_VERSION:
@@ -414,7 +391,6 @@ def _read_attribution(path: Path, agent_id: int) -> _Attribution:
             None,
             f"envelope version {version!r} != {_REQUEST_VERSION}",
             None,
-            content_unreadable=False,
         )
     named = envelope.get("agent_id")
     if named != agent_id:
@@ -422,25 +398,20 @@ def _read_attribution(path: Path, agent_id: int) -> _Attribution:
             None,
             f"envelope names agent {named!r}, not {agent_id}",
             None,
-            content_unreadable=False,
         )
     timeout = envelope.get("timeout_s")
     timeout_s = float(timeout) if isinstance(timeout, int | float) else None
     identity = envelope.get("incarnation")
     if not isinstance(identity, dict):
-        return _Attribution(
-            None, "envelope carries no incarnation", timeout_s, content_unreadable=False
-        )
+        return _Attribution(None, "envelope carries no incarnation", timeout_s)
     fields = cast("dict[str, Any]", identity)
     try:
         incarnation = RuntimeIncarnation(
             agent_id, UUID(str(fields["generation"])), UUID(str(fields["owner"]))
         )
     except (KeyError, ValueError) as exc:
-        return _Attribution(
-            None, f"envelope incarnation is malformed: {exc}", timeout_s, content_unreadable=False
-        )
-    return _Attribution(incarnation, None, timeout_s, content_unreadable=False)
+        return _Attribution(None, f"envelope incarnation is malformed: {exc}", timeout_s)
+    return _Attribution(incarnation, None, timeout_s)
 
 
 def _is_exec_child_argv(argv: Sequence[str] | None) -> bool:
@@ -546,8 +517,9 @@ def main(argv: Sequence[str] | None = None, *, home: Path) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m base.agents.incarnation.exec_request_evidence",
         description=(
-            "List the exec request envelopes left under one agent's run/exec directory, "
-            "or move reviewed envelopes into the explicit quarantine."
+            "List the legacy exec request envelopes left under one agent's run/exec "
+            "directory, or move reviewed envelopes into the explicit quarantine. Managed "
+            "requests are inspected through their DB-selected owner evidence."
         ),
     )
     parser.add_argument("--agent", type=int, required=True, help="agent id to inspect")
@@ -599,7 +571,7 @@ def main(argv: Sequence[str] | None = None, *, home: Path) -> int:
 def print_request_evidence(agent_id: int, entries: Sequence[RequestEvidence]) -> None:
     """The listing an operator reads before deciding anything else."""
     if not entries:
-        _emit(f"agent {agent_id}: no exec request evidence")
+        _emit(f"agent {agent_id}: no legacy exec request evidence")
         return
     retained = [entry for entry in entries if entry.retained]
     for entry in entries:

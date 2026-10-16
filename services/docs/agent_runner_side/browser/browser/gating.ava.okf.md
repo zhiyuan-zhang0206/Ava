@@ -10,9 +10,8 @@ tags: []
 ## Browser
 
 `browser` requires `AVA_BROWSER_ENABLED` plus `browser_incapability()` (display,
-Chrome, and npx). The converge browser step uses the settings-free twin
-`browser_deps_incapability()`: the same prongs, order, and reasons, without the
-`AVA_CHROME_BINARY` override because Settings cannot be built on a fresh host.
+Chrome, and npx). The converge browser step calls the same `browser_incapability()`
+with the configured `AVA_CHROME_BINARY` from its read config.
 
 On macOS, these static prongs are necessary but not sufficient at daemon launch.
 `services/desktop/browser/macos_readiness.py` additionally waits for the current service

@@ -53,7 +53,7 @@ def test_unix_pong_needs_no_root_or_native_inspection(monkeypatch: pytest.Monkey
         pytest.fail("read-only protocol health must not inspect native ownership")
 
     monkeypatch.setattr("psutil.process_iter", forbidden)
-    monkeypatch.setattr(client, "owned_process", forbidden)
+    monkeypatch.setattr(client, "root_process", forbidden)
     with unix_server(b'{"id":0,"ok":true}\n') as path:
         assert probe.ping(path).alive
 

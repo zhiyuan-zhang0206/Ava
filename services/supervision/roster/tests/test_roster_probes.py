@@ -30,7 +30,7 @@ def test_roster_uses_healthy_protocol_without_native_listener_proof(
 
     monkeypatch.setattr(roster, "daemon_identity", identity)
     monkeypatch.setattr("psutil.process_iter", forbidden)
-    monkeypatch.setattr(client, "owned_process", forbidden)
+    monkeypatch.setattr(client, "root_process", forbidden)
     item = next(item for item in roster.build_services() if item.session == service)
     assert item.identity_probe is not None
     assert item.identity_probe().alive
