@@ -3,7 +3,6 @@
 import { newOperationKey as newClientMessageId } from "@/lib/transport/operation-key";
 
 import { useQuery } from "@tanstack/react-query";
-import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -478,17 +477,17 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
         <div className={cn("flex-wrap gap-2 px-0.5 pb-1", FLEX)} data-testid="composer-attachments">
           {images.map((img) => (
             <div key={img.key} className="relative">
-              <Image
-                src={img.previewUrl}
-                alt={img.name}
-                width={56}
-                height={56}
-                className={cn(
-                  "h-14 w-14 rounded border border-border object-cover",
-                  img.status === "uploading" && "opacity-50",
-                  img.status === "error" && "ring-1 ring-destructive",
-                )}
-              />
+              <picture>
+                <img
+                  src={img.previewUrl}
+                  alt={img.name}
+                  className={cn(
+                    "h-14 w-14 rounded border border-border object-cover",
+                    img.status === "uploading" && "opacity-50",
+                    img.status === "error" && "ring-1 ring-destructive",
+                  )}
+                />
+              </picture>
               {img.status !== "ready" ? (
                 <span
                   className={cn(
