@@ -37,7 +37,7 @@ class LmSettings(EnvSettings):
             "executes instead of summarizing — measure before downgrading."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",

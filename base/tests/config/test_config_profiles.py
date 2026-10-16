@@ -275,6 +275,7 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
             "feishu_rest_timeout_seconds",
         ),
         LmSettings: (
+            "labeler_model",
             "reply_suggestion_enabled",
             "reply_suggestion_model",
             "reply_suggestion_gate_model",
