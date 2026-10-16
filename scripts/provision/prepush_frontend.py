@@ -1,10 +1,3 @@
-"""Run frontend checks over the branch contribution, never an old push tip.
-
-Vitest's import graph is only one source of consumers. Keep existing filesystem
-contract tests explicit; global configuration and deleted-module closure belong
-to CI and are reported as unverified locally, rather than running a full suite.
-"""
-
 from __future__ import annotations
 
 import subprocess
@@ -14,8 +7,7 @@ from pathlib import Path
 _SCRIPTS = Path(__file__).resolve().parents[1]
 _WEB = "ui/web/"
 _CODE = (".ts", ".tsx", ".js", ".mjs", ".mts")
-# Canonical HTTP schema/type artifacts have no runtime imports. Their consumers
-# are checked by project tsc and the existing codegen-freshness hook.
+# ava:ref scripts/provision/docs/prepush-selection.ava.okf.md#type-artifact-inputs
 _TYPE_INPUTS = {"ui/web/openapi.json", "ui/web/src/lib/contracts/types-generated.ts"}
 _GLOBAL = {
     "ui/web/package.json",
@@ -28,7 +20,7 @@ _GLOBAL = {
     "ui/web/next.config.ts",
     "ui/web/postcss.config.mjs",
 }
-# Consumers read these inputs from disk, outside Vitest's import graph.
+# ava:ref scripts/provision/docs/prepush-selection.ava.okf.md#disk-consumer-inputs
 _DISK_CONSUMERS = (
     ("ui/web/src/", "src/lib/auth/localstorage-policy.test.ts"),
     ("ui/web/messages/", "src/i18n/messages-layout.test.ts"),
@@ -43,19 +35,17 @@ _DISK_CONSUMERS = (
         "base/packages/plugins/surface/ui_contributions.py",
         "src/components/plugins/plugin-nav-icon.test.ts",
     ),
-    ("ui/web/scripts/fixtures/route-bundle-stats.json", "scripts/check-first-load-js.test.ts"),
 )
 
 
+# ava:ref scripts/provision/docs/prepush-selection.ava.okf.md#fixed-command-execution
 def _query(*args: str) -> str:
-    return subprocess.run(  # noqa: S603 — fixed Git queries
-        ["git", *args], check=True, capture_output=True, text=True
-    ).stdout
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
+# ava:ref scripts/provision/docs/prepush-selection.ava.okf.md#branch-contribution-scope
 def contribution() -> list[str]:
-    """Both sides of renames and deletions count; unknown scope is an error."""
-    base = subprocess.run(  # noqa: S603 — fixed repo-local scope owner
+    base = subprocess.run(
         ["bash", str(_SCRIPTS / "hooks" / "prepush-base.sh")],
         check=True,
         capture_output=True,
@@ -65,14 +55,13 @@ def contribution() -> list[str]:
 
 
 def _run(tool: str, command: list[str]) -> int:
-    return subprocess.run(  # noqa: S603 — fixed command, Git-owned path arguments
+    return subprocess.run(
         ["bash", str(_SCRIPTS / "hooks" / "prepush-guard.sh"), tool, "--", *command], check=False
     ).returncode
 
 
+# ava:ref scripts/provision/docs/prepush-selection.ava.okf.md#empty-related-collection-is-not-green
 def _vitest(paths: list[str], *, related: bool = False) -> int:
-    # `related` defaults passWithNoTests=true in Vitest itself. Override it:
-    # empty affected collection is missing evidence, never a passing test run.
     return _run(
         "vitest",
         [
