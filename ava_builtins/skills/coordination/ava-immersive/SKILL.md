@@ -77,6 +77,6 @@ The default (`reduce-context-switch-for-human`) keeps the human unbothered
 while away: results queue, updates batch, nothing depends on their attention.
 Immersive mode is the other regime of the same attention surface, used while
 the human is present. Both regimes keep heavy work parallel; they differ only
-in when information reaches the human. Do not run immersive behavior outside
+in when information reaches the human. The cap bounds silence while work is active; it is not a timer — a message still must carry information (rule 3), and an `oriented` communication style continues underneath with this session contract on top. Do not run immersive behavior outside
 an active session, and do not leave a session nominally open once the human
 is gone.

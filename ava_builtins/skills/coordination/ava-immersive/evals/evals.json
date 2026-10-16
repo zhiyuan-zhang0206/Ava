@@ -49,6 +49,30 @@
         "Default batched reporting is stated as resumed.",
         "The human's decision (option B) is recorded in the ledger with its one-line rationale."
       ]
+    },
+    {
+      "id": 5,
+      "prompt": "You are agent R. The human writes: \"ok let's do this one live — dig into why the nightly report job keeps drifting, and keep me posted while you're at it.\" They did not name any mode. You are in a scratch directory with the job's logs; long analysis jobs can run in the background. Handle the first minutes per the applicable discipline and write the messages you send.",
+      "files": [],
+      "expected_output": "The live-session discipline activates on the natural-language request (no literal skill name needed): an entry announcement (cap default 60s, split, exit) or explicit confirmation of the live cadence, with the long analysis delegated or backgrounded.",
+      "assertions": [
+        "The agent treats \"let's do this one live / keep me posted\" as a live-session request and applies the discipline.",
+        "The agent does not require the literal words \"immersive on\" to enter.",
+        "The long analysis is delegated or backgrounded, not run inline blocking.",
+        "No silent gap beyond the announced cap appears in the described sequence."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "You are agent R. The human writes: \"I'm going heads-down — don't ping me about this; just fix the broken nightly report job and send me one summary when it's done.\" The work takes about 20 minutes. Handle it and write what you send and when.",
+      "files": [],
+      "expected_output": "Default batch discipline: the work proceeds (delegated or backgrounded if needed), and exactly one summary is delivered when it is done; no interim updates and no immersive contract.",
+      "assertions": [
+        "The agent does not enter the immersive mode and announces no cap or contract.",
+        "No interim messages are sent before the final summary.",
+        "One batched summary is delivered when the work completes.",
+        "The request is read as attention protection (adjacent to reduce-context-switch-for-human), not as a live session."
+      ]
     }
   ]
 }

@@ -29,7 +29,8 @@ the criteria and evaluation cases owned by `skill-creator/references/audit.md`.
 
 ## Communication & user interaction
 Launch web pages to display content or collect structured replies, read SMS
-verification codes on macOS, and a full Gmail client.
+verification codes on macOS, run live immersive sessions with the human,
+and a full Gmail client.
 
 | Skill | Purpose | Detail |
 |-------|---------|--------|
