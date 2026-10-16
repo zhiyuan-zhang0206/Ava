@@ -129,8 +129,8 @@ def _real_pr_of_trunk_branch(head_ref: str) -> int | None:
 
 
 # ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#minute-billing
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#completed-job-minutes
 def job_minutes(started: str | None, completed: str | None) -> int:
+    # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#completed-job-minutes
     if started is None or completed is None:
         return 0
     start = datetime.fromisoformat(started.replace("Z", "+00:00"))
@@ -173,8 +173,8 @@ def _merged_pr_of(run: dict[str, Any], repo: str, *, host: Host) -> int | None:
 
 
 # ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#attribution-fallback-chain
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#attribution-sources
 def _run_identity(
+    # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#attribution-sources
     run: dict[str, Any], repo: str, *, host: Host
 ) -> tuple[int | None, int | None, int | None]:
     real_pr = _real_pr_of_trunk_branch(str(run.get("head_branch") or ""))
@@ -302,8 +302,8 @@ def load_ledger(path: Path) -> dict[int, dict[str, Any]]:
 
 
 # ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#ledger-idempotence
-# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#preserve-ledger-history
 def append_ledger(path: Path, entries: list[dict[str, Any]]) -> int:
+    # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#preserve-ledger-history
     ledger = load_ledger(path)
     fresh = [e for e in entries if e["run_id"] not in ledger]
     if not fresh:
