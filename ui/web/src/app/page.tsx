@@ -2,33 +2,6 @@
 
 import { newOperationKey } from "@/lib/transport/operation-key";
 
-// Ava home page — three-column layout: agent sidebar on the left,
-// timeline + composer in the center, shared context and inspector on the right.
-//
-// agent_id == agent_id 1:1. Picking an agent in the sidebar == selecting
-// an agent. State is split across two hooks (lib/use-agents +
-// lib/use-timeline); this file only wires things up:
-// - useAgents: agent list / lifecycle actions / pending state, all
-//   driven by initial fetch + SSE event merge (no polling, no
-//   optimistic writes — see lib/use-agents.ts)
-// - useTimeline: BackendTimelineItem list merged from three sources + SSE folding
-//
-// Component layering:
-// - HomePage: reads only the toast trigger (no other server state) so it
-//   doesn't subscribe to SSE itself. The global /api/system broadcast is
-//   provided once at the app root (components/providers.tsx), so it persists
-//   across page navigation; the toast renderer lives there too (ToastHost).
-// - HomeShell: calls useAgents (a reader of the scoped agents caches that
-//   the root fold keeps live), owns activeId and the lifecycle
-//   action wrappers, owns the inspector panel open state + preload queries,
-//   threads agents/pendingActions/pendingSpawnCount/forkPending down as props.
-//   Wraps HomeContent in AgentEventStreamProvider — the active-agent
-//   selected-agent detail stream (throttled/batched while visible; suspended
-//   while hidden).
-// - HomeContent: receives activeId + agents from HomeShell; calls
-//   useTimeline + useTokenUsage + usePendingMessages which share that one
-//   active-agent SSE connection (isEventForThread remains a defensive gate).
-
 import { useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -71,17 +44,12 @@ import { AgentEventStreamProvider } from "@/lib/transport/useEventStream";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-// Load the document and reply controls only when the right panel is needed.
 const SharedContextPanel = dynamic(
   () => import("@/components/context/shared-context-panel").then((module) => module.SharedContextPanel),
   { loading: () => <InspectorPanelSkeleton /> },
 );
 
 export default function HomePage() {
-  // Read only client-only state here; the global SSE broadcast is provided at
-  // the app root, and the per-active-agent stream lives inside HomeShell below.
-  // The toast renderer moved to the app root (ToastHost in Providers) so
-  // error toasts reach every route, not just Home.
   const showToast = useStore((s) => s.showToast);
 
   const showError = useCallback(
@@ -90,12 +58,7 @@ export default function HomePage() {
   );
 
   return (
-    // <main> landmark (Task #1051 a11y): the Home page is the primary
-    // surface — screen-reader landmark navigation needs it, and a future
-    // skip-link targets #main-content.
     <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
-      {/* Warms the syntax-highlighter chunk once idle, ahead of any code
-          block actually expanding — see python-code.tsx. */}
       <CodeHighlighterPreloader />
       <HomeShell showError={showError} />
     </main>
@@ -116,12 +79,6 @@ function HomeShell({ showError }: HomeShellProps) {
   } = useSidebarCollapsed();
   const sidebarEntryResetDone = useRef(false);
 
-  // #723: every home entry starts expanded, but a layout transition is not a
-  // new entry. HomeShell stays mounted while HomeLayout switches between the
-  // expanded RRP frame and collapsed static frame; AgentSidebar does not.
-  // Keeping the reset here prevents that child remount from undoing a user's
-  // collapse click. Wait for the persisted settings before consuming the
-  // one-time reset so a cold load with collapsed=true is still expanded.
   useEffect(() => {
     if (sidebarSettingsLoading || sidebarEntryResetDone.current) return;
     sidebarEntryResetDone.current = true;
@@ -146,7 +103,6 @@ function HomeShell({ showError }: HomeShellProps) {
     isLoading: agentsLoading,
   } = useAgents(showError);
 
-  // Shared context opens when present; the existing Inspector preference selects its tab.
   const { open: inspectorOpen, toggle: toggleInspector } = useInspectorOpen();
   const toUser = useToUser(activeId);
   const noticeFeed = useNotices();
@@ -181,9 +137,6 @@ function HomeShell({ showError }: HomeShellProps) {
     if (newId !== null) focusComposer();
   }, [activeId, fork, focusComposer]);
 
-  // Preload the open-pages list when an agent is selected (cheap DB read;
-  // useAgentPages folds SSE into this cache). InspectorPanel owns its current,
-  // statistics, and widget requests only while open.
   useQuery({
     queryKey: ["agent-pages", activeId] as const,
     queryFn: () => {
@@ -225,9 +178,6 @@ function HomeShell({ showError }: HomeShellProps) {
       />
     </AgentEventStreamProvider>
   );
-  // resetKey, not key=: a switch resets the boundary of a crashed panel but
-  // leaves a healthy one mounted, so the inspector's per-agent cache survives
-  // the switch (task #3894).
   const inspector =
     showContext && activeId != null ? (
       <ErrorBoundary resetKey={activeId}>
@@ -278,39 +228,18 @@ function HomeContent({
   const timelineText = useTranslations("timeline");
   const contextText = useTranslations("toUser");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
-  // Timeline content-column width — user-adjustable fraction of the viewport
-  // (display.timeline_width_ratio, default 0.4). The composer gets the same
-  // width (see lib/timeline-width.ts).
   const { settings: userSettings, isLoading: userSettingsLoading } = useUserSettings();
-  // Task #805 (user ruling): the timeline-width ratio is a DESKTOP concept.
-  // Below the md breakpoint (phones — same 768px boundary the sidebar uses
-  // for its overlay drawer) the timeline and composer are FULL-WIDTH and the
-  // ratio is ignored; the inline maxWidth is simply not applied. Desktop
-  // keeps min(<ratio>vw, 1280px).
   const { isNarrow } = useBreakpoint();
   const contentColumnMaxWidth = isNarrow
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_ratio"]);
-  // #723-⑧: the composer aligns with the timeline column width (the #715
-  // 48px-narrower offset was dropped on user request). One falsy convention
-  // everywhere (audit C2): undefined = full width on narrow viewports — no
-  // inline maxWidth is rendered then, same as contentColumnMaxWidth above.
   const composerMaxWidth = isNarrow
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_ratio"]);
   const setMobileSidebarOpen = useStore((s) => s.setMobileSidebarOpen);
-  // Sending explicitly returns to the newest message. Selection restores its
-  // own reading bookmark instead of bumping this force-scroll signal.
   const requestScrollToBottom = useTimelineStore((s) => s.requestScrollToBottom);
-  // The timeline's scroll position is remembered per history entry, so a
-  // browser back/forward returns to the reader's position instead of
-  // re-pinning to the bottom (lib/scroll-memory.ts; bfcacheId is kept across
-  // back/forward, router.refresh() and search-param-/hash-only navigations,
-  // fresh only on a push/replace into a new segment).
   const { bfcacheId } = useRouter();
 
-  // File upload — one or more files sent as a single batch (one request, one
-  // inbound to the agent). progress is the whole batch's byte progress.
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadCount, setUploadCount] = useState(0);
@@ -334,9 +263,6 @@ function HomeContent({
     [activeId],
   );
 
-  // Each selected agent gets a fresh mounted surface, with its own saved
-  // reading position and expansion choices inside this page entry.
-
   const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax, error: timelineError, isFetching, retryTimeline } =
     useTimeline(activeId, showError);
   const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens, contextPending } = useTokenUsage(
@@ -344,9 +270,6 @@ function HomeContent({
     showError,
   );
   const pendingMessages = usePendingMessages(activeId, showError);
-  // A message captured by an external takeover is already in the timeline while
-  // its row still reads status='pending' (cleared only at the executor's ACK),
-  // so hide strip entries the conversation already shows (task #3683).
   const visiblePendingMessages = useMemo(
     () => withoutTimelineDuplicates(pendingMessages, items),
     [pendingMessages, items],
@@ -360,23 +283,14 @@ function HomeContent({
     ): Promise<boolean> => {
       if (activeId == null) return false;
       try {
-        // One send is one message, whatever was typed. Text invoking several
-        // commands (`/recap … /compact`) is sent whole and expanded server-side
-        // inside that single inbound, so the agent reads the commands as one
-        // composite instruction rather than as unrelated turns.
         if (imageUrls.length === 0) {
           await api.sendMessage(activeId, content, clientMessageId);
         } else {
-          // Multimodal: an optional leading text block, then one image_url block
-          // per attachment (the backend gates + inlines them for the model).
           const blocks: ContentBlock[] = [];
           if (content) blocks.push({ type: "text", text: content });
           for (const u of imageUrls) blocks.push({ type: "image_url", image_url: { url: u } });
           await api.sendMessage(activeId, blocks, clientMessageId);
         }
-        // Scroll to the bottom on every send so the user sees the latest
-        // exchange regardless of prior scroll position. This also re-enables
-        // sticky-bottom so the agent's streaming reply is followed automatically.
         requestScrollToBottom();
         return true;
       } catch (e: unknown) {
@@ -391,8 +305,6 @@ function HomeContent({
     [activeId, showError, requestScrollToBottom, t],
   );
 
-  // Upload one pasted / dropped image silently and hand its reference url back
-  // to the composer, which attaches it to the next message as native content.
   const attachImage = useCallback(
     async (file: File): Promise<string> => {
       if (activeId == null) throw new Error("no active agent");
@@ -416,25 +328,9 @@ function HomeContent({
   const activeLabel = activeAgent
     ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` · ${activeAgent.label}` : ""}`
     : "…";
-  // "busy" = the agent is mid-turn. turnActive (the SSE turn-in-progress
-  // signal) alone is flappy: it flips false at every llm_done — including the
-  // MID-turn ones between an LLM call and the exec / next call that follows —
-  // so anything keyed on it bounces at every call boundary. status==="running"
-  // covers the whole turn including those gaps; the union is the steady
-  // signal. Two consumers:
-  // - Composer Stop button: available whenever the agent is running, not only
-  //   mid-action — Stop observes the agent's native work and cancels it, so a
-  //   stop pressed between actions still lands.
-  // - TimelineView turnActive: drives the last detail block's auto-expand and
-  //   its live "Working for Xs" clock in Last mode; feeding it raw turnActive
-  //   made the block collapse+re-expand (and the clock stop/start) at every
-  //   mid-turn llm_done — the streaming jitter.
   const agentBusy = turnActive || activeAgent?.status === "running";
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
-  // The drafted reply shown as the composer's ghost text. The hook owns it (one
-  // writer); the setting must be loaded first so a stored "off" is never raced by the
-  // default "on".
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
     status: activeAgent?.status,
@@ -446,17 +342,6 @@ function HomeContent({
   return (
     <section className={cn("relative", FLEX, MIN_H_0, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN)}>
       <ErrorBoundary>
-        {/* Timeline surface — full-bleed scroll container (user ruling
-            2026-08-06): the timeline is the main page, so its ScrollArea
-            spans the whole pane edge to edge. The scrollbar sits at the
-            pane's right edge and the gutters scroll with the wheel. The
-            conversation column (cap = display.timeline_width_ratio) lives
-            INSIDE the scroll viewport, centered; HeaderBar floats ABOVE the
-            surface (absolute + backdrop blur); the composer stack sits in
-            normal flow below it (user ruling 2026-08-06 11:35) so a growing
-            textarea pushes the timeline up instead of overlapping it.
-            #805: on narrow viewports contentColumnMaxWidth is undefined,
-            so the column is full-width (mobile). */}
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
           {timelineError && (
             <div role="alert" className="mx-4 mt-14 mb-2 rounded-md border border-destructive/30 p-3 text-sm">
@@ -490,16 +375,10 @@ function HomeContent({
             onOpenSidebar={() => setMobileSidebarOpen(true)}
             maxWidthCss={contentColumnMaxWidth}
           >
-            {/* Alert system (Task #1224): unresolved badge in the top bar
-                jumps to /insights#alerts. */}
             <AlertsBadge />
             {contextAvailable && <button onClick={openContext} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">{contextText("openContext")}</button>}
             <InspectorToggle />
           </HeaderBar>
-          {/* Bottom stack: pending strip + composer in normal flow (user
-              ruling 2026-08-06 11:35): a growing textarea pushes the timeline
-              up instead of overlapping it. The composer's own top divider
-              separates it from the timeline content. */}
           <div className="relative z-20 bg-background">
             <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />
             <Composer

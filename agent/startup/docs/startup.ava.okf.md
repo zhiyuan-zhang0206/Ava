@@ -32,6 +32,40 @@ A missing or terminated row is not scheduled as normal work. A fresh foreign
 runtime owner refuses admission. Maintenance holds also refuse ordinary work;
 only the accepted control path can complete its own drain.
 
+## Boot scopes
+
+Process scope runs once per daemon. `init_process_scope()` starts the OTLP trace
+init — only the cheap disk guards and the collector preflight run inline, the
+heavy traceloop import proceeds on a daemon thread, and `turn_span` waits for it
+before the first turn. `land_cluster_extensions()` lands the cluster's installed
+skills on this machine so a machine that missed an install catches up on its next
+start; failures are logged, not raised, and a cluster with no installed
+extensions is a single indexed query returning no rows.
+
+Agent scope runs once per agent, cached on the agent's stored configuration.
+`boot_agent_scope()` creates the agent's workspace, seeds an empty `to_user.md`
+when the file is missing, sends the one-time desktop-permission notice, and
+builds the chat model for the agent's model, reasoning effort and thinking
+budget. The workspace pre-create is unconditional — the folder is the
+relative-path base for `ava.files` / `ava.shell.run` even when the prompt section
+advertising it is off (bench runners) — and the seeded `to_user.md` is the
+shared-context panel the user reads beside the agent's messages: it exists from
+the agent's first boot, an existing file is never rewritten or re-stamped, and
+the panel shows its empty state until the agent writes. The per-agent
+`sdk_disable` list applies additively on the installed SDK surface (the install
+already applied the env baseline; re-listing it is a no-op). The eval boundary is
+added after plugins register: `ava.memory` rebinds to the workspace's own
+`memory-pool` with empty search results, and `agents.get_last_message`, `tasks`,
+`mcps`, `ui` plus `web` / `understand` outside the allowlist are disabled.
+
+Building the model eagerly is safe while the trace init is still in flight:
+traceloop's LangChain wrap injects its callback handler at configuration time, so
+a model built before the init completes still produces spans on its first call —
+which happens inside a turn, after `turn_span` waited. The module keeps the chat
+model and `.startup` imports function-level and `boot_agent_scope`'s return
+annotation `Any`: the disposable exec child imports this module for the SDK
+helpers and must not enter the LM stack (task #3585).
+
 ## Checkpoint interval
 
 `AVA_CHECKPOINT_INTERVAL` defaults to four; the agent's `checkpoint_interval`
