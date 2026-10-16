@@ -92,7 +92,7 @@ resolve the ledger item.
 ### Skill descriptions and SDK docstrings
 
 Use the existing scanners' scope and measurements, not a second file list.
-`lint_skill_descriptions.py` owns `length_units` and `_skill_entries`; description
+`base/packages/text_budget.py` owns the unit metric (`count_words`); `lint_skill_descriptions.py` owns `_skill_entries` and the description gates; description
 trimming must preserve capability and trigger information. For SDK docstrings,
 use the surface discovery and visibility helpers in `agent_docstrings.py`.
 Read [SDK docstring discipline](../sdk-docstring-discipline.md). Function docstrings

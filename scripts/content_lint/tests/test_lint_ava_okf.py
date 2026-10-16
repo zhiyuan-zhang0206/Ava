@@ -239,3 +239,20 @@ def test_type_error_names_the_allowed_types_deterministically(tmp_path: Path) ->
     root = tmp_path.resolve()
     messages = [e.msg for e in gate.lint_file(path.resolve(), gate.collect_all_paths(root), root)]
     assert messages == ["type must be one of ['doc', 'memory'], got 'page'"]
+
+
+def test_the_line_backstop_passes_at_the_cap_and_counts_real_lines(tmp_path: Path) -> None:
+    node_dir = tmp_path / "agent" / "docs"
+    node_dir.mkdir(parents=True, exist_ok=True)
+    root = tmp_path.resolve()
+    at_cap = node_dir / "at-cap.ava.okf.md"
+    at_cap.write_text(_NODE + "x\n" * (gate.MAX_LINES - len(_NODE.splitlines())), encoding="utf-8")
+    assert gate.lint_file(at_cap.resolve(), gate.collect_all_paths(root), root) == []
+
+    over = node_dir / "over-cap.ava.okf.md"
+    over.write_text(
+        _NODE + "x\n" * (gate.MAX_LINES - len(_NODE.splitlines()) + 1), encoding="utf-8"
+    )
+    errors = gate.lint_file(over.resolve(), gate.collect_all_paths(root), root)
+    assert [e.code for e in errors] == ["E007"]
+    assert f"File too long: {gate.MAX_LINES + 1} lines (max {gate.MAX_LINES})" in errors[0].msg

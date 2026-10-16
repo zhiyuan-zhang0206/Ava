@@ -23,7 +23,6 @@
 "test_lint_migrations.py#monkeypatch.setattr scripts.content_lint.lint_migrations.MIGRATIONS_DIR" = 1
 "test_lint_migrations.py#monkeypatch.setattr scripts.content_lint.lint_migrations.SCHEMA_SQL" = 1
 "test_lint_migrations.py#monkeypatch.setattr scripts.content_lint.lint_migrations.immutability_base" = 1
-"test_lint_skill_descriptions.py#monkeypatch.setattr scripts.content_lint.lint_skill_descriptions._REPO_ROOT" = 1
 
 [debt.unresolved-patch]
 "test_lint_doc_symbols.py#monkeypatch.setattr mod._EXEMPT" = 1
