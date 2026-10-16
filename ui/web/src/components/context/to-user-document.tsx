@@ -57,7 +57,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
         </div>
       ) : (
         <div key={references.join("/")} className={cn("overflow-auto p-5 text-sm", MIN_H_0, FLEX_1)}>
-          <ChatMarkdown content={content} skipHtml resolveUrl={(href) => {
+          <ChatMarkdown content={content} resolveUrl={(href) => {
             const resource = resources.get(href);
             return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");
           }} components={{

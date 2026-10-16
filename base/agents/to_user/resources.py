@@ -1,6 +1,7 @@
 import hashlib
 import os
 import stat
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import override
 from urllib.parse import unquote, urlsplit
@@ -37,21 +38,47 @@ def local_target(document: Path, href: str) -> Path | None:
     return (path if path.is_absolute() else document.parent / path).resolve()
 
 
+class _RawHtmlReferences(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.hrefs: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attribute = "src" if tag == "img" else "href" if tag == "a" else None
+        if attribute is None:
+            return
+        for name, value in attrs:
+            if name == attribute and value:
+                self.hrefs.append(value)
+                return
+
+
 def referenced_files(document: Path, content: str) -> dict[str, Path]:
 
     parser = DocumentMarkdown("commonmark", {"html": True}).enable("table").use(footnote_plugin)
     pending = list(parser.parse(content))
     references: dict[str, Path] = {}
+
+    def add(href: str) -> None:
+        path = local_target(document, href)
+        if path is None:
+            return
+        references[href] = path
+        if len(references) > MAX_REFERENCES:
+            raise ValueError("To user exceeds the 256 local reference limit")
+
     while pending:
         token = pending.pop()
         pending.extend(token.children or [])
+        if token.type in ("html_inline", "html_block"):
+            scanner = _RawHtmlReferences()
+            scanner.feed(token.content)
+            for href in scanner.hrefs:
+                add(href)
+            continue
         href = token.attrGet("href") if token.type == "link_open" else token.attrGet("src")
         if isinstance(href, str):
-            path = local_target(document, href)
-            if path is not None:
-                references[href] = path
-                if len(references) > MAX_REFERENCES:
-                    raise ValueError("To user exceeds the 256 local reference limit")
+            add(href)
     return references
 
 
