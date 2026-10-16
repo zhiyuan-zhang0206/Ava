@@ -1,6 +1,3 @@
-"""`cli.fleet_update` against an in-memory cluster (no SSH, shell or launchd) that enforces
-production's order: no gateway stop/start while a runner runs, no runner start without it."""
-
 from __future__ import annotations
 
 import argparse
@@ -13,223 +10,11 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from cli import fleet_update
-
-
-def _git(repo: Path, *args: str) -> str:
-    command = ["git", "-c", "user.name=t", "-c", "user.email=t@x.invalid", "-C", str(repo), *args]
-    return subprocess.run(command, capture_output=True, text=True, check=True).stdout.strip()  # noqa: S603
-
-
-_IDLE: dict[str, Any] = {
-    "dirty": 0,
-    "hook": "no",
-    "active": "no",
-    "hold": ("resumed", None),
-    "up": True,
-}
-_ROW = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve_agent_runner")
-
-
-class Cluster:
-    def __init__(self, old: str, new: str) -> None:
-        self.new = new
-        self.hosts: dict[str, dict[str, Any]] = {
-            a: {**_IDLE, "os": o, "head": old}
-            for a, o in (("gw", "Linux"), ("mac", "Darwin"), ("lin", "Linux"))
-        }
-        self.names = {alias: alias for alias in self.hosts}  # alias -> name the host reports
-        self.silent: set[str] = set()  # aliases whose heartbeat never reaches the roster
-        self.hidden: set[str] = set()  # aliases the roster has no row for
-        self.smoked: list[str] = []  # machine names the gateway smoke-tested
-        self.laptop: dict[str, Any] | None = None  # a roster-only machine no alias reaches
-        self.effects: list[tuple[str, str]] = []
-        self.fail: dict[tuple[str, str], int] = {}
-        self.output = ""
-        self.stored_schedules: tuple[int, list[str]] = (
-            0,
-            [],
-        )  # (VERIFY_RC, lines) of NEW's verify on the gateway's table
-        self.roster_lag = 0  # roster reads that still show every machine offline (heartbeat)
-        self.roster_reads = 0
-        self.now = 0.0  # a fake clock: `fleet_update.time` is patched to this object
-        self.silence_open = False  # the gateway Grafana's deploy-window silence
-        self.silence_hours = 0.0
-        self.silence_comment = ""
-        self.silence_reply: str | None = None  # a canned `SILENCE ...` line instead of success
-
-    def monotonic(self) -> float:
-        return self.now
-
-    def sleep(self, seconds: float) -> None:
-        self.now += seconds
-
-    def _runners_up(self) -> bool:
-        return any(h["up"] for a, h in self.hosts.items() if a != "gw")
-
-    def _effect(self, kind: str, alias: str, host: dict[str, Any], command: str) -> int:
-        self.effects.append((kind, alias))
-        if self.fail.get((kind, alias)):
-            return self.fail[(kind, alias)]
-        if kind == "stop":
-            assert not (alias == "gw" and self._runners_up()), "gateway stopped before a runner"
-            host["up"], host["hold"] = False, ("paused", "stopped")
-        elif kind == "switch":
-            assert not host["up"] and self.new in command
-            assert fleet_update.CLEAN in shlex.split(command)[2]
-            assert "uv sync --frozen --compile-bytecode" in command
-            host["head"] = self.new
-        elif kind in ("start", "oneshot"):
-            assert (kind == "oneshot") == (host["os"] == "Darwin")
-            assert self.hosts["gw"]["up"] if alias != "gw" else not self._runners_up()
-            host["up"], host["hold"] = True, ("resumed", None)
-        elif kind == "smoke":
-            self.smoked.append(command.partition(" - smoke ")[2].split()[0].strip("'"))
-        elif kind == "refresh":
-            assert "--force" not in command  # human-only
-        return 0
-
-    def _roster_json(self) -> str:
-        online = self.roster_lag <= 0
-        self.roster_reads, self.roster_lag = self.roster_reads + 1, self.roster_lag - 1
-        values = [
-            (
-                self.names[a],
-                h["up"] and online and a not in self.silent,
-                False,
-                h["head"],
-                h["head"],
-                True,
-            )
-            for a, h in self.hosts.items()
-            if a not in self.hidden
-        ]
-        if self.laptop:
-            values.append(("laptop", *self.laptop["row"]))
-        return json.dumps([dict(zip(_ROW, row, strict=True)) for row in values])
-
-    def ssh(self, alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
-        host = self.hosts[alias]
-        emit(self.output)
-        if command == "uname -s":
-            emit(str(host["os"]))
-            return 0
-        status, phase = host["hold"]
-        hold = json.dumps(
-            {
-                "hold": {
-                    "status": status,
-                    "maintenance": phase and {"phase": phase},
-                }
-            }
-        )
-        if '"head=$(git rev-parse HEAD)"' in command:
-            for key in ("head", "dirty", "hook", "active"):
-                emit(f"{key}={host[key]}")
-            emit(f"hold={hold}")
-            return 0
-        if command.endswith("status --json'"):
-            emit(hold)
-            return 0
-        if "machine_from_boot(ConfigBoot()).name()" in command:
-            emit(self.names[alias])
-            return 0
-        if " - roster" in command:
-            assert stdin == fleet_update.gateway_program()
-            emit(self._roster_json())
-            return 0
-        if stdin == fleet_update.silence_program():
-            return self._silence(alias, command, emit)
-        if "verify" in command:
-            return self._verify(alias, command, emit)
-        kinds = {
-            "git fetch": "fetch",
-            "stop -y": "stop",
-            "--detach": "switch",
-            "launchctl bootstrap": "oneshot",
-            'ava" start': "start",
-            " - smoke": "smoke",
-            "packages refresh": "refresh",
-        }
-        kind = next(k for s, k in kinds.items() if s in command)
-        if kind == "refresh":
-            emit("  summary: applied 2, conflict 1")
-        return self._effect(kind, alias, host, command)
-
-    def _silence(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
-        """The gateway-side silence program: `python - open --hours H --comment C` / `python - close`."""
-        assert alias == "gw", "the silence is Grafana's: it runs on the gateway host"
-        script = shlex.split(command)[2]  # the host's login shell runs it as `bash -lc <script>`
-        verb, *rest = shlex.split(script.partition('/bin/python" - ')[2])
-        self.effects.append((f"silence-{verb}", alias))
-        if self.silence_reply is not None:
-            emit(self.silence_reply)
-            return 0
-        if verb == "open":
-            self.silence_hours = float(rest[rest.index("--hours") + 1])
-            self.silence_comment = rest[rest.index("--comment") + 1]
-            self.silence_open = True
-            emit("SILENCE opened id=s1 until=later")
-        else:
-            self.silence_open = False
-            emit("SILENCE closed 1")
-        return 0
-
-    def _verify(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
-        """The drift checks: NEW's verify before any stop, then `schedules verify` / `plugins verify`."""
-        kind = (
-            "pre-verify"
-            if "pre-update-verify" in command
-            else "schedules-verify"
-            if "schedules verify" in command
-            else "plugins-verify"
-        )
-        self.effects.append((kind, alias))
-        if kind == "pre-verify":
-            assert alias == "gw" and self.new in command
-            # The home's own checkout reads the table first; the worktree only sees the dump.
-            assert command.index("_read_schedule_rows") < command.index("worktree add")
-            assert command.index("worktree add") < command.index("cli.main")
-            assert all(h["up"] for h in self.hosts.values()), "checked after a service stopped"
-            code, lines = self.stored_schedules
-            for line in [*lines, f"VERIFY_RC={code}"]:
-                emit(line)
-            return 0
-        assert kind != "schedules-verify" or "--no-notify" in command  # attended: no alert funnel
-        if rc := self.fail.get((kind, alias), 0):
-            emit(f"RED the {kind} detail from {alias}")
-        return rc
-
-
-@pytest.fixture
-def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Callable[..., int]]:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q", "--initial-branch=main")
-    for message in ("old", "new"):
-        (repo / ".python-version").write_text("3.12.12\n")
-        (repo / "uv.lock").write_text(message)
-        _git(repo, "add", "-A")
-        _git(repo, "commit", "-qm", message)
-    cluster = Cluster(_git(repo, "rev-parse", "HEAD~1"), _git(repo, "rev-parse", "HEAD"))
-    monkeypatch.setattr(fleet_update, "REPO", repo)
-    monkeypatch.setattr(fleet_update, "ssh", cluster.ssh)
-    monkeypatch.setattr(fleet_update, "time", cluster)
-    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    hosts = [
-        *shlex.split("--gateway gw --runner mac --runner lin --log-dir"),
-        str(tmp_path / "logs"),
-    ]
-
-    def run(half: str, *extra: str) -> int:
-        new = ["--new", cluster.new] if half == "down" else []
-        return fleet_update.main([half, *hosts, *new, *extra])
-
-    return cluster, run
+from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
 
 
 def test_runners_stop_first_and_start_last(env: tuple[Cluster, Callable[..., int]]) -> None:
@@ -250,8 +35,6 @@ def test_runners_stop_first_and_start_last(env: tuple[Cluster, Callable[..., int
 def test_drift_checks_run_after_the_smoke_and_the_refresh(
     env: tuple[Cluster, Callable[..., int]],
 ) -> None:
-    """The gateway's in-store schedule scripts are checked once (the DB lives there); every host's
-    plugins are checked; all of it after the smoke and the refresh, so a red never skips them."""
     cluster, run = env
     assert run("down") == 0
     assert run("up") == 0
@@ -283,9 +66,7 @@ def test_a_red_drift_check_fails_up_with_its_detail(
     assert run("up") == 1
     out = capsys.readouterr().out
     assert detail in out and "FAILED: drift check failed" in out
-    # The smoke and the refresh still ran: a red only fails `up`, last.
     assert {"smoke", "refresh"} <= {k for k, _ in cluster.effects}
-    # Every check ran: a red does not hide the next host's.
     assert [a for k, a in cluster.effects if k == "plugins-verify"] == ["gw", "mac", "lin"]
 
 
@@ -323,8 +104,6 @@ def test_stored_schedules_are_checked_against_new_before_anything_stops(
 def test_a_red_stored_schedule_refuses_down_before_any_stop(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Tonight's shape: a stored script calling `catch_up()` the old way. The refusal lists the
-    row and leaves the cluster running."""
     cluster, run = env
     cluster.stored_schedules = (1, ["RESULT ts=t checked=13 green=12 red=1 rc=1", _RED_ROW])
     assert run("down") == 2
@@ -381,11 +160,6 @@ def test_macos_start_is_a_gui_one_shot() -> None:
 def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The update's `up` runs the default home's own `<home>/source` CLI, from a
-    run-once LaunchAgent in the gui domain. It must pass the checkout guard and the
-    default-home gate of the OS-job registrars that `start`'s converge reaches, and
-    it must not itself be a registrar's job: its label is its own, and nothing in
-    `cli.fleet_update` imports the application."""
     from base.host.system import cron
     from cli.preflight import require_own_checkout
 
@@ -398,7 +172,6 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
     assert 'H="$HOME/.ava"; S="$H/source"' in command
     assert 'AVA_HOME="$H" "$S/.venv/bin/ava" start' in command
 
-    # `$H` is the default home and `$S` its own checkout: both gates let `start` through.
     home = default_home / ".ava"
     (home / "source").mkdir(parents=True)
     assert require_own_checkout(["start"], home / "source") is None
@@ -451,7 +224,7 @@ def test_a_roster_that_never_agrees_fails_with_its_last_state(
     assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
 
 
-_LAPTOP_OFF = {"row": (False, False, None, None, True)}  # online, mismatch, head, running, runner
+_LAPTOP_OFF = {"row": (False, False, None, None, True)}
 
 
 def test_an_unlisted_offline_machine_is_reported_not_required(
@@ -515,11 +288,11 @@ def test_packages_refresh_reports_and_never_forces(
 def test_a_dirty_tree_is_shown_not_cleaned(tmp_path: Path) -> None:
     repo = tmp_path / "dirty"
     repo.mkdir()
-    _git(repo, "init", "-q", "--initial-branch=main")
+    git(repo, "init", "-q", "--initial-branch=main")
 
     def check() -> subprocess.CompletedProcess[str]:
         argv = ["bash", "-c", fleet_update.CLEAN]
-        return subprocess.run(argv, cwd=repo, capture_output=True, text=True, check=False)  # noqa: S603
+        return subprocess.run(argv, cwd=repo, capture_output=True, text=True, check=False)
 
     assert check().returncode == 0
     for n in range(25):
@@ -553,12 +326,22 @@ def test_refuses_inside_an_ava_agent(
     assert cluster.effects == []
 
 
+def test_hosts_that_disagree_on_head_are_refused(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.hosts["lin"]["head"] = "deadbeefdeadbeef"
+    assert run("down") == 2
+    assert cluster.effects == []
+    assert "hosts disagree on HEAD" in capsys.readouterr().out
+
+
 def test_a_python_change_needs_the_flag(env: tuple[Cluster, Callable[..., int]]) -> None:
     cluster, run = env
     repo = fleet_update.REPO
     (repo / ".python-version").write_text("3.12.13\n")
-    _git(repo, "commit", "-qam", "python")
-    cluster.new = _git(repo, "rev-parse", "HEAD")
+    git(repo, "commit", "-qam", "python")
+    cluster.new = git(repo, "rev-parse", "HEAD")
     assert run("down") == 2 and cluster.effects == []
     assert run("down", "--allow-python-change") == 0
 
@@ -567,7 +350,6 @@ def test_dry_run_changes_nothing(env: tuple[Cluster, Callable[..., int]]) -> Non
     cluster, run = env
     assert run("down", "--dry-run") == 0
     assert run("up", "--dry-run") == 0
-    # Only the read-only stored-schedule check runs (a throwaway worktree, no service touched).
     assert [k for k, _ in cluster.effects] == ["pre-verify"]
 
 
@@ -594,28 +376,26 @@ _HOLD_WITH_BACKSLASHES = (
 def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
     shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """zsh's and dash's `echo` interpret backslashes: a hold record whose argv holds `\\$HOME`
-    reached `split_hold_text` as an invalid escape. The probe runs in each host's real shell."""
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
     source = tmp_path / ".ava" / "source"
     (source / ".venv" / "bin").mkdir(parents=True)
-    _git(source, "init", "-q", "--initial-branch=main")
-    _git(source, "commit", "-q", "--allow-empty", "-m", "base")
+    git(source, "init", "-q", "--initial-branch=main")
+    git(source, "commit", "-q", "--allow-empty", "-m", "base")
     (source / ".git" / "info" / "exclude").write_text(".venv/\n")
     fake = source / ".venv" / "bin" / "ava"
     fake.write_text(f"#!/bin/sh\ncat <<'EOF'\nnoise line\n{_HOLD_WITH_BACKSLASHES}\nEOF\n")
     fake.chmod(0o755)
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [shell, "-c", fleet_update.PROBE], capture_output=True, text=True, check=True
     )
 
     facts = {
         key: value for key, _, value in (line.partition("=") for line in result.stdout.splitlines())
     }
-    assert facts["head"] == _git(source, "rev-parse", "HEAD")
+    assert facts["head"] == git(source, "rev-parse", "HEAD")
     assert facts["dirty"] == "0"
     assert fleet_update.split_hold_text(facts["hold"]) == ("paused", "stopped")
     assert json.loads(facts["hold"])["hold"]["operation"] == '["sh", "-c", "\\$HOME\\n"]'
@@ -625,10 +405,6 @@ def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
 def test_the_machine_name_is_asked_through_the_hosts_real_shell(
     shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The roster program ends in `python -` (the script arrives on stdin); a `-c` question
-    appended to it ran `python - -c ...`, which read an empty stdin and printed nothing, so
-    `up` died on an empty answer. The command string runs here in a real shell, against a
-    `python` that behaves as the host's does."""
     if not Path(shell).exists():
         pytest.skip(f"{shell} is not installed")
     source = tmp_path / ".ava" / "source"
@@ -662,7 +438,7 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(
 
 
 def _run_locally(shell: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
-    done = subprocess.run(  # noqa: S603
+    done = subprocess.run(
         [shell, "-c", command], input=stdin or "", capture_output=True, text=True, check=False
     )
     for line in done.stdout.splitlines():

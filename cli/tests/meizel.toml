@@ -7,9 +7,6 @@ exports = ["bootstrap"]
 "test_unit_capability_cli.py" = ["bootstrap"]
 
 [debt.env-patch]
-"test_fleet_update.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
-"test_fleet_update.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 1
-"test_fleet_update.py#monkeypatch.setenv os.environ.HOME" = 2
 "test_install_unit.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
 "test_install_unit.py#patch.dict os.environ" = 1
 "test_lite_verbs.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 2
@@ -39,9 +36,6 @@ exports = ["bootstrap"]
 "test_fleet_alert_silence.py#monkeypatch.setattr base.config.settings.alerts.grafana_admin_password" = 2
 "test_fleet_alert_silence.py#monkeypatch.setattr base.config.settings.observability.telemetry_grafana_url" = 1
 "test_fleet_alert_silence.py#monkeypatch.setattr cli.fleet_alert_silence.colocated_grafana" = 4
-"test_fleet_update.py#monkeypatch.setattr cli.fleet_update.REPO" = 1
-"test_fleet_update.py#monkeypatch.setattr cli.fleet_update.ssh" = 2
-"test_fleet_update.py#monkeypatch.setattr cli.fleet_update.time" = 1
 "test_install_unit.py#monkeypatch.setattr base.cluster.port_free" = 1
 "test_install_unit.py#monkeypatch.setattr base.host.db_authority.unit.install_bundle" = 1
 "test_install_unit.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1

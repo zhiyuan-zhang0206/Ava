@@ -1,17 +1,4 @@
-"""Update a networked source-mode cluster over SSH, in two attended, idempotent halves.
-
-`down --new SHA`: preflight; check the gateway's stored schedule scripts against NEW's code (a red
-refuses, `--allow-red-schedules` overrides); stop each runner, then the gateway; switch every
-checkout to NEW. `up`: start the gateway, then each runner (macOS as a one-time
-GUI-session LaunchAgent: helper signing needs the login keychain); check holds
-and the listed machines' roster rows; smoke-test each listed agent-runner; refresh skills; then check
-for drift (the gateway's in-store schedule scripts, every host's plugins), which fails `up` last.
-After a failure, fix the cause and rerun the whole half. See docs/conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
-
-The window is quiet because `down` opens one Grafana silence over every alert rule before the first
-stop (`--silence-hours`, default 4) and `up` expires it once it completes (cli/fleet_alert_silence.py).
-A failed `up` leaves the silence to its expiry, so the cluster stays quiet while the cause is fixed.
-"""
+# ava:ref cli/docs/fleet-update.ava.okf.md#no-application-imports
 
 from __future__ import annotations
 
@@ -22,6 +9,7 @@ import plistlib
 import re
 import shlex
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -34,13 +22,13 @@ HOME = 'H="$HOME/.ava"; S="$H/source"; cd "$S" || exit 1'
 AVA = 'AVA_HOME="$H" "$S/.venv/bin/ava"'
 _PYTHON = f'{HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
 _STATUS = f"{HOME}; {AVA} status --json"
-_FREE = ("inactive", "resumed")  # maintenance statuses with no hold
-POLL_S = 5  # roster re-read interval
+_FREE = ("inactive", "resumed")
+POLL_S = 5
+KEEP_TIMEOUT_S = 300.0
 _STOP_HINT = (
     '\nOn that host retry "ava stop -y --timeout 600", confirm the maintenance hold is '
     "paused/stopped (`ava status`), then rerun `down`."
 )
-# Reports a dirty tree, never cleans it: untracked files are the operator's to move.
 CLEAN = (
     'd=$(git status --porcelain | head -n 20); [ -z "$d" ] || { echo "$d"; echo "Untracked files '
     "are not caused by this update (a changed .gitignore can reveal them): check them, then "
@@ -52,7 +40,6 @@ printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
 printf '%s\\n' "hold=$({AVA} status --json 2>/dev/null | grep '^{{' | tail -n 1)\""""
-# Early converge passes left these 0555; `uv sync` cannot write through them.
 _VENV_DIRS = (
     "find .venv/bin .venv/lib -maxdepth 3 -type d \\( -path .venv/bin "
     '-o -path ".venv/lib/python*/site-packages" '
@@ -60,7 +47,7 @@ _VENV_DIRS = (
 )
 _LOCKS = ("uv.lock", "ui/web/package-lock.json", ".python-version")
 _WATCHED = ("migrations/", "services/desktop/permissions_helper/helper", *_LOCKS)
-_SECRET_NAME = r"\w*(?:secret|password|token|api_key|capability_key)\w*"  # noqa: S105
+_SECRET_NAME = r"\w*(?:secret|password|token|api_key|capability_key)\w*"
 _SECRETS = (
     (re.compile(r"(?i)(\bbearer\s+)[^\s\"',;]+"), r"\1<redacted>"),
     (re.compile(rf"(?i)(\b{_SECRET_NAME}[\"']?\s*[=:]\s*[\"']?)[^\s\"',;}}]+"), r"\1<redacted>"),
@@ -69,39 +56,19 @@ _SECRETS = (
 
 
 def gateway_program() -> str:
-    """The gateway checks' single source, sent on stdin after NEW has started."""
     return (Path(__file__).parent / "commands" / "management" / "fleet_gateway.py").read_text(
         encoding="utf-8"
     )
 
 
-# Before anything stops: NEW's `ava schedules verify` over the running gateway's schedule table
-# (every stored script, agent-written ones included). The table is read by the home's own source
-# checkout (OLD), the only code the database authority admits; NEW's source, from a throwaway
-# worktree, receives the rows as a file and checks them offline on the host's current interpreter
-# (cwd wins sys.path, so NEW's modules are the ones imported). Nothing dials the database from the
-# worktree and no service is touched. `VERIFY_RC` is the verdict, so a crashed check (unreadable
-# table, new dependency missing) is told apart from a red.
-#
-# This script is generated from the operator's checkout (NEW code) but runs against whatever OLD
-# the hosts have, so neither step may lean on NEW-only API:
-# - the read step runs under OLD, whose `_read_schedule_rows` may or may not take a database
-#   factory (and `cli.database` may not exist); it dispatches on the signature it finds instead of
-#   importing anything unconditionally, and fails loudly on a real error rather than falling back.
-# - the check step goes through NEW's `ava schedules verify` entry point (`cli.main`) with a
-#   throwaway AVA_HOME (the rows file makes it offline, so no real home is needed and the
-#   home-ownership guard has nothing to refuse), never `cmd_schedules_verify` directly, whose
-#   keyword-only parameters change between versions.
 VERIFY_SCRIPTS = Path(__file__).parent / "commands" / "management"
 
 
 def read_rows_py() -> str:
-    """The read step; a real file (so its imports are visible) whose text the host receives."""
     return (VERIFY_SCRIPTS / "schedules_verify_read_rows.py").read_text(encoding="utf-8")
 
 
 def check_rows_py() -> str:
-    """The check step; a real file (so its imports are visible) whose text the host receives."""
     return (VERIFY_SCRIPTS / "schedules_verify_check_rows.py").read_text(encoding="utf-8")
 
 
@@ -119,14 +86,13 @@ echo "VERIFY_RC=$?"; exit 0"""
 
 
 class FailedError(RuntimeError):
-    """A step failed; fix it, then rerun the whole half."""
+    pass
 
 
 def ssh(alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
-    """Run `command` on `alias` through its account's shell, emitting each output line."""
     argv = ["ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", alias, command]
     pipe = PIPE if stdin is not None else subprocess.DEVNULL
-    process = subprocess.Popen(argv, stdin=pipe, stdout=PIPE, stderr=STDOUT, text=True)  # noqa: S603
+    process = subprocess.Popen(argv, stdin=pipe, stdout=PIPE, stderr=STDOUT, text=True)
     if stdin is not None and process.stdin is not None:
         process.stdin.write(stdin)
         process.stdin.close()
@@ -144,19 +110,17 @@ def split_hold_text(text: str) -> tuple[str, str | None]:
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     command = ["git", "-C", str(REPO), *args]
-    return subprocess.run(command, capture_output=True, text=True, check=False)  # noqa: S603
+    return subprocess.run(command, capture_output=True, text=True, check=False)
 
 
 class Session:
-    """One half: the dry-run switch, each host's OS, and the tee'd, redacted log."""
-
     def __init__(self, args: argparse.Namespace) -> None:
         self.dry_run: bool = args.dry_run
         args.log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         path = args.log_dir / f"{datetime.now(UTC):%Y%m%dT%H%M%S.%fZ}-{args.half}.log"
         self.log = os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w")
         self.say(f"log: {path}")
-        self.os: dict[str, str] = {}  # alias -> `uname -s`; commands run raw until it is known
+        self.os: dict[str, str] = {}
 
     def say(self, line: str) -> None:
         for pattern, replacement in _SECRETS:
@@ -166,7 +130,6 @@ class Session:
         self.log.flush()
 
     def run(self, alias: str, script: str, *, effect: bool = True, stdin: str | None = None) -> str:
-        """`script` on `alias` (in its login shell once the OS is known); FailedError on exit != 0."""
         self.say(f"[{alias}] {'$' if effect else 'read:'} " + script.replace("\n", "\n    "))
         if effect and self.dry_run:
             return ""
@@ -193,15 +156,14 @@ def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
         reasons.append(f"{alias}: a post-checkout hook (the guard recurses); move it aside")
     if facts["active"] == "yes":
         reasons.append(f"{alias}: $HOME/.ava/updates/active names an unfinished release operation")
-    # A completed stop is what an interrupted `down` leaves; rerunning is fine.
     stopped = (status, phase) == ("paused", "stopped")
     if status not in _FREE and not stopped:
         reasons.append(f"{alias}: maintenance hold {status}/{phase}")
     return reasons
 
 
-def _preflight(s: Session, args: argparse.Namespace, new: str) -> list[str]:
-    """The four refusals, HEAD agreement, and the OLD..NEW report (OLD = the unswitched HEAD)."""
+# ava:ref cli/docs/fleet-update-window.ava.okf.md#preflight-refusals
+def _preflight(s: Session, args: argparse.Namespace, new: str) -> tuple[list[str], str | None]:
     reasons: list[str] = []
     heads: dict[str, str] = {}
     for alias in [args.gateway, *args.runner]:
@@ -211,25 +173,60 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> list[str]:
         reasons += _host_refusals(alias, facts)
     old = {head for head in heads.values() if head != new}
     if len(old) > 1:
-        return [*reasons, f"hosts disagree on HEAD: {heads}"]
-    if old and _git("cat-file", "-e", f"{next(iter(old))}^{{commit}}").returncode:
-        return [*reasons, f"OLD {next(iter(old))} is not in {REPO}: git fetch origin"]
-    if old:
-        stat = _git("diff", "--stat", next(iter(old)), new, "--", *_WATCHED).stdout.rstrip()
+        return [*reasons, f"hosts disagree on HEAD: {heads}"], None
+    resolved = next(iter(old)) if old else None
+    if resolved and _git("cat-file", "-e", f"{resolved}^{{commit}}").returncode:
+        return [*reasons, f"OLD {resolved} is not in {REPO}: git fetch origin"], None
+    if resolved:
+        stat = _git("diff", "--stat", resolved, new, "--", *_WATCHED).stdout.rstrip()
         s.say(stat or "no change under " + " ".join(_WATCHED))
-        python = _git("diff", "--quiet", next(iter(old)), new, "--", ".python-version")
+        python = _git("diff", "--quiet", resolved, new, "--", ".python-version")
         if python.returncode and not args.allow_python_change:
             reasons.append(".python-version changes (venvs rebuild): pass --allow-python-change")
-    return reasons
+    return reasons, resolved
 
 
+# ava:ref cli/docs/fleet-update-window.ava.okf.md#keep-decision-subprocess
+def keep_decision(
+    s: Session, old: str | None, new: str, *, timeout: float = KEEP_TIMEOUT_S
+) -> list[str]:
+    if old is None:
+        old = new
+    script = REPO / "scripts" / "host_ops" / "fleet_update_keep.py"
+    argv = [sys.executable, str(script), "--repo", str(REPO), "--old", old, "--new", new]
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        s.say(f"WARNING: keep decision timed out after {timeout:g}s; restarting every service")
+        return []
+    if done.returncode:
+        detail = (done.stderr.strip().splitlines() or ["no output"])[-1]
+        s.say(
+            f"WARNING: keep decision failed (exit {done.returncode}: {detail}); "
+            "restarting every service"
+        )
+        return []
+    try:
+        data = json.loads(done.stdout.strip().splitlines()[-1])
+        keeps = [str(name) for name in data["keep_services"]]
+    except (IndexError, KeyError, TypeError, ValueError) as exc:
+        s.say(f"WARNING: keep decision output was not usable ({exc!r}); restarting every service")
+        return []
+    s.say(f"keep decision: {old[:12]}..{new[:12]} ({data.get('changed_files', '?')} changed files)")
+    for component in data.get("components", []):
+        verdict = "keep" if component.get("keep") else "restart"
+        hits = [str(hit) for hit in component.get("hits") or ()]
+        detail = f"{component.get('hit_count', 0)} changed: " + ", ".join(hits[:3])
+        if len(hits) > 3:
+            detail += f", +{len(hits) - 3} more"
+        if not hits:
+            detail = str(component.get("reason", ""))
+        s.say(f"keep decision: {component.get('name')}={verdict} ({detail})")
+    return keeps
+
+
+# ava:ref cli/docs/fleet-update-window.ava.okf.md#stored-schedules-refusal
 def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
-    """Refuse to stop a cluster whose stored schedule scripts NEW's code cannot run.
-
-    A schedule script lives in the database, not the checkout: a library change (a moved module, an
-    undefined name, a changed signature) leaves it crash-looping the moment `up` starts the
-    schedule-manager, and the gateway's own `ava schedules verify` only exists after that start.
-    Run NEW's verify first."""
     out = s.run(
         args.gateway,
         PRE_VERIFY.format(
@@ -261,15 +258,11 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
 
 
 def silence_program() -> str:
-    """The silence program's source, shipped to the gateway on stdin."""
     return Path(__file__).with_name("fleet_alert_silence.py").read_text()
 
 
+# ava:ref cli/docs/fleet-update-window.ava.okf.md#silence-window
 def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "") -> None:
-    """Open or expire the window's alert silence on the gateway; a failure warns, never stops the half.
-
-    The program runs on the host that holds Grafana's admin password and reports `SILENCE ...`
-    lines; a window without a silence is noisy, not unsafe."""
     hours = getattr(args, "silence_hours", 0)
     tail = f" --hours {hours:g} --comment {shlex.quote(comment)}" if verb == "open" else ""
     out = s.run(args.gateway, f"{_PYTHON} - {verb}{tail}", stdin=silence_program())
@@ -278,26 +271,34 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
             s.say(f"WARNING: alert silence not {verb}: {line.removeprefix('SILENCE ')}")
 
 
+# ava:ref cli/docs/fleet-update.ava.okf.md#update-half-ordering
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
     if not new:
         raise FailedError(f"refused: {args.new} is not a commit in {REPO}; git fetch origin")
-    if reasons := _preflight(s, args, new):
+    reasons, old = _preflight(s, args, new)
+    if reasons:
         raise FailedError("refused: " + "; ".join(reasons))
     everyone = [args.gateway, *args.runner]
-    for alias in everyone:  # before any stop: a missing NEW must not strand a stopped cluster
+    for alias in everyone:
         s.run(alias, f'{HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
     _stored_schedules(s, args, new)
+    if args.restart_all:
+        keeps: list[str] = []
+        s.say("keep decision: skipped (--restart-all): every service stops")
+    else:
+        keeps = keep_decision(s, old, new, timeout=args.keep_timeout)
+    keep_flags = "".join(f" --keep-service {name}" for name in keeps)
     _silence(
         s, args, "open", f"fleet update to {new[:12]}: planned outage; `up` expires this silence"
     )
     for alias in [*args.runner, args.gateway]:
         try:
-            s.run(alias, f"{HOME}; {AVA} stop -y --timeout {args.stop_timeout}")
+            s.run(alias, f"{HOME}; {AVA} stop -y --timeout {args.stop_timeout}{keep_flags}")
             if not s.dry_run:
                 status, phase = split_hold_text(s.run(alias, _STATUS, effect=False))
                 if (status, phase) != ("paused", "stopped"):
-                    raise FailedError(f"{alias}: stop left {status}/{phase}")  # noqa: TRY301
+                    raise FailedError(f"{alias}: stop left {status}/{phase}")
         except FailedError as exc:
             raise FailedError(f"{exc}{_STOP_HINT}") from exc
     for alias in everyone:
@@ -310,10 +311,9 @@ def down(s: Session, args: argparse.Namespace) -> None:
 
 
 def gui_oneshot(alias: str, timeout_s: int) -> str:
-    """`ava start` as a run-once gui/<uid> LaunchAgent; left loaded (not killed) past the deadline."""
     stamp = f"{datetime.now(UTC):%Y%m%dT%H%M%S}"
     label = f"com.ava.fleet-update.{re.sub(r'[^A-Za-z0-9.-]', '-', alias)}.{stamp}"
-    log = f"/tmp/{label}/oneshot.log"  # noqa: S108 — remote path in a fresh 0700 directory
+    log = f"/tmp/{label}/oneshot.log"
     start = f"{HOME}; {AVA} start"
     job = {
         "Label": label,
@@ -337,9 +337,6 @@ rm -rf "$D"; exit "$rc\""""
 
 
 def machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
-    """Each listed host's own machine name (what the roster calls it), asked of the host.
-
-    Asked with `-c`, so it takes `_PYTHON`, not the `python -` program that reads stdin."""
     ask = f'{_PYTHON} -c "from base.config import ConfigBoot; from base.cluster.machine.boot import machine_from_boot; print(machine_from_boot(ConfigBoot()).name())"'
     names: dict[str, str] = {}
     for alias in aliases:
@@ -352,13 +349,8 @@ def machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
     return names
 
 
+# ava:ref cli/docs/fleet-update.ava.okf.md#up-completion-gates
 def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[dict[str, Any]], str]:
-    """The listed machines' roster rows and the one commit they all run, online, at that checkout.
-
-    Only the `--gateway`/`--runner` machines are required; the rest of the roster (a laptop
-    that is off) is reported and left alone. A listed host is matched to its row by the
-    machine name it reports, not by its SSH alias; no row for it is an error.
-    `online` follows the heartbeat: a machine just started is re-read until --roster-timeout."""
     names = machine_names(s, [args.gateway, *args.runner])
     wanted = set(names.values())
     deadline = time.monotonic() + args.roster_timeout
@@ -392,28 +384,18 @@ def _report_unlisted(s: Session, rows: list[dict[str, Any]], wanted: set[str]) -
 
 
 def _refresh(s: Session, args: argparse.Namespace) -> None:
-    """Skills follow their channel, not the checkout; a differing local copy is replaced."""
     for alias in [args.gateway, *args.runner]:
         out = s.run(alias, f"{HOME}; {AVA} packages refresh")
-        if out:  # empty on a dry run
+        if out:
             s.say(f"packages refresh [{alias}] {out.splitlines()[-1].strip()}")
 
 
 def _drift_checks(s: Session, args: argparse.Namespace) -> None:
-    """Library changes that stale what lives outside the checkout, found before an agent runs on it.
-
-    `ava schedules verify` on the gateway (the in-store schedule scripts: imports resolve and every
-    call into repo code still binds) and `ava plugins verify` on every host (each enabled plugin
-    loads; the agent loader contains a broken one, so only this surfaces it). Both read-only.
-    Every check runs; each one's detail is in the log above, and any red fails `up`. They run
-    after the smoke and the refresh: a red names a repair to make, not a reason to leave the
-    cluster half-updated."""
     checks = [(args.gateway, "schedules verify --no-notify")]
     checks += [(alias, "plugins verify") for alias in [args.gateway, *args.runner]]
     failed: list[str] = []
     for alias, verb in checks:
         try:
-            # effect=True so a dry run lists the check without running it.
             s.run(alias, f"{HOME}; {AVA} {verb}", effect=True)
         except FailedError as exc:
             failed.append(f"`ava {verb}` {exc}")
@@ -442,13 +424,16 @@ def up(s: Session, args: argparse.Namespace) -> None:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
         s.run(args.gateway, smoke, stdin=gateway_program())
     _refresh(s, args)
-    _drift_checks(s, args)  # last, so a false red never skips the smoke or the refresh
+    _drift_checks(s, args)
     _silence(s, args, "close")
     s.say(f"up complete: every listed machine runs {commit[:12]}")
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m cli.fleet_update", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="python -m cli.fleet_update",
+        description="Update a networked source-mode cluster over SSH, in two halves",
+    )
     halves = parser.add_subparsers(dest="half", required=True)
     for half in ("down", "up"):
         p = halves.add_parser(half)
@@ -460,6 +445,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--new", required=True, help="commit to switch every host to")
             p.add_argument("--allow-python-change", action="store_true")
             p.add_argument("--stop-timeout", type=int, default=600)
+            p.add_argument("--keep-timeout", type=float, default=KEEP_TIMEOUT_S)
             p.add_argument(
                 "--silence-hours",
                 type=float,
@@ -470,6 +456,11 @@ def main(argv: list[str] | None = None) -> int:
                 "--allow-red-schedules",
                 action="store_true",
                 help="proceed although stored schedule scripts fail NEW's `ava schedules verify`",
+            )
+            p.add_argument(
+                "--restart-all",
+                action="store_true",
+                help="skip the keep decision and stop every service, untouched components included",
             )
         else:
             p.add_argument("--start-timeout", type=int, default=1800)

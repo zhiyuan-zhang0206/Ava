@@ -294,8 +294,9 @@ ava cluster destroy [--drop-db]
 
 Full `stop` closes infrastructure, browser and persistent PTYs; `--keep-infra` and
 repeated `--keep-service` preserve explicitly selected resources. `restart` is the
-ordinary local stop/start path and keeps infrastructure, browser and persistent
-PTYs. Destroy decommissions this host's cluster: it stops it, retires the host's
+ordinary local stop/start path: it keeps infrastructure, the browser session, Gate,
+the permissions helper and native LGTM, while persistent terminals close and the
+pty-sessions service restarts with the new code. Destroy decommissions this host's cluster: it stops it, retires the host's
 native jobs (launchd, crontab, the Linux boot unit, the permissions helper) and marks the home
 detached, so `ava start` refuses it until `destroy-intent.json` is deleted by hand;
 `--drop-db` additionally removes the data directories (`pg/`, `redis/`). It acts on
@@ -405,8 +406,9 @@ load-bearing:
   daily log maintenance, and its ability to come back after a reboot.
 
 `ava stop`, restart and update use the native maintenance primitives.
-Restart retains infrastructure and persistent PTYs; default stop closes those local
-resources. Durable agent identity and work remain on disk.
+Restart retains infrastructure and the shared browser, but closes persistent PTYs
+exactly as a stop does; default stop closes those local resources too. Durable
+agent identity and work remain on disk.
 A stop timeout is a failure; force escalation requires an explicit option.
 Normal `ava start` resumes only after readiness. See the
 [stop procedure](operations/graceful-maintenance.md) for partial stop, coordinated
@@ -457,9 +459,19 @@ itself (its own public key in its own `authorized_keys`):
   could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
   scripts and rerun, or pass `--allow-red-schedules` to proceed (the rows then
   crash-loop after `up` until fixed). A host that has not fetched NEW (a dry run does
-  not fetch) is reported as not checked. Then, before the first stop, it opens the window's
+  not fetch) is reported as not checked. Still before anything stops it derives the keep
+  decision: a dependency closure over the window's `OLD..NEW` diff
+  (`scripts/host_ops/fleet_update_keep.py`, run from the operator's checkout on the same
+  `meizel` facts the locality gate cites) names the stateful components the change does not
+  reach, and every stop gains their `--keep-service` flags — `pty-sessions` (live agent
+  shells stay mounted) and/or `browser` plus `browser-mcp` (the headed Chrome keeps its
+  logins; the two names go together). A component the window touches restarts as before,
+  and so does everything when the decision itself fails; `--restart-all` skips the
+  decision. The verdicts per component print into the log, and `--dry-run` runs the
+  decision too. Then, before the first stop, it opens the window's
   alert silence (below). Then it runs `ava stop -y --timeout 600` on each runner and
-  then the gateway (each must leave phase `stopped` with no failures), then on
+  then the gateway (each must leave phase `stopped` with no failures; the keep flags ride
+  the same stop), then on
   every host checks out NEW detached, repairs legacy read-only venv
   directories, runs `uv sync --frozen` and requires a clean tree.
 - Runners fetch through the gateway's source clone (their checkout's `origin` is the gateway host's `~/.ava/source`): the target commit is fetched by SHA before it is reachable from any of the clone's refs, so the clone carries `uploadpack.allowAnySHA1InWant=true` (repo-local; set 2026-09-30). A reclone of the clone must re-apply it.
