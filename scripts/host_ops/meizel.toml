@@ -1,7 +1,7 @@
-exports = ["check_worktree_remove.py"]
+exports = ["check_worktree_remove.py", "fleet_update_keep.py"]
 
 [uses]
-"tests" = ["guard_editable_venv.py", "update_schedule_script.py"]
+"tests" = ["fleet_update_keep.py", "guard_editable_venv.py", "update_schedule_script.py"]
 
 [external]
 "update_schedule_script.py" = "compiles a user-written schedule script before replacing the stored copy"

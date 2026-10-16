@@ -1,5 +1,3 @@
-"""Execute the shipped gateway program against current API owners and local HTTP."""
-
 from __future__ import annotations
 
 import json
@@ -112,7 +110,7 @@ def run_program(tmp_path: Path, gateway: Gateway, *args: str) -> subprocess.Comp
         "AVA_CONFIG_FETCH": "skip",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
-    return subprocess.run(  # noqa: S603 — fixed interpreter, repository-owned program text
+    return subprocess.run(
         [sys.executable, "-m", "cli.commands.management.fleet_gateway", *args],
         cwd=Path(fleet_update.__file__).resolve().parents[1],
         env=env,
@@ -168,5 +166,5 @@ def test_smoke_program_spawns_executes_and_terminates_with_current_gateway_api(
 
 
 def test_gateway_transport_sends_the_executed_module_source() -> None:
-    owner = Path(__file__).resolve().parents[1] / "commands" / "management" / "fleet_gateway.py"
+    owner = Path(__file__).resolve().parents[2] / "commands" / "management" / "fleet_gateway.py"
     assert owner.read_text(encoding="utf-8") == fleet_update.gateway_program()

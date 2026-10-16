@@ -1,4 +1,4 @@
-exports = ["allowances.py", "budgets", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
+exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
 
 [uses]
 "__main__.py" = ["contracts"]
