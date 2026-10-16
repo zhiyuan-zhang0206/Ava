@@ -1,20 +1,16 @@
-"""`base/deploy/git/memory_repo.py` unit tests — role-aware branch_name, pull_main git
-argument sequence, and the gateway init() auto-switch onto main.
-
-Each test supplies its own MachineIdentity directly to the repository.
-These tests do not touch the network or a real remote: run_git is recorded.
-"""
-
 from __future__ import annotations
 
 import subprocess
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.deploy.git import memory_repo
+from base.deploy.git.tests.memory_checkouts import commit_note
+from base.deploy.git.tests.memory_checkouts import memory_checkout as memory_checkout
 from base.paths import gateway_memory_dir
 
 
@@ -33,36 +29,34 @@ def test_branch_name_agent_runner_authors_machine_branch(
 def test_branch_name_combined_unit_returns_machine_branch(
     *, machine_identity: MachineIdentity
 ) -> None:
-    """On a combined unit (gateway+agent-runner), branch_name() returns the
-    machine branch — the agent-runner capability takes precedence."""
     machine_identity.set(role="gateway,agent-runner", name="test-host")
     assert memory_repo.branch_name(machine=machine_identity) == "machine-test-host"
 
 
-def test_pull_main_git_sequence_and_returned_sha(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    """pull_main fetches origin/main, fast-forward-merges it, then returns the
-    rev-parse HEAD output verbatim. All git commands target the gateway memory
-    path (gateway_memory_dir())."""
-    calls: list[tuple[str, ...]] = []
+def test_pull_main_git_sequence_and_returned_sha(memory_checkout: tuple[Path, Path]) -> None:
+    source, root = memory_checkout
+    memory_repo.run_git("checkout", "-b", "consolidated", cwd=source)
+    expected = commit_note(source, "consolidated update")
+    memory_repo.run_git("push", "origin", "consolidated", cwd=source)
 
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        if args == ("rev-parse", "HEAD"):
-            return "deadbeef1234"
-        return ""
+    sha = memory_repo.pull_main(root=root, keep_local=False, branch="consolidated")
 
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
+    assert sha == expected
+    assert memory_repo.run_git("rev-parse", "HEAD", cwd=root) == expected
+    assert "consolidated update" in (root / "note.md").read_text()
 
-    sha = memory_repo.pull_main(machine=machine_identity)
 
-    assert sha == "deadbeef1234"
-    assert calls == [
-        ("fetch", "origin", "main"),
-        ("merge", "--ff-only", "origin/main"),
-        ("rev-parse", "HEAD"),
-    ]
+def test_pull_main_rejects_divergence(memory_checkout: tuple[Path, Path]) -> None:
+    source, root = memory_checkout
+    commit_note(source, "remote change")
+    memory_repo.run_git("push", "origin", "main", cwd=source)
+    local = commit_note(root, "unpublished local change")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        memory_repo.pull_main(root=root, keep_local=False, branch="main")
+
+    assert memory_repo.run_git("rev-parse", "HEAD", cwd=root) == local
+    assert "unpublished local change" in (root / "note.md").read_text()
 
 
 def test_init_gateway_on_stale_machine_branch_switches_to_main(
@@ -70,9 +64,6 @@ def test_init_gateway_on_stale_machine_branch_switches_to_main(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A pure gateway (no agent-runner) whose checkout was previously initialized
-    on `machine-<name>` (before branch_name became role-aware) auto-switches onto
-    main instead of raising — it never authors, so nothing is lost."""
     machine_identity.set(role="gateway", name="cloud")
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
 
@@ -81,12 +72,12 @@ def test_init_gateway_on_stale_machine_branch_switches_to_main(
     def _fake_run_git(*args: str, **kwargs: object) -> str:
         calls.append(args)
         if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "machine-cloud"  # stale branch from a prior role
+            return "machine-cloud"
         return ""
 
     monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
-    memory_repo.init(machine=machine_identity)  # must not raise
+    memory_repo.init(machine=machine_identity)
 
     assert ("fetch", "origin", "main") in calls
     assert ("checkout", "main") in calls
@@ -95,14 +86,12 @@ def test_init_gateway_on_stale_machine_branch_switches_to_main(
 def test_init_agent_runner_on_wrong_branch_raises(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    """A runner stays strict: an unexpected branch may carry unpushed in-flight
-    work, so init() refuses to unilaterally switch."""
     machine_identity.set(role="agent-runner", name="test-host-2")
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
 
     def _fake_run_git(*args: str, **kwargs: object) -> str:
         if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "main"  # not machine-test-host-2
+            return "main"
         return ""
 
     monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
@@ -114,8 +103,6 @@ def test_init_agent_runner_on_wrong_branch_raises(
 def test_init_gateway_on_main_is_noop(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    """When the gateway-only checkout is already on main, init() returns without
-    issuing any fetch/checkout."""
     machine_identity.set(role="gateway", name="cloud")
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
 
@@ -134,21 +121,16 @@ def test_init_gateway_on_main_is_noop(
     assert calls == [("rev-parse", "--abbrev-ref", "HEAD")]
 
 
-# ── gateway_memory_dir() path tests ──
-
-
 def test_gateway_memory_dir_combined_uses_subdirectory(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    """On a combined unit, gateway_memory_dir() returns
-    $AVA_HOME/gateway/memory, separate from memory_dir()."""
     from base.paths import ava_home
 
     machine_identity.set(role="gateway,agent-runner", name="test-host")
     gmd = gateway_memory_dir(roles=machine_identity.role())
     home = ava_home()
     assert gmd == home / "gateway" / "memory"
-    # Must differ from the agent-runner path
+
     from base.paths import memory_dir
 
     assert gmd != memory_dir()
@@ -157,7 +139,6 @@ def test_gateway_memory_dir_combined_uses_subdirectory(
 def test_gateway_memory_dir_gateway_only_equals_memory_dir(
     *, machine_identity: MachineIdentity
 ) -> None:
-    """On a gateway-only unit, gateway_memory_dir() is the same as memory_dir()."""
     from base.paths import ava_home, memory_dir
 
     machine_identity.set(role="gateway", name="cloud")
@@ -166,15 +147,11 @@ def test_gateway_memory_dir_gateway_only_equals_memory_dir(
     assert gmd == ava_home() / "memory"
 
 
-# ── init_gateway() tests ──
-
-
 def test_init_gateway_creates_checkout_on_main(
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """init_gateway() sets up a git repo on `main` at the gateway memory path."""
     machine_identity.set(role="gateway", name="cloud")
 
     def initialized(*, machine: MachineIdentity) -> bool:
@@ -190,15 +167,13 @@ def test_init_gateway_creates_checkout_on_main(
         return ""
 
     monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-    # Go through the no-remote path: raise MemoryRemoteMissing so init_gateway()
-    # creates a local empty repo.
+
     monkeypatch.setattr(
         memory_repo,
         "memory_remote",
         lambda: (_ for _ in ()).throw(memory_repo.MemoryRemoteMissing("test")),
     )
-    # Stub subprocess.run for git init — must create the directory so
-    # .gitignore write succeeds (git init would normally create it).
+
     import subprocess as sp
 
     from base.paths import gateway_memory_dir as _gmd
@@ -211,7 +186,6 @@ def test_init_gateway_creates_checkout_on_main(
 
     memory_repo.init_gateway(machine=machine_identity)
 
-    # Should have done the local init flow: add .gitignore + commit
     assert ("add", ".gitignore") in calls
     assert ("commit", "-q", "-m", "init: local memory on main") in calls
 
@@ -221,7 +195,6 @@ def test_init_gateway_already_initialized_on_main_is_noop(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """When the gateway checkout is already on main, init_gateway() is a noop."""
     machine_identity.set(role="gateway", name="cloud")
 
     def initialized(*, machine: MachineIdentity) -> bool:
@@ -250,7 +223,6 @@ def test_init_gateway_on_wrong_branch_auto_switches(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Gateway checkout on a stale branch auto-switches to main."""
     machine_identity.set(role="gateway", name="cloud")
 
     def initialized(*, machine: MachineIdentity) -> bool:
@@ -264,7 +236,7 @@ def test_init_gateway_on_wrong_branch_auto_switches(
     def _fake_run_git(*args: str, **kwargs: object) -> str:
         calls.append(args)
         if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "machine-cloud"  # stale
+            return "machine-cloud"
         return ""
 
     monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
@@ -280,15 +252,12 @@ def test_init_combined_unit_does_not_auto_switch_agent_runner_checkout(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """On a combined unit, init() for the agent-runner path raises
-    MemoryBranchMismatch on a wrong branch instead of auto-switching
-    (the gateway capability no longer overrides agent-runner safety)."""
     machine_identity.set(role="gateway,agent-runner", name="test-host")
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
 
     def _fake_run_git(*args: str, **kwargs: object) -> str:
         if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "main"  # not machine-test-host
+            return "main"
         return ""
 
     monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
@@ -297,31 +266,14 @@ def test_init_combined_unit_does_not_auto_switch_agent_runner_checkout(
         memory_repo.init(machine=machine_identity)
 
 
-# ── AVA_MEMORY_KEEP_LOCAL (local-only pool) ──
+def test_pull_main_keep_local_is_noop(tmp_path: Path) -> None:
+    root = tmp_path / "local"
+    memory_repo.init_local_repo("main", root)
+    expected = commit_note(root, "local memory")
 
-
-def test_pull_main_keep_local_is_noop(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    """With AVA_MEMORY_KEEP_LOCAL set, pull_main() does not fetch/merge (there is
-    no remote) — it just reports the current HEAD."""
-    machine_identity.set(role="gateway,agent-runner", name="test-host-2")
-    monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
-
-    calls: list[tuple[str, ...]] = []
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        if args == ("rev-parse", "HEAD"):
-            return "cafef00d"
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    sha = memory_repo.pull_main(machine=machine_identity)
-
-    assert sha == "cafef00d"
-    assert calls == [("rev-parse", "HEAD")]
+    assert memory_repo.run_git("remote", cwd=root) == ""
+    assert memory_repo.pull_main(root=root, keep_local=True, branch="absent") == expected
+    assert (root / "note.md").read_text().endswith("local memory\n")
 
 
 def test_init_keep_local_strips_remote_when_branch_correct(
@@ -329,8 +281,6 @@ def test_init_keep_local_strips_remote_when_branch_correct(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A runner in keep-local mode whose checkout is already on the right branch
-    drops any leftover remote so it can never sync off-box, and never fetches."""
     machine_identity.set(role="agent-runner", name="test-host-2")
     monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
@@ -358,7 +308,7 @@ def test_init_keep_local_fresh_repo_inits_without_remote(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A fresh keep-local checkout is `git init`-ed locally with no clone."""
+    # ava:ref base/deploy/git/tests/docs/memory-repo-tests.ava.okf.md#initialization-command-recorder
     machine_identity.set(role="agent-runner", name="test-host-2")
     monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: False)
@@ -398,8 +348,6 @@ def test_init_gateway_keep_local_strips_remote(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """init_gateway() in keep-local mode drops any leftover remote and never
-    fetches."""
     machine_identity.set(role="gateway", name="cloud")
     monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
 
@@ -427,22 +375,9 @@ def test_init_gateway_keep_local_strips_remote(
     assert not any(c[:1] == ("fetch",) for c in calls)
 
 
-# ── run_git is bounded ─────────────────────────────────────────────────────
-
-
 def test_run_git_is_bounded_and_kills_the_tree_on_expiry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Every git call carries a timeout, via `run_bounded` rather than a plain
-    `subprocess.run(timeout=...)`.
-
-    Unbounded, `pull_main`'s `git fetch` does not merely stall its caller: the
-    memory indexer runs it through `asyncio.to_thread`, and `asyncio.run()`'s
-    shutdown waits on `shutdown_default_executor()` — so a fetch wedged against a
-    dead remote holds the daemon's exit open long past the SIGTERM it was told to
-    stop on. `run_bounded` (not the raw kwarg) because a plain timeout would
-    kill only the direct child and leave its descendants running.
-    """
     seen: list[dict[str, object]] = []
 
     def _fake_run_bounded(
@@ -460,9 +395,6 @@ def test_run_git_is_bounded_and_kills_the_tree_on_expiry(
 
 
 def test_run_git_raises_on_non_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`run_bounded` deliberately has no `check=`, so the raise-on-non-zero half
-    of `run_git`'s contract lives in `run_git` — a failed git must not read as
-    empty output to callers that branch on it."""
 
     def _fails(argv: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(list(argv), 1, "", "fatal: no remote")
@@ -475,8 +407,6 @@ def test_run_git_raises_on_non_zero_exit(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_run_git_propagates_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A tripped bound surfaces as TimeoutExpired rather than being swallowed
-    into a success — the indexer's caller logs it and retries next cycle."""
 
     def _expire(argv: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(list(argv), memory_repo.GIT_TIMEOUT_S)
