@@ -15,6 +15,12 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "--initial-branch=main")
+    (repo / "base" / "sessions" / "pty").mkdir(parents=True)
+    (repo / "base" / "sessions" / "pty" / "daemon.py").write_text("SESSIONS = 1\n")
+    (repo / "services" / "supervision" / "healthchecks").mkdir(parents=True)
+    (repo / "services" / "supervision" / "healthchecks" / "protocol_probe.py").write_text(
+        "PROBE = 1\n"
+    )
     for message in ("old", "new"):
         (repo / ".python-version").write_text("3.12.12\n")
         (repo / "uv.lock").write_text(message)

@@ -326,6 +326,16 @@ def test_refuses_inside_an_ava_agent(
     assert cluster.effects == []
 
 
+def test_hosts_that_disagree_on_head_are_refused(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.hosts["lin"]["head"] = "deadbeefdeadbeef"
+    assert run("down") == 2
+    assert cluster.effects == []
+    assert "hosts disagree on HEAD" in capsys.readouterr().out
+
+
 def test_a_python_change_needs_the_flag(env: tuple[Cluster, Callable[..., int]]) -> None:
     cluster, run = env
     repo = fleet_update.REPO

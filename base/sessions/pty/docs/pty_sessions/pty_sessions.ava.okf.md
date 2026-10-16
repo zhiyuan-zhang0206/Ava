@@ -81,11 +81,12 @@ creating process held does not ride into the shell unless it is forwarded.
 
 ## Session lifetime
 
-A session ends with its shell, a `kill`, a `close_all`, or the service stopping.
-It does not end when an agent, an agent host or a gateway restarts: each is a
-restart of a client. A service-level stop is not: `ava stop`, `ava restart`, a
-fleet update, a crash of the service and a reboot end every session; the only way
-to keep sessions across a stop is the generic `--keep-service pty-sessions`.
+A session ends with its shell, a `kill`, a `close_all`, or the service stopping;
+a client restart (an agent, an agent host or a gateway) does not end it. A
+service-level stop is not: `ava stop`, `ava restart`, a crash of the service and
+a reboot end every session unless `--keep-service pty-sessions` keeps them; a
+fleet update passes it on windows that do not touch the pty surface
+([[scripts/host_ops/docs/fleet-update-keep.ava.okf.md]]).
 Creation, death, kill, signals and the operator freeze are in
 [[session-lifetime.ava.okf.md|session lifetime]].
 

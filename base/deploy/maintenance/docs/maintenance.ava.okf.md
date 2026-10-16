@@ -82,9 +82,9 @@ bootstrap. First-time normal drain still needs data-plane configuration.
 
 SDK dependencies remain available through prepare/drain. Service stop closes
 new ordinary ops admission and waits for admitted handlers and executor work before
-signalling services. `ava restart` retains infrastructure and persistent PTYs;
-`ava stop` closes terminal jobs and shells and stops home-owned infrastructure
-unless explicitly preserved. `service_stop` verifies process identities
+signalling services. `ava restart` retains infrastructure and the shared browser
+but closes terminal jobs and shells, as a stop does; `ava stop` also stops
+home-owned infrastructure unless explicitly preserved. `service_stop` verifies process identities
 and exits; `data_plane/maintenance_stop` saves Redis before its verified shutdown.
 `_stop_extras` covers home-owned Gate/helper/native LGTM outside the session
 roster, retaining desired configuration and data. None of these local checks

@@ -186,12 +186,20 @@ def decide(repo: Path, old: str, new: str) -> dict[str, object]:
         }
         for component in COMPONENTS:
             surface = surfaces[component.name]
-            if not root_counts[component.name]:
+            missing_watch = [w for w in component.watch if w not in surface]
+            if not root_counts[component.name] or missing_watch:
+                reasons: list[str] = []
+                if not root_counts[component.name]:
+                    reasons.append("no root file at either revision")
+                if missing_watch:
+                    reasons.append(
+                        f"watch files absent at both revisions: {', '.join(missing_watch)}"
+                    )
                 verdicts.append(
                     _verdict(
                         component,
                         keep=False,
-                        reason="no root file at either revision; restarting",
+                        reason="; ".join(reasons) + "; restarting",
                         surface_size=None,
                         hit_count=0,
                         hits=[],

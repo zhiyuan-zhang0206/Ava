@@ -216,7 +216,32 @@ def test_a_component_with_no_matching_root_restarts_conservatively(
     payload = _decide(root, base, new, capsys)
     pty = _verdict(payload, "pty-sessions")
     assert not pty["keep"] and "no root file" in pty["reason"]
-    assert payload["keep_services"] == ["browser", "browser-mcp"]
+    browser = _verdict(payload, "browser")
+    assert not browser["keep"] and "watch files absent at both revisions" in browser["reason"]
+    assert payload["keep_services"] == []
+
+
+def test_a_watch_file_absent_at_both_revisions_restarts_conservatively(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "partial"
+    root.mkdir()
+    _git(root, "init", "-q", "--initial-branch=main")
+    for name in _INIT:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("")
+    _write(root, {name: text for name, text in _FILES.items() if name != "ava/mcps/_browser.py"})
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD")
+    new = _commit(root, "ui", {"ui/app.py": "APP = 2\n"})
+    payload = _decide(root, base, new, capsys)
+    browser = _verdict(payload, "browser")
+    assert not browser["keep"]
+    assert browser["reason"] == (
+        "watch files absent at both revisions: ava/mcps/_browser.py; restarting"
+    )
+    assert _verdict(payload, "pty-sessions")["keep"]
 
 
 @pytest.mark.parametrize("ref", ["deadbeefdeadbeef", "HEAD~99"])

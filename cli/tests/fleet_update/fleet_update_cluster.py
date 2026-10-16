@@ -28,6 +28,7 @@ _ROW = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve
 # ava:ref cli/tests/fleet_update/docs/fleet-update-harness.ava.okf.md#harness-order-guards
 class Cluster:
     def __init__(self, old: str, new: str) -> None:
+        self.old = old
         self.new = new
         self.hosts: dict[str, dict[str, Any]] = {
             a: {**_IDLE, "os": o, "head": old}

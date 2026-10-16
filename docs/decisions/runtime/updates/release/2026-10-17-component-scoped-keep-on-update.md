@@ -52,11 +52,12 @@ its sessions with the owners' busy notice and no grace period.
      are files, never expanded. Every other component (gateway, data plane, agent
      host, schedules) restarts on every window, exactly as before.
 3. Fail closed everywhere. A missing script (a checkout older than this change), a
-   timeout, a non-zero exit, unusable JSON, a revision that does not resolve — the
-   decision returns no keeps, prints a WARNING with the cause, and the stop restarts
-   everything: the pre-decision behavior, never a guess. `--restart-all` skips the
-   decision on purpose. A component whose dirs match no tracked file at either
-   revision restarts (the table is out of date).
+   timeout (`--keep-timeout`, default 300 s), a non-zero exit, unusable JSON, a
+   revision that does not resolve — the decision returns no keeps, prints a WARNING
+   with the cause, and the stop restarts everything: the pre-decision behavior, never
+   a guess. `--restart-all` skips the decision on purpose. In a judged window, a
+   component whose dirs or watch entries match no tracked file at either revision
+   restarts: the table is out of date (the OLD == NEW rerun keeps before this check).
 4. Hosts already on NEW have no window to judge: `down` passes NEW as both revisions,
    the empty diff keeps every component — the rerun of an interrupted `down` keeps.
 5. The decision tool lives under `scripts/host_ops/` and `down` runs it as a
