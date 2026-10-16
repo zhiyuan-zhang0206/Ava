@@ -28,6 +28,7 @@ from base.db import Database
 from base.deploy.release import editable_install
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.native_process.turn_identity import HostedTurnResources
 from base.paths import ava_home, exec_run_dir
 
@@ -116,6 +117,7 @@ def spawn_exec_child(
     try:
         return ExecProcessDomain.launch_posix(
             argv,
+            process_control=SYSTEM_PROCESS_CONTROL,
             new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
