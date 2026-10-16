@@ -31,7 +31,7 @@ __all__ = [
 ]
 
 
-# ava:ref base/agents/history/docs/timeline.ava.okf.md#note-timestamp-policy
+# ava:ref base/agents/history/docs/timeline/note-timestamp-policy.ava.okf.md#note-timestamp-policy
 _NO_TIMESTAMP_NOTE_TAGS = frozenset(
     {
         NoteTag.MEMORY,
@@ -73,7 +73,7 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
     return str(content)
 
 
-# ava:ref base/agents/history/docs/timeline.ava.okf.md#timeline-window-contract
+# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#timeline-window-contract
 def build_timeline_items(
     messages: Sequence[BaseMessage],
     *,
@@ -222,7 +222,7 @@ def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | Non
     return urls or None
 
 
-# ava:ref base/agents/history/docs/timeline.ava.okf.md#attach-caption-pairing
+# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#attach-caption-pairing
 def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[str] | None:
     from base.lm.reasoning import content_blocks
 
@@ -314,7 +314,7 @@ def _compact_item(
     )
 
 
-# ava:ref base/agents/history/docs/timeline.ava.okf.md#human-fallback-fail-loud
+# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#human-fallback-fail-loud
 def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> TimelineItem:
     return TimelineItem(
         item_id=f"{msg_idx}.0",
@@ -326,7 +326,7 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> 
     )
 
 
-# ava:ref base/agents/history/docs/timeline.ava.okf.md#timeline-window-unit
+# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#timeline-window-unit
 def timeline_default_limit(*, limit_reader: Callable[[], int]) -> int:
     return limit_reader()
 
@@ -417,7 +417,7 @@ def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str | Non
     )
 
 
-# ava:ref base/agents/history/docs/timeline.ava.okf.md#reasoning-timing
+# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#reasoning-timing
 def _content_block_item(
     block: str | dict[str, Any],
     pos: int,
@@ -459,7 +459,7 @@ def _content_block_item(
     return _chat_item(msg_idx, block_idx, t, created_at), block_idx, reasoning_attached
 
 
-# ava:ref base/agents/history/docs/timeline.ava.okf.md#tool-call-block-offset
+# ava:ref base/agents/history/docs/timeline/timeline.ava.okf.md#tool-call-block-offset
 def _tool_call_items(
     msg: AIMessage,
     msg_idx: int,
