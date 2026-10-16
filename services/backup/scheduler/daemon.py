@@ -13,7 +13,7 @@ from datetime import time as clock_time
 from pathlib import Path
 
 from base import telemetry
-from base.clock import SYSTEM_TIMERS, Clock, Timers
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
@@ -44,7 +44,6 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.backup.scheduler.daemon")
 
 BACKUP_STALE_AFTER_S = 26 * 3600
-_SLEEP_CHUNK_S = 60
 _FAILURE_DETAIL_CHARS = 500
 
 
@@ -133,14 +132,6 @@ def backup_components(state: BackupState, *, clock: Clock) -> list[dict[str, obj
     return [record]
 
 
-async def sleep_in_chunks(seconds: float, *, timers: Timers) -> None:
-    remaining = seconds
-    while remaining > 0:
-        chunk = min(remaining, _SLEEP_CHUNK_S)
-        await timers.asleep(chunk)
-        remaining -= chunk
-
-
 def seconds_until_next_backup_hour(now: datetime, *, config: ConfigBoot, clock: Clock) -> float:
     local_now = now.astimezone(cluster_tz(clock_factory=lambda: clock))
     backup_hour = config.view.services.backup_hour
@@ -188,9 +179,7 @@ async def backup_loop(state: BackupState, *, config: ConfigBoot, clock: Clock) -
             clock_factory=lambda: clock,
             hour_reader=lambda: config.view.services.backup_hour,
         ):
-            await sleep_in_chunks(
-                seconds_until_next_backup_hour(now, config=config, clock=clock), timers=clock
-            )
+            await clock.asleep(seconds_until_next_backup_hour(now, config=config, clock=clock))
             continue
 
         state.record_attempt(now)
@@ -210,9 +199,7 @@ async def backup_loop(state: BackupState, *, config: ConfigBoot, clock: Clock) -
             _log.exception("[pg-backup] dump failed; next attempt at the next backup hour")
         finally:
             state.running = False
-        await sleep_in_chunks(
-            seconds_until_next_backup_hour(clock.now(), config=config, clock=clock), timers=clock
-        )
+        await clock.asleep(seconds_until_next_backup_hour(clock.now(), config=config, clock=clock))
 
 
 async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: Clock) -> None:

@@ -34,9 +34,7 @@ lost the leader is a `RuntimeError`. The leader is never reaped here, so custody
 stays with the caller.
 
 The default signal refuses a reaped leader and accepts XNU's EPERM for an
-all-zombie group, since the listing decides. `group_empty` answers for a group
-whose leader was already reaped: the macOS listing, or a Linux null group
-signal, which the tasklist lock orders against fork.
+all-zombie group, since the listing decides.
 
 This is trusted-tool cleanup, not a fence: a member that calls `setsid()` or
 `setpgid()` leaves the group.

@@ -103,25 +103,6 @@ def group_members(pgid: int) -> list[int]:
     return sorted(members)
 
 
-def group_empty(pgid: int) -> bool:
-    """Whether no process, live or zombie, remains in group `pgid`.
-
-    Only meaningful once the group's leader was reaped: the number stays
-    reserved while any member exists, so no other group can take it. macOS
-    reads the kernel group listing. Linux sends the group a null signal, which
-    walks the group under the tasklist lock that fork holds to add a child to
-    it, so a member mid-fork keeps the answer false. Neither is an
-    enumerate-then-read scan.
-    """
-    if sys.platform == "darwin":
-        return not _darwin_group_listing(pgid)
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return True
-    return False
-
-
 @cache
 def _proc_listpids() -> Any:
     listpids = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True).proc_listpids

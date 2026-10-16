@@ -42,12 +42,6 @@ class PlatformBackend(abc.ABC):
         """The name of the virtualenv binary directory (``"bin"``)."""
         ...
 
-    def venv_python(self) -> str:
-        """Absolute path to the Python interpreter inside the repo's virtualenv."""
-        from base.host.runtime_interpreter import runtime_venv
-
-        return str(runtime_venv() / self.venv_bin_dir_name() / "python3")
-
     def venv_launcher(self, name: str, *, root: Path | None = None) -> Path:
         """Absolute path to a console script the virtualenv installs (``"ava"``,
         ``"uv"``, …) — ``.venv/bin/<name>``.
@@ -58,24 +52,6 @@ class PlatformBackend(abc.ABC):
         from base.host.runtime_interpreter import runtime_venv
 
         return runtime_venv(checkout=root) / self.venv_bin_dir_name() / name
-
-    # -- process ------------------------------------------------------------
-
-    @abc.abstractmethod
-    def process_alive(self, pid: int) -> bool:
-        """True if ``pid`` names a live process on this host.
-
-        POSIX: ``os.kill(pid, 0)`` (signal 0 — existence probe).
-        """
-        ...
-
-    @abc.abstractmethod
-    def force_kill(self, pid: int) -> None:
-        """Force-terminate ``pid``. A dead/absent pid is a silent no-op.
-
-        POSIX: ``os.kill(pid, SIGKILL)``.
-        """
-        ...
 
     # -- PostgreSQL ---------------------------------------------------------
 
@@ -103,28 +79,6 @@ class MacPlatformBackend(PlatformBackend):
     def venv_bin_dir_name(self) -> str:
         return "bin"
 
-    # -- process --
-
-    def process_alive(self, pid: int) -> bool:
-        import os
-
-        try:
-            os.kill(pid, 0)
-            return True
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-
-    def force_kill(self, pid: int) -> None:
-        import os
-        import signal
-
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
-
     # -- PostgreSQL --
 
     def pg_binary_path(self, name: str) -> Path | None:
@@ -143,28 +97,6 @@ class LinuxPlatformBackend(PlatformBackend):
 
     def venv_bin_dir_name(self) -> str:
         return "bin"
-
-    # -- process --
-
-    def process_alive(self, pid: int) -> bool:
-        import os
-
-        try:
-            os.kill(pid, 0)
-            return True
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-
-    def force_kill(self, pid: int) -> None:
-        import os
-        import signal
-
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
 
     # -- PostgreSQL --
 

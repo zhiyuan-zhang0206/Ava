@@ -18,12 +18,11 @@ from typing import cast
 
 import psutil
 
-from base.native_process.ownership import OwnedProcess, leader_owns_pids
+from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import (
     MAX_MESSAGE_BYTES,
     ProtocolError,
     ResponsePayload,
-    UnitState,
     encode,
     parse_response,
     parse_status_response,
@@ -93,39 +92,6 @@ def root_process(*, home: Path, timeout: float = 2.0) -> OwnedProcess | None:
     body = cast("dict[str, object]", raw)
     root = native_identity(body.get("root"))
     return root if root.live() else None
-
-
-def owned_process(unit_id: str, *, home: Path, timeout: float = 2.0) -> OwnedProcess | None:
-    """Read one captured generation of the root of `home` and verify its live root ancestry.
-
-    Unknown transport or birth evidence raises. An absent/stopped unit or a
-    positively dead/reused birth returns None; no current PID occupant is adopted.
-    """
-    from base.paths import root_run_dir
-
-    response = RootClient(root_run_dir(home) / "ava-root.sock", timeout=timeout).status()
-    raw = response.get("result")
-    if response["ok"] is not True or not isinstance(raw, dict):
-        raise RootClientError("root refused its native status")
-    body = cast("dict[str, object]", raw)
-    rows = body.get("units")
-    if not isinstance(rows, list):
-        raise RootClientError("root status omitted its unit roster")
-    for item in cast("list[object]", rows):
-        if not isinstance(item, dict):
-            raise RootClientError("root status contains an invalid unit")
-        row = cast("dict[str, object]", item)
-        if row.get("id") != unit_id:
-            continue
-        if row["state"] == UnitState.STOPPED:
-            return None
-        owner, root = native_identity(row), native_identity(body.get("root"))
-        if not owner.live() or not root.live():
-            return None
-        if not leader_owns_pids(root, {owner.pid}):
-            raise RootClientError("recorded service is outside its root ownership tree")
-        return owner if owner.live() else None
-    return None
 
 
 class RootClient:

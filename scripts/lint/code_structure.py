@@ -119,22 +119,10 @@ _AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9
 _STRUCTURE_DIRS = packages("application", "tests", "tooling")
 
 
-def _scan_file(
-    path: Path,
-    rel_path: str,
-    tree: ast.Module | None = None,
-    *,
-    parse_ast: Callable[..., ast.Module],
-) -> list[tuple[int, str]]:
+def _scan_file(tree: ast.Module, rel_path: str) -> list[tuple[int, str]]:
     """Return AST violations as [(lineno, message), ...]."""
     if lint_common.is_test_path(rel_path):
         return []  # tests are outside the AST rules (module docstring)
-    if tree is None:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return []  # unreadable entry (e.g. a dangling symlink) or binary content
-        tree = parse_ast(text, filename=rel_path)
     out: list[tuple[int, str]] = []
     out.extend(type_checking.violations(tree, rel_path))
     out.extend(machine_role.violations(tree))
@@ -363,10 +351,7 @@ def _check_ast_and_quality(
             continue
         tree = parse_ast(text, filename=rel)
         if ast_rules:
-            errors.extend(
-                f"{rel}:{line}: {message}"
-                for line, message in _scan_file(path, rel, tree, parse_ast=parse_ast)
-            )
+            errors.extend(f"{rel}:{line}: {message}" for line, message in _scan_file(tree, rel))
             _collect_locality(tree, rel, sites, scanned)
         if ambient:
             errors.extend(ambient_state.collect(tree, rel, repo_root, sites, scanned))
