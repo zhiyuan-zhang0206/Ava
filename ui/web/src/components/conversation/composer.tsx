@@ -598,7 +598,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
                 const step = e.key === "ArrowDown" ? 1 : -1;
                 setReplySelection({
                   options: suggestions, agentId,
-                  index: (replyIndex + step + suggestions.length) % suggestions.length,
+                  index: Math.min(Math.max(replyIndex + step, 0), suggestions.length - 1),
                   consumed: false,
                 });
                 return;

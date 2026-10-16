@@ -123,8 +123,10 @@ describe("Composer reply suggestion", () => {
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(input().placeholder).toBe("[4/4] Use D.");
     fireEvent.keyDown(input(), { key: "ArrowDown" });
-    expect(input().placeholder).toBe("[1/4] Use A.");
+    expect(input().placeholder).toBe("[4/4] Use D.");
     fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[3/4] Use C.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(input().placeholder).toBe("[4/4] Use D.");
     expect(input().value).toBe("");
 
@@ -139,6 +141,32 @@ describe("Composer reply suggestion", () => {
     expect(input().placeholder).toBe("Send a message");
     expect(fireEvent.keyDown(input(), { key: "ArrowRight" })).toBe(true);
     expect(input().value).toBe("");
+  });
+
+  it("stops at the first and last candidate instead of wrapping around", () => {
+    render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B.", "Use C."]} />);
+
+    expect(input().placeholder).toBe("[1/3] Use A.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
+
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[2/3] Use B.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[3/3] Use C.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[3/3] Use C.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[3/3] Use C.");
+
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[2/3] Use B.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
   });
 
   it("restores the selected candidate when an accepted or edited draft is cleared", async () => {
