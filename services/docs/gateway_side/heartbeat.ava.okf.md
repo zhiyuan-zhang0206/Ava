@@ -51,6 +51,16 @@ The gateway's roster read renders from those rows (`gateway/cluster/snapshots.py
 and dials inline only a missing or stale one (`?fresh=true` dials everything).
 
 
+## Liveness test boundary
+
+The liveness and probe-failure tests in `services/wake/heartbeat/tests/` use
+real database merges with injected probes. Seeded failure-count cases call the
+merge directly so a successful probe cannot reset their setup. Event assertions
+cover offline edges and the silent `unknown` to `online` transition. Paused-machine
+exclusion is proved by probe calls, absent probe rows and absent events; the
+fixture's endpoint is never dialed. The timeout case checks the configured
+12-second argument, not elapsed timeout enforcement or live ops reachability.
+
 ## Process composition
 
 The heartbeat executable and standalone station probe each capture one loaded

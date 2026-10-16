@@ -54,3 +54,4 @@ host's: reading a host timezone can make a current dump appear to be future.
 - Protects against bad migrations / accidental deletion / DB corruption and makes a best-effort encrypted off-site publish to OSS before local commit and pruning (`services/backup/artifact/offsite.py`, objects under `ava-logical/`; `AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and `AVA_BACKUP_OFFSITE_CREDENTIALS_FILE`). A home without all three skips the leg with one INFO line; an unavailable store or a failed upload leaves the local artifact intact and logs the cause. The bucket must stay versioning-off, since a versioned bucket ignores forbid-overwrite. See `future/infra/data/pg-backup.md`.
 - Restore: follow `.agents/skills/ava-guide/operations/references/db-restore.md` to decrypt before `pg_restore --clean --if-exists`.
 [[shutdown.ava.okf.md|Shutdown ownership]]
+[[recovery-contract.ava.okf.md|Static recovery-contract test boundary]]

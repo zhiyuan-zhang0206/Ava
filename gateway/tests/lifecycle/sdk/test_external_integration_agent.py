@@ -1,5 +1,3 @@
-"""Real PostgreSQL consent, checkpoint hydration and the external SDK effects of an attachment: native checkpoint reads, borrowed sender and lease-log recording."""
-
 import importlib.util
 from dataclasses import replace
 from pathlib import Path
@@ -56,7 +54,6 @@ def native_checkpoint(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
     )
 
-    # The attachment builds its state class from the registry of the plugins loaded into the process.
     def build_registry(*, validate_state: object = None) -> ExtensionRegistry:
         return registry
 
@@ -69,7 +66,7 @@ def native_checkpoint(
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
 
     def loader_stub(**_kwargs: object) -> None:
-        """Accept the `surface` kwarg attach passes (ignored)."""
+        pass
 
     monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
     handle = state_module.PluginStateHandle(IntegrationPlugin, "integration")
@@ -265,7 +262,6 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Attachment-owned ``ava.agents.send_message`` is a central audit row in the lease log."""
     owner, _ = native_checkpoint
     peer_id = create_agent(db_conn)
     db_conn.execute(
@@ -308,8 +304,6 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
         local_machine=machine_identity.name(),
     )
 
-    # The attachment-local SDK meter may be disabled by the surrounding process
-    # profile, but the borrowed inter-agent send is always a central audit row.
     api_events = [
         row["payload"]
         for row in history.entries(str(lease["id"]), db_conn)

@@ -1,5 +1,3 @@
-"""Atomic persistence and failure-priority tests for termination messages."""
-
 from __future__ import annotations
 
 import asyncio
@@ -73,7 +71,6 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """A failed pair rolls back both rows, then retries terminate before chat."""
     real_insert = termination.insert_termination_pair
     failed_pair = False
 
@@ -127,7 +124,6 @@ def test_termination_survives_failed_message_retry(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """Once fallback terminate succeeds, a second chat failure is non-fatal."""
     real_insert = termination.insert_termination_pair
 
     def _fail_pair(
@@ -174,7 +170,6 @@ def test_force_termination_retries_command_before_message(
     running_agent_id: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Force termination uses the same rollback and termination-first fallback."""
     real_insert = termination.insert_termination_pair
     failed_pair = False
 
@@ -235,7 +230,6 @@ def _terminate_payloads(db_conn: psycopg.Connection, agent_id: int) -> list[obje
 
 
 async def _until_blocked_or_done(task: asyncio.Task[object], holder_pid: int) -> None:
-    """Return once `task` finished or some backend waits on `holder_pid`'s lock."""
     deadline = asyncio.get_running_loop().time() + 10
     while not task.done():
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as probe:
@@ -251,13 +245,6 @@ async def _until_blocked_or_done(task: asyncio.Task[object], holder_pid: int) ->
 
 
 class TestKillAllShellSessions:
-    """`kill_all_shell_sessions` on terminate / kill
-    (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md): a graceful
-    terminate of a live agent records the request on its terminate command and
-    kills nothing yet; a force terminate, or an agent that is already
-    terminated, has its sessions killed before the response, which reports
-    them. Without the option nothing is recorded and nothing is killed."""
-
     @pytest.fixture
     def kills(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
         from ops import lifecycle
@@ -302,7 +289,7 @@ class TestKillAllShellSessions:
         assert resp.shell_sessions == ShellSessionsKill(
             when=ShellSessionKillTiming.AT_EXIT, killed=[]
         )
-        assert kills == []  # the last step still runs; its sessions stay up until exit
+        assert kills == []
         assert _terminate_payloads(db_conn, running_agent_id) == [{"kill_all_shell_sessions": True}]
         events = list(emitted_events)
         assert [event.attributes for event in events] == [
@@ -376,9 +363,6 @@ class TestKillAllShellSessions:
         database: Database,
         event_bus: EventBus,
     ) -> None:
-        """A force fence supersedes an unapplied graceful terminate, its kill
-        request included — a force kills sessions only when asked itself (the
-        watchdog's recovery force, for one, is followed by a resurrect)."""
         from ops import lifecycle
 
         await lifecycle.terminate_agent_op(
@@ -404,8 +388,6 @@ class TestKillAllShellSessions:
         database: Database,
         event_bus: EventBus,
     ) -> None:
-        """The already-terminated form: no termination left to apply, the
-        sessions are still killed and reported."""
         from ops import lifecycle
         from ops.rpc_schemas.terminate import ShellSessionsKill
 
@@ -443,9 +425,6 @@ class TestKillAllShellSessions:
         database: Database,
         event_bus: EventBus,
     ) -> None:
-        """The agent dies between the status read and the locked enqueue: the
-        request is not queued onto a dead row no apply will read — its sessions
-        are killed at once instead."""
         from base.api_contracts.agent_contract import AgentStatus
         from ops import lifecycle
 
@@ -482,10 +461,6 @@ class TestKillAllShellSessions:
         database: Database,
         event_bus: EventBus,
     ) -> None:
-        """The kill-requesting enqueue reads the status under the agent row
-        lock. The home runtime's apply holds that lock while it commits the
-        death, so the enqueue waits for it, sees `terminated`, and kills the
-        sessions now — never an `at_exit` request no apply will ever read."""
         from ops import lifecycle
         from ops.rpc_schemas.terminate import ShellSessionsKill
 
@@ -527,8 +502,6 @@ class TestKillAllShellSessions:
         database: Database,
         event_bus: EventBus,
     ) -> None:
-        """The termination is durable before the kill; a failed kill surfaces
-        to the caller, whose repeat request retries the kill."""
         from ops import lifecycle
 
         def _fail(_aid: int, *, before_session_index: int) -> list[int]:
@@ -553,9 +526,6 @@ class TestKillAllShellSessions:
         ).fetchone() == ("terminated",)
 
 
-# A watcher-shaped job whose normal exit path messages its owner: SIGTERM,
-# SIGHUP and an ordinary end all leave the marker (the stand-in for the trailing
-# `ava agents send ... --source watcher:N`). Only a hard kill leaves none.
 _NOTICE_ON_EXIT_JOB = """\
 import pathlib, signal, sys, time
 marker = pathlib.Path(sys.argv[1])
@@ -583,11 +553,6 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """End to end on real PTY sessions held by a real pty-sessions service:
-    `kill --kill-all-shell-sessions` kills the owner's shells and its
-    watcher-shaped running job without letting the job's exit path send its
-    notice, and leaves the owner's `ava.ui.serve` page session and another
-    agent's session running."""
     import shlex
 
     from base.cluster import session_name
@@ -629,7 +594,6 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         shells[name] = pty_reaper.track_session(name).pid
     job_pid = _wait_child(shells[watcher])
     pty_reaper.track(psutil.Process(job_pid))
-    # These explicit service creations model allocated shell IDs 0, 1 and page 2.
     db_conn.execute("UPDATE agents_meta SET session_index=3 WHERE id=%s", (running_agent_id,))
     db_conn.commit()
 
@@ -647,12 +611,10 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     assert not _pid_alive(job_pid)
     assert _pid_alive(shells[page]) and _pid_alive(shells[foreign])
     assert _pid_alive(shells[replacement])
-    # An owner-level kill is silent: the killed job's exit path never ran.
     assert not marker.exists()
 
 
 def _wait_child(pid: int, timeout: float = 15.0) -> int:
-    """The first live child of `pid` once the shell has started its job."""
     import time
 
     import psutil
@@ -667,7 +629,6 @@ def _wait_child(pid: int, timeout: float = 15.0) -> int:
 
 
 def _pid_alive(pid: int, timeout: float = 5.0) -> bool:
-    """True while the process lives (a zombie counts as gone), within `timeout`."""
     import time
 
     import psutil
