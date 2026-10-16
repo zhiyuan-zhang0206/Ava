@@ -49,14 +49,24 @@ class Views:
             single_segment_history(messages), units, MessageUsage(messages), read
         )
 
-    def get(self, _db: object, _agent: int) -> HistoryView:
-        return self.built
+    def get(self, _agent: int, _snapshot: str | None = None):
+        return SimpleNamespace(count=len(self.built.history.messages))
+
+    def span(self, _cut: object, _start: int, _end: int):
+        return [
+            (
+                SimpleNamespace(
+                    message_start=0, message_end=len(self.built.history.messages), offset=0
+                ),
+                self.built,
+            )
+        ]
 
 
 def request(messages: list[BaseMessage]) -> Request:
     state = SimpleNamespace(
         db=cast(Database, object()),
-        run_timeline_views=Views(messages),
+        run_timeline_reader=Views(messages),
         timeline_inputs=_TIMELINE_INPUTS,
         config=InsightsConfig(run_timeline_message_text_max=20),
     )
@@ -143,7 +153,7 @@ def test_a_message_without_a_read_time_has_no_timestamp() -> None:
 
 def test_a_message_carries_the_tokens_it_occupies_and_whether_they_are_estimated() -> None:
     req = request(history(3))
-    views = cast(Views, req.app.state.run_timeline_views)
+    views = cast(Views, req.app.state.run_timeline_reader)
     views.built = replace(
         views.built,
         tokens=[

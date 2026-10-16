@@ -9,11 +9,11 @@ tags:
 # Insights service — read models over agent history
 
 ## What is it
-A gateway-side daemon (`ServiceSpec.capabilities=GATEWAY`; no port and no fixed-table slot) that serves the read models derived from agents' checkpoints and audit record. Rebuilding an agent's stitched history is seconds of CPU on a cold read, so it lives in a process of its own: it never competes with the gateway's event loop, thread pool or GIL, and stopping it never touches the gateway.
+A gateway-side daemon (`ServiceSpec.capabilities=GATEWAY`; no port and no fixed-table slot) that serves the read models derived from agents' checkpoints and audit record. Preparing retained history and deriving a live segment use CPU, so it lives in a process of its own: it never competes with the gateway's event loop, thread pool or GIL, and stopping it never touches the gateway.
 
 ## Shape
 - `daemon.py` — pidfile, the socket and the uvicorn server. Composition root: owns one `ConfigBoot` and passes its live clock/timestamp readers to the app. Its entry captures one `LoadedCommit`, shared by logging and `CodeVersion`. One `ProcessDbGate` admits both logging and service database handles, built from this configuration owner's current dial slice. Unknown capture stays unknown; pidfile, pool, socket and bounded shutdown ordering are unchanged.
-- `app.py` — `build_app(db, pool, config, *, home, catalog, timeline_inputs, default_model_reader)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `config`, `catalog`, `timeline_inputs`, `default_model_reader`, `run_timeline_views`). Its `/healthz` reports the same explicit `home` that `run` uses for the socket and pidfile. Mount new routers here.
+- `app.py` — `build_app(db, pool, config, *, home, catalog, timeline_inputs, default_model_reader)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `config`, `catalog`, `timeline_inputs`, `default_model_reader`, `run_timeline_reader`). Its `/healthz` reports the same explicit `home` that `run` uses for the socket and pidfile. Mount new routers here.
 - `config.py` — the settings slice (`InsightsConfig`).
 - `run_timeline/` — the per-agent reads behind the agent view, see [[run_timeline.ava.okf.md|run timeline reads]].
 
@@ -26,8 +26,20 @@ Typed routes are declared in both places: the service owns validation and the re
 A stopped or wedged service is 502 (socket unreachable) or 504 (no reply within 120 s) on the insights routes; no other gateway route is affected. The roster's identity probe (`services/supervision/healthchecks/insights.py`) asks `GET /healthz` over the socket for this service, this home and the pidfile's pid; a wedged event loop does not answer within 3 s and the root supervisor restarts the unit. On SIGTERM the process exits without waiting for a cold build in a worker thread.
 
 ## Entry Points
+The daemon uses `asyncio.Runner` so its signal path can drain async work without
+waiting for `shutdown_default_executor` to finish a cold-read thread. Repeated
+SIGTERM is ignored after interruption so it cannot abort that bounded drain.
+
 - `services/derived/insights/daemon.py` — `.venv/bin/python -m services.derived.insights.daemon`
 - Supervised through the roster's socket identity probe (`services/supervision/roster/__init__.py`).
 
 Run context model fallback uses the same process configuration owner through an
 explicit live default-model reader; it never reads another process settings facade.
+
+```ava-contract
+id = "insights-service-ownership"
+kind = "invariant"
+statement = "Insights binds an owner-only Unix socket, creates its socket directory, serves the public route paths, and reports the explicit service home and process identity. The caller owns database handles through app shutdown."
+code = ["services/derived/insights/app.py:<module>", "services/derived/insights/daemon.py:<module>"]
+tests = ["services/derived/insights/tests/test_insights_service.py::test_the_socket_is_owner_only_and_replaces_a_predecessors_leftover", "services/derived/insights/tests/test_insights_service.py::test_the_binder_creates_the_directory_of_its_socket", "services/derived/insights/tests/test_insights_service.py::test_healthz_names_the_service_home_and_process"]
+```

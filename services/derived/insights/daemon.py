@@ -1,21 +1,4 @@
-"""Insights service daemon — uvicorn over the read models, on a Unix socket.
-
-The run timeline rebuilds an agent's stitched history from its checkpoints on a cold
-read (seconds of CPU for a long-lived agent). That work lives in this process so it
-never competes with the gateway's event loop, thread pool or GIL. The service binds
-`base.paths.insights_socket(home)` (mode 0600) and serves no TCP port; the gateway proxies
-authenticated requests to it. Its `/healthz` answers on the same socket, so it needs no
-port slot; the supervisor probes it through `services.supervision.healthchecks.insights`.
-
-A stopped service leaves the gateway answering 502 on the insights routes and nothing
-else; the root supervisor restarts it through the roster's socket identity probe
-(`services/supervision/roster/__init__.py`). A cold build in a worker thread is never waited on at stop
-(`_hard_exit`).
-
-Usage:
-    .venv/bin/python -m services.derived.insights.daemon
-"""
-
+# ava:ref services/derived/insights/docs/insights.ava.okf.md#insights-service-ownership
 from __future__ import annotations
 
 import asyncio
@@ -52,26 +35,18 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.derived.insights.daemon")
 
 _MODULE = "services.derived.insights.daemon"
-# Short row lookups only (the agent's model and config for a context breakdown); history
-# and audit reads open their own connections through `Database`.
+
+
 _POOL_MAX_SIZE = 4
 
 
 def insights_config(*, config: ConfigBoot) -> InsightsConfig:
-    """The display slice from this daemon's configuration owner."""
     return InsightsConfig(
         run_timeline_message_text_max=config.view.display.run_timeline_message_text_max
     )
 
 
 def bind_socket(path: Path) -> socket.socket:
-    """A listening-ready Unix socket at `path`, readable and writable by the owner only.
-
-    Only the one daemon the pidfile admits reaches this, so a file already at `path` is a
-    predecessor's leftover and is replaced. The umask closes the window between bind and a
-    later chmod in which another local user could connect. The directory is created here: the
-    path helpers derive paths and create nothing, so the process that binds owns the directory.
-    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -87,7 +62,6 @@ def bind_socket(path: Path) -> socket.socket:
 
 
 async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database]) -> None:
-    """Start the daemon of `home`: pidfile -> database -> socket -> serve until stopped."""
     pidfile = insights_pidfile(home)
     if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
         _log.info("[insights] daemon already running (pidfile=%s), exiting", pidfile)
@@ -128,11 +102,10 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
 
 
 def main() -> None:
-    """Entry point: schema check -> log init -> serve -> bounded exit."""
     from base.deploy.schema.migrations import assert_schema_current
 
     image = LoadedCommit.capture()
-    # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
+
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)
@@ -159,15 +132,12 @@ def main() -> None:
     )
     install_graceful_shutdown("insights")
     code = 0
-    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that awaits
-    # `shutdown_default_executor`, joining the workers — and a cold history build is a
-    # multi-second worker that a stop signal must never wait on (see `_hard_exit`). On the
-    # signal path uvicorn re-raises the signal after its own graceful stop, landing here.
+
     runner = asyncio.Runner()
     try:
         runner.run(run(home=ava_home(), config=config, database=database))
     except KeyboardInterrupt:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         _log.info("[insights] interrupted, shutting down")
         failures = cancel_and_drain(runner)
         if failures:

@@ -1,9 +1,5 @@
 "use client";
 
-// The details of the selected node or message unit: one Details section (time, message span,
-// context, and for a node the agent's own usage and cost over the span), the node's summary
-// (Markdown), its place in the tree, and the messages it covers.
-
 import { FileText, GitBranch, Info, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -20,10 +16,8 @@ import { blockClass, firstLine } from "./model/timeline-model";
 
 const CHIP_SUMMARY_CHARS = 36;
 
-/** The unit kinds that are one part of an AIMessage's turn: the message as a whole holds the others. */
 const TURN_PART_KINDS: readonly RunTimelineUnit["kind"][] = ["thinking", "text", "call"];
 
-/** The agent's own calls over a span, priced from what each call recorded. */
 function UsageMetrics({ usage }: { usage: RunTimelineUsage }) {
   const t = useTranslations("runTimeline");
   return (
@@ -46,7 +40,6 @@ function UsageMetrics({ usage }: { usage: RunTimelineUsage }) {
   );
 }
 
-/** The LLM request an AIMessage was, shown on each of its turn blocks: what it sent and generated, priced from what the call recorded. */
 function RequestSection({ session, request }: { session: number; request: RunTimelineUsage }) {
   const t = useTranslations("runTimeline");
   return (
@@ -80,7 +73,7 @@ function Details({
   end: string;
   i0: number;
   i1: number;
-  /** What the span occupies in the context, when a request has read it. */
+
   tokens: number | null;
   estimated: boolean | null;
   source?: string | null;
@@ -110,7 +103,6 @@ function Details({
   );
 }
 
-/** A node as a button: choosing it selects that node. */
 function NodeChip({ node, onSelect }: { node: RunTimelineNode; onSelect: (id: string) => void }) {
   const t = useTranslations("runTimeline");
   return (
@@ -141,18 +133,21 @@ function Chips({ heading, nodes, onSelect }: { heading: string; nodes: RunTimeli
   );
 }
 
+// ava:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.ava.okf.md#selected-message-parts
 export function NodeDetail({
   agentId,
+  snapshot,
   node,
   ancestors = [],
   childNodes = [],
   onSelectNode = () => undefined,
 }: {
   agentId: number;
+  snapshot?: string;
   node: RunTimelineNode;
-  /** The node's loaded ancestors, nearest first. */
+
   ancestors?: RunTimelineNode[];
-  /** The loaded nodes one level down that this node groups. */
+
   childNodes?: RunTimelineNode[];
   onSelectNode?: (id: string) => void;
 }) {
@@ -174,20 +169,23 @@ export function NodeDetail({
       <Section icon={<FileText className="size-3" />} title={t("summaryHeading")}>
         <TimelineMarkdown content={node.summary} testId="run-timeline-summary" />
       </Section>
-      <TimelineMessages agentId={agentId} start={node.span_start} end={node.span_end} unitKind={null} />
+      <TimelineMessages agentId={agentId} snapshot={snapshot} start={node.span_start} end={node.span_end} unitKind={null} />
     </div>
   );
 }
 
+// ava:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.ava.okf.md#selected-message-parts
 export function UnitDetail({
   agentId,
+  snapshot,
   unit,
   parent = null,
   onSelectNode = () => undefined,
 }: {
   agentId: number;
+  snapshot?: string;
   unit: RunTimelineUnit;
-  /** The level-1 node that covers this block, when it is loaded. */
+
   parent?: RunTimelineNode | null;
   onSelectNode?: (id: string) => void;
 }) {
@@ -225,7 +223,7 @@ export function UnitDetail({
           {t("coveredByNone")}
         </p>
       )}
-      <TimelineMessages agentId={agentId} start={unit.i0} end={unit.i1} unitKind={unit.kind} partTokens={partTokens} />
+      <TimelineMessages agentId={agentId} snapshot={snapshot} start={unit.i0} end={unit.i1} unitKind={unit.kind} partTokens={partTokens} />
     </div>
   );
 }

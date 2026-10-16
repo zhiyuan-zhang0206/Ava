@@ -1,5 +1,3 @@
-"""The insights app and its socket: the routes it serves, and how the daemon binds them."""
-
 from __future__ import annotations
 
 import asyncio
@@ -20,10 +18,9 @@ import httpx
 import pytest
 import uvicorn
 from fastapi.testclient import TestClient
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from psycopg_pool import ConnectionPool
 
-from base.agents.history.checkpoint import FullHistory, single_segment_history
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -40,7 +37,8 @@ from services.derived.insights import daemon
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.daemon import bind_socket
-from services.derived.insights.run_timeline import history
+from services.derived.insights.run_timeline.tests.test_projection import World
+from services.derived.insights.run_timeline.tests.test_projection import world as world
 
 _CONFIG = InsightsConfig(run_timeline_message_text_max=20)
 _TIMELINE_INPUTS = TimelineReadInputs(
@@ -53,16 +51,20 @@ def _app(
     home: Path,
     model_catalog: ModelCatalog,
     timeline_inputs: TimelineReadInputs = _TIMELINE_INPUTS,
+    world: World | None = None,
 ) -> Any:
-    return build_app(
-        cast(Database, object()),
-        cast(ConnectionPool[Any], object()),
+    app = build_app(
+        world.db if world else cast(Database, object()),
+        world.pool if world else cast(ConnectionPool[Any], object()),
         _CONFIG,
         home=home,
         catalog=model_catalog,
         default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
         timeline_inputs=timeline_inputs,
     )
+    if world:
+        app.state.run_timeline_reader.read_segment = world.read_segment
+    return app
 
 
 def test_the_app_serves_the_run_timeline_routes_at_their_public_paths(
@@ -89,7 +91,7 @@ def test_a_route_validates_before_it_reads_anything(
     tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
     client = TestClient(_app(home=tmp_path, model_catalog=model_catalog))
-    # The state holds no database: only a request rejected at the boundary can answer.
+
     assert client.get("/api/agents/1/run-timeline/messages?start=3&end=1").status_code == 422
     assert client.get("/api/agents/1/run-timeline/messages?start=-1&end=1").status_code == 422
     assert client.get("/api/agents/1/nowhere").status_code == 404
@@ -97,7 +99,7 @@ def test_a_route_validates_before_it_reads_anything(
 
 @pytest.fixture
 def short_dir() -> Iterator[Path]:
-    # AF_UNIX paths are about 100 bytes at most; pytest's tmp_path can exceed that.
+
     with tempfile.TemporaryDirectory(dir="/tmp") as name:
         yield Path(name)
 
@@ -115,7 +117,6 @@ def test_the_socket_is_owner_only_and_replaces_a_predecessors_leftover(short_dir
 
 
 def test_the_binder_creates_the_directory_of_its_socket(short_dir: Path) -> None:
-    """The path helpers derive paths and create nothing: the process that binds owns the directory."""
     path = insights_socket(short_dir)
     assert not path.parent.exists()
     sock = bind_socket(path)
@@ -153,8 +154,6 @@ def test_the_app_answers_over_the_bound_socket(
 
 
 class RenderingPolicy:
-    """A live reader with an observable clock, independent of process configuration."""
-
     def __init__(self, *, enabled: bool) -> None:
         self.enabled = enabled
         self.reads = 0
@@ -177,38 +176,34 @@ class RenderingPolicy:
         )
 
 
-def _compact_history(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    loads: list[int] = []
-    messages: list[BaseMessage] = [
-        HumanMessage(
-            content="summary",
-            additional_kwargs={
-                "ava_msg_type": "compact_summary",
-                "ava_created_at": "2026-10-10T12:00:00+00:00",
-            },
-        )
-    ]
-
-    def load(_db: Database, agent_id: int) -> FullHistory:
-        loads.append(agent_id)
-        return single_segment_history(messages)
-
-    monkeypatch.setattr(history, "load_checkpoint_history_full", load)
-
-    def head(_db: Database, _agent: int) -> str:
-        return "head"
-
-    monkeypatch.setattr(history, "latest_checkpoint_id", head)
-    return loads
+def _compact_history(world: World) -> list[str]:
+    world.put(
+        [
+            HumanMessage(
+                content="summary",
+                additional_kwargs={
+                    "ava_msg_type": "compact_summary",
+                    "ava_created_at": "2026-10-10T12:00:00+00:00",
+                },
+            )
+        ],
+        sealed=False,
+        agent=9,
+    )
+    return world.loads
 
 
 def test_apps_keep_their_rendering_policy_and_cache_separate_and_live(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_catalog: ModelCatalog
+    world: World, tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    loads = _compact_history(monkeypatch)
+    loads = _compact_history(world)
     hidden, shown = RenderingPolicy(enabled=False), RenderingPolicy(enabled=True)
-    first = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=hidden.inputs)
-    second = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=shown.inputs)
+    first = _app(
+        home=tmp_path, model_catalog=model_catalog, timeline_inputs=hidden.inputs, world=world
+    )
+    second = _app(
+        home=tmp_path, model_catalog=model_catalog, timeline_inputs=shown.inputs, world=world
+    )
     assert first.state.timeline_inputs is hidden.inputs
     assert second.state.timeline_inputs is shown.inputs
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
@@ -219,28 +214,28 @@ def test_apps_keep_their_rendering_policy_and_cache_separate_and_live(
     assert TestClient(second).get(path).json()["messages"][0]["parts"][0]["text"] == (
         "Compact summary [2026-10-10 12:00:00]:\n\nsummary"
     )
-    # A cold view derives read times and units; the route renders a third time.
+
     assert (hidden.reads, hidden.clock_reads) == (3, 0)
     assert (shown.reads, shown.clock_reads) == (3, 3)
-    assert loads == [9, 9]
+    assert len(loads) == 2
 
     shown.enabled = False
     assert TestClient(second).get(path).json()["messages"][0]["parts"][0]["text"] == (
         "Compact summary:\n\nsummary"
     )
     assert (shown.reads, shown.clock_reads) == (4, 3)
-    assert loads == [9, 9]  # the raw rendering stays live while the view remains cached
+    assert len(loads) == 2
 
 
 def test_a_rendering_error_propagates_and_does_not_cache_a_failed_view(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_catalog: ModelCatalog
+    world: World, tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    loads = _compact_history(monkeypatch)
+    loads = _compact_history(world)
     policy = RenderingPolicy(enabled=False)
     failure = ValueError("invalid rendering policy")
     policy.error = failure
     client = TestClient(
-        _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=policy.inputs)
+        _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=policy.inputs, world=world)
     )
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
     with pytest.raises(ValueError) as caught:
@@ -249,17 +244,16 @@ def test_a_rendering_error_propagates_and_does_not_cache_a_failed_view(
 
     policy.error = None
     assert client.get(path).status_code == 200
-    assert loads == [9, 9]
+    assert len(loads) == 2
     policy.error = failure
     with pytest.raises(ValueError) as caught:
-        client.get(path)  # the cache hit still renders through the same live reader
+        client.get(path)
     assert caught.value is failure
-    assert loads == [9, 9]
+    assert len(loads) == 2
 
 
 @pytest.fixture
 def owned_config_environment() -> Iterator[None]:
-    """Restore environment delivery and the process timezone after a real ConfigBoot."""
     try:
         with patch.dict(os.environ):
             yield

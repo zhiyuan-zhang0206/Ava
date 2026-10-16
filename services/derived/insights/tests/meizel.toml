@@ -15,5 +15,3 @@
 "test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.install_graceful_shutdown" = 1
 "test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.run" = 1
 "test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.uvicorn.Server" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.run_timeline.history.latest_checkpoint_id" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.run_timeline.history.load_checkpoint_history_full" = 1

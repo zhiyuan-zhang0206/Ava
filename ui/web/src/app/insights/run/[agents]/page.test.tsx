@@ -1,3 +1,4 @@
+import type * as ApiModule from "@/lib/transport/api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,7 +44,8 @@ const {
 
 vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
-vi.mock("@/lib/transport/api", () => ({
+vi.mock("@/lib/transport/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof ApiModule>()),
   api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown },
 }));
 
@@ -67,6 +69,7 @@ const usage = { calls: 3, input: 3000, cache_read: 2400, output: 120, cache_writ
 
 const lifetimeResponse: RunTimelineResponse = {
   agent_id: 42,
+  units_omitted: 0,
   window: LIFETIME,
   lifetime: LIFETIME,
   nodes: [
@@ -148,7 +151,7 @@ const lifetimeResponse: RunTimelineResponse = {
       context_total: 1350,
       request: null,
     },
-    // The AIMessage 2 was an LLM request; so was 7, in the second session (after a compaction).
+
     {
       kind: "text",
       i0: 2,
@@ -215,7 +218,6 @@ const cbdFixture: ContextBreakdownResponse = {
   categories: [{ kind: "system_prompt", tokens: 400, estimated: false, exact_fraction: 1 }],
 };
 
-/** Renders the page with the Context size row switched on (it is off by default); `contextSize: false` leaves the default. */
 function render({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = rtlRender(
@@ -227,7 +229,6 @@ function render({ contextSize = true }: { contextSize?: boolean } = {}) {
   return view;
 }
 
-/** An item of a canvas row, found by what it is; the rows draw no element per item. */
 interface Item {
   row: string;
   key: string;
@@ -248,7 +249,7 @@ const xOf = (item: Item) => itemX(lifetimeResponse, item.row, item.key);
 const clickItem = (item: Item) => clickAt(item.row, xOf(item));
 const hoverItem = (item: Item) => pointAt(item.row, xOf(item));
 const leaveItem = (item: Item) => leave(item.row);
-/** How an item looks after the next frame: its state ring and whether a highlight faded it. */
+
 const lookOf = async (item: Item) => {
   await paintFrame();
   return look(item.row, xOf(item));
@@ -299,9 +300,9 @@ afterEach(() => {
 });
 
 describe("the default window", () => {
-  it("asks for the agent's whole lifetime: no from/to", async () => {
+  it("asks for the latest day with bounded message detail", async () => {
     render();
-    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(42, { signal: expect.any(AbortSignal) as AbortSignal }));
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(42, { recentHours: 24, maxUnits: 5000, signal: expect.any(AbortSignal) as AbortSignal }));
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 
@@ -319,7 +320,7 @@ describe("the default window", () => {
       "run-timeline-row-user",
       "run-timeline-row-other",
     ]);
-    // The rows are canvases: one per row, no element per node or block.
+
     expect(screen.queryAllByTestId("run-timeline-node")).toHaveLength(0);
     await paintFrame();
     expect(screen.getByTestId("run-timeline-canvas-level-1")).toBeTruthy();
@@ -371,14 +372,14 @@ describe("selecting", () => {
       "The agent read the repo\nand planned the change.",
     );
     expect(detail.textContent).toContain("5 messages");
-    // One Details section holds the span's facts and the agent's own usage; the summary's generation cost is not shown.
+
     const facts = within(detail).getByTestId("run-timeline-details");
     expect(facts.textContent).toContain("Time");
     expect(facts.textContent).toContain("Calls");
     expect(detail.textContent).not.toContain("Agent cost over this span");
     expect(detail.textContent).not.toContain("Cost of generating this summary");
     expect(detail.textContent).not.toContain("of input from cache");
-    // the agent's own cost: 3 calls, 3.0k input, 2.4k cache read
+
     expect(within(detail).getAllByText("3.0k").length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("2.4k").length).toBeGreaterThan(0);
   });
@@ -429,17 +430,18 @@ describe("selecting", () => {
       }),
     );
     expect(await within(detail).findByText("on it")).toBeTruthy();
-    // The unit's tokens are its part's share, not the whole message's.
+
     expect(within(detail).getAllByTestId("run-timeline-message-tokens")).toHaveLength(1);
     expect(within(detail).queryByText("need a plan")).toBeNull();
     expect(within(detail).queryByText("ls")).toBeNull();
   });
 });
 
+// ava:ref ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.ava.okf.md#row-gesture-and-navigation
 function wheel(target: Element, init: WheelEventInit, count = 1) {
   act(() => {
    for (let i = 0; i < count; i++) {
-    // jsdom's WheelEvent drops the pointer coordinates; a MouseEvent carries them.
+
     const event = new MouseEvent("wheel", { bubbles: true, cancelable: true, clientX: init.clientX });
     Object.defineProperties(event, {
       deltaX: { value: init.deltaX ?? 0 },
@@ -483,7 +485,7 @@ describe("zoom and pan", () => {
     wheel(chart, { deltaY: -400, clientX: 100 });
     const zoomed = summaryText();
     expect(zoomed).not.toBe(whole);
-    // cursor at the left edge: the start stays, so the view starts where the lifetime did
+
     expect(zoomed.split(" – ")[0]).toBe(whole.split(" – ")[0]);
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
@@ -511,9 +513,10 @@ describe("zoom and pan", () => {
   it("a drag pans and its release does not select the block under the pointer", async () => {
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
+    chart.setPointerCapture = vi.fn();
     wheel(chart, { deltaY: -600, clientX: 100 });
     const zoomed = summaryText();
-    // The block at the left edge of the view (the rects are mocked at left 100).
+
     const unit = screen.getByTestId("run-timeline-canvas-units");
     fireEvent.pointerDown(unit, { clientX: 400, button: 0, pointerId: 1 });
     fireEvent.pointerMove(unit, { clientX: 200, pointerId: 1 });
@@ -529,7 +532,7 @@ describe("zoom and pan", () => {
     const unit = screen.getByTestId("run-timeline-canvas-units");
     fireEvent.pointerDown(unit, { clientX: 400, button: 0, pointerId: 1 });
     fireEvent.pointerUp(unit, { clientX: 401, pointerId: 1 });
-    // The canvas rects are mocked at left 100.
+
     clickAt(human.row, xOf(human) + 100);
     expect(await screen.findByTestId("run-timeline-unit-detail")).toBeTruthy();
   });
@@ -699,7 +702,7 @@ describe("legend highlight", () => {
     fireEvent.click(screen.getByTestId("run-timeline-legend-human"));
     wheel(chart, { deltaY: -400, clientX: 100 });
     await paintFrame();
-    // Zoomed at the left edge, the view starts where it did: the first block is still at x 0.
+
     const [inbound, text] = [await unitOf("inbound"), await unitOf("text")];
     const probe = screen.getByTestId("run-timeline-canvas-units");
     expect(probe).toBeTruthy();
@@ -711,7 +714,7 @@ describe("legend highlight", () => {
     render();
     const row = await screen.findByTestId("context-breakdown-category-user_input");
     expect(row.getAttribute("aria-pressed")).toBe("false");
-    // A category with no blocks on the timeline is not a button.
+
     expect(screen.queryByTestId("context-breakdown-category-system_prompt")).toBeNull();
     fireEvent.click(row);
     expect(screen.getByTestId("run-timeline-legend-human").getAttribute("aria-pressed")).toBe("true");
@@ -758,7 +761,7 @@ describe("legend highlight", () => {
 
 describe("hover", () => {
   const readout = () => screen.getByTestId("run-timeline-readout").textContent;
-  // A hover is lit softly: the 1 px ring (the hovered item itself is the stronger of the two).
+
   const ringAfter = async (item: Item) => ringOf(item);
 
   it("reads a block's kind, message span, read time, source and preview, and restores on leave", async () => {
@@ -801,7 +804,7 @@ describe("hover", () => {
     expect(await ringAfter(await nodeOf("3"))).toBe("hover");
     expect(await ringAfter(await unitOf("inbound"))).toBe("hover");
     expect(await ringAfter(await unitOf("text"))).toBe("hover");
-    // node 2 is a sibling: no block of it is covered
+
     expect(await ringAfter(await nodeOf("2"))).toBe("none");
   });
 
@@ -877,7 +880,7 @@ describe("context breakdown follows the point", () => {
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 7));
-    // Zooming at the left edge leaves only the first request (12:05) in view.
+
     wheel(chart, { deltaY: -600, clientX: 100 });
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenLastCalledWith(42, 2));
     vi.restoreAllMocks();
@@ -905,7 +908,7 @@ describe("context size row", () => {
     const second = barAt("uthinking-7-7");
     expect(second?.h ?? 0).toBeGreaterThan(0);
     expect((second?.h ?? 0) / (first?.h ?? 1)).toBeCloseTo(420 / 1050);
-    // Session 0 is blue, session 1 amber.
+
     expect(first?.color).toContain("#3b82f6");
     expect(second?.color).toContain("#f59e0b");
     pointAt("input", xOf(key("uthinking-7-7")));
@@ -929,7 +932,7 @@ describe("context size row", () => {
     const request = await screen.findByTestId("run-timeline-request");
     expect(request.textContent).toContain("1.0k");
     expect(request.textContent).toContain("$0.0021");
-    // A block that was no request has no such section.
+
     clickAt("input", xOf({ row: "input", key: "uinbound-1-1" }));
     await waitFor(() => expect(screen.queryByTestId("run-timeline-request")).toBeNull());
   });

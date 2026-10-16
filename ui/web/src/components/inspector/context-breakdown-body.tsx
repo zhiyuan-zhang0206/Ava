@@ -16,16 +16,12 @@ import { FLEX, FLEX_1, FLEX_COL } from "@/lib/layout/layout";
 
 import { SectionRows } from "./context-sections";
 
-// API kind → message key (contextBreakdown.categories.*). An unknown kind
-// keeps its raw name at render — fail-visible (the P4-5 review condition).
 const CATEGORY_MESSAGE_KEY: Record<string, string> = {
   system_prompt: "categories.system_prompt",
   compact_summary: "categories.compact_summary",
   cluster_memory: "categories.cluster_memory",
   agent_memory: "categories.agent_memory",
-  // context_note (system-note markers) + automation (machine/framework wakeups)
-  // merge into one display row "System notes" (user ruling 2026-08-04) — the API
-  // keeps the two kinds; only the legend merges them.
+
   system_notes: "categories.system_notes",
   user_input: "categories.user_input",
   agent_messages: "categories.agent_messages",
@@ -36,48 +32,42 @@ const CATEGORY_MESSAGE_KEY: Record<string, string> = {
   tool_response: "categories.tool_response",
 };
 
-/** Lets the categories that stand for a kind of timeline block be clicked to highlight it there. */
 export interface CategoryHighlight {
-  /** The category whose blocks are highlighted now, if any. */
+
   active: string | null;
-  /** Whether the category has blocks on the timeline (a row without them is not a button). */
+
   has: (category: string) => boolean;
   onToggle: (category: string) => void;
 }
 
-/** The HTTP status of a gateway answer (an `ApiError`), null for any other error. */
 function httpStatus(error: unknown): number | null {
   const status = error instanceof Error ? (error as { status?: unknown }).status : undefined;
   return typeof status === "number" ? status : null;
 }
 
-/** The breakdown as a standalone card — the composer panel's body rendered
- * inline (run page, task #4023 P4-3), chart-side above the timeline. Demo
- * parity: the pilot-w1 card caps at 520px (`#cbd` in its stylesheet).
- *
- * Without `at` it shows the agent's current context. With `at` (the run timeline's point: a
- * message index, null while the agent has made no request) it shows what the LLM request at or
- * after that message held, titled with its session and time. */
+// ava:ref ui/web/src/docs/frontend-components/context-breakdown.ava.okf.md#context-point-and-failure
 export function ContextBreakdownCard({
   agentId,
   at,
+  snapshot,
   categoryHighlight,
 }: {
   agentId: number;
   at?: number | null;
+  snapshot?: string;
   categoryHighlight?: CategoryHighlight;
 }) {
   const t = useTranslations("contextBreakdown");
   const pointed = at !== undefined;
   const point = useQuery({
-    queryKey: ["run-timeline-context", agentId, at] as const,
-    queryFn: () => api.getRunTimelineContext(agentId, at ?? 0),
+    queryKey: ["run-timeline-context", agentId, at, snapshot] as const,
+    queryFn: () => snapshot === undefined ? api.getRunTimelineContext(agentId, at ?? 0) : api.getRunTimelineContext(agentId, at ?? 0, snapshot),
     enabled: pointed && at !== null,
     staleTime: 10_000,
-    // Panning moves the point often: the card keeps the last one's numbers until the next arrives.
+
     placeholderData: keepPreviousData,
   });
-  // The gateway answers 404 when the agent has made no LLM request: that is an empty point, not a failure.
+
   const noRequest = httpStatus(point.error) === 404;
   const title = point.data
     ? t("pointTitle", {
@@ -111,12 +101,7 @@ export function ContextBreakdownCard({
   );
 }
 
-/** The breakdown itself, fetched lazily per agent. Shared by the composer's
- * anchored panel (`ContextButton`) and the run page's card
- * (`ContextBreakdownCard`). Thresholds are read from the response — the
- * endpoint mirrors the token-usage values (`resolve_context_budget`), so the
- * body carries no live meter props; the collapsed `ContextMeter` keeps its
- * own live values. */
+// ava:ref ui/web/src/docs/frontend-components/context-breakdown.ava.okf.md#context-point-and-failure
 export function ContextBreakdownBody({
   agentId,
   categoryHighlight,
@@ -128,13 +113,13 @@ export function ContextBreakdownBody({
     queryKey: ["context-breakdown", agentId] as const,
     queryFn: () => api.getContextBreakdown(agentId),
     staleTime: 10_000,
-    // This body mounts when the breakdown popover opens — pull fresh on every
-    // open instead of showing a cached snapshot until the staleTime lapses.
+
     refetchOnMount: "always",
   });
   return <BreakdownQuery query={query} categoryHighlight={categoryHighlight} />;
 }
 
+// ava:ref ui/web/src/docs/frontend-components/context-breakdown.ava.okf.md#context-point-and-failure
 function BreakdownQuery({
   query,
   categoryHighlight,
@@ -153,12 +138,9 @@ function BreakdownQuery({
     );
   }
   if (isError) {
-    // The failure renders inside the panel (no toast, no dialog), with the
-    // actual error so a broken endpoint is diagnosable from the UI. api.ts
-    // prefixes every non-OK response with "HTTP <status>: …", which separates
-    // a server-side failure from never reaching the gateway at all.
+
     const message = errMsg(error);
-    // An ApiError is a gateway answer whatever its message (a JSON `detail` replaces the "HTTP <status>" prefix).
+
     const isHttp = httpStatus(error) !== null || message.startsWith("HTTP ");
     return (
       <div className={cn("items-start gap-2", FLEX, FLEX_COL)}>
@@ -181,6 +163,7 @@ function BreakdownQuery({
   return <BreakdownContent data={data} categoryHighlight={categoryHighlight} />;
 }
 
+// ava:ref ui/web/src/docs/frontend-components/context-breakdown.ava.okf.md#context-category-display
 function BreakdownContent({
   data,
   categoryHighlight,
@@ -189,20 +172,13 @@ function BreakdownContent({
   categoryHighlight?: CategoryHighlight;
 }) {
   const t = useTranslations("contextBreakdown");
-  // The anchor the percentages are relative to: the real/anchored input total
-  // (0 while no LLM request has run).
+
   const total = data.total_input_tokens;
   const categoryName = (kind: string) => {
     const messageKey = CATEGORY_MESSAGE_KEY[kind];
     return messageKey ? t(messageKey as Parameters<typeof t>[0]) : kind;
   };
-  // The legend's display rows. `context_note` (system-note markers) and
-  // `automation` (machine/framework wakeup messages) merge into one "System
-  // notes" row (user ruling 2026-08-04 — both are system-injected content and
-  // would otherwise render as two identically-named rows); the API keeps the
-  // two kinds, only the legend merges them. The merged row participates in the
-  // share sort like any other — descending, stable, so equal shares keep the
-  // backend's canonical CATEGORY_ORDER.
+
   const categories: { key: string; tokens: number; estimated: boolean }[] = [];
   let systemNotesTokens = 0;
   let systemNotesEstimated = false;
@@ -218,15 +194,11 @@ function BreakdownContent({
     categories.push({ key: "system_notes", tokens: systemNotesTokens, estimated: systemNotesEstimated });
   }
   categories.sort((a, b) => b.tokens - a.tokens);
-  // Thresholds come from the response itself (the endpoint mirrors the
-  // token-usage values) — see ContextBreakdownResponse's field docs.
+
   const hasThresholds = data.max_input_tokens > 0 && data.hard_compact_tokens > 0;
-  // The whole section block is collapsible like a single section row — chevron
-  // disclosure, collapsed by default so a tall breakdown stays compact.
+
   const [sectionsOpen, setSectionsOpen] = useState(false);
 
-  // The endpoint's tolerated empty shape (no checkpoint yet / checkpoint read
-  // failure): explicit no-data copy instead of a bare "0 tokens" readout.
   if (total <= 0 && data.categories.length === 0) {
     return (
       <p data-testid="context-breakdown-empty" className="text-muted-foreground text-xs">
@@ -237,7 +209,7 @@ function BreakdownContent({
 
   return (
     <div className={cn("gap-2.5", FLEX, FLEX_COL)}>
-      {/* Occupancy summary */}
+
       <p className="text-muted-foreground text-xs tabular-nums" data-testid="context-breakdown-total">
         <span className="block">
           {approx(data.estimated)}
@@ -255,7 +227,6 @@ function BreakdownContent({
         ) : null}
       </p>
 
-      {/* Category legend. */}
       <ul className={cn("gap-1", FLEX, FLEX_COL)} data-testid="context-breakdown-categories">
         {categories.map((c) => {
           const row = (
@@ -299,14 +270,9 @@ function BreakdownContent({
         })}
       </ul>
 
-      {/* System-prompt sections — a recursive tree: any section over the
-          gateway's split threshold carries `children`, collapsed by default and
-          drilled in on click. */}
       {data.sections.length > 0 ? (
         <div className="border-t border-border pt-2">
-          {/* The section block's own disclosure — the same chevron button as a
-              section row's, collapsed by default (the rows below only render
-              once expanded). */}
+
           <div className={cn("mb-1 items-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground", FLEX)}>
             <button
               type="button"

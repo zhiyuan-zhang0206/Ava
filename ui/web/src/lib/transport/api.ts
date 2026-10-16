@@ -92,12 +92,18 @@ export { API_BASE } from "./api-base";
 export class ApiError extends Error {
   status: number;
   agentId?: number;
+  code?: string;
   launchState?: { status: string; availability?: { reason: string; evidence_at?: string | null } | null };
   retryLaunchPath?: string;
   constructor(status: number, message: string, body?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    const detail = body?.detail;
+    if (detail && typeof detail === "object" && "code" in detail && typeof detail.code === "string") {
+      this.code = detail.code;
+      if ("message" in detail && typeof detail.message === "string") this.message = detail.message;
+    }
     if (body?.reason === "agent_launch_failed" && typeof body.agent_id === "number") {
       this.agentId = body.agent_id;
       if (typeof body.retry_launch_path === "string") this.retryLaunchPath = body.retry_launch_path;
@@ -276,11 +282,14 @@ export const api = {
 
   getRunTimeline: (
     agentId: number,
-    options?: { from?: string; to?: string; signal?: AbortSignal },
+    options?: { from?: string; to?: string; recentHours?: number; maxUnits?: number; snapshot?: string; signal?: AbortSignal },
   ): Promise<RunTimelineResponse> => {
     const params = new URLSearchParams();
     if (options?.from != null) params.set("from", options.from);
     if (options?.to != null) params.set("to", options.to);
+    if (options?.recentHours != null) params.set("recent_hours", String(options.recentHours));
+    if (options?.maxUnits != null) params.set("max_units", String(options.maxUnits));
+    if (options?.snapshot != null) params.set("snapshot", options.snapshot);
     const query = params.toString();
     return jsonWithTimeout<RunTimelineResponse>(
       `/api/agents/${agentId}/run-timeline${query ? `?${query}` : ""}`,
@@ -306,17 +315,20 @@ export const api = {
     return f(`/api/insights/run-timeline/link-content?${params.toString()}`).then(ok<RunTimelineLinkContent>);
   },
 
-  getRunTimelineContext: (agentId: number, at: number): Promise<RunTimelineContext> => {
-    return f(`/api/agents/${agentId}/run-timeline/context?at=${at}`).then(ok<RunTimelineContext>);
+  getRunTimelineContext: (agentId: number, at: number, snapshot?: string): Promise<RunTimelineContext> => {
+    const params = new URLSearchParams({ at: String(at) });
+    if (snapshot !== undefined) params.set("snapshot", snapshot);
+    return f(`/api/agents/${agentId}/run-timeline/context?${params.toString()}`).then(ok<RunTimelineContext>);
   },
 
   getRunTimelineMessages: (
     agentId: number,
-    range: { start: number; end: number; limit?: number; full?: boolean },
+    range: { start: number; end: number; limit?: number; full?: boolean; snapshot?: string },
   ): Promise<RunTimelineMessages> => {
     const params = new URLSearchParams({ start: String(range.start), end: String(range.end) });
     if (range.limit != null) params.set("limit", String(range.limit));
     if (range.full) params.set("full", "true");
+    if (range.snapshot !== undefined) params.set("snapshot", range.snapshot);
     return f(`/api/agents/${agentId}/run-timeline/messages?${params.toString()}`).then(
       ok<RunTimelineMessages>,
     );
