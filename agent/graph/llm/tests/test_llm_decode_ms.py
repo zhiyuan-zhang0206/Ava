@@ -1,19 +1,3 @@
-"""W14 decode_ms instrumentation — decode-stage timing on the LLM stream path.
-
-The ops panel "\u751f\u6210 stage \u8f93\u51fa TPS" (Σout_total/Σdecode_ms) needs an honest
-decode window: first chunk arrival → last chunk arrival (monotonic ms),
-measured in `consume_stream_with_stall_timeout` and stamped by
-`stream_llm` onto the handler as `llm_decode_ms`. Non-streaming
-fallback calls and empty streams must carry None → NULL in the payload — a
-fake window (e.g. wall-clock) would contaminate the generation-TPS panel.
-
-The fake clock is advanced by the mock stream itself right before each yield
-(never by scripted global counters): `asyncio.wait_for` reads `loop.time()`
-which is `time.monotonic()` under the hood, so a blind value script would
-make the assertions depend on CPython's wait_for internals. Setting the
-clock inside the stream keeps the recorded timestamps exact and stable.
-"""
-
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -32,8 +16,6 @@ from base.packages.plugin_providers import build_model_catalog
 
 
 class _FakeClock:
-    """Mutable monotonic stand-in; the stream advances `.t` before each yield."""
-
     def __init__(self, t: float = 1000.0) -> None:
         self.t = t
 
@@ -42,9 +24,6 @@ class _FakeClock:
 
 
 class _FakeHandler(RedisStreamHandler):
-    """Real RedisStreamHandler subclass with a no-op publisher: the decode/latency
-    stamps are the only state these tests assert on."""
-
     def __init__(self) -> None:
         super().__init__(
             event_publisher=MagicMock(), agent_id=1, msg_idx=0, turn_progress=TurnProgress()
@@ -63,8 +42,6 @@ class _FakeHandler(RedisStreamHandler):
 async def test_consume_stream_records_first_last_timestamps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The stream records (first, last) chunk-arrival timestamps; decode window
-    = last - first regardless of how the loop consumed the clock."""
     clock = _FakeClock()
     monkeypatch.setattr(llm_stream.time, "monotonic", clock)
 
@@ -91,11 +68,8 @@ async def test_consume_stream_records_first_last_timestamps(
 
 
 async def test_consume_stream_empty_stream_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Empty stream (StopAsyncIteration before any chunk) → (None, None): no
-    honest decode window, so the payload must carry NULL."""
-
     async def _empty() -> AsyncIterator[AIMessageChunk]:
-        if False:  # pragma: no cover — never yields
+        if False:
             yield AIMessageChunk(content="x")
 
     first_ts, last_ts = await consume_stream_with_stall_timeout(
@@ -109,8 +83,6 @@ async def test_consume_stream_empty_stream_returns_none(monkeypatch: pytest.Monk
 
 
 async def test_stream_llm_stamps_decode_ms(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Happy path: handler.llm_decode_ms = (last - first) * 1000, stamped
-    alongside llm_latency_ms after the successful attempt."""
     clock = _FakeClock()
     monkeypatch.setattr(llm_stream.time, "monotonic", clock)
 
@@ -135,20 +107,18 @@ async def test_stream_llm_stamps_decode_ms(monkeypatch: pytest.MonkeyPatch) -> N
         catalog=build_model_catalog(),
     )
 
-    assert handler.llm_decode_ms == 8000.0  # (1013 - 1005) * 1000
-    assert handler.llm_latency_ms == 13000.0  # (1013 - 1000) * 1000
+    assert handler.llm_decode_ms == 8000.0
+    assert handler.llm_latency_ms == 13000.0
     assert len(chunks) == 2
     assert "discarded partial" not in [chunk.content for chunk in chunks]
 
 
 async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No chunks at all → decode_ms stays None (latency still stamped)."""
-
     clock = _FakeClock()
     monkeypatch.setattr(llm_stream.time, "monotonic", clock)
 
     async def _empty() -> AsyncIterator[AIMessageChunk]:
-        if False:  # pragma: no cover — never yields
+        if False:
             yield AIMessageChunk(content="x")
 
     fake_llm = MagicMock()
@@ -165,7 +135,7 @@ async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> N
         catalog=build_model_catalog(),
     )
     assert handler.llm_decode_ms is None
-    assert handler.llm_latency_ms == 0.0  # (1000 - 1000) * 1000
+    assert handler.llm_latency_ms == 0.0
 
 
 async def test_stream_preserves_prefix_and_does_not_recover_cache_403() -> None:

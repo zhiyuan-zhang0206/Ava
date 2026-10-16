@@ -45,6 +45,13 @@ Ava agent's LLM invocation layer — containing tool schema definition (`agent/l
 
 ## Notes
 
+`tests/test_llm_decode_ms.py` advances its fake monotonic clock inside the stream
+immediately before each yield. A scripted sequence of clock returns would couple
+the assertions to event-loop timeout machinery that also reads that clock.
+The handler records the first-to-last chunk window as decode time, separately
+from request latency; an empty stream has no decode window. The handler's publisher
+is a mock, so these assertions do not prove event delivery or live provider speed.
+
 - State type hint uses `from __future__ import annotations` + module attribute references to avoid capturing `BaseAgentState` alias and losing plugin dynamic fields
 - The node retries trusted 429/transport/server failures under the per-model attempt cap and total wall-clock budget, with bounded backoff. Provider SDK construction keeps its existing finite retries. `llm_retry` records the final node retry duration. No retry re-enters the graph or repeats code execution.
 - Turn records, the failed-try protocol and per-turn persistence: [[turn-records.ava.okf.md]].

@@ -85,5 +85,13 @@ proves it are [[walg-restore.ava.okf.md|WAL-G restore and recovery drill]].
 - `cli/commands/cluster/health.py` — the probe hook, a check beside disk usage
 
 ## Notes
+
+`tests/test_check.py` and `tests/test_probe.py` use the sandbox's fake WAL-G and
+local store; selected cases launch real PostgreSQL, not a live OSS connection.
+The idle-archiver case shrinks the RPO objective and waits beyond it with no queued
+work; the hung-command case instead ages a pending segment. The admin-dial unit
+case verifies authority, data-directory and timeout forwarding through injected
+collaborators; it does not itself prove native socket custody.
+
 - Operator procedure (enable, disable, the daily tick, lifecycle rule, escrow): [WAL-G operations](operations.md). Why WAL-G and why launch arguments: [decision](../../../../docs/decisions/data/backup/2026-10-02-walg-physical-backup.md).
 - Gateway capability only; a remote-managed data plane is refused at converge.
