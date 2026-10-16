@@ -47,3 +47,4 @@ Ava agent's LLM invocation layer — containing tool schema definition (`agent/l
 
 - State type hint uses `from __future__ import annotations` + module attribute references to avoid capturing `BaseAgentState` alias and losing plugin dynamic fields
 - The node retries trusted 429/transport/server failures under the per-model attempt cap and total wall-clock budget, with bounded backoff. Provider SDK construction keeps its existing finite retries. `llm_retry` records the final node retry duration. No retry re-enters the graph or repeats code execution.
+- Turn records, the failed-try protocol and per-turn persistence: [[turn-records.ava.okf.md]].

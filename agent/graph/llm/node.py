@@ -1,42 +1,3 @@
-"""llm node: invokes the LLM to stream Python code generation + cancel handling.
-
-Normal path returns Command(goto="before_exec"); cancel path returns
-Command(update={..., halted: True}, goto="after_exec") — under cycling
-topology halted=True; after_exec routes back to claim to dispatch inbound
-(cancel does not exit the process).
-
-AIMessage text content (the agent's per-turn text output) takes two paths:
-- Real-time: RedisStreamHandler streams ChatStart/ChatDelta to the UI
-- Durable: AIMessage naturally lands in LangGraph state.messages; the timeline
-  endpoint pulls the final text from state on refetch — no separate table
-  persistence, avoiding dual-source timestamp drift.
-
-Dependencies injected via `runtime.context: AvaContext`; agent_id read from
-RunnableConfig (LangGraph checkpointer standard).
-
-Interrupt uses `subscribe_interrupt` RAII: on node entry it watches for a
-durable interrupt inbound (kind cancel/terminate) for this agent by polling
-`inbound_messages` on a short cadence (`_INTERRUPT_POLL_S` = 2s, `agent/graph/interrupt.py`),
-deliberately NOT sharing the claim node's Redis pub/sub listener — sharing it
-was the root cause of the 2026-08-02 lost-wake incident (agent 2476, 30.06s
-pickup). The watcher sets an asyncio.Event the moment one is queued; inside the
-node `asyncio.wait` races the streaming task vs `cancel_event.wait()`. On
-context exit the watcher is cancelled. A missed signal is not lost — it stays a
-pending row the claim node dispatches next pass.
-
-State type hint (`state: _state.AgentState`): static only; see `agent/graph/exec/node.py` — the
-graph build, not the annotation, decides which state class a node receives.
-Module layout (Task #1004 >800-line split): streaming consumption, the cancel
-race, chunk assembly + final-message validation, and the error taxonomy
-live in the sibling modules ``_stream.py`` /
-``_cancel.py`` / ``_chunk.py`` (all in this ``llm/`` package) plus the parent
-package's ``llm_errors.py``; this module keeps the node entry + turn dispatch
-(``llm_node``, ``_llm_node_impl``). The goto type both this module and ``_cancel``
-use lives in ``goto.py``. The immutable base
-system prompt + lazy SDK overview capture live in the parent package's
-``_base_prompt.py``, imported lazily by ``system_prompt.build_system_prompt``.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -89,7 +50,6 @@ def _log_llm_retry_duration(
     *,
     outcome: Literal["succeeded", "attempts_exhausted", "budget_exhausted"],
 ) -> None:
-    """Emit the final wall-clock duration for a retried LLM node."""
     if attempt.number < 2:
         return
     logger.info(
@@ -101,7 +61,6 @@ def _log_llm_retry_duration(
 
 
 def _raise_retry_budget_exhausted(attempt: int, *, read_lm: Callable[[str], Any]) -> NoReturn:
-    """End an LLM node before its expired retry budget permits another call."""
     raise LLMRetryBudgetExceededError(
         "LLM retry wall-clock budget "
         f"({read_lm('llm_retry_max_total_seconds'):.0f}s) exhausted before attempt {attempt}"
@@ -117,30 +76,10 @@ def _finalize_turn_observability(
     *,
     catalog: ModelCatalog,
 ) -> None:
-    """Post-stream metadata finalization for one completed AIMessage turn.
-
-    Three coupled side effects, all derived from the just-assembled final_msg:
-    - persist the per-block thinking wall-clock onto the message
-      (`ava_reasoning_ms_by_block`: {block_idx -> ms}) before it enters
-      state.messages, so a timeline reload renders each thinking block's
-      "thought for X seconds" from a real elapsed value. Keyed alongside
-      the other ava_* message tags; absent when no thinking streamed.
-      base/agents/history/timeline.py reads it back.
-    - log standardized token usage (`events.event_name='llm_usage'`).
-    - emit the live TokenUsage SSE event. usage_metadata is accurate only after
-      the stream completes (chunks carry only output_tokens increments;
-      input_tokens lands once in the final), and the frontend uses input_tokens
-      for the context-window gauge.
-    """
-    # Stamp the turn's real wall-clock onto the message so the timeline renders
-    # the agent's reply / reasoning / code at their actual time.
-    # base/agents/history/timeline.py reads it back.
     kw = read_ava_kwargs(final_msg)
     kw["ava_created_at"] = datetime.now(UTC).isoformat()
     reasoning_ms_by_block = handler.reasoning_ms_by_block
     if reasoning_ms_by_block:
-        # str keys: additional_kwargs is checkpoint-serialized, JSON object
-        # keys are strings; base/agents/history/timeline.py reads back with str(block_idx).
         kw["ava_reasoning_ms_by_block"] = {
             str(block_idx): ms for block_idx, ms in reasoning_ms_by_block.items()
         }
@@ -181,13 +120,6 @@ async def llm_node(
     *,
     ledger: LlmLedger,
 ) -> Command[LlmGoto]:
-    """Invoke the LLM, retrying a failed try on the schedule `_retry.retry_wait` decides.
-
-    `ledger` is the graph's `LlmLedger`: what the node remembers per agent between tries and turns.
-
-    The node retries itself rather than through a graph-level policy: the host's one graph
-    serves every agent, and only the node knows whose model and id the schedule is for.
-    """
     agent_id = agent_id_from_config(config)
     model = runtime.context.require_agent().brain.llm_model
     first_started_at = time.time()
@@ -232,7 +164,6 @@ def _enforce_retry_budget(attempt: Attempt, *, read_lm: Callable[[str], Any]) ->
 def _note_failed_attempt(
     exc: BaseException, attempt: Attempt, runtime: Runtime[AvaContext], agent_id: int
 ) -> None:
-    """Mark the settled attempt as progress and record the retry budget left on `exc`."""
     runtime.context.turn_progress.mark(agent_id)
     if isinstance(exc, Exception):
         remaining_seconds = (
@@ -252,11 +183,11 @@ def _note_failed_attempt(
             )
             if attempt.number >= max_attempts:
                 _log_llm_retry_duration(attempt, outcome="attempts_exhausted")
-        # `_retry.retry_wait` reads this attribute to clip the next wait to the budget.
-        with contextlib.suppress(AttributeError):  # an exception type that refuses new attributes
+        with contextlib.suppress(AttributeError):
             setattr(exc, RETRY_REMAINING_ATTR, remaining_seconds)
 
 
+# ava:ref agent/graph/llm/docs/turn-records.ava.okf.md#turn-end-owner
 async def llm_attempt(
     state: _state.AgentState,
     runtime: Runtime[AvaContext],
@@ -264,19 +195,11 @@ async def llm_attempt(
     attempt: Attempt,
     ledger: LlmLedger,
 ) -> Command[LlmGoto]:
-    """One try of the llm node: invoke LLM + streaming token publish + RAII cancel. See module
-    docstring for details.
-
-    `try / except / else` pattern (vs previous try/finally): finally under an async retry
-    boundary may have sys.exc_info() already handled by the retry runner, so it cannot get the
-    active exception → traceback in events.payload becomes "NoneType: None\\n" (167/168 latent
-    bug). Inside the except block, sys.exc_info() is 100% the currently raising exception;
-    `logger.opt(exception=True)` is required to actually capture traceback into the record.
-    """
     turn_start = time.monotonic()
     agent_id = agent_id_from_config(config)
     event_publisher = runtime.context.event_publisher
-    assert event_publisher is not None, "llm_node requires ctx.event_publisher"  # noqa: S101
+    if event_publisher is None:
+        raise RuntimeError("llm_node requires ctx.event_publisher")
     async with node_lifecycle(
         "llm",
         messages=state.messages,
@@ -301,37 +224,24 @@ async def llm_attempt(
             )
             result = await _llm_node_impl(state, runtime, config, ledger)
         except BaseException as exc:
-            # Report the failed attempt before returning to the bounded retry layer.
             _note_failed_attempt(exc, attempt, runtime, agent_id)
             logger.opt(exception=True).warning(
                 "turn ended in {duration_seconds:.2f}s ok=False — _llm_node_impl raised",
                 event="turn_end",
+                agent_id=agent_id,
                 duration_seconds=time.monotonic() - turn_start,
                 ok=False,
             )
-            # Do not publish Error here — this except runs on every failed attempt; sending the frontend N "errors" then
-            # succeeding on retry would contradict. The Error event is published
-            # once by outer `agent/turn/runloop.py:_invoke_graph_with_lifecycle_logging`
-            # after retries are exhausted (Cancelled is still published by
-            # _llm_node_impl itself).
             raise
         else:
             _log_llm_retry_duration(attempt, outcome="succeeded")
             logger.info(
                 "turn ended in {duration_seconds:.2f}s ok=True",
                 event="turn_end",
+                agent_id=agent_id,
                 duration_seconds=time.monotonic() - turn_start,
                 ok=True,
             )
-            # A successful LLM call is the circuit-healed signal: the provider
-            # accepted a request again, so whatever permanently rejected the
-            # last turn (overflow compacted away, balance topped up, key
-            # fixed) has cleared. Close the breaker so heartbeats resume
-            # routing normally. result is the fresh Command _llm_node_impl
-            # just built, so mutating its update dict is safe. The cancel
-            # path is the one success-shaped return that carries NO
-            # `messages` — no stream completed there (the partial generation
-            # was discarded), so it must not close the breaker.
             update = result.update
             if state.circuit.open and update is not None and "messages" in update:
                 update["circuit"] = CircuitState()
@@ -344,24 +254,17 @@ async def llm_attempt(
 
 
 def _is_silent_idle(final_msg: AIMessage) -> bool:
-    """Silent idle: model produced reasoning (thinking blocks / output tokens /
-    reasoning_content) but emitted no text and no tool_call — the agent appears
-    stuck at reasoning.
-
-    Truly empty (no reasoning at all) is NOT a silent idle — looping a
-    deterministic empty output only wastes API credits.
-    """
     if final_msg.tool_calls or final_msg.text:
         return False
-    output_tokens = (final_msg.usage_metadata or {}).get("output_tokens", 0)  # pyright: ignore[reportUnknownMemberType]
-    _content: Any = final_msg.content  # pyright: ignore[reportUnknownMemberType]
+    output_tokens = (final_msg.usage_metadata or {}).get("output_tokens", 0)
+    _content: Any = final_msg.content
     has_thinking_block = isinstance(_content, list) and any(
         isinstance(b, dict) and cast(dict[str, Any], b).get("type") == "thinking"
         for b in content_blocks(cast(list[Any], _content))
     )
     return (
         has_thinking_block
-        or bool(final_msg.additional_kwargs.get("reasoning_content"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        or bool(final_msg.additional_kwargs.get("reasoning_content"))
         or output_tokens > 0
     )
 
@@ -375,17 +278,6 @@ def _silent_idle_command(
     catalog: ModelCatalog,
     read_lm: Callable[[str], Any],
 ) -> Command[LlmGoto] | None:
-    """Continue-loop vs guard-halt decision for a silent-idle turn.
-
-    Keeps the reasoning in context and loops straight back to the LLM
-    (halted=False -> claim's multi-step continue path) so the ava_silent_idle
-    plugin can inject a Continue nudge before the next turn. The ledger's
-    output-token budget bounds a model that habitually reasons without acting:
-    each silent idle consumes at least one unit, even when its provider reports
-    zero output tokens. At the cap, halt to idle instead of spending another
-    model call. The budget resets on the first non-silent-idle turn (the caller
-    resets it). Returns None when the turn is not a silent idle.
-    """
     if not _is_silent_idle(final_msg):
         return None
     tid = str(agent_id)
@@ -439,29 +331,6 @@ def _silent_idle_command(
 
 
 async def persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> None:
-    """Persist two things every completed turn:
-    - last_active_at = now() ALWAYS: this is the agent's real-activity clock
-      the heartbeat daemon reads for idle timing. A completed LLM turn is the
-      definition of "the agent did real work" — including a tool-only turn with
-      no text. It is deliberately NOT written by the ops lifecycle (rollout
-      pause / restart / update), and for an idle agent that whole cycle
-      runs no LLM turn, so an ops restart cannot reset the idle clock.
-    - last_turn_fatal_at = NULL in the same statement: a completed turn is the
-      recovery signal that clears the corpse marker (the heartbeat circuit
-      breaker's "first successful LLM call closes the breaker" moment).
-    - permanent_reject_streak = 0 in the same statement: a completed turn is
-      also the recovery signal that closes the recovery circuit breaker
-      (`base/agents/recovery/breaker.py`) — the only reset, so two consecutive
-      permanent rejections with no success between them keep it >= the halt
-      threshold. `last_permanent_reject_reason` is cleared with it — the reason
-      class belongs to the streak generation.
-    - last_message_text = the AI text WHEN this turn produced any: it survives
-      compact (which replaces the whole checkpoint but not this column), read
-      back by get_last_message.
-    """
-    # A completed LLM step is turn progress regardless of the DB outcome
-    # below — the hosted stall clock must not age just because the persist
-    # write itself failed.
     ctx.turn_progress.mark(agent_id)
     if ctx.ops_pool is None:
         return
@@ -496,14 +365,13 @@ async def _llm_node_impl(
     config: RunnableConfig,
     ledger: LlmLedger,
 ) -> Command[LlmGoto]:
-    """Stream the LLM turn: race streaming vs cancel, assemble + validate the
-    final message, persist activity, then dispatch the post-stream command."""
     ctx = runtime.context
-    assert ctx.event_publisher is not None, (  # noqa: S101
-        "_llm_node_impl requires ctx.event_publisher"
-    )
-    assert ctx.llm is not None, "_llm_node_impl requires ctx.llm"  # noqa: S101
-    llm = ctx.llm  # narrowed local — the assert can't reach nested helpers
+    if ctx.event_publisher is None:
+        raise RuntimeError("_llm_node_impl requires ctx.event_publisher")
+    if ctx.llm is None:
+        raise RuntimeError("_llm_node_impl requires ctx.llm")
+    publisher = ctx.event_publisher
+    llm = ctx.llm
     agent_id = agent_id_from_config(config)
 
     compacted = await auto_compact_for_llm(state, runtime, config)
@@ -511,27 +379,13 @@ async def _llm_node_impl(
         goto = compacted.pop("goto")
         return Command[LlmGoto](update=compacted, goto=goto)
 
-    # Streaming forwarding (chat / reasoning / code) is isolated in
-    # RedisStreamHandler — process_chunk is called in the chunk loop; after
-    # stream completion, finish() publishes LLMDone (frontend timeline reload
-    # trigger). See _callbacks.py for details.
-    #
-    # msg_idx = `len(state.messages)` = position of this LLM-produced AIMessage
-    # (index after LangGraph add_messages reducer appends). Streaming event
-    # item_id uses this + block index, matching the id the gateway timeline
-    # endpoint computes for the same committed AIMessage, so the frontend
-    # merge directly uses stable key matching instead of ts heuristic.
     handler = RedisStreamHandler(
-        ctx.event_publisher,
+        publisher,
         agent_id,
         msg_idx=len(state.messages),
         turn_progress=ctx.turn_progress,
     )
 
-    # chunks is a list — cancel race path: streaming task and outer coroutine
-    # share the same list; on task cancel, whatever has been accumulated is
-    # what's in the list. AIMessageChunk addition merges content +
-    # usage_metadata; `message_chunk_to_message` converts to AIMessage.
     chunks: list[AIMessageChunk] = []
 
     cancelled_cmd = await race_stream_vs_cancel(
@@ -551,20 +405,15 @@ async def _llm_node_impl(
         return cancelled_cmd
 
     if not chunks:
-        # LLM returned empty — extremely rare; return empty code per historical
-        # behavior (exec_node will run exec(""))
         return Command[LlmGoto](update={"messages": [AIMessage(content="")]}, goto=BEFORE_EXEC)
     final_msg = assemble_final_message(chunks, catalog=ctx.require_catalog())
 
-    # Single-tool wire format: code is in tool_calls[0]["args"]["code"], not content.
-    # content is the model's text output (e.g. "OK, let me compute fib(10)"),
-    # printed separately from code
-    text = final_msg.text  # langchain-normalized text extraction (handles str + list-of-blocks)
+    text = final_msg.text
     if text:
         logger.info("[text] {body}", event="text", body=text)
     await persist_last_active(ctx, agent_id, text)
     _finalize_turn_observability(
-        ctx.event_publisher,
+        publisher,
         agent_id,
         final_msg,
         handler,
@@ -572,8 +421,6 @@ async def _llm_node_impl(
         catalog=ctx.require_catalog(),
     )
 
-    # Understanding chunk cut: an enqueue past the token threshold moves the
-    # segment's cut, carried on whichever command ends this turn.
     cut_update = await due_chunk_update(
         state.compact,
         list(state.messages),
@@ -597,21 +444,13 @@ async def _llm_node_impl(
     if silent_idle_cmd is not None:
         return Command[LlmGoto](
             update={**cast("dict[str, Any]", silent_idle_cmd.update), **cut_update},
-            goto=silent_idle_cmd.goto,  # pyright: ignore[reportArgumentType]
+            goto=silent_idle_cmd.goto,
         )
 
-    # Any non-silent-idle turn ends the streak — a single real action clears it.
     ledger.reset_silent_idle(str(agent_id))
 
     if not final_msg.tool_calls:
-        # No tool_call = stop turn — halted=True makes after_exec route back
-        # to claim to wait for the next inbound. Process stays alive.
         if not text:
-            # Truly empty: no tool_call, no text, AND no reasoning — the model
-            # produced nothing at all (no tokens spent). A reasoning-only turn
-            # took the silent_idle continue-loop above and never reaches here.
-            # Distinct WARNING so these turns are countable and the UI symptom
-            # maps to a log line.
             logger.warning(
                 "[halt] {body}",
                 event="halt",
@@ -628,7 +467,4 @@ async def _llm_node_impl(
         event="code",
         body=code_from_args(final_msg.tool_calls[0]["args"], source="llm final_msg tool_call"),
     )
-    # CodeStart + CodeDelta have already been incrementally published by
-    # RedisStreamHandler in _stream() + finish() fallback (see _callbacks.py
-    # module docstring)
     return Command[LlmGoto](update={"messages": [final_msg], **cut_update}, goto=BEFORE_EXEC)
