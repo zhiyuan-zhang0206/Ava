@@ -29,6 +29,7 @@ from base.agents.incarnation.exec_owner_protocol import (
 )
 from base.agents.incarnation.resources import ExecAllocation, ResourceProcess
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 
 
 def _ended(identity: psutil.Process) -> bool:
@@ -236,6 +237,7 @@ def run(context_path: Path) -> None:
     ]
     root, domain = ExecProcessDomain.launch_posix(
         argv,
+        process_control=SYSTEM_PROCESS_CONTROL,
         new_session=True,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,

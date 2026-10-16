@@ -2,7 +2,7 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 
 [uses]
 "code_version.py" = ["loaded_commit.py"]
-"exec_domain.py" = ["__init__.py", "group_closure.py", "ownership.py"]
+"exec_domain.py" = ["__init__.py", "group_closure.py", "ownership.py", "process_control.py"]
 "ownership.py" = ["__init__.py", "pidfd.py"]
 "root_control" = ["ownership.py"]
 "tests" = ["__init__.py", "child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "group_closure.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
