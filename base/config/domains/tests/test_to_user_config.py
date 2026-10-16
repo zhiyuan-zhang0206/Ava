@@ -19,3 +19,8 @@ def test_limits_default_to_the_widened_bounds() -> None:
 def test_every_limit_must_be_positive(field: str) -> None:
     with pytest.raises(ValidationError, match=field):
         ToUserSettings.model_validate({field: 0})
+
+
+def test_environment_alias_overrides_the_widened_default() -> None:
+    config = ToUserSettings.from_environment({"AVA_TO_USER_MAX_REFERENCES": "7"})
+    assert config.max_references == 7
