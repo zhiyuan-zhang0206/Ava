@@ -9,10 +9,11 @@ from typing import Any
 import pytest
 
 import base.config as base_config
+from base.clock import SYSTEM_TIMERS
 from base.deploy.release import collector_artifact as artifact
+from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.tests.test_converge_otel_collector import (
-    ChunkedResp,
     render_real_template,
 )
 from cli.database.runtime import CommandRuntime
@@ -546,7 +547,7 @@ def test_config_file_is_owner_only(
     (tmp_path / "otel-collector/version").write_text(
         artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
     )
-    monkeypatch.setattr(artifact, "download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(artifact, "download_and_verify", lambda _tag, _dir, **_ports: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         base_config.settings.observability, "gateway_otlp_endpoint", "http://10.0.0.10:4318"
     )
@@ -567,41 +568,28 @@ def test_config_file_is_owner_only(
 
 
 def test_stream_download_writes_all_chunks(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The streamed bytes land in the tarball path; the final line reports the
-    size; no heartbeat fires for a fast download."""
-    payload = b"x" * (1 << 20)  # 1 MiB
-
-    def _fake_urlopen(_url: str, **kw: object) -> ChunkedResp:
-        return ChunkedResp([payload] * 4, {"Content-Length": str(4 << 20)})
-
-    monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
+    payload = b"x" * (4 << 20)
+    url = "https://example.invalid/t.tar.gz"
+    opener = FakeUrlOpener()
+    opener.on(url, Answer(payload, headers={"Content-Length": str(len(payload))}))
     dest = tmp_path / "t.tar.gz"
-
-    artifact.stream_download("https://example.invalid/t.tar.gz", dest)
-
-    assert dest.read_bytes() == payload * 4
+    artifact.stream_download(url, dest, timers=SYSTEM_TIMERS, open_url=opener)
+    assert dest.read_bytes() == payload
+    assert opener.urls == [url]
     out = capsys.readouterr().out
     assert "downloaded 4.2 MB" in out
     assert "in 0s" in out
 
 
-def test_stream_download_honors_socket_timeout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The socket timeout is passed through to urlopen — the per-read guard
-    against a wedged connection."""
-    seen: dict[str, object] = {}
-
-    def _fake_urlopen(url: str, timeout: float) -> None:
-        seen["timeout"] = timeout
-        raise TimeoutError("timed out")
-
-    monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
+def test_stream_download_honors_socket_timeout(tmp_path: Path) -> None:
+    url = "https://example.invalid/t.tar.gz"
+    opener = FakeUrlOpener()
+    opener.on(url, TimeoutError("timed out"))
     with pytest.raises(TimeoutError):
-        artifact.stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
-    assert seen["timeout"] == artifact.DOWNLOAD_SOCKET_TIMEOUT_S
+        artifact.stream_download(url, tmp_path / "t.tar.gz", timers=SYSTEM_TIMERS, open_url=opener)
+    assert opener.calls[0].timeout == artifact.DOWNLOAD_SOCKET_TIMEOUT_S
 
 
 @pytest.mark.parametrize(
