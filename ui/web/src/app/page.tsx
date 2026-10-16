@@ -110,8 +110,8 @@ function HomeShell({ showError }: HomeShellProps) {
   const activeNotices = [...noticeFeed.awaiting, ...noticeFeed.open]
     .filter((notice) => notice.agent_id === activeId)
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || b.created_at.localeCompare(a.created_at));
-  const hasContext = Boolean(toUser.data?.content) || activeNotices.length > 0;
-  const showContext = isLarge ? hasContext || inspectorOpen : mobileContextOpen || inspectorOpen;
+  // ava:ref ui/web/src/docs/frontend-state/shared-context.ava.okf.md#panel-composition
+  const showContext = isLarge ? activeId != null : mobileContextOpen || inspectorOpen;
 
   const handleSpawn = useCallback(
     async ({
@@ -173,8 +173,8 @@ function HomeShell({ showError }: HomeShellProps) {
         forkPending={forkPending}
         showError={showError}
         handleFork={handleFork}
-        contextAvailable={!isLarge && hasContext}
-        openContext={() => setMobileContextOpen(true)}
+        contextAvailable={!isLarge && activeId != null}
+        openContext={() => { setMobileContextOpen(true); if (inspectorOpen) toggleInspector(); }}
       />
     </AgentEventStreamProvider>
   );
@@ -187,7 +187,6 @@ function HomeShell({ showError }: HomeShellProps) {
           notices={activeNotices}
           noticesFailed={noticeFeed.error}
           mobile={!isLarge}
-          onShowDocument={() => { if (!isLarge) setMobileContextOpen(true); }}
           onClose={() => { setMobileContextOpen(false); if (inspectorOpen) toggleInspector(); }}
         />
       </ErrorBoundary>

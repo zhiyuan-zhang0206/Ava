@@ -42,3 +42,9 @@ def read_document(workspace: Path, *, references: list[str] | None = None) -> To
         modified_at=datetime.fromtimestamp(info.st_mtime, UTC),
         resources=resources,
     )
+
+
+def ensure_document(workspace: Path) -> None:
+    path = workspace / DOCUMENT_FILENAME
+    if not path.exists():
+        path.touch()
