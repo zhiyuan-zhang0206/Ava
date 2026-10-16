@@ -37,7 +37,7 @@ def identity_child_record() -> dict[str, Any]:
     import agent.execution.child as exec_child
     from base.agents.context.clients import ClientSet
     from base.telemetry.delivery.receipts import DrainStatus
-    from base.telemetry.otlp import telemetry_otlp
+    from base.telemetry.otlp import telemetry_otlp_exporting
 
     backends: list[Any] = []
 
@@ -45,7 +45,9 @@ def identity_child_record() -> dict[str, Any]:
         backends.append(backend)
         backend.export_batch(events)
 
-    pipeline = telemetry_otlp.ExportingEventPipeline(writer=writer, export_allowed=lambda: True)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        writer=writer, export_allowed=lambda: True
+    )
     clients = ClientSet(pipeline_factory=lambda: pipeline)
     exec_child.init_logger(
         999999,

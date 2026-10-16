@@ -16,7 +16,7 @@ exports = ["identity_inputs.py"]
 
 [debt.first-party-patch]
 "test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_sink_failure" = 1
-"test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.OtlpBackend" = 2
+"test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_exporting.OtlpBackend" = 2
 "test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.build_providers" = 2
 "test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_metrics.metrics_resource" = 1
 "test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_worker.report_no_pipeline" = 2

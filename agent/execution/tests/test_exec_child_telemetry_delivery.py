@@ -228,7 +228,7 @@ def test_unfinished_ordinary_delivery_preserves_success_and_attempts_otlp_tail(
     from ava.tests.fixtures.pin_agent import pin_agent
     from base import telemetry
     from base.agents.context.clients import ClientSet
-    from base.telemetry.otlp.telemetry_otlp import ExportingEventPipeline
+    from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
 
     result_path = str(tmp_path / "result.json")
     payload = ResultPayload(kind="done", code_reached=True)
