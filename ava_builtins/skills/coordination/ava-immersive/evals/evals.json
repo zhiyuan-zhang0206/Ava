@@ -1,0 +1,54 @@
+{
+  "skill_name": "ava-immersive",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "You are agent R. The human writes: \"immersive on — I need to fix our onboarding doc before tomorrow. Check the repo copy first, then have the full lint suite run; it takes about four minutes.\" You are in a scratch directory containing onboarding.md; you can message the human at any time; a lint command (~4 minutes) and a background runner are available. Keep this live session per the ava-immersive skill. Write your entry announcement and your next two messages, and list every action you take between messages.",
+      "files": [],
+      "expected_output": "An entry announcement naming the silence cap (default 60s), the inline/delegate split, and how the session ends; onboarding.md read inline; the 4-minute lint delegated or backgrounded rather than blocking; messages that stay inside the cap.",
+      "assertions": [
+        "The entry announcement names the silence cap, the inline/delegate split, and the exit condition.",
+        "The small local read happens inline while the 4-minute job is delegated or backgrounded before it runs.",
+        "The agent never blocks the conversation waiting on the long job.",
+        "Each message carries new information (finding, delta, decision, or next step).",
+        "No results are claimed for the long job before it completes."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "You are agent R. The human writes, without any live session and while away from the dialog: \"Can you fix the broken link in onboarding.md and tell me what you changed?\" You are in a scratch directory with edit access. Handle the request and write what you send and when.",
+      "files": [],
+      "expected_output": "Default reporting discipline: the fix is done, the change is summarized once (batched), and no immersion behaviors appear; at most one offer of a live pass, with nothing sent if it would not help.",
+      "assertions": [
+        "No immersive contract announcement and no cap behavior without a human-started session.",
+        "The result is delivered as a batched summary, not as a stream of updates.",
+        "The agent does not enter the immersive mode on its own.",
+        "Any offer of a live session is made at most once, without follow-up."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "You are mid-session: the human already said \"immersive on\" (cap 60s). You just started a build that takes 6 minutes. Two minutes in, the human asks: \"does this touch the API schema?\" Describe exactly what you send and when, and how you handle the human's question while the build runs.",
+      "files": [],
+      "expected_output": "A pre-notice at or before the build start (\"running the build, ~6 min, next update when it lands\"), the human's question answered within one small step from an inline check (not by waiting on the build), a ledger entry, and the build result delivered when it lands.",
+      "assertions": [
+        "The long build is covered by a pre-notice or a split, so no silent gap exceeds the cap.",
+        "The human's question is answered within one small step.",
+        "The answer comes from a quick inline check, not from blocking on the build.",
+        "The build's completion result is delivered when it lands, and the wait state is recorded in the ledger."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "End of a live session: the human says \"ok, we're done for now.\" During the session you delegated two tasks and the human decided option B for the doc structure. Write your closing message and state what changes about your reporting behavior now.",
+      "files": [],
+      "expected_output": "A close naming what changed, the two delegated tasks with owners and where to find them, the ledger location, and the next step; an explicit end of the session with default batched reporting resumed.",
+      "assertions": [
+        "The closing message names the delegated work, the ledger location, and the next step.",
+        "The session is explicitly ended; no further cap guarantees are claimed.",
+        "Default batched reporting is stated as resumed.",
+        "The human's decision (option B) is recorded in the ledger with its one-line rationale."
+      ]
+    }
+  ]
+}
