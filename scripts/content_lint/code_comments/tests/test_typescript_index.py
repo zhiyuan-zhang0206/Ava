@@ -10,7 +10,7 @@ from scripts.content_lint.code_comments.typescript_index import load_index
 
 def parser_output() -> dict[str, object]:
     return {
-        "version": 1,
+        "version": 2,
         "sources": [
             {
                 "path": "core.ts",
@@ -54,7 +54,7 @@ def test_missing_source_or_partial_output_cannot_pass(
 
 def test_unknown_parser_version_and_fields_fail(tmp_path: Path) -> None:
     repo = repository(tmp_path, {"core.ts": "export const value = 1;\n"})
-    for key, value in [("version", 2), ("skip", True)]:
+    for key, value in [("version", 3), ("skip", True)]:
         data = parser_output()
         data[key] = value
         with pytest.raises(ValueError):

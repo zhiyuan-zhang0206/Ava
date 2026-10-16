@@ -1,17 +1,13 @@
-import re
 import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from scripts.codegen.sdk_surface.contracts import MemberProof, query
-from scripts.content_lint.code_comments.model import Contract, Finding, Kind, NoteKind, Source
+from scripts.content_lint.code_comments.directives import reference_key
+from scripts.content_lint.code_comments.model import Contract, Finding, Kind, Note, NoteKind, Source
 from scripts.content_lint.code_comments.python_source import parse_python
 from scripts.content_lint.code_comments.records import canonical_path, parse_document
 from scripts.structure.placement import ModuleIndex
-
-REFERENCE = re.compile(
-    r"(?:#|//) ava:ref ([A-Za-z0-9_./-]+\.ava\.okf\.md#[a-z][a-z0-9]*(?:-[a-z0-9]+)*)"
-)
 
 
 def test_anchor(anchor: str) -> tuple[str, str]:
@@ -53,7 +49,7 @@ class Repository:
             or target.resolve() != self.root.resolve() / path
         ):
             raise ValueError(f"not a regular in-repository file: {path}")
-        return target.read_text(encoding="utf-8")
+        return target.read_bytes().decode("utf-8")
 
     def source(self, path: str) -> Source:
         if path not in self.sources:
@@ -140,8 +136,47 @@ def check_reference(
     return None
 
 
+def rationale_owners(source: Source, contracts: dict[str, Contract]) -> set[str]:
+    return {
+        note.owner
+        for note in source.notes
+        if note.kind == NoteKind.COMMENT
+        and (key := reference_key(note.text, python=source.path.endswith(".py"))) is not None
+        and check_reference(source.path, note.owner, note.line, key, contracts) is None
+    }
+
+
+def unreferenced_note(
+    path: str, note: Note, rationales: set[str], *, strict: bool
+) -> Finding | None:
+    if note.kind in {NoteKind.MACHINE, NoteKind.FIXTURE_HELP}:
+        return None
+    if note.kind == NoteKind.LINT_DIRECTIVE:
+        if strict and note.owner not in rationales:
+            return Finding(
+                path,
+                note.line,
+                "directive-owner",
+                "line directive needs a valid typed rationale bound to its definition",
+            )
+        return None
+    if strict or (note.kind == NoteKind.COMMENT and "ava:ref" in note.text):
+        return Finding(
+            path,
+            note.line,
+            "free-comment",
+            f"{note.kind}: remove redundant prose or move the fact to a typed document contract",
+        )
+    return None
+
+
+# ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-machine-directives
 def check_notes(
-    source: Source, contracts: dict[str, Contract], *, strict: bool
+    source: Source,
+    contracts: dict[str, Contract],
+    *,
+    strict: bool,
+    strict_notes: frozenset[int] | None = None,
 ) -> tuple[list[Finding], set[str]]:
     findings: list[Finding] = []
     used: set[str] = set()
@@ -151,29 +186,33 @@ def check_notes(
         if contract.kind == Kind.API
         for anchor in contract.code
     }
-    for note in source.notes:
+    rationales = rationale_owners(source, contracts)
+    for index, note in enumerate(source.notes):
         if note.kind == NoteKind.DOCSTRING:
             contract = api_by_symbol.get(f"{source.path}:{note.owner}")
             if contract is not None and note.text == contract.statement:
                 used.add(contract.key)
                 continue
-        match = REFERENCE.fullmatch(note.text) if note.kind == NoteKind.COMMENT else None
-        if match:
-            key = match[1]
+        key = (
+            reference_key(note.text, python=source.path.endswith(".py"))
+            if note.kind == NoteKind.COMMENT
+            else None
+        )
+        if key is not None:
             problem = check_reference(source.path, note.owner, note.line, key, contracts)
             if problem is not None:
                 findings.append(problem)
             else:
                 used.add(key)
-        elif strict or (note.kind == NoteKind.COMMENT and "ava:ref" in note.text):
-            findings.append(
-                Finding(
-                    source.path,
-                    note.line,
-                    "free-comment",
-                    f"{note.kind}: remove redundant prose or move the fact to a typed document contract",
-                )
+        elif (
+            problem := unreferenced_note(
+                source.path,
+                note,
+                rationales,
+                strict=strict and (strict_notes is None or index in strict_notes),
             )
+        ) is not None:
+            findings.append(problem)
     return findings, used
 
 
@@ -202,7 +241,12 @@ def validated_contracts(repo: Repository) -> tuple[dict[str, Contract], list[Fin
     return contracts, findings
 
 
-def check(repo: Repository, *, strict_paths: frozenset[str] | None = None) -> Result:
+def check(
+    repo: Repository,
+    *,
+    strict_paths: frozenset[str] | None = None,
+    strict_notes: dict[str, frozenset[int]] | None = None,
+) -> Result:
     contracts, findings = validated_contracts(repo)
     used: set[str] = set()
     for path in sorted(repo.files):
@@ -213,7 +257,12 @@ def check(repo: Repository, *, strict_paths: frozenset[str] | None = None) -> Re
             if not strict and path not in repo.sources and "ava:ref" not in repo.text(path):
                 continue
             source = repo.source(path)
-            problems, references = check_notes(source, contracts, strict=strict)
+            problems, references = check_notes(
+                source,
+                contracts,
+                strict=strict,
+                strict_notes=None if strict_notes is None else strict_notes.get(path),
+            )
             findings.extend(problems)
             used.update(references)
         except (ValueError, SyntaxError, OSError, tokenize.TokenError) as error:

@@ -1,6 +1,7 @@
 exports = ["lint_no_cjk.py", "lint_no_tailnet.py", "lint_quiesced_loops.py"]
 
 [uses]
+"code_comments" = ["lint_quiesced_loops.py"]
 "tests" = ["check_cross_branch_migrations.py", "check_doc_references.py", "lint_audit_record.py", "lint_ava_okf.py", "lint_core_content_manifests.py", "lint_doc_anchors.py", "lint_doc_roster.py", "lint_doc_symbols.py", "lint_migrations.py", "lint_no_cjk.py", "lint_no_tailnet.py", "lint_quiesced_loops.py", "lint_skill_descriptions.py", "lint_skill_md_size.py"]
 
 [debt.private-name]

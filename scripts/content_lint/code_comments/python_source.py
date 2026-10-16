@@ -3,8 +3,17 @@ import inspect
 import io
 import re
 import tokenize
+from collections import Counter
+from collections.abc import Collection
+from dataclasses import replace
 from itertools import pairwise
 
+from scripts.content_lint.code_comments.directives import (
+    ambient_call_lines,
+    comment_kind,
+    is_quiesce_reference,
+)
+from scripts.content_lint.code_comments.fixtures import fixture_owners
 from scripts.content_lint.code_comments.model import Note, NoteKind, Source, Symbol
 
 
@@ -34,12 +43,38 @@ def attribute_docs(body: list[ast.stmt]) -> list[tuple[str, ast.Expr]]:
     return result
 
 
+def indentation(line: str) -> int:
+    return len(line[: len(line) - len(line.lstrip())].expandtabs(8))
+
+
+def body_tail_end(
+    node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]
+) -> int:
+    end = node.end_lineno or node.lineno
+    first = node.body[0]
+    if lines[first.lineno - 1][: first.col_offset].strip():
+        return end
+    body_indent = indentation(lines[first.lineno - 1])
+    for index in range(end, len(lines)):
+        line = lines[index]
+        if not line.strip():
+            continue
+        if not line.lstrip().startswith("#") or indentation(line) < body_indent:
+            break
+        end = index + 1
+    return end
+
+
 class SymbolCollector(ast.NodeVisitor):
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, fixtures: frozenset[str]) -> None:
         self.symbols = {"<module>": Symbol("<module>", 1, max(1, len(text.splitlines())))}
+        self.definitions = list(self.symbols.values())
         self.notes: list[Note] = []
         self.scope: list[str] = []
         self.docstrings: set[int] = set()
+        self.fixtures = fixtures
+        self.text = text
+        self.lines = text.splitlines()
 
     def collect_body(
         self, node: ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
@@ -51,7 +86,12 @@ class SymbolCollector(ast.NodeVisitor):
             self.docstrings.add(id(first))
             self.notes.append(
                 Note(
-                    NoteKind.DOCSTRING, first.lineno, first.end_lineno or first.lineno, value, name
+                    NoteKind.FIXTURE_HELP if name in self.fixtures else NoteKind.DOCSTRING,
+                    first.lineno,
+                    first.end_lineno or first.lineno,
+                    value,
+                    name,
+                    raw_text=ast.get_source_segment(self.text, first) or "",
                 )
             )
         for attribute, expression in attribute_docs(node.body):
@@ -65,6 +105,7 @@ class SymbolCollector(ast.NodeVisitor):
                     expression.end_lineno or expression.lineno,
                     inspect.cleandoc(text),
                     owner,
+                    raw_text=ast.get_source_segment(self.text, expression) or "",
                 )
             )
         self.generic_visit(node)
@@ -89,6 +130,9 @@ class SymbolCollector(ast.NodeVisitor):
             parameters,
             name in self.symbols,
             isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef),
+        )
+        self.definitions.append(
+            replace(self.symbols[name], end_line=body_tail_end(node, self.lines))
         )
         self.collect_body(node)
         self.scope.pop()
@@ -116,6 +160,7 @@ class SymbolCollector(ast.NodeVisitor):
                     node.end_lineno or node.lineno,
                     node.value.value,
                     owner,
+                    raw_text=ast.get_source_segment(self.text, node) or "",
                 )
             )
         self.generic_visit(node)
@@ -137,25 +182,59 @@ class SymbolCollector(ast.NodeVisitor):
         self.collect_assignment(node)
 
 
-def comment_owner(symbols: dict[str, Symbol], line: int) -> str:
+def enclosing_definition(symbols: Collection[Symbol], line: int, *, following: bool) -> Symbol:
     enclosing = [
-        item
-        for item in symbols.values()
-        if item.name != "<module>" and item.line <= line <= item.end_line
+        item for item in symbols if item.name != "<module>" and item.line <= line <= item.end_line
     ]
     if enclosing:
-        return min(enclosing, key=lambda item: item.end_line - item.line).name
-    following = [item for item in symbols.values() if item.line == line + 1]
-    if len(following) == 1:
-        return following[0].name
-    return "<module>"
+        return min(enclosing, key=lambda item: item.end_line - item.line)
+    adjacent = [item for item in symbols if item.line == line + 1] if following else []
+    if len(adjacent) == 1:
+        return adjacent[0]
+    return next(item for item in symbols if item.name == "<module>")
+
+
+def comment_owner(symbols: Collection[Symbol], line: int, *, following: bool = True) -> str:
+    return enclosing_definition(symbols, line, following=following).name
+
+
+def definition_identities(definitions: list[Symbol]) -> list[Symbol]:
+    parents: list[int] = [0]
+    groups: list[tuple[int, str, str]] = [(0, "module", "<module>")]
+    for index, definition in enumerate(definitions[1:], 1):
+        parent = enclosing_definition(definitions[:index], definition.line, following=False)
+        parent_index = definitions.index(parent)
+        parents.append(parent_index)
+        groups.append(
+            (parent_index, "function" if definition.callable else "class", definition.name)
+        )
+    totals = Counter(groups)
+    ordinal: Counter[tuple[int, str, str]] = Counter()
+    result = [replace(definitions[0], lexical_key="<module>")]
+    for index, definition in enumerate(definitions[1:], 1):
+        group = groups[index]
+        ordinal[group] += 1
+        key = f"{result[parents[index]].lexical_key}/{group[1]}:{definition.name}[{ordinal[group]}/{totals[group]}]"
+        result.append(replace(definition, lexical_key=key))
+    return result
 
 
 # ava:ref scripts/content_lint/code_comments/docs/code_comments.ava.okf.md#python-entry-shebang
 def parse_python(path: str, text: str) -> Source:
     tree = ast.parse(text, filename=path)
-    collector = SymbolCollector(text)
+    collector = SymbolCollector(text, fixture_owners(tree))
     collector.visit(tree)
+    collector.definitions = definition_identities(collector.definitions)
+    collector.notes = [
+        replace(
+            note,
+            lexical_owner=enclosing_definition(
+                collector.definitions, note.line, following=False
+            ).lexical_key,
+        )
+        for note in collector.notes
+    ]
+    ambient_lines = ambient_call_lines(path, tree)
     for item in tokenize.generate_tokens(io.StringIO(text).readline):
         if item.type != tokenize.COMMENT:
             continue
@@ -163,9 +242,23 @@ def parse_python(path: str, text: str) -> Source:
             r"#!/usr/bin/(?:env python(?:3(?:\.12)?)?|python3(?:\.12)?)", item.string
         ):
             continue
-        owner = comment_owner(collector.symbols, item.start[0])
+        kind = comment_kind(item.string, item.start[0], ambient_lines)
+        machine_reference = kind == NoteKind.LINT_DIRECTIVE or is_quiesce_reference(item.string)
+        lexical_owner = comment_owner(
+            collector.definitions, item.start[0], following=not machine_reference
+        )
+        owner = (
+            lexical_owner
+            if machine_reference
+            else comment_owner(collector.symbols.values(), item.start[0])
+        )
+        scope = enclosing_definition(
+            collector.definitions,
+            item.start[0],
+            following=not machine_reference and not item.line[: item.start[1]].strip(),
+        ).lexical_key
         collector.notes.append(
-            Note(NoteKind.COMMENT, item.start[0], item.end[0], item.string, owner)
+            Note(kind, item.start[0], item.end[0], item.string, owner, scope, item.string)
         )
     return Source(
         path,
