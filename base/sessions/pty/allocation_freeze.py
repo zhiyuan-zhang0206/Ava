@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
 
-from base.host.atomic_io import fsync_parent, write_text_atomic
+from base.host.atomic_io import AtomicWriter
 from base.native_process.os_platform import file_lock
 
 SCHEMA_VERSION = 1
@@ -135,13 +135,9 @@ def current_generation() -> str | None:
     return snapshot.generation
 
 
-def _fsync_parent(path: Path) -> None:
-    fsync_parent(path)
-
-
-def write_atomic(path: Path, payload: dict[str, object]) -> None:
+def write_atomic(path: Path, payload: dict[str, object], *, writer: AtomicWriter) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_text_atomic(
+    writer.write_text(
         path,
         json.dumps(payload, separators=(",", ":"), sort_keys=True),
         encoding="utf-8",
@@ -149,7 +145,7 @@ def write_atomic(path: Path, payload: dict[str, object]) -> None:
         prefix=".pty-allocation-freeze-",
     )
     try:
-        _fsync_parent(path)
+        writer.fsync_parent(path)
     except OSError:
         # The replace already committed visible state. Do not report that the
         # caller failed to freeze when every new-session path now sees frozen.
@@ -168,7 +164,7 @@ def locked_freeze_state() -> Generator[PtyAllocationFreeze]:
         yield _read_unlocked(state_path())
 
 
-def freeze(*, holder: str, reason: str) -> PtyAllocationFreeze:
+def freeze(*, holder: str, reason: str, writer: AtomicWriter) -> PtyAllocationFreeze:
     """Create a new operator-owned allocation freeze generation."""
     if not holder:
         raise ValueError("holder must be non-empty")
@@ -193,11 +189,11 @@ def freeze(*, holder: str, reason: str) -> PtyAllocationFreeze:
             "reason": reason,
             "created_at": now.isoformat(),
         }
-        write_atomic(path, payload)
+        write_atomic(path, payload, writer=writer)
         return _parse(payload)
 
 
-def resume(generation: str) -> bool:
+def resume(generation: str, *, writer: AtomicWriter) -> bool:
     """CAS-activate exactly ``generation``; never clear a replacement owner."""
     if not generation:
         raise ValueError("generation must be non-empty")
@@ -219,5 +215,6 @@ def resume(generation: str) -> bool:
                 "reason": current.reason,
                 "created_at": current.created_at.isoformat() if current.created_at else None,
             },
+            writer=writer,
         )
         return True

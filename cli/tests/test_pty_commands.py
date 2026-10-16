@@ -9,6 +9,7 @@ import psycopg
 import pytest
 import redis
 
+from base.host.atomic_io import AtomicWriter
 from base.native_process.os_platform import LockTimeoutError
 from base.sessions.pty import allocation_freeze
 from cli import main as cli_main
@@ -74,7 +75,8 @@ def test_cli_resume_reports_allocation_lock_timeout(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def _locked(_generation: str) -> bool:
+    def _locked(_generation: str, *, writer: AtomicWriter) -> bool:
+        _ = writer
         raise LockTimeoutError("allocation lock remained held")
 
     monkeypatch.setattr(allocation_freeze, "resume", _locked)
