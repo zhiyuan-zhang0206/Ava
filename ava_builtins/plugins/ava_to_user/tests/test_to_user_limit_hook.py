@@ -205,3 +205,15 @@ async def test_an_unreadable_panel_logs_and_stays_silent(
         "to_user soft limit: the panel could not be read; no reminder"
         in loguru_records.messages("WARNING")
     )
+
+
+async def test_the_reminder_count_is_the_shared_word_metric(hook: Any, agent: int) -> None:
+    from base.packages.text_budget import count_words
+
+    panel = "\u4eca\u5929\u5b8c\u6210\u4e86 3 \u9879\u4efb\u52a1, see report.md for details. " * 40
+    _write_panel(panel)
+
+    result = await hook(_state(), _runtime({"to_user_soft_limit_words": 5}), RunnableConfig())
+
+    note = _note(result)
+    assert f"panel is at {count_words(panel)} words" in str(note.content)
