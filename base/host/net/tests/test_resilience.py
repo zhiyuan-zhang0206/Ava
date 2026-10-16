@@ -250,6 +250,17 @@ class TestWaitHooks:
             await run(_call)
         assert seen == [1.0, 2.0]
 
+    def test_retry_uses_the_callers_own_wait(self, retry_waits: list[float]) -> None:
+        # ava:ref base/host/docs/host.ava.okf.md#retry-caller-wait
+        seen: list[float] = []
+        run = retry(
+            Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none"),
+            sleep=seen.append,
+        )
+        assert run(_Flaky(urllib.error.URLError("boom"), 1)) == "ok"
+        assert seen == [1.0]
+        assert retry_waits == []
+
     async def test_retry_waits_records_sync_and_async_waits_in_call_order(
         self, retry_waits: list[float]
     ) -> None:

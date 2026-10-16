@@ -261,7 +261,10 @@ class Policy:
     on_final_failure: Callable[[Exception], None] | None = None
 
 
-def retry(policy: Policy) -> Callable[[Callable[[], T]], T]:
+# ava:ref base/host/docs/host.ava.okf.md#retry-caller-wait
+def retry(
+    policy: Policy, *, sleep: Callable[[float], None] | None = None
+) -> Callable[[Callable[[], T]], T]:
     """Wrap a sync ``fn`` in the one retry loop."""
 
     def _run(fn: Callable[[], T]) -> T:
@@ -276,7 +279,11 @@ def retry(policy: Policy) -> Callable[[Callable[[], T]], T]:
                         retry_after = extract_retry_after(exc)
                         if retry_after is not None:
                             delay = max(delay, retry_after)
-                    retry_sleep(jittered(delay, policy.jitter_span, policy.jitter))
+                    seconds = jittered(delay, policy.jitter_span, policy.jitter)
+                    if sleep is None:
+                        retry_sleep(seconds)
+                    else:
+                        sleep(seconds)
                     continue
                 if policy.on_final_failure is not None:
                     policy.on_final_failure(exc)

@@ -44,13 +44,27 @@ policy with the one `AtomicWriter` its test builds.
 
 `base/host/net/resilience.py` owns immutable `Policy` parameters and the shared
 `retry` / `aretry` executors, including backoff, jitter, classification and
-idempotency gates. Bootstrap fetches use this owner. Provider and Redis-listener
+idempotency gates. The module wait hooks are the default; an operation that already
+holds its own clock passes its wait per call (`retry(policy, sleep=timers.sleep)`),
+so its backoff waits with that clock — and a caller that passes `ManualTimers`
+records the waits and advances virtual time instead of blocking.
+Bootstrap fetches use this owner. Provider and Redis-listener
 loops still have dedicated contracts; the remaining Redis audit is a
 [future item](../../../future/infra/engineering/retry-consumer-contracts.md).
 
+```ava-contract
+id = "retry-caller-wait"
+kind = "invariant"
+statement = "retry() sleeps through the module wait hook by default; a caller that passes its own wait (sleep=timers.sleep) waits through it at every retry, so a ManualTimers records the waits and advances virtual time while the module hook records nothing."
+code = ["base/host/net/resilience.py:retry", "base/host/net/tests/test_resilience.py:TestWaitHooks.test_retry_uses_the_callers_own_wait"]
+tests = ["base/host/net/tests/test_resilience.py::TestWaitHooks::test_retry_uses_the_callers_own_wait"]
+```
+
 `base/host/net/ports.py` is the port for an HTTP request whose answer a test controls.
 `UrlOpener` has `urllib.request.urlopen`'s shape (a request or a URL and a timeout in, a readable
-context manager out); a component that makes the request takes it as a required argument and a
+context manager out whose surface is `read` and `read1`: a caller that owns a wall-clock budget
+reads with `read1`, one socket read per call, instead of an aggregate `read` that waits for the
+requested size); a component that makes the request takes it as a required argument and a
 composition root passes `SYSTEM_URL_OPENER`. `base.host.net.tests.fake_url_opener.FakeUrlOpener`
 records each request and answers from a script routed by URL prefix, raises `HTTPError` for a
 status outside 2xx as `urlopen` does, and refuses a URL nobody scripted. A test that wants the

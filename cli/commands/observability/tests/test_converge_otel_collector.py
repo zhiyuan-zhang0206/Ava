@@ -248,7 +248,7 @@ def test_ensure_downloads_when_missing(
     monkeypatch.setattr(
         artifact,
         "download_and_verify",
-        lambda tag, _d: downloaded.append(tag),  # pyright: ignore[reportUnknownArgumentType]
+        lambda tag, _d, **_ports: downloaded.append(tag),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     monkeypatch.setattr(
@@ -738,27 +738,3 @@ def test_local_otlp_pipelines_drop_mismatched_cluster_resources(
         assert pipelines[name]["processors"][:2] == ["memory_limiter", "filter/cluster_allow"]
     assert "filter/cluster_allow" not in pipelines["metrics/infra"]["processors"]
     assert "filter/cluster_allow" not in pipelines["traces/remote"]["processors"]
-
-
-# -- issue #172: bounded, loud download -------------------------------------
-
-
-class ChunkedResp:
-    """A urlopen response stand-in that yields chunk by chunk."""
-
-    def __init__(self, chunks: list[bytes], headers: dict[str, str] | None = None) -> None:
-        self._chunks = list(chunks)
-        self._headers = headers or {}
-
-    def __enter__(self) -> ChunkedResp:
-        return self
-
-    def __exit__(self, *_a: object) -> None:
-        return None
-
-    def read(self, _n: int) -> bytes:
-        return self._chunks.pop(0) if self._chunks else b""
-
-    @property
-    def headers(self) -> dict[str, str]:
-        return self._headers
