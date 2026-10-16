@@ -21,6 +21,36 @@ pipelines through `ClientSet`, without finalizing or shutting another owner. Pro
 queue draining, FIFO flush and SDK teardown all stay on that worker. A caller
 never becomes a rescue writer or runs provider teardown itself.
 
+## Two wait classes, one deadline
+
+```ava-contract
+id = "two-wait-classes-one-deadline"
+kind = "invariant"
+statement = "A stop takes one real deadline: the writer observation completes or expires before the exporter observation starts, and each native stage receives only the deadline's remaining real time — never the original allowance, and zero once it is spent. A virtualized clock may drive a cancellable cooldown, but never a native stop observation or its budget."
+code = [
+  "base/telemetry/otlp/telemetry_otlp.py:OtlpBackend.shutdown",
+  "base/telemetry/otlp/telemetry_otlp.py:ExportingEventPipeline.stop",
+]
+tests = [
+  "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py::test_two_stage_stop_hands_stage_two_the_real_remaining_time",
+  "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py::test_zero_timeout_stage_one_leaves_the_exporter_untouched",
+  "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py::test_blocked_writer_and_blocked_exporter_release_in_stages",
+]
+```
+
+Waits are two classes. A **cooldown** is the process's own time policy — like
+the collector retry gate, it owns no thread or handle and is no completion
+condition. A virtualized clock may drive it; a stop cancels and releases it at
+once (the deferral's cancel-and-join), and it never consumes the native budget.
+A **native observation** waits for a real thread or handle to end — writer
+join, deferral clock join, worker join, exporter teardown — and only real
+elapsed time ends it, so only real-behavior tests establish its correctness; an
+injected clock does not advance while a native wait consumes real time, and a
+later stage would read a phantom full allowance. Virtual fast-forward may skip
+a cooldown; it can never end a native observation. One stop call takes one
+deadline, hands each stage only the real remainder, and leaves an exhausted
+remainder at zero.
+
 ## Why the seam is single
 
 The SDK default (`shutdown_on_exit=True`) registers a provider shutdown on

@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from base.telemetry.delivery import reporting
-from base.telemetry.delivery.receipts import DrainStatus, Event
+from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.otlp import telemetry_otlp_worker as worker_module
 from base.telemetry.tests.otlp.test_telemetry_otlp import otlp_test_event
@@ -28,6 +28,25 @@ class _Provider:
         self.closed.set()
 
 
+class _BlockingProvider(_Provider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.teardown_entered = threading.Event()
+        self.teardown_entered_at = 0.0
+        self.release = threading.Event()
+
+    def shutdown(self) -> None:
+        self.teardown_entered_at = time.monotonic()
+        self.teardown_entered.set()
+        assert self.release.wait(5)
+        self.closed.set()
+
+
+class _CloseGateFaultBackend(telemetry_otlp.OtlpBackend):
+    def _enabled(self) -> bool:
+        raise RuntimeError("close-time eligibility read failed")
+
+
 def _backend(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, _Provider, _Provider]:
     logs, metrics = _Provider(), _Provider()
     backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True, providers=(logs, metrics))
@@ -39,6 +58,12 @@ def _backend(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, _Provider, _Provider
     monkeypatch.setattr(backend, "_emit_log", ignore)
     monkeypatch.setattr(backend, "_record_metrics", ignore)
     return backend, logs, metrics
+
+
+def _assert_release_completes(pipeline: Any, release: threading.Event) -> None:
+    release.set()
+    assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
+    assert pipeline.stopped
 
 
 def test_blocked_sdk_init_stays_owned_after_finite_stop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -586,3 +611,155 @@ def test_unfinished_exporter_keeps_pipeline_for_later_observation(
         assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
     assert pipeline.stopped
     assert logs.closed.is_set() and metrics.closed.is_set()
+
+
+def test_two_stage_stop_hands_stage_two_the_real_remaining_time() -> None:
+    before = {thread.ident for thread in threading.enumerate()}
+    logs, metrics = _BlockingProvider(), _Provider()
+    writer_started, writer_gate = threading.Event(), threading.Event()
+    writer_done: list[float] = []
+    stop_timeout = 0.6
+    writer_sleep = 0.3
+
+    def write(_events: list[Event], _exporter: Any) -> None:
+        writer_started.set()
+        assert writer_gate.wait(5)
+        time.sleep(writer_sleep)
+        writer_done.append(time.monotonic())
+
+    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    backend = pipeline._exporter
+    backend._providers = (logs, metrics)
+    assert backend._ensure()
+    pipeline.enqueue(otlp_test_event())
+    assert writer_started.wait(5)
+    started = time.monotonic()
+    writer_gate.set()
+    result = pipeline.stop(timeout=stop_timeout)
+    elapsed = time.monotonic() - started
+    assert result.status is DrainStatus.UNFINISHED
+    assert result.phase is DrainPhase.STOP
+    assert not pipeline.stopped
+    assert writer_done and writer_done[0] - started >= writer_sleep * 0.8
+    assert logs.teardown_entered.wait(2)
+    assert logs.teardown_entered_at >= writer_done[0]
+    assert elapsed <= stop_timeout + 0.15
+    _assert_release_completes(pipeline, logs.release)
+    assert backend._worker is not None
+    assert {thread.ident for thread in threading.enumerate()} <= before
+
+
+def test_zero_timeout_stage_one_leaves_the_exporter_untouched() -> None:
+    writer_started, release_writer = threading.Event(), threading.Event()
+
+    def write(_events: list[Event], _exporter: Any) -> None:
+        writer_started.set()
+        assert release_writer.wait(5)
+
+    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    backend = pipeline._exporter
+    pipeline.enqueue(otlp_test_event())
+    assert writer_started.wait(5)
+    started = time.monotonic()
+    result = pipeline.stop(timeout=0)
+    assert time.monotonic() - started < 0.5
+    assert result.status is DrainStatus.UNFINISHED
+    assert result.phase is DrainPhase.STOP
+    assert not pipeline.stopped
+    assert backend._worker is None
+    assert not backend._closed.is_set()
+    _assert_release_completes(pipeline, release_writer)
+
+
+def test_blocked_writer_and_blocked_exporter_release_in_stages() -> None:
+    logs, metrics = _BlockingProvider(), _Provider()
+    writer_started, release_writer = threading.Event(), threading.Event()
+
+    def write(_events: list[Event], _exporter: Any) -> None:
+        writer_started.set()
+        assert release_writer.wait(5)
+
+    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    backend = pipeline._exporter
+    backend._providers = (logs, metrics)
+    assert backend._ensure()
+    pipeline.enqueue(otlp_test_event())
+    assert writer_started.wait(5)
+    assert pipeline.stop(timeout=0.3).status is DrainStatus.UNFINISHED
+    assert not backend._closed.is_set()
+    assert not logs.teardown_entered.is_set()
+    release_writer.set()
+    assert pipeline.stop(timeout=0.3).status is DrainStatus.UNFINISHED
+    assert logs.teardown_entered.wait(2)
+    assert not pipeline.stopped
+    _assert_release_completes(pipeline, logs.release)
+    assert backend._worker is not None
+    assert not backend._worker._thread.is_alive()
+
+
+def test_stop_from_the_writer_thread_is_refused() -> None:
+    pipeline: telemetry_otlp.ExportingEventPipeline
+
+    def write(_events: list[Event], _exporter: Any) -> None:
+        with pytest.raises(RuntimeError) as raised:
+            pipeline.stop(timeout=0)
+        assert "event drain cannot join itself" in str(raised.value)
+
+    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    pipeline.enqueue(otlp_test_event())
+    assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
+    assert pipeline.stopped
+
+
+def test_concurrent_stop_calls_share_the_blocked_observation() -> None:
+    logs, metrics = _BlockingProvider(), _Provider()
+    pipeline = telemetry_otlp.ExportingEventPipeline(
+        writer=lambda _events, _exporter: None, export_allowed=lambda: True
+    )
+    backend = pipeline._exporter
+    backend._providers = (logs, metrics)
+    assert backend._ensure()
+    results: list[DrainResult] = []
+    failures: list[BaseException] = []
+
+    def call_stop() -> None:
+        try:
+            results.append(pipeline.stop(timeout=0.3))
+        except BaseException as exc:
+            failures.append(exc)
+
+    threads = [threading.Thread(target=call_stop) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert not failures
+    assert len(results) == 2
+    assert all(result.status is DrainStatus.UNFINISHED for result in results)
+    assert pipeline.stop(timeout=0.05).status is DrainStatus.UNFINISHED
+    assert logs.teardown_entered.wait(2)
+    assert not pipeline.stopped
+    _assert_release_completes(pipeline, logs.release)
+    assert backend._worker is not None
+    assert not backend._worker._thread.is_alive()
+
+
+def test_close_time_gate_fault_raises_after_the_finite_observation() -> None:
+    logs, metrics = _BlockingProvider(), _Provider()
+    backend = _CloseGateFaultBackend(export_allowed=lambda: True, providers=(logs, metrics))
+    backend.defer_until_exit()
+    backend.export_batch([otlp_test_event()])
+    assert backend._deferral.is_active()
+    assert backend._ensure()
+    started = time.monotonic()
+    with pytest.raises(RuntimeError) as raised:
+        backend.shutdown(timeout=0.3)
+    assert "close-time eligibility read failed" in str(raised.value)
+    assert time.monotonic() - started >= 0.2
+    assert logs.teardown_entered.wait(2)
+    assert backend._worker is not None
+    assert backend._worker._thread.is_alive()
+    logs.release.set()
+    assert backend.shutdown().status is DrainStatus.COMPLETED
+    assert backend._worker is not None
+    assert not backend._worker._thread.is_alive()
