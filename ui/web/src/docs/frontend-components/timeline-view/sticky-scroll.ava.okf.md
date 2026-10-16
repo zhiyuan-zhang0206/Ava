@@ -47,7 +47,7 @@ stay in flow. The existing frosted pane, geometry tracking and fast-scroll
 suppression apply only to those work and detail headers. Suppression uses
 separate entry and exit speeds with a settling interval, so it cannot toggle
 repeatedly near the threshold, and the first movement after a pause is
-measured against one frame, not the whole idle gap.
+measured against one frame, not the whole idle gap. Fast-scroll suppression responds to the reader's own movement alone: the auto-follow growth pins that keep the viewport on the streaming tail and the history-prepend compensation refresh the speed baseline but never release the titles; a reader's own fast scroll still releases them (task #5188).
 
 Event timestamps remain visible in message-card headers at narrow widths;
 headers and timestamp text wrap when needed. Standing context notes continue

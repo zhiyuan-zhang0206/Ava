@@ -384,7 +384,7 @@ export const TimelineView = memo(function TimelineView({
       const isPrependEcho = prependEchoRef.current || boundaryCorrection;
       prependEchoRef.current = false;
 
-      trackHeaderScrollMotion(viewport, isPrependEcho);
+      trackHeaderScrollMotion(viewport, isPrependEcho || controller.isSticky());
       if (direction !== "none" && !isPrependEcho) {
         if (pendingRestoreRef.current) holdRestoredPositionRef.current = true;
         pendingRestoreRef.current = null;
