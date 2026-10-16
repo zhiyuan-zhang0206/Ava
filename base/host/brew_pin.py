@@ -1,5 +1,3 @@
-"""Read-only warning helpers for installed operator-approved Homebrew pins."""
-
 from __future__ import annotations
 
 import subprocess
@@ -7,10 +5,9 @@ from pathlib import Path
 
 from base.host.proc import CommandRunner
 
-_BREW_TIMEOUT_S = (
-    60.0  # `brew list` reads the Cellar; the bound only keeps a wedged brew from stalling
-)
+_BREW_TIMEOUT_S = 60.0
 
+# ava:ref base/host/docs/brew_pin.ava.okf.md#brew-formula-manifest
 PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
     {
         "ca-certificates",
@@ -28,48 +25,24 @@ PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
     }
 )
 
-# The operator-approved uv version for standalone installs (toolchain.sh on
-# Linux/Docker, CI setup-uv input). Homebrew hosts pin the `uv` formula
-# above; this is the same version for the GitHub-release-asset path.
-# toolchain.sh embeds these values because it runs before Python exists on a
-# fresh box; tests/scripts/test_toolchain_uv_pin.py asserts the copies match.
-UV_VERSION = "0.12.23"
+# ava:ref base/host/docs/brew_pin.ava.okf.md#uv-pin-copies
+UV_VERSION = "0.13.1"
 
-# SHA256 of each supported platform's release tarball (astral-sh/uv 0.12.23
-# release asset digests, verified against all four downloaded archives). Keys
-# are the asset-name platform suffix; toolchain.sh maps `uname` output to the
-# same keys.
 UV_ASSET_SHA256: dict[str, str] = {
-    "aarch64-apple-darwin": "50487ae565ccd96e499056b4674d438f4c53170202617b4c759defe0c6a1b544",
-    "x86_64-apple-darwin": "960da44cb4b73685206ddd250b19e0a117fa41095710c1038f081f5cb613efb4",
-    "aarch64-unknown-linux-gnu": "6524bd338177ed50d035d39354e12545e993bbeba2ecbddf0480c5b3a81d313f",
-    "x86_64-unknown-linux-gnu": "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6",
+    "aarch64-apple-darwin": "cfe454573412ff7380d15fc7dae5997ab53ffce72fce0a78e91ddbc84001acd2",
+    "x86_64-apple-darwin": "bb7b805bdcf3d0bc8c74ceb94569e6b3e8aa35bd492acdbb9d46bf46d9d4ff6b",
+    "aarch64-unknown-linux-gnu": "9041c73c99fdc5892cf128140beb354eca9231d502068cc36e6cb53a8e59ad14",
+    "x86_64-unknown-linux-gnu": "eadd9d27c134ab5ac1ffd4473b97a741407f3ea238288f03121fc4deddf90220",
 }
 
-
-# The operator-approved PgBouncer build for Linux apt installs (pgdg, Ubuntu
-# 24.04). Homebrew hosts pin the `pgbouncer` formula above. PgBouncer releases
-# change pooled-session semantics (1.26 tracks `default_transaction_read_only`
-# per client), so moving this needs the maintainer's approval.
-# scripts/provision/database.sh (bash, before Python exists) and the CI install
-# action embed the same string; tests/ci/test_pgbouncer_pin.py asserts they match.
+# ava:ref base/host/docs/brew_pin.ava.okf.md#apt-pin-copies
 PGBOUNCER_APT_VERSION = "1.26.0-1.pgdg24.04+1"
 
-# The operator-approved Redis series for Linux apt installs (redis.io, Ubuntu
-# 24.04): the newest 8.2 patch release, as the `redis@8.2` formula above is for
-# Homebrew hosts. An apt glob, not one build, because the series is what the
-# operator approved. scripts/provision/database.sh (bash, before Python exists)
-# embeds the same string; tests/ci/test_redis_pin.py asserts the copies match.
 REDIS_APT_VERSION = "6:8.2.*"
 
 
+# ava:ref base/host/docs/brew_pin.ava.okf.md#brew-probe-warnings
 def pinned_brew_formulae(*, run: CommandRunner) -> set[str] | None:
-    """Return Homebrew's pinned formulae, or ``None`` when brew is absent.
-
-    This probe is warning-only infrastructure: process errors degrade to an
-    empty observed set so callers can report drift without breaking lifecycle
-    commands. It never mutates pins and does no work at import time.
-    """
     try:
         result = run(
             ["brew", "list", "--pinned"], capture_output=True, text=True, timeout=_BREW_TIMEOUT_S
@@ -82,12 +55,6 @@ def pinned_brew_formulae(*, run: CommandRunner) -> set[str] | None:
 
 
 def installed_brew_formulae(*, run: CommandRunner) -> set[str] | None:
-    """Return Homebrew's installed formulae, or ``None`` when brew is absent.
-
-    This probe is warning-only infrastructure: process errors degrade to an
-    empty observed set so callers can report drift without breaking lifecycle
-    commands. It never mutates pins and does no work at import time.
-    """
     try:
         result = run(
             ["brew", "list", "--formula"], capture_output=True, text=True, timeout=_BREW_TIMEOUT_S
@@ -100,7 +67,6 @@ def installed_brew_formulae(*, run: CommandRunner) -> set[str] | None:
 
 
 def unpinned_formulae(*, run: CommandRunner) -> tuple[str, ...]:
-    """Return installed approved formulae missing from the host's pin set, sorted."""
     pinned = pinned_brew_formulae(run=run)
     if pinned is None:
         return ()
@@ -111,13 +77,9 @@ def unpinned_formulae(*, run: CommandRunner) -> tuple[str, ...]:
 
 
 def brew_prefix(formula: str = "") -> Path:
-    """`brew --prefix [formula]`. Bare form → the Homebrew root (`/opt/homebrew`
-    on Apple Silicon, `/usr/local` on Intel); with a formula → that keg's path.
-    Falls back to the Apple-Silicon default if brew is absent so callers degrade
-    to a wrong-but-harmless path (probes then read not-running) instead of crashing."""
     cmd = ["brew", "--prefix", *([formula] if formula else [])]
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
+        out = subprocess.run(cmd, capture_output=True, text=True, check=False)
     except FileNotFoundError:
         return Path("/opt/homebrew")
     return Path(out.stdout.strip() or "/opt/homebrew")

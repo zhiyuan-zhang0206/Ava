@@ -18,6 +18,7 @@ helpers. HTTPX uses its installed import behavior and public entry points.
 - [[ops/docs/env-audit.ava.okf.md]] — Base — .env write audit & integrity guard.
 - [[base/host/env/docs/registry.ava.okf.md]] — Environment declarations and boot/child projections.
 - [[base/host/docs/runtime_interpreter.ava.okf.md]] — Loaded-runtime interpreter binding.
+- [[base/host/docs/brew_pin.ava.okf.md]] — Operator-approved tool pins: brew formula manifest, uv release digests, apt-series pins, brew probes.
 
 `base/host/system/hostport.py` is the port to this machine. A component that starts a process,
 looks up a program or branches on the platform takes a required `host: Host` with four fields:
