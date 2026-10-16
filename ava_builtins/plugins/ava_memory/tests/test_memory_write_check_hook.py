@@ -1,10 +1,3 @@
-"""The write-check hook: rules for every written note, duplicates for shared ones, one reminder.
-
-The gateway responds through an in-process HTTP transport that records its requests; the decision
-model sits behind it, so only its returned probabilities reach these tests. Whatever the
-check finds or fails to find, the hook must hand back a cleared record and never raise.
-"""
-
 from __future__ import annotations
 
 import json
@@ -62,8 +55,6 @@ def search() -> _MemoryGateway:
 
 
 class _MemoryGateway:
-    """Record memory-search HTTP requests and serve the chosen wire response."""
-
     def __init__(self) -> None:
         self.results: list[MemorySearchResult] = []
         self.failure: str | None = None
@@ -152,7 +143,6 @@ def runtime(search: _MemoryGateway, model_catalog: Any) -> Iterator[Runtime[AvaC
             try:
                 yield Runtime(context=context)
             finally:
-                # A cancelled async deadline does not stop its worker thread.
                 assert search.finished.wait(timeout=2), "memory HTTP handler did not finish"
     finally:
         clients.close()
@@ -167,7 +157,6 @@ def _write(root: Path, rel: str, text: str) -> Path:
 
 @pytest.fixture
 def stores(unit_home: Path) -> tuple[Path, Path]:
-    """(shared pool, the agent's own memory folder) for agent 17 under the unit home."""
     from base.paths import memory_dir, workspace_dir
 
     pin_agent(17)
@@ -329,7 +318,7 @@ async def test_one_reminder_covers_every_note_of_the_call(
         < text.index(str(pool / "b.md"))
         < text.index(str(own / "mine.md"))
     )
-    assert len(search.calls) == 2  # the two shared notes
+    assert len(search.calls) == 2
 
 
 async def test_personal_notes_get_the_rules_but_no_duplicate_search(
@@ -371,8 +360,6 @@ async def test_an_unavailable_search_leaves_the_rules_findings_alone(
     runtime: Runtime[AvaContext],
     failure: str,
 ):
-    """A failed decision call reaches the agent process as `IndexerUnavailable` (the gateway
-    maps `DecisionError`): the duplicate part is dropped, the rule part still reports."""
     pool, _ = stores
     _write(pool, "broken.md", "no frontmatter")
     _write(pool, "fine.md", _GOOD)
@@ -447,8 +434,6 @@ async def test_the_check_never_changes_a_note(
 async def test_records_union_across_calls_and_reset_in_a_real_graph(
     hook: Any, search: _MemoryGateway, stores: tuple[Path, Path], runtime: Runtime[AvaContext]
 ):
-    """Two exec calls of one assistant turn add to the same record (union reducer); the hook reads
-    both, reports once, and the record is empty afterwards so nothing is checked twice."""
     from langgraph.graph import END, START, StateGraph
 
     pool, _ = stores
@@ -481,3 +466,20 @@ async def test_records_union_across_calls_and_reset_in_a_real_graph(
     assert str(pool / "a.md") in str(reminder.content) and str(pool / "b.md") in str(
         reminder.content
     )
+
+
+async def test_an_over_cap_note_is_named_with_its_character_count(
+    hook: Any, stores: tuple[Path, Path], runtime: Runtime[AvaContext]
+):
+    from ava_builtins.plugins.ava_memory.template import validate
+
+    pool, _ = stores
+    cap = validate.note_char_cap()
+    _write(pool, "huge.md", _GOOD + "x" * (cap - len(_GOOD) + 1))
+
+    result = await hook(_state({"huge.md"}), runtime, RunnableConfig())
+
+    [note] = _reminders(result)
+    text = str(note.content)
+    assert str(pool / "huge.md") in text
+    assert f"Note is {cap + 1} characters, over the {cap} cap" in text

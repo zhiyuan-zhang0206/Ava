@@ -32,6 +32,10 @@ tags: [type/feedback]
 
 Required by the pool validator (`template/validate.py`): `type`, `ava_agent`,
 `description`, exactly one valid `type/<x>` tag; a note stays under 8000 characters.
+The cap counts characters as `len()` — the measurement the shared budget names
+`Unit.CHARS` — and stays with the standalone validator (which also runs where
+`base.*` is unimportable); the write check adds no second cap and only surfaces
+its finding.
 
 ## Write check
 
@@ -60,6 +64,30 @@ A finding becomes one `memory_write_check` system note after the exec result; no
 adds nothing. Nothing is blocked, rewritten or raised: a timeout, an unavailable search
 or any unexpected error is logged and the notes go unreported.
 
+
+```ava-contract
+id = "write-check-rules"
+kind = "invariant"
+statement = "Every written note — shared and personal — is checked against the pool validator's single-note rules (template/validate.py::validate_note); only the notes with findings are reported, shared notes first, each group in path order, and a note that is gone or is not a note is skipped. Nothing is changed, blocked or rejected: the findings come back as one reminder."
+code = ["ava_builtins/plugins/ava_memory/write_checks.py:check_written_notes", "ava_builtins/plugins/ava_memory/write_checks.py:NoteReport", "ava_builtins/plugins/ava_memory/write_checks.py:render_reminder"]
+tests = ["ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_rule_violations_are_named_per_file", "ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_one_reminder_covers_every_note_of_the_call", "ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_index_files_and_vanished_notes_are_skipped", "ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_the_check_never_changes_a_note", "ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_an_over_cap_note_is_named_with_its_character_count"]
+```
+
+```ava-contract
+id = "write-check-duplicates"
+kind = "invariant"
+statement = "A written shared note is searched against the pool with purpose dedup: the query is the note's description then body, capped at 4000 characters; k = 5, with the note itself set aside, so an already-indexed note leaves four candidates, and only the five closest others are considered. Candidates at or above memory_write_dedup_threshold are named with their probability. Personal notes are not searched."
+code = ["ava_builtins/plugins/ava_memory/write_checks.py:_SEARCH_K", "ava_builtins/plugins/ava_memory/write_checks.py:_QUERY_CHAR_CAP", "ava_builtins/plugins/ava_memory/write_checks.py:_query_of", "ava_builtins/plugins/ava_memory/write_checks.py:_duplicates_of", "ava_builtins/plugins/ava_memory/write_checks.py:Duplicate"]
+tests = ["ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_the_search_asks_for_the_five_closest_notes", "ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_a_probable_duplicate_is_named_with_its_probability", "ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_the_note_itself_is_never_its_own_duplicate", "ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_only_the_five_closest_others_are_considered", "ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_the_threshold_is_configurable", "ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_personal_notes_get_the_rules_but_no_duplicate_search"]
+```
+
+```ava-contract
+id = "write-check-degrade"
+kind = "invariant"
+statement = "A duplicate search that cannot be answered — the gateway or the indexer unavailable, or an HTTP error status carrying no wire reason — leaves that note without duplicate findings, so its rule findings stand; the HTTP failure is logged at error, never raises into the turn, and the httpx import stays deferred, off the boot path."
+code = ["ava_builtins/plugins/ava_memory/write_checks.py:_search"]
+tests = ["ava_builtins/plugins/ava_memory/tests/test_memory_write_check_hook.py::test_an_unavailable_search_leaves_the_rules_findings_alone"]
+```
 
 ## Key Dependencies
 
