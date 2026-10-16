@@ -171,15 +171,19 @@ to what the branch can do with the machine, not to what it can steal.
 
 ### Observing
 
-The gateway binds `127.0.0.1` without a cluster secret (`gateway/cluster/server.py`) and the
-frontend starts with `next start -H 127.0.0.1` (`ui/web/package.json`), so `docker run -p`
-cannot reach either. A cluster secret would bind the gateway to all interfaces and
-require an `AVA_TRANSPORT_ENCRYPTION` declaration. The browser dials
+The gateway binds `127.0.0.1` (the recipe declares a loopback `--machine-host`; a gateway
+serves off-box only for a declared non-loopback reach — `gateway/cluster/server.py`) and
+the frontend starts with `next start -H 127.0.0.1` (`ui/web/package.json`), so
+`docker run -p` cannot reach either. The browser dials
 `<page hostname>:<gateway port>` (`base/cluster/derive.py:fe_build_env`), so a forward to
 the host would have to reuse the fixed port numbers, which collide with the host's own
 cluster. So the observer (`scripts/verify/observe.py`) runs inside the container, from the
-checkout's interpreter, and writes `observer.json`. It runs every check and records each
-outcome, so a partial result keeps its evidence:
+checkout's interpreter, and writes `observer.json`. The cluster API always authenticates
+(`ava init` mints a human secret for every gateway home), so the observer logs in with
+that secret from the home's `.env` — minted inside the boundary, nothing sent in from
+outside — the way an operator's browser does, and the `cors` and `scripted_agent` checks
+carry the session. It runs every check and records each outcome, so a partial result
+keeps its evidence:
 
 | Check | Passes when |
 |---|---|
