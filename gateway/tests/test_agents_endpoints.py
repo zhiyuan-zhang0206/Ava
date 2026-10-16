@@ -1,12 +1,3 @@
-"""Gateway lifecycle endpoints HTTP integration tests.
-
-POST /api/agents (spawn + optional prompt + optional fork_from)
-POST /api/agents/{id}/terminate (INSERT terminate inbound)
-GET /api/agents (bounded directory cards and explicit cursor)
-
-Real database rows and gateway/home-runner operation dispatch; no host task is started.
-"""
-
 from __future__ import annotations
 
 import json
@@ -46,7 +37,6 @@ def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:
 
 
 def returned_id(cur: psycopg.Cursor) -> int:
-    """Read an integer primary key from a RETURNING cursor."""
     row = cur.fetchone()
     assert row is not None
     return cast(int, row[0])
@@ -62,7 +52,6 @@ def inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, 
 
 
 def terminate_hosted(db: psycopg.Connection, agent_id: int) -> None:
-    """Terminate a hosted incarnation; resurrection resumes only retained hosted authority."""
     db.execute(
         "UPDATE agents_meta SET status = 'terminated', runtime_kind = 'hosted', "
         "runtime_generation = gen_random_uuid(), runtime_owner = gen_random_uuid() WHERE id = %s",
@@ -76,7 +65,6 @@ def _flat_model_ids(body: dict[str, Any]) -> list[str]:
 
 
 def _assert_retired_models_absent(body: dict[str, Any], flat: list[str]) -> None:
-    # Retired ids are absent from the entire registry, including the picker.
     for model in (
         "deepseek-v4-pro",
         "deepseek-v4-flash",
@@ -96,7 +84,6 @@ def test_get_models_returns_grouped_supported_models() -> None:
     assert "deepseek-flash" in flat
     _assert_retired_models_absent(body, flat)
     assert "gpt-5.6-sol" in flat
-    # additional verified-live models
     assert "claude-sonnet-5" in flat
     assert "gpt-5.6-terra" in flat
     assert "gpt-5.6-luna" in flat
@@ -117,9 +104,6 @@ def test_get_models_surfaces_superseded_by(
     model_catalog: ModelCatalog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The picker's hide-by-default rule is data, not gateway logic: the
-    endpoint publishes each model's ``superseded_by`` straight off the registry,
-    and an un-superseded model carries null."""
     glm = model_catalog.models["glm-5.2"]
     catalog = add_models(model_catalog, {"glm-5.2": replace(glm, superseded_by="kimi-k3")})
     import gateway.app as gateway_app
@@ -133,12 +117,6 @@ def test_get_models_surfaces_superseded_by(
 
 
 def test_get_models_every_model_has_reasoning_effort_control() -> None:
-    """No model may render a bare "Effort: default" blank dropdown — every
-    provider either exposes a graded reasoning_effort field, or, where the
-    real API only has a binary thinking on/off switch (mimo,
-    claude-haiku-4-5-20251001), a two-value control mapped onto that switch. Locks in
-    the 2026-07-24 audit that closed the mimo/haiku gap (both used to return
-    `reasoning_effort_options: null`, hiding the dropdown entirely)."""
     with gateway_test_client() as client:
         resp = client.get("/api/models")
     body = resp.json()
@@ -151,7 +129,6 @@ def test_get_models_every_model_has_reasoning_effort_control() -> None:
 def _assert_provider_binding_vocabulary(
     models: dict[str, Any], provider: str, binding: str
 ) -> None:
-    """The provider's models all publish the binding's wire-clamp vocabulary."""
     binding_levels = build_model_catalog().bindings[binding].effort_levels
     assert binding_levels is not None
     provider_models = [m for m, info in models.items() if info["provider"] == provider]
@@ -161,7 +138,6 @@ def _assert_provider_binding_vocabulary(
 
 
 def _assert_provider_vocabulary_subset(models: dict[str, Any], provider: str, binding: str) -> None:
-    """The provider's declared vocabularies stay inside the provider-wide fallback."""
     binding_levels = build_model_catalog().bindings[binding].effort_levels
     assert binding_levels is not None
     fallback = set(binding_levels)
@@ -173,33 +149,15 @@ def _assert_provider_vocabulary_subset(models: dict[str, Any], provider: str, bi
 
 
 def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
-    """Gateway's per-model effort option lists come straight off the registry
-    (`ModelSpec.effort_levels`), and the registry values for the OpenAI-style
-    providers must mirror their plugin binding's clamp vocabularies — a drift
-    would silently offer the spawn UI a value build_chat_model then clamps
-    away, or hide a value the provider actually accepts."""
-
     with gateway_test_client() as client:
         resp = client.get("/api/models")
     models = resp.json()["models"]
 
-    # The endpoint serves exactly the registry's per-model vocabulary.
     for model, info in models.items():
         expected_levels = build_model_catalog().models[model].effort_levels
         assert expected_levels is not None, model
         assert info["reasoning_effort_options"] == list(expected_levels), model
 
-    # And the registry vocabulary for the OpenAI-style providers matches the
-    # plugin binding's wire clamp, so UI options and clamp cannot diverge.
-    # Providers whose whole registry shares one vocabulary mirror the
-    # binding vocabulary exactly (UI options == clamp). Gemini
-    # diverged deliberately: the agent build path clamps per model
-    # (`ModelSpec.effort_levels`), so a model's options equal its own registry
-    # vocabulary (verified in the loop above), and the provider-wide table is
-    # only the fallback for models without a declared vocabulary (media path).
-    # The gemini invariant is that every declared vocabulary stays a subset of
-    # that fallback — a model must never accept a level the fallback cannot
-    # express.
     _assert_provider_binding_vocabulary(models, "mimo", "mimo-")
     _assert_provider_binding_vocabulary(models, "kimi", "kimi-")
     _assert_provider_binding_vocabulary(models, "glm", "glm-")
@@ -212,13 +170,6 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
 def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Every spawnable model publishes a concrete `reasoning_effort_default`
-    (what the picker pre-selects), equal to the registry's per-model tuning
-    layer — never "" (provider default, not displayable) and never the ladder
-    floor by accident. An explicit cluster-wide AVA_REASONING_EFFORT pin must
-    NOT leak into the published default: the picker shows the model's own
-    default, while the pin is operator policy (visible in the config panel's
-    per-model view)."""
     from base.config import settings
 
     with gateway_test_client() as client:
@@ -226,9 +177,6 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     assert resp.status_code == 200
     models = resp.json()["models"]
 
-    # Spot-check the documented vendor defaults (decision doc
-    # 2026-07-25-per-model-tuning-values.md Decision 4): deepseek max,
-    # claude adaptive family high, gpt medium, kimi/glm max.
     assert models["deepseek-flash"]["reasoning_effort_default"] == "max"
     assert models["claude-sonnet-5"]["reasoning_effort_default"] == "high"
     assert models["claude-haiku-4-5-20251001"]["reasoning_effort_default"] == "none"
@@ -236,16 +184,12 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     assert models["kimi-k3"]["reasoning_effort_default"] == "max"
     assert models["glm-5.2"]["reasoning_effort_default"] == "max"
 
-    # General invariant: default == the registry's tuning value, is concrete,
-    # and sits on the model's own ladder (a default off the ladder would be
-    # clamped or dropped at build — a UI lie).
     for model, info in models.items():
         expected = build_model_catalog().models[model].tuning.reasoning_effort
         assert info["reasoning_effort_default"] == expected, model
-        assert expected, model  # concrete, never ""
+        assert expected, model
         assert expected in info["reasoning_effort_options"], model
 
-    # The published default is the MODEL's default, not the cluster pin.
     monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
     with gateway_test_client() as client:
         resp = client.get("/api/models")
@@ -260,9 +204,7 @@ class TestSpawn:
         assert resp.status_code == 201
         new_id = resp.json()["id"]
         row = _agent_row(db_conn, new_id)
-        # spawner defaults to 'user' (triggered by UI button)
         assert row == (new_id, "user", None, None, "idling")
-        # No inbound delivered
         assert inbound_rows(db_conn, new_id) == []
 
     def test_spawn_with_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
@@ -272,7 +214,6 @@ class TestSpawn:
         assert inbound_rows(db_conn, new_id) == [("\u67e5 X", "chat", "user")]
 
     def test_spawn_with_long_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
-        """Long reports are delivered through the shared user-content schema."""
         prompt = "a" * 100_000
         with gateway_test_client() as client:
             resp = spawn_via_http(client, {"prompt": prompt, "prompt_source": "user"})
@@ -281,7 +222,6 @@ class TestSpawn:
         assert inbound_rows(db_conn, new_id) == [(prompt, "chat", "user")]
 
     def test_spawn_with_explicit_spawner(self, db_conn: psycopg.Connection) -> None:
-        """spawner can be passed explicitly — e.g., when claude-code starts an ava agent, pass 'claude-code'."""
         with gateway_test_client() as client:
             resp = spawn_via_http(client, {"spawner": "claude-code"})
         new_id = resp.json()["id"]
@@ -294,10 +234,6 @@ class TestSpawn:
         withdrawn_model: tuple[str, ModelCatalog],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A registered-but-withdrawn llm_model is rewritten to its registered
-        fallback before the row is created, and the spawner gets the receipt in
-        the response (task #4306) — instead of the withdrawal surfacing only as
-        a wake-time normalization log."""
         model, catalog = withdrawn_model
         import gateway.app as gateway_app
 
@@ -315,7 +251,6 @@ class TestSpawn:
             assert cur.fetchone() == ({"llm_model": "deepseek-flash"},)
 
     def test_spawn_available_model_carries_no_receipt(self, db_conn: psycopg.Connection) -> None:
-        """An available id is stored as sent — no rewrite, no receipt."""
         with gateway_test_client() as client:
             resp = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}})
         assert resp.status_code == 201, resp.text
@@ -328,8 +263,6 @@ class TestSpawn:
     def test_spawn_fork_resolves_latest_and_copies_checkpoint(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """fork_from given → gateway internally SELECT max(checkpoint_id) → spawn_agent
-        with explicit fork_checkpoint. New agent gets full checkpoint chain."""
         with gateway_test_client() as client:
             source = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
@@ -343,11 +276,9 @@ class TestSpawn:
 
             resp = spawn_via_http(client, {"fork_from": source})
         new_id = resp.json()["id"]
-        # agents row records fork_source_*
         row = _agent_row(db_conn, new_id)
         assert row is not None
-        assert row[2] == source and row[3] == "ckc"  # latest = ckc
-        # new agent gets full a/b/c chain
+        assert row[2] == source and row[3] == "ckc"
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s ORDER BY checkpoint_id",
@@ -360,8 +291,6 @@ class TestSpawn:
         self,
         db_conn: psycopg.Connection,
     ) -> None:
-        """fork_from's source has no checkpoint → 409 + reason='fork_source_empty'
-        (follows ForkSourceEmpty wire-encoded path, handler maps uniformly, SDK reconstructs from code)."""
         with gateway_test_client() as client:
             source = spawn_via_http(client, {}).json()["id"]
             resp = spawn_via_http(client, {"fork_from": source})
@@ -374,7 +303,6 @@ class TestSpawn:
         self,
         db_conn: psycopg.Connection,
     ) -> None:
-        """Empty prompt → 422 (pydantic StringConstraints strip + min_length)."""
         with gateway_test_client() as client:
             resp = spawn_via_http(client, {"prompt": "   "})
         assert resp.status_code == 422
@@ -383,21 +311,15 @@ class TestSpawn:
         self,
         db_conn: psycopg.Connection,
     ) -> None:
-        """prompt given but prompt_source missing → 422 (model_validator blocks).
-        Prevents the anti-pattern of "caller forgot field silently attributed to user"."""
         with gateway_test_client() as client:
             resp = spawn_via_http(client, {"prompt": "\u67e5 X"})
         assert resp.status_code == 422
-        # detail contains validator's Chinese-language prompt
         assert "prompt_source" in resp.text
 
 
 def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unexpected post-commit error retains the identity and CORS headers."""
-    # The autouse conftest fixture stubs forward_spawn_to_remote in-process;
-    # this test's monkeypatch runs later and wins, making the route itself blow up.
     import gateway.agents.creation as _agents_creation
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
@@ -406,7 +328,7 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
 
     monkeypatch.setattr(_agents_creation, "forward_spawn_to_remote", _explode)
     with gateway_test_client() as client:
-        allowed_origin = client.app.state.gateway_config.allowed_origins[0]  # type: ignore[union-attr]
+        allowed_origin = client.app.state.gateway_config.allowed_origins[0]
         resp = spawn_via_http(client, {}, headers={"Origin": allowed_origin})
     assert resp.status_code == 502
     assert resp.json()["reason"] == "agent_launch_failed"
@@ -442,7 +364,7 @@ class TestTerminate:
             "open_tasks": None,
             "shell_sessions": None,
         }
-        assert inbound_rows(db_conn, agent_id) == []  # not delivered
+        assert inbound_rows(db_conn, agent_id) == []
 
     def test_terminate_nonexistent_404(
         self,
@@ -456,26 +378,20 @@ class TestTerminate:
     def test_terminate_force_commits_fence_and_returns_enqueued(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A force request durably fences the identity before reporting acceptance."""
-
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
 
-        # status should become 'terminated'
         row = _agent_row(db_conn, agent_id)
         assert row is not None and row[4] == "terminated"
 
-        # should have inserted an audit inbound (terminate kind)
         assert inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_force_with_custom_source(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """force=true passes source parameter through to audit inbound."""
-
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
@@ -484,14 +400,12 @@ class TestTerminate:
             )
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
 
-        # inbound source should be agent:42, not default user
         rows = inbound_rows(db_conn, agent_id)
         assert rows == [("", "terminate", "agent:42")]
 
     def test_terminate_force_already_terminated_returns_already_terminated(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Repeated force records a fresh inbound fence without another status transition."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
@@ -523,8 +437,6 @@ class TestTerminate:
     def test_terminate_force_nonexistent_404(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """force=true for nonexistent agent still 404."""
-
         with gateway_test_client() as client:
             resp = client.post("/api/agents/9999/terminate", json={"force": True})
         assert resp.status_code == 404
@@ -535,8 +447,6 @@ class TestAutoResurrect:
     def test_chat_to_terminated_agent_triggers_auto_resurrect(
         self, db_conn: psycopg.Connection
     ) -> None:
-        """Sending chat message to a terminated agent → auto-resurrect triggers automatically,
-        INSERT 'resurrect' lifecycle inbound."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             terminate_hosted(db_conn, agent_id)
@@ -546,12 +456,10 @@ class TestAutoResurrect:
             )
         assert resp.status_code == 201
         rows = inbound_rows(db_conn, agent_id)
-        # Auto-resurrect inserts a 'resurrect' inbound (source='system') before the chat
         assert ("", "resurrect", "system") in rows
         assert ("resume your work", "chat", "user") in rows
 
     def test_chat_to_alive_agent_no_resurrect(self, db_conn: psycopg.Connection) -> None:
-        """Sending chat to an alive agent → no resurrect inbound inserted."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
@@ -559,15 +467,12 @@ class TestAutoResurrect:
                 json={"content": "hello", "source": "user"},
             )
         assert resp.status_code == 201
-        # Only the chat, no resurrect marker
         rows = inbound_rows(db_conn, agent_id)
         assert ("hello", "chat", "user") in rows
-        # No resurrect row
         resurrect_rows = [r for r in rows if r[1] == "resurrect"]
         assert len(resurrect_rows) == 0
 
     def test_chat_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
-        """source not in envelope allowlist → 422."""
         with gateway_test_client() as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
@@ -592,7 +497,6 @@ _RESULT_READ_ENDPOINTS = [
 
 
 def _result_read(client: TestClient, method: str, path: str, *, caller: str | None = None):
-    """Call a guarded endpoint with the one valid POST body when needed."""
     params = {"caller": caller} if caller is not None else None
     if method == "POST":
         return client.post(path, params=params, json={"query": "test", "k": 1, "purpose": "search"})
@@ -600,7 +504,6 @@ def _result_read(client: TestClient, method: str, path: str, *, caller: str | No
 
 
 def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make non-blocked artifact reads deterministic without external services."""
     import gateway.events.agent_events as agent_events_router
     from services.derived.memory_indexer.backends import factory as backend_factory
     from services.derived.memory_indexer.embeddings import factory as _embedding_factory
@@ -646,7 +549,6 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_eval_isolated_callers_cannot_read_result_surfaces(
     db_conn: psycopg.Connection, method: str, path_template: str
 ) -> None:
-    """Every artifact-read endpoint blocks the SDK-bypassing eval caller."""
     from base.db import create_agent
 
     target_id = create_agent(db_conn)
@@ -686,7 +588,6 @@ def test_result_surfaces_allow_non_isolated_and_unmarked_callers(
     method: str,
     path_template: str,
 ) -> None:
-    """The guard leaves ordinary reads intact and preserves last-message validation."""
     from base.db import create_agent
 
     _stub_result_read_backends(monkeypatch)

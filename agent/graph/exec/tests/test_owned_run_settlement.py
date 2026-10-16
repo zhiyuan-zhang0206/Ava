@@ -1,5 +1,3 @@
-"""Settlement edges of one managed exec that the real-subprocess tests do not reach."""
-
 import asyncio
 import time
 from types import SimpleNamespace
@@ -37,13 +35,13 @@ def _run(**fields: Any) -> OwnedRun:
 async def test_unsettled_attached_owner_is_retained_by_the_hosted_scope() -> None:
     run = _run(scope=SimpleNamespace(completions=set()))
     receipt = MagicMock()
-    run.settle_attached_owner = AsyncMock(return_value=receipt)  # type: ignore[method-assign]
+    run.settle_attached_owner = AsyncMock(return_value=receipt)
 
     async def completion() -> Any:
         return await run.settle_attached_owner()
 
     task = asyncio.ensure_future(completion())
-    run.attached_completion = lambda: task  # type: ignore[assignment]
+    run.attached_completion = lambda: task
 
     assert run.needs_hand_off() is True
     await run.finish_owner()
@@ -58,7 +56,7 @@ async def test_owner_that_cannot_settle_raises_its_original_failure() -> None:
         raise failure
 
     task = asyncio.ensure_future(failing())
-    run.attached_completion = lambda: task  # type: ignore[assignment]
+    run.attached_completion = lambda: task
 
     with pytest.raises(RuntimeError) as observed:
         await run.finish_owner()
@@ -82,7 +80,7 @@ async def test_cancelled_registration_that_failed_settles_the_unpermitted_owner(
         raise ResourceEvidenceError("registration refused")
 
     registration = asyncio.ensure_future(failed())
-    run.settle_unpermitted_owner = AsyncMock()  # type: ignore[method-assign]
+    run.settle_unpermitted_owner = AsyncMock()
     original = asyncio.CancelledError()
 
     await run.settle_registration_after_cancel(registration, original)
@@ -102,7 +100,7 @@ async def test_unresolved_unpermitted_owner_leaves_a_note_and_stays_unsettled() 
         raise ResourceEvidenceError("registration refused")
 
     registration = asyncio.ensure_future(failed())
-    run.settle_unpermitted_owner = AsyncMock(side_effect=RuntimeError("still open"))  # type: ignore[method-assign]
+    run.settle_unpermitted_owner = AsyncMock(side_effect=RuntimeError("still open"))
     original = asyncio.CancelledError()
 
     await run.settle_registration_after_cancel(registration, original)

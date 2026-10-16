@@ -1,5 +1,3 @@
-"""Contract: the branch-protection audit accepts the real .trunk/trunk.yaml declaration of the full gate."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,7 +22,7 @@ def test_trunk_gate_findings_accept_the_real_declaration() -> None:
 
 def test_real_trunk_yaml_declares_the_full_gate() -> None:
     text = (_REPO_ROOT / ".trunk" / "trunk.yaml").read_text()
-    document = yaml.safe_load(text)  # type: ignore[name-defined]
+    document = yaml.safe_load(text)
     statuses = document["merge"]["required_statuses"]
     assert len(statuses) == 13
     assert "secret scan (Gitleaks)" in statuses

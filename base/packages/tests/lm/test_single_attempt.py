@@ -1,5 +1,3 @@
-"""Guarded generation constructs a fresh retry-free client; normal callers keep defaults."""
-
 from collections.abc import Mapping
 from typing import cast
 
@@ -95,7 +93,7 @@ def test_single_attempt_flag_is_strict(flag: object, *, model_catalog: ModelCata
             catalog=model_catalog,
             llm_override="",
             overrides=model_overrides(),
-        )  # type: ignore[arg-type]
+        )
 
 
 def test_withdrawn_model_cannot_switch_provider_attempt(

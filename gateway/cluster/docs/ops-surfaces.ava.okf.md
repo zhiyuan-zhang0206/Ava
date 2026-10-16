@@ -28,6 +28,12 @@ that guard is on and exactly when you need to look.
 Neither has an SDK wrapper. They are HTTP-only, called directly over the private
 network, because they are operator tools and the SDK surface is for agents.
 
+Admin events request only telemetry/log categories and treat `level` as a
+minimum. The limit defaults to display configuration; omitting `since` uses a
+24-hour floor. `gateway/tests/routers/cluster_endpoints/test_admin_events.py`
+checks these forwarded arguments with a fake reader. Its row assertions check
+pass-through order, not database filtering or sorting.
+
 The cluster router exposes no source-checkout update, rollout, restart or
 update-check endpoint. The status page displays observations and does not
 launch deployments; a fleet update is the operator script `python -m cli.fleet_update`.

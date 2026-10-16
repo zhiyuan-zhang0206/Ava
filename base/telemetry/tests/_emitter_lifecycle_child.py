@@ -1,8 +1,3 @@
-"""Clean-interpreter scenarios for the event writer lifecycle; never imported by a production entry.
-
-Run as ``python -I _emitter_lifecycle_child.py <scenario>``; a failed assertion exits non-zero.
-"""
-
 from __future__ import annotations
 
 import sys
@@ -57,7 +52,7 @@ def cold_emit() -> None:
     def forbidden_thread(*args: object, **kwargs: object) -> None:
         raise AssertionError("emit must not construct a writer")
 
-    threading.Thread = forbidden_thread  # type: ignore[misc, assignment]
+    threading.Thread = forbidden_thread
     telemetry.emit("log", "log", attributes={"cold": True})
     assert telemetry.flush().status is telemetry.DrainStatus.COMPLETED
 
