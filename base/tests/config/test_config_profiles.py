@@ -290,6 +290,14 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
             assert extra["restart_required"] == "gateway", name
 
 
+def test_hierarchy_model_declares_all_restart() -> None:
+    from base.config.domains.lm import LmSettings
+
+    extra = LmSettings.model_fields["hierarchy_model"].json_schema_extra
+    assert isinstance(extra, dict)
+    assert extra["restart_required"] == "all"
+
+
 def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.MonkeyPatch) -> None:
     from pydantic import Field
 

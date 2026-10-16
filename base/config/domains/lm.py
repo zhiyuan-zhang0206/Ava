@@ -61,7 +61,7 @@ class LmSettings(EnvSettings):
             "(same rationale as labeler_model)."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "all",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
