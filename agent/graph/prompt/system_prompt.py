@@ -280,7 +280,8 @@ _STEP_SKILL_INDEX = (
     "and match the task against descriptions and expected outputs before "
     "starting work. Load applicable skills with ava.help(ava.skills.<name>). "
     "For non-trivial, ambiguous, consequential, sustained, or parallel work, "
-    "load ava-workflow when available to choose how to work. Its lightweight "
+    "load ava-workflow when available (`ava.help(ava.skills.ava_workflow)`) "
+    "in your first `execute_code` turn to choose how to work. Its lightweight "
     "entry selects only the needed methods; it does not mandate an interview, "
     "goal supervision, or a plan document."
 )

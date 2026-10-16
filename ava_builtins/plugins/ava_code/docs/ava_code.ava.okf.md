@@ -12,27 +12,26 @@ tags:
 
 ## What it is
 
-`ava_code` is Ava's built-in coding convention plugin. It injects two system prompt sections and an after_exec hook, enabling the agent to automatically follow project coding conventions (AGENTS.md/worktree/PR workflow) and automatically perceive project context files (delivered in-memory inside the exec turn — see below).
+`ava_code` is Ava's built-in coding convention plugin: it contributes two system-prompt sections (`coding_tools_section` and `engineering_workflow_section`), `ava.cwd`, and an `after_exec` hook that auto-injects `AGENTS.md`/`CLAUDE.md` context notes inside the exec turn.
 
 ## Declared hooks
 
 ### System prompt injection (×2)
 
-```python
-def _coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    # cwd / ava.files / ava.shell stub descriptions + coding convention preamble
-    # (fail fast, don't reinvent, worktree + PR workflow, AGENTS.md/CLAUDE.md role)
-```
+#### Coding prompt sections {#coding-prompt-sections}
 
-```python
-def _engineering_workflow_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    # Loose debug / bug-fix workflow advice (reproduce → root cause → fix)
-    # Gated by "ava_code_workflow" ∈ settings.agent.system_prompt_extra
-    # (env AVA_SYSTEM_PROMPT_EXTRA), **default empty = not injected by default**
+```ava-contract
+id = "coding-prompt-sections"
+kind = "invariant"
+code = ["ava_builtins/plugins/ava_code/_prompt_sections.py:<module>"]
+tests = [
+  "ava_builtins/plugins/ava_code/tests/ava_code_plugin/test_read_wrap_corrupted_state_field_raises.py::test_coding_tools_section_skips_framework_expanded_modules",
+  "ava_builtins/plugins/ava_code/tests/ava_code_plugin/test_read_wrap_corrupted_state_field_raises.py::test_coding_tools_section_all_expanded_keeps_preamble_only",
+]
+statement = """
+`_prompt_sections.py` is kept separate from `agent_runtime.py` because `coding_tools_section` renders `cwd`, `files`, and `shell` stubs through `ava.help`, whereas `agent_runtime.py` does not import `ava`. Modules already in `effective_sdk_expand` (exact path match) are skipped so their contracts are not rendered twice, while the coding preamble (`AGENTS.md` + opening-turn workflow/engineering skill load, `rg` over recursive `grep`/`find`, isolated git worktree + PR workflow, narrowest-first verification, and persistent shell sessions) always renders. `engineering_workflow_section` is off by default and renders only when `ava_code_workflow` is in `system_prompt_extra`.
+"""
 ```
-
-These two are declared in `contribute()`'s `PluginContributions.system_prompt_sections`,
-and appended at runtime to the agent's system prompt (the `_engineering_workflow_section` is off by default, not injected).
 
 ### Context file auto-injection (in-memory, inside the exec turn)
 

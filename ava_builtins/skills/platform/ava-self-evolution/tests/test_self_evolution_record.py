@@ -130,3 +130,19 @@ def test_targeted_correction_remains_a_per_agent_correction(
 
     assert rec["corrections"] == ["wrong: use the requested path"]
     assert rec["label"] == "fumbled"
+
+
+def test_msg_text_skips_thinking_and_tool_use_blocks(record: Any) -> None:
+    silent_turn = [
+        {"type": "thinking", "thinking": "internal reasoning"},
+        {"type": "tool_use", "name": "execute_code", "input": {"code": "import ava"}},
+    ]
+    spoken_turn = [
+        {"type": "thinking", "thinking": "internal reasoning"},
+        {"type": "text", "text": "Checking the logs now."},
+        {"type": "tool_use", "name": "execute_code", "input": {"code": "import ava"}},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+    ]
+
+    assert record._msg_text(silent_turn) == ""
+    assert record._msg_text(spoken_turn) == "Checking the logs now. image_url"
