@@ -18,7 +18,7 @@ export function useStickyHeaderMotion(
   wrapperRef: RefObject<HTMLDivElement | null>,
   threadKey: string | undefined,
   onRestore: () => void,
-): (viewport: HTMLElement, compensated: boolean) => void {
+): (viewport: HTMLElement, autoScrolled: boolean) => void {
   const motionRef = useRef<ScrollMotion>({ top: null, at: null, suppressed: false, slowSince: null });
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -43,14 +43,14 @@ export function useStickyHeaderMotion(
     };
   }, [wrapperRef, threadKey]);
 
-  return useCallback((viewport: HTMLElement, compensated: boolean) => {
+  return useCallback((viewport: HTMLElement, autoScrolled: boolean) => {
     const motion = motionRef.current;
     const now = performance.now();
     const distance = Math.abs(viewport.scrollTop - (motion.top ?? viewport.scrollTop));
     const elapsed = motion.at === null ? 16 : now - motion.at;
     motion.top = viewport.scrollTop;
     motion.at = now;
-    if (compensated || distance === 0) return;
+    if (autoScrolled || distance === 0) return;
 
     const speed = distance / (elapsed > IDLE_SETTLE_MS ? 16 : Math.max(8, elapsed));
     if (!motion.suppressed && speed >= FAST_PX_PER_MS) {
