@@ -89,3 +89,37 @@ standard gateway authentication, returns `expired` or `not_open`, and returns
 
 Receipts: [[system-note.ava.okf.md]], [[gateway/agents/docs/launch-retry.ava.okf.md]],
 [[base/agents/compaction/docs/manual-compact/manual-compact.ava.okf.md|guarded compact]].
+
+
+## Recovery and message boundaries
+
+A failed catalog does not invalidate an already committed chat receipt. Replay
+compares the normalized original content before current image/model checks;
+missing receipts still validate uploaded images before inserting anything.
+Plain text delivery does not need model metadata. Image references must belong
+to the addressed agent's existing upload; arbitrary filesystem paths and remote
+URLs are not admitted as uploads. An image-only inbound retains a text placeholder
+for envelope/timeline consumers alongside its native content blocks. The 1 MiB
+message limit bounds pending/checkpoint storage and telemetry volume.
+
+Termination's open-task hint and shell-TTL cleanup are advisory after acceptance.
+Failed hint/cleanup work is logged; it cannot undo or block accepted termination.
+The TTL reaper eventually retires leftover shell rows. Label edits and their audit
+fact commit together; agent-attributed edits also reach the active impersonation
+lease log through the shared audit owner.
+
+Context-budget views require a catalog even when checkpoint counts are absent.
+An unavailable catalog is an explicit 503 rather than a fabricated zero ceiling.
+The existing unknown-model-window display handling and checkpoint-read tolerance
+remain separate from catalog availability.
+
+## Model capability availability
+
+Directory, roster and ID-addressed detail remain readable after a retained model
+catalog startup failure. Their required `supports_vision` field is null until a
+healthy gateway generation can resolve it; other database facts and enum checks
+remain unchanged. Projection ownership is
+[[base/agents/observation/docs/observation.ava.okf.md]]. Creation and image messages
+still require a complete catalog. Ordinary text delivery records an inbound
+receipt, and an exact-work stop records cancellation acceptance: neither receipt
+proves that the runner executed the message or ended the work.

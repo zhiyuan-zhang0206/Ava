@@ -8173,7 +8173,14 @@
             "title": "Machine"
           },
           "supports_vision": {
-            "type": "boolean",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Supports Vision"
           },
           "liveness_state": {
@@ -9100,7 +9107,14 @@
             "title": "Machine"
           },
           "supports_vision": {
-            "type": "boolean",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Supports Vision"
           },
           "liveness_state": {

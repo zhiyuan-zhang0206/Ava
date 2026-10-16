@@ -29,6 +29,13 @@ changes afterwards. This endpoint does not await embedding completion. Native
 Git work remains under `asyncio.to_thread`; removing that hop can stall the
 gateway even though the Git command itself has a timeout.
 
+## Model availability
+
+Search requires the app's complete model catalog before it constructs its
+embedding provider and before reranking. Catalog failure retains the gateway's
+explicit model-unavailable error, while graph, note, bundle and refresh keep
+their existing independent requirements.
+
 ## Search budgets
 
 ```ava-contract

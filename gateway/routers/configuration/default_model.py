@@ -1,54 +1,37 @@
-"""The cluster's default model — GET/PUT /api/config/default-model.
-
-The one value in `cluster_defaults`: which model a NEW agent is born on. It is a
-spawn-time input, not a config layer — nothing reads it into `settings`, and no
-running process consults it for its own behavior (see `base/agents/model/birth_config.py`).
-An agent already alive carries its own frozen choice on its row, so editing this
-never moves anyone who already exists.
-
-Deliberately its own narrow endpoint rather than a field on `PUT /api/config`.
-That PUT is a reducer over the whole editable `.env` surface and has a history of
-a partial payload unsetting everything it did not name; a one-value write with a
-roster check has no business sharing that machinery — and this value does not live
-in `.env` at all.
-
-GET reports the effective default plus which layer produced it. PUT validates
-against the registry's spawnable roster (the same roster the spawn picker renders)
-and 400s on anything else, so an unknown id can never be stored and then blow up
-at the far-away spawn.
-"""
-
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
 from base.agents.model.birth_config import resolve_default_model, set_cluster_default_model
+from gateway.http.model_catalog import require_model_catalog
 from gateway.schemas.models import DefaultModelView, DefaultModelWrite
 
 router = APIRouter()
 
 
-@router.get("/api/config/default-model")
+@router.get(
+    "/api/config/default-model",
+    description="The model a new agent is born on, and where that value came from.",
+)
 def get_default_model(request: Request) -> DefaultModelView:
-    """The model a new agent is born on, and where that value came from."""
+
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         resolved = resolve_default_model(
-            cur, catalog=request.app.state.catalog, authority=request.app.state.config_authority
+            cur,
+            catalog=require_model_catalog(request),
+            authority=request.app.state.config_authority,
         )
         return DefaultModelView(model=resolved.model, source=resolved.source)
 
 
-@router.put("/api/config/default-model")
+@router.put(
+    "/api/config/default-model",
+    description="Set the cluster's default model.\n\n400 when the id is not a spawnable model in the model catalog.\nTakes effect for agents born after the write; every existing agent keeps the\nmodel stamped on its own row.",
+)
 def put_default_model(body: DefaultModelWrite, request: Request) -> DefaultModelView:
-    """Set the cluster's default model.
 
-    400 when the id is not a spawnable model in the model catalog.
-    Takes effect for agents born after the write; every existing agent keeps the
-    model stamped on its own row.
-    """
-    spawnable = {
-        m for models in request.app.state.catalog.supported_models.values() for m in models
-    }
+    catalog = require_model_catalog(request)
+    spawnable = {m for models in catalog.supported_models.values() for m in models}
     if body.model not in spawnable:
         raise HTTPException(
             status_code=400,
@@ -60,6 +43,6 @@ def put_default_model(body: DefaultModelWrite, request: Request) -> DefaultModel
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         set_cluster_default_model(cur, body.model, updated_by="api")
         resolved = resolve_default_model(
-            cur, catalog=request.app.state.catalog, authority=request.app.state.config_authority
+            cur, catalog=catalog, authority=request.app.state.config_authority
         )
         return DefaultModelView(model=resolved.model, source=resolved.source)

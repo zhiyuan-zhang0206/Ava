@@ -1,23 +1,4 @@
-// /control/config page tests — loading/error/no-data tri-state + bool
-// toggle + text inline edit (Enter commit / Escape cancel / no-op cancel on
-// unchanged value) + restart hint + the per-machine selector (cluster vs
-// agent-runner view, host remote_writable editability, capability pre-grey,
-// write-result per-field rejection + value revert, restart banner from the
-// PUT result) + the tag-filter bar.
-//
-// Page groups fields into the 17 display groups of _config_groups.ts (a
-// frontend regrouping — env var → group, falling back by the backend's domain
-// group, then to "Other"). Each row shows a label derived from the env var —
-// AVA_ prefix stripped, underscores to spaces, case preserved (the env var
-// rides in the title attribute) plus tag badges:
-// Runtime / CLI-only, the raw scope, per-agent, "Startup: <target>". A remote
-// agent-runner view drops fields of capabilities the machine doesn't carry and
-// shows a "(edit on Cluster view)" hint for non-host fields. Sensitive fields
-// are always read-only (masked + lock + CLI-only).
-//
-// happy-dom + RTL + real QueryClient (mock at the
-// api.{getConfig,putConfig,getMachines,getSystemStatus} layer so useQuery /
-// useMutation goes through its full lifecycle).
+
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -62,28 +43,14 @@ function wrap(ui: React.ReactElement, qc?: QueryClient) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
-// The page renders TWO independently async panels that share one label/badge
-// vocabulary: the editable group list (a single getConfig read) and the
-// read-only per-model list above it (getModels, then getResolvedConfig gated on
-// the model it returns — a two-hop chain that normally lands later). So a
-// document-wide text query is only stable once BOTH have rendered: awaiting a
-// group-list element leaves the per-model rows in flight, and whether they
-// arrive before the assertion is scheduler timing. That is the `expected 4 to
-// be 3` that failed CI on PR #908 under a loaded box — 4 is the settled truth
-// (three group rows plus one per-model row), 3 was a half-rendered page.
-//
-// Render through this helper so assertions always see the final DOM, and count
-// group-list badges with `inGroups` so a per-model row can never be swept in.
 async function renderSettled() {
   const rendered = wrap(<ConfigPage />);
   await screen.findByText("LOG LEVEL");
-  // A per-model row exists only once both hops have resolved — the last thing
-  // on the page to render.
+
   await screen.findByTestId("per-model-source-auto_compact_fraction");
   return rendered;
 }
 
-/** Matches of `text` inside the editable group list, never the per-model panel. */
 function inGroups(text: string): HTMLElement[] {
   return screen
     .getAllByTestId(/^config-group-/)
@@ -112,13 +79,6 @@ const OK_RESULT = (
   restart_required: restart,
 });
 
-// Fixture spans all three capabilities so the remote-hides-gateway-fields
-// behavior is exercised. Display groups (via _config_groups.ts): AVA_LOG_LEVEL
-// + AVA_MAX_RETRIES → "LLM settings" (backend-group fallback), AVA_ENABLE_COMPACT
-// + AVA_API_KEY + AVA_NUDGE_CADENCE → "Agent execution" (Agent fallback),
-// AVA_BUILD_SHA + AVA_HOST_LABEL → "Display & general" (General fallback),
-// AVA_BROWSER_ENABLED → "Services" (static map), AVA_GATEWAY_PORT →
-// "Connection" (static map).
 const VIEW: ConfigView = {
   fields: [
     {
@@ -286,15 +246,10 @@ const VIEW: ConfigView = {
     },
   ],
   raw_overrides: { log_level: "INFO" },
-  // The default fixture is a pure agent-runner: a remote view of it drops the
-  // gateway section. Tests that need a co-located box override this.
+
   machine_capabilities: ["agent-runner"],
 };
 
-// The per-model resolution view (read-only, above the editable groups) is part
-// of the page, so its two reads are mocked for every test here. `max_retries`
-// appears in BOTH fixtures on purpose: it is the row the "go to editor" link
-// jumps to, and a resolved row is a real config field by contract.
 const MODELS: ModelsResponse = {
   providers: { deepseek: ["deepseek-v4-pro"], claude: ["claude-opus-5"] },
   models: {
@@ -373,8 +328,7 @@ beforeEach(() => {
   vi.spyOn(api, "getSystemStatus").mockResolvedValue(STATUS);
   vi.spyOn(api, "getModels").mockResolvedValue(MODELS);
   vi.spyOn(api, "getResolvedConfig").mockResolvedValue(RESOLVED);
-  // Third async panel: the cluster default-model control (its own tests live in
-  // _default_model.test.tsx; here it only has to not reach the network).
+
   vi.spyOn(api, "getDefaultModel").mockResolvedValue({
     model: "deepseek-v4-pro",
     source: "cluster",
@@ -436,26 +390,21 @@ describe("ConfigPage render", () => {
   it("display-group headers render with raw case-preserved field labels", async () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     await renderSettled();
-    // Display-group headers from _config_groups.ts (backend-group fallback +
-    // static-map hits).
+
     expect(screen.getByText("LLM settings")).toBeTruthy();
     expect(screen.getByText("Agent execution")).toBeTruthy();
     expect(screen.getByText("Display & general")).toBeTruthy();
     expect(screen.getByText("Connection")).toBeTruthy();
-    // Case-preserved labels (AVA_ stripped, underscores to spaces); the env var
-    // rides in the title attribute, and the python field name is not rendered.
+
     expect(screen.getByTitle("AVA_LOG_LEVEL")).toBeTruthy();
-    // Scoped: max_retries is also a per-model row, so a document-wide getByText
-    // would find two on a settled page.
+
     expect(inGroups("MAX RETRIES")).toHaveLength(1);
     expect(screen.queryByText("log_level")).toBeNull();
     expect(screen.queryByText("AVA_LOG_LEVEL")).toBeNull();
   });
 
   it("HIDDEN_ENV_VARS: transport micro-tuning is dropped from the panel", async () => {
-    // AVA_GATEWAY_MAX_RETRIES is in HIDDEN_ENV_VARS — it must not render even
-    // though the backend serves it in the field list (matching keys on env_var,
-    // not the python name).
+
     const viewWithHiddenField: ConfigView = {
       ...VIEW,
       fields: [
@@ -489,7 +438,7 @@ describe("ConfigPage render", () => {
   it("field appears under its display-group header", async () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     await renderSettled();
-    // "LLM settings" group header appears before LOG LEVEL in the DOM.
+
     const groupHeader = screen.getByText("LLM settings");
     const fieldName = screen.getByText("LOG LEVEL");
     expect(
@@ -501,26 +450,22 @@ describe("ConfigPage render", () => {
   it("scope badge is shown per row (raw scope)", async () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     await renderSettled();
-    // Three fields have cluster-default scope (log_level, max_retries,
-    // nudge_cadence) — the badge shows the scope verbatim.
+
     expect(inGroups("cluster-default")).toHaveLength(3);
-    // "host" scope badge (on host_label, build_sha, browser_enabled, gateway_port).
+
     expect(inGroups("host")).toHaveLength(4);
-    // "agent" scope badge (on enable_compact).
+
     expect(inGroups("agent")).toHaveLength(1);
-    // "cluster-pinned" for api_key.
+
     expect(inGroups("cluster-pinned")).toHaveLength(1);
   });
 
   it("per-agent tag follows the wire field; Startup tag follows restart_required", async () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     await renderSettled();
-    // per_agent rides on the wire (ConfigFieldView.per_agent — the same flag
-    // the per-model view uses), not a scope approximation: the three fixture
-    // cluster-default fields carry per_agent=true. Counted inside the group
-    // list: the per-model panel draws its own per-agent badge.
+
     expect(inGroups("per-agent")).toHaveLength(3);
-    // log_level restarts "all"; nudge_cadence restarts "agent".
+
     expect(screen.getByText("Startup: all")).toBeTruthy();
     expect(screen.getAllByText(/Startup: /).length).toBeGreaterThanOrEqual(2);
   });
@@ -529,18 +474,17 @@ describe("ConfigPage render", () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     const putSpy = vi.spyOn(api, "putConfig").mockResolvedValue(OK_RESULT(["api_key"]));
     await renderSettled();
-    // Masked — the cleartext is never rendered.
+
     expect(screen.getByText("••••••••")).toBeTruthy();
     expect(screen.queryByText("secret-xyz")).toBeNull();
     expect(screen.getByTestId("sensitive-api_key")).toBeTruthy();
-    // A writable secret exposes a Replace affordance that opens an EMPTY password
-    // input (never seeded with the mask or a read-back value).
+
     fireEvent.click(screen.getByTestId("edit-api_key"));
     const input = screen.getByTestId<HTMLInputElement>("input-api_key");
     expect(input.getAttribute("type")).toBe("password");
     expect(screen.getByLabelText("Replace AVA_API_KEY")).toBe(input);
     expect(input.value).toBe("");
-    // A non-empty value replaces the secret; the delta carries the new value.
+
     fireEvent.change(input, { target: { value: "sk-NEW" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
@@ -554,7 +498,7 @@ describe("ConfigPage render", () => {
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("edit-api_key"));
     fireEvent.click(screen.getByTestId("edit-api_key"));
-    screen.getByTestId("input-api_key"); // opened, left blank
+    screen.getByTestId("input-api_key");
     fireEvent.click(screen.getByTestId("save-api_key"));
     expect(putSpy).not.toHaveBeenCalled();
   });
@@ -617,7 +561,7 @@ describe("ConfigPage render", () => {
     };
     vi.spyOn(api, "getConfig").mockResolvedValue(withHidden);
     await renderSettled();
-    // AVA_CLUSTER_SECRET is on the hidden list → its row never renders.
+
     expect(screen.queryByText("CLUSTER SECRET")).toBeNull();
   });
 
@@ -636,12 +580,12 @@ describe("ConfigPage tag filter", () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     await renderSettled();
     fireEvent.click(screen.getByTestId("filter-sensitive"));
-    // Only api_key is sensitive → its group survives, the LLM group vanishes.
+
     expect(screen.getByText("API KEY")).toBeTruthy();
     expect(screen.queryByText("LOG LEVEL")).toBeNull();
     expect(screen.queryByText("LLM settings")).toBeNull();
     expect(screen.getByText("1 setting")).toBeTruthy();
-    // Back to All restores everything.
+
     fireEvent.click(screen.getByTestId("filter-all"));
     expect(screen.getByText("LOG LEVEL")).toBeTruthy();
   });
@@ -650,8 +594,7 @@ describe("ConfigPage tag filter", () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     await renderSettled();
     fireEvent.click(screen.getByTestId("filter-cli-only"));
-    // build_sha (writable=false) + gateway_port (writable=false). api_key is a
-    // WRITABLE secret → editable write-only → "runtime", not "cli-only".
+
     expect(screen.getByText("BUILD SHA")).toBeTruthy();
     expect(screen.getByText("GATEWAY PORT")).toBeTruthy();
     expect(screen.queryByText("API KEY")).toBeNull();
@@ -663,7 +606,7 @@ describe("ConfigPage capability visibility", () => {
   it("Cluster view shows every capability's fields", async () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     await renderSettled();
-    // gateway_port (capability gateway) renders under its display group.
+
     expect(
       screen.getByTestId("config-group-config-connection").textContent,
     ).toMatch(/GATEWAY PORT/);
@@ -676,18 +619,16 @@ describe("ConfigPage capability visibility", () => {
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
     fireEvent.change(select, { target: { value: AGENT_RUNNER } });
-    // The gateway-capability field vanishes with its now-empty group
-    // (machine-independent — edited on the Cluster view).
+
     await waitFor(() => screen.getByText("HOST LABEL"));
     expect(screen.queryByText("GATEWAY PORT")).toBeNull();
     expect(screen.queryByTestId("config-group-config-connection")).toBeNull();
-    // agent-runner + common capability fields are still present.
+
     expect(screen.getByText("LOG LEVEL")).toBeTruthy();
   });
 
   it("remote co-located gateway,agent-runner box keeps gateway fields", async () => {
-    // A single box carries both capabilities, so its remote view still shows
-    // gateway-capability fields — its gateway-daemon toggles must stay editable.
+
     vi.spyOn(api, "getConfig").mockResolvedValue({
       ...VIEW,
       machine_capabilities: ["gateway", "agent-runner"],
@@ -800,8 +741,7 @@ describe("ConfigPage enum select", () => {
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
     fireEvent.change(machineSelect, { target: { value: AGENT_RUNNER } });
-    // The cluster-scope enum is machine-independent → read-only here, so it
-    // renders its value as text with no editable <select>.
+
     await waitFor(() => expect(screen.getByText("once_per_compaction")).toBeTruthy());
     expect(screen.queryByTestId("select-nudge_cadence")).toBeNull();
   });
@@ -1102,10 +1042,6 @@ describe("Fix 2 — capability reason hidden on non-editable rows", () => {
   });
 });
 
-// The read-only per-model view: it must name the layer that produced each
-// effective value (not just print the value), and it must be able to hand the
-// user off to the one editor that CAN change it — including when the current
-// filter has that row hidden, which is the failure mode a plain #anchor has.
 describe("ConfigPage per-model resolution view", () => {
   it("labels each row with the layer that produced its value", async () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
@@ -1147,15 +1083,14 @@ describe("ConfigPage per-model resolution view", () => {
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("per-model-shadowed-max_retries"));
 
-    // Explicit shadows both the model default and the shared floor.
     expect(screen.getByTestId("per-model-shadowed-max_retries").textContent).toBe(
       "shadows model default 4, shared default 6",
     );
-    // A model default shadows only the floor.
+
     expect(screen.getByTestId("per-model-shadowed-auto_compact_fraction").textContent).toBe(
       "shadows shared default 0.8",
     );
-    // The floor winning shadows nothing — the badge already says so.
+
     expect(screen.queryByTestId("per-model-shadowed-llm_retry_max_attempts")).toBeNull();
   });
 
@@ -1163,7 +1098,7 @@ describe("ConfigPage per-model resolution view", () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("per-model-source-max_retries"));
-    // Defaults to the cluster's own model, not the first option.
+
     const select = screen.getByLabelText<HTMLSelectElement>("Model");
     expect(select.value).toBe("deepseek-v4-pro");
 
@@ -1178,8 +1113,6 @@ describe("ConfigPage per-model resolution view", () => {
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("per-model-goto-max_retries"));
 
-    // Hide max_retries behind a filter it doesn't match. Assert on the row
-    // element, not its label text — the per-model row carries the same label.
     fireEvent.click(screen.getByTestId("filter-sensitive"));
     await waitFor(() =>
       expect(document.getElementById("config-field-max_retries")).toBeNull(),
@@ -1193,7 +1126,7 @@ describe("ConfigPage per-model resolution view", () => {
       return el;
     });
     expect(row?.className).toContain("ring-primary");
-    // Only the linked row is highlighted.
+
     expect(document.getElementById("config-field-log_level")?.className).not.toContain(
       "ring-primary",
     );
@@ -1230,5 +1163,24 @@ describe("ConfigPage per-model resolution view", () => {
     });
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("per-model-unregistered"));
+  });
+});
+
+describe("ConfigPage without a model catalog", () => {
+  it("reports model failure while preserving ordinary configuration editing", async () => {
+    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    vi.spyOn(api, "getModels").mockRejectedValue(new Error("provider private diagnostic"));
+    vi.spyOn(api, "getDefaultModel").mockRejectedValue(new Error("model unavailable"));
+    const put = vi.spyOn(api, "putConfig").mockResolvedValue(OK_RESULT(["log_level"]));
+    wrap(<ConfigPage />);
+    await screen.findByText("Model settings are unavailable. Check the gateway configuration and reload.");
+    expect(screen.getByLabelText<HTMLSelectElement>("Model").disabled).toBe(true);
+    expect(screen.queryByText("Loading…")).toBeNull();
+    expect(screen.queryByText(/provider private diagnostic/)).toBeNull();
+    expect(api.getResolvedConfig).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByTestId("edit-log_level"));
+    fireEvent.change(screen.getByTestId("input-log_level"), { target: { value: "DEBUG" } });
+    fireEvent.keyDown(screen.getByTestId("input-log_level"), { key: "Enter" });
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ log_level: "DEBUG" }, undefined));
   });
 });

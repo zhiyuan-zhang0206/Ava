@@ -50,7 +50,7 @@ Gateway MCP clients use `spawn_agent_guarded_v1` for retained original
 birth recovery. The versioned tool name admits each write on its serving
 gateway before effects and has a distinct authenticated MCP-client namespace;
 unsupported servers reject it without legacy fallback. See the
-[MCP endpoint owner](../../mcp_server/docs/mcp-endpoint.ava.okf.md).
+[MCP endpoint owner](../../mcp_server/docs/mcp-endpoint/mcp-endpoint.ava.okf.md).
 
 Creation, SDK and immutable fork recovery tests live in `tests/creation/`.
 Its local `path_scopes.toml` retains the creation identity fixture scope.

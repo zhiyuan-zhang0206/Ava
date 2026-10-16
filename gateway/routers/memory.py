@@ -17,6 +17,7 @@ from base.db import Database
 from base.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.disconnect import run_until_disconnect
+from gateway.http.model_catalog import require_model_catalog
 from gateway.schemas.memory import (
     MemoryGraphEdge,
     MemoryGraphNode,
@@ -237,7 +238,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     inputs: MemorySearchInputs = request.app.state.memory_search_inputs
     provider = _embedding_factory.get_provider(
         inputs.embedding_backend(),
-        catalog=request.app.state.catalog,
+        catalog=require_model_catalog(request),
         timeout_reader=inputs.embedding_timeout,
         api_key_reader=inputs.api_key,
     )
@@ -289,7 +290,7 @@ async def _search_and_rank(
         hits,
         purpose=body.purpose,
         model=inputs.rerank_model(),
-        catalog=request.app.state.catalog,
+        catalog=require_model_catalog(request),
         k=body.k,
         limit=limit,
         exclude=exclude,

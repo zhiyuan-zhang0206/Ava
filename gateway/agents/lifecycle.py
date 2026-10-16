@@ -1,16 +1,3 @@
-"""Agent lifecycle endpoints — /api/agents/* lifecycle surface.
-
-Compact / cancel / terminate / resurrect / restart.
-
-Lifecycle operations that mutate physical host state (session / OS
-process) always run on the agent's home machine via its ops server
-(`forward_to_home_machine`, `forward.py`) — no local shortcut
-even when the target is the co-located box. Operations that are durable
-DB-row + event-publish work (cancel) run on whichever
-gateway receives them. CRUD + spawn live in `router.py`; message +
-state reads in `state.py`.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -64,6 +51,7 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     request_key,
 )
+from gateway.http.model_catalog import require_model_catalog
 from ops.rpc_schemas import (
     OpenTaskRow,
     OpenTasksHint,
@@ -79,7 +67,7 @@ router = APIRouter()
 
 _log = logging.getLogger(__name__)
 
-# The open-task hint shows at most this many rows; `more` counts the rest.
+
 _OPEN_TASKS_SHOWN = 5
 
 
@@ -92,11 +80,14 @@ class ForceExpireImpersonationResponse(BaseModel):
     status: Literal["expired", "not_open"]
 
 
-@router.post("/api/agents/{agent_id}/impersonation/force-expire")
+@router.post(
+    "/api/agents/{agent_id}/impersonation/force-expire",
+    description="End the caller's observed takeover without terminating the native agent.",
+)
 async def post_force_expire_impersonation(
     agent_id: int, body: ForceExpireImpersonationRequest, request: Request
 ) -> ForceExpireImpersonationResponse:
-    """End the caller's observed takeover without terminating the native agent."""
+
     verified_by = getattr(request.state, "source_verified_by", None)
     principal = getattr(request.state, "auth_principal", None)
     subject = getattr(principal, "subject", None)
@@ -118,32 +109,16 @@ async def post_force_expire_impersonation(
     return ForceExpireImpersonationResponse(session_id=body.session_id, status=status)
 
 
-@router.post("/api/agents/{agent_id}/terminate")
+@router.post(
+    "/api/agents/{agent_id}/terminate",
+    description="Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404; an\nalready-terminated identity is a no-op for graceful termination.\n\n`kill_all_shell_sessions` also kills the agent's shell sessions on its home\nmachine, silently; `shell_sessions` in the response says whether that\nalready happened (`now`, with the killed ids) or happens right before a\ngraceful termination applies (`at_exit`).\n\nOn success the response additionally carries `open_tasks` — the tasks the\nagent still owns (in_progress; at most five, most recently\nupdated first) as it goes down. The hint is advisory: a failed read leaves\nit null and never changes the termination result.",
+)
 async def post_agent_terminate(
     agent_id: int,
     request: Request,
     body: TerminateAgentRequest = Body(default_factory=TerminateAgentRequest),  # noqa: B008
 ) -> TerminateAgentResponse:
-    """Terminate through the home runner's durable native control path.
 
-    Claim returns to END and the host flushes before applying normal termination.
-    An optional message is committed as pending work before the command, retained
-    for later resurrection without causing another model turn. Force returns
-    enqueued while the exact original host settles its task and execution
-    resources; acceptance and metadata status are not proof of completed exit.
-
-    Both paths forward to the home runner. A missing agent returns 404; an
-    already-terminated identity is a no-op for graceful termination.
-
-    `kill_all_shell_sessions` also kills the agent's shell sessions on its home
-    machine, silently; `shell_sessions` in the response says whether that
-    already happened (`now`, with the killed ids) or happens right before a
-    graceful termination applies (`at_exit`).
-
-    On success the response additionally carries `open_tasks` — the tasks the
-    agent still owns (in_progress; at most five, most recently
-    updated first) as it goes down. The hint is advisory: a failed read leaves
-    it null and never changes the termination result."""
     return await terminate_agent_with_open_tasks(
         agent_id, body, request.app.state.db_pool, db=request.app.state.db
     )
@@ -152,12 +127,7 @@ async def post_agent_terminate(
 async def terminate_agent_with_open_tasks(
     agent_id: int, body: TerminateAgentRequest, pool: ConnectionPool, *, db: Database
 ) -> TerminateAgentResponse:
-    """Forward the terminate op to the home runner, drop the TTL rows of any
-    shell sessions it killed, then attach the agent's open-task hint — read
-    once from `agent_tasks` after acceptance.
 
-    Advisory by design: a failed hint read is logged and leaves `open_tasks`
-    null, so it can never block or alter the termination itself."""
     forwarded = await forward_to_home_machine(
         agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump(), db=db, pool=pool
     )
@@ -177,14 +147,6 @@ async def terminate_agent_with_open_tasks(
 
 
 async def _drop_killed_shell_ttls(pool: ConnectionPool, agent_id: int, killed: list[int]) -> None:
-    """Delete the `agent_shell_ttls` rows of sessions a terminate just killed.
-
-    The TTL reaper's own row removal, done up front because the runner that
-    killed them holds no DELETE on the table. Sessions a graceful terminate
-    kills at exit keep their rows until the reaper retires them at their
-    deadline, silently (an absent session never notifies). A failed delete is
-    logged and left to that same reaper; it never alters the termination.
-    """
 
     def _delete() -> None:
         with write_transaction(pool) as conn:
@@ -206,8 +168,7 @@ async def _drop_killed_shell_ttls(pool: ConnectionPool, agent_id: int, killed: l
 
 
 def _open_tasks_hint_blocking(pool: ConnectionPool, agent_id: int) -> OpenTasksHint | None:
-    """One `agent_tasks` read — the agent's open tasks, most recently updated
-    first; None when it owns none."""
+
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT id, title, status, updated_at FROM agent_tasks "
@@ -228,40 +189,16 @@ def _open_tasks_hint_blocking(pool: ConnectionPool, agent_id: int) -> OpenTasksH
     )
 
 
-@router.post("/api/agents/{agent_id}/resurrect")
+@router.post(
+    "/api/agents/{agent_id}/resurrect",
+    description="Resurrect a terminated agent — UPDATE 'terminated' -> 'idling' +\nlaunch a fresh detached process attached to the same agent_id\n(LangGraph state preserved; the agent wakes and continues from its last\nturn).\n\nUsed by the frontend resurrect button. A bare resurrect is a pure\nlifecycle event with no message — the agent just gets the \"you have been\nresurrected\" marker; the \"resurrect with prompt\" path carries a `prompt`\nthat is INSERTed as a chat inbound in the **same transaction** as the\nlifecycle 'resurrect' inbound. The detached session may be created before\ncommit, but its child blocks on the agent row and cannot claim or process\neither inbound early. `resurrected_by` defaults to\n\"user\" and is validated against the envelope source whitelist.\n\nPeer agents have no dedicated resurrect API — they `send_message`, and\nauto-resurrect (`deliver_chat_inbound`) wakes a terminated target. This\nendpoint covers the case auto-resurrect cannot: a resurrect with no\nmessage to deliver.\n\nAlways runs on the agent's home machine via its ops server\n(`forward_to_home_machine`) — that host starts the new process; launching\nanywhere else would start it on the wrong host.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n`already_alive`: agent is still alive\n    (running/idling); resurrect does not\n    apply — idempotent.",
+)
 async def post_agent_resurrect(
     agent_id: int,
     request: Request,
     body: ResurrectAgentRequest = Body(default_factory=ResurrectAgentRequest),  # noqa: B008
 ) -> ResurrectAgentResponse:
-    """Resurrect a terminated agent — UPDATE 'terminated' -> 'idling' +
-    launch a fresh detached process attached to the same agent_id
-    (LangGraph state preserved; the agent wakes and continues from its last
-    turn).
 
-    Used by the frontend resurrect button. A bare resurrect is a pure
-    lifecycle event with no message — the agent just gets the "you have been
-    resurrected" marker; the "resurrect with prompt" path carries a `prompt`
-    that is INSERTed as a chat inbound in the **same transaction** as the
-    lifecycle 'resurrect' inbound. The detached session may be created before
-    commit, but its child blocks on the agent row and cannot claim or process
-    either inbound early. `resurrected_by` defaults to
-    "user" and is validated against the envelope source whitelist.
-
-    Peer agents have no dedicated resurrect API — they `send_message`, and
-    auto-resurrect (`deliver_chat_inbound`) wakes a terminated target. This
-    endpoint covers the case auto-resurrect cannot: a resurrect with no
-    message to deliver.
-
-    Always runs on the agent's home machine via its ops server
-    (`forward_to_home_machine`) — that host starts the new process; launching
-    anywhere else would start it on the wrong host.
-
-    404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
-    `already_alive`: agent is still alive
-        (running/idling); resurrect does not
-        apply — idempotent.
-    """
     forwarded = await forward_to_home_machine(
         agent_id,
         f"/api/agents/{agent_id}/resurrect-explicit",
@@ -272,27 +209,26 @@ async def post_agent_resurrect(
     return ResurrectAgentResponse.model_validate(forwarded)
 
 
-@router.post("/api/agents/{agent_id}/restart")
+@router.post(
+    "/api/agents/{agent_id}/restart",
+    description="Enqueue native restart on the agent's home runner.\n\nThe current turn reaches claim, returns normally and flushes its checkpoint.\nThe host then applies the exact command and releases the incarnation for\nnew admission, retaining agent ID and context. Terminated agents require\nresurrection; restart returns already_terminated for them.",
+)
 async def post_agent_restart(
     agent_id: int,
     request: Request,
     body: RestartAgentRequest = Body(default_factory=RestartAgentRequest),  # noqa: B008
 ) -> RestartAgentResponse:
-    """Enqueue native restart on the agent's home runner.
 
-    The current turn reaches claim, returns normally and flushes its checkpoint.
-    The host then applies the exact command and releases the incarnation for
-    new admission, retaining agent ID and context. Terminated agents require
-    resurrection; restart returns already_terminated for them."""
     if body.config_overlay:
         from base.packages.plugins.config_registration import validate_config_overlay
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
+        catalog = require_model_catalog(request)
         try:
             validate_config_overlay(
                 body.config_overlay,
-                models=request.app.state.catalog.models,
-                decision_models=request.app.state.catalog.decision_models,
+                models=catalog.models,
+                decision_models=catalog.decision_models,
             )
         except InvalidConfigOverlay as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -306,22 +242,28 @@ async def post_agent_restart(
     return RestartAgentResponse.model_validate(forwarded)
 
 
-@router.get("/api/keyed/v1/agents/{agent_id}/native-work")
+@router.get(
+    "/api/keyed/v1/agents/{agent_id}/native-work",
+    description="Expose only eligible ACTIVE work backed by actual managed-owner evidence.",
+)
 async def native_work(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)], request: Request
 ) -> NativeWorkTarget:
-    """Expose only eligible ACTIVE work backed by actual managed-owner evidence."""
+
     target = await asyncio.to_thread(observe_native_work, request.app.state.db_pool, agent_id)
     if target is None:
         raise HTTPException(status_code=409, detail="no eligible active native work")
     return target
 
 
-@router.post("/api/keyed/v1/agents/{agent_id}/cancel-work")
+@router.post(
+    "/api/keyed/v1/agents/{agent_id}/cancel-work",
+    description="Accept one exact work intent; acceptance does not prove checkpoint execution.",
+)
 async def native_cancel(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: NativeWorkTarget, request: Request
 ) -> NativeCancelAcceptance:
-    """Accept one exact work intent; acceptance does not prove checkpoint execution."""
+
     scoped = _native_control_key(request)
     try:
         return await asyncio.to_thread(
@@ -348,11 +290,14 @@ def _native_control_key(request: Request) -> str:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/api/keyed/v1/agents/{agent_id}/restart-work")
+@router.post(
+    "/api/keyed/v1/agents/{agent_id}/restart-work",
+    description="Accept the original ACTIVE restart once through its dedicated executor.",
+)
 async def native_restart(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: NativeRestartRequest, request: Request
 ) -> NativeRestartAcceptance:
-    """Accept the original ACTIVE restart once through its dedicated executor."""
+
     key = _native_control_key(request)
     try:
         previous = await asyncio.to_thread(
@@ -394,13 +339,16 @@ async def native_restart(
     return stored
 
 
-@router.get("/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}")
+@router.get(
+    "/api/keyed/v1/agents/{agent_id}/restart-commands/{command_id}",
+    description="Observe retained original execution facts; no mutable current-owner inference.",
+)
 async def native_restart_status(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)],
     command_id: Annotated[int, Path(gt=0, lt=2**63)],
     request: Request,
 ) -> NativeRestartProgress:
-    """Observe retained original execution facts; no mutable current-owner inference."""
+
     progress = await asyncio.to_thread(
         native_restart_progress, request.app.state.db_pool, agent_id, command_id
     )
@@ -409,22 +357,29 @@ async def native_restart_status(
     return progress
 
 
-@router.get("/api/keyed/v1/agents/{agent_id}/compact-target")
+@router.get(
+    "/api/keyed/v1/agents/{agent_id}/compact-target",
+    description="Observe only actual new-host quiescent, closed-resource source evidence.",
+)
 async def guarded_compact_target(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)], request: Request
 ) -> CompactTarget:
-    """Observe only actual new-host quiescent, closed-resource source evidence."""
+
     try:
         return await asyncio.to_thread(observe_guarded_compact, request.app.state.db_pool, agent_id)
     except CompactConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/api/keyed/v1/agents/{agent_id}/compact-history", status_code=202)
+@router.post(
+    "/api/keyed/v1/agents/{agent_id}/compact-history",
+    status_code=202,
+    description="Accept the original observed history; 202 is not summary/application success.",
+)
 async def guarded_compact_history(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)], body: CompactTarget, request: Request
 ) -> CompactAcceptance:
-    """Accept the original observed history; 202 is not summary/application success."""
+
     key = request.headers.get("Idempotency-Key")
     if (
         key is None
@@ -458,11 +413,14 @@ async def guarded_compact_history(
     return accepted
 
 
-@router.get("/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}")
+@router.get(
+    "/api/keyed/v1/agents/{agent_id}/compact-commands/{command_id}",
+    description="Inspect current execution evidence independently of immutable acceptance.",
+)
 async def guarded_compact_command(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)], command_id: UUID, request: Request
 ) -> CompactStatus:
-    """Inspect current execution evidence independently of immutable acceptance."""
+
     try:
         return await asyncio.to_thread(
             guarded_compact_status, request.app.state.db_pool, agent_id, command_id

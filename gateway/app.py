@@ -1,59 +1,3 @@
-"""Web UI / HTTP API (pure JSON API, does not serve HTML).
-
-`/docs` / `/redoc` / `/openapi.json` are disabled (docs_url=None etc. below,
-to avoid leaking the route schema) — this module is the contract source of
-truth; codegen auto-generates frontend / SDK types from the code, and any drift
-is caught by the codegen-fresh hook. The docstring does **not** re-list
-endpoints (rot defense).
-
-The non-JSON response surface is deliberately small and enumerated:
-- `GET /api/okf/graph` (`gateway/inspect/okf_graph.py`) — the OKF
-  knowledge-graph D3 visualization as a self-contained HTML page (dev-tool
-  template + build mechanics, not a frontend component).
-- `GET /api/agents/{id}/uploads/...` (`gateway/routers/upload/router.py`) —
-  `FileResponse` file downloads.
-- `/pages/{agent_id}-{name}/...` (`gateway/routers/pages.py`) — a
-  streaming reverse proxy to an agent's own page server (arbitrary content).
-- `/grafana/*` (`gateway/routers/grafana.py`) — streaming reverse proxy to a
-  co-located Grafana instance (HTML dashboard, default off → 404).
-All four sit behind the normal session-cookie / bearer-secret middleware.
-
-Design-wise, the gateway (spawn / send_message) is centralized under
-`/api/agents/*` — SDK (`ava.agents.*`) / frontend / bootstrap script
-all share the same endpoint set. Auto-resurrect is handled internally
-by `deliver_chat_inbound`. See
-docs/decisions/api/2026-05-09-stateless-gateway.md.
-
-Architectural rule: this module does **not** build the turn-loop prompts
-(spawn/draft endpoints like schedules/guide/packages DO inline a fixed
-system prompt for the agent they spawn — that is the deliberate exception),
-does not run the LLM, does not construct the LangGraph; it only imports
-pure-function helpers from `agent.messages` (cancel marker detection,
-etc.).
-UI and kernel are coupled through Postgres (pending / agents tables) +
-Redis (`ava:events` channel); they do not share Python process state or
-semantic payload.
-
-Concurrency:
-- DB uses one `Database.pool()` per process; each request borrows a connection
-- Publish callsites reuse one process-wide `aredis.Redis` via
-  `base.events.live.redis_client.get_async_redis()`; SSE / pubsub subscribers still
-  open their own connection per request (subscriber lifecycle ≠ publisher).
-
-Frontend: Next.js app under `ui/web/`, served on :3000; the browser calls
-this service directly at `<hostname>:8000` (no rewrites proxy — see
-ui/web/next.config.ts).
-
-Endpoint implementations live in the gateway's feature packages
-(`gateway/<feature>/`) and single-module `gateway/routers/<domain>.py`, and are
-mounted at the bottom of this file in a fixed order. Lifespan and middleware registration remain
-in this module; exception-to-envelope adapters live in `gateway/http/middleware/error_handlers.py`.
-
-Start: `.venv/bin/python scripts/entrypoints/gateway.py` (or `python -m gateway`)
--> uvicorn :8000 on all interfaces, both IPv4 and IPv6 (reachable on the
-cluster's private network)
-"""
-
 import asyncio
 import logging
 import time
@@ -127,8 +71,14 @@ from gateway.http.middleware.error_envelope import error_response, request_trace
 from gateway.http.middleware.error_handlers import (
     ava_agent_error_handler,
     http_exception_handler,
+    model_catalog_unavailable_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
+)
+from gateway.http.model_catalog import (
+    ModelCatalogUnavailableError,
+    load_model_catalog,
+    require_catalog,
 )
 from gateway.inspect import okf_graph as okf_graph_router
 from gateway.inspect import router as inspect_router
@@ -180,7 +130,7 @@ _log = logging.getLogger(__name__)
 
 
 def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
-    """Build caches, concurrency gates, and event throttles for one gateway lifespan."""
+
     machine_token_acceptance: AcceptanceCache = {}
     app.state.machine_token_acceptance = machine_token_acceptance
     app.state.telemetry_staleness = TelemetryStaleness()
@@ -192,7 +142,7 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
     app.state.reply_suggestions = reply_suggestion_service(
         config,
         db=app.state.db,
-        catalog=app.state.catalog,
+        catalog_reader=partial(require_catalog, app.state.catalog),
         rendering=app.state.timeline_policy.rendering,
     )
     app.state.memory_search_gate = memory_router.build_search_gate(
@@ -222,7 +172,7 @@ def _build_request_resources(app: FastAPI, config: ConfigBoot) -> None:
         lockout_seconds_reader=lambda: config.view.gateway.login_lockout_seconds,
         config=LoginRateLimitConfig(),
     )
-    # The insights service's Unix socket: no connection until the first proxied read.
+
     app.state.insights_client = insights_router.build_client()
 
 
@@ -233,20 +183,7 @@ async def lifespan(
     process: GatewayProcess,
     process_ownership: Literal["borrowed", "owned"],
 ) -> AsyncGenerator[None]:
-    """App-level resources: data-plane and control-plane DB pools.
 
-    Redis is not shared at app level — SSE endpoints need independent pubsub
-    connections (one per client); attaching pubsub to a shared client causes
-    interference.
-
-    Web does not run the LLM, does not build the graph, does not hold the
-    checkpointer — all operations that need those (framework compact /
-    agent compact) go through writes to the inbound_messages table and are
-    handed off to the kernel.
-
-    The agent host handles native lifecycle work. Auto label generation
-    runs in the separate services/derived/labeler daemon.
-    """
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
     app.state.gateway_process = process
@@ -260,21 +197,13 @@ async def lifespan(
             pipeline=process.event_pipeline(),
             machine_reader=process.machine.name,
         )
-        app.state.catalog = build_model_catalog()
+        app.state.catalog = load_model_catalog(build_model_catalog)
         app.state.config_authority = ConfigAuthority(
             runtime=config.view,
             all_domains=config.view if config.view.profile is None else Settings(profile=None),
             env_path=paths.ava_home() / ".env",
         )
 
-        # Runtime consumer -> `Database.pool()` dials the pooled URL (PgBouncer when
-        # enabled, else direct) and decides the connection kwargs in one place:
-        # prepare_threshold=None keeps every borrowed connection transaction-pooling-safe,
-        # and PG_KEEPALIVE_KWARGS bounds a borrow on a half-dead socket. The second
-        # matters here because this pool outlives everything — it is opened once per
-        # gateway process and serves every request, so a connection idle across a host
-        # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
-        # the request handler on the OS TCP-retransmit timeout.
         app.state.started_at = time.time()
         app.state.db = process.database()
         app.state.bus = EventBus.from_settings()
@@ -285,21 +214,11 @@ async def lifespan(
         app.state.session_touch = SessionTouchThrottle()
         app.state.page_host_cache = pages_router.PageHostCache()
         app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
-        # The control plane must never queue behind the saturated data-plane pool.
-        # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
-        # recovery reads need their own short, small reservation.
+
         app.state.control_db_pool = app.state.db.pool(min_size=1, max_size=2, timeout=2.0)
 
-        # Shared upstream client for the Grafana reverse proxy — one connection
-        # pool across proxied requests instead of an AsyncClient per request.
-        # Cheap when the proxy is disabled: no connection exists until the first
-        # proxied request.
         app.state.grafana_client = grafana_router.build_proxy_client()
 
-        # Register the OS-level health-probe cron (launchd plist on macOS, crontab
-        # on Linux). This is the primary registration path — every gateway start
-        # refreshes the health probe command on the next gateway restart
-        # without relying on the converge phase. Idempotent.
         try:
             await asyncio.to_thread(
                 register_os_cron,
@@ -309,15 +228,11 @@ async def lifespan(
         except Exception:
             _log.warning("OS health-probe cron registration failed", exc_info=True)
 
-        # Periodic telemetry emitters (latency / auth-401 / runtime): each
-        # drains its accumulator or DB sample once per 60s and emits ONE bounded
-        # event; the lifespan owns and stops every task or scheduled callback.
         app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
         upload_recovery = UploadRecovery(
             app.state.db_pool, app.state.db, app.state.bus, machine=process.machine
         )
-        # The lifespan owns this handle; app.state is only the HTTP exposure and
-        # can be replaced by a nested lifespan on the same app.
+
         app.state.upload_recovery = upload_recovery
 
         async with _background_lifetime(app, upload_recovery):
@@ -328,12 +243,9 @@ async def lifespan(
 async def _background_lifetime(
     app: FastAPI, upload_recovery: UploadRecovery
 ) -> AsyncGenerator[None]:
-    """Join this lifespan's service loops before closing its database pools."""
+
     inspect_queries = app.state.inspect_query_cache
-    # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
-    # lifespan — StreamableHTTPSessionManager.run() can only be entered once
-    # per instance, and the tools close over this pool. Off (the default):
-    # /mcp answers 404 through the mcp_gateway wrapper and nothing changes.
+
     mcp_manager = None
     config: GatewayConfig = app.state.gateway_config
     if config.mcp_endpoint_enabled:
@@ -341,7 +253,7 @@ async def _background_lifetime(
             app.state.db_pool,
             app.state.db,
             app.state.bus,
-            catalog=app.state.catalog,
+            catalog_reader=lambda: app.state.catalog,
             authority=app.state.config_authority,
             image=app.state.process_image,
             local_machine=app.state.machine,
@@ -372,8 +284,6 @@ async def _background_lifetime(
                             app.state.grafana_client.aclose(), app.state.insights_client.aclose()
                         )
                     finally:
-                        # Infinite loops need cancellation even on a normal return.
-                        # The group joins this lifespan's tasks before pool closure.
                         latency_flusher.cancel()
                         auth401_flusher.cancel()
     finally:
@@ -384,16 +294,8 @@ async def _background_lifetime(
             app.state.control_db_pool.close()
 
 
-# Pause exemptions are a route-declared attribute: the middleware consumes
-# only the tested decision function `gateway.http.middleware.pause_policy.should_bypass_pause`,
-# which reads the CONTROL_PLANE doorplates from `base/api_contracts/contracts.py`. The
-# exempt surface (control plane + agent self-reports) is enumerable and
-# audited by gateway/http/middleware/tests/test_route_contracts_middleware.py — a new exemption is a
-# deliberate declaration, not an incident patch.
-
-
 async def cluster_is_paused(_request: Request) -> bool:
-    """Read this home's durable admission state without a stale posture cache."""
+
     from base.deploy.maintenance.admission import business_paused
 
     return await asyncio.to_thread(business_paused)
@@ -403,16 +305,7 @@ async def cluster_pause_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    """During this home's journal-owned stop window, refuse business requests.
 
-    Drain keeps SDK dependencies available; stop/start phases fence them until
-    the same durable admission hold is released. Control-plane routes bypass
-    the journal read, including when the record needs explicit repair.
-
-    Exempt: every route whose doorplate declares CONTROL_PLANE (the
-    /api/cluster/* control plane, health, the ingest webhooks and the
-    bootstrap config read). Everything else 503.
-    """
     if not pause_policy.should_bypass_pause(
         request.method, request.url.path
     ) and await cluster_is_paused(request):
@@ -427,35 +320,19 @@ async def cluster_pause_middleware(
     return await call_next(request)
 
 
-# `/api/health`, `/api/auth/login`, and `/api/auth/check` must remain
-# reachable without auth. Health is probed by each host on the private
-# network; login is how the browser obtains a session cookie.
-# Every other API route requires either a valid session cookie or a
-# Bearer token carrying the cluster secret or a machine API token of the active
-# write generation.
 _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",
         "/api/auth/login",
-        # The ticket is the credential: redemption is single-use, short-lived
-        # and shares the login limiter. Issuing one (`/api/auth/login-ticket`)
-        # is NOT bypassed: it needs the human secret.
         "/api/auth/login-ticket/redeem",
         "/api/auth/check",
         "/api/auth/logout",
-        # /mcp authenticates revocable, scoped clients in its ASGI wrapper.
-        # Starlette redirects the mount root to /mcp/, so both spellings must
-        # bypass cluster auth. Cluster credentials are not MCP identities.
         "/mcp",
         "/mcp/",
     }
 )
 _AUTH_BYPASS_METHOD_PATHS: frozenset[tuple[str, str]] = frozenset(
     {
-        # Ingest webhooks — authenticated by
-        # its own token (X-Alerts-Token / cluster-secret
-        # Bearer / loopback trust) inside the router, not by the
-        # session/bearer middleware. Alert reads still require cluster auth.
         ("POST", "/api/alerts"),
     }
 )
@@ -463,13 +340,7 @@ _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DE
 
 
 async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | None:
-    """The request's session cookie and its credential fact, when it authenticates.
 
-    Valid only while the credential that minted the session is current (a
-    rotated secret's sessions end). Only a request
-    carrying a cookie consults the session store: bearer and anonymous
-    requests never pay its thread hop.
-    """
     from gateway.http.auth.request_principal import current_session_fact
 
     cookie_token = request.cookies.get(cookie_name())
@@ -490,32 +361,14 @@ async def cluster_auth_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    """Require a valid session cookie OR Bearer token on every API route.
 
-    Two auth methods, checked in order:
-    1. Session cookie (``ava_session``) — for browser users who logged in; it
-       authenticates only while the credential that minted it is current.
-    2. ``Authorization: Bearer <token>`` — the human cluster secret (operator
-       SDK / scripts), or the active write generation's machine API token that
-       the launcher delivers to every service and agent (``AVA_API_TOKEN``).
-
-    There is no unauthenticated posture: every cluster has a human secret
-    (``server.main`` refuses to start without one), and a blank secret never
-    verifies as a bearer.
-    """
     from gateway.http.auth.request_principal import AuthPrincipal, cluster_credential
 
-    # This is set only by credential verification, never by caller/source JSON.
     request.state.auth_principal = None
     request.state.source_verified_by = None
     config: GatewayConfig = request.app.state.gateway_config
     secret = config.cluster_secret
-    # CORS preflight (OPTIONS) carries no credentials by spec, so it can never
-    # satisfy the cookie/Bearer check below. CORSMiddleware is now OUTERMOST and
-    # answers preflights before this middleware runs, so this branch is a
-    # defensive fallback for a future CORS reconfiguration — keep it, because a
-    # preflight that 401s here would surface every cross-origin POST/PATCH/PUT
-    # (resurrect / terminate / restart / send-message) as "Failed to fetch".
+
     if request.method == "OPTIONS":
         return await call_next(request)
     if (
@@ -528,18 +381,13 @@ async def cluster_auth_middleware(
     ):
         return await call_next(request)
 
-    # 1. Check session cookie.
     session = await _cookie_session(request, secret)
     if session is not None:
         cookie_token, session_fact = session
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
         request.state.source_verified_by = session_fact
         origin = request.headers.get("Origin")
-        # Origin is checked only after valid cookie auth; without it, the request
-        # reaches 401 unless another explicit credential authenticates it.
-        # Bearer callers carry no ambient credential; login is exempt by design,
-        # with SameSite=Lax and the rate limiter bounding its CSRF exposure.
-        # Exact mutation origins also close the same-site-subdomain vector.
+
         if (
             request.method in _STATE_CHANGING_METHODS
             and origin is not None
@@ -560,8 +408,6 @@ async def cluster_auth_middleware(
             )
         return await call_next(request)
 
-    # 2. Check Bearer token: the human secret, or the active write generation's
-    # machine API token (a pending generation's never authenticates).
     verified_by = cluster_credential(
         request.headers.get("Authorization"),
         secret,
@@ -582,19 +428,19 @@ async def cluster_auth_middleware(
     )
 
 
+# ava:ref gateway/docs/error-responses-and-middleware-order.ava.okf.md#error-response-cors
 def create_app(
     config: GatewayConfig,
     *,
     process: GatewayProcess,
     process_ownership: Literal["borrowed", "owned"],
 ) -> FastAPI:
-    """Assemble one app's fixed HTTP policy and explicit process lifetime."""
+
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
     app = FastAPI(
         title="Ava",
         lifespan=partial(lifespan, process=process, process_ownership=process_ownership),
-        # Disable schema pages while retaining the build-time OpenAPI contract.
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -606,21 +452,8 @@ def create_app(
     app.middleware("http")(cluster_pause_middleware)
     app.middleware("http")(cluster_auth_middleware)
 
-    # Per-endpoint latency metering (Task #1091). Registered near-last so it is
-    # near-OUTERMOST — Starlette builds the stack in reverse registration order —
-    # and the measurement covers the full pipeline: pause gate and auth.
-    # `await call_next` returns at response headers, so SSE / long-poll
-    # connections count time-to-first-byte, not lifetime.
     app.middleware("http")(latency.latency_middleware)
 
-    # CORSMiddleware is registered AFTER latency — the OUTERMOST middleware — so
-    # allowlisted responses carry Access-Control-* headers even when inner
-    # middleware short-circuits with 401 or 503. Unhandled route exceptions need
-    # the Exception handler below because ServerErrorMiddleware sits outside user
-    # middleware (#187). Browser origins are exact matches: an explicit setting is
-    # authoritative; otherwise the allowlist derives the local frontend origins and
-    # the gateway URL's own origin (its own scheme, host, and port). A CORS
-    # preflight (OPTIONS) is answered here before auth or pause ever see it.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.allowed_origins,
@@ -629,16 +462,14 @@ def create_app(
         allow_headers=["*"],
     )
 
-    # Registered last so every response path, including auth and pause short-circuits,
-    # receives a fallback trace id before it reaches an error response builder.
     app.middleware("http")(request_trace_middleware)
 
     app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, unhandled_exception_handler)
+    app.add_exception_handler(ModelCatalogUnavailableError, model_catalog_unavailable_handler)
 
-    # --- Router registration (feature packages + gateway/routers/<domain>.py) ---
     for router in (
         auth_router.router,
         bootstrap_router.router,
@@ -694,17 +525,12 @@ def create_app(
     ):
         app.include_router(router)
 
-    # /mcp — MCP control plane (design task #1212 step 1). Mounted always; the
-    # wrapper answers 404 while the app configuration disables MCP, so
-    # the route surface is stable and the flag is a pure on/off switch. Auth is
-    # the mounted wrapper requires its own revocable client token; cluster cookies
-    # and Bearer secrets are not MCP identities.
     app.mount("/mcp", mcp_server_endpoint.mcp_gateway(app))
     return app
 
 
 def create_app_from_environment() -> FastAPI:
-    """Build an owned process in the uvicorn worker's environment boundary."""
+
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
@@ -720,7 +546,7 @@ def create_app_from_environment() -> FastAPI:
 
 
 def openapi_schema() -> dict[str, Any]:
-    """Extract the route contract without booting or entering runtime resources."""
+
     config = ConfigBoot()
     process = GatewayProcess(
         config=config, image=LOADED_IMAGE, machine=machine_from_boot(config), host=Host.system()
@@ -746,5 +572,5 @@ def _borrowed_app(process: GatewayProcess) -> FastAPI:
 
 
 def main() -> None:
-    """Run the gateway process through the stable `gateway.app` entry point."""
+
     _run_gateway(build_app=_borrowed_app)

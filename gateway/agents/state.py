@@ -1,11 +1,3 @@
-"""Agent message + state endpoints — /api/agents/* read/inspect surface.
-
-Message delivery (POST /messages) + history reads (GET /messages, trace
-checkpoint messages, last-message), the pending-inbound queue, activity
-trail, token usage, and the context-breakdown panel. CRUD + spawn live in
-`router.py`; the lifecycle surface in `lifecycle.py`.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -55,6 +47,7 @@ from gateway.agents.schemas import (
     TraceCheckpointMessagesResponse,
 )
 from gateway.agents.system_note import system_note_blocking as system_note_blocking
+from gateway.http.model_catalog import require_model_catalog
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.lifecycle.delivery import deliver_chat_inbound, reconcile_chat_delivery
@@ -63,16 +56,12 @@ from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, 
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
-# Protective cap on one inbound message's content bytes — bounds what one send
-# can park in the pending queue/checkpoint + its Loki volume; a self-imposed
-# guard, not an external protocol limit (KEEP, task #3696 exception inventory;
-# the default *window* is config: settings.display.messages_default_limit).
+
 _MAX_MESSAGE_CONTENT_BYTES = 1_048_576
 
 
 def _validate_image_ref(agent_id: int, url: str) -> None:
-    """422/404 a multimodal image reference that is not a real image upload of
-    this agent — a client cannot smuggle an arbitrary path/url into the model."""
+
     parsed = parse_upload_url(url)
     if parsed is None:
         raise HTTPException(422, f"image_url {url!r} is not an upload reference")
@@ -92,16 +81,7 @@ def _validate_image_ref(agent_id: int, url: str) -> None:
 def _prepare_message_content(
     request: Request, agent_id: int, content: str | list[ContentBlock]
 ) -> tuple[str, dict[str, object] | None]:
-    """Split a message body into (text, payload) for storage.
 
-    A plain string passes through unchanged (`text`, None). A block list is
-    gated + validated, then split into the text part (stored in the `content`
-    column for the envelope / timeline / legacy readers) plus a
-    `{"content_blocks": [...]}` JSONB payload the claim node inlines as native
-    model content. The capability gate 422s an image addressed to a text-only
-    model here, up front, rather than letting the LLM call fail after the
-    inbound is already queued.
-    """
     from base.lm.factory import model_supports_vision, vision_capable_provider_names
 
     if isinstance(content, str):
@@ -109,20 +89,21 @@ def _prepare_message_content(
 
     blocks = content
     if any(isinstance(b, ImageUrlContentBlock) for b in blocks):
+        catalog = require_model_catalog(request)
         model = resolve_agent_model(
             request.app.state.db_pool,
             agent_id,
-            catalog=request.app.state.catalog,
+            catalog=catalog,
             default_model_reader=lambda: cast(
                 str, request.app.state.config_authority.service_field_value("llm_model")
             ),
         )
-        if not model_supports_vision(model, catalog=request.app.state.catalog):
+        if not model_supports_vision(model, catalog=catalog):
             raise HTTPException(
                 422,
                 f"agent {agent_id}'s model {model!r} cannot see images — "
                 "switch it to a vision-capable model "
-                f"({', '.join(vision_capable_provider_names(catalog=request.app.state.catalog))})",
+                f"({', '.join(vision_capable_provider_names(catalog=catalog))})",
             )
         for b in blocks:
             if isinstance(b, ImageUrlContentBlock):
@@ -134,13 +115,7 @@ def _prepare_message_content(
 def _normalize_message_content(
     content: str | list[ContentBlock],
 ) -> tuple[str, dict[str, object] | None]:
-    """Map the validated wire body to its immutable database representation.
 
-    Unlike `_prepare_message_content`, this pure step does not re-read the
-    agent's current model or uploaded files. Reconciliation must compare the
-    original body with the durable row even if those mutable facts changed
-    after the first POST committed.
-    """
     if isinstance(content, str):
         return content, None
     text = "\n".join(
@@ -148,8 +123,7 @@ def _normalize_message_content(
         for block in content
         if isinstance(block, TextContentBlock) and block.text.strip()
     )
-    # An image-only message stores a placeholder so the content column / envelope
-    # / timeline text is never empty; the image conveys the real content.
+
     text = text or "[image]"
     payload: dict[str, object] = {"content_blocks": [block.model_dump() for block in content]}
     return text, payload
@@ -163,10 +137,7 @@ def _message_content_size_bytes(content: str | list[ContentBlock]) -> int:
 
 
 def scoped_message_key(request: Request, key: str) -> str:
-    """Delivery and reconciliation identify the same logical chat message.
 
-    The key is stored under the chat identity the delivery outbox flush shares.
-    """
     from base.api_contracts.idempotency import chat_message_key
     from gateway.http.auth.request_principal import PrincipalScopeError, keyed_principal
 
@@ -184,7 +155,7 @@ def _completion_delivery_required(
     *,
     authority: ConfigAuthority,
 ) -> bool:
-    """Commit one hourly buffer entry before deciding whether to deliver it."""
+
     with pool.connection() as conn:
         required = delivery_required_for_agent(
             conn,
@@ -196,7 +167,11 @@ def _completion_delivery_required(
     return required
 
 
-@router.post("/api/agents/{agent_id}/messages", status_code=201)
+@router.post(
+    "/api/agents/{agent_id}/messages",
+    status_code=201,
+    description="Deliver a chat inbound to the specified agent.\n\n`content` is either a plain string or a list of OpenAI-shaped content blocks\n(multimodal: text + `image_url` referencing an upload of this agent). A\nstring is a pure INSERT + return; a block list is capability-gated (422 if\nthe agent's model cannot see images) and stored with the blocks in the\ninbound's JSONB payload for the claim node to inline natively.\n\nAuto-resurrect in `deliver_chat_inbound` ensures the message always reaches\na live agent — the caller does not branch on status. An optional\n`Idempotency-Key` (always sent with `Idempotency-Scope: principal-v1`) is\nstored transactionally with the inbound; same-key retries return the same\n`inbound_id` and mismatched key reuse fails 409.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n409: the key already identifies a different agent/body/source.\n413: message content exceeds the 1 MiB transport limit.\n422: a block list gated out (non-vision model) or referencing a bad upload,\nor a key without the principal-v1 scope header.",
+)
 async def post_agent_message(
     agent_id: int,
     body: AgentMessageIn,
@@ -205,26 +180,7 @@ async def post_agent_message(
         default=None, alias="Idempotency-Key", min_length=1, max_length=128
     ),
 ) -> AgentMessageEnqueued:
-    """Deliver a chat inbound to the specified agent.
 
-    `content` is either a plain string or a list of OpenAI-shaped content blocks
-    (multimodal: text + `image_url` referencing an upload of this agent). A
-    string is a pure INSERT + return; a block list is capability-gated (422 if
-    the agent's model cannot see images) and stored with the blocks in the
-    inbound's JSONB payload for the claim node to inline natively.
-
-    Auto-resurrect in `deliver_chat_inbound` ensures the message always reaches
-    a live agent — the caller does not branch on status. An optional
-    `Idempotency-Key` (always sent with `Idempotency-Scope: principal-v1`) is
-    stored transactionally with the inbound; same-key retries return the same
-    `inbound_id` and mismatched key reuse fails 409.
-
-    404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
-    409: the key already identifies a different agent/body/source.
-    413: message content exceeds the 1 MiB transport limit.
-    422: a block list gated out (non-vision model) or referencing a bad upload,
-    or a key without the principal-v1 scope header.
-    """
     provenance = request_inbound_provenance(request)
     if idempotency_key is not None:
         idempotency_key = scoped_message_key(request, idempotency_key)
@@ -236,18 +192,9 @@ async def post_agent_message(
                 "to a file and send the file path instead"
             ),
         )
-    # AgentNotFound is returned 404 + reason by the handler; first SELECT
-    # to verify existence then INSERT (same pattern as frontend
-    # `/agents/{id}/messages`). After INSERT, SELECT once more to get the
-    # true "delivery time" status — see docstring. Off the event loop:
-    # get_agent_status opens a fresh DB connection.
+
     await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
     if idempotency_key is not None:
-        # Resolve a committed receipt before consulting mutable delivery
-        # prerequisites. The original upload can disappear or the agent's model
-        # can change after COMMIT; neither invalidates the durable identity. A
-        # missing receipt still takes the normal validation + INSERT path, with
-        # the unique index closing a concurrent first-delivery race.
         normalized_text, normalized_payload = _normalize_message_content(body.content)
         try:
             existing = await reconcile_chat_delivery(
@@ -299,34 +246,18 @@ async def post_agent_message(
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
 
 
-@router.post("/api/agents/{agent_id}/system-note", status_code=201)
+@router.post(
+    "/api/agents/{agent_id}/system-note",
+    status_code=201,
+    description="Deliver a framework system note to the specified agent.\n\nThe note is queued as a kind='system_note' inbound; the agent's claim\nrenders it as a system note (system_marker, NoteTag `body.note_tag`) in\nits timeline — no Agent prefix, no peer timestamp — instead of a chat\npeer message. Task notifications (assign / update / reminder) are the\ncurrent family (`note_tag='task'`).\n\n`body.resurrect` mirrors the chat path's auto-resurrect but is a choice,\nnot a given: task assignment (a delegator direction) wakes a terminated\nowner, while plain update / reminder notices must not (user ruling\n2026-08-27 — notification messages never resurrect a terminated owner).\n\nA required Idempotency-Key names one logical note, including its\nresurrection policy. Replays return the original inbound id and repair\nits wake tail; changed requests conflict (409). The inbound remains kind='system_note'.\n\n404: agent_id does not exist. 413: content exceeds the 1 MiB transport\nlimit. 422: note_tag is not a NoteTag value, or source is not a legal\nenvelope source.",
+)
 async def post_agent_system_note(
     agent_id: int,
     body: SystemNoteIn,
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> AgentMessageEnqueued:
-    """Deliver a framework system note to the specified agent.
 
-    The note is queued as a kind='system_note' inbound; the agent's claim
-    renders it as a system note (system_marker, NoteTag `body.note_tag`) in
-    its timeline — no Agent prefix, no peer timestamp — instead of a chat
-    peer message. Task notifications (assign / update / reminder) are the
-    current family (`note_tag='task'`).
-
-    `body.resurrect` mirrors the chat path's auto-resurrect but is a choice,
-    not a given: task assignment (a delegator direction) wakes a terminated
-    owner, while plain update / reminder notices must not (user ruling
-    2026-08-27 — notification messages never resurrect a terminated owner).
-
-    A required Idempotency-Key names one logical note, including its
-    resurrection policy. Replays return the original inbound id and repair
-    its wake tail; changed requests conflict (409). The inbound remains kind='system_note'.
-
-    404: agent_id does not exist. 413: content exceeds the 1 MiB transport
-    limit. 422: note_tag is not a NoteTag value, or source is not a legal
-    envelope source.
-    """
     if len(body.content.encode("utf-8")) > _MAX_MESSAGE_CONTENT_BYTES:
         raise HTTPException(
             status_code=413,
@@ -361,7 +292,7 @@ async def post_agent_system_note(
         client_message_id=idempotency_key,
         resurrect=body.resurrect,
     )
-    # Announce for the live UI (frontend badge / turn active), like chat.
+
     note_kind = InboundKind.SYSTEM_NOTE
     await _ops.publish_inbound_arrived(
         request.app.state.bus, agent_id, inbound_id, note_kind, body.source, body.content
@@ -380,14 +311,17 @@ async def post_agent_system_note(
     return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
 
 
-@router.post("/api/agents/{agent_id}/messages/reconcile")
+@router.post(
+    "/api/agents/{agent_id}/messages/reconcile",
+    description="Resolve a timed-out POST and heal its still-pending delivery tail.",
+)
 async def reconcile_agent_message(
     agent_id: int,
     body: AgentMessageIn,
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> AgentMessageEnqueued:
-    """Resolve a timed-out POST and heal its still-pending delivery tail."""
+
     idempotency_key = scoped_message_key(request, idempotency_key)
     if _message_content_size_bytes(body.content) > _MAX_MESSAGE_CONTENT_BYTES:
         raise HTTPException(
@@ -418,40 +352,18 @@ async def reconcile_agent_message(
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
 
 
-@router.get("/api/agents/{agent_id}/messages", dependencies=[Depends(deny_isolated_result_read)])
+@router.get(
+    "/api/agents/{agent_id}/messages",
+    dependencies=[Depends(deny_isolated_result_read)],
+    description="Raw state.messages for one agent — the data layer beneath the\nrendered GET .../timeline view. Consumers (ops scripts / other agents /\nevals) get each message as a LangChain BaseMessage `model_dump()`\n(type / content / tool_calls / id / additional_kwargs / ...) rather than\nthe per-block TimelineItem rendering.\n\nSame path as `POST /api/agents/{id}/messages` but different method: the\nPOST enqueues a new chat inbound for delivery; this GET reads back the\nfull conversation history.\n\nWindowing is an absolute-integer-index analog of the timeline's tail-window\nmode (the timeline cursor is an `item_id` string + `has_more`; here the\ncursor is an absolute index into `state.messages`). No `limit` returns the\nconfigured default window (``display.messages_default_limit`` — 100 by\ndefault); `before=<index>` without a limit returns that window immediately\nbefore the exclusive cursor. An explicit `limit` (1..10000)\npreserves the requested page size. `messages[i]` corresponds to\n`state.messages[start_index + i]`; `msg_count` is the total length, and\n`has_more` tells the caller whether `start_index` can be supplied as the\nnext `before` cursor for an older page.\n\n404: agent_id does not exist (same precondition as the timeline GET).\n503: the checkpoint store could not be read — a programmatic data endpoint\n    does not disguise a read failure as an empty history; the caller retries\n    or checks store health.",
+)
 def get_agent_messages(
     agent_id: int,
     request: Request,
-    # le=10000 is a protective range bound (task #3696 exception inventory).
     limit: int | None = Query(default=None, ge=1, le=10000),
     before: int | None = Query(default=None, ge=0),
 ) -> AgentMessagesResponse:
-    """Raw state.messages for one agent — the data layer beneath the
-    rendered GET .../timeline view. Consumers (ops scripts / other agents /
-    evals) get each message as a LangChain BaseMessage `model_dump()`
-    (type / content / tool_calls / id / additional_kwargs / ...) rather than
-    the per-block TimelineItem rendering.
 
-    Same path as `POST /api/agents/{id}/messages` but different method: the
-    POST enqueues a new chat inbound for delivery; this GET reads back the
-    full conversation history.
-
-    Windowing is an absolute-integer-index analog of the timeline's tail-window
-    mode (the timeline cursor is an `item_id` string + `has_more`; here the
-    cursor is an absolute index into `state.messages`). No `limit` returns the
-    configured default window (``display.messages_default_limit`` — 100 by
-    default); `before=<index>` without a limit returns that window immediately
-    before the exclusive cursor. An explicit `limit` (1..10000)
-    preserves the requested page size. `messages[i]` corresponds to
-    `state.messages[start_index + i]`; `msg_count` is the total length, and
-    `has_more` tells the caller whether `start_index` can be supplied as the
-    next `before` cursor for an older page.
-
-    404: agent_id does not exist (same precondition as the timeline GET).
-    503: the checkpoint store could not be read — a programmatic data endpoint
-        does not disguise a read failure as an empty history; the caller retries
-        or checks store health.
-    """
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
@@ -463,8 +375,7 @@ def get_agent_messages(
             status_code=503, detail="checkpoint read failed; retry or check store health"
         ) from exc
     msg_count = len(messages)
-    # `before` is an exclusive upper bound (absolute index); clamp to the
-    # available range so an out-of-range cursor still returns a valid window.
+
     end = msg_count if before is None else min(before, msg_count)
     effective_limit = limit if limit is not None else settings.display.messages_default_limit
     start = max(0, end - effective_limit)
@@ -480,26 +391,12 @@ def get_agent_messages(
 @router.get(
     "/api/agents/{agent_id}/traces/{trace_id}/messages",
     dependencies=[Depends(deny_isolated_result_read)],
+    description="Full turn content for one OTel trace, resolved on demand from checkpoints.\n\nTrace v2 content-retrieval path: spans carry metadata only (task #792), so\nclicking an LM span needs this endpoint to bring back the turn's complete\nmessages — system prompt included (the checkpoint's `messages` channel is\nthe whole conversation, not a window).\n\n`pruned` semantics: the checkpoint link is written by the agent after each\nturn (`checkpoints.metadata.trace_id`). Checkpoints are never deleted, so\na trace id that resolves to nothing means no checkpoint carries it (the\nlink itself may predate the feature or the turn committed no checkpoint);\nthe response is then pruned=true with an empty list, which the caller\nrenders as absent content rather than an error.\n\n404: agent_id does not exist. 503: checkpoint store read failed.",
 )
 def get_trace_checkpoint_messages(
     agent_id: int, trace_id: str, request: Request
 ) -> TraceCheckpointMessagesResponse:
-    """Full turn content for one OTel trace, resolved on demand from checkpoints.
 
-    Trace v2 content-retrieval path: spans carry metadata only (task #792), so
-    clicking an LM span needs this endpoint to bring back the turn's complete
-    messages — system prompt included (the checkpoint's `messages` channel is
-    the whole conversation, not a window).
-
-    `pruned` semantics: the checkpoint link is written by the agent after each
-    turn (`checkpoints.metadata.trace_id`). Checkpoints are never deleted, so
-    a trace id that resolves to nothing means no checkpoint carries it (the
-    link itself may predate the feature or the turn committed no checkpoint);
-    the response is then pruned=true with an empty list, which the caller
-    renders as absent content rather than an error.
-
-    404: agent_id does not exist. 503: checkpoint store read failed.
-    """
     db = request.app.state.db
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
@@ -528,27 +425,14 @@ def get_trace_checkpoint_messages(
 @router.get(
     "/api/agents/{agent_id}/last-message",
     dependencies=[Depends(deny_isolated_result_read)],
+    description="Return the text of the last AI message for an agent.\n\nA non-isolated agent in the same cluster can query any other agent; an\neval-isolated caller is denied before this result can become a replay leak.\n\nReturns ``text=None`` when the agent has no AI message with text\ncontent yet.\n\nReads ``agents_meta.last_message_text`` — a column the agent process\nwrites after each LLM turn that produced text and that survives compact\n(which replaces the entire checkpoint), so this read never touches the\ncheckpoint.",
 )
 def get_last_message(
     agent_id: int,
     request: Request,
     caller: str = Query(..., description="Caller identifier, e.g. 'agent:240'"),
 ) -> LastMessageResponse:
-    """Return the text of the last AI message for an agent.
 
-    A non-isolated agent in the same cluster can query any other agent; an
-    eval-isolated caller is denied before this result can become a replay leak.
-
-    Returns ``text=None`` when the agent has no AI message with text
-    content yet.
-
-    Reads ``agents_meta.last_message_text`` — a column the agent process
-    writes after each LLM turn that produced text and that survives compact
-    (which replaces the entire checkpoint), so this read never touches the
-    checkpoint.
-    """
-    # Keep the documented, required marker contract. The shared dependency
-    # reads the raw query parameter so every guarded route uses one policy.
     del caller
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT last_message_text FROM agents_meta WHERE id = %s", (agent_id,))
@@ -558,21 +442,13 @@ def get_last_message(
     return LastMessageResponse(text=row[0] or None)
 
 
-@router.get("/api/agents/{agent_id}/pending", dependencies=[Depends(deny_isolated_result_read)])
+@router.get(
+    "/api/agents/{agent_id}/pending",
+    dependencies=[Depends(deny_isolated_result_read)],
+    description="Chat inbounds still queued for the agent (status='pending'), oldest\nfirst. These have not been claimed yet, so they are absent from the\ntimeline snapshot; the web UI shows them as a compact strip above the\ncomposer. Once a message is claimed it enters the agent's messages and\nappears in the timeline, dropping out of this list. A chat the active takeover\nabsorbed (trail or relay read) is omitted too (#3683). A multimodal\nmessage carries its image reference urls (`images`) so the strip can\nrender thumbnails before the claim.\n\nReturns an empty list for a nonexistent agent (this is a plain\ninbound-table read with no agent-existence precondition; a missing agent\njust has no pending rows).",
+)
 def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound]:
-    """Chat inbounds still queued for the agent (status='pending'), oldest
-    first. These have not been claimed yet, so they are absent from the
-    timeline snapshot; the web UI shows them as a compact strip above the
-    composer. Once a message is claimed it enters the agent's messages and
-    appears in the timeline, dropping out of this list. A chat the active takeover
-    absorbed (trail or relay read) is omitted too (#3683). A multimodal
-    message carries its image reference urls (`images`) so the strip can
-    render thumbnails before the claim.
 
-    Returns an empty list for a nonexistent agent (this is a plain
-    inbound-table read with no agent-existence precondition; a missing agent
-    just has no pending rows).
-    """
     with request.app.state.db_pool.connection() as conn:
         rows = list_pending_inbounds(conn, agent_id)
     return [
@@ -587,22 +463,12 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
     ]
 
 
-@router.get("/api/agents/{agent_id}/token-usage")
+@router.get(
+    "/api/agents/{agent_id}/token-usage",
+    description="The agent's most recent LLM call token usage. `input_tokens` is\ncontext-window occupancy; `max_input_tokens` is the model's context\nwindow ceiling so the frontend can render \"context: 26k/1M tokens\".\nWhen the frontend switches to an existing agent, it uses this endpoint\nto fetch the historical latest value to initialize the token counter\nUI — the SSE `token_usage` event is fire-and-forget without persistence,\nand the previous value is not available without switching to.\n\nReturns (0, 0, 0) on a checkpoint read failure — the intentional\nfail-fast boundary: the read failure is caught here (the SSE\ntoken_usage push refreshes the UI later), but the reverse scan over\nthe loaded messages runs unguarded so a bug surfaces normally rather\nthan being masked as 0/0.",
+)
 def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
-    """The agent's most recent LLM call token usage. `input_tokens` is
-    context-window occupancy; `max_input_tokens` is the model's context
-    window ceiling so the frontend can render "context: 26k/1M tokens".
-    When the frontend switches to an existing agent, it uses this endpoint
-    to fetch the historical latest value to initialize the token counter
-    UI — the SSE `token_usage` event is fire-and-forget without persistence,
-    and the previous value is not available without switching to.
 
-    Returns (0, 0, 0) on a checkpoint read failure — the intentional
-    fail-fast boundary: the read failure is caught here (the SSE
-    token_usage push refreshes the UI later), but the reverse scan over
-    the loaded messages runs unguarded so a bug surfaces normally rather
-    than being masked as 0/0.
-    """
     try:
         messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
@@ -618,20 +484,11 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
 def token_usage_response(
     agent_id: int, request: Request, messages: Sequence[BaseMessage]
 ) -> TokenUsageResponse:
-    """The token-usage payload for already-loaded checkpoint *messages*.
 
-    The context budget comes from the agent's model; the counts come from the
-    most recent AIMessage carrying usage_metadata (0/0 when none does, which
-    is also what an unreadable checkpoint's ``[]`` yields).
-    """
     from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
 
-    # Look up the agent's model from config_overlay (per-agent override) else the
-    # cluster default, and resolve its context budget: the window ceiling plus
-    # the soft/hard compact thresholds (a per-agent fraction of the window).
-    # An unknown model degrades all three to 0 — a display endpoint must not
-    # 500 over a model-registry gap; the frontend hides an absent ceiling.
     max_input_tokens = soft_compact_tokens = hard_compact_tokens = 0
+    catalog = require_model_catalog(request)
     try:
         with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
@@ -647,9 +504,7 @@ def token_usage_response(
 
             model = settings.lm.llm_model
         if model:
-            budget = resolve_context_budget(
-                model, catalog=request.app.state.catalog, overrides=overrides
-            )
+            budget = resolve_context_budget(model, catalog=catalog, overrides=overrides)
             max_input_tokens = budget.max_context_tokens
             soft_compact_tokens = budget.soft_compact_tokens
             hard_compact_tokens = budget.hard_compact_tokens
@@ -658,9 +513,6 @@ def token_usage_response(
     except Exception as exc:
         _log.warning("token-usage: config_overlay read failed for agent %s: %r", agent_id, exc)
 
-    # Scan in reverse for the most recent AIMessage with usage_metadata —
-    # after the LLM call completes, llm_node appends final_msg to state, and
-    # usage_metadata travels with it.
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):
             usage = msg.usage_metadata
@@ -686,17 +538,12 @@ def token_usage_response(
     )
 
 
-@router.get("/api/agents/{agent_id}/context-breakdown")
+@router.get(
+    "/api/agents/{agent_id}/context-breakdown",
+    description="How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nThe breakdown of the latest LLM request's input: each message's tokens anchored to the\nprovider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed\nfrom them, only the inside of a message split by an estimator. Pure view logic\n(`base/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.\nA checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown\nwith zeroed totals (same tolerance as token-usage: the panel re-opens fine later).",
+)
 def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownResponse:
-    """How the agent's context window is spent, for the composer's breakdown
-    panel (lazy-loaded on expand).
 
-    The breakdown of the latest LLM request's input: each message's tokens anchored to the
-    provider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed
-    from them, only the inside of a message split by an estimator. Pure view logic
-    (`base/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.
-    A checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown
-    with zeroed totals (same tolerance as token-usage: the panel re-opens fine later)."""
     try:
         messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
@@ -710,7 +557,7 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
         request.app.state.db_pool,
         agent_id,
         latest_request_breakdown(messages),
-        catalog=request.app.state.catalog,
+        catalog=require_model_catalog(request),
         default_model_reader=lambda: cast(
             str, request.app.state.config_authority.service_field_value("llm_model")
         ),

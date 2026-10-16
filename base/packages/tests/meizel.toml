@@ -1,4 +1,4 @@
-exports = ["model_catalog.py", "plugin_config"]
+exports = ["lm", "model_catalog.py", "plugin_config"]
 
 [uses]
 "bootstrap" = ["providers"]

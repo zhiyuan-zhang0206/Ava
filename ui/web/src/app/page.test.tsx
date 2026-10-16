@@ -231,6 +231,7 @@ vi.mock("@/components/conversation/composer", () => {
   function ComposerMock({
     mode,
     onSend,
+    onStop,
     onUploadFiles,
     onAttachImage,
     children,
@@ -241,6 +242,7 @@ vi.mock("@/components/conversation/composer", () => {
     suggestions?: readonly string[] | null;
     mode: string;
     onSend: (s: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
+    onStop: () => Promise<void>;
     onUploadFiles?: (files: File[]) => void;
     onAttachImage?: (file: File) => Promise<string>;
     children?: React.ReactNode;
@@ -269,6 +271,7 @@ vi.mock("@/components/conversation/composer", () => {
         <button data-testid="composer-send" onClick={() => void onSend("hi", [], "test-client-message-id")}>send</button>
         <button data-testid="composer-send-multi" onClick={() => void onSend("/compact /update", [], "test-client-message-id")}>send multi</button>
         <button data-testid="composer-send-multi-args" onClick={() => void onSend("/search hello world /compact", [], "test-client-message-id")}>send multi args</button>
+        <button data-testid="composer-stop" onClick={() => void onStop()}>stop</button>
         <button data-testid="composer-send-plain" onClick={() => void onSend("plain text", [], "test-client-message-id")}>send plain</button>
         <button data-testid="composer-send-multi-image" onClick={() => void onSend("/compact /update", ["/api/agents/5/uploads/a.png"], "test-client-message-id")}>send multi image</button>
         {details}
@@ -892,6 +895,26 @@ describe("pasted image routing", () => {
       },
     ],
   };
+
+  it("explains unknown model capabilities while text and exact-work stop remain available", async () => {
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: null, status: "running" })];
+    wrap(<HomePage />);
+    expect(screen.getByText("Model capabilities are unavailable. You can still send text or request a stop.")).toBeTruthy();
+    expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
+    fireEvent.click(screen.getByTestId("composer-send-plain"));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId("composer-stop"));
+    await waitFor(() => expect(api.observeWork).toHaveBeenCalledWith(5));
+    expect(api.cancel).toHaveBeenCalledWith({ agent_id: 5, work_id: "original" }, expect.any(String));
+    expect(hooksState.agents[0].status).toBe("running");
+    const image = new File(["png"], "paste.png", { type: "image/png" });
+    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
+      clipboardData: { files: [image], types: ["Files"] },
+    });
+    await waitFor(() => expect(api.submitUploadedFiles).toHaveBeenCalledTimes(1));
+    expect(api.uploadFiles).not.toHaveBeenCalled();
+  });
 
   it("uses file delivery without a native thumbnail for a text-only agent", async () => {
     hooksState.activeId = 5;

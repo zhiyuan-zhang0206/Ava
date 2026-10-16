@@ -1,20 +1,10 @@
-"""Ava Guide entry — /api/keyed/v1/guide/draft.
-
-Hands a natural-language operations request to an ava-guide agent: spawns an
-agent that loads the ROOT `ava.skills.ava_guide` skill (the map for operating the
-cluster via the `ava` CLI — start/update/track switching, MCP servers, installing
-skills/plugins, presets, schedules) and returns its id so the Control page can
-open the conversation. Mirrors the schedule/preset draft endpoints — a fixed
-prompt pointed at the skill + `create_and_launch_agent`; the operator finishes
-the task in the spawned agent's session.
-"""
-
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
+from gateway.http.model_catalog import require_model_catalog
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
@@ -28,13 +18,14 @@ class GuideDraftResponse(BaseModel):
     agent_id: int
 
 
-@router.post("/api/keyed/v1/guide/draft")
+@router.post(
+    "/api/keyed/v1/guide/draft",
+    description="Spawn an ava-guide agent for a natural-language ops request and return its\nid so the UI can open the conversation. Replays one raw draft intent and its\noriginal birth.",
+)
 async def guarded_draft_guide(
     body: GuideDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
 ) -> GuideDraftResponse:
-    """Spawn an ava-guide agent for a natural-language ops request and return its
-    id so the UI can open the conversation. Replays one raw draft intent and its
-    original birth."""
+
     prompt = (
         "You are an Ava operations assistant. Read and follow ava.skills.ava_guide "
         "to help with this request — operate the cluster via the `ava` CLI (run / "
@@ -53,7 +44,7 @@ async def guarded_draft_guide(
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,
-        catalog=request.app.state.catalog,
+        catalog=require_model_catalog(request),
         authority=request.app.state.config_authority,
         creation_key=key,
         creation_identity=body.model_dump(mode="json"),

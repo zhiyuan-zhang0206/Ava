@@ -11,7 +11,7 @@ tags:
 
 This node covers Ava's agents as MCP clients. The inbound direction (external
 clients driving the cluster) is the gateway `/mcp` endpoint:
-[[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md]].
+[[gateway/mcp_server/docs/mcp-endpoint/mcp-endpoint.ava.okf.md]].
 
 ## What It Is
 MCP (Model Context Protocol) integrations let agents call external tool servers. Agents invoke tools as `ava.mcps.<server>.<tool>(...)` — calls serialize into **custom newline-delimited JSON** (`{id,method,params}` → `{id,ok,result|error}`, `ava/mcps/_daemon.py`) over a Unix socket to the **shared per-machine MCP daemon** (ops roster session "mcp-daemon", watchdog-managed) managing connections to each server. **Standard JSON-RPC is only used for the daemon↔MCP server hop** — over stdio for local servers (`command`) or Streamable HTTP for remote ones (`url`).
@@ -39,7 +39,7 @@ The four `.mcp.json` layers, `~/.ava/mcp_enabled.json` enable control, `requires
 Native vs installed (mirroring skills), the relative-path `.mcp.json` startup form, per-layer `server_cwd`, and why not `uv run`: [[docs/mcps/installation-startup.ava.okf.md]].
 
 ## Key Dependencies
-- [[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md]] — the inbound direction: this cluster AS an MCP server (gateway `/mcp`)
+- [[gateway/mcp_server/docs/mcp-endpoint/mcp-endpoint.ava.okf.md]] — the inbound direction: this cluster AS an MCP server (gateway `/mcp`)
 - [[mcp-daemon.ava.okf.md]] — MCP daemon subprocess management
 - [[agent/docs/state.ava.okf.md]] — agent identity for socket path
 

@@ -2275,7 +2275,7 @@ export interface components {
             last_inbound_at: string;
             label: string | null;
             machine: string;
-            supports_vision: boolean;
+            supports_vision: boolean | null;
             liveness_state: components["schemas"]["LivenessState"];
             availability?: components["schemas"]["AgentAvailability"] | null;
             observation: components["schemas"]["AgentObservation"];
@@ -2412,7 +2412,7 @@ export interface components {
             last_inbound_at: string;
             label: string | null;
             machine: string;
-            supports_vision: boolean;
+            supports_vision: boolean | null;
             liveness_state: components["schemas"]["LivenessState"];
             last_probe_at: string | null;
             last_launch_attempt_id?: string | null;

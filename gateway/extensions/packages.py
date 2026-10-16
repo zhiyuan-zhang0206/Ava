@@ -1,20 +1,3 @@
-"""Package install entry — /api/keyed/v1/packages/draft.
-
-Hands a natural-language "I want a capability like X" request to an
-ava-package-installer agent: spawns an agent that loads
-`ava.skills.ava_guide.packages.install` and returns its id so the Control page can
-open the conversation. Mirrors the schedule / guide draft endpoints — a fixed
-prompt pointed at the skill + `create_and_launch_agent`; the user finishes the
-task in the spawned agent's session.
-
-The whole install lifecycle (clarify -> discover candidates -> confirm ->
-install -> spawn a test agent -> read and judge the package -> report what
-adaptation it needs) lives in the skill. This endpoint only routes: it carries
-which *kind* of package the entry point was for and the user's words. There is
-deliberately no URL/spec field — the user is not expected to know which package
-is any good, so every install goes through an agent that can look.
-"""
-
 from __future__ import annotations
 
 from typing import Literal
@@ -23,15 +6,14 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
+from gateway.http.model_catalog import require_model_catalog
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
 
 PackageKind = Literal["skill", "plugin", "mcp"]
 
-# Per-kind framing handed to the agent: what the thing is, and how much trust
-# installing it costs. The skill turns the second half into the confirm gate
-# (a plugin/MCP runs code here, so the user confirms the candidate first).
+
 KIND_BRIEF: dict[str, str] = {
     "skill": (
         "a skill — an instruction pack an agent reads and follows; installing it runs "
@@ -54,13 +36,14 @@ class PackageDraftResponse(BaseModel):
     agent_id: int
 
 
-@router.post("/api/keyed/v1/packages/draft")
+@router.post(
+    "/api/keyed/v1/packages/draft",
+    description="Spawn an ava-package-installer agent for a natural-language install request\nand return its id so the UI can open the conversation. Replays one raw draft\nintent and its original birth; 422 on an unknown kind.",
+)
 async def guarded_draft_package(
     body: PackageDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
 ) -> PackageDraftResponse:
-    """Spawn an ava-package-installer agent for a natural-language install request
-    and return its id so the UI can open the conversation. Replays one raw draft
-    intent and its original birth; 422 on an unknown kind."""
+
     prompt = (
         "You are installing a package for the user. Read and follow "
         "ava.skills.ava_guide.packages.install and run the whole lifecycle it describes: "
@@ -83,7 +66,7 @@ async def guarded_draft_package(
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,
-        catalog=request.app.state.catalog,
+        catalog=require_model_catalog(request),
         authority=request.app.state.config_authority,
         creation_key=key,
         creation_identity=body.model_dump(mode="json"),

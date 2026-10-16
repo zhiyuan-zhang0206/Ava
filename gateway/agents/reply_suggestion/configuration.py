@@ -1,7 +1,6 @@
-"""Compose the reply-suggestion service from the gateway's configuration and stores."""
-
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
@@ -17,7 +16,6 @@ from gateway.agents.reply_suggestion.service import (
     DRAFT_TIMEOUT_S,
     ReplySuggestionPolicy,
     ReplySuggestionService,
-    validate_models,
 )
 from ops.agents import get_agent_status
 
@@ -25,7 +23,7 @@ __all__ = ["reply_suggestion_policy", "reply_suggestion_service"]
 
 
 def reply_suggestion_policy(config: ConfigBoot) -> ReplySuggestionPolicy:
-    """Capture an owner without reading any setting until a request needs it."""
+
     return ReplySuggestionPolicy(
         enabled=lambda: config.view.lm.reply_suggestion_enabled,
         model=lambda: config.view.lm.reply_suggestion_model,
@@ -39,17 +37,14 @@ def reply_suggestion_service(
     config: ConfigBoot,
     *,
     db: Database,
-    catalog: ModelCatalog,
+    catalog_reader: Callable[[], ModelCatalog],
     rendering: TimelineReadInputs,
 ) -> ReplySuggestionService:
-    """The service wired to the real stores and providers; refuses unusable model settings."""
-    policy = reply_suggestion_policy(config)
-    validate_models(policy, catalog)
 
-    def draft_model(model: str) -> Any:
-        # Reasoning off: deepseek defaults to the maximum effort, which makes a one-line
-        # draft run for tens of seconds. The gateway holds no per-agent tuning, so the
-        # build resolves through the model's registry defaults.
+    policy = reply_suggestion_policy(config)
+
+    def draft_model(model: str, catalog: ModelCatalog) -> Any:
+
         return build_chat_model(
             model,
             reasoning_effort=ReasoningEffort.NONE,
@@ -61,7 +56,7 @@ def reply_suggestion_service(
 
     return ReplySuggestionService(
         policy=policy,
-        catalog=catalog,
+        catalog_reader=catalog_reader,
         rendering=rendering,
         load_messages=lambda agent_id: load_current_messages(db, agent_id),
         agent_status=lambda agent_id: get_agent_status(db, agent_id),
