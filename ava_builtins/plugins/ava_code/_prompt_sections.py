@@ -45,7 +45,7 @@ def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         "switch the branch of, or push the shared checkout directly; every change goes "
         "through a PR.\n"
         "- Every commit appends a `Co-authored-by: Ava #<your agent id>` trailer; PR "
-        "titles start with `[Ava-<your agent id>]`.\n"
+        "titles carry no `[Ava-<your agent id>]` prefix.\n"
         "- Before calling a change done, run the narrowest check that proves it (the "
         "failing test, the exact command), then widen to nearby cases — don't claim "
         "success from reading the diff alone.\n"

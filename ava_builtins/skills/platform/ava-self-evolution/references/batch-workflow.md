@@ -166,9 +166,9 @@ ava.ui.notify(
 ```
 
 For a high-confidence skill fix, open a PR to `main` following the
-`ava-self-development` skill's workflow (PR title `[Ava-<your-id>]`, commit
-`Co-authored-by: Ava #<your-id>`). Do not merge it yourself — leave it for the
-user to review.
+`ava-self-development` skill's workflow (PR title without an `[Ava-<id>]`
+prefix, commit `Co-authored-by: Ava #<your-id>`). Do not merge it yourself —
+leave it for the user to review.
 
 ## Data source
 

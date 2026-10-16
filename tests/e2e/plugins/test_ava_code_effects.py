@@ -254,7 +254,7 @@ def test_system_prompt_carries_the_coding_conventions(
     prompt = system["text"]
     assert "# Coding tools" in prompt
     assert "git worktree" in prompt
-    assert "Ava-<your agent id>" in prompt
+    assert "titles carry no `[Ava-<your agent id>]` prefix" in prompt
     assert "Read `AGENTS.md` first" in prompt
     assert "ava.cwd" in prompt
     assert "Resolving issues and debugging" not in prompt
