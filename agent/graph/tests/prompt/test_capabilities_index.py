@@ -186,8 +186,7 @@ def test_default_index_does_not_request_a_capability_report(fake_skills_dir: Pat
 
     paragraphs = text.split("\n\n")
     assert paragraphs[2].startswith("This is your index of what you can already do.")
-    assert "ava_workflow" in paragraphs[2]
-    assert "first `execute_code` turn" in paragraphs[2]
+    assert "skipping an established playbook" in paragraphs[2]
     assert paragraphs[3].startswith("**Skills**")
     for phrase in ("Before starting any task", "name the skill", "final output"):
         assert phrase not in text
@@ -240,7 +239,6 @@ def test_delegation_check_routes_nontrivial_work_without_forcing_methods(
     )
     assert "load ava-workflow when available" in text
     assert "ava.help(ava.skills.ava_workflow)" in text
-    assert "first `execute_code` turn" in text
     assert "non-trivial, ambiguous, consequential, sustained, or parallel" in text
     assert "does not mandate an interview" in text
     assert "goal supervision, or a plan document" in text
