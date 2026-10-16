@@ -1,5 +1,3 @@
-"""Turn-boundary conversion of pending attachments into one HumanMessage."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -49,9 +47,9 @@ def _context(model_name: str, database_gate: ProcessDbGate) -> AvaContext:
 
 
 def _blocks(message: HumanMessage) -> list[dict[str, Any]]:
-    """Return a packed attachment message's native content blocks."""
-    assert isinstance(message.content, list)  # pyright: ignore[reportUnknownMemberType]
-    return cast("list[dict[str, Any]]", message.content)  # pyright: ignore[reportUnknownMemberType]
+    content = cast(Any, message).content
+    assert isinstance(content, list)
+    return cast("list[dict[str, Any]]", content)
 
 
 def test_drain_builds_one_native_image_message(
@@ -69,10 +67,8 @@ def test_drain_builds_one_native_image_message(
     assert drain["attach"] == AttachState()
     message = drain["messages"][0]
     assert isinstance(message, HumanMessage)
-    assert message.additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value  # pyright: ignore[reportUnknownMemberType]
+    assert cast(Any, message).additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value
     blocks = _blocks(message)
-    # Interleaved pack: [text(notice), text(caption line), image_url, ...] —
-    # the file's own caption line sits directly before its media block.
     assert [b["type"] for b in blocks] == ["text", "text", "image_url"]
     assert "Files attached during this turn" in blocks[0]["text"]
     assert "after fix" in blocks[1]["text"]
@@ -86,13 +82,12 @@ def test_drain_keeps_text_only_models_informed(
     _write_png(image)
     state = BaseAgentState(attach=AttachState(pending=[AttachEntry(path=str(image), label=None)]))
 
-    drain = build_attach_drain(state, _context("deepseek-flash", database_gate=database_gate))
+    drain = build_attach_drain(state, _context("glm-5.3", database_gate=database_gate))
 
     assert drain is not None
     message = drain["messages"][0]
     assert isinstance(message, HumanMessage)
     blocks = _blocks(message)
-    # Skipped entry: notice + its caption line, both text blocks, no media block.
     assert [b["type"] for b in blocks] == ["text", "text"]
     assert "your model cannot receive image" in blocks[1]["text"]
 
@@ -124,7 +119,7 @@ async def test_claim_drains_before_turn_boundary_wait(
 
     assert command.goto == CLAIM
     assert command.update is not None
-    assert command.update["attach"] == AttachState()  # type: ignore[index]
+    assert cast("dict[str, Any]", command.update)["attach"] == AttachState()
 
 
 async def test_claim_does_not_drain_mid_turn(
@@ -145,4 +140,4 @@ async def test_claim_does_not_drain_mid_turn(
 
     assert command.goto == "before_llm"
     assert command.update is not None
-    assert "attach" not in command.update  # type: ignore[operator]
+    assert "attach" not in cast("dict[str, Any]", command.update)

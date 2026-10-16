@@ -114,7 +114,9 @@ transforms, scanning — run the same id on its V4.1 Flash backend.
 
 - Complexity is absorbed by **decomposition and verification waves**, not by
   upgrading the model (next section).
-- Vision work uses plain `deepseek-flash`.
+- Vision work uses plain `deepseek-flash`: it receives images natively
+  (user uploads, `ava.self.attach`). PDF, audio and video still go through
+  `ava.understand`.
 - Other registered models (`gemini-*`, Claude, GLM, Qwen, …) sit outside the
   default policy: select one only when the user explicitly asks for that
   model, and confirm it is on the roster first (section above).

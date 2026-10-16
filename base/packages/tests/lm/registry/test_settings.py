@@ -365,9 +365,16 @@ def test_attach_modalities_default_to_the_declared_media_matrix(
             prefix: binding.vision for prefix, binding in model_catalog.bindings.items()
         },
     ) == frozenset({"image"})
+    assert attach_modalities_for_model(
+        "deepseek-flash",
+        models=model_catalog.models,
+        vision_prefixes={
+            prefix: binding.vision for prefix, binding in model_catalog.bindings.items()
+        },
+    ) == frozenset({"image"})
     assert (
         attach_modalities_for_model(
-            "deepseek-flash",
+            "glm-5.3",
             models=model_catalog.models,
             vision_prefixes={
                 prefix: binding.vision for prefix, binding in model_catalog.bindings.items()
