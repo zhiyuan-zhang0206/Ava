@@ -22,8 +22,14 @@ def test_initial_human_response_is_present_without_plugins(
     prompt = build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())
 
     assert prompt.count(user_reply_section(slices)) == 1
-    assert "before the first tool call" in prompt
-    assert "If you can answer directly, give the answer" in prompt
+    assert (
+        "If you can answer directly, give the answer without calling "
+        "`execute_code`; no separate acknowledgment is needed. Whenever your first "
+        "turn on a human request calls `execute_code` — even for a single quick "
+        "check — include a brief, substantive 1-2 sentence reply in that same first "
+        "response before the first tool call"
+    ) in prompt
+    assert "Never emit a tool-only first turn with empty assistant text" in prompt
     assert "deliver the result in that conversation" in prompt
     assert "Peer messages, watcher events, scheduled wakes and system notes" in prompt
     assert "do not require courtesy replies" in prompt
