@@ -1,42 +1,4 @@
 #!/usr/bin/env python3
-"""CI usage attribution — per-agent GitHub Actions minutes.
-
-Attribution source: the `[Ava-<id>]` prefix on PR titles and commit subjects
-(the fleet's standing convention). GitHub's actor identity is one shared
-account, so actor-level attribution does not exist; the convention is parsed
-instead. Billable minutes are measured from job started/completed timestamps
-(ceil to the minute, GitHub's billing unit) — GitHub's own metrics/timing
-APIs are enterprise-only for this account (verified 2026-09-06).
-
-Scope: the `CI` workflow only (the cost driver — a full run is ~110 billable
-minutes across shards; auxiliary workflows are seconds each).
-
-Usage:
-    .venv/bin/python scripts/ci/pull_requests/accounting.py --since 2026-09-05T16:00Z \
-        --until 2026-09-06T16:00Z [--repo owner/repo] [--json]
-
-    .venv/bin/python scripts/ci/pull_requests/accounting.py --since ... --until ... \
-        --append-ledger scripts/ci/ci_usage/ledger.jsonl
-    .venv/bin/python scripts/ci/pull_requests/accounting.py --report [--days N] [--json]
-
-    Default: print one attribution entry per CI run in the window. With
-    `--append-ledger PATH` the entries are appended idempotently (keyed by
-    run id) and the appended count is printed — this is the daily
-    reconciliation step. `--report` reads a ledger and prints per-agent
-    totals with cost at the GitHub-hosted overage rates.
-
-Rates: Linux $0.006/min, macOS $0.062/min (private-repo GitHub-hosted,
-corrected 2026-09-06 per GitHub's published pricing). NOTE: this repo is
-currently PUBLIC — standard GitHub-hosted runner minutes are free for public
-repos, so cost estimates are a private-repo overage equivalent and phase-2
-quotas must gate on MINUTES, not dollars. The account's 3,000 included
-minutes/month (private-repo billing) are account-wide across all repos.
-
-Ledger rows are JSONL: {"run_id": int, "day": "YYYY-MM-DD", "agent_id": int|null,
-"task_id": int|null, "pr_number": int|null, "name": str, "head_branch": str,
-"linux_minutes": int, "macos_minutes": int, "jobs": int, "conclusion": str|null}.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -65,13 +27,10 @@ _TASK_RE = re.compile(r"\(task #(\d+)\)")
 _TRUNK_PR_RE = re.compile(r"trunk-merge/pr-(\d+)/")
 _BRANCH_AGENT_RE = re.compile(r"^ava-(\d+)-")
 
-# The runs list endpoint caps results at 1000 per query window; a day of the
-# fleet can exceed that. Collecting in sub-windows keeps every run reachable.
 _WINDOW_CHUNK_SECONDS = 4 * 3600
 
 
 def _gh_api(path: str, *, jq: str, host: Host) -> list[dict]:
-    """Run `gh api` and return the JSON array; [] on any failure."""
     try:
         result = host.run(
             ["gh", "api", path, "--jq", jq],
@@ -91,7 +50,6 @@ def _gh_api(path: str, *, jq: str, host: Host) -> list[dict]:
 
 
 def parse_identity(text: str) -> tuple[int | None, int | None]:
-    """(agent_id, task_id) parsed from a PR title / commit subject."""
     agent_match = _AGENT_RE.search(text)
     task_match = _TASK_RE.search(text)
     agent_id = int(agent_match.group(1)) if agent_match else None
@@ -100,7 +58,6 @@ def parse_identity(text: str) -> tuple[int | None, int | None]:
 
 
 def _pr_title(repo: str, pr_number: int | None, *, host: Host) -> str:
-    """PR title for attribution; empty when the PR number is unknown."""
     if pr_number is None:
         return ""
     try:
@@ -127,17 +84,12 @@ def _pr_title(repo: str, pr_number: int | None, *, host: Host) -> str:
 
 
 def _real_pr_of_trunk_branch(head_ref: str) -> int | None:
-    """A synthetic trunk-merge/pr-<n>/<uuid> branch belongs to real PR <n>."""
     match = _TRUNK_PR_RE.search(head_ref or "")
     return int(str(match.group(1))) if match else None
 
 
+# ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#minute-billing
 def job_minutes(started: str | None, completed: str | None) -> int:
-    """Billable minutes of one job: ceil of its wall duration.
-
-    The jobs API reports null started/completed for in-progress and
-    cancelled-before-start jobs — such jobs bill 0 minutes.
-    """
     if not started or not completed:
         return 0
     start = datetime.fromisoformat(started.replace("Z", "+00:00"))
@@ -148,7 +100,6 @@ def job_minutes(started: str | None, completed: str | None) -> int:
 def _identity_from_prs(
     run: dict, repo: str, real_pr: int | None, *, host: Host
 ) -> tuple[int | None, int | None, int | None]:
-    """`(pr_number, agent_id, task_id)` from the run's PR payload, or the trunk branch's real PR."""
     pull_requests = [p for p in run.get("pull_requests", []) if isinstance(p, dict)]
     if pull_requests:
         raw_number = pull_requests[0].get("number")
@@ -157,15 +108,12 @@ def _identity_from_prs(
         agent_id, task_id = parse_identity(title)
         return (real_pr or pr_number), agent_id, task_id
     if real_pr is not None:
-        # Queue test runs on trunk-merge/pr-<n> branches carry no PR payload —
-        # the branch name itself names the real PR.
         agent_id, task_id = parse_identity(_pr_title(repo, real_pr, host=host))
         return real_pr, agent_id, task_id
     return None, None, None
 
 
 def _merged_pr_of(run: dict, repo: str, *, host: Host) -> int | None:
-    """The PR a push-to-main merge run landed, from its head commit."""
     head_sha = str(run.get("head_sha") or "")
     if not head_sha:
         return None
@@ -175,12 +123,11 @@ def _merged_pr_of(run: dict, repo: str, *, host: Host) -> int | None:
     return merged_prs[0] if merged_prs and isinstance(merged_prs[0], int) else None
 
 
+# ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#attribution-fallback-chain
 def _run_identity(run: dict, repo: str, *, host: Host) -> tuple[int | None, int | None, int | None]:
-    """`(pr_number, agent_id, task_id)` of a run, by PR title, merge commit, subject or branch."""
     real_pr = _real_pr_of_trunk_branch(str(run.get("head_branch") or ""))
     pr_number, agent_id, task_id = _identity_from_prs(run, repo, real_pr, host=host)
     if agent_id is None and str(run.get("head_branch") or "") == "main":
-        # A push-to-main merge run: the merge commit names the PR it landed.
         merged = _merged_pr_of(run, repo, host=host)
         if merged is not None:
             pr_number = merged
@@ -188,8 +135,6 @@ def _run_identity(run: dict, repo: str, *, host: Host) -> tuple[int | None, int 
     if agent_id is None:
         agent_id, task_id = parse_identity(str(run.get("head_commit_msg") or ""))
     if agent_id is None:
-        # Convention-prefix commits aside: agent worktree branches name the
-        # agent (`ava-<id>-<slug>`), covering type(scope)-style subjects.
         branch_match = _BRANCH_AGENT_RE.match(str(run.get("head_branch") or ""))
         if branch_match:
             agent_id = int(str(branch_match.group(1)))
@@ -197,9 +142,6 @@ def _run_identity(run: dict, repo: str, *, host: Host) -> tuple[int | None, int 
 
 
 def _run_entry(run: dict, repo: str, *, host: Host) -> dict:
-    """One ledger entry for a CI run: identity from the PR title (synthetic
-    test PRs resolve to their real PR) with the head-commit subject as
-    fallback (push-to-main merge runs)."""
     pr_number, agent_id, task_id = _run_identity(run, repo, host=host)
     day = (run.get("created_at") or "")[:10]
     return {
@@ -224,9 +166,6 @@ def _fill_job_minutes(entry: dict, repo: str, *, host: Host) -> None:
         host=host,
     )
     for job in jobs:
-        # The jobs API returns null started/completed for in-progress and
-        # cancelled jobs — pass them through as None so job_minutes bills 0
-        # (str(None) == "None" would reach fromisoformat and crash).
         started = job.get("started")
         completed = job.get("completed")
         minutes = job_minutes(
@@ -242,7 +181,6 @@ def _fill_job_minutes(entry: dict, repo: str, *, host: Host) -> None:
 
 
 def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, Any]]:
-    """Attribution entries for every CI run created in [since, until)."""
     entries: dict[int, dict] = {}
     since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
     until_dt = datetime.fromisoformat(until.replace("Z", "+00:00"))
@@ -280,7 +218,6 @@ def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, 
 
 
 def load_ledger(path: Path) -> dict[int, dict]:
-    """run_id -> entry from a JSONL ledger; a missing file is an empty ledger."""
     if not path.exists():
         return {}
     ledger: dict[int, dict] = {}
@@ -296,8 +233,8 @@ def load_ledger(path: Path) -> dict[int, dict]:
     return ledger
 
 
+# ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#ledger-idempotence
 def append_ledger(path: Path, entries: list[dict]) -> int:
-    """Append entries not already in the ledger; return the appended count."""
     ledger = load_ledger(path)
     fresh = [e for e in entries if e["run_id"] not in ledger]
     if not fresh:
@@ -309,8 +246,8 @@ def append_ledger(path: Path, entries: list[dict]) -> int:
     return len(fresh)
 
 
+# ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#overage-equivalent-cost
 def report_rows(ledger: dict[int, dict], *, days: int, agent: int | None) -> list[dict]:
-    """Per-agent rollups of the last `days` days: runs, minutes, est. overage cost."""
     cutoff = datetime.now(UTC).timestamp() - days * 86400
     per_agent: dict[int | None, dict] = {}
     for entry in ledger.values():

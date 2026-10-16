@@ -1,5 +1,3 @@
-"""Scheduled reports, task maintenance and understanding-tree events."""
-
 from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
@@ -7,20 +5,11 @@ from typing import Literal, NotRequired, TypedDict
 from base.events.vocabulary import EventSpec, telemetry_event
 
 
+# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#ci-usage-reconciliation
 class CiUsageDaily(TypedDict):
-    """`ci_usage_daily` payload — schedules/c9-daily-report-schedule.py.
-
-    One event per reconciliation day (05:00-05:00 cluster time): the CI
-    workflow's runs and ceil-billed minutes for the window, split by
-    attribution (PR-title [Ava-<id>] convention) and OS. `est_usd` is the
-    private-repo overage equivalent at the GitHub-hosted rates — the repo is
-    currently public, so minutes are the billing fact (scripts/ci/pull_requests/accounting.py).
-    Per-agent detail lives in the attribution ledger, not here.
-    """
-
-    day: str  # cluster-tz date of the window end
-    window_start: str  # UTC ISO
-    window_end: str  # UTC ISO
+    day: str
+    window_start: str
+    window_end: str
     runs: int
     attributed_runs: int
     unattributed_runs: int
@@ -28,70 +17,32 @@ class CiUsageDaily(TypedDict):
     attributed_minutes: int
     linux_minutes: int
     macos_minutes: int
-    appended_runs: int  # new ledger rows this reconciliation (0 = re-fire no-op)
+    appended_runs: int
     est_usd: float
 
 
 class DebtSweepDaily(TypedDict):
-    """`debt_sweep_daily` payload — schedules/debt-sweep-daily-schedule.py.
-
-    One event per claimed 06:30 cluster-time slot. The mechanical scan may
-    fail without blocking the clearing worker, so scan status is an explicit
-    fact rather than an implied success from the worker action.
-    """
-
-    day: str  # cluster-tz date of the claimed slot
-    scan_status: str  # ok | failed
-    action: str  # spawned | resurrected | messaged
+    day: str
+    scan_status: str
+    action: str
     worker_agent_id: int
 
 
+# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#pr-flow-daily-gauge
 class PrFlowDaily(TypedDict):
-    """`pr_flow_daily` payload — scripts/ci/pull_requests/pr_flow_export.py (macmini daily job).
-
-    One event per complete cluster-tz day in the trailing window, re-emitted
-    on every run so the whole window stays inside Prometheus's retention.
-    Every numeric field is absolute per-day state, never a sum, and the OTLP
-    disposition records each as an ObservableGauge
-    (``base/telemetry/otlp/telemetry_otlp.py``) — a counter or histogram would accrue
-    across re-emissions. Fields are absent when the day has no such sample
-    (no merges -> no percentile values; an unreachable flaky source
-    omits ``flake_new_quarantines`` rather than claiming zero).
-    """
-
-    day: str  # cluster-tz date (Asia/Shanghai fleet clock)
-    merged_count: int  # PRs whose merged_at falls on the day
+    day: str
+    merged_count: int
     ready_to_merge_median_seconds: NotRequired[float]
     ready_to_merge_p90_seconds: NotRequired[float]
-    flake_new_quarantines: NotRequired[int]  # tests quarantined on the day
+    flake_new_quarantines: NotRequired[int]
 
 
 class PrFlowRun(TypedDict):
-    """`pr_flow_run` payload — scripts/ci/pull_requests/pr_flow_export.py (macmini daily job).
-
-    One event per run: the point-in-time Trunk queue depth sample. Absolute
-    state -> ObservableGauge (``ava_pr_flow_run_queue_depth_ratio``). The
-    event is emitted even when the depth sample is unavailable, so the daily
-    breadcrumb survives a Trunk outage; the missing field stays absent (an
-    absent optional metric is not zero).
-    """
-
     queue_depth: NotRequired[int]
 
 
+# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#ci-runs-daily-dedup
 class CiRunsDaily(TypedDict):
-    """`ci_runs_daily` payload — scripts/ci/pull_requests/runs_export.py.
-
-    One absolute-state sample per complete cluster-time day and repository.
-    The collector re-emits its trailing window, so every number is an OTLP
-    gauge rather than an accumulating counter. Classification labels overlap;
-    `white_run_share` alone deduplicates instant skips, superseded runs, and
-    abandoned PR heads in that priority order. Per-PR percentiles are absent
-    when no completed PR has attributed runs. `first_pass_pr_share` is v1's
-    run-level approximation: attributed non-noise, non-zombie runs have no
-    red conclusion and no retry attempt.
-    """
-
     repo: str
     day: str
     runs: int
@@ -119,15 +70,8 @@ class CiRunsDaily(TypedDict):
     first_pass_pr_share: NotRequired[float]
 
 
+# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#ci-workflow-window
 class CiWorkflowWindow(TypedDict):
-    """`ci_workflow_window` payload — scripts/ci/pull_requests/runs_export.py.
-
-    Trailing-window absolute workflow state, keyed by repository and workflow
-    name, emitted with the same daily sampler. Execution percentiles omit
-    zombie wall-clock artifacts and zero-execution runs rather than treating
-    an empty population as a real zero.
-    """
-
     repo: str
     workflow: str
     runs: int
@@ -145,13 +89,6 @@ class CiWorkflowWindow(TypedDict):
 
 
 class CiRunsRun(TypedDict):
-    """`ci_runs_run` payload — scripts/ci/pull_requests/runs_export.py.
-
-    One sampler breadcrumb per repository: the fixed window's population and
-    this run's GitHub-read budget. These are current observations, so all
-    numbers are gauges even though their names are counts.
-    """
-
     repo: str
     window_days: int
     window_runs: int
@@ -160,16 +97,12 @@ class CiRunsRun(TypedDict):
 
 
 class TaskReminderDigest(TypedDict):
-    """`task_reminder_digest` payload — task-maintenance daemon."""
-
     owner_id: int
     task_count: int
     task_ids: list[int]
 
 
 class TaskEscalation(TypedDict):
-    """`task_escalation` payload — task-maintenance daemon."""
-
     owner_id: int
     task_count: int
     task_ids: list[int]
@@ -177,60 +110,37 @@ class TaskEscalation(TypedDict):
 
 
 class UnderstandingEnqueueFailed(TypedDict):
-    """`understanding_enqueue_failed` payload — a chunk-triggered understanding
-    job could not be enqueued. Best-effort by design: the agent's turn goes on
-    and the next trigger covers the same stretch again."""
-
     agent_id: int
     compact_version: int
     error: str
 
 
 class UnderstandingChunkFailed(TypedDict):
-    """`understanding_chunk_failed` payload — a queued understanding chunk
-    failed (drifted indices, a generation, checkpoint or database error, a stopping host, a
-    claimer that died, a checkpoint that never caught up). A chunk is attempted once and the
-    stretch stays undescribed."""
-
     agent_id: int
     job_id: int
     attempts: int
     error: str
 
 
+# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#understanding-chunk-gap
 class UnderstandingChunkGap(TypedDict):
-    """`understanding_chunk_gap` payload — stretches of a chunk that no node will describe: the
-    runs after the first uncovered run of a chunk that overlapped existing nodes, and the turns a
-    closing chunk's boundary snapshot lacks. The rest of the chunk was described."""
-
     agent_id: int
     job_id: int
     gaps: str
 
 
 class UnderstandingSnapshotLag(TypedDict):
-    """`understanding_snapshot_lag` payload — a compaction stamped its boundary before the
-    checkpoint held the state's last message (the wait for it timed out), so the segment's
-    closing chunk may find the snapshot short."""
-
     agent_id: int
     waited_seconds: float
 
 
 class UnderstandingChunkSkipped(TypedDict):
-    """`understanding_chunk_skipped` payload — a queued chunk was closed
-    without a node: an already described chunk or one with no conversation content."""
-
     agent_id: int
     job_id: int
     reason: str
 
 
 class UnderstandingGroupFailed(TypedDict):
-    """`understanding_group_failed` payload — an upper-level grouping check
-    failed (provider error, or a reply still refused after the configured
-    corrections). The level's open nodes stay ungrouped until its next threshold of new nodes arrives."""
-
     agent_id: int
     level: int
     open_nodes: int
@@ -238,39 +148,28 @@ class UnderstandingGroupFailed(TypedDict):
 
 
 class UnderstandingCallRecordFailed(TypedDict):
-    """`understanding_call_record_failed` payload — the audit rows of an understanding
-    call (a chunk job, or a grouping check with `job_id` 0) could not be written. The
-    node or group the call produced is kept; only the call record is lost."""
-
     agent_id: int
     job_id: int
     error: str
 
 
+# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#understanding-rebuild-failure
 class UnderstandingRebuildFailed(TypedDict):
-    """`understanding_rebuild_failed` payload — a rebuild of an agent's leaves failed on its
-    last allowed attempt and was closed as failed; the leaves stay as they were."""
-
     agent_id: int
     rebuild_id: int
     attempts: int
     error: str
 
 
+# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#understanding-leaf-out-of-order
 class UnderstandingLeafOutOfOrder(TypedDict):
-    """`understanding_leaf_out_of_order` payload — a level-1 node landed before one that already
-    has a parent. Nothing repairs it automatically: the agent's upper levels need a manual build."""
-
     agent_id: int
     job_id: int
     span_end: int
 
 
+# ava:ref base/events/docs/maintenance-payloads.ava.okf.md#understanding-backlog
 class UnderstandingBacklog(TypedDict):
-    """`understanding_backlog` payload — one sample of the chunk queue per
-    consumer round: rows waiting, rows in flight, and how long the oldest
-    waiting row has waited. A growing age is a consumer that does not keep up."""
-
     pending: int
     running: int
     oldest_pending_age_seconds: float
@@ -333,7 +232,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=TaskEscalation,
         site="task_maintenance/daemon.py:run_escalate",
     ),
-    # labeler / trace housekeeping
     "label_generated": telemetry_event("label_generated", "label auto-generated", tier="noise"),
     "label_generate_failed": telemetry_event(
         "label_generate_failed", "label generation failed", tier="anomaly"
