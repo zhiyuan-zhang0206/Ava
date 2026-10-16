@@ -247,10 +247,11 @@ def test_memory_backend_switch_fields_require_gateway_restart() -> None:
 def test_gateway_consumed_fields_declare_gateway_restart() -> None:
     from base.config.domains.channels.feishu import FeishuSettings
     from base.config.domains.channels.telegram import TelegramSettings
+    from base.config.domains.lm import LmSettings
     from base.config.domains.services.settings import ServiceSettings
     from base.config.profiles import PROCESS_PROFILES
 
-    for domain in ("services", "telegram", "feishu"):
+    for domain in ("services", "telegram", "feishu", "lm"):
         assert domain in PROCESS_PROFILES["gateway"]
 
     by_model = {
@@ -273,12 +274,28 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
             "feishu_app_secret",
             "feishu_rest_timeout_seconds",
         ),
+        LmSettings: (
+            "labeler_model",
+            "reply_suggestion_enabled",
+            "reply_suggestion_model",
+            "reply_suggestion_gate_model",
+            "reply_suggestion_gate_threshold",
+            "reply_suggestion_max_input_tokens",
+        ),
     }
     for model, names in by_model.items():
         for name in names:
             extra = model.model_fields[name].json_schema_extra
             assert isinstance(extra, dict)
             assert extra["restart_required"] == "gateway", name
+
+
+def test_hierarchy_model_declares_all_restart() -> None:
+    from base.config.domains.lm import LmSettings
+
+    extra = LmSettings.model_fields["hierarchy_model"].json_schema_extra
+    assert isinstance(extra, dict)
+    assert extra["restart_required"] == "all"
 
 
 def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.MonkeyPatch) -> None:

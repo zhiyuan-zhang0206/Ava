@@ -37,7 +37,7 @@ class LmSettings(EnvSettings):
             "executes instead of summarizing — measure before downgrading."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -61,7 +61,7 @@ class LmSettings(EnvSettings):
             "(same rationale as labeler_model)."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "all",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -80,7 +80,7 @@ class LmSettings(EnvSettings):
             "calling any model."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -97,7 +97,7 @@ class LmSettings(EnvSettings):
             "registered chat model; an unknown id fails the gateway at boot."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -114,7 +114,7 @@ class LmSettings(EnvSettings):
             "model (not a chat model); an unknown id fails the gateway at boot."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -132,7 +132,7 @@ class LmSettings(EnvSettings):
             "would help the user' for replies to be drafted. Raise it to draft less often."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
@@ -152,7 +152,7 @@ class LmSettings(EnvSettings):
             "newest words."
         ),
         json_schema_extra={
-            "restart_required": "",
+            "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
             "capability": "gateway",
