@@ -39,7 +39,10 @@ and releases on failure without a separate unlock. Indexing failures are 500
 and may be retried. HTTP requests never
 perform whole-history reconstruction. The operator can prepare legacy agents
 with `python -m services.derived.insights.run_timeline.projection.backfill 2697 6110`
-after applying the migration through the authorized lifecycle. Use the installed
+after applying the migration through the authorized lifecycle. The executable
+migration is `migrations/2026/10/16/15/20261016T153550_run-timeline-range-projection.sql`;
+the earlier SQL under `db/migrations/` is retained historical source and is not
+discovered by the migration loader. Use the installed
 target generation and its explicit `AVA_HOME`; this writes derived tables only.
 No request attempts DDL. A changed retained prefix fails explicitly and requires
 an operator to rebuild the affected projection.
