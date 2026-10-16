@@ -25,8 +25,8 @@ current task state. Use task/agent reads for current state.
 The request contains a positive non-bool `actor_agent_id`, task title,
 description, positive parent id, canonical priority and requested reminder
 interval, plus agent label, machine and config. Unknown fields and enum values
-are rejected. The SDK preserves `None` interval intent and puts an explicitly
-supplied preset in config; omitting a preset uses current gateway defaults.
+are rejected. The SDK preserves `None` interval intent and passes the explicit config
+fields; keys the config does not name follow the cluster default.
 It defaults machine to its own machine before HTTP. Actor/machine/config
 changes under the same verified principal and key conflict; identical raw Python
 arguments from another context do not necessarily produce the same request.
@@ -44,7 +44,7 @@ sharing the same pair across them. No browser or MCP compound consumer is added.
 
 ## Transaction and concurrency
 
-Freeze the semantic request before preset/default settlement. A short first
+Freeze the semantic request before config/default settlement. A short first
 transaction locks and looks up the compound receipt. Missing receipts use the
 existing spawn preflight outside that transaction, avoiding a nested pool borrow
 with pool size one. The business transaction locks and looks up again: a winner
@@ -60,8 +60,9 @@ owners. There are no child-step keys, extra outbox, or generic workflow engine.
 
 `task_assignment_receipts` owns the immutable request, original complete Task
 snapshot, positive agent id and original launch attempt, plus a historical
-first-accepted birth snapshot (machine, config_overlay, birth_config, preset name,
-attempt). It has no FK or automatic TTL. Receipt deletion would permit repeating
+first-accepted birth snapshot (machine, config_overlay, birth_config, attempt;
+its retained `preset_name` key is always null since the preset mechanism was
+removed — task #5236). It has no FK or automatic TTL. Receipt deletion would permit repeating
 an operation; retention must preserve tombstones. Missing/unknown Task fields or
 invalid stored vocabulary fail instead of filling defaults or recreating rows.
 

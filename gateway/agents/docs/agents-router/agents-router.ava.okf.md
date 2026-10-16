@@ -47,8 +47,8 @@ TTL cleanup. Forward helpers do not import the assembled `gateway.app`.
 
 ## Spawn boundary
 
-[[gateway/agents/docs/agents-router/router-spawn.ava.okf.md]] owns preset resolution,
-fork config constraints, creation acceptance and launch retries.
+[[gateway/agents/docs/agents-router/router-spawn.ava.okf.md]] owns fork config
+constraints, creation acceptance and launch retries.
 
 ## List projections
 

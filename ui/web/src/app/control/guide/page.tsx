@@ -3,10 +3,6 @@
 // /control#guide — the Ava Guide entry. Describe an operations task in natural
 // language and it spawns an ava-guide agent (POST /api/keyed/v1/guide/draft), then jumps
 // to that conversation to finish it. Mirrors the Schedules page's writer entry:
-// the fixed prompt lives server-side and points at ava.skills.ava_guide (the
-// map for operating the cluster via the `ava` CLI — start/update, tracks, MCP
-// servers, installing skills/plugins, presets, schedules). This is where the
-// non-actionable config knobs the panel omits get handled: ask the agent.
 
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";

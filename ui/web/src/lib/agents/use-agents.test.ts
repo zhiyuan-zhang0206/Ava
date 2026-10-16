@@ -123,21 +123,7 @@ describe("useAgents.spawn", () => {
     expect(useStore.getState().activeId).toBe(42);
   });
 
-  it("preset rides inside config (task #2694), not as a sibling field", async () => {
-    vi.mocked(api.spawnAgent).mockResolvedValue({ id: 60 });
-    const { result } = renderHook(() => useAgents(noop), { wrapper });
-    await waitFor(() => {
-      expect(result.current.activeId).toBe(1);
-    });
-
-    await act(async () => {
-      await result.current.spawn(undefined, undefined, "coder");
-    });
-
-    expect(api.spawnAgent).toHaveBeenCalledWith({ config: { preset: "coder" } }, expect.any(String));
-  });
-
-  it("preset + model → both inside config, explicit fields next to the preset", async () => {
+  it("model and effort ride inside config", async () => {
     vi.mocked(api.spawnAgent).mockResolvedValue({ id: 61 });
     const { result } = renderHook(() => useAgents(noop), { wrapper });
     await waitFor(() => {
@@ -145,11 +131,11 @@ describe("useAgents.spawn", () => {
     });
 
     await act(async () => {
-      await result.current.spawn(undefined, "claude-sonnet-5", "coder", "high");
+      await result.current.spawn(undefined, "claude-sonnet-5", "high");
     });
 
     expect(api.spawnAgent).toHaveBeenCalledWith({
-      config: { llm_model: "claude-sonnet-5", reasoning_effort: "high", preset: "coder" },
+      config: { llm_model: "claude-sonnet-5", reasoning_effort: "high" },
     }, expect.any(String));
   });
 

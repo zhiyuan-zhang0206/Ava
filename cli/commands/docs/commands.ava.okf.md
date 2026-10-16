@@ -28,7 +28,7 @@ subpackages hold the domains, each an independent package door:
 
 - `agents/` — lifecycle control, notices, timelines, external-agent
   impersonation, the pty allocation freeze and the computer-use daemons
-- `management/` — gateway-managed config, presets, schedules
+- `management/` — gateway-managed config, schedules
 - `extensions/` — plugins, skills, packages, MCP servers, memory; owns its
   converge steps (`materialize.py`, `skills_sync.py`, `external_skills.py`)
 - `observability/` — native LGTM desired state, the OTel collector, trace

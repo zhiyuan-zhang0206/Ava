@@ -1471,38 +1471,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/presets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_presets_api_presets_get"];
-        put?: never;
-        post: operations["create_preset_api_presets_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/presets/{preset_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_preset_api_presets__preset_id__get"];
-        put?: never;
-        post?: never;
-        delete: operations["delete_preset_api_presets__preset_id__delete"];
-        options?: never;
-        head?: never;
-        patch: operations["update_preset_api_presets__preset_id__patch"];
-        trace?: never;
-    };
     "/api/keyed/v1/guide/draft": {
         parameters: {
             query?: never;
@@ -2328,7 +2296,6 @@ export interface components {
             config_overlay: {
                 [key: string]: unknown;
             };
-            preset_name?: string | null;
             notice?: components["schemas"]["OpenNotice"] | null;
             heartbeat: components["schemas"]["HeartbeatInfo"];
         };
@@ -3401,33 +3368,6 @@ export interface components {
             status: "ok" | "warn" | "error";
             updated_at: string;
             updated_by: string | null;
-        };
-        PresetCreate: {
-            name: string;
-            label: string;
-            description?: string | null;
-            config?: {
-                [key: string]: unknown;
-            };
-        };
-        PresetUpdate: {
-            name?: string | null;
-            label?: string | null;
-            description?: string | null;
-            config?: {
-                [key: string]: unknown;
-            } | null;
-        };
-        PresetView: {
-            id: number;
-            name: string;
-            label: string;
-            description: string | null;
-            config: {
-                [key: string]: unknown;
-            };
-            created_at: string;
-            updated_at: string;
         };
         Priority: "P0" | "P1" | "P2" | "P3";
         RebuildProgressOut: {
@@ -7026,149 +6966,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScheduleDraftResponse"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_presets_api_presets_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PresetView"][];
-                };
-            };
-        };
-    };
-    create_preset_api_presets_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PresetCreate"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PresetView"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_preset_api_presets__preset_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                preset_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PresetView"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_preset_api_presets__preset_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                preset_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_preset_api_presets__preset_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                preset_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PresetUpdate"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PresetView"];
                 };
             };
             422: {

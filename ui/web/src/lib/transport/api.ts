@@ -48,8 +48,6 @@ import type { ToUserDocument, NoticesFeed,
   PackageKind,
   PageRow,
   PendingInbound,
-  PresetUpdate,
-  PresetView,
   ResolvedConfigView,
   RestartAgentResponse,
   ResurrectAgentResponse,
@@ -793,18 +791,6 @@ export const api = {
 
   draftPackage: (kind: PackageKind, nl: string, operationKey: string = newOperationKey()): Promise<PackageDraftResponse> => {
     return draftAgent("/api/keyed/v1/packages/draft", { kind, nl }, operationKey);
-  },
-
-  listPresets: (): Promise<PresetView[]> => {
-    return f("/api/presets").then(ok<PresetView[]>);
-  },
-
-  updatePreset: (id: number, body: PresetUpdate): Promise<PresetView> => {
-    return f(`/api/presets/${id}`, PATCH_JSON(body)).then(ok<PresetView>);
-  },
-
-  deletePreset: (id: number): Promise<{ status: string }> => {
-    return f(`/api/presets/${id}`, { method: "DELETE" }).then(ok<{ status: string }>);
   },
 
   getSettings: (): Promise<UserSettingListResponse> => {

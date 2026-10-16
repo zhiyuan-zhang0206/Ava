@@ -47,7 +47,7 @@ administrator principal. Different credential bytes therefore do not inherently
 identify distinct operations. Authentication is still checked on every replay;
 a revoked credential cannot retrieve the accepted result.
 
-Maintain effective inputs across retries, including config/preset request fields
+Maintain effective inputs across retries, including config request fields
 and any overlay recomputed by the caller: omitted `machine` resolves to the
 caller's own machine, and the established actor supplies `spawner` and prompt
 source. Changing context can change those fields even when the raw Python

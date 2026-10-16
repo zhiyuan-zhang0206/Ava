@@ -91,7 +91,7 @@ def test_preflight_failure_returns_winner_committed_during_its_window(
         accepted = client.post(PATH, json=body, headers=HEADERS)
         assert accepted.status_code == 201, accepted.text
         winner.append(accepted.json())
-        raise ValueError("preset vanished after concurrent acceptance")
+        raise ValueError("preflight lost a race after concurrent acceptance")
 
     monkeypatch.setattr(agent_creation, "spawn_preflight_blocking", loses)
     replay = client.post(PATH, json=body, headers=HEADERS)

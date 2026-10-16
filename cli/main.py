@@ -60,7 +60,6 @@ _LITE_VERBS = frozenset(
         "cluster",
         "agents",
         "config",
-        "presets",
         "schedules",
         "logs",
         "mcp",

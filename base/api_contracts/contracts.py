@@ -275,13 +275,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/plugin-ui/{plugin}/{rest:path}"): RouteContract(
         note="plugin page mount — static read"
     ),
-    ("GET", "/api/presets"): RouteContract(),
-    ("GET", "/api/presets/{preset_id}"): RouteContract(),
-    ("POST", "/api/presets"): RouteContract(
-        Idempotency.NON_IDEMPOTENT, note="create preset — pure INSERT; a retry duplicates the row"
-    ),
-    ("PATCH", "/api/presets/{preset_id}"): RouteContract(note="update — repeats are harmless"),
-    ("DELETE", "/api/presets/{preset_id}"): RouteContract(note="delete — repeats are harmless"),
     ("GET", "/api/schedules"): RouteContract(),
     ("GET", "/api/schedules/{schedule_id}"): RouteContract(),
     ("GET", "/api/schedules/{schedule_id}/logs"): RouteContract(),

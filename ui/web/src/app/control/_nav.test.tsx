@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { pickActiveAnchor } from "./_nav";
 
-const IDS = ["status", "config", "config-gateway", "config-agent-runner", "config-common", "presets"];
+const IDS = ["status", "config", "config-gateway", "config-agent-runner", "config-common", "schedules"];
 
 describe("pickActiveAnchor", () => {
   it("picks the last anchor whose top is at/above the line", () => {
@@ -19,7 +19,7 @@ describe("pickActiveAnchor", () => {
       "config-gateway": 40,
       "config-agent-runner": 300,
       "config-common": 560,
-      presets: 900,
+      schedules: 900,
     };
     expect(pickActiveAnchor(IDS, 96, (id) => tops[id])).toBe("config-gateway");
   });
@@ -32,7 +32,7 @@ describe("pickActiveAnchor", () => {
       "config-gateway": 200,
       "config-agent-runner": 480,
       "config-common": 740,
-      presets: 1000,
+      schedules: 1000,
     };
     expect(pickActiveAnchor(IDS, 96, (id) => atSectionTop[id])).toBe("config");
     // Scroll down into the agent-runner zone → the sub-anchor wins over config.
@@ -42,7 +42,7 @@ describe("pickActiveAnchor", () => {
       "config-gateway": -300,
       "config-agent-runner": 40,
       "config-common": 300,
-      presets: 640,
+      schedules: 640,
     };
     expect(pickActiveAnchor(IDS, 96, (id) => inAgentRunner[id])).toBe("config-agent-runner");
   });
@@ -54,7 +54,7 @@ describe("pickActiveAnchor", () => {
       "config-gateway": 700,
       "config-agent-runner": 900,
       "config-common": 1100,
-      presets: 1300,
+      schedules: 1300,
     };
     expect(pickActiveAnchor(IDS, 96, (id) => allBelow[id])).toBe("status");
   });
@@ -66,7 +66,7 @@ describe("pickActiveAnchor", () => {
       "config-gateway": null, // not in the DOM (e.g. hidden on a remote config view)
       "config-agent-runner": 500,
       "config-common": 700,
-      presets: 900,
+      schedules: 900,
     };
     expect(pickActiveAnchor(IDS, 96, (id) => tops[id] ?? null)).toBe("config");
   });

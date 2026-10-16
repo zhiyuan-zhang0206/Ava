@@ -29,13 +29,6 @@ vi.mock("@/lib/transport/api", () => ({
   api: {
     getSystemStatus: vi.fn(),
     getModels: vi.fn(),
-    // Not exercised by any test here (no test renders >0 presets), but real
-    // SpawnButton code always fires this query on mount — leaving it absent
-    // means every render throws "api.listPresets is not a function" inside
-    // the queryFn. React Query swallows that into a silently-failed query
-    // (presets stays []), so no test here noticed, but an absent mock is
-    // still a landmine — pin it explicit instead of relying on the throw.
-    listPresets: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -174,46 +167,6 @@ const modelsWithTwoLadders = () => ({
   default: "deepseek-v4-pro",
 });
 
-// Ultra Speed Worker-style preset: carries llm_model (+ optionally
-// reasoning_effort), as agent_presets.config does on the wire.
-const presetRow = (
-  overrides: Partial<{
-    name: string;
-    label: string;
-    config: Record<string, unknown>;
-  }> = {},
-) => ({
-  id: 6,
-  name: "ultra-speed-worker",
-  label: "Ultra Speed Worker",
-  description: null,
-  config: { llm_model: "mimo-v2.5-pro-ultraspeed" },
-  created_at: "2026-07-24T00:09:50.002371-07:00",
-  updated_at: "2026-07-24T00:09:50.002371-07:00",
-  ...overrides,
-});
-
-// deepseek + mimo — the shape a preset-model override test needs (the preset
-// carries mimo-v2.5-pro-ultraspeed, the cluster default is deepseek).
-const modelsWithMimo = () => ({
-  providers: { deepseek: ["deepseek-v4-pro"], mimo: ["mimo-v2.5-pro-ultraspeed"] },
-  models: {
-    "deepseek-v4-pro": {
-      provider: "deepseek",
-      context_window: 128_000,
-      reasoning_effort_options: ["high", "max"],
-      reasoning_effort_default: "max",
-    },
-    "mimo-v2.5-pro-ultraspeed": {
-      provider: "mimo",
-      context_window: 1_000_000,
-      reasoning_effort_options: ["none", "high"],
-      reasoning_effort_default: "high",
-    },
-  },
-  default: "deepseek-v4-pro",
-});
-
 // Helper: open the model picker popover and click a model option by its text.
 // Scoped to the popover's list — the trigger button shows the current model
 // name too, so an unscoped getByText can match twice.
@@ -222,13 +175,6 @@ async function selectModel(modelName: string) {
   // findByRole waits for the popover's list to actually be in the DOM (the
   // click → open → portal-mount sequence is async; under the parallel full
   // suite the waitFor(getByText("Models")) above raced the list mount).
-  // Radix Popover is controlled (open={modelOpen}); clicking the trigger
-  // while the preset popover's dismissal is still settling can leave the
-  // fresh popover closed (observed as a ~25% flake in the full suite: the
-  // popover either never opens or opens and is immediately dismissed, so
-  // findByRole("list") below times out). Retry the toggle until the list is
-  // actually in the DOM — each click flips the controlled state, so a
-  // dismissed-open ends with a plain closed→open on the next attempt.
   const trigger = screen.getByLabelText("Model");
   let list: HTMLElement;
   for (let attempt = 0; ; attempt++) {
@@ -243,17 +189,6 @@ async function selectModel(modelName: string) {
     }
   }
   fireEvent.click(within(list).getByText(modelName));
-  // The selection is DB-backed user settings — the write + re-render is
-  // async, so wait for the trigger to reflect the new model before returning
-  // (a bare click could leave a caller's next assertion racing the update;
-  // observed as a flake in "explicit model pick after a preset still wins").
-  await waitFor(() => {
-    expect(screen.getByLabelText("Model").textContent).toContain(modelName);
-  });
-  // The selection is DB-backed user settings — the write + re-render is
-  // async, so wait for the trigger to reflect the new model before returning
-  // (a bare click could leave a caller's next assertion racing the update;
-  // observed as a flake in "explicit model pick after a preset still wins").
   await waitFor(() => {
     expect(screen.getByLabelText("Model").textContent).toContain(modelName);
   });
@@ -693,7 +628,7 @@ describe("SpawnButton model dropdown", () => {
     });
   });
 
-  it("explicitly selecting the default model sends it (beats a preset's pinned model)", async () => {
+  it("explicitly selecting the default model sends it", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
     const onSpawn = vi.fn();
@@ -706,9 +641,6 @@ describe("SpawnButton model dropdown", () => {
       expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(false);
     });
 
-    // Change to non-default, then back to default — the explicit pick is
-    // stored and must be sent, or a preset's pinned llm_model would silently
-    // win over what the user visibly selected (task #568).
     await selectModel("claude-opus-4-8");
     await selectModel("deepseek-v4-pro");
 
@@ -989,146 +921,6 @@ describe("SpawnButton model dropdown", () => {
     expect(onSpawn).toHaveBeenCalledWith({
       machine: "test-host",
       model: "deepseek-v4-pro",
-      reasoning_effort: "max",
-    });
-  });
-
-  // Task #568: picking a preset that carries a model (config.llm_model) must
-  // override the previously selected model — the user's exact complaint ("when I pick
-  // Ultra Speed Worker, the model I picked before stays as-is").
-  it("preset with a model overrides the model picker and the spawn", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithMimo());
-    vi.mocked(api.listPresets).mockResolvedValue([presetRow()]);
-    const onSpawn = vi.fn();
-    wrap(<SpawnButton variant="sm" onSpawn={onSpawn} />);
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Preset")).toBeTruthy();
-    });
-    await waitFor(() => {
-      expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(false);
-    });
-
-    // Start on the cluster default (deepseek) — the stored spawn_model is unset.
-    expect(screen.getByLabelText("Model").textContent).toContain("deepseek-v4-pro");
-    // #723r2: the preset picker is a Popover button now (fixed width +
-    // ellipsis — a native select cannot render an ellipsis).
-    fireEvent.click(screen.getByLabelText("Preset"));
-    fireEvent.click(screen.getByText("Ultra Speed Worker"));
-
-    // Model picker follows the preset's model, effort follows that model's default.
-    expect(screen.getByLabelText("Model").textContent).toContain("mimo-v2.5-pro-ultraspeed");
-    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("high");
-
-    fireEvent.click(screen.getByLabelText("Spawn agent"));
-    expect(onSpawn).toHaveBeenCalledWith({
-      machine: "test-host",
-      model: "mimo-v2.5-pro-ultraspeed",
-      preset: "ultra-speed-worker",
-      reasoning_effort: "high",
-    });
-  });
-
-  it("preset without a model leaves the model selection alone", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithMimo());
-    vi.mocked(api.listPresets).mockResolvedValue([
-      presetRow({ config: { skills_to_inject_into_system_prompt: ["gmail"] } }),
-    ]);
-    const onSpawn = vi.fn();
-    wrap(<SpawnButton variant="sm" onSpawn={onSpawn} />);
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Preset")).toBeTruthy();
-    });
-    await waitFor(() => {
-      expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(false);
-    });
-
-    // #723r2: the preset picker is a Popover button now (fixed width +
-    // ellipsis — a native select cannot render an ellipsis).
-    fireEvent.click(screen.getByLabelText("Preset"));
-    fireEvent.click(screen.getByText("Ultra Speed Worker"));
-
-    expect(screen.getByLabelText("Model").textContent).toContain("deepseek-v4-pro");
-    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("max");
-
-    fireEvent.click(screen.getByLabelText("Spawn agent"));
-    expect(onSpawn).toHaveBeenCalledWith({
-      machine: "test-host",
-      model: undefined,
-      preset: "ultra-speed-worker",
-      reasoning_effort: "max",
-    });
-  });
-
-  // A preset that pins reasoning_effort carries it into the picker (and the
-  // spawn), even when it does not carry a model.
-  it("preset with reasoning_effort overrides the effort picker", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithMimo());
-    vi.mocked(api.listPresets).mockResolvedValue([
-      presetRow({ config: { reasoning_effort: "high" } }),
-    ]);
-    const onSpawn = vi.fn();
-    wrap(<SpawnButton variant="sm" onSpawn={onSpawn} />);
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Preset")).toBeTruthy();
-    });
-    await waitFor(() => {
-      expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(false);
-    });
-
-    // #723r2: the preset picker is a Popover button now (fixed width +
-    // ellipsis — a native select cannot render an ellipsis).
-    fireEvent.click(screen.getByLabelText("Preset"));
-    fireEvent.click(screen.getByText("Ultra Speed Worker"));
-
-    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("high");
-
-    fireEvent.click(screen.getByLabelText("Spawn agent"));
-    expect(onSpawn).toHaveBeenCalledWith({
-      machine: "test-host",
-      model: undefined,
-      preset: "ultra-speed-worker",
-      reasoning_effort: "high",
-    });
-  });
-
-  // The preset's model is a seed, not a lock: an explicit pick after the preset
-  // still wins (backend merge: explicit config beats preset config per key).
-  it("explicit model pick after a preset still wins", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithMimo());
-    vi.mocked(api.listPresets).mockResolvedValue([presetRow()]);
-    const onSpawn = vi.fn();
-    wrap(<SpawnButton variant="sm" onSpawn={onSpawn} />);
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Preset")).toBeTruthy();
-    });
-    await waitFor(() => {
-      expect(screen.getByLabelText("Spawn agent").hasAttribute("disabled")).toBe(false);
-    });
-
-    // #723r2: the preset picker is a Popover button now (fixed width +
-    // ellipsis — a native select cannot render an ellipsis).
-    fireEvent.click(screen.getByLabelText("Preset"));
-    fireEvent.click(screen.getByText("Ultra Speed Worker"));
-    expect(screen.getByLabelText("Model").textContent).toContain("mimo-v2.5-pro-ultraspeed");
-
-    // Explicitly switch back to deepseek — the preset stays selected (it still
-    // seeds skills etc.), but the explicit model wins on spawn.
-    await selectModel("deepseek-v4-pro");
-    expect(screen.getByLabelText<HTMLSelectElement>("Thinking effort").value).toBe("max");
-
-    fireEvent.click(screen.getByLabelText("Spawn agent"));
-    expect(onSpawn).toHaveBeenCalledWith({
-      machine: "test-host",
-      model: "deepseek-v4-pro",
-      preset: "ultra-speed-worker",
       reasoning_effort: "max",
     });
   });

@@ -47,10 +47,8 @@ copied from an old doc or an old spawn; list the current roster first:
   embeddings price from the archive alone). The frontend picker and
   `/api/models` both derive from this registry, so the registry is the only
   place a model is born.
-- **Presets are not models.** `ava presets ls` / `ava.agents.presets.list()`
-  list named config templates (which may carry an `llm_model`), not the model
-  roster. There is no dedicated `ava models` CLI yet — the API above or the
-  registry is how an agent lists models.
+- There is no dedicated `ava models` CLI yet — the API above or the registry
+  is how an agent lists models.
 
 This skill names concrete ids as **policy** — the standing choices, not the
 full roster. Before spawning, confirm the id exists in the registry; if this
@@ -63,8 +61,8 @@ Select a Fast service through its independent roster ID (for example,
 `gpt-6.1-sol-fast` or `claude-opus-5-5-fast`). It has its own price row and
 usage identity; no additional Fast toggle is needed. Providers may serve the
 same underlying model with a speed parameter. MiMo UltraSpeed already has a
-native model ID. Presets can pin any authorized ID; effort still controls
-reasoning independently of inference speed.
+native model ID. A spawn's `config_overlay` can pin any authorized ID; effort
+still controls reasoning independently of inference speed.
 
 Do not assume switching speed preserves the prompt cache. Claude explicitly
 invalidates system and message caches when switching Fast/Standard; its tools

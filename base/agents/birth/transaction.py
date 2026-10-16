@@ -232,7 +232,6 @@ def insert_agent_birth(
     label: str | None = None,
     prompt: str | None = None,
     prompt_source: str | None = None,
-    preset_name: str | None = None,
     fork_tail_skills: list[str] | None = None,
     creation_key: str | None = None,
     creation_request_hash: str | None = None,
@@ -275,9 +274,9 @@ def insert_agent_birth(
     # resurrectable (`base.agents.incarnation.lifecycle_acceptance.record_unowned_termination`).
     cur.execute(
         "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
-        "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, preset_name, "
+        "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, "
         "last_launch_attempt_id, last_resurrect_inbound_id, incarnation_resources) "
-        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s, 0, %s)",
+        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, 0, %s)",
         (
             new_id,
             lineage_spawner,
@@ -287,7 +286,6 @@ def insert_agent_birth(
             target_machine,
             json.dumps(config) if config else None,
             json.dumps(birth_config, sort_keys=True),
-            preset_name,
             launch_attempt_id,
             Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")),
         ),

@@ -133,3 +133,5 @@ turn, and compaction is not guaranteed to arrive soon (or at all).
 - Preset configs edited after a spawn drift from the stored overlay: the
   inspector then shows those fields as "differs from preset" — honest about
   the effective values, and the next spawn picks up the edited preset.
+
+Superseded in part by: [decisions/2026-10-17-preset-removal.md](2026-10-17-preset-removal.md) — the preset mechanism (the `config_overlay` key, `agents_meta.preset_name`, the inspect diff) is removed; the fork config-stability and cache-prefix rules stay.

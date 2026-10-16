@@ -15,7 +15,7 @@ Policy: `base/api_contracts/contracts.py`.
 Versioned routes: [[guarded-creation.ava.okf.md]], [[guarded-pages.ava.okf.md]] and
 [[guarded-notices.ava.okf.md]] and [[guarded-uploads.ava.okf.md]].
 
-Preset/schedule receipts are optional; their routes remain `NON_IDEMPOTENT`.
+Schedule receipts are optional; their routes remain `NON_IDEMPOTENT`.
 Keyless calls stay one-shot with no retry promise; a supplied key must carry
 `Idempotency-Scope: principal-v1`.
 Observed lifecycle routes: [[guarded-lifecycle.ava.okf.md]].
@@ -54,9 +54,6 @@ Owners:
 | `POST /api/memory/refresh` | natural | re-scan — repeats are harmless |
 | `POST /api/memory/search` | natural | pure read |
 | `POST /api/agents/{agent_id}/notices` | keyed | immutable request and original notice snapshot replay before mutable expiry/task checks |
-| `POST /api/presets` | one-shot | optional keyed creation receipt commits with the resource; replay returns original identity after rename/delete |
-| `PATCH /api/presets/{preset_id}` | natural | update — repeats are harmless |
-| `DELETE /api/presets/{preset_id}` | natural | delete — repeats are harmless |
 | `POST /api/schedules` | one-shot | optional keyed creation receipt commits with resource/version; replay returns original identity after rename/delete |
 | `POST /api/schedules/{schedule_id}/start` | one-shot | optional keyed receipt commits desired state/sync; replay returns original acceptance without re-enabling later state |
 | `POST /api/schedules/{schedule_id}/stop` | one-shot | optional keyed receipt commits desired state/sync; unchanged disabled state is a no-op |

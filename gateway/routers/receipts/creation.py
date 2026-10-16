@@ -1,10 +1,3 @@
-"""Creation acceptance identities for presets and schedules, without request copies.
-
-The caller owns the business transaction. Only a fingerprint and original
-resource ID/timestamps survive: replay reconstructs the original view from the
-matching caller request, avoiding an extra archive of opaque configuration.
-"""
-
 import hashlib
 import json
 from datetime import datetime

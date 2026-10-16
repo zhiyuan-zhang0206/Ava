@@ -20,7 +20,7 @@ control plane for sessions, tools, events and channel connections.
 | Agents (multi-agent routing) | Peer agent fleet (`ava.agents.spawn`), delegation via messages and tasks | |
 | Skills / tools / plugins (ClawHub) | `ava skill install` (Agent Skills standard), `ava plugins`, MCP via `ava mcp` | Skills already in SKILL.md form install directly; anything else needs porting to SKILL.md or an MCP server covering the same tool. |
 | Cron / webhooks | `ava schedules` (gateway-supervised) + `ava.watcher` | |
-| Config `~/.openclaw/openclaw.json` (JSON5: channels, messages, providers, security) | `ava config get/set/unset` + `ava presets` | |
+| Config `~/.openclaw/openclaw.json` (JSON5: channels, messages, providers, security) | `ava config get/set/unset` | |
 | Control UI (`openclaw dashboard`, :18789) | Platform fleet view; per-report pages via `ava.ui.serve` | |
 | Companion apps (voice, canvas, camera, screen sharing) | No equivalent — Ava delivers pages (`ava.ui.serve`) and text | |
 | Memory | Shared memory pool (`~/.ava/memory`) + per-agent memory | |
@@ -39,8 +39,8 @@ control plane for sessions, tools, events and channel connections.
    server that covers the tool.
 4. **Recreate roles.** OpenClaw "agents" → Ava role agents: spawn one per
    domain, record each boundary as `type/role` memory.
-5. **Move provider/model choices** into presets per role (OpenClaw's
-   `providers` block has no single Ava equivalent).
+5. **Move provider/model choices** into each agent's `config_overlay`
+   (OpenClaw's `providers` block has no single Ava equivalent).
 
 ## Differences and pitfalls
 

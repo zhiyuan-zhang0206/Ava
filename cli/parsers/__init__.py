@@ -48,7 +48,6 @@ from cli.parsers.host import (
 from cli.parsers.logs import add_logs_parser
 from cli.parsers.management import (
     add_config_parser,
-    add_presets_parser,
     add_schedules_parser,
 )
 from cli.parsers.pty import add_pty_parser
@@ -88,7 +87,6 @@ def build_parser(
     add_agents_parser(sub)
     add_impersonation_parser(sub)
     add_config_parser(sub)
-    add_presets_parser(sub)
     add_schedules_parser(sub)
     add_plugins_parser(sub)
     add_skill_parser(sub)

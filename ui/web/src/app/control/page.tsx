@@ -1,10 +1,5 @@
 "use client";
 
-// /control — the cluster's write/manage surface: a page header (back to
-// conversation + title), a left anchor-nav rail, and a single scroll container
-// holding every section top to bottom (Guide, Config, Presets, Display,
-// Plugins, MCP, Skills, Schedules, OKF Graph). The read-only observability sections
-// (Status + Ops + Alerts) live on their own page, /insights — see app/insights.
 // The horizontal TabBar is long gone: the whole page is Ctrl-F-searchable and
 // every section is deep-linkable (#config-gateway, #skills, …). Named Control,
 // not Settings — it carries operational actions (schedules, config, inventory),
@@ -27,7 +22,6 @@ import ConfigPage from "@/app/control/config/page";
 import DisplaySettingsPage from "@/app/control/display/page";
 import GuidePage from "@/app/control/guide/page";
 import { McpInventory, PluginsInventory } from "@/app/control/inventory/page";
-import PresetsPage from "@/app/control/presets/page";
 import SchedulesPage from "@/app/control/schedules/page";
 import SkillsPage from "@/app/control/skills/page";
 import { PluginNavList } from "@/components/plugins/plugin-nav";
@@ -95,14 +89,6 @@ export default function ControlPage() {
 
             <ControlSection id="config" label={ts("config")}>
               <ConfigPage />
-            </ControlSection>
-
-            <ControlSection
-              id="presets"
-              label={ts("presets")}
-              description={t("presetsDescription")}
-            >
-              <PresetsPage />
             </ControlSection>
 
             <ControlSection

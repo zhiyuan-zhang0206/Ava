@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Task Lifecycle — Task Lifecycle & API
-description: "Complete ava.tasks API: create / create_and_assign / get / list / update / log, state transitions, owner change conventions, reminder mechanism, and SELECT FOR UPDATE concurrency safety"
+description: "ava.tasks API reference: create / create_and_assign / get / list / update / log, owner change conventions and the reminder mechanism; state, concurrency and event-log facts live in the child nodes"
 tags:
 - fleet
 - tasks
@@ -11,19 +11,6 @@ tags:
 ---
 
 # Task Lifecycle — Task Lifecycle & API
-
-## State Transitions
-
-```
-in_progress ──→ done
-     │
-     └──→ cancelled
-```
-
-- **`in_progress`**: created and actively worked (a task is born `in_progress` — user ruling 2026-08-29 dropped the meaningless `open` state); **`done`**: completed (outcome in `results`); **`cancelled`**: from any state.
-- The system root task is pinned to `in_progress` permanently and is immutable — the root is not a status of its own (`"ongoing"` was removed by user ruling 2026-09-15).
-
-`status` is enforced by a database `CHECK` constraint; passing an illegal value raises `ValueError`.
 
 ## API
 
@@ -42,14 +29,13 @@ Standalone creation returns the original accepted Task snapshot on replay;
 see [[task_creation_receipts.ava.okf.md|Creation receipts]]. Query `get(task.id)`
 for current state.
 
-### `create_and_assign(title, description, *, operation_key, preset=None, label=None, config_overlay=None, machine=None, parent, priority="P2", remind_interval_seconds=None) -> TaskAssignment`
+### `create_and_assign(title, description, *, operation_key, label=None, config_overlay=None, machine=None, parent, priority="P2", remind_interval_seconds=None) -> TaskAssignment`
 
 Accept the agent birth, task and initial assignment in one transaction. An explicit
 `operation_key` is required; reuse the same key and inputs to recover the original
 result after a lost reply. The result is `TaskAssignment(task, agent_id)`, a
 NamedTuple that still unpacks as `task, agent_id`. The SDK uses only `/api/keyed/v1/task-assignments`.
-There is no opt-in flag or separate spawn/create recipe. A missing preset uses
-the gateway's current defaults rather than assuming a named preset exists.
+There is no opt-in flag or separate spawn/create recipe.
 
 Borrowed leases are refused before HTTP. `(Task, agent_id)` proves acceptance;
 read current task and agent state to observe execution and progress. Update
@@ -96,19 +82,7 @@ ava.tasks.update(task_id, status="done", operation_key=str(uuid4()))            
 ava.tasks.update(task_id, owner=other_agent_id, operation_key=str(uuid4()))                             # transfer to another agent
 ```
 
-## Concurrency Safety
+## Reference
 
-`update`/`log` (log delegates to update) lock the target row with `SELECT ... FOR UPDATE` in a transaction: no lost owner transfers, no lost appended lines.
-
-```sql
-BEGIN;
-SELECT owner, title FROM agent_tasks WHERE id = %s FOR UPDATE;  -- row lock
-UPDATE agent_tasks SET owner = %s, updated_at = now() WHERE id = %s;
-COMMIT;
-```
-
-Notifications (`send_system_note`) are executed **after** the transaction commits—avoiding waking other agents while holding the lock.
-
-## Event Log
-
-Every `create`, `update`, and `log` records an audit fact in `audit_events` in the same transaction (`record_audit`), recording `agent_id` (the actor), `payload` (the changes), and `target_agent_id` (new owner on owner changes), used for auditing and fleet view replay.
+- [[ava_builtins/plugins/ava_fleet/docs/tasks/task_lifecycle/task_lifecycle_mechanics.ava.okf.md|State, Concurrency & Event Log]] — the lifecycle state machine, `SELECT FOR UPDATE` locking and the audit event log
+- [[ava_builtins/plugins/ava_fleet/docs/tasks/task_lifecycle/task_lifecycle_sdk_help.ava.okf.md|Generated SDK Help]] — the `create_and_assign` SDK docstring source and its typed contract

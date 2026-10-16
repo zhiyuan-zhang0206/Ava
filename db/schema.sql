@@ -139,8 +139,7 @@ CREATE TABLE agents_meta (
     heartbeat_backoff_level    INTEGER NOT NULL DEFAULT 0 CHECK (heartbeat_backoff_level BETWEEN 0 AND 16),  -- platform-side nudge backoff (B7): consecutive no-op nudges raise the level, stretching the reminder floor to heartbeat_interval * 2^level (cap 24h); reset to 0 on real inbound or an agent pause.
     last_message_text          TEXT,                     -- text of the last AI message produced by this agent; survives compact (which replaces the entire checkpoint). Written by the agent process after each LLM turn; read by get_last_message API. NULL = no AI message yet.
     config_overlay             JSONB,                    -- per-agent config overlay (currently llm_model); authoritative source read at agent boot after spawn/respawn/resurrect. NULL = cluster defaults.
-    birth_config               JSONB,                    -- the values the cluster defaults resolved to at THIS agent's birth, for every per-agent field the registry declares lifecycle="frozen" (base/config: the brain + the system-prompt-shaping set). Stamped once at the spawn boundary (base/agents/model/birth_config.py), replayed on every restart/respawn/resurrect/compact, and inherited verbatim by a fork. Deliberately a SEPARATE column from config_overlay so provenance survives: config_overlay = "someone chose this for this agent", birth_config = "nobody chose; this was merely the cluster default that day". Resolution order everywhere is config_overlay > birth_config > current config. NULL = resolve every frozen field live (pre-column rows the backfill skipped). A migration that rewrites a frozen field's stored VALUE must rewrite this column too — it is a second home for values that used to live only in config_overlay (precedent: 20260725T060802_pin-haiku-dated-model-id.sql rewrites config_overlay->>'llm_model'). The skill-name renames are NOT such a case: they canonicalize agent_presets.config only, since base/packages/skills/names.py folds dash and underscore so an already-stored per-agent value still resolves. See migrations/20260731T071400_agent-birth-config.sql.
-    preset_name                TEXT,                     -- spawn-time preset reference (display only): which agent_presets row supplied the base the resolved config_overlay carries. NULL = no preset. Copied verbatim by a fork without its own preset; cleared semantics live in decisions/2026-09-10-preset-in-config-overlay-fork-cache.md
+    birth_config               JSONB,                    -- the values the cluster defaults resolved to at THIS agent's birth, for every per-agent field the registry declares lifecycle="frozen" (base/config: the brain + the system-prompt-shaping set). Stamped once at the spawn boundary (base/agents/model/birth_config.py), replayed on every restart/respawn/resurrect/compact, and inherited verbatim by a fork. Deliberately a SEPARATE column from config_overlay so provenance survives: config_overlay = "someone chose this for this agent", birth_config = "nobody chose; this was merely the cluster default that day". Resolution order everywhere is config_overlay > birth_config > current config. NULL = resolve every frozen field live (pre-column rows the backfill skipped). A migration that rewrites a frozen field's stored VALUE must rewrite this column too — it is a second home for values that used to live only in config_overlay (precedent: 20260725T060802_pin-haiku-dated-model-id.sql rewrites config_overlay->>'llm_model'). The skill-name renames are NOT such a case: they canonicalize stored skill names only, since base/packages/skills/names.py folds dash and underscore so an already-stored per-agent value still resolves. See migrations/20260731T071400_agent-birth-config.sql.
     termination_source         TEXT CHECK (termination_source IN ('user', 'exit', 'reaper', 'launch-confirm', 'integrity')),  -- WHO/WHAT terminated the row; meaningful only while status='terminated'. Value set = base.agents.TerminationSource (locked by tests/contracts/test_db_check_enum_sync.py); stamped in the SAME statement as the status flip by every terminated-write site (enforced by scripts/lint_termination_source.py). 'user' = force-kill / terminate-of-already-dead (ops_lifecycle._force_mark_terminated); 'exit' = agent's own graceful process-exit finalize (mark_agent_exited_op); 'reaper' = restarter corpse reaper forced it (dead pid / stale unclaimed idling row); 'launch-confirm' = a launch that never confirmed forced it — the launcher's confirm poll timing out (agent_launch) or the child's own early-boot schema/placement gate rejecting the boot before it claimed the row (agent/_starting.py); 'integrity' = the framework found the row's own state self-inconsistent and killed it (historical rows only; no code writes it now), deliberately NOT resurrectable since the row's history is corrupt and a retry loop would bury a one-time fault. CrashResurrectController resurrects ONLY 'reaper' + 'launch-confirm' (involuntary/system-detected + self-healing); 'user'/'exit'/'integrity'/NULL are never auto-resurrected. NULL = pre-column legacy row → conservatively not eligible. Cleared to NULL on the terminated→idling resurrect transition (per-death). CHECK permits NULL.
     last_force_terminate_inbound_id BIGINT,              -- monotonic explicit-kill fence: every force termination (including an already-terminated row) inserts a kind='terminate' inbound under the agents_meta row lock and stores its id here. Pending-work resurrection (chat/compact_request) requires its exact pending inbound id to be greater than this fence, so older work cannot reverse a later kill. No FK on purpose: inbound retention must not erase lifecycle intent. Never cleared; NULL = no force intent recorded.
     last_resurrect_inbound_id  BIGINT,                  -- incarnation-epoch fence: every resurrection inserts its kind='resurrect' inbound under the agents_meta row lock and stores its id here. A lifecycle command (restart/terminate) whose intent predates the fence is superseded by that resurrection - acceptance settles it as superseded (payload names the resurrect) instead of adopting it - so a delayed terminate created before a resurrect can never kill the incarnation the resurrect just admitted (#2158). No FK on purpose: inbound retention must not erase lifecycle intent. Never cleared; NULL = no resurrection recorded.
@@ -1268,7 +1267,7 @@ CREATE TABLE resource_creation_receipts (
     accepted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE resource_creation_receipts IS
-    'Preset/schedule creation acceptance identities. Only request fingerprint and original resource identity/timestamps are retained, without raw request/config/secret copies or expiry.';
+    'Schedule creation acceptance identities. Only request fingerprint and original resource identity/timestamps are retained, without raw request/config/secret copies or expiry.';
 
 CREATE TABLE schedule_operation_receipts (
     operation_key TEXT PRIMARY KEY,
@@ -1322,60 +1321,6 @@ CREATE TABLE schedule_fire_log (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (schedule_id, slot_fire_at)
 );
-
--- ─────────────── agent_presets ───────────────
--- Named config templates for spawning agents. A preset bundles a flat per-agent
--- config overlay (llm_model, plugin per_agent fields, ...) under a stable `name`;
--- a spawn referencing that name seeds its config from it, with an explicit spawn
--- config winning per-key. `config` is an opaque JSONB template — validated only
--- when a spawned agent applies it at boot, not at write time.
-CREATE TABLE agent_presets (
-    id          BIGSERIAL PRIMARY KEY,
-    name        TEXT NOT NULL UNIQUE,
-    label       TEXT NOT NULL,
-    description TEXT,
-    config      JSONB NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Seed: the preset catalog. These five carry no config: the skill index is
--- universal (cluster default `["*"]`), so the skill lists they used to carry
--- would now narrow an agent's index instead of widening it — see
--- migrations/20260731T084500_seed-presets-drop-skill-index-list.sql. They stay
--- seeded as named roles; what differentiates them is the next piece of work.
-INSERT INTO agent_presets (name, label, description, config) VALUES
-    (
-        'coder',
-        'Coder',
-        'Coding agent — writes and ships code, driving Claude Code / Codex for the long runs.',
-        '{}'::jsonb
-    ),
-    (
-        'reviewer',
-        'Reviewer',
-        'Code review agent — judges other agents'' PRs rather than authoring its own.',
-        '{}'::jsonb
-    ),
-    (
-        'researcher',
-        'Researcher',
-        'Research agent — searches the open web and synthesizes what it finds into an answer.',
-        '{}'::jsonb
-    ),
-    (
-        'orchestrator',
-        'Orchestrator',
-        'Orchestration agent — decomposes a goal, spawns workers for the parts, and supervises to completion.',
-        '{}'::jsonb
-    ),
-    (
-        'explorer',
-        'Explorer',
-        'Exploration agent — autonomous technology scouting: discover → evaluate → recommend.',
-        '{}'::jsonb
-    )
-ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE mcp_clients (
     id SERIAL PRIMARY KEY,
@@ -2690,7 +2635,7 @@ CREATE TABLE task_assignment_receipts (
         AND birth_snapshot ?& ARRAY['machine', 'config_overlay', 'birth_config', 'preset_name', 'launch_attempt_id']
         AND jsonb_typeof(birth_snapshot->'machine') = 'string'
         AND jsonb_typeof(birth_snapshot->'birth_config') = 'object'
-    ),
+    ),  -- 'preset_name' stays required by this merged CHECK; snapshots written after the preset removal (2026-10-17, task #5236) carry it as JSON null
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE task_assignment_receipts IS

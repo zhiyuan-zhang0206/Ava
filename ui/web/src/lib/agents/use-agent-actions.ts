@@ -22,7 +22,7 @@ export interface AgentActions {
   pendingActions: Record<number, PendingAction>;
   pendingSpawnCount: number;
   forkPending: boolean;
-  spawn: (machine?: string, model?: string, preset?: string, reasoning_effort?: string) => Promise<number | null>;
+  spawn: (machine?: string, model?: string, reasoning_effort?: string) => Promise<number | null>;
   fork: (sourceId: number, prompt?: string) => Promise<number | null>;
   terminate: (id: number, force?: boolean) => Promise<void>;
   forceExpire: (id: number, sessionId: number) => Promise<void>;
@@ -50,27 +50,21 @@ export function useAgentActions(
     mutationFn: ({
       machine,
       model,
-      preset,
       reasoning_effort,
       operationKey,
     }: {
       machine?: string;
       model?: string;
-      preset?: string;
       reasoning_effort?: string;
       operationKey: string;
     }) =>
       api.spawnAgent({
         ...(machine !== undefined ? { machine } : {}),
-        // The preset rides INSIDE the config overlay (config.preset) — the
-        // spawn boundary resolves it as the base; the explicit model/effort
-        // fields win per key (preset-in-config-overlay ruling, task #2694).
-        ...(model !== undefined || reasoning_effort !== undefined || preset !== undefined
+        ...(model !== undefined || reasoning_effort !== undefined
           ? {
               config: {
                 ...(model !== undefined ? { llm_model: model } : {}),
                 ...(reasoning_effort !== undefined ? { reasoning_effort } : {}),
-                ...(preset !== undefined ? { preset } : {}),
               },
             }
           : {}),
@@ -293,7 +287,7 @@ export function useAgentActions(
   );
 
   const spawn = useCallback(
-    async (machine?: string, model?: string, preset?: string, reasoning_effort?: string): Promise<number | null> => {
+    async (machine?: string, model?: string, reasoning_effort?: string): Promise<number | null> => {
       // Snapshot current ids so the in-flight placeholder can detect when
       // this spawn's row arrives through repair (which beats the HTTP
       // response) and yield to it instead of double-rendering.
@@ -305,7 +299,7 @@ export function useAgentActions(
         ),
       );
       try {
-        const { id } = await spawnMutation.mutateAsync({ machine, model, preset, reasoning_effort, operationKey: newOperationKey() });
+        const { id } = await spawnMutation.mutateAsync({ machine, model, reasoning_effort, operationKey: newOperationKey() });
         setActiveId(id);
         await markSpawnPending(id);
         return id;

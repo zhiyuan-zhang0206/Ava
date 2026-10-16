@@ -49,7 +49,6 @@ jitter revalidates its lease before using the agent ID.
 - [[ava/impersonation/docs/attachment.ava.okf.md]] — local external Python attachment to a consented agent lease
 - [[ava/agents/docs/agents.ava.okf.md]] — spawn / fork / send_message / terminate / resurrect / get_neighbors / get_ancestors / get_status
 - [[ava_builtins/plugins/ava_fleet/docs/tasks/tasks.ava.okf.md|Tasks]] — Task registry `ava.tasks`: create / get / list / update / log (injected by ava_fleet plugin, not core SDK—docs in fleet subtree)
-- [[presets.ava.okf.md]] — Configuration presets: list / get
 
 ### Tools & External
 - [[ava/mcps/docs/mcps.ava.okf.md]] — MCP tool servers (determined by config; built-in chrome + servers installed via `ava mcp install` beyond core)

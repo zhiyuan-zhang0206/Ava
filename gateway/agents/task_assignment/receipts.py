@@ -40,7 +40,7 @@ def save_assignment(
     """Commit the original pair with birth, task, audit and durable assignment."""
     cur.execute(
         "SELECT jsonb_build_object('machine',machine,'config_overlay',config_overlay,"
-        "'birth_config',birth_config,'preset_name',preset_name,"
+        "'birth_config',birth_config,'preset_name',NULL,"
         "'launch_attempt_id',last_launch_attempt_id) FROM agents_meta WHERE id=%s",
         (result.agent_id,),
     )

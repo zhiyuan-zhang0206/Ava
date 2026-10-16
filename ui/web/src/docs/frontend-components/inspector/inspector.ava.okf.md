@@ -27,7 +27,7 @@ selector); `embedded` panels render no header at all — the mobile close X belo
 has its own rule.
 
 **Empty sections render nothing** — a hidden Page section with no open page, an
-available-but-empty shell list, an empty config overlay without a preset, a
+available-but-empty shell list, an empty config overlay, a
 missing notice, a widget whose payload came back empty. The first-load skeleton
 promises only the built-in sections that may appear: the notice and plugin-widget
 areas are not promised by it (plugins have their own generic placeholder).

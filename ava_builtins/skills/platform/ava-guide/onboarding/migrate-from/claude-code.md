@@ -16,7 +16,7 @@ subagents, hooks, slash commands, and MCP servers.
 | Project instructions — `CLAUDE.md`, `CLAUDE.local.md`, path-scoped `.claude/rules/` | `AGENTS.md` / `CLAUDE.md` in the repo (Ava surfaces both); standing rules in the shared memory pool as `type/feedback` notes | `@path` imports in CLAUDE.md are Claude-Code-only — Ava does not expand them; keep files self-contained. |
 | Auto memory (`~/.claude/projects/<project>/memory/`, `/memory`) | Shared memory pool (`~/.ava/memory`, `ava memory` CLI) + per-agent `memory/` workspace | Notes are markdown with frontmatter and semantic search; agents write them deliberately instead of Claude Code's automatic MEMORY.md upkeep. |
 | Skills (`.claude/skills/`, `~/.claude/skills/`) | Same Agent Skills `SKILL.md` standard — `ava skill install <git-url-or-path>` | Verified: unmodified Claude Code skill folders install as-is. The fields Ava does not act on are `allowed-tools` / `disallowed-tools` and `context: fork` — its single tool is `execute_code`. |
-| Subagents (`.claude/agents/*.md` with tools/model/permissionMode/maxTurns frontmatter) | Peer agents — `ava.agents.spawn`, role-card skills (`be-a-<role>`), presets (`ava presets`) | Ava agents are full peers with their own workspace, memory and tools, not scoped subprocesses. Boundaries are set in the spawn prompt and recorded as `type/role` memory — there is no per-agent tool allowlist. |
+| Subagents (`.claude/agents/*.md` with tools/model/permissionMode/maxTurns frontmatter) | Peer agents — `ava.agents.spawn`, role-card skills (`be-a-<role>`) | Ava agents are full peers with their own workspace, memory and tools, not scoped subprocesses. Boundaries are set in the spawn prompt and recorded as `type/role` memory — there is no per-agent tool allowlist. |
 | Hooks (`settings.json` → PreToolUse, PostToolUse, Stop, SessionStart, …) | No hook system. Policy rules → AGENTS.md + memory notes; conditions/notifications → `ava.watcher`; format/lint/test on change → repo CI | A hook that enforced policy (e.g. blocking `rm -rf`) must become a written rule, not an executable hook. |
 | Slash commands (`.claude/commands/`, built-ins `/init`, `/compact`, `/review`) | Skills (same idea: a named instruction pack the agent reads) + the `ava` CLI for operations | No interactive slash-command bar. |
 | Permission prompts & modes (default / acceptEdits / plan / `--dangerously-skip-permissions`) | No per-tool approval UI. Agents decide what to run; the user's standing gates are recorded in memory at onboarding, and irreversible / outward-facing actions raise `ava.ui.notify(require_response=True, idempotency_key=notice_key)` | The biggest behavioral difference — see pitfalls. |
@@ -41,10 +41,9 @@ token setup: `docs/conventions/extensions/mcp-client-access.md`).
    `type/feedback` notes, so every agent honors them rather than one project.
    Flatten `@path` imports.
 3. **Replace subagents with roles.** Each `.claude/agents/*.md` becomes a
-   role-card skill (`be-a-<role>`; see the presets sub-skill's
-   references/role-cards.md) plus a preset naming it in
-   `skills_to_expand_at_start`. The spawn prompt carries the mission; record
-   the role's boundary as `type/role` memory.
+   role-card skill (`be-a-<role>`; see `skill-creator`), loaded through the
+   spawn's `skills_to_expand_at_start`. The spawn prompt carries the mission;
+   record the role's boundary as `type/role` memory.
 4. **Recreate hooks as rules and watchers.** Policy hooks become AGENTS.md /
    memory rules; notification and condition hooks become `ava.watcher`
    watchers; format/lint hooks belong in repo CI.

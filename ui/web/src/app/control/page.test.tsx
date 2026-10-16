@@ -11,7 +11,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/control/guide/page", () => ({ default: () => <div>GUIDE_BODY</div> }));
 vi.mock("@/app/control/config/page", () => ({ default: () => <div>CONFIG_BODY</div> }));
-vi.mock("@/app/control/presets/page", () => ({ default: () => <div>PRESETS_BODY</div> }));
 vi.mock("@/app/control/display/page", () => ({ default: () => <div>DISPLAY_BODY</div> }));
 vi.mock("@/app/control/schedules/page", () => ({ default: () => <div>SCHEDULES_BODY</div> }));
 vi.mock("@/app/control/skills/page", () => ({ default: () => <div>SKILLS_BODY</div> }));
@@ -19,9 +18,6 @@ vi.mock("@/app/control/inventory/page", () => ({
   PluginsInventory: () => <div>PLUGINS_BODY</div>,
   McpInventory: () => <div>MCP_BODY</div>,
 }));
-// The Plugins section also carries plugin-contributed page links, which read
-// the contributions endpoint. Kept real (it renders nothing when no plugin
-// declares one) with the api boundary mocked, like every other test here.
 vi.mock("@/lib/transport/api", () => ({
   api: { getUiContributions: vi.fn().mockResolvedValue({ themes: [], nav: [] }) },
   assetUrl: (p: string) => p,
@@ -35,7 +31,6 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.restoreAllMocks();
   window.location.hash = "";
-  // happy-dom doesn't implement scrollIntoView; the nav + hash effect call it.
   Element.prototype.scrollIntoView = vi.fn();
 });
 
@@ -76,7 +71,6 @@ describe("ControlPage shell", () => {
     const markers = [
       "GUIDE_BODY",
       "CONFIG_BODY",
-      "PRESETS_BODY",
       "DISPLAY_BODY",
       "PLUGINS_BODY",
       "MCP_BODY",

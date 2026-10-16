@@ -69,8 +69,6 @@ async def native_weixin(
             )
         if request.method == "GET" and request.url.path.endswith("/timeline"):
             return httpx.Response(200, json={"items": []})
-        if request.method == "GET" and request.url.path == "/api/presets":
-            return httpx.Response(200, json=[])
         raise AssertionError("unexpected gateway call in native Weixin fixture")
 
     def provider(request: httpx.Request) -> httpx.Response:

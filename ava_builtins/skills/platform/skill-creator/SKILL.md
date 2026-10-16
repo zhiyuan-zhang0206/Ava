@@ -42,8 +42,9 @@ that the job needs. Keep run artifacts outside the instruction package.
 | Invocation | SKILL.md body | Keep essential decisions, constraints, and resource routing here. |
 | On demand | References, scripts, assets | Link each resource where it becomes useful; avoid duplicate instructions. |
 
-The description guides implicit selection. Explicit invocation and preset
-preloading also load skills, so test discovery separately from execution.
+The description guides implicit selection. Explicit invocation and preloading
+at spawn (`skills_to_expand_at_start`) also load skills, so test discovery
+separately from execution.
 
 For a catalog audit or substantial discovery/resource-routing change, read
 [audit guidance](references/audit.md) for criteria and focused evaluation cases.

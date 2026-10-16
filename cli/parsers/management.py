@@ -47,48 +47,6 @@ def _h_config_unset(args: argparse.Namespace) -> int:
     return h_config_unset(args)
 
 
-def _h_presets_ls(_args: argparse.Namespace) -> int:
-    from cli.commands.management.presets import h_presets_ls
-
-    return h_presets_ls(_args)
-
-
-def _h_presets_get(args: argparse.Namespace) -> int:
-    from cli.commands.management.presets import h_presets_get
-
-    return h_presets_get(args)
-
-
-def _h_presets_create(args: argparse.Namespace) -> int:
-    from cli.commands.management.presets import h_presets_create
-
-    return h_presets_create(args)
-
-
-def _h_presets_update(args: argparse.Namespace) -> int:
-    from cli.commands.management.presets import h_presets_update
-
-    if (
-        args.name is None
-        and args.label is None
-        and args.description is None
-        and args.config is None
-    ):
-        print(
-            "ava: pass at least one of --name / --label / --description / --config — "
-            "a partial update needs at least one field",
-            file=sys.stderr,
-        )
-        return 2
-    return h_presets_update(args)
-
-
-def _h_presets_delete(args: argparse.Namespace) -> int:
-    from cli.commands.management.presets import h_presets_delete
-
-    return h_presets_delete(args)
-
-
 def _h_schedules_ls(args: argparse.Namespace) -> int:
     from cli.commands.management.schedules import h_schedules_ls
 
@@ -217,56 +175,6 @@ def add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "--machine", default=None, help="fetch through the gateway: a machine name or 'all'"
     )
     audit_p.set_defaults(func=_h_config_audit)
-
-
-def add_presets_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava presets` — manage agent config presets (thin client over /api/presets).
-    presets_p = sub.add_parser(
-        "presets",
-        help="manage agent config presets (list / get / create / update / delete)",
-    )
-    presets_sub = presets_p.add_subparsers(dest="presets_cmd", required=True)
-
-    presets_ls_p = presets_sub.add_parser("ls", help="list all presets")
-    presets_ls_p.set_defaults(func=_h_presets_ls)
-
-    presets_get_p = presets_sub.add_parser("get", help="show one preset (by name or id)")
-    presets_get_p.add_argument("identifier", help="preset name or numeric id")
-    presets_get_p.set_defaults(func=_h_presets_get)
-
-    presets_create_p = presets_sub.add_parser("create", help="create a preset")
-    presets_create_p.add_argument("--name", required=True, help="unique preset name (kebab-case)")
-    presets_create_p.add_argument("--label", required=True, help="human-readable label")
-    presets_create_p.add_argument("--description", default=None, help="what this preset is for")
-    presets_create_p.add_argument(
-        "--config",
-        type=_config_overlay_json,
-        default=None,
-        help='config overlay as JSON (e.g. {"llm_model":"..."})',
-    )
-    presets_create_p.set_defaults(func=_h_presets_create)
-
-    presets_update_p = presets_sub.add_parser(
-        "update", help="partial-update a preset (by name or id) — only passed fields change"
-    )
-    presets_update_p.add_argument("identifier", help="preset name or numeric id")
-    presets_update_p.add_argument("--name", default=None, help="new unique name")
-    presets_update_p.add_argument("--label", default=None, help="new label")
-    presets_update_p.add_argument("--description", default=None, help="new description")
-    presets_update_p.add_argument(
-        "--config",
-        type=_config_overlay_json,
-        default=None,
-        help="new config overlay as JSON",
-    )
-    presets_update_p.set_defaults(func=_h_presets_update)
-
-    presets_delete_p = presets_sub.add_parser("delete", help="delete a preset (by name or id)")
-    presets_delete_p.add_argument("identifier", help="preset name or numeric id")
-    presets_delete_p.add_argument(
-        "--force", "-f", action="store_true", help="skip the confirmation prompt"
-    )
-    presets_delete_p.set_defaults(func=_h_presets_delete)
 
 
 def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

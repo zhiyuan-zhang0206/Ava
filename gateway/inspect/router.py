@@ -186,7 +186,6 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
         shells_available=shells[1],
         observation=db.observation,
         config_overlay=db.config_overlay,
-        preset_name=db.preset_name,
         notice=notice,
         heartbeat=project_heartbeat(
             status=db.status,

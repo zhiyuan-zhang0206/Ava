@@ -40,7 +40,6 @@ from base.api_contracts.agent_contract import ResurrectError as ResurrectError
 from base.api_contracts.agent_contract import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
 
 from . import compaction as compaction
-from . import presets as presets
 from . import work as work
 
 __all_for_ava__ = [
@@ -67,7 +66,6 @@ __all_for_ava__ = [
     "get_status",
     "list_agents",
     "list_machines",
-    "presets",
     "restart",
     "retry_launch",
     "resurrect",
@@ -412,11 +410,11 @@ def spawn(
     execution, and uncertain transport outcomes are not automatically retried.
 
     `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
-    `machine` defaults to yours. `config_overlay={"preset": "name"}` starts from a saved config
-    template; explicit keys win. Identity config you do not name (model, reasoning effort, the
-    inject/expand lists, prompt shaping) is frozen at spawn; operational knobs follow the shared
-    default. `fork_from` copies another agent's conversation and keeps its config: the overlay
-    may then only add entries to `skills_to_inject_into_system_prompt` /
+    `machine` defaults to yours. `config_overlay` carries per-agent config fields; keys it does
+    not name follow the shared default. Identity config you do not name (model, reasoning effort,
+    the inject/expand lists, prompt shaping) is frozen at spawn; operational knobs follow the
+    shared default. `fork_from` copies another agent's conversation and keeps its config: the
+    overlay may then only add entries to `skills_to_inject_into_system_prompt` /
     `skills_to_expand_at_start` (anything else raises ForkConfigChangeNotAllowed).
     `{"eval_isolation": True, "eval_network_allowlist": ["web"]}` isolates the agent, allowing
     only the listed `web` / `understand`; `mcps` and `ui` are off.
@@ -470,12 +468,6 @@ def spawn_impl(
     label: str | None,
     idempotency_key: str,
 ) -> int:
-    # Shared spawn body. `label` is exposed on the public `spawn` only when the
-    # ava_fleet plugin wraps it (the plugin passes a real label through here);
-    # the unwrapped core spawn always passes label=None. A preset — named inside
-    # `config["preset"]` — is resolved to its config template on the gateway
-    # side; only the explicit `config` fields are validated locally (the
-    # preset's own values are validated at child boot).
     prompt = coerce_str(prompt, "prompt", allow_none=True)
     fork_from = coerce_typed(fork_from, "fork_from", int, allow_none=True)
     machine = coerce_str(machine, "machine", allow_none=True)
@@ -486,28 +478,18 @@ def spawn_impl(
     idempotency_key = validate_idempotency_key(idempotency_key)
     spawner = ava.sdk_surface.agent_identity.require_actor()
     if config:
-        # The `preset` key is spawn-boundary metadata, not a Settings field: it
-        # must not reach the overlay validators, which reject unknown keys.
-        overlay = {k: v for k, v in config.items() if k != "preset"}
-        if "preset" in config:
-            name = config["preset"]
-            if not isinstance(name, str) or not name.strip():
-                raise ValueError(
-                    f"config_overlay['preset'] must be a non-empty string, got {name!r}"
-                )
-        if overlay:
-            from ava.sdk_surface import settings as sdk_settings
-            from ava.sdk_surface.installation import installed
-            from base.packages.plugins.config_registration import validate_config_overlay
+        from ava.sdk_surface import settings as sdk_settings
+        from ava.sdk_surface.installation import installed
+        from base.packages.plugins.config_registration import validate_config_overlay
 
-            installation = installed()
-            catalog = sdk_settings.model_catalog()
-            validate_config_overlay(
-                overlay,
-                None if installation is None else installation.configs,
-                models=catalog.models,
-                decision_models=catalog.decision_models,
-            )
+        installation = installed()
+        catalog = sdk_settings.model_catalog()
+        validate_config_overlay(
+            config,
+            None if installation is None else installation.configs,
+            models=catalog.models,
+            decision_models=catalog.decision_models,
+        )
     return gateway_client.spawn(
         spawner=spawner,
         prompt=prompt,

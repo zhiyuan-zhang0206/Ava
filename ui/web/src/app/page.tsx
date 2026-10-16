@@ -117,15 +117,13 @@ function HomeShell({ showError }: HomeShellProps) {
     async ({
       machine,
       model,
-      preset,
       reasoning_effort,
     }: {
       machine?: string;
       model?: string;
-      preset?: string;
       reasoning_effort?: string;
     }) => {
-      const newId = await spawn(machine, model, preset, reasoning_effort);
+      const newId = await spawn(machine, model, reasoning_effort);
       if (newId !== null) focusComposer();
     },
     [spawn, focusComposer],
