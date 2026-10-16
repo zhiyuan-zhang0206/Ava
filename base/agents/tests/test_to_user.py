@@ -77,8 +77,11 @@ def test_relative_absolute_file_uri_and_reference_links(tmp_path: Path) -> None:
     )
     (workspace / "to_user.md").write_text(source)
     document = read_document(workspace)
-    assert len(document.resources) == 3
-    for resource in document.resources.values():
+    assert len(document.resources) == 4
+    for href, resource in document.resources.items():
+        if href == "html-secret":
+            assert resource.name == "html-secret"
+            continue
         assert resource.name == "a b.png"
         assert read_resource(workspace, [resource.id]) == b"image"
     with pytest.raises(FileNotFoundError):
@@ -137,6 +140,20 @@ def test_home_reference_and_symlink_target(tmp_path: Path) -> None:
     assert len(document.resources) == 2
     for resource in document.resources.values():
         assert read_resource(tmp_path, [resource.id]) == b"shared"
+
+
+def test_raw_html_images_and_links_are_resources(tmp_path: Path) -> None:
+    (tmp_path / "to_user.md").write_text(
+        '<img src="chart.png" alt="chart">\n\n'
+        'Inline <a href="notes.md">notes</a> link\n\n'
+        '<img src="a&amp;b.png">\n'
+    )
+    (tmp_path / "chart.png").write_bytes(b"png")
+    (tmp_path / "notes.md").write_text("# Notes")
+    (tmp_path / "a&b.png").write_bytes(b"amp")
+    document = read_document(tmp_path)
+    assert set(document.resources) == {"chart.png", "notes.md", "a&b.png"}
+    assert document.resources["notes.md"].markdown
 
 
 def test_footnote_links_are_resources_but_raw_html_blocks_are_not(tmp_path: Path) -> None:

@@ -33,13 +33,20 @@ describe("To user Markdown", () => {
     expect(screen.getByRole("img").getAttribute("src")).toContain(`/api/agents/7/to-user/resource?reference=${id}&v=asset-v1`);
     expect(screen.getByRole("link", { name: "report" }).getAttribute("href")).toContain("reference=" + "c".repeat(64));
   });
-  it("uses the shared theme and blocks raw HTML and unregistered filesystem links", () => {
+  it("keeps the shared theme, strips hostile HTML and unregistered filesystem links", () => {
     const { container } = show(document('# Status\n\n<style>body{color:red}</style>\n\n<script>alert(1)</script>\n\n[secret](/private/file)\n\n[site](https://example.com)'));
     expect(screen.getByRole("heading", { name: "Status" })).toBeTruthy();
     expect(container.querySelector(".chat-md.font-sans")).toBeTruthy();
     expect(container.querySelector("iframe,style,script")).toBeNull();
-    expect(screen.getByRole("link", { name: "secret" }).getAttribute("href")).toBe("about:blank");
+    expect(screen.queryByRole("link", { name: "secret" })).toBeNull();
+    expect(screen.getByText("secret")).toBeTruthy();
     expect(screen.getByRole("link", { name: "site" }).getAttribute("target")).toBe("_blank");
+  });
+  it("renders the safe raw-HTML subset, including registered local images", () => {
+    const { container } = show(document('<details><summary>More</summary>body</details>\n\n<img src="/tmp/plot.png" alt="raw plot">'));
+    expect(container.querySelector("details > summary")?.textContent).toBe("More");
+    expect(container.querySelector("details")?.textContent).toContain("body");
+    expect(screen.getByRole("img", { name: "raw plot" }).getAttribute("src")).toContain(`/api/agents/7/to-user/resource?reference=${id}&v=asset-v1`);
   });
   it("opens linked Markdown in the panel and supports returning to its parent", () => {
     show(document("[Details](details.md)"));
