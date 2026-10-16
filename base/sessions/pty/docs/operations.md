@@ -16,7 +16,10 @@ ava pty resume <generation-token>
 
 Retain the random token printed by your freeze. Its acknowledgement is the
 allocation boundary: earlier allocations have been recorded; later missing-name
-allocations are refused. An already-live name remains idempotent. A stale token
+allocations are refused. That boundary is the visible marker commit: a failure
+before it refuses the freeze and leaves the existing marker intact, while a
+directory sync failure after it is logged as a warning and does not revoke the
+acknowledgement. An already-live name remains idempotent. A stale token
 cannot resume a replacement freeze. These local host commands remain available
 while the gateway, Postgres or Redis is down.
 

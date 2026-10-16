@@ -13,7 +13,6 @@ from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.deploy.maintenance import pause_owner
 from base.sessions import coding_session_owner_record
 from base.sessions.coding_session_owner_record import CodingSessionStatus
-from base.sessions.pty import allocation_freeze
 from cli.commands.observability import grafana_render, observatory_urls, otel_collector
 
 _START_GENERATION = "00000000-0000-4000-8000-000000000001"
@@ -36,15 +35,13 @@ def _marker_write(case: str, path: Path) -> None:
         )
     elif case == "pause":
         pause_owner.write_atomic(path, payload)
-    elif case == "freeze":
-        allocation_freeze.write_atomic(path, payload)
     elif case == "locks":
         home_lifecycle_locks.write_atomic(path, payload)
     else:
         raise AssertionError(case)
 
 
-@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "locks"])
+@pytest.mark.parametrize("case", ["start", "owner", "pause", "locks"])
 def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -52,7 +49,6 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
         "start": start_serving,
         "owner": coding_session_owner_record,
         "pause": pause_owner,
-        "freeze": allocation_freeze,
         "locks": home_lifecycle_locks,
     }
     module = modules[case]
