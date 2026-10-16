@@ -8,7 +8,7 @@ tags: [base, plugins]
 # Plugin config images and agent views
 
 Ownership follows the
-[plugin config image decision](../../../../docs/decisions/extensions/plugins/2026-10-09-plugin-config-images-have-an-owner.md).
+[plugin config image decision](../../../../../docs/decisions/extensions/plugins/2026-10-09-plugin-config-images-have-an-owner.md).
 
 The config face declares one frozen Pydantic model. Its full authority image
 lives at `$AVA_HOME/configs/<plugin>/config.json`. Reading a missing image can
@@ -89,3 +89,5 @@ statement = """A launched service validates its birth snapshot: a present packet
 code = ["base/packages/plugins/config_registration.py:read_service_config", "base/packages/plugins/config_registration.py:service_config_packet"]
 tests = ["base/packages/plugins/tests/test_service_config_snapshot.py::test_service_birth_snapshot_survives_authority_image_changes", "base/packages/plugins/tests/test_service_config_snapshot.py::test_present_service_packet_never_falls_back", "base/packages/plugins/tests/test_service_config_snapshot.py::test_absent_service_carrier_is_distinct_from_invalid"]
 ```
+
+View contracts: [[config-view.ava.okf.md]]
