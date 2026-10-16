@@ -1,5 +1,3 @@
-"""`ci_utils.py --diagnose`: classify a PR's failing CI checks from rollup, job logs and Trunk state."""
-
 from __future__ import annotations
 
 import json
@@ -18,7 +16,7 @@ _DIAGNOSE_LOG_TAIL = 4000
 _DIAGNOSE_MAX_JOB_LOGS = 8
 _DIAGNOSE_MAX_SYNTHETIC_PRS = 3
 
-# (regex, classification, suggested action) — first match wins.
+# ava:ref scripts/ci/pull_requests/docs/diagnostics.ava.okf.md#failure-signature-table
 _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
     (
         r"over the 800-line hard ceiling",
@@ -53,8 +51,8 @@ _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
 ]
 
 
+# ava:ref scripts/ci/pull_requests/docs/diagnostics.ava.okf.md#best-effort-evidence
 def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object] | None:
-    """gh pr view --json; None when gh fails or the output is not an object."""
     try:
         result = host.run(
             ["gh", "pr", "view", pr, "--repo", repo, "--json", fields],
@@ -74,7 +72,6 @@ def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object
 
 
 def _job_log_tail(job_id: int, repo: str, *, host: Host) -> str:
-    """The last `_DIAGNOSE_LOG_TAIL` chars of a job log; empty when unreadable."""
     try:
         result = host.run(
             ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
@@ -90,7 +87,6 @@ def _job_log_tail(job_id: int, repo: str, *, host: Host) -> str:
 
 
 def _classify_check(name: str, log: str) -> tuple[str, str]:
-    """(classification, suggested action) from a failing check's native log."""
     for pattern, label, action in _FAILURE_SIGNATURES:
         if re.search(pattern, log, re.IGNORECASE):
             return label, action
@@ -100,7 +96,6 @@ def _classify_check(name: str, log: str) -> tuple[str, str]:
 
 
 def _pull_head_ref(pull: dict[str, object]) -> str:
-    """The head branch ref of a pull payload; empty when unreadable."""
     head = pull.get("head")
     if not isinstance(head, dict):
         return ""
@@ -108,7 +103,6 @@ def _pull_head_ref(pull: dict[str, object]) -> str:
 
 
 def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, object]]:
-    """Trunk's trunk-merge/pr-<n>/* test PRs (each = one queue attempt)."""
     try:
         result = host.run(
             [
@@ -144,14 +138,12 @@ def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, obj
     ][:_DIAGNOSE_MAX_SYNTHETIC_PRS]
 
 
+# ava:ref scripts/ci/pull_requests/docs/diagnostics.ava.okf.md#pr-level-issues
 def _pr_level_issues(
     view: dict[str, object], pr: str, repo: str, *, host: Host
 ) -> list[dict[str, object]]:
-    """Merge-conflict and base-freshness issues of an open PR (merged/closed PRs have none)."""
     issues: list[dict[str, object]] = []
     mergeable = view.get("mergeable")
-    # A merged/closed PR reports mergeable=UNKNOWN and its recorded base is
-    # naturally behind main — those are not diagnosable problems.
     if view.get("state") == "OPEN" and mergeable == "CONFLICTING":
         issues.append(
             {
@@ -186,12 +178,9 @@ def _pr_level_issues(
 def _failing_check_entries(
     view: dict[str, object], pr: str, repo: str, *, host: Host
 ) -> list[dict[str, object]]:
-    """Classified entries (with job log tails) for the PR's failing checks."""
     try:
         failed_jobs = list_failed_jobs(pr, repo, host=host)
     except CiJobRerunError:
-        # Diagnosis stays best-effort: the rollup still names the failing
-        # checks; only the per-job log tail enrichment degrades.
         failed_jobs = []
     raw_rollup = view.get("statusCheckRollup", [])
     rollup_rows = raw_rollup if isinstance(raw_rollup, list) else []
@@ -238,11 +227,6 @@ def diagnose_pr(
     host: Host,
     open_url: UrlOpener,
 ) -> dict[str, Any]:
-    """Collect the PR's failure evidence and classify it (task #2572).
-    Diagnosis only — no repair action is taken here; the operator executes the suggested action.
-    Evidence sources: the PR's check rollup + job log tails, Trunk's queue state, and
-    the synthetic trunk-merge test PRs.
-    """
     diag: dict[str, Any] = {
         "pr": pr,
         "repo": repo,
@@ -273,7 +257,6 @@ def diagnose_pr(
 
 
 def print_diagnosis(diag: dict[str, Any]) -> None:
-    """Human-readable --diagnose report."""
     if diag.get("gh_error"):
         print(f"PR #{diag['pr']} diagnosis failed: {diag['gh_error']}", file=sys.stderr)
         return
