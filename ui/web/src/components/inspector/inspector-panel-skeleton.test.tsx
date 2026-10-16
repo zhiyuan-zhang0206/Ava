@@ -31,8 +31,7 @@ describe("InspectorPanelSkeleton", () => {
     expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
     expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
-    expect(screen.getByLabelText("Cost loading")).toBeTruthy();
-    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
+    expect(screen.getByLabelText("Cost + Activity loading")).toBeTruthy();
     expect(container.querySelector(".animate-pulse")).toBeTruthy();
     expect(aside.querySelector('[data-slot="scroll-area"] [data-slot="scroll-area-viewport"]')).toBeTruthy();
   });
@@ -65,9 +64,8 @@ describe("Individual Skeletons", () => {
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
   });
 
-  it("WindowedSectionsSkeleton renders cost and activity", () => {
+  it("WindowedSectionsSkeleton renders the merged cost and activity section", () => {
     render(<WindowedSectionsSkeleton />);
-    expect(screen.getByLabelText("Cost loading")).toBeTruthy();
-    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
+    expect(screen.getByLabelText("Cost + Activity loading")).toBeTruthy();
   });
 });

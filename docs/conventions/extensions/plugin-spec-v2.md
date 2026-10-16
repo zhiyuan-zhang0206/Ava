@@ -181,9 +181,9 @@ gateway restart.
 **Widget order keys.** A widget's `order` is any int; the panel's built-in
 sections carry fixed keys, so a value slots a widget anywhere between them:
 
-| page | shells | liveness | configOverlay | cost | activity | runLink | notice |
-|---|---|---|---|---|---|---|---|
-| 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 |
+| runLink | costActivity | page | shells | liveness | configOverlay | notice |
+|---|---|---|---|---|---|---|
+| 50 | 75 | 100 | 200 | 300 | 400 | 800 |
 
 Equal orders stack built-in sections first, then widgets by `(plugin, id)` —
 deterministic, independent of registration order. (The fleet plugin's task
