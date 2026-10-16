@@ -13,7 +13,7 @@ from base.packages.plugins.extensions import PluginContributions, SdkWrap
 from .written import record_panel_write
 
 
-# ava:ref ava_builtins/plugins/ava_to_user/docs/ava_to_user.ava.okf.md#panel-write-observation
+# ava:ref ava_builtins/plugins/ava_to_user/docs/panel-write-check.ava.okf.md#panel-write-observation
 def wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
     result = inner(path, content)
     record_panel_write(path)

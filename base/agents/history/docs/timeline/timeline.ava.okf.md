@@ -24,7 +24,7 @@ image blocks are dropped (thumbnails ride on `ava_image_urls`); an attach's
 data-URI images ride on `images` with per-image captions. The system prompt is
 item 0, `created_at=None`. A compact item prefixes the payload with the
 wall-clock ts when the timestamp policy is on and carries the producing run as
-`compact_id`. Signature-only / redacted thinking blocks render nothing.
+`compact_id`. Signature-only / redacted thinking blocks render nothing. The note timestamp split is its own node: [[base/agents/history/docs/timeline/note-timestamp-policy.ava.okf.md]].
 
 ## Window and identifiers
 
@@ -34,16 +34,6 @@ kind = "invariant"
 statement = """The render is incremental-safe: `start` renders only messages[start:] while item_ids keep ABSOLUTE msg_idx (streaming SSE ids stay aligned); msg_count is ALWAYS the full len(messages) — the frontend's future-partial boundary depends on it; segment_prefix is reserved for cold-loaded compact history and prefixes local ids. An unrecognized message shape raises — fail-loud."""
 code = ["base/agents/history/timeline.py:build_timeline_items"]
 tests = ["gateway/tests/history/test_timeline_part2.py::TestBuildTimelineItemsStartOffset::test_start_offset_keeps_absolute_item_ids_and_full_msg_count", "gateway/tests/history/test_timeline.py::TestTimelineFailLoud::test_dispatch_error_propagates_as_500"]
-```
-
-## Note timestamp policy
-
-```ava-contract
-id = "note-timestamp-policy"
-kind = "invariant"
-statement = """system_marker.show_timestamp hides the ts for ambient context and the one-time guidance notes (compact reminder, SDK hint, agent reply, silent idle-continue, security, exec timeout, timezone, the to_user soft limit); heartbeats, lifecycle_* transitions, task notifications, impersonation and NEW_SKILLS keep it. NEW_SKILLS stays visible deliberately: the drift note is the only place that mid-window install is visible. The split is closed over NoteTag — a new member needs an explicit decision."""
-code = ["base/agents/history/timeline.py:_NO_TIMESTAMP_NOTE_TAGS"]
-tests = ["gateway/tests/history/timeline/test_ai_message_items.py::TestAiMessageItems::test_system_note_show_timestamp_by_tag"]
 ```
 
 ## Tool-call block offset

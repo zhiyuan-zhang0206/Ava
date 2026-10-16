@@ -17,7 +17,7 @@ reads beside the agent's messages ([Markdown shared context decision](../../../.
 within its soft limit. It is the second member of the write-check family
 ([[ava_builtins/plugins/ava_memory/docs/memory-write-check.ava.okf.md]] is the first):
 the plugin's `files.write` / `append` / `edit` wraps record, inside the exec subprocess,
-whether a call wrote this agent's panel (`written.py`), and the after_exec hook
+whether a call wrote this agent's panel (`written.py`; [[ava_builtins/plugins/ava_to_user/docs/panel-write-check.ava.okf.md|the recording's own node]]), and the after_exec hook
 (`agent_runtime.py`) reads that record in the agent process, counts the panel in
 CJK-aware words and adds one reminder note when it exceeds `to_user_soft_limit_words`.
 The check is soft: it never blocks, rewrites or rejects a write, and it never fails the
@@ -46,16 +46,6 @@ Cadence is `to_user_limit_reminder_cadence`: `once_per_compaction` (default) rem
 most once per context window, re-armed by a compaction (the same `reminded` set +
 `last_seen_compact` bookmark `ava_sdk_reminder` uses) and by the panel coming back
 within its limit; `every_time` reminds on every over-limit write.
-
-### SDK wraps
-
-`files.write` / `files.append` / `files.edit` — transparent (call the layer below
-exactly once; hand back its result or let its exception propagate) and record only
-after a write that succeeded. `ava_builtins/plugins/ava_to_user/written.py:panel_path` matches only this agent's
-`<workspace>/to_user.md` (relative paths resolve against the tracked `ava.cwd` like the
-core); shell-redirected writes are not observed, the same contract the memory write
-check has. Wrap order: plugins stack in name order, later outermost — `ava_to_user`
-sits outside `ava_memory`'s and `ava_code`'s wraps of the same targets.
 
 ### State
 
@@ -89,14 +79,6 @@ sits outside `ava_memory`'s and `ava_code`'s wraps of the same targets.
   hops ([Markdown shared context decision](../../../../docs/decisions/frontend/documents/2026-10-15-markdown-context-and-file-references.md)).
 
 ## Contracts
-
-```ava-contract
-id = "panel-write-observation"
-kind = "invariant"
-statement = """The files.write / append / edit wraps call the layer below exactly once and return or propagate its outcome untouched; a panel write is recorded only after a successful call, and recording never raises. panel_path matches only this agent's <workspace>/to_user.md; the wraps see the caller's raw path, so a relative one resolves against the tracked ava.cwd. The wraps carry no docstrings, so the rendered SDK keeps the original files.* contracts."""
-code = ["ava_builtins/plugins/ava_to_user/plugin.py:wrapped_write", "ava_builtins/plugins/ava_to_user/written.py:panel_path", "ava_builtins/plugins/ava_to_user/written.py:record_panel_write"]
-tests = ["ava_builtins/plugins/ava_to_user/tests/test_written_recording.py::test_the_write_wrap_records_a_panel_write", "ava_builtins/plugins/ava_to_user/tests/test_written_recording.py::test_the_write_wrap_lets_its_exception_through_untouched", "ava_builtins/plugins/ava_to_user/tests/test_written_recording.py::test_a_relative_panel_path_resolves_like_the_core"]
-```
 
 ```ava-contract
 id = "soft-limit-reminder"

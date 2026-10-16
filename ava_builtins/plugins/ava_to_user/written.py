@@ -22,7 +22,7 @@ def _absolute(path: str | Path) -> Path:
     return cwd.get() / target if cwd is not None else _ava_files.resolve(target)
 
 
-# ava:ref ava_builtins/plugins/ava_to_user/docs/ava_to_user.ava.okf.md#panel-write-observation
+# ava:ref ava_builtins/plugins/ava_to_user/docs/panel-write-check.ava.okf.md#panel-write-observation
 def panel_path(path: str | Path, *, agent_id: int) -> Path | None:
     target = _absolute(path).resolve()
     if target.name != DOCUMENT_FILENAME:
