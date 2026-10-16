@@ -362,9 +362,11 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    expect(screen.getByRole("link", { name: "Open run timeline" }).getAttribute("href")).toBe(
-      "/insights/run/1",
-    );
+    const link = screen.getByRole("link", { name: "Open run timeline" });
+    expect(link.getAttribute("href")).toBe("/insights/run/1");
+    const classes = link.className.split(" ");
+    expect(classes).toContain("rounded");
+    expect(classes).toContain("bg-sidebar-accent/40");
   });
 
   it("renders no Alerts section (user ruling 2026-08-29)", async () => {
