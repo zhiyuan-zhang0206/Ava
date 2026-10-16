@@ -1,12 +1,8 @@
+exports = ["test_projection.py"]
+
+[uses]
+"test_history_cache.py" = ["test_projection.py"]
+
 [debt.first-party-patch]
-"test_history_cache.py#monkeypatch.setattr services.derived.insights.run_timeline.history.MAX_AGE_SECONDS" = 1
-"test_history_cache.py#monkeypatch.setattr services.derived.insights.run_timeline.history.TTL_SECONDS" = 3
-"test_history_cache.py#monkeypatch.setattr services.derived.insights.run_timeline.history.latest_checkpoint_id" = 1
-"test_history_cache.py#monkeypatch.setattr services.derived.insights.run_timeline.history.load_checkpoint_history_full" = 1
-"test_run_timeline.py#monkeypatch.setattr services.derived.insights.run_timeline.history.latest_checkpoint_id" = 1
-"test_run_timeline.py#monkeypatch.setattr services.derived.insights.run_timeline.history.load_checkpoint_history_full" = 1
-"test_run_timeline.py#monkeypatch.setattr services.derived.insights.run_timeline.history.time.monotonic" = 1
-"test_run_timeline.py#monkeypatch.setattr services.derived.insights.run_timeline.router.load_generation_costs" = 1
-"test_run_timeline.py#monkeypatch.setattr services.derived.insights.run_timeline.router.load_nodes" = 1
 "test_run_timeline_context.py#monkeypatch.setattr services.derived.insights.run_timeline.context.context_breakdown_response" = 1
 "test_run_timeline_links.py#monkeypatch.setattr services.derived.insights.run_timeline.links.PAGE_SIZE" = 1

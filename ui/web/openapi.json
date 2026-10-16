@@ -5875,6 +5875,24 @@
               "default": false,
               "title": "Full"
             }
+          },
+          {
+            "name": "snapshot",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Snapshot"
+            }
           }
         ],
         "responses": {
@@ -5924,6 +5942,24 @@
               "type": "integer",
               "minimum": 0,
               "title": "At"
+            }
+          },
+          {
+            "name": "snapshot",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Snapshot"
             }
           }
         ],
@@ -5998,6 +6034,60 @@
                 }
               ],
               "title": "To"
+            }
+          },
+          {
+            "name": "recent_hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 168,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Recent Hours"
+            }
+          },
+          {
+            "name": "max_units",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 10000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Units"
+            }
+          },
+          {
+            "name": "snapshot",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Snapshot"
             }
           }
         ],
@@ -16652,6 +16742,22 @@
             },
             "type": "array",
             "title": "Units"
+          },
+          "units_omitted": {
+            "type": "integer",
+            "title": "Units Omitted",
+            "default": 0
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot"
           }
         },
         "type": "object",
@@ -16663,7 +16769,7 @@
           "units"
         ],
         "title": "RunTimelineResponse",
-        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it."
+        "description": "GET /api/agents/{agent_id}/run-timeline response.\n\n`lifetime` is the agent's whole extent — the earliest and latest of its\nmessages and understanding nodes — and the default window; None when it has\nneither. `nodes` are the tree's nodes intersecting the window, every level;\n`units` are layer 0 intersecting it. With `max_units`, a denser window omits\nall message detail and reports its count in `units_omitted`; it never silently\ntruncates the window. `snapshot` pins later window, message and context reads\nto this history until it expires or is evicted (HTTP 409)."
       },
       "RunTimelineUnit": {
         "properties": {

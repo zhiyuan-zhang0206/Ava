@@ -1,8 +1,8 @@
-"""The LLM requests of the stitched history and the context breakdown of one of them."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
+from cProfile import Profile
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException, Request
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from base.agents.history.checkpoint import FullHistory
+from base.agents.history.checkpoint import FullHistory, single_segment_history
 from base.agents.history.context_breakdown import RequestBreakdown
 from base.agents.history.context_response import ContextBreakdownResponse, ContextCategory
 from base.agents.history.hierarchy.units import (
@@ -21,6 +21,7 @@ from base.agents.history.hierarchy.units import (
     read_times,
 )
 from base.agents.history.hierarchy.usage import MessageUsage
+from base.agents.history.message_tokens import MessageTokens
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock
 from base.config import settings
@@ -28,7 +29,8 @@ from base.db import Database
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.run_timeline import context
 from services.derived.insights.run_timeline.history import HistoryView
-from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts, block_tokens
+from services.derived.insights.run_timeline.projection.derive import segment_view
+from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
@@ -56,8 +58,6 @@ def human(text: str, minutes: int) -> HumanMessage:
 
 
 def two_sessions() -> HistoryView:
-    """Session 0: prompt, ask@0, reply@1 (100 tokens). Session 1 (after a compaction): its own
-    prompt (dropped from the stitched list), ask@10, reply@11 (40 tokens)."""
     messages: list[BaseMessage] = [
         SystemMessage(content="first prompt"),
         human("ask one", 0),
@@ -69,7 +69,7 @@ def two_sessions() -> HistoryView:
     units = display_blocks(divide_units(messages, timeline_inputs=_TIMELINE_INPUTS), messages, read)
     history = FullHistory(
         messages,
-        (messages[0], SystemMessage(content="second prompt")),  # type: ignore[arg-type]
+        (cast(SystemMessage, messages[0]), SystemMessage(content="second prompt")),
         (1, 3),
     )
     return HistoryView.of(history, units, MessageUsage(messages), read)
@@ -78,23 +78,22 @@ def two_sessions() -> HistoryView:
 def test_requests_carry_their_session_and_send_time() -> None:
     requests = context.llm_requests(two_sessions())
     assert [(r.idx, r.session) for r in requests] == [(2, 0), (4, 1)]
-    # A request is sent when the message before it was read.
+
     assert requests[0].ts == T0
     assert requests[1].ts == T0 + timedelta(minutes=10)
 
 
 def with_output(msg: AIMessage, output: int) -> AIMessage:
+    assert msg.usage_metadata is not None
     msg.usage_metadata = {
-        "input_tokens": msg.usage_metadata["input_tokens"],  # type: ignore[index]
+        "input_tokens": msg.usage_metadata["input_tokens"],
         "output_tokens": output,
-        "total_tokens": msg.usage_metadata["input_tokens"] + output,  # type: ignore[index]
+        "total_tokens": msg.usage_metadata["input_tokens"] + output,
     }
     return msg
 
 
 def three_requests_then_a_session() -> HistoryView:
-    """Session 0: prompt, ask@0, reply1@1 (input 100, output 5), two asks @2 and @3, reply2@4
-    (input 160, output 7), ask@5, reply3@6 (input 190). Session 1: ask@10, reply4@11 (input 40)."""
     messages: list[BaseMessage] = [
         SystemMessage(content="first prompt"),
         human("ask one", 0),
@@ -111,7 +110,7 @@ def three_requests_then_a_session() -> HistoryView:
     units = display_blocks(divide_units(messages, timeline_inputs=_TIMELINE_INPUTS), messages, read)
     history = FullHistory(
         messages,
-        (messages[0], SystemMessage(content="second prompt")),  # type: ignore[arg-type]
+        (cast(SystemMessage, messages[0]), SystemMessage(content="second prompt")),
         (1, 8),
     )
     return HistoryView.of(history, units, MessageUsage(messages), read)
@@ -124,6 +123,7 @@ def contexts(view: HistoryView) -> list[tuple[DisplayBlock, BlockContext]]:
 
 def test_the_context_before_a_reply_is_the_input_of_the_request_that_made_it() -> None:
     view = three_requests_then_a_session()
+    book = BlockContexts(view)
     inputs = {2: 100, 5: 160, 7: 190, 9: 40}
     by_reply: dict[int, list[tuple[DisplayBlock, BlockContext]]] = {}
     for block, ctx in contexts(view):
@@ -131,10 +131,10 @@ def test_the_context_before_a_reply_is_the_input_of_the_request_that_made_it() -
             by_reply.setdefault(block.i0, []).append((block, ctx))
     for idx, input_tokens in inputs.items():
         first, last = by_reply[idx][0], by_reply[idx][-1]
-        tokens = block_tokens(view, first[0]).context_tokens or 0
-        # The first block of a reply adds its own share to what the request sent.
+        tokens = book.tokens(first[0]).context_tokens or 0
+
         assert first[1].context_total == input_tokens + tokens
-        # The last block ends at the ctx through the whole reply.
+
         assert last[1].context_total == input_tokens + (view.tokens[idx].context_tokens or 0)
         assert all(
             c.request is not None and c.request.input == input_tokens for _, c in by_reply[idx]
@@ -146,7 +146,7 @@ def test_a_message_block_is_the_context_through_its_last_message() -> None:
     totals = {
         block.i0: ctx.context_total for block, ctx in contexts(view) if block.kind == "inbound"
     }
-    # ask one (1) follows the head; asks two and three (3, 4) are blocks of their own.
+
     assert totals[3] == 100 + 5 + (view.tokens[3].context_tokens or 0)
     assert totals[4] == (totals[3] or 0) + (view.tokens[4].context_tokens or 0)
 
@@ -158,7 +158,7 @@ def test_the_context_total_starts_over_after_a_compaction() -> None:
         if block.kind == "inbound"
     }
     assert by_idx[8].session == 1
-    # Session 1 holds its own head and first message only: the previous session's replies are gone.
+
     assert by_idx[8].context_total == 40
     assert (by_idx[1].session, (by_idx[1].context_total or 0) > 0) == (0, True)
 
@@ -168,9 +168,58 @@ def test_only_a_replys_blocks_carry_its_request() -> None:
         assert (ctx.request is not None) == (block.kind in ("thinking", "text", "call"))
 
 
+@pytest.mark.parametrize("context_tokens", [60, 90])
+def test_turn_splits_are_shared_without_changing_counts_or_context_progression(
+    context_tokens: int,
+) -> None:
+    reply = AIMessage(
+        content=[{"type": "thinking", "thinking": "aa"}, {"type": "text", "text": "bb"}],
+        tool_calls=[{"name": "execute_code", "args": {"code": "cc"}, "id": "call"}],
+        usage_metadata={"input_tokens": 100, "output_tokens": 60, "total_tokens": 160},
+        additional_kwargs=stamp(1),
+    )
+    messages: list[BaseMessage] = [SystemMessage(content="prompt"), human("ask", 0), reply]
+    read = read_times(messages, timeline_inputs=_TIMELINE_INPUTS)
+    blocks = display_blocks(
+        divide_units(messages, timeline_inputs=_TIMELINE_INPUTS), messages, read
+    )
+    view = HistoryView.of(single_segment_history(messages), blocks, MessageUsage(messages), read)
+
+    record = MessageTokens(context_tokens, 60, "estimated")
+    segment = view.segments[0]
+    view = replace(
+        view,
+        tokens=[*view.tokens[:2], record],
+        segments=(replace(segment, messages=(*segment.messages[:-1], record)),),
+    )
+    book = BlockContexts(view)
+    turn = [block for block in blocks if block.i0 == 2]
+    assert {block.kind for block in turn} == {"thinking", "text", "call"}
+    share = context_tokens // 3
+    totals = {"thinking": 100 + share, "text": 100 + 2 * share, "call": 100 + context_tokens}
+    with Profile() as profile:
+        for block in [*turn, *reversed(turn)]:
+            tokens = book.tokens(block)
+            assert (tokens.context_tokens, tokens.generation_tokens, tokens.estimated) == (
+                share,
+                20,
+                True,
+            )
+            assert book.of(block).context_total == totals[block.kind]
+
+    split_calls = sum(
+        entry.callcount
+        for entry in profile.getstats()
+        if not isinstance(entry.code, str) and entry.code.co_name == "ai_message_parts"
+    )
+    assert split_calls == 2
+
+
 def test_a_point_resolves_to_the_next_request_else_the_last() -> None:
     requests = context.llm_requests(two_sessions())
-    assert [context.request_at(requests, at).idx for at in (0, 2, 3, 4, 99)] == [2, 2, 4, 4, 4]  # type: ignore[union-attr]
+    for at, expected in zip((0, 2, 3, 4, 99), (2, 2, 4, 4, 4), strict=True):
+        found = context.request_at(requests, at)
+        assert found is not None and found.idx == expected
     assert context.request_at([], 0) is None
 
 
@@ -178,8 +227,28 @@ class Views:
     def __init__(self, view: HistoryView) -> None:
         self.view = view
 
-    def get(self, _db: object, _agent: int) -> HistoryView:
-        return self.view
+    def get(self, _agent: int, _snapshot: str | None = None):
+        return SimpleNamespace(sessions=len(self.view.history.segment_starts))
+
+    def request(self, _cut: object, at: int):
+        found = context.request_at(context.llm_requests(self.view), at)
+        if found is None:
+            raise HTTPException(404, "the agent has made no LLM request")
+        history = self.view.history
+        start = history.segment_starts[found.session]
+        stop = (
+            history.segment_starts[found.session + 1]
+            if found.session + 1 < len(history.segment_starts)
+            else len(history.messages)
+        )
+        head = history.segment_heads[found.session]
+        raw = ([head] if head is not None else []) + history.messages[start:stop]
+        local = single_segment_history(raw)
+        view = segment_view(
+            local, self.view.read[start - 1] if start else None, inputs=_TIMELINE_INPUTS
+        )
+        segment = SimpleNamespace(offset=start - local.segment_starts[0], session=found.session)
+        return found.idx, found.ts, segment, view
 
 
 def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch, catalog: ModelCatalog):
@@ -194,7 +263,7 @@ def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch, catalog: M
     ) -> ContextBreakdownResponse:
         assert catalog is app_state.catalog
         assert default_model_reader is app_state.default_model_reader
-        # The window and thresholds come from the model registry; the bucketing is the real one.
+
         return ContextBreakdownResponse(
             total_input_tokens=found.total.tokens,
             estimated=found.total.estimated,
@@ -215,7 +284,7 @@ def call(view: HistoryView, at: int, monkeypatch: pytest.MonkeyPatch, catalog: M
     app_state = SimpleNamespace(
         db=cast(Database, object()),
         db_pool=object(),
-        run_timeline_views=Views(view),
+        run_timeline_reader=Views(view),
         catalog=catalog,
         default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
     )
@@ -231,7 +300,7 @@ def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(
     assert (result.request, result.session, result.sessions) == (4, 1, 2)
     assert result.ts == T0 + timedelta(minutes=10)
     assert result.total_input_tokens == 40
-    assert result.estimated is False  # the request's own input_tokens
+    assert result.estimated is False
     kinds = {c.kind: c.tokens for c in result.categories}
     assert set(kinds) == {"system_prompt", "user_input"}
     assert sum(kinds.values()) == 40

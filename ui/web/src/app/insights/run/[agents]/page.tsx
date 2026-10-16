@@ -1,12 +1,13 @@
 "use client";
 
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 
 import { ContextBreakdownCard, type CategoryHighlight } from "@/components/inspector/context-breakdown-body";
 import { AgentViewToolbar } from "@/components/run-timeline/agent-view/agent-view-toolbar";
 import { AgentPending } from "@/components/run-timeline/agent-view/agent-view-group";
+import { useTimelineWindows } from "@/components/run-timeline/agent-view/use-timeline-windows";
 import type { AgentSelection } from "@/components/run-timeline/agent-view/agent-view-nav";
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { LinkDetail } from "@/components/run-timeline/run-timeline-link-detail";
@@ -30,13 +31,11 @@ import {
 } from "@/components/run-timeline/model/timeline-model";
 import type { UnitHeights } from "@/components/run-timeline/canvas/run-timeline-paint";
 import type { RowOptions } from "@/components/run-timeline/model/timeline-nav";
-import type { RunTimelineResponse } from "@/lib/contracts/types";
 import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { formatAbsolute } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
 
-/** The agent ids of the URL segment (`405` or `405,6657`); null when any is not a non-negative integer. */
 function parseAgents(segment: string): number[] | null {
   const ids: number[] = [];
   for (const part of decodeURIComponent(segment).split(",")) {
@@ -49,28 +48,20 @@ function parseAgents(segment: string): number[] | null {
 
 const NO_AGENTS: number[] = [];
 
-/** What the page keeps of each agent's query; shared by structure, so an unchanged read keeps its identity. */
-const pickRead = (results: { data: RunTimelineResponse | undefined; isError: boolean }[]) =>
-  results.map(({ data, isError }) => ({ data, isError }));
-
 const pathFor = (ids: readonly number[]) => `/insights/run/${ids.join(",")}`;
 
-/** The agent view: any number of agents on one timeline, each with every level of its understanding
- *  tree and, under them, its message units. One agent is the view of that agent alone. The backend
- *  answers once per agent with its whole lifetime; zooming and panning move a shared viewport over
- *  the loaded data (no further reads). */
+// ava:ref ui/web/src/docs/frontend-components/run-timeline/window-reads.ava.okf.md#agent-view-ownership
 export default function AgentViewPage({ params }: { params: Promise<{ agents: string }> }) {
   const t = useTranslations("runTimeline");
-  // The agents in view, in the order they were added; the URL names them so a reload keeps them.
+
   const [agentIds, setAgentIds] = useState<number[] | null>(null);
   const [paramsResolved, setParamsResolved] = useState(false);
-  const [selection, setSelection] = useState<AgentSelection | null>(null);
-  // The legend's (or a context breakdown row's) highlight of one kind of block; it survives zoom and pan.
+  const [picked, setPicked] = useState<{ value: AgentSelection; snapshot: string | null | undefined } | null>(null);
+
   const [highlight, setHighlight] = useState<Highlight | null>(null);
-  // null = the whole loaded extent.
+
   const [viewport, setViewport] = useState<Viewport | null>(null);
-  // The selected arrow between agents (a selected arrow and a selected block exclude each other) and the kinds drawn.
-  // The selected links: one for an arrow of one link, several for a merged arrow.
+
   const [linkKeys, setLinkKeys] = useState<readonly string[]>([]);
   const setLinkKey = (key: string | null) => setLinkKeys(key === null ? [] : [key]);
   const [linkKinds, setLinkKinds] = useState<ReadonlySet<LinkKind>>(() => new Set(LINK_KINDS));
@@ -78,7 +69,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const [showOther, setShowOther] = useState(true);
   const [maxArrows, setMaxArrows] = useState<number>(MAX_ARROWS);
   const [levels, setLevels] = useState<number | null>(null);
-  // Off by default: the Context size row is one more row per agent.
+
   const [contextSize, setContextSize] = useState(false);
   const [unitHeights, setUnitHeights] = useState<UnitHeights>("tokens");
   const options: RowOptions = useMemo(() => ({ levels, contextSize }), [levels, contextSize]);
@@ -101,9 +92,15 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   }, [params]);
 
   const ids = agentIds ?? NO_AGENTS;
+  const { reads, retry, initial } = useTimelineWindows(ids, viewport);
+
+  const selection = picked !== null && picked.snapshot === initial.at(ids.indexOf(picked.value.agent))?.data?.snapshot ? picked.value : null;
+  const setSelection = (next: AgentSelection | null) => setPicked(next === null ? null : {
+    value: next, snapshot: initial.at(ids.indexOf(next.agent))?.data?.snapshot,
+  });
   const setAgents = (next: number[]) => {
     setAgentIds(next);
-    // The extent changes with the agents: show all of it again.
+
     setViewport(null);
     window.history.replaceState(null, "", pathFor(next));
   };
@@ -117,14 +114,6 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     setAgents(ids.filter((other) => other !== id));
   };
 
-  const queryClient = useQueryClient();
-  const reads = useQueries({
-    queries: ids.map((id) => ({
-      queryKey: ["run-timeline", id],
-      queryFn: ({ signal }) => api.getRunTimeline(id, { signal }),
-    })),
-    combine: pickRead,
-  });
   const entries: AgentEntry[] = useMemo(
     () =>
       ids.map((id, i): AgentEntry => {
@@ -134,13 +123,11 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
       }),
     [ids, reads],
   );
-  const retry = (id: number) => void queryClient.refetchQueries({ queryKey: ["run-timeline", id] });
   const loaded = useMemo(
     () => entries.flatMap((entry) => (entry.status === "loaded" ? [{ id: entry.id, data: entry.data }] : [])),
     [entries],
   );
 
-  // The arrows are read for the extent the agents together span.
   const linkWindow = useMemo(() => {
     const spans = loaded.map(({ data }) => viewportOf(data.window));
     return spans.length === 0
@@ -166,16 +153,19 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     );
   }
 
-  // The extent every agent's lifetime spans together.
-  const windows = loaded.map(({ data }) => viewportOf(data.window));
+  const windows = initial.flatMap(({ data }) => data === undefined ? [] : [viewportOf(data.lifetime ?? data.window)]);
+  const initialWindows = initial.flatMap(({ data }) => data === undefined ? [] : [viewportOf(data.window)]);
   const base: Viewport | null =
     windows.length === 0
       ? null
       : { from: Math.min(...windows.map((w) => w.from)), to: Math.max(...windows.map((w) => w.to)) };
-  const view = base && viewport ? clampViewport(viewport, base) : base;
+  const firstView = initialWindows.length === 0 ? null : {
+    from: Math.min(...initialWindows.map((w) => w.from)), to: Math.max(...initialWindows.map((w) => w.to)),
+  };
+  const view = base && viewport ? clampViewport(viewport, base) : firstView;
 
   const dataOf = (id: number) => loaded.find((agent) => agent.id === id)?.data;
-  // The selection's own agent; else the first loaded one, which the context card follows.
+
   const focus = selection !== null && dataOf(selection.agent) !== undefined ? selection.agent : loaded.at(0)?.id;
   const focusData = focus === undefined ? undefined : dataOf(focus);
   const mine = selection !== null && selection.agent === focus ? selection.selection : null;
@@ -188,8 +178,8 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
         )
       : undefined;
 
-  // The context card follows the selected block, else the last LLM request in view.
-  const contextAt = focusData && view ? contextPoint(mine, focusData.nodes, focusData.units, view) : undefined;
+  const contextAt = focusData && view && (focusData.units_omitted === 0 || selectedNode !== undefined || selectedUnit !== undefined)
+    ? contextPoint(mine, focusData.nodes, focusData.units, view) : undefined;
   const categoryHighlight: CategoryHighlight = {
     active: highlight === null ? null : classCategory(highlight.cls),
     has: (category) => categoryClass(category) !== null,
@@ -200,8 +190,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     },
   };
   const maxLevels = Math.max(0, ...loaded.map(({ data }) => levelsTopFirst(data.nodes).length));
-  // Selecting one link of a merged arrow zooms to it: a window 20 times the span the group covered, so
-  // the group falls apart, never wider than now.
+
   const focusLink = (key: string) => {
     const target = links.find((l) => l.key === key);
     if (target === undefined || view === null) return;
@@ -239,6 +228,9 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
         maxArrows={maxArrows}
         onMaxArrows={setMaxArrows}
       />
+      {reads.map((read, i) => read.preparing ? (
+        <p key={ids[i]} role="status" className="text-xs text-muted-foreground">{t("preparingHistory", { id: ids[i] })}</p>
+      ) : null)}
       {base && view ? (
         <>
           <p className="text-xs text-muted-foreground" data-testid="run-timeline-window">
@@ -246,9 +238,16 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
               from: formatAbsolute(new Date(view.from).toISOString()),
               to: formatAbsolute(new Date(view.to).toISOString()),
               nodes: loaded.reduce((sum, { data }) => sum + data.nodes.length, 0),
-              units: loaded.reduce((sum, { data }) => sum + data.units.length, 0),
+              units: loaded.reduce((sum, { data }) => sum + data.units.length + data.units_omitted, 0),
             })}
           </p>
+          {reads.map((read, i) => read.pending ? (
+            <p key={ids[i]} role="status" className="text-xs text-muted-foreground">{t("windowLoading", { id: ids[i] })}</p>
+          ) : read.windowError ? (
+            <p key={ids[i]} role="alert" className="text-xs text-destructive">
+              {t("windowFailed", { id: ids[i] })} <button type="button" onClick={() => retry(ids[i])}>{t("retry")}</button>
+            </p>
+          ) : null)}
           <RunTimelineRows
             entries={entries}
             base={base}
@@ -310,9 +309,9 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
           ))}
         </div>
       )}
-      {/* Agent-scoped context details follow the timeline. */}
+
       {focus !== undefined && contextAt !== undefined ? (
-        <ContextBreakdownCard agentId={focus} at={contextAt} categoryHighlight={categoryHighlight} />
+        <ContextBreakdownCard agentId={focus} at={contextAt} snapshot={focusData?.snapshot ?? undefined} categoryHighlight={categoryHighlight} />
       ) : null}
     </>
   );
@@ -320,11 +319,12 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   const side = selectedLinks.length > 1 ? (
     <LinkGroupDetail links={selectedLinks} onSelect={focusLink} />
   ) : selectedLinks.length === 1 ? (
-    <LinkDetail key={selectedLinks[0].key} resolved={selectedLinks[0]} onAddAgent={addAgent} />
+    <LinkDetail key={selectedLinks[0].key} resolved={selectedLinks[0]} snapshot={dataOf(selectedLinks[0].to.agent)?.snapshot ?? undefined} onAddAgent={addAgent} />
   ) : selectedNode ? (
     <NodeDetail
       key={`n${focus}-${selectedNode.id}`}
       agentId={focus ?? 0}
+      snapshot={focusData?.snapshot ?? undefined}
       node={selectedNode}
       ancestors={focusData ? nodeAncestors(selectedNode, focusData.nodes) : []}
       childNodes={focusData ? nodeChildren(selectedNode, focusData.nodes) : []}
@@ -334,6 +334,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
     <UnitDetail
       key={`u${focus}-${selectedUnit.kind}${selectedUnit.i0}-${selectedUnit.i1}`}
       agentId={focus ?? 0}
+      snapshot={focusData?.snapshot ?? undefined}
       unit={selectedUnit}
       parent={focusData?.nodes.find((node) => node.id === selectedUnit.parent) ?? null}
       onSelectNode={focus === undefined ? () => undefined : select(focus)}

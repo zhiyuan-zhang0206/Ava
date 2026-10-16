@@ -1,15 +1,14 @@
-"""The run-timeline window: lifetime default from messages and nodes, units and nodes per window."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from fastapi import HTTPException, Request
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from psycopg import Connection
 
 from base.agents.history.checkpoint import single_segment_history
 from base.agents.history.hierarchy.store import StoredNode
@@ -25,6 +24,9 @@ from base.config import settings
 from base.db import Database
 from services.derived.insights.run_timeline import router
 from services.derived.insights.run_timeline.history import HistoryView
+from services.derived.insights.run_timeline.projection.derive import project_segment
+from services.derived.insights.run_timeline.projection.jobs import IndexJobs
+from services.derived.insights.run_timeline.projection.reader import Snapshot, TimelineReader
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
@@ -47,7 +49,6 @@ def usage(tokens: int) -> dict[str, object]:
 
 
 def history_messages() -> list[BaseMessage]:
-    """system, inbound@0, work@1..2 (call + result), text@10."""
     return [
         SystemMessage(content="prompt"),
         HumanMessage(
@@ -57,7 +58,7 @@ def history_messages() -> list[BaseMessage]:
         AIMessage(
             content=[{"type": "thinking", "thinking": "plan"}],
             tool_calls=[{"name": "execute_code", "args": {"code": "ls"}, "id": "t1"}],
-            usage_metadata=usage(100),  # type: ignore[arg-type]
+            usage_metadata=usage(100),
             additional_kwargs={"ava_created_at": at(1)},
         ),
         ToolMessage(
@@ -71,7 +72,7 @@ def history_messages() -> list[BaseMessage]:
         ),
         AIMessage(
             content="done",
-            usage_metadata=usage(200),  # type: ignore[arg-type]
+            usage_metadata=usage(200),
             additional_kwargs={"ava_created_at": at(10)},
         ),
     ]
@@ -100,41 +101,102 @@ def stored(node_id: int, *, level: int, span: tuple[int, int], start: int, end: 
 
 
 class World:
-    """Everything the endpoint reads, stubbed in one place."""
-
-    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, database: Database, db_conn: Connection[Any]) -> None:
         self.view = view()
         self.nodes: list[StoredNode] = []
-        self.fresh_reads = 0
-        monkeypatch.setattr(router, "load_nodes", self._nodes)
-        monkeypatch.setattr(router, "load_generation_costs", self._costs)
-
-    def get(self, _db: object, _agent: int, *, needs: int = 0) -> HistoryView:
-        """The `HistoryViewCache.get` the app state serves."""
-        self.fresh_reads += needs > 0
-        return self.view
-
-    def _nodes(self, _db: object, _agent: int) -> list[StoredNode]:
-        return list(self.nodes)
-
-    def _costs(self, _db: object, _agent: int) -> tuple[dict[int, object], dict[str, object]]:
-        return {}, {}
+        self.db, self.conn = database, db_conn
 
 
 def read(
-    world: World, from_: datetime | None = None, to: datetime | None = None
+    world: World,
+    from_: datetime | None = None,
+    to: datetime | None = None,
+    *,
+    recent_hours: int | None = None,
+    max_units: int | None = None,
 ) -> router.RunTimelineResponse:
-    state = SimpleNamespace(db=cast(Database, object()), run_timeline_views=world)
-    request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
-    return router.get_run_timeline(request, 405, from_, to)
+    world.conn.execute("DELETE FROM understanding_nodes WHERE agent_id = 405")
+    for n in world.nodes:
+        world.conn.execute(
+            """INSERT INTO understanding_nodes
+            (id, agent_id, depth, span_start, span_end, start_ts, end_ts, text, segment_key,
+             text_hash, input_hash, children_count, model, engine_version, prompt_version, schema_version)
+            VALUES (%s, 405, %s, %s, %s, %s, %s, %s, 's', 'h', 'i', 1, 'm', 'e', 'p', 1)""",
+            (n.id, n.depth, n.span_start, n.span_end, n.start_ts, n.end_ts, n.text),
+        )
+    world.conn.commit()
+    projection = project_segment("fixture", world.view.history, None, inputs=_TIMELINE_INPUTS)
+    extent = world.view.extent
+    if extent is not None and extent[0] == extent[1]:
+        extent = extent[0], extent[1] + timedelta(seconds=1)
+    cut = Snapshot(405, "fixture-snapshot", 0, "fixture", None, projection, extent)
+    pool = world.db.pool(min_size=1, max_size=4)
+    jobs = IndexJobs(lambda _agent: False)
+    try:
+
+        def no_body(_db: Database, _agent: int, _id: str):
+            raise AssertionError("a window query must not read a checkpoint")
+
+        reader = TimelineReader(
+            world.db, pool, inputs=_TIMELINE_INPUTS, jobs=jobs, read_segment=no_body
+        )
+
+        def snapshot(_agent: int, _snapshot: str | None) -> Snapshot:
+            return cut
+
+        state = SimpleNamespace(
+            run_timeline_reader=SimpleNamespace(get=snapshot, window=reader.window)
+        )
+        request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
+        return router.get_run_timeline(request, 405, from_, to, recent_hours, max_units)
+    finally:
+        jobs.close()
+        pool.close()
+
+
+def test_recent_day_is_relative_to_the_last_activity_and_keeps_the_lifetime(
+    database: Database,
+    db_conn: Connection[Any],
+) -> None:
+    world = World(database, db_conn)
+    messages = history_messages()
+    messages[-1].additional_kwargs["ava_created_at"] = at(3 * 24 * 60)
+    world.view = view(messages)
+    result = read(world, recent_hours=24, max_units=5000)
+    assert result.lifetime is not None and result.lifetime.from_ == T0
+    assert result.window.to == T0 + timedelta(days=3)
+    assert result.window.from_ == T0 + timedelta(days=2)
+    assert [(u.kind, u.i0) for u in result.units] == [("text", 4)]
+    assert result.snapshot == "fixture-snapshot"
+
+
+def test_dense_windows_report_omitted_detail_without_constructing_it(
+    database: Database,
+    db_conn: Connection[Any],
+) -> None:
+    world = World(database, db_conn)
+    world.nodes = [stored(1, level=1, span=(1, 4), start=0, end=10)]
+    result = read(world, max_units=4)
+    assert result.units == [] and result.units_omitted == 5
+    assert [n.id for n in result.nodes] == ["1"]
+    assert len(read(world, max_units=5).units) == 5
+    assert read(world, max_units=5).units_omitted == 0
+
+
+def test_recent_window_rejects_conflicting_explicit_bounds(
+    database: Database, db_conn: Connection[Any]
+) -> None:
+    with pytest.raises(HTTPException) as caught:
+        read(World(database, db_conn), from_=T0, recent_hours=24)
+    assert caught.value.status_code == 422
 
 
 def test_default_window_is_the_lifetime_of_the_messages_read_times(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    db_conn: Connection[Any],
 ) -> None:
-    world = World(monkeypatch)
-    # The messages span minutes 0..10; a node's stored times (here -5..20) are not what is served:
-    # it is placed on the read times of its messages (minutes 1..2).
+    world = World(database, db_conn)
+
     world.nodes = [stored(1, level=1, span=(1, 4), start=-5, end=20)]
     result = read(world)
     assert (result.window.from_, result.window.to) == (T0, T0 + timedelta(minutes=10))
@@ -142,9 +204,10 @@ def test_default_window_is_the_lifetime_of_the_messages_read_times(
 
 
 def test_all_levels_and_every_unit_are_served_in_the_lifetime_window(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    db_conn: Connection[Any],
 ) -> None:
-    world = World(monkeypatch)
+    world = World(database, db_conn)
     world.nodes = [
         stored(1, level=1, span=(1, 3), start=0, end=2),
         stored(2, level=1, span=(4, 4), start=10, end=10),
@@ -164,8 +227,10 @@ def test_all_levels_and_every_unit_are_served_in_the_lifetime_window(
     assert result.nodes[2].usage.calls == 2 and result.nodes[2].usage.input == 300
 
 
-def test_a_unit_names_the_leaf_covering_its_first_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
+def test_a_unit_names_the_leaf_covering_its_first_message(
+    database: Database, db_conn: Connection[Any]
+) -> None:
+    world = World(database, db_conn)
     world.nodes = [
         stored(1, level=1, span=(1, 3), start=0, end=2),
         stored(2, level=1, span=(4, 4), start=10, end=10),
@@ -182,9 +247,10 @@ def test_a_unit_names_the_leaf_covering_its_first_message(monkeypatch: pytest.Mo
 
 
 def test_an_inbound_block_names_the_inbound_row_the_checkpoint_stamped(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    db_conn: Connection[Any],
 ) -> None:
-    world = World(monkeypatch)
+    world = World(database, db_conn)
     messages = history_messages()
     messages[1].additional_kwargs["ava_inbound_id"] = 77
     world.view = view(messages)
@@ -198,15 +264,17 @@ def test_an_inbound_block_names_the_inbound_row_the_checkpoint_stamped(
     }
 
 
-def test_a_unit_no_leaf_covers_has_no_parent(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
+def test_a_unit_no_leaf_covers_has_no_parent(database: Database, db_conn: Connection[Any]) -> None:
+    world = World(database, db_conn)
     world.nodes = [stored(1, level=1, span=(2, 3), start=0, end=2)]
     result = read(world)
     assert {u.i0: u.parent for u in result.units} == {1: None, 2: "1", 4: None}
 
 
-def test_a_narrowed_window_keeps_what_intersects_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
+def test_a_narrowed_window_keeps_what_intersects_it(
+    database: Database, db_conn: Connection[Any]
+) -> None:
+    world = World(database, db_conn)
     world.nodes = [
         stored(1, level=1, span=(1, 3), start=0, end=2),
         stored(2, level=1, span=(4, 4), start=10, end=10),
@@ -217,19 +285,22 @@ def test_a_narrowed_window_keeps_what_intersects_it(monkeypatch: pytest.MonkeyPa
     assert [(u.kind, u.i0) for u in result.units] == [("text", 4)]
 
 
-def test_a_unit_straddling_the_window_edge_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
+def test_a_unit_straddling_the_window_edge_is_kept(
+    database: Database, db_conn: Connection[Any]
+) -> None:
+    world = World(database, db_conn)
     result = read(world, T0 + timedelta(seconds=90), T0 + timedelta(minutes=5))
     assert [(u.kind, u.i0, u.i1) for u in result.units] == [
         ("output", 2, 3),
-        ("text", 4, 4),  # a text-only turn spans its stream: minute 2 to minute 10
+        ("text", 4, 4),
     ]
 
 
 def test_an_agent_with_nothing_has_a_fallback_window_and_no_lifetime(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    db_conn: Connection[Any],
 ) -> None:
-    world = World(monkeypatch)
+    world = World(database, db_conn)
     world.view = view([SystemMessage(content="prompt")])
     result = read(world)
     assert result.lifetime is None
@@ -237,24 +308,14 @@ def test_an_agent_with_nothing_has_a_fallback_window_and_no_lifetime(
     assert result.nodes == [] and result.units == []
 
 
-def test_a_node_beyond_the_cached_view_asks_for_a_view_that_reaches_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    world = World(monkeypatch)
-    world.nodes = [stored(1, level=1, span=(1, 4), start=0, end=10)]
-    read(world)
-    assert world.fresh_reads == 0
-
-
 def test_an_orphan_node_is_left_out_and_the_page_still_answers(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    db_conn: Connection[Any],
 ) -> None:
-    """A node whose span lies past the history (checkpoints rolled back or restored) used to fail
-    the whole read with an IndexError (a 500 for the agent's page, for good)."""
-    world = World(monkeypatch)
+    world = World(database, db_conn)
     world.nodes = [
         stored(1, level=1, span=(1, 4), start=0, end=10),
-        stored(2, level=1, span=(400, 410), start=11, end=12),  # past the 5 messages
+        stored(2, level=1, span=(400, 410), start=11, end=12),
     ]
     result = read(world)
     assert [n.id for n in result.nodes] == ["1"]
@@ -264,22 +325,21 @@ def test_an_orphan_node_is_left_out_and_the_page_still_answers(
 @pytest.mark.parametrize(
     ("from_", "to"),
     [
-        (datetime.fromisoformat("2026-10-04T12:00:00"), None),  # naive
-        (T0 + timedelta(minutes=5), T0),  # reversed
+        (datetime.fromisoformat("2026-10-04T12:00:00"), None),
+        (T0 + timedelta(minutes=5), T0),
     ],
 )
 def test_a_bad_window_is_a_422(
-    monkeypatch: pytest.MonkeyPatch, from_: datetime, to: datetime | None
+    database: Database, db_conn: Connection[Any], from_: datetime, to: datetime | None
 ) -> None:
-    world = World(monkeypatch)
+    world = World(database, db_conn)
     with pytest.raises(HTTPException) as caught:
         read(world, from_, to)
     assert caught.value.status_code == 422
 
 
 def test_nodes_and_units_follow_the_read_order_when_the_stamps_do_not() -> None:
-    # An inbound message that arrived while the agent streamed (minute 3) sits after the
-    # AIMessage (stamped at its end, minute 5): its own stamp is earlier than the one before it.
+
     msgs: list[BaseMessage] = [
         SystemMessage(content="prompt"),
         AIMessage(content="first", additional_kwargs={"ava_created_at": at(5)}),
@@ -299,7 +359,7 @@ def test_nodes_and_units_follow_the_read_order_when_the_stamps_do_not() -> None:
     units = display_blocks(divide_units(msgs, timeline_inputs=_TIMELINE_INPUTS), msgs, read)
     spans = [(u.start, u.end) for u in units]
     assert all(a[1] <= b[0] for a, b in pairwise(spans))
-    # The raw stamps stay what they were.
+
     assert msgs[2].additional_kwargs["ava_created_at"] == at(3)
 
 
@@ -323,7 +383,7 @@ def test_a_recorded_pickup_time_is_the_read_time_and_older_messages_fall_back_to
             content="picked up",
             additional_kwargs={
                 "ava_msg_type": "inbound",
-                "ava_created_at": at(3),  # arrival, while the agent was streaming
+                "ava_created_at": at(3),
                 "ava_picked_up_at": at(6),
             },
         ),
@@ -335,56 +395,27 @@ def test_a_recorded_pickup_time_is_the_read_time_and_older_messages_fall_back_to
     assert read_times(msgs, timeline_inputs=_TIMELINE_INPUTS) == [
         None,
         T0 + timedelta(minutes=5),
-        T0 + timedelta(minutes=6),  # the recorded pickup, not the arrival
-        T0 + timedelta(minutes=6),  # no pickup: arrival, lifted to the read order
+        T0 + timedelta(minutes=6),
+        T0 + timedelta(minutes=6),
     ]
 
 
-def test_a_view_behind_the_tree_is_rebuilt_but_not_more_than_every_two_seconds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from services.derived.insights.run_timeline import history as history_module
-
-    loads: list[int] = []
-    clock = {"now": 100.0}
-
-    def load(_db: object, _agent: int) -> object:
-        loads.append(1)
-        return single_segment_history(history_messages())
-
-    def head(_db: object, _agent: int) -> str:
-        return "c1"
-
-    monkeypatch.setattr(history_module, "load_checkpoint_history_full", load)
-    # Even an unchanged checkpoint id does not keep a view the tree reaches past.
-    monkeypatch.setattr(history_module, "latest_checkpoint_id", head)
-    monkeypatch.setattr(history_module.time, "monotonic", lambda: clock["now"])
-    cache = history_module.HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
-    db = cast(Database, object())
-    cache.get(db, 1)
-    cache.get(db, 1, needs=99)  # an orphan reaches past the history: too soon to rebuild
-    assert len(loads) == 1
-    clock["now"] += 2.5
-    cache.get(db, 1, needs=99)  # long enough since the build: rebuilt once ...
-    cache.get(db, 1, needs=99)  # ... and not again at once
-    assert len(loads) == 2
-
-
 def test_a_block_carries_the_context_through_it_and_a_reply_its_request(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    db_conn: Connection[Any],
 ) -> None:
-    units = {(u.kind, u.i0): u for u in read(World(monkeypatch)).units}
-    # The first request sent 100 tokens (the prompt and the ask); the ask is the context through it.
+    units = {(u.kind, u.i0): u for u in read(World(database, db_conn)).units}
+
     assert units[("inbound", 1)].context_total == 100
-    # The reply's one output token is split between its thinking and its call: they add up to it.
+
     thinking, call = units[("thinking", 2)], units[("call", 2)]
     assert thinking.context_total == 100 + (thinking.context_tokens or 0)
     assert call.context_total == 101
-    # The tool result adds its 99; the next request sent exactly that.
+
     assert units[("output", 2)].context_total == 200
     assert units[("text", 4)].context_total == 201
     assert {u.session for u in units.values()} == {0}
-    # The reply's blocks carry its request (200 is the second one's input); other blocks carry none.
+
     assert [(k, i) for (k, i), u in units.items() if u.request is not None] == [
         ("thinking", 2),
         ("call", 2),
@@ -394,11 +425,14 @@ def test_a_block_carries_the_context_through_it_and_a_reply_its_request(
         100,
         1,
     )
-    assert units[("text", 4)].request is not None and units[("text", 4)].request.input == 200  # type: ignore[union-attr]
+    request = units[("text", 4)].request
+    assert request is not None and request.input == 200
 
 
-def test_a_block_no_request_has_read_has_no_context_total(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
+def test_a_block_no_request_has_read_has_no_context_total(
+    database: Database, db_conn: Connection[Any]
+) -> None:
+    world = World(database, db_conn)
     world.view = view(
         [
             *history_messages(),
@@ -413,29 +447,32 @@ def test_a_block_no_request_has_read_has_no_context_total(monkeypatch: pytest.Mo
 
 
 def test_units_carry_their_tokens_and_whether_they_are_estimated(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    db_conn: Connection[Any],
 ) -> None:
-    world = World(monkeypatch)
+    world = World(database, db_conn)
     units = {(u.kind, u.i0): u for u in read(world).units}
-    # The tool result is alone between the two requests: 200 - 100 - 1 (the first reply's output).
+
     result = units[("output", 2)]
     assert (result.context_tokens, result.generation_tokens, result.estimated) == (99, None, False)
-    # The inbound shares the first request's input with the system prompt: a share, so estimated.
+
     inbound = units[("inbound", 1)]
     assert inbound.estimated is True
     assert 0 < (inbound.context_tokens or 0) < 100
-    # The first reply's one output token is divided between its reasoning and its call.
+
     thinking, call = units[("thinking", 2)], units[("call", 2)]
     assert (thinking.estimated, call.estimated) == (True, True)
     assert (thinking.context_tokens or 0) + (call.context_tokens or 0) == 1
     assert (thinking.generation_tokens or 0) + (call.generation_tokens or 0) == 1
-    # A reply that is only text is the provider's own output count.
+
     done = units[("text", 4)]
     assert (done.context_tokens, done.generation_tokens, done.estimated) == (1, 1, False)
 
 
-def test_a_unit_no_request_has_read_has_no_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
+def test_a_unit_no_request_has_read_has_no_tokens(
+    database: Database, db_conn: Connection[Any]
+) -> None:
+    world = World(database, db_conn)
     world.view = view(
         [
             *history_messages(),
@@ -451,8 +488,10 @@ def test_a_unit_no_request_has_read_has_no_tokens(monkeypatch: pytest.MonkeyPatc
     ]
 
 
-def test_a_node_sums_the_context_tokens_of_its_messages(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
+def test_a_node_sums_the_context_tokens_of_its_messages(
+    database: Database, db_conn: Connection[Any]
+) -> None:
+    world = World(database, db_conn)
     world.nodes = [stored(1, level=1, span=(1, 3), start=0, end=2)]
     node = read(world).nodes[0]
     units = [u for u in read(world).units if node.span_start <= u.i0 <= node.span_end]
@@ -463,8 +502,10 @@ def test_a_node_sums_the_context_tokens_of_its_messages(monkeypatch: pytest.Monk
     )
 
 
-def test_a_node_no_request_has_read_has_no_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch)
+def test_a_node_no_request_has_read_has_no_tokens(
+    database: Database, db_conn: Connection[Any]
+) -> None:
+    world = World(database, db_conn)
     world.view = view(
         [
             *history_messages(),
