@@ -2,7 +2,6 @@
 
 import { type RefObject, useCallback, useLayoutEffect, useRef } from "react";
 
-// Separate enter/exit speeds and a settling interval prevent threshold flicker.
 const FAST_PX_PER_MS = 1.8;
 const SLOW_PX_PER_MS = 0.6;
 const SLOW_SETTLE_MS = 120;
@@ -15,7 +14,6 @@ interface ScrollMotion {
   slowSince: number | null;
 }
 
-/** Temporarily let pinned titles scroll in flow during rapid movement. */
 export function useStickyHeaderMotion(
   wrapperRef: RefObject<HTMLDivElement | null>,
   threadKey: string | undefined,
@@ -54,7 +52,6 @@ export function useStickyHeaderMotion(
     motion.at = now;
     if (compensated || distance === 0) return;
 
-    // The first movement after a pause belongs to a frame, not the whole idle gap.
     const speed = distance / (elapsed > IDLE_SETTLE_MS ? 16 : Math.max(8, elapsed));
     if (!motion.suppressed && speed >= FAST_PX_PER_MS) {
       motion.suppressed = true;
