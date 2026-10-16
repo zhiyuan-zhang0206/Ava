@@ -9,8 +9,9 @@ tags: [gateway, agents, lm]
 
 After an agent's turn the web console shows model-chosen reply candidates in the empty
 composer's placeholder, using its ordinary font and colour. Several candidates carry a
-`[1/3]` position marker. Up/Down cycles through them; Right fills the selected text and
-places the caret at its end, without the marker. Enter then sends the draft.
+`[1/3]` position marker. Up/Down moves through them, stopping at the first and last
+(no wrap-around); Right fills the selected text and places the caret at its end, without
+the marker. Enter then sends the draft.
 
 ## Trigger (frontend)
 

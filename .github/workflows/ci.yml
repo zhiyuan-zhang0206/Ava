@@ -303,7 +303,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Python deps
@@ -338,7 +338,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Python deps
@@ -446,7 +446,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           # This job installs no project dependencies. Do not let it publish
           # an incomplete cache under the lockfile key used by install jobs.
           enable-cache: false
@@ -482,7 +482,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -656,7 +656,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Python deps
@@ -893,7 +893,7 @@ jobs:
         if: ${{ env.STATUS == 'merged' }}
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Python deps
@@ -990,7 +990,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -1192,7 +1192,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -1290,7 +1290,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
@@ -1423,7 +1423,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Python deps
@@ -1447,7 +1447,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Python deps
@@ -1571,7 +1571,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Python deps
@@ -1939,7 +1939,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Node
@@ -2051,7 +2051,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Node
@@ -2163,7 +2163,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: 0.12.23
+          version: 0.13.1
           enable-cache: true
 
       - name: Install Node

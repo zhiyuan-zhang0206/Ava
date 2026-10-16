@@ -299,6 +299,9 @@ check-typed-exception = true
 # S603 (untrusted input) is inapplicable. The contract lives in
 # scripts/provision/docs/prepush-selection.ava.okf.md.
 "scripts/provision/prepush_frontend.py" = ["S603"]
+# brew_prefix resolves the Homebrew prefix through a fixed argv; the optional
+# formula name is a local literal, not external input.
+"base/host/brew_pin.py" = ["S603"]
 # ava_syntax_fix uses fullwidth chars in docstrings as examples of what the fixer targets,
 # and carries Chinese notes from data analysis of real error corpora.
 "ava_builtins/plugins/ava_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]

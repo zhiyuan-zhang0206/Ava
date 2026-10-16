@@ -4,16 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStickyHeaderMotion } from "./use-sticky-header-motion";
 
-function Harness({ thread = "first", compensated = false, onRestore }: {
+function Harness({ thread = "first", autoScrolled = false, onRestore }: {
   thread?: string;
-  compensated?: boolean;
+  autoScrolled?: boolean;
   onRestore: () => void;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const track = useStickyHeaderMotion(wrapperRef, thread, onRestore);
   return (
     <div ref={wrapperRef} data-testid="wrapper" className="group/timeline">
-      <div data-slot="scroll-area-viewport" onScroll={(event) => track(event.currentTarget, compensated)}>
+      <div data-slot="scroll-area-viewport" onScroll={(event) => track(event.currentTarget, autoScrolled)}>
         <button type="button">Message title</button>
         <p>Message body</p>
       </div>
@@ -90,7 +90,7 @@ describe("sticky titles during rapid scrolling", () => {
 
   it("does not treat history prepend compensation as a fast gesture", () => {
     const { wrapper, viewport, rerender, onRestore } = setup();
-    rerender(<Harness compensated onRestore={onRestore} />);
+    rerender(<Harness autoScrolled onRestore={onRestore} />);
     scroll(viewport, 3000);
     expect(wrapper.dataset.fastScrolling).toBeUndefined();
     rerender(<Harness onRestore={onRestore} />);
