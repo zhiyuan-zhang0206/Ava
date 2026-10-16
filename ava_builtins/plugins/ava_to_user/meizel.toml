@@ -1,5 +1,5 @@
 [uses]
-"agent_runtime.py" = ["_state.py", "counting.py"]
+"agent_runtime.py" = ["_state.py"]
 "plugin.py" = ["written.py"]
-"tests" = ["_state.py", "agent_runtime.py", "counting.py", "plugin.py", "written.py"]
+"tests" = ["_state.py", "agent_runtime.py", "plugin.py", "written.py"]
 "written.py" = ["agent_runtime.py"]

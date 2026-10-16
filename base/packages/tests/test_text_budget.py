@@ -40,6 +40,14 @@ def test_words_count_ignores_punctuation_whitespace_and_symbols():
     assert count_words("\U0001f642\U0001f642") == 0
 
 
+def test_words_count_edge_shapes():
+    assert count_words("123456") == 1
+    assert count_words("v2.1 shipped") == 3
+    assert count_words("multi\nline\nwords") == 3
+    assert count_words("caf\u00e9 r\u00e9sum\u00e9") == 2
+    assert count_words("## heading\n\n- item one\n- item two") == 5
+
+
 def test_measure_chars_counts_code_points():
     assert measure("abc", Unit.CHARS) == 3
     assert measure("\u4f60\u597d", Unit.CHARS) == 2
