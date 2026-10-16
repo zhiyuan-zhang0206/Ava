@@ -41,6 +41,7 @@ _NO_TIMESTAMP_NOTE_TAGS = frozenset(
         NoteTag.HISTORY_DUMP,
         NoteTag.SDK_HINT,
         NoteTag.MEMORY_WRITE_CHECK,
+        NoteTag.TO_USER_SOFT_LIMIT,
         NoteTag.AGENT_REPLY,
         NoteTag.SILENT_IDLE_CONTINUE,
         NoteTag.SECURITY,

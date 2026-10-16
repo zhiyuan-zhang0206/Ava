@@ -9,6 +9,7 @@ BUILTIN_PLUGINS: tuple[str, ...] = (
     "ava_sdk_reminder",
     "ava_silent_idle",
     "ava_memory",
+    "ava_to_user",
 )
 
 __all__ = [

@@ -624,6 +624,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "ava_builtins/plugins/ava_to_user/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "ava_builtins/plugins/lm_google/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

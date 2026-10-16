@@ -27,6 +27,7 @@ def test_note_tag_value_set() -> None:
         "silent_idle_continue",
         "memory",
         "memory_write_check",
+        "to_user_soft_limit",
         "lifecycle_terminate",
         "lifecycle_restart",
         "lifecycle_resurrect",

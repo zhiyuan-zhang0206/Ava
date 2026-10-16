@@ -444,7 +444,15 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         "serves referenced files to the user; no copying, registration or server is needed. "
         "Keep linked files available. Use notifications when you need a reply; this "
         "document does not itself send a notification. If you previously maintained "
-        "to_user.html, preserve it and rewrite its current shared context in to_user.md."
+        "to_user.html, preserve it and rewrite its current shared context in to_user.md. "
+        "Keep the panel within its soft limit "
+        f"({slices.prompt.to_user_soft_limit_words} words, counted CJK-aware; a reminder "
+        "points back here when a panel you wrote exceeds it). Links and images in the "
+        "panel are shown to the user like in a normal Markdown editor — clickable, images "
+        "render — so a report, analysis or image can live in its own file and be linked "
+        "from the panel. A small task can carry its whole story on the page; as it grows, "
+        "keep the page as the user's entry point — current state, decisions, next steps — "
+        "and link the detail."
     )
 
 
