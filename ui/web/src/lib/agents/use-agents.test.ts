@@ -41,6 +41,22 @@ beforeEach(() => {
 afterEach(() => { cleanup(); _qc.clear(); vi.restoreAllMocks(); });
 
 describe("bounded roster and independent selection", () => {
+  it("replaces cached vision support with authoritative unknown metadata", async () => {
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => expect(result.current.activeAgent?.supports_vision).toBe(true));
+    vi.mocked(api.getAgentRoster).mockResolvedValue({
+      agents: MOCK_AGENTS.map((agent) => ({ ...agent, supports_vision: null })), ancestors: [],
+    });
+    await act(async () => { await _qc.invalidateQueries({ queryKey: AGENTS_QUERY_KEY }); });
+    await waitFor(() => expect(result.current.activeAgent?.supports_vision).toBeNull());
+    expect(result.current.activeAgent?.status).toBe("running");
+    expect(result.current.agents).toHaveLength(2);
+    expect(api.listAgents).not.toHaveBeenCalled();
+    vi.mocked(api.getAgent).mockResolvedValue({ ...row(99, "terminated"), supports_vision: null });
+    act(() => result.current.setActiveId(99));
+    await waitFor(() => expect(result.current.activeAgent?.agent_id).toBe(99));
+    await waitFor(() => expect(result.current.activeAgent?.supports_vision).toBeNull());
+  });
   it("loads one coherent tree without reading the archive", async () => {
     vi.mocked(api.getAgentRoster).mockResolvedValue({ agents: [row(3)], ancestors: [{ agent_id: 2, spawner: "user", fork_source_agent_id: null }] });
     const { result } = renderHook(() => useAgents(noop), { wrapper });

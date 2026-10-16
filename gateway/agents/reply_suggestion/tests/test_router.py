@@ -11,6 +11,7 @@ from base.api_contracts.agent_contract import AgentNotFound
 from base.lm.catalog import ModelCatalog
 from gateway.agents.reply_suggestion.router import router
 from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse
+from gateway.agents.reply_suggestion.service import ReplySuggestionConfigurationError
 from gateway.agents.reply_suggestion.tests.support import Harness
 from gateway.http.disconnect import run_until_disconnect
 
@@ -51,6 +52,16 @@ def test_the_route_reports_why_there_is_no_suggestion_as_a_200() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"suggestions": [], "reason": "not_useful"}
+
+
+def test_bad_model_configuration_is_an_explicit_capability_failure() -> None:
+    response = client_for(
+        StubService(ReplySuggestionConfigurationError("private model configuration"))
+    ).post("/api/agents/7/reply-suggestion")
+    assert response.status_code == 503
+    assert response.json()["code"] == "reply_suggestion_unavailable"
+    assert response.json()["retryable"] is False
+    assert "private model configuration" not in response.text
 
 
 def test_a_non_integer_agent_id_is_rejected() -> None:

@@ -1,5 +1,3 @@
-"""The reply-suggestion settings and the boot-time check of the models they name."""
-
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -101,10 +99,10 @@ def test_the_draft_model_is_built_with_reasoning_off(
     service = reply_suggestion_service(
         config,  # pyright: ignore[reportArgumentType]
         db=object(),  # pyright: ignore[reportArgumentType]
-        catalog=model_catalog,
+        catalog_reader=lambda: model_catalog,
         rendering=object(),  # pyright: ignore[reportArgumentType]
     )
-    service._draft_model("deepseek-flash")
+    service._draft_model("deepseek-flash", model_catalog)
 
     ((model, kwargs),) = built
     assert model == "deepseek-flash"

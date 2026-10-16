@@ -9,12 +9,9 @@ tags: []
 
 Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (needs a cluster secret; loopback unless `AVA_MACHINE_HOST` is declared, which needs declared transport encryption — `gateway/cluster/server.py:main`). Pure JSON API, no HTML rendering — with a small enumerated set of exceptions: `GET /api/okf/graph` (D3 knowledge-graph page), uploads `FileResponse`, the agents' page-server reverse proxy, and the grafana reverse proxy. Frontend, CLI, agent SDK (`ava.agents.*`) and bootstrap scripts use the same `/api/*` endpoints.
 
-## Terminology (domain ubiquitous language)
+## Terminology
 
-> This is the authoritative terminology for the gateway domain.
-
-- **Gateway** — one FastAPI app, one port; after cutover more than an adapter, also the cluster orchestrator (`gateway/cluster/router.py`; `ops/cluster/rpc.py` for cross-machine RPC to agent-ops `/ops`). Keeps the old name — `gateway` is the identifier for 170+ files, renaming churn outweighs benefit. Three "not's": **not the lifecycle owner** (`agents_meta` is the truth; agents spawn/terminate/heartbeat via DB + the native supervisor; release decisions run outside the gateway too, a retained native operation), **does not route inter-agent messages** (`inbound_messages` is the bus; gateway writes to it via `ops/lifecycle/delivery.py:deliver_chat_inbound`, never routes between agents), **stateless** (restart loses no state). Chat writes may carry a `client_message_id` (unique constraint with the inbound); `POST .../messages/reconcile` returns the stable `inbound_id` after an ambiguous response and replays the pending wake/resurrection tail — a gateway death cannot duplicate chat.
-- **Client** — HTTP consumers of the gateway (more than one): Next.js browser frontend + agent SDK on agent-runner, both directly connect to `/api/*` over private network. Client **does not** talk to agents directly — everything goes through gateway HTTP.
+Authoritative vocabulary: [[gateway/docs/terminology.ava.okf.md|Gateway terminology]].
 
 ## Core Responsibilities
 
@@ -69,7 +66,7 @@ Feature packages (routes + helpers + wire models):
 [[services/derived/insights/run_timeline/docs/run_timeline.ava.okf.md|run_timeline]] (proxied),
 [[gateway/inspect/docs/inspect.ava.okf.md|inspect]],
 [[gateway/schedules/docs/schedules.ava.okf.md|schedules]],
-[[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md|mcp_server]], `auth`, `lgtm`,
+[[gateway/mcp_server/docs/mcp-endpoint/mcp-endpoint.ava.okf.md|mcp_server]], `auth`, `lgtm`,
 `middleware`, `extensions`. [[routers.ava.okf.md]]:
 single-module routers. [[agent/db/docs/db.ava.okf.md]]: Postgres pool.
 
@@ -82,3 +79,12 @@ single-module routers. [[agent/db/docs/db.ava.okf.md]]: Postgres pool.
 - **Stateless design**: Gateway does not hold agent process state. Restarting Gateway does not affect running agents (they are detached processes, double fork reparented to init, not hanging off the gateway/ops process tree)
 - **Endpoint contract**: `/docs` / `/redoc` / `/openapi.json` all `None` in `create_app` (to prevent route schema leakage) — no OpenAPI pages; `openapi_schema()` mounts routes onto a bare `FastAPI` for codegen, which generates frontend / SDK types from the code
 - **Concurrency model**: async/await full chain (FastAPI + psycopg_pool + aredis)
+
+
+## Model capability failures
+
+[[gateway/docs/model-capability-failures.ava.okf.md|Model capability failures]] — which requests fail explicitly while management stays up.
+
+## Error responses and middleware order
+
+[[gateway/docs/error-responses-and-middleware-order.ava.okf.md|Error responses and middleware order]] — the typed 500 envelope, CORS placement and middleware order.

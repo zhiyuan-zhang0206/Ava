@@ -1,7 +1,4 @@
-// Default-model control tests — read the stored value, PUT a new one.
-//
-// Renders <DefaultModelPanel /> directly; useSectionVisible defaults true so the
-// queries enable. Mock at the api layer.
+
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -89,7 +86,7 @@ describe("DefaultModelPanel", () => {
     wrap();
     const select = await screen.findByTestId<HTMLSelectElement>("select-default-model");
     await waitFor(() => expect(select.value).toBe("deepseek-flash"));
-    // optgroup labels are an attribute, not text — read them off the DOM.
+
     const groups = [...select.querySelectorAll("optgroup")].map((g) => g.label);
     expect(groups).toEqual(["DeepSeek", "Claude"]);
     expect([...select.options].map((o) => o.value)).toEqual([
@@ -184,4 +181,12 @@ describe("DefaultModelPanel", () => {
     expect(await screen.findByText(/Couldn't load the default model/)).toBeTruthy();
     expect(screen.queryByText(/boom 500/)).toBeNull();
   });
+});
+
+it("keeps the default model read-only when the catalog fails", async () => {
+  vi.mocked(api.getModels).mockRejectedValue(new Error("provider private diagnostic"));
+  wrap();
+  expect(await screen.findByText(/Couldn't load the default model/)).toBeTruthy();
+  expect(screen.queryByTestId("save-default-model")).toBeNull();
+  expect(screen.queryByText(/provider private diagnostic/)).toBeNull();
 });

@@ -1,19 +1,3 @@
-"""Understanding endpoints — /api/agents/{id}/sessions and /api/agents/{id}/understanding/*.
-
-The understanding tree is built by the agent host's consumer from chunk jobs: the producers enqueue
-them as an agent runs (`base/agents/history/hierarchy/chunks.py`), and this module is the manual way
-to build what they did not cover, session by session (a session is the stretch between two
-compactions; `base/agents/history/hierarchy/sessions.py`).
-
-- `GET /api/agents/{id}/sessions` lists the sessions with their coverage and an estimated cost;
-- `POST /api/agents/{id}/understanding/build` cuts the chosen sessions into chunk jobs (the live
-  rule, minus what level 1 already covers) and queues them together with one rebuild of the levels
-  above (`base/agents/history/hierarchy/build.py`, `rebuild.py`); `dry_run` plans and prices only;
-- `GET /api/agents/{id}/understanding/builds/{build_id}` reports a build's progress and actual cost.
-
-Building the session still in progress is what closing the live segment used to be.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -55,18 +39,18 @@ from base.db import Database, agent_exists
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError
 from gateway.agents.history.read_inputs import UnderstandingReadPolicy
+from gateway.http.model_catalog import require_model_catalog
 
 router = APIRouter()
 
 
 class SessionCoverage(BaseModel):
-    """How much of a session's describable material the level-1 nodes cover.
-
-    `none` / `partial` / `full`; `ratio` is `covered_messages / total_messages`. Runs that hold only
-    framework notes count as covered. A session with nothing to describe is `full`.
-    """
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": "How much of a session's describable material the level-1 nodes cover.\n\n`none` / `partial` / `full`; `ratio` is `covered_messages / total_messages`. Runs that hold only\nframework notes count as covered. A session with nothing to describe is `full`."
+        },
+    )
 
     status: Literal["none", "partial", "full"]
     ratio: float
@@ -75,12 +59,12 @@ class SessionCoverage(BaseModel):
 
 
 class CostEstimateOut(BaseModel):
-    """The cold-cache price of building what a session (or a request) still lacks.
-
-    `cost_usd` is None when the agent's model has no price. See `cost_basis` of the response.
-    """
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": "The cold-cache price of building what a session (or a request) still lacks.\n\n`cost_usd` is None when the agent's model has no price. See `cost_basis` of the response."
+        },
+    )
 
     jobs: int
     input_tokens: int
@@ -89,13 +73,12 @@ class CostEstimateOut(BaseModel):
 
 
 class SessionOut(BaseModel):
-    """One session. `number` 1 is the oldest. `boundary_checkpoint_id` is None for the session in
-    progress. `start` / `end` are the first and last message read times (None when no message has one).
-    `context_tokens` / `generation_tokens` total the session's messages (`message_tokens`: the head
-    and every message a request has read); `estimated` is true when any of that was a share of a
-    provider total rather than the provider's own number, `exact_fraction` the exact share."""
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": "One session. `number` 1 is the oldest. `boundary_checkpoint_id` is None for the session in\nprogress. `start` / `end` are the first and last message read times (None when no message has one).\n`context_tokens` / `generation_tokens` total the session's messages (`message_tokens`: the head\nand every message a request has read); `estimated` is true when any of that was a share of a\nprovider total rather than the provider's own number, `exact_fraction` the exact share."
+        },
+    )
 
     number: int
     boundary_checkpoint_id: str | None
@@ -112,13 +95,12 @@ class SessionOut(BaseModel):
 
 
 class SessionsResponse(BaseModel):
-    """GET /api/agents/{agent_id}/sessions response.
-
-    `model` is the agent's model, the one the build's jobs run and are priced for. `cost_basis`
-    states how every `estimate` is computed.
-    """
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": "GET /api/agents/{agent_id}/sessions response.\n\n`model` is the agent's model, the one the build's jobs run and are priced for. `cost_basis`\nstates how every `estimate` is computed."
+        },
+    )
 
     agent_id: int
     model: str
@@ -128,10 +110,12 @@ class SessionsResponse(BaseModel):
 
 
 class BuildRequest(BaseModel):
-    """What to build: `sessions` (numbers from the sessions list) or a `from` / `to` time range
-    (every session whose read-time extent intersects it), exactly one of the two."""
-
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "description": "What to build: `sessions` (numbers from the sessions list) or a `from` / `to` time range\n(every session whose read-time extent intersects it), exactly one of the two."
+        },
+    )
 
     sessions: list[int] | None = None
     from_: datetime | None = Field(default=None, alias="from")
@@ -152,12 +136,12 @@ class BuildRequest(BaseModel):
 
 
 class BuildJobOut(BaseModel):
-    """One chunk job of a build. `state`: `planned` (a dry run), `enqueued` (new, or an ended job of
-    the same stretch taken up again) or `merged` (a pending or running job of the same stretch).
-    `start_index` / `end_index` are request-list indices of the session's segment (head at 0);
-    `first_message` / `last_message` the inclusive stitched message span the job describes."""
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": "One chunk job of a build. `state`: `planned` (a dry run), `enqueued` (new, or an ended job of\nthe same stretch taken up again) or `merged` (a pending or running job of the same stretch).\n`start_index` / `end_index` are request-list indices of the session's segment (head at 0);\n`first_message` / `last_message` the inclusive stitched message span the job describes."
+        },
+    )
 
     session: int
     start_index: int
@@ -170,14 +154,12 @@ class BuildJobOut(BaseModel):
 
 
 class BuildResponse(BaseModel):
-    """POST /api/agents/{agent_id}/understanding/build response.
-
-    `build_id` and `rebuild_id` are None for a dry run, which writes nothing. `queued` counts the jobs
-    newly on the queue, `merged` those of the same stretch already live. `jobs` may be empty
-    (everything chosen is covered): the rebuild of the upper levels is still queued.
-    """
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": "POST /api/agents/{agent_id}/understanding/build response.\n\n`build_id` and `rebuild_id` are None for a dry run, which writes nothing. `queued` counts the jobs\nnewly on the queue, `merged` those of the same stretch already live. `jobs` may be empty\n(everything chosen is covered): the rebuild of the upper levels is still queued."
+        },
+    )
 
     agent_id: int
     dry_run: bool
@@ -193,10 +175,12 @@ class BuildResponse(BaseModel):
 
 
 class BuildJobProgress(BaseModel):
-    """A build's job as it stands. Token counts and `cost_usd` are summed over its provider calls so
-    far (`cost_usd` None when the model has no price)."""
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": "A build's job as it stands. Token counts and `cost_usd` are summed over its provider calls so\nfar (`cost_usd` None when the model has no price)."
+        },
+    )
 
     job_id: int
     session: int
@@ -214,11 +198,12 @@ class BuildJobProgress(BaseModel):
 
 
 class RebuildProgressOut(BaseModel):
-    """The build's rebuild of the upper levels. `leaves` is the level-1 nodes it replayed; the usage
-    is that of the grouping calls since it started (or, before it starts, since the build); `levels`
-    counts the agent's nodes per level above 1 right now."""
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": "The build's rebuild of the upper levels. `leaves` is the level-1 nodes it replayed; the usage\nis that of the grouping calls since it started (or, before it starts, since the build); `levels`\ncounts the agent's nodes per level above 1 right now."
+        },
+    )
 
     id: int
     status: Literal["pending", "running", "done", "failed"]
@@ -235,14 +220,12 @@ class RebuildProgressOut(BaseModel):
 
 
 class BuildProgressResponse(BaseModel):
-    """GET /api/agents/{agent_id}/understanding/builds/{build_id} response.
-
-    `phase`: `chunks` (jobs still live), `rebuild_pending` (jobs ended; the rebuild waits for the
-    agent's chunk jobs to end or is running), `done`, `failed` (the rebuild failed). A job that failed
-    leaves its stretch undescribed; the build still completes. `cost_usd` is the actual total so far.
-    """
-
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        json_schema_extra={
+            "description": "GET /api/agents/{agent_id}/understanding/builds/{build_id} response.\n\n`phase`: `chunks` (jobs still live), `rebuild_pending` (jobs ended; the rebuild waits for the\nagent's chunk jobs to end or is running), `done`, `failed` (the rebuild failed). A job that failed\nleaves its stretch undescribed; the build still completes. `cost_usd` is the actual total so far."
+        },
+    )
 
     build_id: int
     agent_id: int
@@ -282,7 +265,7 @@ def _require_agent(request: Request, agent_id: int) -> None:
 def _load(
     db: Database, agent_id: int, *, policy: UnderstandingReadPolicy
 ) -> tuple[FullHistory, list[Session]]:
-    """The stored history and its sessions (blocking)."""
+
     history = load_checkpoint_history_full(db, agent_id)
     boundaries = list(reversed(list_compact_boundary_checkpoint_ids(db, agent_id)))
     return history, build_sessions(
@@ -305,8 +288,7 @@ def build_model(
 def chunk_size(
     db: Database, agent_id: int, *, catalog: ModelCatalog, policy: UnderstandingReadPolicy
 ) -> int:
-    """The agent's chunk size in tokens: the ratio of its own model's soft compaction threshold,
-    with its own overrides (the rule of the live hook)."""
+
     model, overrides = agent_model_target(
         db,
         agent_id,
@@ -319,16 +301,17 @@ def chunk_size(
 
 def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
     _require_agent(request, agent_id)
+    catalog = require_model_catalog(request)
     db: Database = request.app.state.db
     policy: UnderstandingReadPolicy = request.app.state.understanding_policy
     history, sessions = _load(db, agent_id, policy=policy)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
-    model = build_model(db, agent_id, catalog=request.app.state.catalog, policy=policy)
+    model = build_model(db, agent_id, catalog=catalog, policy=policy)
     jobs = plan_jobs(
         history,
         sessions,
         covered,
-        threshold=chunk_size(db, agent_id, catalog=request.app.state.catalog, policy=policy),
+        threshold=chunk_size(db, agent_id, catalog=catalog, policy=policy),
         timeline_inputs=policy.rendering,
     )
     totals = summarize_segments(history)
@@ -356,7 +339,7 @@ def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
                     estimate_cost(
                         model,
                         [j for j in jobs if j.session == s.number],
-                        prices=request.app.state.catalog.prices,
+                        prices=catalog.prices,
                     )
                 ),
             )
@@ -400,6 +383,7 @@ def _select(sessions: list[Session], body: BuildRequest) -> list[Session]:
 
 def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> BuildResponse:
     _require_agent(request, agent_id)
+    catalog = require_model_catalog(request)
     db: Database = request.app.state.db
     policy: UnderstandingReadPolicy = request.app.state.understanding_policy
     history, sessions = _load(db, agent_id, policy=policy)
@@ -409,14 +393,14 @@ def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> Buil
         history,
         chosen,
         covered,
-        threshold=chunk_size(db, agent_id, catalog=request.app.state.catalog, policy=policy),
+        threshold=chunk_size(db, agent_id, catalog=catalog, policy=policy),
         timeline_inputs=policy.rendering,
     )
     estimate = _estimate_out(
         estimate_cost(
-            build_model(db, agent_id, catalog=request.app.state.catalog, policy=policy),
+            build_model(db, agent_id, catalog=catalog, policy=policy),
             planned,
-            prices=request.app.state.catalog.prices,
+            prices=catalog.prices,
         )
     )
     numbers = [s.number for s in chosen]
@@ -464,61 +448,30 @@ async def _run[T](fn: Callable[..., T], *args: object) -> T:
         ) from exc
 
 
-@router.get("/api/agents/{agent_id}/sessions")
+@router.get(
+    "/api/agents/{agent_id}/sessions",
+    description="The agent's sessions (the stretches between two compactions), oldest first, with their coverage by the understanding tree and what building the rest would cost.\n\nNumbers are 1-based, grow with time and are stable: a new session is only ever added at the\nend. The last session has no boundary checkpoint while it is still in progress. Times are the\nmessages' read times; `peak_input_tokens` is the largest provider-reported input of any\nrequest in the session. `coverage` counts the session's describable material (past its\nframework head, up to the last request the agent sent) that level-1 nodes already describe;\n`estimate` prices building what is still missing, on a cold cache and at full input price (see\n`cost_basis`: it is an estimate from the stored history, not a quote). 404 when the agent does\nnot exist; 503 when the stored history cannot be read.",
+)
 async def get_agent_sessions(agent_id: int, request: Request) -> SessionsResponse:
-    """The agent's sessions (the stretches between two compactions), oldest first, with their coverage by the understanding tree and what building the rest would cost.
 
-    Numbers are 1-based, grow with time and are stable: a new session is only ever added at the
-    end. The last session has no boundary checkpoint while it is still in progress. Times are the
-    messages' read times; `peak_input_tokens` is the largest provider-reported input of any
-    request in the session. `coverage` counts the session's describable material (past its
-    framework head, up to the last request the agent sent) that level-1 nodes already describe;
-    `estimate` prices building what is still missing, on a cold cache and at full input price (see
-    `cost_basis`: it is an estimate from the stored history, not a quote). 404 when the agent does
-    not exist; 503 when the stored history cannot be read.
-    """
     return await _run(_sessions_blocking, request, agent_id)
 
 
-@router.post("/api/agents/{agent_id}/understanding/build")
+@router.post(
+    "/api/agents/{agent_id}/understanding/build",
+    description="Build the understanding tree of chosen sessions by hand, then rebuild the levels above.\n\nChoose sessions by number (`sessions`) or by a `from` / `to` range (every session whose\nread-time extent intersects it). Each chosen session is cut into chunks by the live rule\n(a chunk per `AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold of\ngrowth in the provider-reported input, the session's remainder last); what level-1 nodes already cover is skipped exactly, a chunk that\noverlaps it is cut to its uncovered runs. The jobs run on the agent hosts' consumer in order,\none agent at a time; the session still in progress is built to the last request the agent has\nsent. Once the agent's chunk jobs have all ended, every node above level 1 and the grouping\ncursor are dropped and the levels above are rebuilt over all of the agent's level-1 nodes in\nmessage order; builds of one agent in flight merge into one rebuild. A job that fails leaves\nits stretch undescribed and the rebuild runs anyway.\n\nCost warning: these calls are NOT warm. A manual build reads a stored history long after the\nagent's last request, so every job's whole conversation prefix is billed at the full\n(cache-miss) input price; a 390K-token session costs that much input once per chunk. Always run\nwith `dry_run=true` first: it returns the chunk jobs that would be queued and the estimated\ncost (`cost_basis` says how) without writing anything, and it works whatever the feature switch.\n\nThe feature switch: with `AVA_UNDERSTANDING_ENABLED` off the build is still queued (jobs and\nrebuild) and waits, undescribed, until the switch is turned on; `understanding_enabled` in the\nresponse says which it is. A repeat request merges into the jobs and the pending rebuild already\nqueued and only records another build. Returns the jobs queued and a `build_id` for\n`GET .../understanding/builds/{build_id}`. 404 when the agent does not exist; 422 for an\nunknown session number, an empty selection or a range no session intersects; 503 when the\nstored history cannot be read.",
+)
 async def post_understanding_build(
     agent_id: int, body: BuildRequest, request: Request
 ) -> BuildResponse:
-    """Build the understanding tree of chosen sessions by hand, then rebuild the levels above.
 
-    Choose sessions by number (`sessions`) or by a `from` / `to` range (every session whose
-    read-time extent intersects it). Each chosen session is cut into chunks by the live rule
-    (a chunk per `AVA_UNDERSTANDING_CHUNK_RATIO` x the agent model's soft compaction threshold of
-    growth in the provider-reported input, the session's remainder last); what level-1 nodes already cover is skipped exactly, a chunk that
-    overlaps it is cut to its uncovered runs. The jobs run on the agent hosts' consumer in order,
-    one agent at a time; the session still in progress is built to the last request the agent has
-    sent. Once the agent's chunk jobs have all ended, every node above level 1 and the grouping
-    cursor are dropped and the levels above are rebuilt over all of the agent's level-1 nodes in
-    message order; builds of one agent in flight merge into one rebuild. A job that fails leaves
-    its stretch undescribed and the rebuild runs anyway.
-
-    Cost warning: these calls are NOT warm. A manual build reads a stored history long after the
-    agent's last request, so every job's whole conversation prefix is billed at the full
-    (cache-miss) input price; a 390K-token session costs that much input once per chunk. Always run
-    with `dry_run=true` first: it returns the chunk jobs that would be queued and the estimated
-    cost (`cost_basis` says how) without writing anything, and it works whatever the feature switch.
-
-    The feature switch: with `AVA_UNDERSTANDING_ENABLED` off the build is still queued (jobs and
-    rebuild) and waits, undescribed, until the switch is turned on; `understanding_enabled` in the
-    response says which it is. A repeat request merges into the jobs and the pending rebuild already
-    queued and only records another build. Returns the jobs queued and a `build_id` for
-    `GET .../understanding/builds/{build_id}`. 404 when the agent does not exist; 422 for an
-    unknown session number, an empty selection or a range no session intersects; 503 when the
-    stored history cannot be read.
-    """
     return await _run(_build_blocking, request, agent_id, body)
 
 
 def _progress_blocking(request: Request, agent_id: int, build_id: int) -> BuildProgressResponse:
     _require_agent(request, agent_id)
-    progress = load_build(
-        request.app.state.db_pool, agent_id, build_id, prices=request.app.state.catalog.prices
-    )
+    catalog = require_model_catalog(request)
+    progress = load_build(request.app.state.db_pool, agent_id, build_id, prices=catalog.prices)
     if progress is None:
         raise HTTPException(
             status_code=404, detail=f"build {build_id} of agent {agent_id} not found"
@@ -526,16 +479,12 @@ def _progress_blocking(request: Request, agent_id: int, build_id: int) -> BuildP
     return BuildProgressResponse.model_validate(asdict(progress))
 
 
-@router.get("/api/agents/{agent_id}/understanding/builds/{build_id}")
+@router.get(
+    "/api/agents/{agent_id}/understanding/builds/{build_id}",
+    description="A build's progress: each job's status and actual cost, then the rebuild of the upper levels.\n\n`phase` runs `chunks` (jobs live) then `rebuild_pending` (the rebuild waits for the agent's\nchunk jobs to end or is running) then `done`, or `failed` when the rebuild failed. Costs are\nsummed from the raw record of the provider calls so far at the price book's rates; a stalled\nbuild with `AVA_UNDERSTANDING_ENABLED` off stays in `chunks` with its jobs `pending`. 404 when\nthe agent or the build (of this agent) does not exist.",
+)
 async def get_understanding_build(
     agent_id: int, build_id: int, request: Request
 ) -> BuildProgressResponse:
-    """A build's progress: each job's status and actual cost, then the rebuild of the upper levels.
 
-    `phase` runs `chunks` (jobs live) then `rebuild_pending` (the rebuild waits for the agent's
-    chunk jobs to end or is running) then `done`, or `failed` when the rebuild failed. Costs are
-    summed from the raw record of the provider calls so far at the price book's rates; a stalled
-    build with `AVA_UNDERSTANDING_ENABLED` off stays in `chunks` with its jobs `pending`. 404 when
-    the agent or the build (of this agent) does not exist.
-    """
     return await _run(_progress_blocking, request, agent_id, build_id)

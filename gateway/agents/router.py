@@ -1,17 +1,3 @@
-"""Agent CRUD + spawn endpoints — /api/agents/* and /api/keyed/v1/agents.
-
-Covers list / get / keyed spawn / label patch, the birth-chain read
-(`GET /api/agents/{id}/born-chain` — the light half of `/neighbors` that the
-inherited-memory context note resolves), plus the model registry
-(`GET /api/models`) the spawn dialog renders. The lifecycle surface
-(compact / cancel / terminate / exited / resurrect / restart)
-lives in `lifecycle.py`; message + state reads (messages /
-trace / last-message / pending / activity / token-usage / context-breakdown)
-in `state.py`; the cross-machine forward helpers shared by all
-of them in `forward.py`. The per-agent events endpoints (SSE
-live tail + historical REST query) live in `gateway/events/agent_events.py`.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -32,6 +18,7 @@ from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.http.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
+from gateway.http.model_catalog import catalog_for_observation, require_model_catalog
 from gateway.inspect import neighbors
 from gateway.inspect.schemas import BornChainResponse, BornChainRow
 from gateway.schemas.models import ModelsResponse
@@ -43,20 +30,13 @@ from ops.rpc_schemas import (
 router = APIRouter()
 
 
-@router.patch("/api/agents/{agent_id}", status_code=204)
+@router.patch(
+    "/api/agents/{agent_id}",
+    status_code=204,
+    description='Manually set / reset an agent label.\n\nbody.label non-empty: UPDATE directly. Empty string (after strip):\nUPDATE label=NULL to reset back to "not set"; frontend re-displays\nfallback `#N`. Both cases also set `label_user_set=TRUE` — sticky bit\nso the background LLM CAS no longer overwrites (otherwise after the\nuser resets, the LLM would still match `label IS NULL` and rename it,\ndefeating the reset intent). The change and its `label_change` audit fact commit\ntogether; both cases publish LabelUpdated so SSE pushes in real time.\n\n404: agent_id does not exist.',
+)
 async def patch_agent(agent_id: int, body: LabelPatchRequest, request: Request) -> Response:
-    """Manually set / reset an agent label.
 
-    body.label non-empty: UPDATE directly. Empty string (after strip):
-    UPDATE label=NULL to reset back to "not set"; frontend re-displays
-    fallback `#N`. Both cases also set `label_user_set=TRUE` — sticky bit
-    so the background LLM CAS no longer overwrites (otherwise after the
-    user resets, the LLM would still match `label IS NULL` and rename it,
-    defeating the reset intent). The change and its `label_change` audit fact commit
-    together; both cases publish LabelUpdated so SSE pushes in real time.
-
-    404: agent_id does not exist.
-    """
     new_label: str | None = body.label if body.label else None
     await asyncio.to_thread(
         _patch_label_blocking, request.app.state.db_pool, agent_id, new_label, body.source
@@ -65,28 +45,19 @@ async def patch_agent(agent_id: int, body: LabelPatchRequest, request: Request) 
     return Response(status_code=204)
 
 
-@router.get("/api/models")
+@router.get(
+    "/api/models",
+    description="List selectable LLM models (grouped by provider) + the cluster default.\n\nRoster and tuning come from the model registry; current rates come from\nthe versioned pricing catalog. The default uses the same DB/config\nresolution as the birth stamp and spawn preflight.",
+)
 def get_models(request: Request) -> ModelsResponse:
-    """List selectable LLM models (grouped by provider) + the cluster default.
 
-    Roster and tuning come from the model registry; current rates come from
-    the versioned pricing catalog. The default uses the same DB/config
-    resolution as the birth stamp and spawn preflight.
-    """
     from base.agents.model.birth_config import resolve_default_model
     from base.lm.pricing import rates_at
     from base.lm.registry import explain_setting
     from gateway.schemas.models import ModelInfo, ModelPricing
 
-    # Plugin provider models are in the catalog (loaded once per process) — the spawn
-    # dropdown must list them even though the gateway never loads plugin.py.
-    catalog = request.app.state.catalog
+    catalog = require_model_catalog(request)
 
-    # Stable model facts come off the registry; volatile prices come off the
-    # effective-dated catalog. `effort_levels` is the same vocabulary the factory
-    # validates at model build (for extended-thinking-only models like
-    # claude-haiku-4-5 it is the binary thinking on/off vocabulary), so the
-    # dropdown and the wire behavior cannot drift apart.
     models: dict[str, ModelInfo] = {}
     for provider, model_list in catalog.supported_models.items():
         for model in model_list:
@@ -101,14 +72,7 @@ def get_models(request: Request) -> ModelsResponse:
                 cache_write_5m=rates.cache_write_5m,
                 cache_write_1h=rates.cache_write_1h,
             )
-            # The model's default effort: the per-model tuning layer, resolved
-            # through the registry's layering (NOT the raw field — same code
-            # path agents use, minus the explicit-env layer: the picker shows
-            # the model's own default, while a cluster-wide AVA_REASONING_EFFORT
-            # pin is operator policy visible in the config panel's per-model
-            # view). Validation guarantees spawnable models pin a concrete
-            # value; "" (provider's own default) surfaces as None for any
-            # model that slipped through without one.
+
             resolved_effort = explain_setting(
                 "reasoning_effort", model=model, explicit=None, models=catalog.models
             ).value
@@ -136,7 +100,10 @@ def get_models(request: Request) -> ModelsResponse:
     )
 
 
-@router.get("/api/agents")
+@router.get(
+    "/api/agents",
+    description="Read one directory page. History is explicit and never fetched implicitly.",
+)
 def get_agents(
     request: Request,
     scope: Annotated[roster.AgentDirectoryScope, Query()] = "live",
@@ -144,11 +111,11 @@ def get_agents(
     before_id: Annotated[int | None, Query(gt=0, le=9223372036854775807)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> roster.AgentDirectoryPage:
-    """Read one directory page. History is explicit and never fetched implicitly."""
+
     with request.app.state.db_pool.connection() as conn:
         return roster.list_directory(
             conn,
-            catalog=request.app.state.catalog,
+            catalog=catalog_for_observation(request.app.state.catalog),
             scope=scope,
             query=query,
             before_id=before_id,
@@ -159,13 +126,16 @@ def get_agents(
         )
 
 
-@router.get("/api/agents/roster")
+@router.get(
+    "/api/agents/roster",
+    description="Read the live tree and its necessary ancestor links in one snapshot.",
+)
 def get_agent_roster(request: Request) -> roster.AgentRoster:
-    """Read the live tree and its necessary ancestor links in one snapshot."""
+
     with request.app.state.db_pool.connection() as conn:
         return roster.select_roster(
             conn,
-            catalog=request.app.state.catalog,
+            catalog=catalog_for_observation(request.app.state.catalog),
             default_model_reader=lambda: cast(
                 str, request.app.state.config_authority.service_field_value("llm_model")
             ),
@@ -175,11 +145,7 @@ def get_agent_roster(request: Request) -> roster.AgentRoster:
 def _patch_label_blocking(
     pool: ConnectionPool, agent_id: int, new_label: str | None, source: str
 ) -> None:
-    """Sync label UPDATE + 404 guard + audit fact in one transaction — via to_thread.
 
-    A change the agent made itself is attributed to the agent (`agent:<id>`), which lets
-    `record_central_event` append it to the agent's open impersonation lease log in the same
-    transaction; an operator's change is not a borrowed actor's and stays out of it."""
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -203,41 +169,19 @@ def _patch_label_blocking(
     telemetry.emit_prepared(label_event)
 
 
-@router.post("/api/keyed/v1/agents", status_code=201, response_model_exclude_none=True)
+@router.post(
+    "/api/keyed/v1/agents",
+    status_code=201,
+    response_model_exclude_none=True,
+    description="Create or fork an agent through principal-bound keyed admission.\n\nSpawn is HTTP-uniform: every spawn funnels through\n`create_and_launch_agent`, which creates the agent row in the gateway\nprocess (the main data-plane identity — the target runner's ops server\nruns as the least-privilege `ava_runner` role and cannot INSERT agents)\nand forwards a launch-only op to the target runner's ops server, whether\nthe runner is remote or co-located on this box (localhost) — one code\npath, uniform logs/traces, no in-process shortcut. Auto label generation\nis done asynchronously by the services/derived/labeler daemon — does not block\nthe spawn response.\n\nPlain and fork first prompts commit with the row. The fork marker precedes\nits chat in that transaction. InboundArrived is a best-effort live hint;\nthe pending scan recovers a missed wake.\n\nbody.machine = None targets the local machine (which must be a registered\nagent-runner).\n\nCallers must keep the key fixed for one intent: a retry replays the retained\nbirth instead of creating another agent.\n\n400: the target machine is registered but has no agent-runner capability\n(wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the\nregistry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet),\nor the key already identifies a different request. 422: the scope header is\nnot principal-v1.",
+)
 async def post_guarded_agents(
     body: SpawnAgentRequest,
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
     idempotency_scope: str = Header(alias=SCOPE_HEADER),
 ) -> SpawnedAgent:
-    """Create or fork an agent through principal-bound keyed admission.
 
-    Spawn is HTTP-uniform: every spawn funnels through
-    `create_and_launch_agent`, which creates the agent row in the gateway
-    process (the main data-plane identity — the target runner's ops server
-    runs as the least-privilege `ava_runner` role and cannot INSERT agents)
-    and forwards a launch-only op to the target runner's ops server, whether
-    the runner is remote or co-located on this box (localhost) — one code
-    path, uniform logs/traces, no in-process shortcut. Auto label generation
-    is done asynchronously by the services/derived/labeler daemon — does not block
-    the spawn response.
-
-    Plain and fork first prompts commit with the row. The fork marker precedes
-    its chat in that transaction. InboundArrived is a best-effort live hint;
-    the pending scan recovers a missed wake.
-
-    body.machine = None targets the local machine (which must be a registered
-    agent-runner).
-
-    Callers must keep the key fixed for one intent: a retry replays the retained
-    birth instead of creating another agent.
-
-    400: the target machine is registered but has no agent-runner capability
-    (wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the
-    registry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet),
-    or the key already identifies a different request. 422: the scope header is
-    not principal-v1.
-    """
     if idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="guarded creation requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
@@ -249,7 +193,7 @@ async def post_guarded_agents(
             request.app.state.db_pool,
             request.app.state.db,
             request.app.state.bus,
-            catalog=request.app.state.catalog,
+            catalog=require_model_catalog(request),
             authority=request.app.state.config_authority,
             creation_key=key,
         )
@@ -257,19 +201,17 @@ async def post_guarded_agents(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.get("/api/agents/{agent_id}")
+@router.get(
+    "/api/agents/{agent_id}",
+    description="Full detail addressed by ID, including terminated agents outside loaded pages.\n\nThe browser and SDK status readers use this independent selection boundary.\nNotice bodies stay here and in the Inbox; directory cards contain counts.\nA nonexistent ID returns 404 rather than falling back to another agent.",
+)
 def get_agent(agent_id: int, request: Request) -> AgentRow:
-    """Full detail addressed by ID, including terminated agents outside loaded pages.
 
-    The browser and SDK status readers use this independent selection boundary.
-    Notice bodies stay here and in the Inbox; directory cards contain counts.
-    A nonexistent ID returns 404 rather than falling back to another agent.
-    """
     with request.app.state.db_pool.connection() as conn:
         snap = snapshot_module.select_one(
             conn,
             agent_id,
-            catalog=request.app.state.catalog,
+            catalog=catalog_for_observation(request.app.state.catalog),
             default_model_reader=lambda: cast(
                 str, request.app.state.config_authority.service_field_value("llm_model")
             ),
@@ -279,20 +221,12 @@ def get_agent(agent_id: int, request: Request) -> AgentRow:
     return AgentRow.model_validate(snap.model_dump())
 
 
-@router.get("/api/agents/{agent_id}/born-chain")
+@router.get(
+    "/api/agents/{agent_id}/born-chain",
+    description="The immutable birth chain above `agent_id`, nearest ancestor first\n(1 = direct birth parent) — one recursive `agents_meta.born_spawner` walk.\n\nThe light half of `/neighbors`, and separate on purpose: the inherited\nmemory context note resolves this chain at every window establishment, and\nit must not drag the tie graph's frozen-archive read + Loki live tail into\nthat path. Adds `machine` (which ancestors a reader can open locally) and\nkeeps `status` (the chain includes terminated ancestors). Terminates only\nwhen `born_spawner` is not an `agent:N` value (a user / external spawn).\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).",
+)
 def get_agent_born_chain(agent_id: int, request: Request) -> BornChainResponse:
-    """The immutable birth chain above `agent_id`, nearest ancestor first
-    (1 = direct birth parent) — one recursive `agents_meta.born_spawner` walk.
 
-    The light half of `/neighbors`, and separate on purpose: the inherited
-    memory context note resolves this chain at every window establishment, and
-    it must not drag the tie graph's frozen-archive read + Loki live tail into
-    that path. Adds `machine` (which ancestors a reader can open locally) and
-    keeps `status` (the chain includes terminated ancestors). Terminates only
-    when `born_spawner` is not an `agent:N` value (a user / external spawn).
-
-    404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
-    """
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:

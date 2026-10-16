@@ -22,11 +22,10 @@ from base.agents.observation.evidence import (
     availability,
     observation,
 )
+from base.agents.observation.snapshot import agent_supports_vision
 from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import AgentStatus, LivenessState
 from base.lm.catalog import ModelCatalog
-from base.lm.factory import model_supports_vision
-from base.lm.registry import resolve_available_model
 
 AgentDirectoryScope = Literal["live", "terminated", "all"]
 
@@ -50,7 +49,7 @@ class AgentCard(AgentLineage):
     last_inbound_at: datetime
     label: str | None
     machine: str
-    supports_vision: bool
+    supports_vision: bool | None
     liveness_state: LivenessState
     availability: AgentAvailability | None = None
     observation: AgentObservation
@@ -87,7 +86,7 @@ _CARD_COLUMNS = """
     COALESCE(a.last_active_at, a.started_at, a.spawned_at) AS last_active_at,
     COALESCE(im.last_inbound_at, a.started_at, a.spawned_at) AS last_inbound_at,
     t.label, a.machine, a.heartbeat_paused_until, a.liveness_state,
-    a.config_overlay ->> 'llm_model' AS effective_model,
+    a.config_overlay, a.birth_config,
     mp.last_probe_at AS machine_probe_at, mp.agent_host_online, a.lease_expires_at,
     a.last_admission_outcome, a.last_admission_at,
     a.last_launch_failure_reason, a.last_launch_failure_at,
@@ -151,12 +150,14 @@ LIVE_SQL = sql.SQL("""
 
 
 def _card(
-    data: dict[str, Any], *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
+    data: dict[str, Any], *, catalog: ModelCatalog | None, default_model_reader: Callable[[], str]
 ) -> AgentCard:
-    model = resolve_available_model(
-        data.pop("effective_model") or default_model_reader(), models=catalog.models
+    data["supports_vision"] = agent_supports_vision(
+        data.pop("config_overlay"),
+        data.pop("birth_config"),
+        catalog=catalog,
+        default_model_reader=default_model_reader,
     )
-    data["supports_vision"] = model_supports_vision(model, catalog=catalog)
     probe = data.pop("machine_probe_at")
     host_online = data.pop("agent_host_online")
     lease = data.pop("lease_expires_at")
@@ -182,7 +183,10 @@ def _card(
 
 
 def select_roster(
-    conn: psycopg.Connection[Any], *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
+    conn: psycopg.Connection[Any],
+    *,
+    catalog: ModelCatalog | None,
+    default_model_reader: Callable[[], str],
 ) -> AgentRoster:
     """Read live cards and their ancestor closure from the same database snapshot."""
     with conn.cursor() as cur:
@@ -202,7 +206,7 @@ def select_roster(
 def list_directory(
     conn: psycopg.Connection[Any],
     *,
-    catalog: ModelCatalog,
+    catalog: ModelCatalog | None,
     scope: AgentDirectoryScope = "live",
     query: str = "",
     before_id: int | None = None,

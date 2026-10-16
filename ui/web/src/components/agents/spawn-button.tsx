@@ -57,12 +57,13 @@ export function SpawnButton({ onSpawn, variant }: Props) {
     queryFn: () => api.getSystemStatus(),
     refetchInterval: 15_000,
   });
-  const { data: modelsData } = useQuery({
+  const modelsQuery = useQuery({
     queryKey: ["models"],
     queryFn: () => api.getModels(),
     // Config writes invalidate this catalog, including its effective birth default.
     staleTime: Infinity,
   });
+  const modelsData = modelsQuery.error ? undefined : modelsQuery.data;
   const { data: presetsData } = useQuery({
     queryKey: ["presets"],
     queryFn: () => api.listPresets(),
@@ -337,6 +338,15 @@ export function SpawnButton({ onSpawn, variant }: Props) {
         </Popover.Portal>
       </Popover.Root>
     ) : null;
+
+  if (modelsQuery.error) {
+    return (
+      <div className={cn(FLEX, "items-center gap-2 text-xs text-muted-foreground")}>
+        {variant === "sm" && <span role="status">{t("modelsUnavailable")}</span>}
+        <TriggerButton variant={variant} disabled title={t("modelsUnavailable")} />
+      </div>
+    );
+  }
 
   if (spawnable.length === 0) {
     return (

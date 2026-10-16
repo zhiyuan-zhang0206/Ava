@@ -89,3 +89,9 @@ unchanged for inspection, but is not written back over current operator changes
 and does not lock the running configuration to historical values. This endpoint
 does not call the attempt-rotating retry-launch API. Launch/execution are outside
 the atomic database acceptance boundary.
+
+
+Catalog access belongs inside fresh preflight and post-acceptance launch
+observation. A replay with an unavailable catalog still returns the same retained
+pair with an explicit launch failure. A new intent fails before acceptance. This
+preserves the durable receipt even when mutable provider configuration fails.

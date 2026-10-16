@@ -26,13 +26,7 @@ A **schedule** is a resident process supervised by the `schedule-manager` servic
 ### ScheduleRunner (`services/wake/schedule_manager/engine.py`)
 - The in-session entrypoint `.venv/bin/python -m services.wake.schedule_manager.runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [[schedule-runner.ava.okf.md]].
 
-### Built-in Cron Slot Claims (`schedules/catchup.py`)
-
-- Cron knowledge remains in each script template; neither `ScheduleManager` nor the `schedules` data model learns cron expressions.
-- Online fires call `fire_slot_once()`; a slot missed while the schedule was not running is not replayed. The TTL reaper deletes every claim past the retention window.
-- `fire_slot_once()` claims with `INSERT ... ON CONFLICT DO NOTHING`, which commits before the callback, making `(schedule_id, slot_fire_at)` at-most-once across concurrent processes and restarts.
-- The winning callback receives `(slot_fire_at, payload)` explicitly; the slot is normalized to UTC before claiming and dispatch. Window-based reports use that slot.
-- A crash after the claim but before callback completion leaves the slot claimed. This accepted loss window is the explicit cost of at-most-once behavior; there is no at-least-once retry path.
+The built-in cron slot mechanism — at-most-once claims per `(schedule_id, slot_fire_at)` — is owned by [[gateway/schedules/docs/cron-slot-claims.ava.okf.md|Cron slot claims]].
 
 ## State Machine (`schedules.status`)
 
@@ -63,3 +57,7 @@ actual process birth can lose work; this is accepted to prevent duplicate starts
 - `services/wake/schedule_manager/daemon.py` — `.venv/bin/python -m services.wake.schedule_manager.daemon`: the service, its two loops and the checkout guard
 - `services/wake/schedule_manager/manager.py:ScheduleManager` — reconcile logic
 - `services/wake/schedule_manager/runner.py:main()` — the process entrypoint; calls `services/wake/schedule_manager/engine.py:run()` with explicit SDK inputs
+
+## Router contracts
+
+The router's script checks, projections, log reads and its SQL invariant are owned by [[gateway/schedules/docs/router-contracts.ava.okf.md|Schedule router contracts]].

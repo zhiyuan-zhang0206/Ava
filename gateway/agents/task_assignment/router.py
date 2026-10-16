@@ -1,7 +1,6 @@
-"""Atomic business acceptance for explicit guarded create-and-assign callers."""
-
 import asyncio
 from collections.abc import Callable
+from functools import partial
 from typing import Any, cast
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -32,6 +31,7 @@ from gateway.agents.task_assignment.schemas import (
     TaskAssignmentIn,
     TaskAssignmentResult,
 )
+from gateway.http.model_catalog import require_model_catalog
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
@@ -57,7 +57,7 @@ def commit_assignment(
     catalog: ModelCatalog,
     authority: ConfigAuthority,
 ) -> tuple[TaskAssignmentResult, list[telemetry.Event]]:
-    """The second lookup fences concurrent winners after out-of-TX preflight."""
+
     with write_transaction(pool) as conn, conn.cursor() as cur:
         result = existing_assignment(cur, key, request)
         if result is not None:
@@ -103,7 +103,7 @@ def commit_assignment(
 def announce_assignment(
     events: list[telemetry.Event], bus: EventBus, actor: int, result: TaskAssignmentResult
 ) -> None:
-    """A missed live/telemetry hint cannot invalidate accepted durable facts."""
+
     try:
         for event in events:
             telemetry.emit_prepared(event)
@@ -121,10 +121,9 @@ async def observe_launch(
     request: dict[str, Any],
     result: TaskAssignmentResult,
     *,
-    catalog: ModelCatalog,
+    catalog_reader: Callable[[], ModelCatalog],
     default_model_reader: Callable[[], str],
 ) -> TaskAssignmentAccepted:
-    """The retained pair is immutable; native current eligibility controls recovery."""
 
     def current() -> CreationReceipt | None:
         with pool.connection() as conn:
@@ -136,7 +135,12 @@ async def observe_launch(
         if existing is None or existing.launch_attempt_id != result.launch_attempt_id:
             return response
         response.launch = await recover_launch(
-            pool, db, bus, existing, catalog=catalog, default_model_reader=default_model_reader
+            pool,
+            db,
+            bus,
+            existing,
+            catalog=catalog_reader(),
+            default_model_reader=default_model_reader,
         )
     except AgentLaunchFailed as exc:
         response.launch_failure = str(exc)
@@ -149,14 +153,18 @@ async def observe_launch(
     return response
 
 
-@router.post(PATH, status_code=201)
+@router.post(
+    PATH,
+    status_code=201,
+    description="Accept one original pair; this response never asserts runner readiness.",
+)
 async def post_task_assignment(
     body: TaskAssignmentIn,
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
     idempotency_scope: str = Header(alias=SCOPE_HEADER),
 ) -> TaskAssignmentAccepted:
-    """Accept one original pair; this response never asserts runner readiness."""
+
     if idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="task assignment requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path=PATH)
@@ -176,13 +184,14 @@ async def post_task_assignment(
             config=body.agent.config,
         )
         try:
+            catalog = require_model_catalog(request)
             preset_name, _, _ = await asyncio.to_thread(
                 creation.spawn_preflight_blocking,
                 db,
                 target,
                 spawn,
                 pool,
-                catalog=request.app.state.catalog,
+                catalog=catalog,
                 authority=request.app.state.config_authority,
             )
         except Exception:
@@ -199,7 +208,7 @@ async def post_task_assignment(
                 spawn,
                 target,
                 preset_name,
-                catalog=request.app.state.catalog,
+                catalog=catalog,
                 authority=request.app.state.config_authority,
             )
             if events:
@@ -213,7 +222,7 @@ async def post_task_assignment(
         key,
         raw,
         result,
-        catalog=request.app.state.catalog,
+        catalog_reader=partial(require_model_catalog, request),
         default_model_reader=lambda: cast(
             str, request.app.state.config_authority.service_field_value("llm_model")
         ),

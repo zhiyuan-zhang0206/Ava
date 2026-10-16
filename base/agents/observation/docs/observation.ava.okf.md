@@ -54,9 +54,31 @@ Selected-agent detail exposes optional `last_launch_attempt_id` from metadata,
 so guarded retry callers can submit the exact observed UUID. It is an attempt
 identity, not admission or execution evidence; older details may omit it.
 
+## Agent capability projection
+
 Model projections take an explicit `default_model_reader` from their caller.
-Snapshot model lookup preserves birth pins followed by overlay pins; roster
-cards retain their existing overlay-only lookup. A pinned model never reads
-the default. Each unpinned row reads the caller's current default independently,
-then resolves any model withdrawal through the supplied catalog. Database read
-failure in `agent_model_target` still returns the caller's explicit fallback.
+Cards and snapshots resolve overlay pins over birth pins, using the caller's
+current default only when neither map pins a model. They share
+`snapshot.agent_supports_vision`, including registered withdrawal resolution.
+A healthy catalog retains the existing capability policy: registered model
+metadata, then plugin-prefix vision, then text-only when no prefix matches.
+This read does not impose spawn admission or credential checks on historical rows.
+
+`supports_vision` is required and nullable on both wire projections. With an
+unavailable catalog it is null, not false, and no default model is guessed or
+read. Stored map structure and model-pin types are checked before this branch;
+database failures and lifecycle/observation enum validation still propagate.
+Unknown capability does not change agent status, ownership evidence, pagination,
+or the live roster's ancestor closure. A missing agent is still missing.
+
+```ava-contract
+id = "agent-capability-projection"
+kind = "invariant"
+statement = "Agent cards and snapshots share overlay > birth > live model resolution. A missing catalog makes only the required supports_vision field null; it cannot hide malformed stored model pins, database errors or invalid agent enums."
+code = ["base/agents/observation/snapshot.py:agent_supports_vision", "base/agents/observation/roster.py:AgentCard", "base/agents/observation/snapshot.py:AgentSnapshot"]
+tests = ["base/agents/observation/tests/test_catalog_unavailable.py::test_catalog_failure_does_not_hide_damaged_model_pins", "base/agents/observation/tests/test_catalog_unavailable.py::test_nullable_capability_is_required_and_does_not_relax_agent_enums", "gateway/tests/bootstrap/catalog/test_model_failure_routes.py::test_normal_birth_pin_keeps_list_and_detail_capabilities_consistent"]
+```
+
+Database read failure in `agent_model_target` retains its separate historical
+contract: it logs the error and returns the caller's explicit fallback. That
+execution lookup requires a complete catalog; it does not use nullable metadata.
