@@ -7,6 +7,7 @@ from base.agents.to_user import (
     MAX_DOCUMENT_BYTES,
     MAX_RESOURCE_BYTES,
     ToUserReadRequest,
+    ensure_document,
     read_document,
     read_resource,
 )
@@ -148,3 +149,14 @@ def test_footnote_links_are_resources_but_raw_html_blocks_are_not(tmp_path: Path
     assert set(document.resources) == {"report.pdf"}
     resource = document.resources["report.pdf"]
     assert read_resource(tmp_path, [resource.id]) == b"pdf"
+
+
+def test_ensure_document_seeds_only_a_missing_panel(tmp_path: Path) -> None:
+    ensure_document(tmp_path)
+    panel = tmp_path / "to_user.md"
+    assert panel.read_text() == ""
+    panel.write_text("# Keep me")
+    marker = panel.stat().st_mtime_ns
+    ensure_document(tmp_path)
+    assert panel.read_text() == "# Keep me"
+    assert panel.stat().st_mtime_ns == marker

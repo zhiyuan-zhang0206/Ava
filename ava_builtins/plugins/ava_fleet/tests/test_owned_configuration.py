@@ -1,4 +1,6 @@
 import json
+import os
+import sys
 from collections.abc import Generator
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from ava_builtins.plugins.ava_fleet.default_config import FleetConfig, contribut
 from ava_builtins.plugins.ava_fleet.services import services
 from base.host.env import bootstrap, dotenv_file
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV, SERVICE_PLUGIN_CONFIG_ENV
+from base.host.proc import run_bounded
 from base.packages.plugins.config_registration import (
     disk_image_path,
     plugin_bootstrap_config,
@@ -55,6 +58,32 @@ def test_remote_cluster_projection_never_overrides_local_host_gate(
     monkeypatch.delenv(PLUGIN_CLUSTER_CONFIG_ENV)
     with pytest.raises(InvalidConfigData, match="lacks cluster"):
         read_plugin_config("ava_fleet", FleetConfig, image)
+
+
+_CHILD = Path(__file__).with_name("child_gateway_unit_compose.py")
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def test_gateway_unit_without_a_packet_composes_from_its_local_image() -> None:
+    write_image(FleetConfig(task_escalate_n=7, reduce_context_switch=False))
+    env = {key: value for key, value in os.environ.items() if key != PLUGIN_CLUSTER_CONFIG_ENV}
+    env.update(
+        {
+            "AVA_MACHINE_SERVE_GATEWAY": "true",
+            "AVA_MACHINE_SERVE_AGENT_RUNNER": "true",
+            "AVA_GATEWAY_URL": "http://gateway.invalid:8000",
+        }
+    )
+    proc = run_bounded(
+        [sys.executable, "-I", str(_CHILD)],
+        cwd=_REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "gateway-unit-compose-ok" in proc.stdout
 
 
 @pytest.mark.parametrize("packet", ['{"ava_fleet":null}', '{"ava_fleet":[]}', "[]"])
