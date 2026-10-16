@@ -44,3 +44,14 @@ daemons; naming an agent restart or no restart would leave their boot-time reads
 unchanged. Registry validation rejects unknown restart labels and process kinds
 that lack the field's domain. The profile tests cover those metadata constraints
 alongside construction and access behavior.
+
+```ava-contract
+id = "lm-settings-domain"
+kind = "invariant"
+statement = "`LmSettings` (`base/config/domains/lm.py`) preserves the flat `.env` aliases for language-model settings. `llm_model` defaults to `deepseek-flash` with `capability=\"common\"`, `scope=\"cluster-default\"`, and `per_agent=True` so it serves as both the gateway spawn default and a per-agent overridable setting; `labeler_model` and `hierarchy_model` default to `deepseek-flash` with `capability=\"gateway\"` so their provider keys survive the gateway profile pop; `understand_media_model` defaults to `gemini-3.8-flash`; and `gemini_api_key` carries `capability=\"common\"` for both gateway-side embeddings and agent-side Gemini calls."
+code = ["base/config/domains/lm.py:<module>"]
+tests = [
+  "base/tests/config/test_config_defaults.py::test_llm_model_code_default_is_deepseek_flash",
+  "base/tests/config/test_config_defaults.py::test_understand_media_model_code_default_is_gemini_3_8_flash",
+]
+```

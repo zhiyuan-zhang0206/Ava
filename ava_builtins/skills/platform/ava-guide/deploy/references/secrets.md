@@ -9,7 +9,7 @@ agent reaches for it.
 |---|---|---|
 | `DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | the chat model | `AVA_MODEL` (or a per-agent override) uses that provider — `deepseek-*` / `claude-*` / `gpt-*` |
 | `GLM_API_KEY` / `MIMO_API_KEY` / `MOONSHOT_API_KEY` / `XAI_API_KEY` / `DASHSCOPE_API_KEY` | the chat model | `AVA_MODEL` (or a per-agent override) uses that provider — `glm-*` / `mimo-*` / `kimi-*` / `grok-*` / `qwen*` |
-| `GEMINI_API_KEY` | `ava.understand` media path (image/video/audio/PDF) | always, in practice — the default media model is `gemini-3.5-flash` |
+| `GEMINI_API_KEY` | `ava.understand` media path (image/video/audio/PDF) | always, in practice — the default media model is `gemini-3.8-flash` |
 | `BRAVE_API_KEY` | `ava.web.search` | you want web search |
 | `JINA_API_KEY` | `ava.web.fetch` (higher rate limit) | optional — empty = anonymous tier |
 | `AVA_TELEGRAM_BOT_TOKEN` / `AVA_TELEGRAM_OWNER_ID` | push to your phone (the `telegram-send-file` skill) | optional |

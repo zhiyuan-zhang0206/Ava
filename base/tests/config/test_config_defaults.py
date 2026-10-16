@@ -1,5 +1,3 @@
-"""Shipped defaults: daemon and delivery knobs, SDK contract toggles, session TTL and timeline compaction; split from base/tests/test_config.py (task #4922)."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,13 +10,10 @@ from base.config.service_read import ConfigAuthority
 
 @pytest.fixture
 def authority(tmp_path: Path) -> ConfigAuthority:
-    """Explicit boot model and config file owned by this test."""
     return ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
 
 
 def test_sdk_code_reminder_cadence_config_contract(authority: ConfigAuthority) -> None:
-    """The code-category reminder cadence is a live per-agent enum whose
-    default preserves the existing once-per-context-window behavior."""
     from base.config import FIELD_INFOS, get_config_metadata
 
     field = FIELD_INFOS["sdk_code_reminder_cadence"]
@@ -35,8 +30,6 @@ def test_sdk_code_reminder_cadence_config_contract(authority: ConfigAuthority) -
 
 
 def test_sdk_nameerror_hint_enabled_config_contract() -> None:
-    """The assumed-persistence NameError hint is enabled by default and can be
-    adjusted per agent without changing the `.env` naming surface."""
     from base.config import FIELD_INFOS
 
     field = FIELD_INFOS["sdk_nameerror_hint_enabled"]
@@ -49,13 +42,15 @@ def test_sdk_nameerror_hint_enabled_config_contract() -> None:
 
 
 def test_llm_model_code_default_is_deepseek_flash() -> None:
-    """An unset AVA_MODEL must fall back to deepseek-flash (user rulings 2026-09-10 / 2026-09-17)."""
     from base.config.domains.lm import LmSettings
 
     assert LmSettings.model_fields["llm_model"].default == "deepseek-flash"
 
 
-# ─── legacy inverted aliases resolve with correct semantics ───
+def test_understand_media_model_code_default_is_gemini_3_8_flash() -> None:
+    from base.config.domains.lm import LmSettings
+
+    assert LmSettings.model_fields["understand_media_model"].default == "gemini-3.8-flash"
 
 
 def test_gateway_session_ttl_defaults_to_one_day() -> None:
