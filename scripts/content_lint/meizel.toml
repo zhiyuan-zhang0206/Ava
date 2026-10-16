@@ -6,4 +6,3 @@ exports = ["lint_no_cjk.py", "lint_no_tailnet.py", "lint_quiesced_loops.py"]
 [debt.private-name]
 "tests/test_lint_core_content_manifests.py -> lint_core_content_manifests.py#_REPO_ROOT" = 1
 "tests/test_lint_doc_anchors.py -> lint_doc_anchors.py#_REPO_ROOT" = 1
-"tests/test_lint_skill_descriptions.py -> lint_skill_descriptions.py#_REPO_ROOT" = 1
