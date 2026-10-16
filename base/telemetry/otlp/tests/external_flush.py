@@ -10,7 +10,7 @@ import pytest
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 
 from base.telemetry.delivery.receipts import Event as TelemetryEvent
-from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_exporting
 
 # A bounded handshake allows close telemetry to drain on a loaded runner.
 HANDSHAKE_BOUND_S = 30.0
@@ -38,7 +38,7 @@ def paused_otlp_record(
     def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
         return backend
 
-    monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)
+    monkeypatch.setattr(telemetry_otlp_exporting, "OtlpBackend", build_backend)
 
     paused = Event()
     release = Event()

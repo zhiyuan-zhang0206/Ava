@@ -8,7 +8,7 @@ import pytest
 
 from base.telemetry.delivery import reporting
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
-from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_exporting
 from base.telemetry.otlp import telemetry_otlp_worker as worker_module
 from base.telemetry.tests.otlp.test_telemetry_otlp import otlp_test_event
 
@@ -538,13 +538,28 @@ def test_empty_exporting_pipeline_stops_without_reading_identity() -> None:
     def reject() -> bool:
         raise AssertionError("empty close must not read identity")
 
-    pipeline = telemetry_otlp.ExportingEventPipeline(
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
         writer=lambda _events, _exporter: None, export_allowed=reject
     )
     assert pipeline.stop(timeout=1).status is DrainStatus.COMPLETED
     assert pipeline.stopped
     assert pipeline._exporter._worker is None
     assert pipeline._exporter._export_decision is None
+
+
+def test_stop_refuses_non_finite_and_negative_timeout() -> None:
+    def reject() -> bool:
+        raise AssertionError("a refused budget must not read identity")
+
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        writer=lambda _events, _exporter: None, export_allowed=reject
+    )
+    for bad in (float("nan"), -1.0):
+        with pytest.raises(ValueError, match="finite and non-negative"):
+            pipeline.stop(timeout=bad)
+        assert not pipeline.stopped
+    assert pipeline.stop(timeout=1).status is DrainStatus.COMPLETED
+    assert pipeline.stopped
 
 
 def test_unfinished_ordinary_writer_keeps_its_exporter_alive(
@@ -555,14 +570,16 @@ def test_unfinished_ordinary_writer_keeps_its_exporter_alive(
     def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
         return backend
 
-    monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)
+    monkeypatch.setattr(telemetry_otlp_exporting, "OtlpBackend", build_backend)
     entered, release = threading.Event(), threading.Event()
 
     def write(_events: list[Event], _exporter: Any) -> None:
         entered.set()
         assert release.wait(5)
 
-    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        writer=write, export_allowed=lambda: True
+    )
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
     assert entered.wait(2)
@@ -587,7 +604,7 @@ def test_unfinished_exporter_keeps_pipeline_for_later_observation(
     def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
         return backend
 
-    monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)
+    monkeypatch.setattr(telemetry_otlp_exporting, "OtlpBackend", build_backend)
     entered, release = threading.Event(), threading.Event()
     original = logs.shutdown
 
@@ -597,7 +614,7 @@ def test_unfinished_exporter_keeps_pipeline_for_later_observation(
         original()
 
     monkeypatch.setattr(logs, "shutdown", close)
-    pipeline = telemetry_otlp.ExportingEventPipeline(
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
         writer=lambda _events, _exporter: None, export_allowed=lambda: True
     )
     assert backend._ensure()
@@ -627,7 +644,9 @@ def test_two_stage_stop_hands_stage_two_the_real_remaining_time() -> None:
         time.sleep(writer_sleep)
         writer_done.append(time.monotonic())
 
-    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        writer=write, export_allowed=lambda: True
+    )
     backend = pipeline._exporter
     backend._providers = (logs, metrics)
     assert backend._ensure()
@@ -656,7 +675,9 @@ def test_zero_timeout_stage_one_leaves_the_exporter_untouched() -> None:
         writer_started.set()
         assert release_writer.wait(5)
 
-    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        writer=write, export_allowed=lambda: True
+    )
     backend = pipeline._exporter
     pipeline.enqueue(otlp_test_event())
     assert writer_started.wait(5)
@@ -679,7 +700,9 @@ def test_blocked_writer_and_blocked_exporter_release_in_stages() -> None:
         writer_started.set()
         assert release_writer.wait(5)
 
-    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        writer=write, export_allowed=lambda: True
+    )
     backend = pipeline._exporter
     backend._providers = (logs, metrics)
     assert backend._ensure()
@@ -698,14 +721,16 @@ def test_blocked_writer_and_blocked_exporter_release_in_stages() -> None:
 
 
 def test_stop_from_the_writer_thread_is_refused() -> None:
-    pipeline: telemetry_otlp.ExportingEventPipeline
+    pipeline: telemetry_otlp_exporting.ExportingEventPipeline
 
     def write(_events: list[Event], _exporter: Any) -> None:
         with pytest.raises(RuntimeError) as raised:
             pipeline.stop(timeout=0)
         assert "event drain cannot join itself" in str(raised.value)
 
-    pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        writer=write, export_allowed=lambda: True
+    )
     pipeline.enqueue(otlp_test_event())
     assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
     assert pipeline.stopped
@@ -713,7 +738,7 @@ def test_stop_from_the_writer_thread_is_refused() -> None:
 
 def test_concurrent_stop_calls_share_the_blocked_observation() -> None:
     logs, metrics = _BlockingProvider(), _Provider()
-    pipeline = telemetry_otlp.ExportingEventPipeline(
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
         writer=lambda _events, _exporter: None, export_allowed=lambda: True
     )
     backend = pipeline._exporter
