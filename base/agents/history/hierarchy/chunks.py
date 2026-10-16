@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -716,10 +717,21 @@ INSERT INTO understanding_chunk_calls (
 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s)
 """
 
+_NUL_ESCAPE = re.compile(r"(?<!\\)((?:\\\\)*)\\u0000")
+
 
 def _json(value: Any) -> str | None:
     """`value` as JSON text for a jsonb column; `default=str` keeps an odd leaf from losing the row."""
-    return None if value is None else json.dumps(value, ensure_ascii=False, default=str)
+    if value is None:
+        return None
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    if "\\u0000" in text:
+        text = _NUL_ESCAPE.sub(lambda m: m.group(1) + "\\ufffd", text)
+    return text
+
+
+def _text(value: str | None) -> str | None:
+    return None if value is None else value.replace("\x00", "\ufffd")
 
 
 async def write_chunk_calls(
@@ -739,7 +751,7 @@ async def write_chunk_calls(
             job.attempts,
             call.round,
             call.model,
-            call.instruction,
+            _text(call.instruction),
             call.prefix_len,
             call.start_offset,
             _json(call.response.content if call.response else None),
@@ -748,9 +760,9 @@ async def write_chunk_calls(
             _json(getattr(call.response, "usage_metadata", None)),
             _json(call.response.response_metadata if call.response else None),
             call.duration_ms,
-            call.error,
+            _text(call.error),
             call.kind,
-            call.problem,
+            _text(call.problem),
         )
         for call in calls
     ]

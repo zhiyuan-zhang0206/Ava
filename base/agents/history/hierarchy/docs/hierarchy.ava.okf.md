@@ -44,7 +44,8 @@ How much runs at once, and how rate limits are met:
 - **Deterministic structure**: layer 0 and every cost figure are code; only "what happened" is
   an LLM text.
 - **Audited**: every provider call is persisted whole (`understanding_chunk_calls`,
-  `understanding_group_calls`), failures included.
+  `understanding_group_calls`), failures included; a NUL byte in a text or the reply
+  is stored as U+FFFD (Postgres cannot hold it).
 - **Stable spans**: compaction boundaries are never trimmed (#1125), so the stitched full
   history is append-only and a span's identity never shifts; a span outside the history is an
   explicit error.
