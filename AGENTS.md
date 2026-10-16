@@ -2,11 +2,7 @@
 
 Read [docs/contributing.md](docs/contributing.md) before repository work. It is
 the contributor entry point for setup, scoped validation, self-review and PRs.
-Follow the user's authorized scope. Before discussing or reviewing code, read
-the revision in question: the named branch, PR or worktree; the deployed
-generation for runtime behavior; otherwise a freshly fetched `origin/main`
-(read with `git show` or a new worktree, never by pulling a deployment
-checkout). If you cannot fetch, name the revision you read.
+Follow the user's authorized scope.
 
 ## Project invariants
 
@@ -29,8 +25,6 @@ checkout). If you cannot fetch, name the revision you read.
 - Development is separate from a running deployment. Use an isolated checkout,
   its own real virtualenv and a temporary `AVA_HOME` for development tools that
   import application code. Pytest supplies its own isolation.
-- A merge does not authorize deployment. Production changes require separate
-  operator authorization and verification of the actual running generation.
 - Merged migrations are immutable. Fix forward, synchronize `db/schema.sql`,
   and use expand-contract for lossy changes. See the [migration guide](db/docs/migrations.md).
 
