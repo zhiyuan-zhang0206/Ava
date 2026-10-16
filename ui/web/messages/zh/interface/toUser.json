@@ -17,12 +17,6 @@
   "noticesUnavailable": "通知刷新失败。",
   "expandNotice": "展开通知",
   "collapseNotice": "折叠通知",
-  "allSections": "全部内容",
-  "runtime": "运行状态",
-  "usage": "用量与活动",
-  "pages": "页面",
-  "extensions": "扩展",
-  "category": "Inspector 分类",
   "openContext": "To user",
   "back": "返回",
   "legacyHtml": "等待 Markdown 文档。"

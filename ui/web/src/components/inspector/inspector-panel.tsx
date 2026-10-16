@@ -10,12 +10,11 @@ import {
   RefreshCw,
   SlidersHorizontal,
   Terminal,
-  Timer,
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Fragment, useCallback, useRef, type ReactNode, useEffect, useState } from "react";
+import { Fragment, useCallback, useRef, type ReactNode, useEffect } from "react";
 
 import { LiveSectionsSkeleton, SectionSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { InspectWidgetSection } from "@/components/inspector/inspector-widgets";
@@ -81,8 +80,6 @@ function matchesInspectWindow(
 
 export function InspectorPanel({ agentId, embedded = false }: { agentId: number; embedded?: boolean }) {
   const t = useTranslations("inspector");
-  const contextText = useTranslations("toUser");
-  const [category, setCategory] = useState("all");
   const { open, toggle } = useInspectorOpen();
   const { inspectorHours: hours, setInspectorHours: setHours } = useInspectorHours();
   const { isLarge } = useBreakpoint();
@@ -129,18 +126,15 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
   const windowedData = matchesInspectWindow(windowedQuery.data, agentId, hours)
     ? windowedQuery.data
     : undefined;
-  const isFetching =
-    liveQuery.isFetching || windowedQuery.isFetching || widgetsQuery.isFetching;
   const hasStaleError =
     (liveQuery.error !== null && liveData !== undefined) ||
     (windowedQuery.error !== null && windowedData !== undefined) ||
     (widgetsQuery.error !== null && widgetsQuery.data !== undefined);
 
-  const refresh = useCallback(() => {
-    void liveQuery.refetch();
+  // ava:ref ui/web/src/docs/frontend-components/inspector/queries-and-refresh.ava.okf.md#cost-activity-controls
+  const refreshCostActivity = useCallback(() => {
     void windowedQuery.refetch();
-    void widgetsQuery.refetch();
-  }, [liveQuery, windowedQuery, widgetsQuery]);
+  }, [windowedQuery]);
 
   useEffect(() => {
     if (!open) {
@@ -182,9 +176,43 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
 
   if (!open) return null;
 
-  const sections: { order: number; tie: number; key: string; node: ReactNode }[] = [
-    { order: INSPECT_SECTION_ORDER.page, tie: 0, key: "page", node: <PageSection pages={pages} /> },
-  ];
+  // ava:ref ui/web/src/docs/frontend-components/inspector/inspector.ava.okf.md#section-order
+  const sections: { order: number; tie: number; key: string; node: ReactNode }[] = [];
+  const runLinkNode = (
+    <div className={cn("items-center gap-2", FLEX)}>
+      <Link
+        href={`/insights/run/${agentId}`}
+        className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+      >
+        {t("openRunTimeline")}
+        <ExternalLink className="size-3" aria-hidden />
+      </Link>
+      {hasStaleError ? <span className="ml-auto"><StaleDot /></span> : null}
+    </div>
+  );
+  sections.push({
+    order: INSPECT_SECTION_ORDER.runLink,
+    tie: 0,
+    key: "run-link",
+    node: runLinkNode,
+  });
+  sections.push({
+    order: INSPECT_SECTION_ORDER.costActivity,
+    tie: 0,
+    key: "cost-activity",
+    node: (
+      <CostActivitySection
+        inspect={windowedData}
+        failed={windowedQuery.error != null}
+        pending={windowedQuery.isPending}
+        hours={hours}
+        onHoursChange={setHours}
+        fetching={windowedQuery.isFetching}
+        onRefresh={refreshCostActivity}
+      />
+    ),
+  });
+  sections.push({ order: INSPECT_SECTION_ORDER.page, tie: 0, key: "page", node: <PageSection pages={pages} /> });
   if (liveData) {
     sections.push(
       { order: INSPECT_SECTION_ORDER.shells, tie: 0, key: "shells", node: <ShellsSection inspect={liveData} /> },
@@ -206,39 +234,6 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
       ) : <LiveSectionsSkeleton />,
     });
   }
-  if (windowedData) {
-    sections.push(
-      { order: INSPECT_SECTION_ORDER.cost, tie: 0, key: "cost", node: <CostSection inspect={windowedData} /> },
-      { order: INSPECT_SECTION_ORDER.activity, tie: 0, key: "activity", node: <ActivitySection inspect={windowedData} /> },
-    );
-  } else if (windowedQuery.error || !windowedQuery.isPending) {
-    sections.push({
-      order: INSPECT_SECTION_ORDER.cost,
-      tie: 0,
-      key: "windowed-error",
-      node: <WindowedSectionsError pending={windowedQuery.isFetching} onRetry={() => void windowedQuery.refetch()} />,
-    });
-  } else {
-    sections.push(
-      { order: INSPECT_SECTION_ORDER.cost, tie: 0, key: "cost", node: <SectionSkeleton title={t("sectionCost")} rows={4} /> },
-      { order: INSPECT_SECTION_ORDER.activity, tie: 0, key: "activity", node: <SectionSkeleton title={t("sectionActivity")} rows={4} /> },
-    );
-  }
-  const runLinkNode = (
-    <Link
-      href={`/insights/run/${agentId}`}
-      className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-    >
-      {t("openRunTimeline")}
-      <ExternalLink className="size-3" aria-hidden />
-    </Link>
-  );
-  sections.push({
-    order: INSPECT_SECTION_ORDER.runLink,
-    tie: 0,
-    key: "run-link",
-    node: runLinkNode,
-  });
   if (liveData?.notice && !embedded) {
     sections.push({
       order: INSPECT_SECTION_ORDER.notice,
@@ -249,7 +244,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
   }
   if (widgetsQuery.isPending || (widgetsQuery.error && !widgetsQuery.data)) {
     sections.push({
-      order: INSPECT_SECTION_ORDER.runLink,
+      order: INSPECT_SECTION_ORDER.page,
       tie: 1,
       key: "widgets-state",
       node: widgetsQuery.error ? (
@@ -276,70 +271,28 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
 
   const body = (
     <>
-      <header className={cn("relative items-center gap-2 px-4", BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX)}>
-        {!isLarge && !embedded ? (
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label={t("closeInspector")}
-            className="shrink-0 rounded p-1 -ml-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-          >
-            <X className="size-5" />
-          </button>
-        ) : null}
-        <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
-          {embedded ? (
-            <select aria-label={contextText("category")} value={category} onChange={(event) => setCategory(event.target.value)} className="w-full cursor-pointer rounded border border-border bg-background px-2 py-1 text-xs text-foreground">
-              <option value="all">{contextText("allSections")}</option>
-              <option value="runtime">{contextText("runtime")}</option>
-              <option value="usage">{contextText("usage")}</option>
-              <option value="pages">{contextText("pages")}</option>
-              <option value="extensions">{contextText("extensions")}</option>
-            </select>
-          ) : t("title")}
-        </span>
-        {hasStaleError ? <StaleDot /> : null}
-        <button
-          type="button"
-          onClick={refresh}
-          disabled={isFetching}
-          aria-label={t("refreshInspector")}
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
-        >
-          <RefreshCw className={cn("size-3.5", isFetching && "animate-spin")} />
-        </button>
-        <WindowSelect
-          value={hours == null ? "all" : String(hours)}
-          options={WINDOWS.map((w) => {
-            const label = t(w.labelKey as Parameters<typeof t>[0]);
-            const appliedHours = windowedData?.applied_window_hours;
-            return {
-              value: String(w.value ?? "all"),
-              label:
-                w.value === hours &&
-                appliedHours != null &&
-                w.value != null &&
-                appliedHours < w.value
-                  ? `${label} · ${appliedHours}h`
-                  : label,
-            };
-          })}
-          onChange={(v) => setHours(v === "all" ? null : Number(v))}
-          ariaLabel={t("windowAriaLabel")}
-          className="shrink-0 cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-ring focus:outline-none"
-        />
-      </header>
+      {embedded ? null : (
+        <header className={cn("relative items-center gap-2 px-4", BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX)}>
+          {!isLarge ? (
+            <button
+              type="button"
+              onClick={toggle}
+              aria-label={t("closeInspector")}
+              className="shrink-0 rounded p-1 -ml-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <X className="size-5" />
+            </button>
+          ) : null}
+          <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
+            {t("title")}
+          </span>
+        </header>
+      )}
 
       <ScrollArea ref={scrollRef} className={cn("text-xs", MIN_H_0, FLEX_1)}>
         <div className="px-4 py-3">
           <div className="space-y-4">
-            {sections.filter((section) => {
-              if (!embedded || category === "all") return true;
-              if (category === "runtime") return ["shells", "liveness", "config-overlay", "live-state"].includes(section.key);
-              if (category === "usage") return ["cost", "activity", "run-link", "windowed-error"].includes(section.key);
-              if (category === "pages") return section.key === "page";
-              return section.key.startsWith("widget:") || section.key === "widgets-state";
-            }).map((section) => (
+            {sections.map((section) => (
               <Fragment key={section.key}>{section.node}</Fragment>
             ))}
           </div>
@@ -387,11 +340,6 @@ function InspectReadError({ message, retryLabel, pending, onRetry }: {
       </button>
     </div>
   );
-}
-
-function WindowedSectionsError({ pending, onRetry }: { pending: boolean; onRetry: () => void }) {
-  const t = useTranslations("inspector");
-  return <InspectReadError message={t("windowedUnavailable")} retryLabel={t("retryWindowed")} pending={pending} onRetry={onRetry} />;
 }
 
 function PageSection({ pages }: { pages: PageRow[] }) {
@@ -586,70 +534,126 @@ function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
   );
 }
 
-function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
-  const { cost } = inspect;
+function CostActivitySection({
+  inspect,
+  failed,
+  pending,
+  hours,
+  onHoursChange,
+  fetching,
+  onRefresh,
+}: {
+  inspect: AgentInspectStatistics | undefined;
+  failed: boolean;
+  pending: boolean;
+  hours: number | null;
+  onHoursChange: (hours: number | null) => void;
+  fetching: boolean;
+  onRefresh: () => void;
+}) {
   const t = useTranslations("inspector");
+  const cost = inspect?.cost;
+  const activity = inspect?.activity ?? null;
+  const tps = inspect?.tps;
+  const hasLife = activity !== null && activity.alive_seconds > 0;
+  const idleSeconds = activity
+    ? Math.max(0, activity.alive_seconds - activity.active_seconds)
+    : 0;
   const unpricedSub =
     cost && cost.unpriced_calls > 0
       ? t("unpriced", { count: String(cost.unpriced_calls) })
       : undefined;
   return (
-    <Section icon={<DollarSign className="size-3" />} title={t("sectionCost")}>
-      {cost ? (
-        <div className="grid grid-cols-2 gap-1">
-          <Metric
-            label={t("metricCost")}
-            value={`$${cost.cost_usd.toFixed(4)}`}
-            sub={unpricedSub}
+    <Section
+      icon={<DollarSign className="size-3" />}
+      title={t("sectionCostActivity")}
+      action={
+        <span className={cn("shrink-0 items-center gap-1", FLEX)}>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={fetching}
+            aria-label={t("refreshCostActivity")}
+            className="rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn("size-3.5", fetching && "animate-spin")} />
+          </button>
+          <WindowSelect
+            value={hours == null ? "all" : String(hours)}
+            options={WINDOWS.map((w) => {
+              const label = t(w.labelKey as Parameters<typeof t>[0]);
+              const appliedHours = inspect?.applied_window_hours;
+              return {
+                value: String(w.value ?? "all"),
+                label:
+                  w.value === hours &&
+                  appliedHours != null &&
+                  w.value != null &&
+                  appliedHours < w.value
+                    ? `${label} · ${appliedHours}h`
+                    : label,
+              };
+            })}
+            onChange={(v) => onHoursChange(v === "all" ? null : Number(v))}
+            ariaLabel={t("windowAriaLabel")}
+            className="cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-ring focus:outline-none"
           />
-          <Metric label={t("metricLlmCalls")} value={String(cost.llm_calls)} />
-          <Metric
-            label={t("metricTokens")}
-            value={`${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}`}
-          />
-          <Metric
-            label={t("metricCacheHit")}
-            value={cost.cache_hit_pct === null ? "N/A" : `${cost.cache_hit_pct.toFixed(2)}%`}
-          />
+        </span>
+      }
+    >
+      {inspect ? (
+        <div className="space-y-1">
+          {cost ? (
+            <div className="grid grid-cols-2 gap-1">
+              <Metric
+                label={t("metricCost")}
+                value={`$${cost.cost_usd.toFixed(4)}`}
+                sub={unpricedSub}
+              />
+              <Metric label={t("metricLlmCalls")} value={String(cost.llm_calls)} />
+              <Metric
+                label={t("metricTokens")}
+                value={`${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}`}
+              />
+              <Metric
+                label={t("metricCacheHit")}
+                value={cost.cache_hit_pct === null ? "N/A" : `${cost.cache_hit_pct.toFixed(2)}%`}
+              />
+            </div>
+          ) : null}
+          <div className="grid grid-cols-2 gap-1">
+            <Metric
+              label={t("metricTps")}
+              value={tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—"}
+            />
+            <Metric
+              label={t("metricLlmOutput")}
+              value={
+                hasLife && activity.llm_seconds != null
+                  ? formatInterval(Math.round(activity.llm_seconds))
+                  : "—"
+              }
+            />
+            <Metric
+              label={t("metricCodeExecution")}
+              value={hasLife ? formatInterval(Math.round(activity.exec_seconds)) : "—"}
+            />
+            <Metric
+              label={t("metricIdle")}
+              value={hasLife ? formatInterval(Math.round(idleSeconds)) : "—"}
+            />
+          </div>
         </div>
-      ) : null}
-    </Section>
-  );
-}
-
-function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
-  const { activity, tps } = inspect;
-  const hasLife = activity !== null && activity.alive_seconds > 0;
-  const idleSeconds = activity
-    ? Math.max(0, activity.alive_seconds - activity.active_seconds)
-    : 0;
-  const t = useTranslations("inspector");
-  return (
-    <Section icon={<Timer className="size-3" />} title={t("sectionActivity")}>
-      <div className="grid grid-cols-2 gap-1">
-        <Metric
-          label={t("metricTps")}
-          value={tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—"}
+      ) : failed || !pending ? (
+        <InspectReadError
+          message={t("windowedUnavailable")}
+          retryLabel={t("retryWindowed")}
+          pending={fetching}
+          onRetry={onRefresh}
         />
-        <Metric
-          label={t("metricLlmOutput")}
-          value={
-            hasLife && activity.llm_seconds != null
-              ? formatInterval(Math.round(activity.llm_seconds))
-              : "—"
-          }
-        />
-        <Metric
-          label={t("metricCodeExecution")}
-          value={
-            hasLife ? formatInterval(Math.round(activity.exec_seconds)) : "—"
-          }
-        />
-        <Metric
-          label={t("metricIdle")}
-          value={hasLife ? formatInterval(Math.round(idleSeconds)) : "—"}
-        />
-      </div>
+      ) : (
+        <SectionSkeleton title={t("sectionCostActivity")} rows={4} />
+      )}
     </Section>
   );
 }

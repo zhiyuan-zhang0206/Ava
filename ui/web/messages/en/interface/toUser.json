@@ -17,12 +17,6 @@
   "noticesUnavailable": "Notifications unavailable.",
   "expandNotice": "Expand notification",
   "collapseNotice": "Collapse notification",
-  "allSections": "All sections",
-  "runtime": "Runtime",
-  "usage": "Usage and activity",
-  "pages": "Pages",
-  "extensions": "Extensions",
-  "category": "Inspector category",
   "openContext": "To user",
   "back": "Back",
   "legacyHtml": "Awaiting Markdown."
