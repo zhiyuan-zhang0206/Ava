@@ -298,6 +298,15 @@ check-typed-exception = true
 "cli/commands/*.py" = ["S603"]
 "services/desktop/permissions_helper/tests/test_helper_retirement.py" = ["S603"]
 "services/supervision/healthchecks/*.py" = ["S603"]
+# The fleet-update halves drive fixed git/ssh/script argv — repo-owned or
+# operator-supplied arguments, never a shell — and their tests do the same, so
+# S603 (untrusted input) is inapplicable. cli/fleet_update.py also redacts a
+# secret-name regex (S105), probes a fresh remote 0700 /tmp path (S108), and
+# re-wraps a failed stop with the retry hint from inside its try (TRY301).
+"cli/fleet_update.py" = ["S603", "S105", "S108", "TRY301"]
+"cli/tests/fleet_update/*.py" = ["S603"]
+"scripts/host_ops/fleet_update_keep.py" = ["S603"]
+"scripts/host_ops/tests/test_fleet_update_keep.py" = ["S603"]
 # Pre-push selectors run only fixed repo-local commands — git queries and
 # scripts/hooks/prepush-*.sh — with repo-owned path arguments, never a shell;
 # S603 (untrusted input) is inapplicable. The contract lives in
