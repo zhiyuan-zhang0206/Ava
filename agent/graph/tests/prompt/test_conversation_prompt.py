@@ -1,5 +1,3 @@
-"""Core communication policy survives optional styles and output-shape toggles."""
-
 from typing import cast
 
 import pytest
@@ -65,7 +63,6 @@ def test_reply_routing_and_handoff_policy_survive_every_style(
 def communication_prompt(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[str, str]:
-    """Build every optional-guidance combination without collaboration plugins."""
     style, output_shape = cast(tuple[str, bool], request.param)
     monkeypatch.setattr(settings.agent, "agent_communication_style", style)
     monkeypatch.setattr(settings.agent, "prompt_output_conciseness_enabled", output_shape)
@@ -77,7 +74,6 @@ def communication_prompt(
 
 
 def test_language_policy_survives_optional_guidance(communication_prompt: tuple[str, str]) -> None:
-    """Standing language preferences cannot disappear with optional guidance."""
     _, prompt = communication_prompt
 
     assert prompt.count("## Communication language") == 1
@@ -90,7 +86,6 @@ def test_language_policy_survives_optional_guidance(communication_prompt: tuple[
 def test_user_facing_text_policy_survives_every_style(
     communication_prompt: tuple[str, str],
 ) -> None:
-    """Only explicit live pairing adds checkpoints; text always serves the user."""
     style, prompt = communication_prompt
 
     assert prompt.count("## Meaningful progress") == 1
@@ -107,11 +102,11 @@ def test_user_facing_text_policy_survives_every_style(
 def test_milestone_policy_preserves_results_and_questions(
     communication_prompt: tuple[str, str],
 ) -> None:
-    """The default filters internal steps without suppressing actual deliverables."""
     _, prompt = communication_prompt
 
     assert "meaningful milestones for the user: a usable result" in prompt
     assert "Completing an internal step or ending a turn is not itself a milestone" in prompt
+    assert "call `execute_code` with no accompanying assistant text on intermediate turns" in prompt
     assert "Do not narrate routine tool calls, retries, file reads, internal bookkeeping" in prompt
     assert "There is no fixed reporting cadence" in prompt
     assert "without a tool-call preamble or trailing introduction" in prompt
