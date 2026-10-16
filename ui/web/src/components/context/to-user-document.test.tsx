@@ -1,12 +1,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ToUserDocument } from "@/lib/contracts/types";
 
 const { linkedQuery } = vi.hoisted(() => ({ linkedQuery: vi.fn() }));
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 vi.mock("@/lib/context/use-to-user", () => ({ useToUser: linkedQuery }));
 vi.mock("@/components/content/python-code", () => ({ PythonCode: () => null }));
+import { preloadChatMarkdown } from "@/components/content/markdown";
 import { ToUserDocumentView } from "./to-user-document";
+
+beforeAll(async () => {
+  await preloadChatMarkdown();
+});
 
 const id = "a".repeat(64);
 function document(content: string): ToUserDocument {
