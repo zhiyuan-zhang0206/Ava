@@ -72,7 +72,8 @@ and centered inside it. The column clears the floating HeaderBar with 52px
 (44px bar + 8px clearance, derived from `BAR_HEIGHT_PX`; user ruling 2026-08-06)
 so a bar-height change cannot slide the first row underneath it. The composer
 stack lives in normal flow below the surface (user ruling 2026-08-06), leaving
-only a small bottom padding.
+only a small bottom padding, and shares the same column cap with one
+`undefined`-means-full-width convention on narrow viewports.
 
 ## Relationship to Other Nodes
 

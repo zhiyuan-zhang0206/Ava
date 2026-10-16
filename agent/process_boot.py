@@ -77,10 +77,16 @@ def land_cluster_extensions(db: Database) -> None:
 async def boot_agent_scope(
     agent_id: int, llm_model: str, overrides: ModelOverrides, *, catalog: Any, llm_override: str
 ) -> Any:
-    workspace_dir(agent_id)
+    workspace = workspace_dir(agent_id)
+
+    from base.agents.to_user.document import ensure_document
+
+    ensure_document(workspace)
+
     from .startup import notify_desktop_permissions_at_startup
 
     await notify_desktop_permissions_at_startup()
+
     from base.lm.factory import build_chat_model_bound
 
     return build_chat_model_bound(

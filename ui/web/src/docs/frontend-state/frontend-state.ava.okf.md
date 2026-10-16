@@ -23,7 +23,11 @@ hint raises the open-tasks notice (display-only, no state write).
 | Zustand `timeline-store.ts` | **SSE-driven timeline state** (items/turnActive/streamingCode/streamingIds/hasMoreOlder and the compact display buffer); split from `store.ts` so high-frequency code_delta/chat_delta folding only notifies timeline subscribers, not sidebar/spawn/banner | `lib/timeline-store.ts` |
 | localStorage | 7 **per-device values** (not synced): active agent (`ava.active.agent_id`), Fleet mobile tab (`ava.fleet.mobileTab`), and library-managed splits (`ava.fleet.split`, `ava.memory.graph.split`, `ava.home.columns.context`, `ava.home.columns.mobile`, `ava.home.context.desktop`) | `use-agents.ts`, `fleet-view.tsx`, `memory/graph/page.tsx`, `home-layout.tsx` |
 
-`display.*`/`behavior.*` covers: Thinking/Code/Output expand defaults, inspector toggles, sidebar collapse/view mode/sort/stats/show terminated, fleet queue collapse + left panel tab, task graph mode + done/canceled filters, force params (graph + task graph), shell terminal theme, spawn model/preset/reasoning_effort, notification and confirmation toggles, `behavior.replySuggestions`, UI language (`display.language`, i18n locale via `i18n/language-provider.tsx`; framework copy only, data plane never translated — `docs/decisions/frontend/browser/2026-08-05-frontend-i18n-next-intl.md`) — defaults in `lib/types.ts:USER_SETTING_DEFAULTS`. `content-toggle-store.ts` stays a thin `useUserSettings` wrapper. `inspector-panel-store.ts` is breakpoint-aware (task #793): on desktop (≥ lg) the inspector is a side panel, so `display.inspector_open` stays a DB-backed workspace preference (default closed); on mobile (< lg) it is a full-screen overlay that hides the timeline, so its open state is **per-session volatile state** (`mobileInspectorOpen` in `store.ts`, default closed) and mobile toggles never write the shared setting — opening/closing the overlay on a phone must not yank the desktop panel.
+`display.*`/`behavior.*` covers: Thinking/Code/Output expand defaults, inspector toggles, sidebar collapse/view mode/sort/stats/show terminated, fleet queue collapse + left panel tab, task graph mode + done/canceled filters, force params (graph + task graph), shell terminal theme, spawn model/preset/reasoning_effort, notification and confirmation toggles, `behavior.replySuggestions`, UI language (`display.language`, i18n locale via `i18n/language-provider.tsx`; framework copy only, data plane never translated — `docs/decisions/frontend/browser/2026-08-05-frontend-i18n-next-intl.md`) — defaults in `lib/types.ts:USER_SETTING_DEFAULTS`. `content-toggle-store.ts` stays a thin `useUserSettings` wrapper.
+
+## Inspector open state
+
+`inspector-panel-store.ts` is breakpoint-aware (task #793): on desktop (≥ lg) the inspector is the right panel's secondary view, so `display.inspector_open` stays a DB-backed workspace preference (default closed) that selects that view; on mobile (< lg) the reading surfaces are full-screen overlays that hide the timeline, so the inspector's open state is **per-session volatile state** (`mobileInspectorOpen` in `store.ts`, default closed) and mobile toggles never write the shared setting — opening or closing on a phone must not yank the desktop view. The statistics window select (`inspectorHours`) is session state and is not persisted.
 
 Server data is not mirrored into Zustand — the sidebar reads `useAgents → useQuery`. The composer's drafted-reply ghost text is hook-local volatile state with one writer ([[gateway/agents/docs/reply-suggestion/reply-suggestion.ava.okf.md]]).
 
@@ -58,28 +62,13 @@ The selected conversation store and its abortable reads have their own node:
 
 `createStickyController` is the **sole owner** of the sticky flag — replacing 6 paths that each wrote `stickyRef`. Two core ideas: when pinning, move the baseline together (`notifyPinnedToBottom` makes the pin's own echo read as zero movement, eliminating direction heuristics/grace timers); `lastBottomScrollHeight` witnesses "content growing taller under my feet". At-bottom zone width splits into two thresholds by pointer type (touch/mouse). Callers only issue `requestStick()`/`handleScroll()`/`handleLayoutChange()`, never modify the flag. `scrollToBottomRequest` is the sole forced-scroll signal, bumped on agent switch (`switchThread`) + on send — those two force pins also hand the controller a fresh upward run (`notifyPinnedToBottom(view, freshRun)`; a stale run would otherwise release following again on the first post-pin twitch, before the reply could be followed). Automatic (streaming-growth) pins keep the run.
 
-## History-Entry Scroll Memory (`lib/scroll-memory.ts`)
+## History-Entry Scroll Memory
 
-The document never scrolls (h-full chain; every page scrolls inside its own
-element), so the browser's history scroll restoration has nothing to restore:
-a back/forward remount would reset each container (timeline re-pinned to the
-newest message, terminal to its tail). Every scrolling surface saves its
-position under the history entry it belongs to — keyed by
-`router.bfcacheId`, which the client router keeps across back/forward,
-`router.refresh()`, and search-param-/hash-only navigations and hands out
-fresh only when a push/replace lands on a new segment (vendored Next 16.3.4
-use-router docs), independent of `cacheComponents` — so a restore happens
-only on a return to a kept entry; a first visit keeps its own default, and a
-search-param-only switch (e.g. `?agent_id=`) shares the previous home
-visit's slot. The record carries a content key (agent / agent+session): a
-mismatch drops the position instead of restoring it onto other content, and
-the sticky flag rides along so a follower returns following. Restores land in
-a layout effect on the first commit that can hold them (before paint), report
-through
-`notifyRestored` (following resumes exactly at an at-bottom restore), and the
-mount force-pin defers to a pending restore.
+Per-container reading positions survive back/forward through the history
+entry's `bfcacheId`; the save/restore path has its own node:
+[[ui/web/src/docs/frontend-state/scroll-memory.ava.okf.md|History-Entry Scroll Memory]].
 
 ## Shared user context
 
-The document reader, notification area, Inspector tabs and file-change repair are
+The document reader, notification area, inspector view and file-change repair are
 owned by [[ui/web/src/docs/frontend-state/shared-context.ava.okf.md|Shared user context]].
