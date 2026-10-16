@@ -1,10 +1,4 @@
-"""Assemble one self-evolution trace dataset record.
-
-This script sibling owns the record-shaping helpers used by ``collect.py``.
-Keeping the assembly here separates collection transport and database access
-from the stable dataset-record contract.
-"""
-
+# ava:ref ava_builtins/skills/platform/ava-self-evolution/docs/ava-self-evolution.ava.okf.md#record-assembly
 from __future__ import annotations
 
 import ast
@@ -17,10 +11,6 @@ from typing import Any, NamedTuple
 
 from pydantic import ValidationError
 
-# `audit`/`label` are siblings in this skill's own scripts/ dir, not an
-# importable package (PYTHONSAFEPATH=1 keeps a script's own directory off
-# sys.path) — restore it for the sibling import. Structure Rule 6 recognizes
-# this exact __file__-derived, within-skill shape as the endorsed guard.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audit import LeakPaths, invalidated, scan
@@ -30,7 +20,6 @@ from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_
 from base.db import Database
 from base.telemetry.audit_events import SkillInvokedPayload
 
-# Chinese correction keywords — user is redirecting or correcting the agent.
 CN_CORRECTION_KEYWORDS = [
     "\u4e0d\u5bf9",
     "\u9519\u4e86",
@@ -53,7 +42,6 @@ CN_CORRECTION_KEYWORDS = [
     "\u8bef\u5bfc",
 ]
 
-# English correction keywords — user is redirecting or correcting the agent.
 EN_CORRECTION_KEYWORDS = [
     "wrong",
     "incorrect",
@@ -74,7 +62,6 @@ EN_CORRECTION_KEYWORDS = [
     "try again",
 ]
 
-# Agent-to-agent feedback keywords — one agent correcting or reminding another.
 PEER_FEEDBACK_KEYWORDS = [
     "\u4f60\u90a3\u4e2a",
     "\u4f60\u6ca1",
@@ -96,7 +83,6 @@ PEER_FEEDBACK_KEYWORDS = [
 
 
 def _detect_correction(content: str) -> bool:
-    """Return whether content reads as a user correction rather than a follow-up."""
     if not content:
         return False
     if any(keyword in content for keyword in CN_CORRECTION_KEYWORDS):
@@ -106,7 +92,6 @@ def _detect_correction(content: str) -> bool:
 
 
 def _detect_peer_feedback(content: str) -> bool:
-    """Return whether an agent-to-agent message contains corrective feedback."""
     if not content:
         return False
     if any(keyword in content for keyword in PEER_FEEDBACK_KEYWORDS):
@@ -115,7 +100,6 @@ def _detect_peer_feedback(content: str) -> bool:
 
 
 def _dotted(node: ast.AST) -> str | None:
-    """Resolve an attribute chain like ``ava.files.edit`` to its dotted string."""
     parts: list[str] = []
     while isinstance(node, ast.Attribute):
         parts.append(node.attr)
@@ -127,17 +111,10 @@ def _dotted(node: ast.AST) -> str | None:
 
 
 def count_tool_calls(codes: list[str]) -> dict[str, int]:
-    """Count ``ava.*`` SDK calls across a run's executed code blocks."""
     counts: Counter[str] = Counter()
     for code in codes:
         try:
             with warnings.catch_warnings():
-                # The code is agent-written history, not the scanner's own:
-                # an invalid escape sequence in it (a non-raw-string regex,
-                # say) parses fine and changes no counts, but Python 3.12's
-                # SyntaxWarning would leak into the scan's stderr as
-                # "<unknown>:N" lines and ride along in the schedule ALERT
-                # message (observed 2026-08-27 00:00 run).
                 warnings.simplefilter("ignore", SyntaxWarning)
                 tree = ast.parse(code)
         except SyntaxError:
@@ -168,10 +145,6 @@ _EXEC_FAIL_EVENTS = frozenset(
 
 
 def _is_exec_fail(event: str) -> bool:
-    # Exact failure/abnormal names only. `exec_envelope` is the per-execution
-    # wrapper (timing/counters), not an outcome — counting it as a failure
-    # inflated every Codex-driven run's exec_failed (observed 2026-08-25:
-    # dataset exec_failed=18 vs Loki exec_failed=0, 87 envelopes).
     return event in _EXEC_FAIL_EVENTS
 
 
@@ -182,6 +155,8 @@ def _msg_text(content: Any) -> str:
         parts = []
         for block in content:
             if isinstance(block, dict):
+                if block.get("type") in {"thinking", "tool_use"}:
+                    continue
                 parts.append(block.get("text") or block.get("type") or "")
             else:
                 parts.append(str(block))
@@ -190,7 +165,6 @@ def _msg_text(content: Any) -> str:
 
 
 def _transcript(agent_id: int, *, database: Database) -> list[dict[str, str]]:
-    """Full Task #1125 conversation, or [] if its checkpoint is unreadable."""
     try:
         messages = load_checkpoint_messages_full(database, agent_id)
     except CheckpointReadError:
@@ -199,7 +173,6 @@ def _transcript(agent_id: int, *, database: Database) -> list[dict[str, str]]:
 
 
 def _skills_touched(log_events: list[tuple]) -> list[str]:
-    """Return explicitly loaded skills recorded by the run."""
     loaded: set[str] = set()
     for event_type, payload in log_events:
         if event_type != "skill_invoked":
@@ -212,7 +185,6 @@ def _skills_touched(log_events: list[tuple]) -> list[str]:
 
 
 def _plugins_activated(events: list[tuple]) -> tuple[dict[str, int], int]:
-    """Return fired plugin contribution counts and malformed-row count."""
     fired: Counter[str] = Counter()
     skipped = 0
     for event_type, payload in events:
@@ -241,7 +213,6 @@ def _task_prompt(
     agent_messages: list[dict[str, Any]],
     inbounds: list[dict[str, Any]],
 ) -> str:
-    """The run's task: the first user message, else the spawner's, else the first system one."""
     task_prompt = user_messages[0] if user_messages else ""
     if not task_prompt.strip() and spawner.startswith("agent:"):
         spawner_messages = [
@@ -261,7 +232,6 @@ def _task_prompt(
 
 
 def _peer_feedback(spawner: str, agent_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Feedback from agents other than the spawner."""
     spawner_id: int | None = None
     if spawner.startswith("agent:"):
         with contextlib.suppress(IndexError, ValueError):
@@ -280,8 +250,6 @@ def _peer_feedback(spawner: str, agent_messages: list[dict[str, Any]]) -> list[d
 
 
 class _EventStats(NamedTuple):
-    """What one run's telemetry events add up to."""
-
     turns: int
     models: list[str]
     tokens_in: int
@@ -331,7 +299,6 @@ def _event_stats(events: list[tuple]) -> _EventStats:
 def _per_agent_messages(
     inbounds: list[dict[str, Any]],
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    """`(user message texts, agent-sourced messages)` addressed to this agent alone."""
     per_agent = [message for message in inbounds if not message["is_broadcast"]]
     user_messages = [message["content"] for message in per_agent if message["source"] == "user"]
     agent_messages = [message for message in per_agent if message["source"].startswith("agent:")]
@@ -360,7 +327,6 @@ def build_record(
     database: Database,
     leak_paths: LeakPaths | None = None,
 ) -> dict[str, Any]:
-    """Assemble the stable trace dataset record for one agent run."""
     spawner, status, last_message_text = meta
 
     user_messages, agent_messages = _per_agent_messages(inbounds)

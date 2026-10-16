@@ -1,8 +1,4 @@
-"""The ava_code plugin's system-prompt sections: coding-tool advertising and the opt-in
-debugging workflow. Kept apart from `agent_runtime.py` (the host-side face), which does not
-import `ava`: the coding-tools section renders SDK stubs through `ava.help`.
-"""
-
+# ava:ref ava_builtins/plugins/ava_code/docs/ava_code.ava.okf.md#coding-prompt-sections
 from __future__ import annotations
 
 import contextlib
@@ -12,25 +8,10 @@ import ava
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 
-# ── system prompt section: coding tool advertising ──────────────────────────
-# From the plugin's perspective, what "hands" should the agent use for
-# coding? Feed cwd / files / shell as three modules into help() — the
-# renderer is Python-stub-format, each module renders the full docstring +
-# each child function as `def name(sig): """doc"""`; the agent gets the
-# full contract with zero drill-down.
-
 _PROMOTED_MODULES = ("cwd", "files", "shell")
 
 
 def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Render the cwd / files / shell modules as Python stubs under `## ava.X`.
-
-    A module already expanded by the framework's "Expanded SDK reference"
-    section (the effective list: plugin registrations + AVA_SDK_EXPAND, exact
-    path match) is skipped here — its full contract is in the prompt once
-    already; the preamble conventions below still apply and are always
-    rendered. With the default config every promoted module is expanded, so
-    this section reduces to the preamble."""
     del catalog
     from agent.graph.prompt.system_prompt import effective_sdk_expand
 
@@ -55,7 +36,9 @@ def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         "When you start a coding task:\n\n"
         "- Point your working directory at the project root once when you start.\n"
         "- Read `AGENTS.md` first (via the file tools) before reading other "
-        "code — it sets the project rules you must follow.\n"
+        "code — it sets the project rules you must follow — and load any "
+        "matching workflow or engineering skill (`ava.help(ava.skills.ava_workflow)` "
+        "for non-trivial tasks) in that same opening `execute_code` call.\n"
         "- Search with `rg` (ripgrep), not `grep -r`/`find` — recursive grep scans "
         "every `.worktrees/` checkout and often hits the 30s shell timeout.\n"
         "- For any change to a repo, work in an isolated `git worktree` — never edit, "
@@ -75,13 +58,7 @@ def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     return f"# Coding tools\n\n{preamble}\n\n{body}"
 
 
-# ── system prompt section: debugging workflow (opt-in) ──────────────────────
-# Coding-specific advice, so it belongs to this plugin rather than the core
-# prompt. Off by default; toggled by adding "ava_code_workflow" to
-# settings.agent.system_prompt_extra (env AVA_SYSTEM_PROMPT_EXTRA).
-# Empty return when disabled = no contribution.
 def engineering_workflow_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    """Loose bug-fix-workflow advice, gated by system_prompt_extra=ava_code_workflow."""
     del catalog
     if "ava_code_workflow" not in slices.prompt.system_prompt_extra:
         return ""

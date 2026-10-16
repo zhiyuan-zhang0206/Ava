@@ -1,10 +1,8 @@
-"""Core reply, language and milestone policy, plus optional conversation styles."""
-
+# ava:ref agent/graph/prompt/docs/composition.ava.okf.md#conversation-policy
 from base.host.env.agent_slices import AgentSlices
 
 
 def user_reply_section(_slices: AgentSlices) -> str:
-    """Core communication requirements stay active with every optional style."""
     return (
         "# Responding to human requests\n\n"
         "Reply in ordinary assistant text in this conversation. Text alongside a "
@@ -52,6 +50,8 @@ def user_reply_section(_slices: AgentSlices) -> str:
         "An explicitly selected live-pairing style may add more frequent "
         "substantive updates, but every message must remain self-contained and "
         "useful to the user. Do not assume continuous attention to the session.\n\n"
+        "After the opening reply, call `execute_code` with no accompanying "
+        "assistant text on intermediate turns unless you reach a milestone. "
         "Do not narrate routine tool calls, retries, file reads, internal "
         "bookkeeping or unchanged status. Keep those details in tool feedback "
         "or working notes. There is no fixed reporting cadence; do not "
@@ -101,10 +101,6 @@ _SILENT_BODY = (
     "waiting until the end would waste the whole run."
 )
 
-# One rendered section per narrating style. Keys match the Literal on
-# settings.agent.agent_communication_style minus 'off', so an unknown style
-# raises rather than silently rendering nothing. 'off' is not a key here — it
-# is handled as a gate by system_prompt._communication_style_section.
 COMMUNICATION_STYLE_SECTIONS = {
     "oriented": f"# Keeping the user oriented\n\n{_NOTIFICATION_GUIDANCE}\n\n{_ORIENTED_BODY}",
     "concise": f"# Talking to the user\n\n{_NOTIFICATION_GUIDANCE}\n\n{_CONCISE_BODY}",
