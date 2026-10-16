@@ -1,3 +1,4 @@
+import type * as ApiModule from "@/lib/transport/api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +19,8 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
   }));
 
 vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
-vi.mock("@/lib/transport/api", () => ({
+vi.mock("@/lib/transport/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof ApiModule>()),
   api: { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings },
 }));
 
@@ -66,6 +68,7 @@ const unit = (i0: number, from: number, to: number, parent: string): RunTimeline
 
 const response = (agent: number, window: [number, number], tree: boolean): RunTimelineResponse => ({
   agent_id: agent,
+  units_omitted: 0,
   window: { from: at(window[0]), to: at(window[1]) },
   lifetime: { from: at(window[0]), to: at(window[1]) },
   nodes: tree
@@ -74,7 +77,6 @@ const response = (agent: number, window: [number, number], tree: boolean): RunTi
   units: [unit(0, window[0] + 5, window[0] + 10, "l"), unit(1, window[0] + 20, window[0] + 25, "l")],
 });
 
-// Agent 7 runs 0-60 min with a two-level tree, agent 8 runs 30-120 min with one level.
 const BY_AGENT: Record<number, RunTimelineResponse> = {
   7: response(7, [0, 60], true),
   8: response(8, [30, 120], false),
@@ -82,7 +84,6 @@ const BY_AGENT: Record<number, RunTimelineResponse> = {
 };
 const BASE_78 = viewportOf({ from: at(0), to: at(120) });
 
-/** Renders the page with the Context size row switched on (it is off by default); `contextSize: false` leaves the default. */
 function render(agents = "7", { contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = rtlRender(
@@ -135,9 +136,9 @@ describe("agent view", () => {
     await screen.findByTestId("agent-view-agent-8");
     await waitFor(() => expect(within(group(7)).getByTestId("run-timeline-agent").textContent).toBe("Agent #7 · seven"));
     expect(screen.getAllByTestId("run-timeline-chart")).toHaveLength(1);
-    expect(getRunTimeline).toHaveBeenCalledWith(7, { signal: expect.any(AbortSignal) as AbortSignal });
-    expect(getRunTimeline).toHaveBeenCalledWith(8, { signal: expect.any(AbortSignal) as AbortSignal });
-    // Each agent keeps all of its own rows: agent 7 two tree levels, agent 8 one.
+    expect(getRunTimeline).toHaveBeenCalledWith(7, { recentHours: 24, maxUnits: 5000, signal: expect.any(AbortSignal) as AbortSignal });
+    expect(getRunTimeline).toHaveBeenCalledWith(8, { recentHours: 24, maxUnits: 5000, signal: expect.any(AbortSignal) as AbortSignal });
+
     expect(rowIn(7, "run-timeline-row-level-2")).not.toBeNull();
     expect(rowIn(7, "run-timeline-row-level-1")).not.toBeNull();
     expect(rowIn(8, "run-timeline-row-level-2")).toBeNull();
@@ -218,7 +219,7 @@ describe("agent view", () => {
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
     await paintFrame();
     const live = () => screen.getByTestId("run-timeline-selection-live").textContent;
-    // The bar of agent 7's second block, in its last row (Context size).
+
     const x = itemX(BY_AGENT[7], "input", "utext-1-1", 1000, BASE_78);
     fireEvent.click(within(group(7)).getByTestId("run-timeline-canvas-input"), { clientX: x });
     expect(live()).toContain("Agent #7");
@@ -229,7 +230,7 @@ describe("agent view", () => {
     fireEvent.keyDown(window, { key: "ArrowUp" });
     expect(live()).toContain("Agent #7");
     expect(live()).toContain("unit 1");
-    // Within an agent, up stays in the agent's own rows: the block in the Messages row, then its tree level.
+
     fireEvent.keyDown(window, { key: "ArrowUp" });
     fireEvent.keyDown(window, { key: "ArrowUp" });
     expect(live()).toContain("Agent #7");
@@ -287,7 +288,6 @@ describe("arrows between agents", () => {
   const BLUE = "#3b82f6";
   const GREEN = "#22c55e";
 
-  // jsdom lays nothing out: every track is 1000 px wide, 30 px tall, 40 px below the one before.
   const trackRect = (el: Element) => {
     const index = [...document.querySelectorAll("[data-track]")].indexOf(el);
     return { left: 0, top: index * 40, width: 1000, height: 30, right: 1000, bottom: index * 40 + 30, x: 0, y: index * 40, toJSON: () => ({}) };
@@ -298,7 +298,6 @@ describe("arrows between agents", () => {
     return (track === null ? 0 : trackRect(track).top) + 15;
   };
 
-  // The middle of the message arrow from agent 7 to agent 8 (key as `resolveLinks` makes it).
   const messageArrowMiddle = () =>
     curvePoint(curveOf(`send_message-${at(40)}-7-8-0`, 1000 / 3, mid(7, "run-timeline-row-units"), 1000 / 3, mid(8, "run-timeline-row-units")), 0.5);
 
@@ -329,15 +328,15 @@ describe("arrows between agents", () => {
   it("draws one arrow per link in its kind's color, from the sender's Messages row to where the event lands", async () => {
     await ready();
     const byColor = (color: string) => strokes().filter((d) => d.color === color);
-    // The message has no inbound block to land on: it ends in agent 8's Messages row at its time.
+
     const [message] = byColor(BLUE);
     expect(message.x).toBeCloseTo(1000 / 3, 1);
     expect(message.y).toBe(mid(7, "run-timeline-row-units"));
     expect(message.y + message.h).toBe(mid(8, "run-timeline-row-units"));
-    // A spawn ends in agent 8's Messages row too: the agent view has no lifecycle row.
+
     const [spawn] = byColor(GREEN);
     expect(spawn.y + spawn.h).toBe(mid(8, "run-timeline-row-units"));
-    // Both ends outside the view are drawn to the Other agents row.
+
     const toOther = strokes().filter((d) => d.y + d.h === mid(null, "run-timeline-row-other"));
     expect(toOther.map((d) => d.color).sort()).toEqual(["#14b8a6"]);
     const fromOther = strokes().filter((d) => d.y === mid(null, "run-timeline-row-other"));
@@ -363,7 +362,7 @@ describe("arrows between agents", () => {
     expect(screen.getByTestId("run-timeline-readout").textContent).toContain("Message · #7 → #8");
     fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: 900, clientY: middleY });
     expect(screen.getByTestId("run-timeline-readout").textContent).not.toContain("→");
-    // The pointer over a block of the Messages row: the block is hovered and clicked, not the arrow across it.
+
     fireEvent.pointerMove(canvasOf(7, "units"), { clientX: itemX(BY_AGENT[7], "units", "utext-0-0", 1000, BASE_78) });
     fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: arrowX, clientY: middleY });
     expect(screen.getByTestId("run-timeline-readout").textContent).not.toContain("→");
@@ -378,7 +377,7 @@ describe("arrows between agents", () => {
     expect(detail.textContent).toContain("#7");
     expect(detail.textContent).toContain("#8");
     expect(screen.queryByTestId("run-timeline-link-add-agent")).toBeNull();
-    // No block of agent 8 carries an inbound id: the arrow says it is not exact.
+
     expect(screen.getByTestId("run-timeline-link-unmatched")).toBeTruthy();
   });
 
@@ -392,7 +391,7 @@ describe("arrows between agents", () => {
     expect(detail.textContent).toContain("#99 (not in the view)");
     fireEvent.click(screen.getByTestId("run-timeline-link-add-agent"));
     await waitFor(() => {
-      expect(getRunTimeline).toHaveBeenCalledWith(99, { signal: expect.any(AbortSignal) as AbortSignal });
+      expect(getRunTimeline).toHaveBeenCalledWith(99, { recentHours: 24, maxUnits: 5000, signal: expect.any(AbortSignal) as AbortSignal });
       const call = getRunTimeline.mock.calls.find(([id]) => id === 99);
       expect(call?.[1]).toHaveProperty("signal.aborted", false);
     });
@@ -404,8 +403,7 @@ describe("arrows between agents", () => {
     const x = itemX(BY_AGENT[8], "units", "utext-0-0", 1000, BASE_78);
     fireEvent.pointerMove(block, { clientX: x });
     fireEvent.click(block, { clientX: x });
-    // Agent 8 is the last: down from its Messages row goes to its Context size row, and from there into
-    // the Other agents row, at the event nearest in time (the earlier one on a tie).
+
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "ArrowDown" });
     const [fork, terminate] = screen.getAllByTestId("run-timeline-link-tick");
@@ -417,7 +415,7 @@ describe("arrows between agents", () => {
     expect(terminate.getAttribute("aria-pressed")).toBe("true");
     fireEvent.keyDown(window, { key: "ArrowLeft" });
     await waitFor(() => expect(fork.getAttribute("aria-pressed")).toBe("true"));
-    // Up leaves the row for the last agent's Messages row.
+
     fireEvent.keyDown(window, { key: "ArrowUp" });
     await waitFor(() => expect(screen.getByTestId("run-timeline-unit-detail")).toBeTruthy());
   });
@@ -445,14 +443,14 @@ describe("arrows between agents", () => {
     render("7,8");
     await screen.findByTestId("agent-view-user");
     await waitFor(() => expect(within(screen.getByTestId("agent-view-user")).getAllByTestId("run-timeline-link-tick")).toHaveLength(4));
-    // The watcher's message is not the user's; the two people's messages, the user's terminate and the agent's notice are.
+
     fireEvent.click(within(screen.getByTestId("agent-view-user")).getAllByTestId("run-timeline-link-tick")[3]);
     const detail = await screen.findByTestId("run-timeline-link-detail");
     expect(detail.textContent).toContain("User");
     await waitFor(() => expect(detail.textContent).toContain("need a decision"));
     expect(getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 11 });
     expect(screen.queryByTestId("run-timeline-link-add-agent")).toBeNull();
-    // The legend counts them with the rest: two chat messages and one notice (the terminate is its own kind).
+
     expect(screen.getByTestId("run-timeline-link-legend-user_message").textContent).toBe("User message 2");
     expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 0");
     expect(screen.getByTestId("run-timeline-link-legend-notice").textContent).toBe("Notice 1");
@@ -462,7 +460,7 @@ describe("arrows between agents", () => {
     await ready();
     const user = screen.getByTestId<HTMLInputElement>("agent-view-interactions-user");
     const other = screen.getByTestId<HTMLInputElement>("agent-view-interactions-other");
-    // There is no master switch: both are on and enabled by default.
+
     expect(screen.queryByTestId("agent-view-interactions")).toBeNull();
     expect([user.checked, other.checked, user.disabled, other.disabled]).toEqual([true, true, false, false]);
     expect(strokes()).toHaveLength(4);
@@ -470,9 +468,9 @@ describe("arrows between agents", () => {
     await paintFrame();
     expect(screen.queryByTestId("agent-view-other")).toBeNull();
     expect(screen.getByTestId("agent-view-user")).toBeTruthy();
-    // Only the arrows between agents in view stay: the message and the spawn.
+
     expect(strokes()).toHaveLength(2);
-    // The kind legend is always there, whatever the groups.
+
     expect(screen.getByTestId("run-timeline-link-legend")).toBeTruthy();
     fireEvent.click(other);
     fireEvent.click(user);
@@ -510,7 +508,7 @@ describe("arrows between agents", () => {
 
   it("merges close arrows, as little as keeps the panel within the limit, with a count on each merged one; groups hover, select and pull apart on a click", async () => {
     getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent] ?? response(agent, [10, 20], false)));
-    // 40 messages from 7 to 8, 3 seconds apart, and one spawn between the same agents: over the limit of 30.
+
     getRunTimelineLinks.mockResolvedValue({
       links: [
         ...Array.from({ length: 40 }, (_, i) => link({ ts: at(40 + i / 20) })),
@@ -521,21 +519,19 @@ describe("arrows between agents", () => {
     await screen.findByTestId("agent-view-other");
     await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 40"));
     await paintFrame();
-    // No more than the limit are drawn; the spawn is never merged into the messages.
+
     expect(strokes().length).toBeLessThanOrEqual(MAX_ARROWS);
     expect(strokes().some((d) => d.color === GREEN)).toBe(true);
     const badges = drawnLinks().filter((d) => d.op === "text").map((d) => Number(d.text));
     expect(badges.length).toBeGreaterThan(0);
-    // The badges and the arrows without one add up to the 40 messages.
+
     const single = strokes().filter((d) => d.color === BLUE).length - badges.length;
     expect(badges.reduce((a, b) => a + b, 0) + single).toBe(40);
-    // The legend counts the links, not the arrows.
+
     expect(screen.getByTestId("run-timeline-link-legend-spawn").textContent).toBe("Spawn 1");
-    // Every arrow has the same width.
+
     expect(new Set(strokes().map((d) => d.lineWidth)).size).toBe(1);
 
-    // Hover, then select, a merged arrow. A stroke records only its ends, so the point on the curve is
-    // found by trying keys, whose hash picks the bend (a per-link factor).
     const chart = screen.getByTestId("run-timeline-chart");
     const group = strokes().find((d) => d.color === BLUE);
     if (group === undefined) throw new Error("no message arrow drawn");
@@ -606,7 +602,6 @@ describe("arrows between agents", () => {
     const valid = strokes().length;
     expect(input.getAttribute("aria-invalid")).toBe("false");
 
-    // Anything else keeps the last valid limit in force, marks the field and says what is accepted.
     for (const bad of ["", "0", "-3", "2.5", "abc", "1e2", "+5", "501", "20 arrows"]) {
       type(bad);
       await paintFrame();
@@ -614,7 +609,7 @@ describe("arrows between agents", () => {
       expect(input.getAttribute("aria-invalid"), `"${bad}"`).toBe("true");
       expect(screen.getByTestId("agent-view-max-arrows-error").textContent).toContain("1 to 500");
     }
-    // The boundaries are valid, and a valid number clears the complaint.
+
     type("1");
     await paintFrame();
     expect(strokes().length).toBeLessThanOrEqual(1);

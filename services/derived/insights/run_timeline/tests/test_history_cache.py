@@ -1,108 +1,106 @@
 from __future__ import annotations
 
-import threading
-import time
-from types import SimpleNamespace
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
-from langchain_core.messages import HumanMessage
+from fastapi import HTTPException
+from psycopg import Connection
 
-from base.agents.history.checkpoint import single_segment_history
-from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from services.derived.insights.run_timeline import history
-from services.derived.insights.run_timeline.history import HistoryViewCache
-
-
-class FakeStore:
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, *, delay: float = 0.0) -> None:
-        self.head: str | None = "c1"
-        self.loads = 0
-        self.probes = 0
-        self.delay = delay
-        monkeypatch.setattr(history, "load_checkpoint_history_full", self._load)
-        monkeypatch.setattr(history, "latest_checkpoint_id", self._probe)
-
-    def _load(self, db: Any, agent_id: int):
-        self.loads += 1
-        time.sleep(self.delay)
-        return single_segment_history([HumanMessage(content="hi")])
-
-    def _probe(self, db: Any, agent_id: int) -> str | None:
-        self.probes += 1
-        return self.head
+from services.derived.insights.run_timeline.projection.reader import TimelineReader
+from services.derived.insights.run_timeline.projection.source import Source, capture_source
+from services.derived.insights.run_timeline.tests.test_projection import AGENT, World, messages
+from services.derived.insights.run_timeline.tests.test_projection import world as world
 
 
-DB: Any = SimpleNamespace()
-_TIMELINE_INPUTS = TimelineReadInputs(
-    lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), lambda: False
-)
+def test_concurrent_cold_readers_share_one_tail(world: World) -> None:
+    head = world.put(messages(0), sealed=False)
+    with ThreadPoolExecutor(max_workers=6) as workers:
+        cuts = list(workers.map(world.reader.get, [AGENT] * 6))
+    assert all(c is cuts[0] for c in cuts) and world.loads == [head]
 
 
-def test_concurrent_cold_readers_share_one_build(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = FakeStore(monkeypatch, delay=0.2)
-    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
-    views: list[Any] = []
-    threads = [threading.Thread(target=lambda: views.append(cache.get(DB, 9))) for _ in range(6)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert store.loads == 1
-    assert all(v is views[0] for v in views)
+def test_unchanged_head_keeps_a_snapshot_after_the_short_ttl(world: World) -> None:
+    head = world.put(messages(0), sealed=False)
+    first = world.reader.get(AGENT)
+    world.clock = 6
+    assert world.reader.get(AGENT) is first and world.loads == [head]
 
 
-def test_an_unchanged_checkpoint_keeps_the_view_past_the_ttl(
-    monkeypatch: pytest.MonkeyPatch,
+def test_new_head_rebuilds_only_the_tail(world: World) -> None:
+    world.put(messages(0), sealed=True)
+    head = world.put(messages(1), sealed=False)
+    world.prepare()
+    first = world.reader.get(AGENT)
+    latest = world.put(messages(2), sealed=False)
+    world.clock = 6
+    assert world.reader.get(AGENT).id != first.id
+    assert world.loads == [head, latest]
+
+
+def test_expired_unknown_and_wrong_agent_snapshots_never_read_bodies(world: World) -> None:
+    head = world.put(messages(0), sealed=False)
+    first = world.reader.get(AGENT)
+    for agent, snapshot in ((AGENT, "unknown"), (AGENT + 1, first.id)):
+        with pytest.raises(HTTPException) as caught:
+            world.reader.get(agent, snapshot)
+        assert caught.value.status_code == 409
+    world.clock = 601
+    with pytest.raises(HTTPException) as caught:
+        world.reader.get(AGENT, first.id)
+    assert caught.value.status_code == 409 and world.loads == [head]
+    assert world.reader.get(AGENT).id != first.id
+    assert world.loads == [head, head]
+
+
+def test_oldest_snapshot_is_evicted_after_sixteen_agents(world: World) -> None:
+    first = world.reader.get(1)
+    for agent in range(2, 18):
+        world.reader.get(agent)
+    with pytest.raises(HTTPException) as caught:
+        world.reader.get(1, first.id)
+    assert caught.value.status_code == 409
+
+
+def test_recent_head_check_cannot_revive_an_absolutely_expired_snapshot(world: World) -> None:
+    head = world.put(messages(0), sealed=False)
+    first = world.reader.get(AGENT)
+    world.clock = 599
+    assert world.reader.get(AGENT) is first
+    world.clock = 601
+    with pytest.raises(HTTPException) as caught:
+        world.reader.get(AGENT, first.id)
+    assert caught.value.status_code == 409
+    refreshed = world.reader.get(AGENT)
+    assert refreshed.id != first.id
+    assert world.reader.get(AGENT, refreshed.id) is refreshed
+    assert world.loads == [head, head]
+
+
+def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
+    world: World,
 ) -> None:
-    store = FakeStore(monkeypatch)
-    monkeypatch.setattr(history, "TTL_SECONDS", 0.0)
-    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
-    first = cache.get(DB, 9)
-    assert cache.get(DB, 9) is first
-    assert (store.loads, store.probes) == (1, 2)
+    def evict_during_capture(conn: Connection[Any], agent_id: int) -> Source:
+        source = capture_source(conn, agent_id)
+        if agent_id == 1 and world.clock > 0:
+            for other_agent in [*range(2, 17), 18]:
+                reader.get(other_agent)
+        return source
 
-
-def test_a_new_checkpoint_rebuilds_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = FakeStore(monkeypatch)
-    monkeypatch.setattr(history, "TTL_SECONDS", 0.0)
-    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
-    first = cache.get(DB, 9)
-    store.head = "c2"
-    assert cache.get(DB, 9) is not first
-    assert store.loads == 2
-
-
-def test_a_view_is_rebuilt_past_the_max_age(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = FakeStore(monkeypatch)
-    monkeypatch.setattr(history, "TTL_SECONDS", 0.0)
-    monkeypatch.setattr(history, "MAX_AGE_SECONDS", -1.0)
-    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
-    cache.get(DB, 9)
-    cache.get(DB, 9)
-    assert store.loads == 2
-
-
-def test_within_the_ttl_the_store_is_not_probed(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = FakeStore(monkeypatch)
-    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
-    cache.get(DB, 9)
-    cache.get(DB, 9)
-    assert (store.loads, store.probes) == (1, 1)
-
-
-def test_one_page_of_agents_stays_cached_and_the_oldest_is_evicted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    store = FakeStore(monkeypatch)
-    cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
-    cap = history.MAX_ENTRIES
-    for agent_id in range(cap):
-        cache.get(DB, agent_id)
-    for agent_id in range(cap):
-        cache.get(DB, agent_id)
-    assert store.loads == cap
-    cache.get(DB, cap)
-    cache.get(DB, 0)
-    assert store.loads == cap + 2
+    reader = TimelineReader(
+        world.db,
+        world.pool,
+        inputs=world.inputs,
+        jobs=world.jobs,
+        read_segment=world.read_segment,
+        read_source=evict_during_capture,
+        timer=lambda: world.clock,
+    )
+    first = reader.get(1)
+    world.clock = 6
+    assert reader.get(1) is first
+    assert len(reader._entries) == 16
+    assert reader._checked.keys() == reader._entries.keys()
+    with pytest.raises(HTTPException) as caught:
+        reader.get(1, first.id)
+    assert caught.value.status_code == 409

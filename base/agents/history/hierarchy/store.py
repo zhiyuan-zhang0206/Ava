@@ -1,21 +1,4 @@
-"""Reads of the understanding tree — the `understanding_nodes` table and the call record.
-
-The write paths live with their writers: depth-1 nodes in `chunks.py` (`write_group_nodes`), the
-levels above in `group_store.py` (`write_groups`). Both key a node by the deterministic span
-identity `(agent_id, depth, span_start, span_end)`; boundaries are never trimmed (#1125), so the
-stitched full history is append-only and message indices never shift.
-
-Read paths:
-- `load_nodes(agent_id)`, every node of the agent for the run-timeline serving merge (the window
-  is applied there, on the read times);
-- `load_generation_costs(agent_id)`, what each chunk job's and each grouping check's calls cost
-  (from `understanding_chunk_calls` / `understanding_group_calls`), joined to nodes by `job_id` /
-  `check_key`.
-
-Nodes without timestamps are not served — they stay stored, just unservable until their time is
-known.
-"""
-
+# ava:ref base/agents/history/docs/range-read-contracts.ava.okf.md#history-range-inputs
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -24,19 +7,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from psycopg import Connection
+from psycopg import Connection, sql
 
 from base.agents.history.hierarchy.usage import GenerationUsage
 from base.db import Database
 
-# The stored row shape's version; bump with a migration when columns change.
 SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
 class StoredNode:
-    """One stored node row, in the shape the serving merge consumes."""
-
     id: int
     depth: int
     span_start: int
@@ -53,7 +33,6 @@ class StoredNode:
 
 @contextmanager
 def _read_connection(db: Database) -> Generator[Connection[Any]]:
-    """Borrow one short-lived autocommit read connection (checkpoint.py pattern)."""
     db_pool = db.pool(autocommit=True)
     try:
         with db_pool.connection() as conn:
@@ -63,7 +42,6 @@ def _read_connection(db: Database) -> Generator[Connection[Any]]:
 
 
 def load_nodes(db: Database, agent_id: int) -> list[StoredNode]:
-    """Every node of one agent, ordered by depth then message position."""
     with _read_connection(db) as conn:
         rows = conn.execute(
             """
@@ -86,28 +64,29 @@ def _costs(rows: list[Any]) -> dict[Any, GenerationUsage]:
 
 
 def load_generation_costs(
-    db: Database, agent_id: int
+    db: Database,
+    agent_id: int,
+    *,
+    job_ids: list[int] | None = None,
+    check_keys: list[str] | None = None,
 ) -> tuple[dict[int, GenerationUsage], dict[str, GenerationUsage]]:
-    """What generating the agent's nodes cost, from the raw record of every understanding call:
-    by chunk job id (the level-1 nodes of that job share it) and by grouping check key (the
-    nodes that check wrote share it)."""
     with _read_connection(db) as conn:
         jobs = conn.execute(
-            """
+            sql.SQL("""
             SELECT job_id, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
                    coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
                    coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
-            FROM understanding_chunk_calls WHERE agent_id = %s GROUP BY job_id
-            """,
-            (agent_id,),
+            FROM understanding_chunk_calls WHERE agent_id = %s {} GROUP BY job_id
+            """).format(sql.SQL(" AND job_id = ANY(%s)" if job_ids is not None else "")),
+            (agent_id, job_ids) if job_ids is not None else (agent_id,),
         ).fetchall()
         checks = conn.execute(
-            """
+            sql.SQL("""
             SELECT check_key, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
                    coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
                    coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
-            FROM understanding_group_calls WHERE agent_id = %s GROUP BY check_key
-            """,
-            (agent_id,),
+            FROM understanding_group_calls WHERE agent_id = %s {} GROUP BY check_key
+            """).format(sql.SQL(" AND check_key = ANY(%s)" if check_keys is not None else "")),
+            (agent_id, check_keys) if check_keys is not None else (agent_id,),
         ).fetchall()
     return _costs(jobs), _costs(checks)

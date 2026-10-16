@@ -1,9 +1,5 @@
 "use client";
 
-// The messages an index range covers, a page at a time, each rendered the way the conversation
-// renders it (`ItemView`, the conversation's own renderer) with
-// the context tokens it occupies; `unitKind` narrows each message to the unit's own parts.
-
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { MessagesSquare } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -23,7 +19,6 @@ import { partsForUnit } from "./model/timeline-model";
 
 const PAGE = 50;
 
-/** What a message occupies in the context; `estimated` says it is a share, not the provider's number. */
 export interface MessageTokens {
   tokens: number;
   estimated: boolean;
@@ -41,8 +36,6 @@ const ITEM_KIND: Record<RunTimelineMessagePart["kind"], BackendTimelineItem["kin
   prompt: "system_prompt",
 };
 
-/** A part as the conversation's own item, so the conversation's own row renders it: the same
- *  card, header, components and type scale as the main page. */
 function partItem(message: RunTimelineMessage, part: RunTimelineMessagePart, index: number): BackendTimelineItem {
   return {
     item_id: `${message.idx}.${index}`,
@@ -55,7 +48,6 @@ function partItem(message: RunTimelineMessage, part: RunTimelineMessagePart, ind
   };
 }
 
-/** One part as the conversation's row, open and collapsible like there. */
 function PartRow({ item }: { item: BackendTimelineItem }) {
   const [expanded, setExpanded] = useState(true);
   const config = cardConfigFor(item, useTimelineColors());
@@ -94,7 +86,7 @@ function MessageCard({
           </span>
         ) : null}
       </header>
-      {/* The conversation column's own type scale (timeline/index.tsx). */}
+
       <div className="space-y-1 text-[13px] leading-relaxed">
         {parts.map((part, index) => (
           <PartRow key={`${message.idx}-${index}`} item={partItem(message, part, index)} />
@@ -104,7 +96,7 @@ function MessageCard({
   );
 }
 
-/** A message the history does not hold (a preview an event carries), through the same card and row as the ones it does: `kind` says which part it is shown as. */
+// ava:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.ava.okf.md#selected-message-parts
 export function PreviewMessage({
   text,
   source,
@@ -134,24 +126,27 @@ export function PreviewMessage({
   );
 }
 
+// ava:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.ava.okf.md#selected-message-parts
 export function TimelineMessages({
   agentId,
+  snapshot,
   start,
   end,
   unitKind,
   partTokens = null,
 }: {
   agentId: number;
+  snapshot?: string;
   start: number;
   end: number;
   unitKind: RunTimelineUnit["kind"] | null;
-  /** The tokens of the one part a thinking / text / tool-call unit shows; the message as a whole holds the others. */
+
   partTokens?: MessageTokens | null;
 }) {
   const t = useTranslations("runTimeline");
   const query = useInfiniteQuery({
-    queryKey: ["run-timeline-messages", agentId, start, end],
-    queryFn: ({ pageParam }) => api.getRunTimelineMessages(agentId, { start: pageParam, end, limit: PAGE, full: true }),
+    queryKey: ["run-timeline-messages", agentId, start, end, snapshot],
+    queryFn: ({ pageParam }) => api.getRunTimelineMessages(agentId, { start: pageParam, end, limit: PAGE, full: true, ...(snapshot === undefined ? {} : { snapshot }) }),
     initialPageParam: start,
     getNextPageParam: (last) => last.next_start ?? undefined,
   });

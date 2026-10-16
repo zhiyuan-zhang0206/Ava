@@ -1,12 +1,5 @@
 "use client";
 
-// The agent view's rows: any number of agents on one shared axis (plain time). Each agent is a group
-// of rows: one row per understanding-tree level (topmost first), then
-// layer 0 — the message units — and the context bars at the bottom. All rows of all agents share one
-// viewport on the loaded data: the wheel / pinch zooms around the cursor, a drag or a horizontal
-// scroll pans, and nothing refetches. A click selects a block; the arrow keys move the selection,
-// down from an agent's last row into the next agent's first.
-
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -64,9 +57,8 @@ import { RunTimelineLegend } from "./run-timeline-legend";
 import { RowShell } from "./run-timeline-row-shell";
 import { readoutText } from "./model/run-timeline-readout";
 
-// Track width assumed until the first measurement.
 const DEFAULT_TRACK_PX = 1000;
-// A pointer must travel this far before a press becomes a pan (below it, it is a click).
+
 const DRAG_THRESHOLD_PX = 4;
 const WHEEL_ZOOM_RATE = 0.0015;
 const PINCH_ZOOM_RATE = 0.01;
@@ -75,12 +67,12 @@ const UNIT_ROW_PX = 40;
 const CONTEXT_ROW_PX = 40;
 const EMPTY_DATA = { nodes: [], units: [] };
 
-/** One agent of the view: its data once read, else what is shown in its place. */
 export type AgentEntry =
   | { id: number; status: "loaded"; data: RunTimelineResponse }
   | { id: number; status: "loading" }
   | { id: number; status: "failed" };
 
+// ava:ref ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.ava.okf.md#row-gesture-and-navigation
 export function RunTimelineRows({
   entries,
   base,
@@ -105,37 +97,36 @@ export function RunTimelineRows({
   onSelectLinks,
   maxArrows = MAX_ARROWS,
 }: {
-  /** The agents, top to bottom; at least one is loaded. */
+
   entries: readonly AgentEntry[];
-  /** The whole loaded extent of every agent: the viewport never leaves it. */
+
   base: Viewport;
   view: Viewport;
   onView: (view: Viewport) => void;
   selection: AgentSelection | null;
   onSelect: (selection: AgentSelection) => void;
-  /** The legend's highlight: every block of one class (or one source) stays lit, the rest fades. */
+
   highlight: Highlight | null;
   onHighlight: (highlight: Highlight | null) => void;
   options: RowOptions;
-  /** How the Messages row draws a block's height. */
+
   unitHeights: UnitHeights;
-  /** Removes an agent from the view; null while it is the only one. */
+
   onRemove: ((agent: number) => void) | null;
   onRetry: (agent: number) => void;
-  /** Every arrow between agents the view can resolve; the kinds that are off are not drawn. */
+
   links: readonly ResolvedLink[];
-  /** Whether the User group and the Other agents group, with the arrows that end in them, are shown (the × of a group sets the same state as the toolbar's switch). */
+
   showUser: boolean;
   onShowUser: (on: boolean) => void;
   showOther: boolean;
   onShowOther: (on: boolean) => void;
   linkKinds: ReadonlySet<LinkKind>;
   onToggleLinkKind: (kind: LinkKind) => void;
-  /** The selected arrow. */
-  /** The selected links: one for an arrow of one link, several for a merged arrow. */
+
   linkKeys: readonly string[];
   onSelectLinks: (keys: readonly string[]) => void;
-  /** The most arrows shown at once. */
+
   maxArrows?: number;
 }) {
   const linkKey = linkKeys.length === 1 ? linkKeys[0] : null;
@@ -144,7 +135,7 @@ export function RunTimelineRows({
   const linkLabels = useLinkKindLabels();
   const endLabel = useLinkEndLabel();
   const [hover, setHover] = useState<AgentSelection | null>(null);
-  // The arrow under the pointer (a merged one stands for several links); set only when it changes.
+
   const [hoverArrow, setHoverArrow] = useState<LinkHitResult | null>(null);
   const hoverArrowKey = useRef<string | null>(null);
   const hoverArrowTo = (next: LinkHitResult | null) => {
@@ -154,7 +145,7 @@ export function RunTimelineRows({
   };
   const hoverKeys = useMemo(() => new Set(hoverArrow?.members ?? []), [hoverArrow]);
   const selectedKeys = useMemo(() => new Set(linkKeys), [linkKeys]);
-  // Whether the pointer is over a block or node: an item wins over an arrow drawn across it.
+
   const overItem = useRef(false);
   const hitRef = useRef<LinkHit>(() => null);
   const shownLinks = useMemo(
@@ -164,7 +155,7 @@ export function RunTimelineRows({
       ),
     [showUser, showOther, links, linkKinds],
   );
-  // The links of the User and Other agents groups, in the order the groups are drawn: the arrow keys walk down through them.
+
   const groups = useMemo(() => {
     const grouped = groupLinks(shownLinks);
     return ([
@@ -177,7 +168,7 @@ export function RunTimelineRows({
     for (const l of links) counts.set(l.kind, (counts.get(l.kind) ?? 0) + 1);
     return counts;
   }, [links]);
-  // The row the selection was made in: a block and its bar in the Context size row select the same thing.
+
   const [navRow, setNavRow] = useState<string | null>(null);
   const choose = (agent: number, row: string, target: AgentSelection["selection"]) => {
     setNavRow(row);
@@ -199,12 +190,12 @@ export function RunTimelineRows({
   const viewU = axis.viewU(view);
   const chartRef = useRef<HTMLDivElement>(null);
   const live = useRef({ base, view, onView, axis });
-  // The view a wheel event produced that React has not rendered yet.
+
   const pending = useRef<Viewport | null>(null);
   useEffect(() => {
     const wanted = pending.current;
     if (wanted && (view.from !== wanted.from || view.to !== wanted.to)) {
-      // A render of an older view: the wheel's own result is still on its way.
+
       live.current = { ...live.current, base, onView, axis };
       return;
     }
@@ -212,7 +203,7 @@ export function RunTimelineRows({
     live.current = { base, view, onView, axis };
   });
   const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
-  // Where the selected items are, per row: drawn as an outlined box in each row and a line through all of them.
+
   const layouts = new Map(agents.map((agent) => [agent.id, layoutsFor(agent.data, axis, viewU, trackPx, agent.rows)]));
   const selected = selection === null ? undefined : byId.get(selection.agent);
   const roles = selectionRoles(
@@ -220,8 +211,7 @@ export function RunTimelineRows({
     selected?.data ?? EMPTY_DATA,
     selected?.rows,
   );
-  // The primary item (the cursor's) gets one strong frame; what is linked to it one light frame per row around the whole batch.
-  // A frame hugs the drawn item; a primary item narrower than 6 px also gets a hairline.
+
   const boxesOf = (agent: number, row: string, keys: Iterable<string>) => {
     const boxes = layouts.get(agent)?.get(row)?.boxes;
     return [...keys].flatMap((key) => boxes?.get(key) ?? []);
@@ -260,7 +250,7 @@ export function RunTimelineRows({
   useEffect(() => {
     nav.current = { agents, view, base, axis, selection, navRow, onSelect, onView, groups, linkKey, onSelectLink };
   });
-  // Arrow keys move the selection (see `navigateAcross`) and pan the view to it; editable and resizing controls keep their own arrows.
+
   useEffect(() => {
     const keys: Partial<Record<string, NavKey>> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
     const onKey = (event: KeyboardEvent) => {
@@ -273,7 +263,7 @@ export function RunTimelineRows({
         const shown = revealView(s.axis, s.view, s.base, ms, ms);
         if (shown !== s.view) s.onView(shown);
       };
-      // In the User or Other agents group the arrows walk its events; down goes on to the next group, up back to the one above or to the last agent's Messages row.
+
       const at = s.linkKey === null ? -1 : s.groups.findIndex((g) => g.links.some((l) => l.key === s.linkKey));
       if (s.linkKey !== null && at >= 0) {
         event.preventDefault();
@@ -318,11 +308,11 @@ export function RunTimelineRows({
         s.view,
       );
       event.preventDefault();
-      // The clicked block keeps keyboard focus (its focus ring and hover echo) while the selection moves on.
+
       if (el !== null && chartRef.current?.contains(el) && el instanceof HTMLElement) el.blur();
       setHover(null);
       if (next === null) {
-        // Down from the last agent's last row enters the first group, at the event nearest in time.
+
         const last = s.agents.at(-1);
         const here = key === "down" && s.selection !== null && last?.id === s.selection.agent ? selectionMs(last.data, s.selection.selection) : null;
         const first = s.groups.at(0);
@@ -345,7 +335,6 @@ export function RunTimelineRows({
   const drag = useRef<{ x: number; view: Viewport; panning: boolean; id: number } | null>(null);
   const suppressClick = useRef(false);
 
-  // The wheel listener is native and non-passive so the page does not scroll under a zoom.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -359,7 +348,7 @@ export function RunTimelineRows({
       const next = horizontal
         ? panView(a, v, b, event.deltaX / track.width)
         : zoomView(a, v, b, (event.clientX - track.left) / track.width, Math.exp(event.deltaY * rate));
-      // Events can arrive faster than React renders: the next one must start from this result.
+
       pending.current = next;
       live.current = { ...live.current, view: next };
       live.current.onView(next);
@@ -368,7 +357,6 @@ export function RunTimelineRows({
     return () => chart.removeEventListener("wheel", onWheel);
   }, []);
 
-  // A click on an arrow (where no block is under the pointer) selects it; native, like the wheel, because the chart itself is no control.
   const onLinks = useRef(onSelectLinks);
   useEffect(() => {
     onLinks.current = onSelectLinks;
@@ -393,7 +381,7 @@ export function RunTimelineRows({
   };
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const state = drag.current;
-    // An arrow is under the pointer only where no item is (and not over a marker of the Other agents row, which hovers itself).
+
     if (state === null && !(event.target instanceof Element && event.target.closest("[data-testid=run-timeline-link-tick]"))) {
       const hit = overItem.current ? null : hitRef.current(event.clientX, event.clientY);
       hoverArrowTo(hit);
@@ -405,14 +393,14 @@ export function RunTimelineRows({
     if (!state.panning) {
       if (Math.abs(dx) < DRAG_THRESHOLD_PX) return;
       state.panning = true;
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- jsdom has no pointer capture
-      event.currentTarget.setPointerCapture?.(state.id);
+
+      event.currentTarget.setPointerCapture(state.id);
     }
     onView(panView(axis, state.view, base, -dx / track.width));
   };
   const endDrag = () => {
     if (drag.current?.panning) {
-      // The release of a pan would otherwise click the block under the pointer.
+
       suppressClick.current = true;
       setTimeout(() => {
         suppressClick.current = false;
@@ -439,7 +427,7 @@ export function RunTimelineRows({
     highlight !== null && (highlight.cls === "human" || highlight.cls === "agent")
       ? [...new Set(agents.flatMap((agent) => inboundSources(agent.data.units, highlight.cls as "human" | "agent")))].sort()
       : [];
-  // The line saying what is hovered (or selected) names its agent when the view holds several.
+
   const describe = (target: AgentSelection | null) => {
     const owner = target === null ? undefined : byId.get(target.agent);
     if (target === null || owner === undefined) return null;
@@ -450,7 +438,7 @@ export function RunTimelineRows({
   const readout = (() => {
     if (hoveredLinks.length === 0) return describe(hover);
     const first = hoveredLinks[0];
-    // The ends of merged arrows can be different peers in the Other agents row: then the row is named, not one agent.
+
     const same = (pick: (l: ResolvedLink) => number | null, label: string | null) => (hoveredLinks.every((l) => pick(l) === pick(first)) ? endLabel(pick(first)) : (label ?? ""));
     const common = {
       kind: linkLabels[first.kind],
@@ -466,7 +454,7 @@ export function RunTimelineRows({
       end: formatShort(new Date(Math.max(...times)).toISOString()),
     });
   })();
-  // The layout of every row (where each item is drawn) is cached per view: hovering and selecting only repaint.
+
   const paintStateOf = (agent: ViewAgent): PaintState => {
     const mine = hover?.agent === agent.id ? hover.selection : null;
     return {
@@ -503,9 +491,9 @@ export function RunTimelineRows({
       />
     );
   };
-  // The selection read aloud: the canvas is decorative, the arrow keys move through every item.
+
   const spoken = describe(selection);
-  const empty = loaded.every(({ data }) => data.nodes.length === 0 && data.units.length === 0);
+  const empty = loaded.every(({ data }) => data.nodes.length === 0 && data.units.length === 0 && data.units_omitted === 0);
 
   const renderAgent = (agent: ViewAgent) => {
     const { data } = agent;
@@ -533,7 +521,11 @@ export function RunTimelineRows({
         ))}
 
         <RowShell label={t("messagesRow")} height="h-10" testId="run-timeline-row-units">
-          {canvasFor(agent, UNITS_ROW, UNIT_ROW_PX, (p, layout) =>
+          {data.units_omitted > 0 ? (
+            <p className={cn(FLEX, "h-full items-center text-xs text-muted-foreground")} data-testid="run-timeline-zoom-details">
+              {t("zoomForDetails", { count: data.units_omitted })}
+            </p>
+          ) : canvasFor(agent, UNITS_ROW, UNIT_ROW_PX, (p, layout) =>
             paintUnits(p, layout, paintState, decoFor(agent.id, UNITS_ROW), unitHeights, barTop(UNITS_ROW, data)),
           )}
         </RowShell>

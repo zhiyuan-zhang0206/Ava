@@ -3616,6 +3616,8 @@ export interface components {
             lifetime: components["schemas"]["RunTimelineWindow"] | null;
             nodes: components["schemas"]["RunTimelineNode"][];
             units: components["schemas"]["RunTimelineUnit"][];
+            units_omitted: number;
+            snapshot?: string | null;
         };
         RunTimelineUnit: {
             kind: "inbound" | "text" | "note" | "thinking" | "call" | "output";
@@ -7469,6 +7471,7 @@ export interface operations {
                 end: number;
                 limit?: number;
                 full?: boolean;
+                snapshot?: string | null;
             };
             header?: never;
             path: {
@@ -7500,6 +7503,7 @@ export interface operations {
         parameters: {
             query: {
                 at: number;
+                snapshot?: string | null;
             };
             header?: never;
             path: {
@@ -7532,6 +7536,9 @@ export interface operations {
             query?: {
                 from?: string | null;
                 to?: string | null;
+                recent_hours?: number | null;
+                max_units?: number | null;
+                snapshot?: string | null;
             };
             header?: never;
             path: {
