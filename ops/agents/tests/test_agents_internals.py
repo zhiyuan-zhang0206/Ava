@@ -1,8 +1,4 @@
-"""Real database contracts for agent creation, forks, and resurrection.
-
-Tests verify durable birth configuration, lifecycle messages, exact resurrection
-triggers, and caller fences. Host wake publication follows committed state.
-"""
+# ava:ref ops/docs/env-audit.ava.okf.md#spawn-and-snapshot-contract
 
 from __future__ import annotations
 
@@ -58,11 +54,6 @@ def spawn_agent(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
 ) -> int:
-    """Test setup helper — mirrors the pre-#1236 `spawn_agent()` contract
-    (create row + launch) as the two-phase split: `create_agent_row`
-    (gateway-side, the main data-plane identity) then `_launch_agent_process`
-    (runner-side), with the launch stubbed by the autouse guard. The launch op's
-    prompt-delivery half is covered in ops/lifecycle/tests/test_operations.py."""
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(),
@@ -105,10 +96,6 @@ class TestSpawnAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """The create+launch split (create_agent_row + _launch_agent_process) inserts
-        agents + agents_meta row and does **not** insert inbound (asymmetric with
-        resurrect — spawn creates from nothing, so no notification needed)."""
-
         new_id = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -116,9 +103,7 @@ class TestSpawnAgent:
             local_machine=machine_identity,
         )
 
-        # agents row: status='idling', spawner='user' (default), pid not yet filled
         assert _agents_row(db_conn, new_id) == (new_id, "user", "idling", None)
-        # spawn should not insert inbound
         assert inbound_count(db_conn, new_id) == 0
 
     def test_spawner_recorded(
@@ -132,13 +117,12 @@ class TestSpawnAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """The birth-time lineage string is stamped into both metadata fields."""
         parent_id = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
-        )  # spawner='user' default
+        )
         child_id = spawn_agent(
             spawner=f"agent:{parent_id}",
             config_authority=config_authority,
@@ -164,8 +148,6 @@ class TestSpawnAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A spawner-assigned label is stored with label_user_set=TRUE so the
-        labeler's CAS (WHERE label IS NULL AND NOT label_user_set) skips it."""
         new_id = spawn_agent(
             label="auth worker",
             config_authority=config_authority,
@@ -178,7 +160,6 @@ class TestSpawnAgent:
             row = cur.fetchone()
         assert row == ("auth worker", True)
 
-        # Default (no label) stays NULL + not-set so the labeler can fill it.
         plain_id = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -200,10 +181,6 @@ class TestSpawnAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """spawn_agent(config={...}) persists to agents_meta.config_overlay AND
-        passes config_overlay= to _launch_agent_process. Both sides must work for
-        the per-agent model override to actually take effect at boot.
-        """
         from base.config import settings
 
         new_id = spawn_agent(
@@ -215,14 +192,11 @@ class TestSpawnAgent:
             local_machine=machine_identity,
         )
 
-        # column persisted
         with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
             cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (new_id,))
             row = cur.fetchone()
         assert row is not None
         assert row[0] == {"llm_model": "gpt-5.6-sol"}
-
-        # launch received the overlay
 
     def test_snapshot_reports_effective_model_vision_support(
         self,
@@ -238,14 +212,14 @@ class TestSpawnAgent:
     ) -> None:
         from dataclasses import replace
 
-        model = "deepseek-vision-fixture"
+        model = "glm-vision-fixture"
         model_catalog = add_models(
             model_catalog,
             {
                 model: replace(
-                    build_model_catalog().models["deepseek-flash"],
+                    build_model_catalog().models["glm-5.3"],
                     spawnable=False,
-                    unavailable_fallback="deepseek-flash",
+                    unavailable_fallback="glm-5.3",
                     media_types=frozenset({"image"}),
                 )
             },
@@ -257,13 +231,12 @@ class TestSpawnAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        # No birth pin: the live default decides (spawn stamps whatever .env says).
         db_conn.execute(
             "UPDATE agents_meta SET birth_config = '{}' WHERE id = %s", (default_model_agent,)
         )
         db_conn.commit()
         text_only_agent = spawn_agent(
-            config={"llm_model": "deepseek-flash"},
+            config={"llm_model": "glm-5.3"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -314,9 +287,6 @@ class TestSpawnAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """`llm_model` is birth-frozen: an agent born under a vision-capable default keeps
-        it after the cluster default flips to a text-only model, as the host resolves it
-        (overlay over birth stamp over the live default)."""
         born_vision = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -329,15 +299,13 @@ class TestSpawnAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        for agent_id, stamped in ((born_vision, "claude-sonnet-5"), (born_text, "deepseek-flash")):
+        for agent_id, stamped in ((born_vision, "claude-sonnet-5"), (born_text, "glm-5.3")):
             db_conn.execute(
                 "UPDATE agents_meta SET birth_config = %s::jsonb WHERE id = %s",
                 (f'{{"llm_model": "{stamped}"}}', agent_id),
             )
         db_conn.commit()
-        monkeypatch.setattr(
-            settings.lm, "llm_model", "deepseek-flash"
-        )  # the default has since flipped
+        monkeypatch.setattr(settings.lm, "llm_model", "glm-5.3")
 
         vision = select_one(
             db_conn,
@@ -365,14 +333,6 @@ def insert_checkpoint(
     channel_versions: dict[str, str] | None = None,
     compact_boundary: bool = False,
 ) -> None:
-    """Test helper: directly INSERT a LangGraph checkpoint row (simplified version, bypassing
-    PostgresSaver's serialization overhead). The fork copy logic only cares about SQL row-level copy + chain
-    integrity, not the real content of the checkpoint blob.
-
-    `channel_versions` fills the mapping PostgresSaver reads blobs through, and
-    `compact_boundary` stamps the metadata flag `mark_compact_boundary` writes —
-    the two fields the fork copy actually branches on.
-    """
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO checkpoints (thread_id, checkpoint_id, parent_checkpoint_id, "
@@ -420,9 +380,6 @@ def blob_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, byt
 
 
 class TestSpawnerValidation:
-    """create_agent_row rejects malformed spawner values that would produce
-    "Agent None" in the frontend tree."""
-
     def test_agent_none_rejected(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -498,7 +455,7 @@ class TestSpawnerValidation:
     def test_agent_valid_id_accepted(
         self,
         redis_url: str,
-        db_conn,
+        db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
@@ -506,7 +463,6 @@ class TestSpawnerValidation:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        # spawner="agent:42" is valid — must not raise
         new_id = spawn_agent(
             spawner="agent:42",
             config_authority=config_authority,
@@ -514,14 +470,14 @@ class TestSpawnerValidation:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        row = _agents_row(db_conn, new_id)  # pyright: ignore[reportUnknownArgumentType]
+        row = _agents_row(db_conn, new_id)
         assert row is not None
         assert row[1] == "agent:42"
 
     def test_user_spawner_accepted(
         self,
         redis_url: str,
-        db_conn,
+        db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
@@ -536,14 +492,14 @@ class TestSpawnerValidation:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        row = _agents_row(db_conn, new_id)  # pyright: ignore[reportUnknownArgumentType]
+        row = _agents_row(db_conn, new_id)
         assert row is not None
         assert row[1] == "user"
 
     def test_arbitrary_spawner_accepted(
         self,
         redis_url: str,
-        db_conn,
+        db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
@@ -558,7 +514,7 @@ class TestSpawnerValidation:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        row = _agents_row(db_conn, new_id)  # pyright: ignore[reportUnknownArgumentType]
+        row = _agents_row(db_conn, new_id)
         assert row is not None
         assert row[1] == "claude-code"
 
