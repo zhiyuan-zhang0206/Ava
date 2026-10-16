@@ -118,8 +118,10 @@ the external effect but before its result becomes durable.
 
 ## Updating and moving the data plane
 
-`python -m cli.fleet_update down` stops every unit with `ava stop -y` and `up`
-starts them again (the runbook's "Updating a networked cluster in source mode").
+`python -m cli.fleet_update down` stops every unit with `ava stop -y`, keeping the
+stateful components whose code the window does not touch (`--keep-service`; the
+[keep decision](../../decisions/runtime/updates/release/2026-10-17-component-scoped-keep-on-update.md)),
+and `up` starts them again (the runbook's "Updating a networked cluster in source mode").
 A stored-script upgrade blocked by held business admission uses the
 [script-only maintenance operator entry](../../../schedules/README.md#script-repair-during-maintenance)
 with the existing installed runtime. It preserves the stopped hold and schedule
@@ -131,8 +133,10 @@ terminals a bounded completed-work wait, then closes known shells/terminals
 best effort. This does not prove detached/background writers disappeared;
 inspect residual writers before treating it as an external-work barrier. Each
 busy owner receives the same closure notice as
-`ava stop`. Terminal state does not survive an update; schedules are re-armed
-after start.
+`ava stop`. When the window does not restart the pty-sessions service (the keep decision
+above), terminal state survives the update and old-code shells keep running: the stop is
+not a writer barrier for them in that window. A window that does restart it closes
+terminals as above; schedules are re-armed after start.
 
 For a move, stop all participating runners, then stop the gateway last. Check
 each command's exit status before taking the final snapshots. PostgreSQL uses

@@ -8,6 +8,14 @@ and the matching GitHub Releases.
 ## [Unreleased]
 
 ### Changed
+- A cluster update keeps the stateful components its window does not touch
+  ([decision](docs/decisions/runtime/updates/release/2026-10-17-component-scoped-keep-on-update.md)):
+  `cli.fleet_update down` derives a dependency closure over the window's `OLD..NEW` diff
+  (`scripts/host_ops/fleet_update_keep.py`, the `meizel` facts the locality gate cites) and adds
+  `--keep-service pty-sessions` and/or `--keep-service browser --keep-service browser-mcp` to every
+  stop, so live agent shells stay mounted and the shared Chrome keeps its sessions when their code
+  did not change. A touched component — or any decision failure — restarts as before, and
+  `--restart-all` skips the decision.
 - An external agent (Claude Code, Codex, an MCP client) can message an Ava agent
   through `ava agents send --source ...`, the SDK or MCP `send_message` in two
   ways: `user` delivers as the user, and `external_agent:<subject>[:<instance>]`

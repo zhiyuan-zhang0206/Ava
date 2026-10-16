@@ -1,4 +1,4 @@
-exports = ["audit", "ci", "codegen", "data_plane_ops", "lint", "model_registry", "post_deploy_visual", "provision", "structure", "verify"]
+exports = ["audit", "ci", "codegen", "data_plane_ops", "host_ops", "lint", "model_registry", "post_deploy_visual", "provision", "structure", "verify"]
 
 [uses]
 "audit" = ["ci"]

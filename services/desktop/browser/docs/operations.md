@@ -46,9 +46,13 @@ the operating choices below do not redefine either component.
   profile is deliberately left alone — it cannot be positively identified as ours,
   and the operator's own browser is the thing that must never be killed — so that
   one is still quit by hand.
-- **Browser lifetime**: pause, update and restart preserve the running
-  `ava-browser` session. Default `ava stop` closes it; `--keep-service browser`
-  retains it. The profile and its logins survive either choice. `ava start`
+- **Browser lifetime**: restart preserves the running `ava-browser` session; a
+  cluster update (`cli.fleet_update down`) keeps it while the window's changes do
+  not reach the browser code — the
+  [keep decision](../../../../docs/decisions/runtime/updates/release/2026-10-17-component-scoped-keep-on-update.md)
+  adds `--keep-service browser --keep-service browser-mcp` — and restarts Chrome
+  together with the MCP upstream when they do (`--restart-all` forces that).
+  Default `ava stop` closes it; `--keep-service browser` retains it. The profile and its logins survive either choice. `ava start`
   reuses a retained session and relaunches a stopped one. Explicit force stop
   and cluster destroy additionally sweep owned Chrome processes outside the
   recorded session tree (`services/desktop/browser/orphan.py`).

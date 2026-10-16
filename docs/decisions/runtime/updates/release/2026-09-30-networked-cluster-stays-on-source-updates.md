@@ -99,3 +99,7 @@ The release/image path is to be deleted, and stale processes are to be kept
 out by a version gate instead; see the follow-up decision.
 
 Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](../../../agents/graph/2026-10-03-delete-ava-pause.md).
+
+Forward link (2026-10-17): persistent terminals close only when the window's changes reach the
+pty-sessions code; the update keeps the components its window does not touch. See
+[component-scoped keep on update](2026-10-17-component-scoped-keep-on-update.md).

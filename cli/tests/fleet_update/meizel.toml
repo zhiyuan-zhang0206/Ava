@@ -1,0 +1,15 @@
+[uses]
+"conftest.py" = ["fleet_update_cluster.py"]
+"test_fleet_update.py" = ["fleet_update_cluster.py"]
+"test_fleet_update_keep.py" = ["fleet_update_cluster.py"]
+
+[debt.env-patch]
+"conftest.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_fleet_update.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 1
+"test_fleet_update.py#monkeypatch.setenv os.environ.HOME" = 2
+
+[debt.first-party-patch]
+"conftest.py#monkeypatch.setattr cli.fleet_update.REPO" = 1
+"conftest.py#monkeypatch.setattr cli.fleet_update.ssh" = 1
+"conftest.py#monkeypatch.setattr cli.fleet_update.time" = 1
+"test_fleet_update.py#monkeypatch.setattr cli.fleet_update.ssh" = 1

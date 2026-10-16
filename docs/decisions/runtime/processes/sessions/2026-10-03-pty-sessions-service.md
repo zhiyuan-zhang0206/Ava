@@ -101,4 +101,6 @@ long-lived process is a member of the root's tree.
 - No migration and no port slot: the unit appears in the roster at the update that ships it. Hosts
   left by the previous code are closed by that code's own `ava stop` in the update's down leg.
 
-<!-- Later: the crash, forced-stop and sweep gap is closed by decisions/2026-10-04-pty-crash-notices.md -->
+<!-- Later: the crash, forced-stop and sweep gap is closed by decisions/2026-10-04-pty-crash-notices.md
+     Later: a fleet update keeps this service (and its sessions) while the window's changes do not
+     reach its code: decisions/runtime/updates/release/2026-10-17-component-scoped-keep-on-update.md -->
