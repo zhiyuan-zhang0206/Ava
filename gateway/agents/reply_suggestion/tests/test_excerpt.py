@@ -1,5 +1,3 @@
-"""The excerpt: which text is kept, and how it is cut to the token budget."""
-
 from __future__ import annotations
 
 import pytest
@@ -16,13 +14,15 @@ def item(
     source: str | None = None,
     source_message_id: str | None = None,
 ) -> TimelineItem:
-    return TimelineItem(
-        item_id=f"{index}.0",
-        kind=kind,  # pyright: ignore[reportArgumentType]
-        payload=payload,
-        source=source,
-        created_at="2026-10-11T00:00:00+00:00",
-        source_message_id=source_message_id,
+    return TimelineItem.model_validate(
+        {
+            "item_id": f"{index}.0",
+            "kind": kind,
+            "payload": payload,
+            "source": source,
+            "created_at": "2026-10-11T00:00:00+00:00",
+            "source_message_id": source_message_id,
+        }
     )
 
 
@@ -104,11 +104,13 @@ def test_identity_falls_back_to_item_id_and_time_without_a_message_id() -> None:
     assert excerpt.last_message_id == "4.0@2026-10-11T00:00:00+00:00"
 
 
-@pytest.mark.parametrize("budget", [40, 120, 300])
-def test_the_excerpt_never_exceeds_the_budget_and_keeps_the_newest_text(budget: int) -> None:
+@pytest.mark.parametrize("budget", [120, 300])
+def test_the_excerpt_never_exceeds_the_budget_and_the_reply_keeps_its_newest_words(
+    budget: int,
+) -> None:
     long_reply = " ".join(f"word{n}" for n in range(400)) + " THE-END"
     items = [
-        item("inbound_chat", "q " * 200 + "latest-question", 1, "user"),
+        item("inbound_chat", "please deploy the release", 1, "user"),
         item("agent_chat", long_reply, 2),
     ]
 
@@ -116,11 +118,12 @@ def test_the_excerpt_never_exceeds_the_budget_and_keeps_the_newest_text(budget: 
 
     assert excerpt is not None
     assert estimate_tokens(excerpt.text) <= budget
+    assert "please deploy the release" in excerpt.text
     assert excerpt.text.endswith("THE-END")
     assert "…" in excerpt.text
 
 
-def test_the_walk_goes_backwards_so_an_oversized_reply_displaces_the_user_message() -> None:
+def test_an_oversized_reply_still_keeps_the_user_message() -> None:
     items = [
         item("inbound_chat", "latest-question", 1, "user"),
         item("agent_chat", "x" * 4000, 2),
@@ -129,8 +132,23 @@ def test_the_walk_goes_backwards_so_an_oversized_reply_displaces_the_user_messag
     excerpt = build_excerpt(items, 200)
 
     assert excerpt is not None
-    assert "latest-question" not in excerpt.text
+    assert "latest-question" in excerpt.text
     assert estimate_tokens(excerpt.text) <= 200
+
+
+def test_an_oversized_user_message_keeps_its_newest_words_and_displaces_the_reply() -> None:
+    items = [
+        item("inbound_chat", "q " * 400 + "the-ask", 1, "user"),
+        item("agent_chat", "ok", 2),
+    ]
+
+    excerpt = build_excerpt(items, 100)
+
+    assert excerpt is not None
+    assert excerpt.text.startswith("[User]")
+    assert excerpt.text.endswith("the-ask")
+    assert "[Assistant]" not in excerpt.text
+    assert estimate_tokens(excerpt.text) <= 100
 
 
 def test_non_ascii_text_is_counted_per_character() -> None:
