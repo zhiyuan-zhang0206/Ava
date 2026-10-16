@@ -1,13 +1,9 @@
-"""Google Gemini provider plugin for Ava."""
-
+# ava:ref ava_builtins/plugins/docs/plugins.ava.okf.md#lm-google-provider
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    # Annotation-only (`build` return): keeps the chat-model stack off the
-    # provider-registration path (exec-child boot, task #3633;
-    # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
@@ -29,22 +25,10 @@ _GEMINI_EFFORT_LEVELS = ("minimal", "low", "medium", "high")
 
 
 def _thinking_level(ctx: BuildContext, *, thinking_disabled: bool) -> str | None:
-    """The `thinking_level` for this request, by path: media knob, disabled, or resolved effort."""
     thinking_level: str | None = None
     if ctx.media_thinking_level is not None:
-        # Media path — the caller owns the Gemini vocabulary mapping
-        # (ava/understand/answer.py), including the `max` → configured-knob
-        # special case; the resolved-effort path is skipped entirely so a
-        # global AVA_REASONING_EFFORT cannot silently override the media
-        # knob (historic behavior).
         return ctx.media_thinking_level
     if thinking_disabled:
-        # thinking_level is a Gemini 3.x vocabulary; older models
-        # (gemini-2.5-*) reject it with a 400 on every call (issue #190), so
-        # "disabled" is only expressible where the model declares the
-        # vocabulary. Elsewhere it is a no-op — no thinking parameters on the
-        # wire, exactly what the issue measured as working — plus a warning
-        # so the operator knows the request was not honored.
         spec = ctx.spec
         if spec is not None and spec.effort_levels is not None:
             thinking_level = spec.effort_levels[0] if spec.effort_levels else "minimal"
@@ -54,8 +38,6 @@ def _thinking_level(ctx: BuildContext, *, thinking_disabled: bool) -> str | None
                 f"thinking={{'type': 'disabled'}} ignored (issue #190)"
             )
     if ctx.resolved_effort and not thinking_disabled:
-        # A declared model vocabulary is authoritative: 3.8 Flash does not
-        # accept `minimal`, even though the Gemini-wide fallback includes it.
         spec = ctx.spec
         levels = (
             spec.effort_levels
@@ -71,10 +53,6 @@ def _thinking_level(ctx: BuildContext, *, thinking_disabled: bool) -> str | None
 
 
 def _media_resolution(setting: str | None) -> Any | None:
-    """Map the low/medium/high media-resolution setting onto Google's MediaResolution enum."""
-    # Media-resolution mapping (ava.understand's media path). The enum import
-    # is lazy like the model class itself so the google-genai SDK binding
-    # stays inside this provider branch.
     if setting is None:
         return None
     from google.genai.types import MediaResolution
@@ -93,53 +71,15 @@ def _media_resolution(setting: str | None) -> Any | None:
 
 
 def build(ctx: BuildContext) -> BaseChatModel:
-    """gemini-* branch: ChatGoogleGenerativeAI. include_thoughts surfaces
-    the thinking summary as canonical thinking blocks; thinking depth
-    rides thinking_level (cannot fully turn off — disabled maps to
-    "minimal" + include_thoughts=False).
-
-    Media-path extras (ava.understand): `media_resolution` maps the
-    low/medium/high setting onto Google's MediaResolution enum;
-    `media_thinking_level` carries the Gemini thinking_level vocabulary
-    explicitly (the media path maps effort itself, including the
-    `max` → configured-knob special case) and keeps include_thoughts at
-    the SDK default — the media path never surfaced thought blocks, and
-    surfacing them would change latency/cost even though the response
-    flattener drops them. `base_url` overrides the Gemini endpoint.
-    All three are None on the agent main path, so it behaves exactly as
-    before."""
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    # Reuse GEMINI_API_KEY (already used by ava.understand). Direct
-    # construction matches the claude-/deepseek- branches; the repo has
-    # no `langchain` meta-package, so no init_chat_model dispatcher.
-    # Fail fast on missing key rather than a later server 401.
-    api_key = require_key("GEMINI_API_KEY")
-    # include_thoughts surfaces the model's thinking summary as
-    # `{"type":"thinking", "thinking":...}` content blocks — the same
-    # shape claude/deepseek emit, so the streaming fan-out and timeline
-    # render reasoning without a provider-specific branch. Without it the
-    # model still thinks but returns zero thought blocks (no reasoning in
-    # the live view).
-    #
-    # Thinking depth rides `thinking_level`. Gemini 3.x cannot fully turn
-    # thinking off, so a caller disabling thinking (short-text paths) gets
-    # the model's lowest declared level + include_thoughts=False — dropping
-    # include_thoughts alone would only hide the thought blocks while the
-    # model keeps thinking (and billing) at its default level. Otherwise
-    # the cross-provider effort maps onto the thinking_level vocabulary;
-    # unset effort leaves thinking_level None → the model default
-    # (3.8/3.5 Flash medium, 3.1 Pro high).
+    return ChatGoogleGenerativeAI(**chat_model_kwargs(ctx, api_key=require_key("GEMINI_API_KEY")))
+
+
+def chat_model_kwargs(ctx: BuildContext, *, api_key: str) -> dict[str, Any]:
     thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"
     thinking_level = _thinking_level(ctx, thinking_disabled=thinking_disabled)
-    # include_thoughts only on the vocabulary-supporting path: passing it to a
-    # model that rejects thinking parameters would 400 exactly like
-    # thinking_level (issue #190). Unsupported models keep the SDK default;
-    # the non-disabled path keeps its historical include_thoughts=True.
     if ctx.media_thinking_level is not None:
-        # Media path historic behavior: the field was never set on the
-        # ChatGoogleGenerativeAI constructor, so leave it at the SDK default
-        # (None) — do not surface thought blocks.
         include_thoughts: bool | None = None
     elif thinking_disabled and thinking_level is None:
         include_thoughts = None
@@ -147,18 +87,19 @@ def build(ctx: BuildContext) -> BaseChatModel:
         include_thoughts = not thinking_disabled
     media_resolution_value = _media_resolution(ctx.media_resolution)
     kwargs: dict[str, Any] = {
-        "model": ctx.model,  # type: ignore[call-arg]
+        "model": ctx.model,
         "google_api_key": api_key,
         "include_thoughts": include_thoughts,
-        "thinking_level": thinking_level,  # type: ignore[arg-type]
+        "thinking_level": thinking_level,
         "disable_streaming": ctx.disable_streaming,
         "timeout": ctx.timeout,
+        "temperature": None,
     }
     if media_resolution_value is not None:
         kwargs["media_resolution"] = media_resolution_value
     if ctx.base_url is not None:
         kwargs["base_url"] = ctx.base_url
-    return ChatGoogleGenerativeAI(**kwargs)
+    return kwargs
 
 
 PROVIDER = ProviderContribution(
@@ -181,14 +122,9 @@ PROVIDER = ProviderContribution(
             provider="gemini",
             spawnable=True,
             context_window=1_048_576,
-            # Google does not publish a cutoff for 3.8 Flash; carries the 3.7
-            # estimate forward (3.7 GA'd 2026-08-13, 3.8 GA'd 2026-09-02).
             knowledge_cutoff="2026-03",
-            # thinking_level vocabulary; `minimal` 400s (verified live 2026-09-03).
             effort_levels=("low", "medium", "high"),
             tuning=ModelTuning(
-                # The model page says its default thinking_level is `medium`
-                # (docs/decisions/engineering/design/simplification/2026-07-25-per-model-tuning-values.md).
                 reasoning_effort="medium",
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
@@ -196,6 +132,7 @@ PROVIDER = ProviderContribution(
         "gemini-3.7-flash": ModelSpec(
             provider="gemini",
             spawnable=True,
+            superseded_by="gemini-3.8-flash",
             context_window=1_048_576,
             knowledge_cutoff="2026-03",
             effort_levels=("minimal", "low", "medium", "high"),
@@ -205,12 +142,11 @@ PROVIDER = ProviderContribution(
         "gemini-3.5-flash": ModelSpec(
             provider="gemini",
             spawnable=True,
+            superseded_by="gemini-3.8-flash",
             context_window=1_048_576,
             knowledge_cutoff="2025-01",
             effort_levels=("minimal", "low", "medium", "high"),
             tuning=ModelTuning(
-                # Pinned 2026-08-01 (task #568): flash default thinking_level is
-                # `medium` (see gemini-3.8-flash).
                 reasoning_effort="medium",
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
@@ -218,18 +154,8 @@ PROVIDER = ProviderContribution(
         "gemini-flash-lite-latest": ModelSpec(
             provider="gemini",
             spawnable=True,
-            # The registered id is Google's official `latest` alias, which
-            # tracks the newest stable Flash-Lite; it resolves to
-            # gemini-3.5-flash-lite (GA 2026-07; ai.google.dev models page,
-            # checked 2026-09-10). The user's dev channel verified the alias
-            # answers while the concrete gemini-2.5-flash-lite id 404s. Facts
-            # below are the 3.5 Flash-Lite ones; re-verify them when the
-            # alias moves to a newer Flash-Lite.
             context_window=1_048_576,
             knowledge_cutoff="2026-03",
-            # The Gemini thinking guide lists minimal/low/medium/high for
-            # 3.5 Flash-Lite; its default thinking is `minimal` (the flash
-            # models default to `medium`).
             effort_levels=("minimal", "low", "medium", "high"),
             tuning=ModelTuning(reasoning_effort="minimal"),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
@@ -237,32 +163,12 @@ PROVIDER = ProviderContribution(
         "gemini-3.1-pro-preview": ModelSpec(
             provider="gemini",
             spawnable=True,
-            # 1,048,576 per three independent first-party Google pages (the model
-            # page, the thinking guide, and the DeepMind model card). Every "2M"
-            # claim traces back to speculative blogs about a rumored Ultra tier.
             context_window=1_048_576,
             knowledge_cutoff="2025-01",
-            # `minimal` returns 400 (verified live 2026-09-03); matches the
-            # recorded decision that this model cannot drop to minimal.
             effort_levels=("low", "medium", "high"),
             tuning=ModelTuning(
-                # Pinned 2026-08-01 (task #568): this model defaults to
-                # thinking_level=high and cannot drop to minimal (Google docs;
-                # also recorded in docs/decisions/2026-07-25-per-model-tuning-
-                # values.md Decision 3).
                 reasoning_effort="high",
-                # The only asymmetry Google's own docs admit inside this family:
-                # preview models "might come with more restrictive rate limits" and
-                # "rate limits are more restricted for experimental and preview
-                # models"; the two flashes are GA. Matching first-party 503 reports
-                # against paid accounts since launch.
                 llm_retry_max_attempts=10,
-                # Gemini's wire has no protocol preamble (no message_start /
-                # response.created), so the first chunk IS the first content or
-                # thought — unlike Claude and GPT, thinking time lands inside TTFT
-                # here. This model defaults to thinking_level=high and cannot go to
-                # `minimal`, and first-output latency of 17s+ was observed during a
-                # Vertex degradation.
                 llm_stream_ttft_timeout_seconds=90.0,
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
@@ -270,21 +176,10 @@ PROVIDER = ProviderContribution(
         "gemini-4-argon": ModelSpec(
             provider="gemini",
             spawnable=True,
-            # Unified input+output window: the model page, the DeepMind model
-            # card, and the live /v1beta/models probe (inputTokenLimit) agree on
-            # 1,048,576 (checked 2026-10-14).
             context_window=1_048_576,
-            # DeepMind model card: "The knowledge cutoff for Gemini 4 is March
-            # 2026" (checked 2026-10-14).
             knowledge_cutoff="2026-03",
-            # The thinking guide lists low/medium/high with a `medium` default;
-            # `minimal` 400s ("Thinking level MINIMAL is not supported for this
-            # model", verified live 2026-10-14) — the same no-minimal class as
-            # 3.8 Flash and 3.1 Pro.
             effort_levels=("low", "medium", "high"),
             tuning=ModelTuning(
-                # Documented default thinking_level (thinking guide, checked
-                # 2026-10-14).
                 reasoning_effort="medium",
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
@@ -446,11 +341,6 @@ PROVIDER = ProviderContribution(
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-10-14",
             vendor="google",
-            # Google publishes calendar dates without a timezone; the promo
-            # ends "through November 30, 2026" and the increase starts
-            # December 1, so it is activated at the earliest global occurrence
-            # of 2026-12-01 (UTC+14) to avoid underestimating cost — the same
-            # boundary convention as the 3.8/3.7 Flash increases.
             periods=(
                 PricePeriod(
                     effective_from=None,
@@ -485,5 +375,4 @@ PROVIDER = ProviderContribution(
 
 
 def contribute() -> PluginContributions:
-    """What this plugin declares: its model provider."""
     return PluginContributions(providers=(PROVIDER,))

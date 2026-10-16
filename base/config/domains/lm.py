@@ -1,9 +1,4 @@
-"""LLM config — LmSettings.
-
-Split out of the former flat Settings god object; each field keeps its exact
-env alias so the .env surface is unchanged. Aggregated by base/config.
-"""
-
+# ava:ref base/config/docs/process-profiles.ava.okf.md#lm-settings-domain
 from __future__ import annotations
 
 from pydantic import Field, SecretStr
@@ -24,15 +19,7 @@ class LmSettings(EnvSettings):
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
-            # capability=common: the cluster-wide spawn default, read by the
-            # gateway (spawn pre-select / default-model endpoint) AND frozen
-            # into agents at spawn — owned by neither capability alone.
             "capability": "common",
-            # per_agent: gates the spawn/restart config-overlay (read by
-            # base/packages/plugins/config_registration.py for both framework Settings and
-            # plugin config fields). Orthogonal to scope: scope is the ownership
-            # axis (drives bootstrap distribution); per_agent is the override
-            # gate. They coexist on llm_model.
             "per_agent": True,
             "lifecycle": "frozen",
             "scope": "cluster-default",
@@ -40,9 +27,6 @@ class LmSettings(EnvSettings):
     )
 
     labeler_model: str = Field(
-        # The flash tier is the only DeepSeek tier, served as `deepseek-flash`.
-        # Staying inside DeepSeek keeps the gateway's required-key surface
-        # unchanged; re-measure label quality if it regresses.
         default="deepseek-flash",
         alias="AVA_LABELER_MODEL",
         description=(
@@ -56,8 +40,6 @@ class LmSettings(EnvSettings):
             "restart_required": "",
             "writable": True,
             "sensitive": False,
-            # The labeler daemon runs on the gateway side (services/derived/labeler) —
-            # its model key must survive the gateway profile pop.
             "capability": "gateway",
             "scope": "cluster-pinned",
         },
@@ -82,9 +64,6 @@ class LmSettings(EnvSettings):
             "restart_required": "",
             "writable": True,
             "sensitive": False,
-            # The generation worker runs on the gateway side (same landing as
-            # the labeler daemon) — its model key must survive the gateway
-            # profile pop.
             "capability": "gateway",
             "scope": "cluster-pinned",
         },
@@ -484,7 +463,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_media_model: str = Field(
-        default="gemini-3.5-flash",
+        default="gemini-3.8-flash",
         alias="AVA_UNDERSTAND_MEDIA_MODEL",
         description=(
             "Model for `ava.understand`'s media path (image/video/audio/PDF). "
@@ -579,8 +558,6 @@ class LmSettings(EnvSettings):
         alias="GEMINI_API_KEY",
         description="Google Gemini API key, used by `ava.understand`'s media path and any gemini-* agent model. Empty = media understand raises.",
         json_schema_extra={
-            # capability=common: consumed by memory_indexer (gateway-side
-            # embeddings) AND agent-side Gemini calls.
             "capability": "common",
             "restart_required": "agent",
             "writable": True,
