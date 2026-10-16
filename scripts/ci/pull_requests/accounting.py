@@ -175,7 +175,10 @@ def _merged_pr_of(run: dict[str, Any], repo: str, *, host: Host) -> int | None:
 # ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#attribution-fallback-chain
 def _run_identity(
     # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#attribution-sources
-    run: dict[str, Any], repo: str, *, host: Host
+    run: dict[str, Any],
+    repo: str,
+    *,
+    host: Host,
 ) -> tuple[int | None, int | None, int | None]:
     real_pr = _real_pr_of_trunk_branch(str(run.get("head_branch") or ""))
     pr_number, agent_id, task_id = _identity_from_prs(run, repo, real_pr, host=host)
