@@ -8,10 +8,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import ValidationError
 
-from base.agents.to_user import MAX_RESOURCE_BYTES, ToUserDocument, ToUserReadRequest
+from base.agents.to_user import ToUserDocument, ToUserReadRequest
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
+from base.config import settings
 from gateway.agents.eval_guard import deny_isolated_result_read
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, dispatch_to_machine
 
@@ -29,6 +30,9 @@ def home_machine(request: Request, agent_id: int) -> str:
 
 
 def resource_request(agent_id: int, references: list[str]) -> ToUserReadRequest:
+    max_depth = settings.to_user.max_chain_depth
+    if len(references) > max_depth:
+        raise HTTPException(422, f"A resource chain may carry at most {max_depth} reference IDs")
     try:
         return ToUserReadRequest(agent_id=agent_id, references=references)
     except ValidationError as exc:
@@ -90,11 +94,12 @@ async def fetch_resource(
         if response.status_code != 200:
             status = response.status_code if response.status_code in (404, 422, 503) else 502
             raise HTTPException(status, "Referenced file could not be read")
+        limit = settings.to_user.max_resource_bytes
         content = bytearray()
         async for chunk in response.aiter_bytes():
             content.extend(chunk)
-            if len(content) > MAX_RESOURCE_BYTES:
-                raise HTTPException(413, "Referenced file exceeds the resource limit")
+            if len(content) > limit:
+                raise HTTPException(413, f"Referenced file exceeds the {limit}-byte resource limit")
         return bytes(content)
 
 
@@ -102,7 +107,7 @@ async def fetch_resource(
 async def get_resource(
     agent_id: int,
     request: Request,
-    reference: Annotated[list[str], Query(min_length=1, max_length=8)],
+    reference: Annotated[list[str], Query(min_length=1)],
 ) -> Response:
     machine = await asyncio.to_thread(home_machine, request, agent_id)
     query = resource_request(agent_id, reference)

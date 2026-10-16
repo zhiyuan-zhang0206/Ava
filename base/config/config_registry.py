@@ -69,6 +69,7 @@ DOMAIN_MODELS: tuple[tuple[str, str, str | type[Any], str], ...] = (
     ("sandbox", "Sandbox", "SandboxSettings", "agent-runner"),
     ("agent", "Agent", "AgentSettings", "agent-runner"),
     ("web", "Web", "WebSettings", "agent-runner"),
+    ("to_user", "To user", "ToUserSettings", "common"),
     ("gateway", "Gateway", "GatewaySettings", "gateway"),
     ("daemon", "Daemon", "DaemonSettings", "gateway"),
     ("alerts", "Alerts", "AlertsSettings", "gateway"),
@@ -112,6 +113,7 @@ def model_classes() -> dict[str, type[Any]]:
     from base.config.domains.services.settings import ServiceSettings
     from base.config.domains.storage.data_plane import DataPlaneSettings
     from base.config.domains.storage.walg import WalgSettings
+    from base.config.domains.to_user import ToUserSettings
     from base.config.domains.web import WebSettings
 
     return {
@@ -119,6 +121,7 @@ def model_classes() -> dict[str, type[Any]]:
         "SandboxSettings": SandboxSettings,
         "AgentSettings": AgentSettings,
         "WebSettings": WebSettings,
+        "ToUserSettings": ToUserSettings,
         "GatewaySettings": GatewaySettings,
         "DaemonSettings": DaemonSettings,
         "AlertsSettings": AlertsSettings,

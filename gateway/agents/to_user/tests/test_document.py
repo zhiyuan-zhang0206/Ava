@@ -2,7 +2,8 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from base.agents.to_user import MAX_RESOURCE_BYTES, ToUserReadRequest
+from base.agents.to_user import ToUserReadRequest
+from base.config import settings
 from gateway.agents.to_user.document import attachment_response, fetch_resource, resource_request
 
 
@@ -18,7 +19,9 @@ def test_active_files_download_and_previews_are_sandboxed() -> None:
     assert svg.headers["x-content-type-options"] == "nosniff"
 
 
-@pytest.mark.parametrize("references", [["/etc/passwd"], ["a" * 64] * 9])
+@pytest.mark.parametrize(
+    "references", [["/etc/passwd"], ["a" * 64] * (settings.to_user.max_chain_depth + 1)]
+)
 def test_client_paths_and_unbounded_chains_are_rejected(references: list[str]) -> None:
     with pytest.raises(HTTPException) as error:
         resource_request(1, references)
@@ -43,10 +46,18 @@ async def test_binary_response_and_auth_are_preserved() -> None:
 
 
 @pytest.mark.asyncio
+async def _oversize_stream():
+    chunk = b"x" * (4 * 1024 * 1024)
+    remaining = settings.to_user.max_resource_bytes + 1
+    while remaining > 0:
+        yield chunk[: min(len(chunk), remaining)]
+        remaining -= len(chunk)
+
+
 async def test_missing_file_and_oversize_fail_explicitly() -> None:
     for status, content, expected in [
         (404, b"gone", 404),
-        (200, b"x" * (MAX_RESOURCE_BYTES + 1), 413),
+        (200, _oversize_stream(), 413),
     ]:
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(

@@ -2,12 +2,13 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.agents.to_user.models import DOCUMENT_FILENAME, MAX_DOCUMENT_BYTES, ToUserDocument
+from base.agents.to_user.models import DOCUMENT_FILENAME, ToUserDocument
 from base.agents.to_user.resources import (
     read_regular_file,
     resolve_reference,
     resource_descriptions,
 )
+from base.config import settings
 
 
 def read_document(workspace: Path, *, references: list[str] | None = None) -> ToUserDocument:
@@ -24,7 +25,7 @@ def read_document(workspace: Path, *, references: list[str] | None = None) -> To
         legacy_html=not references and (workspace / "to_user.html").is_file(),
     )
     try:
-        raw, info = read_regular_file(path, MAX_DOCUMENT_BYTES)
+        raw, info = read_regular_file(path, settings.to_user.max_document_bytes)
     except FileNotFoundError:
         if references:
             raise
