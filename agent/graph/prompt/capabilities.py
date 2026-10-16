@@ -220,11 +220,9 @@ _MCP_HOWTO = (
 
 _MATCH_EVERY_TASK = (
     "This is your index of what you can already do. Match every task "
-    "against it before you start and call `ava.help(ava.skills.<path>)` "
-    "in your first `execute_code` turn for any matching workflow, "
-    "engineering, or domain skill — that is what keeps you from skipping "
-    "established playbooks (`ava_workflow`, `ava_serious_engineering`, ...) "
-    "or rebuilding something (email, browser, transcription, feeds, ...) "
+    "against it before you start — that is the only thing standing between "
+    "you and skipping an established playbook or rebuilding something "
+    "(workflow, research, email, browser, transcription, feeds, ...) "
     "that already exists here."
 )
 

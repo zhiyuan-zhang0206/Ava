@@ -29,7 +29,7 @@ tests = [
   "ava_builtins/plugins/ava_code/tests/ava_code_plugin/test_read_wrap_corrupted_state_field_raises.py::test_coding_tools_section_all_expanded_keeps_preamble_only",
 ]
 statement = """
-`_prompt_sections.py` is kept separate from `agent_runtime.py` because `coding_tools_section` renders `cwd`, `files`, and `shell` stubs through `ava.help`, whereas `agent_runtime.py` does not import `ava`. Modules already in `effective_sdk_expand` (exact path match) are skipped so their contracts are not rendered twice, while the coding preamble (`AGENTS.md` + opening-turn workflow/engineering skill load, `rg` over recursive `grep`/`find`, isolated git worktree + PR workflow, narrowest-first verification, and persistent shell sessions) always renders. `engineering_workflow_section` is off by default and renders only when `ava_code_workflow` is in `system_prompt_extra`.
+`_prompt_sections.py` is kept separate from `agent_runtime.py` because `coding_tools_section` renders `cwd`, `files`, and `shell` stubs through `ava.help`, whereas `agent_runtime.py` does not import `ava`. Modules already in `effective_sdk_expand` (exact path match) are skipped so their contracts are not rendered twice, while the coding preamble (`AGENTS.md`, `rg` over recursive `grep`/`find`, isolated git worktree + PR workflow, narrowest-first verification, and persistent shell sessions) always renders. `engineering_workflow_section` is off by default and renders only when `ava_code_workflow` is in `system_prompt_extra`.
 """
 ```
 
