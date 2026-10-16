@@ -1,10 +1,4 @@
-// API wrapper unit tests — only verify URL + method + body shape.
-// Anchors the frontend↔gateway endpoint contract: changing endpoint
-// path / HTTP method makes the tests go red.
-//
-// Doesn't verify happy-path response shape — backend OpenAPI schema
-// carries the types; the frontend `ok<T>` only checks res.ok at
-// runtime; type safety comes from tsc.
+
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,9 +35,7 @@ beforeEach(() => {
     "fetch",
     vi.fn((url: string, init?: RequestInit) => {
       calls.push({ url, init });
-      // GET /api/agents returns one page (listAgents maps its agents field);
-      // every other stubbed endpoint here only has its URL/method asserted, so a
-      // bare object suffices.
+
       const isListAgents = !init?.method && /\/api\/agents(?:\?|$)/.test(url);
       return Promise.resolve(
         new Response(JSON.stringify(isListAgents ? { agents: [], next_cursor: null } : {}), {
@@ -150,6 +142,17 @@ describe("lifecycle endpoints", () => {
     expect(calls[0].url).toMatch(/\/api\/agents\/405\/run-timeline$/);
   });
 
+  it("requests bounded recent history and pins later range/detail reads to its snapshot", async () => {
+    await api.getRunTimeline(405, { recentHours: 24, maxUnits: 5000 });
+    await api.getRunTimeline(405, { from: "2026-10-01T00:00:00Z", to: "2026-10-02T00:00:00Z", maxUnits: 5000, snapshot: "v1" });
+    await api.getRunTimelineContext(405, 10, "v1");
+    await api.getRunTimelineMessages(405, { start: 10, end: 11, snapshot: "v1" });
+    expect(calls[0].url).toMatch(/recent_hours=24&max_units=5000$/);
+    expect(calls[1].url).toMatch(/max_units=5000&snapshot=v1$/);
+    expect(calls[2].url).toMatch(/context\?at=10&snapshot=v1$/);
+    expect(calls[3].url).toMatch(/messages\?start=10&end=11&snapshot=v1$/);
+  });
+
   it("getRunTimelineLinks GETs the events of a set of agents in a window", async () => {
     await api.getRunTimelineLinks([405, 6657], { from: "2026-10-03T00:00:00.000Z", to: "2026-10-05T00:00:00.000Z" });
 
@@ -179,10 +182,9 @@ describe("lifecycle endpoints", () => {
   it("listAgents defaults to the SQL-bounded live roster", async () => {
     await api.listAgents();
     expect(calls).toHaveLength(1);
-    // After happy-dom provides window, API_BASE is inferred as http://localhost:8000;
-    // tests only anchor the endpoint path (gateway contract); host part is ignored.
+
     expect(calls[0].url).toMatch(/\/api\/agents\?scope=live&limit=100$/);
-    // GET goes through the f() wrapper by default (no method, no body).
+
     expect(calls[0].init?.method).toBeUndefined();
   });
 
@@ -225,8 +227,7 @@ describe("lifecycle endpoints", () => {
 
   it("spawnAgent POSTs JSON body to /api/keyed/v1/agents", async () => {
     await api.spawnAgent({ prompt: "Search X", spawner: "claude-code", prompt_source: "user" });
-    // After happy-dom provides window, API_BASE is inferred as http://localhost:8000;
-    // tests only anchor the endpoint path (gateway contract); host part is ignored.
+
     expect(calls[0].url).toMatch(/\/api\/keyed\/v1\/agents$/);
     expect(calls[0].init?.method).toBe("POST");
     const headers = new Headers(calls[0].init?.headers);
@@ -276,7 +277,7 @@ describe("lifecycle endpoints", () => {
     await api.terminateAgent(42);
     expect(calls[0].url).toMatch(/\/api\/agents\/42\/terminate$/);
     expect(calls[0].init?.method).toBe("POST");
-    // graceful path sends no body — backend defaults force=false
+
     expect(calls[0].init?.body).toBeUndefined();
   });
 
@@ -675,7 +676,6 @@ describe("stats / config / timeline / system status", () => {
   });
 });
 
-
 describe("uploadFiles", () => {
   interface XhrInstance {
     setRequestHeader: ReturnType<typeof vi.fn>;
@@ -706,13 +706,10 @@ describe("uploadFiles", () => {
   }
 
   beforeEach(() => {
-    // regular function → constructable with `new`. assign last so caller code
-    // path inside Promise executor sees the populated stub when it sets
-    // .upload.onprogress / .onload etc.
-    function FakeXHR(this: XhrInstance) {
-      Object.assign(this, makeXhr());
-      // eslint-disable-next-line @typescript-eslint/no-this-alias -- must capture into closure for subsequent inst.* operations
-      inst = this;
+    // ava:ref ui/web/src/docs/frontend-state/api-requests.ava.okf.md#upload-transport-fixture
+    function FakeXHR() {
+      inst = makeXhr();
+      return inst;
     }
     vi.stubGlobal("XMLHttpRequest", FakeXHR);
   });
@@ -883,7 +880,6 @@ describe("schedule creation identity", () => {
   });
 });
 
-
 it("creation callers reuse a key across calls while new actions mint distinct keys", async () => {
   await api.spawnAgent({}, "creation-a");
   await api.spawnAgent({}, "creation-a");
@@ -914,6 +910,14 @@ it("submits distinct business operations on private HTTP without randomUUID", as
 });
 
 describe("run timeline read ownership", () => {
+  it("uses the same 35 second budget for the initial range", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+    let failure: unknown;
+    void api.getRunTimeline(6111, { recentHours: 24, maxUnits: 5000 }).catch((error: unknown) => { failure = error; });
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(failure).toMatchObject({ name: "TimeoutError" });
+  });
   it.each(["fetch", "body"] as const)("bounds a pending %s and aborts its network request", async (phase) => {
     vi.useFakeTimers();
     let signal: AbortSignal | null | undefined;

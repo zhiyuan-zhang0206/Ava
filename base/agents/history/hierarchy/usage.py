@@ -1,22 +1,4 @@
-"""Deterministic cost of a stretch of history — summed from what the messages carry.
-
-Two figures hang on an understanding node, both computed by code (the model
-only writes the node's text):
-
-- the agent's own cost over the node's message span: the `usage_metadata` (and the recorded
-  `ava_usage` cost) of the AIMessages inside it, summed (`MessageUsage.span`). `input` is the
-  provider's total input tokens (cache reads included), the figure the
-  telemetry's `in_total` reports;
-- the cost of generating the node itself, from the raw record of the calls that wrote it
-  (`understanding_chunk_calls` / `understanding_group_calls`), joined by the id the node row
-  records (`job_id` / `check_key`, see `store.load_generation_costs`). A job's cost is shared by
-  all the nodes of that job (a chunk call writes several groups), so it is the cost of the call
-  that produced the node, not a part of it.
-
-The agent's own cost sums level by level — a parent's span is the union of its
-children's — so each node is one prefix-sum read.
-"""
-
+# ava:ref base/agents/history/docs/range-read-contracts.ava.okf.md#history-range-inputs
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -31,8 +13,6 @@ from base.lm.pricing.cache_writes import cache_write_tokens
 
 @dataclass(frozen=True)
 class Usage:
-    """Token usage over some set of provider calls."""
-
     calls: int
     input: int
     cache_read: int
@@ -40,8 +20,6 @@ class Usage:
     cache_write: int
     cost_usd: float
     cost_calls: int
-    """How many of `calls` carry a recorded cost; `cost_usd` sums those only. A call without one
-    (predating the record, or unpriced) has an unknown cost, never an estimate."""
 
 
 _ZERO = Usage(0, 0, 0, 0, 0, 0.0, 0)
@@ -77,13 +55,15 @@ def _add(a: Usage, b: Usage) -> Usage:
 
 
 class MessageUsage:
-    """Prefix sums of the AIMessage usage of one message list; `span` is a constant-time read."""
+    def __init__(self, messages: Sequence[BaseMessage], *, preceding: Usage = _ZERO) -> None:
+        self._sums = list(accumulate((_call_usage(m) for m in messages), _add, initial=preceding))
 
-    def __init__(self, messages: Sequence[BaseMessage]) -> None:
-        self._sums = [_ZERO, *accumulate((_call_usage(m) for m in messages), _add)]
+    def prefix(self, stop: int) -> Usage:
+        if not 0 <= stop < len(self._sums):
+            raise IndexError(f"prefix {stop} is outside the {len(self._sums) - 1} messages")
+        return self._sums[stop]
 
     def span(self, i0: int, i1: int) -> Usage:
-        """The usage of messages `i0..i1` inclusive."""
         if not 0 <= i0 <= i1 < len(self._sums) - 1:
             raise IndexError(f"span [{i0}, {i1}] is outside the {len(self._sums) - 1} messages")
         low, high = self._sums[i0], self._sums[i1 + 1]
@@ -100,8 +80,6 @@ class MessageUsage:
 
 @dataclass(frozen=True)
 class GenerationUsage:
-    """What generating one node cost: its calls' usage and wall time."""
-
     calls: int
     input: int
     cache_read: int

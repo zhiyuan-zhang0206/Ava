@@ -1,8 +1,5 @@
 "use client";
 
-// The details of the selected arrow between agents: what happened, from whom to whom, when, and (for
-// an end that is not in the view) a button to bring that agent in.
-
 import { useQuery } from "@tanstack/react-query";
 import { Info } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -16,7 +13,6 @@ import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
 import type { ResolvedLink } from "./model/timeline-links";
 import { PreviewMessage, TimelineMessages } from "./run-timeline-messages";
 
-/** The text of an event with no block: read for the selected arrow only (the list carries none), then shown through the same card and row as any message. */
 function LinkText({ link }: { link: ResolvedLink["link"] }) {
   const t = useTranslations("runTimeline");
   const ref = link.inbound_id !== null ? { inbound_id: link.inbound_id } : link.notice_id !== null ? { notice_id: link.notice_id } : null;
@@ -52,7 +48,8 @@ function LinkText({ link }: { link: ResolvedLink["link"] }) {
   );
 }
 
-export function LinkDetail({ resolved, onAddAgent }: { resolved: ResolvedLink; onAddAgent: (agent: number) => void }) {
+// ava:ref ui/web/src/docs/frontend-components/run-timeline/details-panel.ava.okf.md#selected-message-parts
+export function LinkDetail({ resolved, snapshot, onAddAgent }: { resolved: ResolvedLink; snapshot?: string; onAddAgent: (agent: number) => void }) {
   const t = useTranslations("runTimeline");
   const labels = useLinkKindLabels();
   const { link, external } = resolved;
@@ -91,8 +88,8 @@ export function LinkDetail({ resolved, onAddAgent }: { resolved: ResolvedLink; o
         </button>
       ) : null}
       {resolved.block !== null ? (
-        // The block the arrow ends on: its message, exactly as the details of that block show it.
-        <TimelineMessages agentId={resolved.to.agent} start={resolved.block.i0} end={resolved.block.i1} unitKind={resolved.block.kind} />
+
+        <TimelineMessages agentId={resolved.to.agent} snapshot={snapshot} start={resolved.block.i0} end={resolved.block.i1} unitKind={resolved.block.kind} />
       ) : (
         <LinkText link={link} />
       )}
