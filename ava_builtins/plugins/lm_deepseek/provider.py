@@ -1,13 +1,9 @@
-"""DeepSeek provider plugin for Ava."""
-
+# ava:ref ava_builtins/plugins/docs/plugins.ava.okf.md#lm-deepseek-provider
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    # Annotation-only (`build` return): keeps the chat-model stack off the
-    # provider-registration path (exec-child boot, task #3633;
-    # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.lm.effort import validate_effort
@@ -29,31 +25,12 @@ _DEEPSEEK_EFFORT_LEVELS = ("high", "max")
 
 
 def deepseek_wire_effort(effort: str, levels: tuple[str, ...], *, target: str) -> str | None:
-    """Resolve a cross-provider effort onto DeepSeek's `output_config.effort`.
-
-    None means "no reasoning": DeepSeek's wire vocabulary is graded levels only
-    and carries no `none` variant (sending one 400s with ``unknown variant
-    `none` ``), so off is the endpoint's thinking switch instead — the caller's
-    job. Every graded value must be an exact member of `levels`; unsupported
-    values fail before the request is sent.
-    """
     if effort == "none":
         return None
     return validate_effort(effort, levels, target=target)
 
 
 def _require_deepseek_key() -> str:
-    """The provider key from the process env, else this unit's `.env` file.
-
-    The gateway profile deliberately pops agent-runner capability keys from
-    ``os.environ`` at boot (Task #856) while the unit's `.env` file still
-    declares them. The gateway-side draft model (reply-suggestion, model
-    ``deepseek-flash``) builds inside that process and must still find its
-    key, so the build consumes the same fallback channel spawn validation
-    already reads (``base/lm/factory.py::_ensure_provider_key``, Task #1562):
-    ``os.environ`` first, then ``read_env_aliases()``. Consume-only — the
-    value is never written back into ``os.environ``.
-    """
     try:
         return require_key("DEEPSEEK_API_KEY")
     except RuntimeError:
@@ -67,21 +44,11 @@ def _require_deepseek_key() -> str:
 
 
 def build(ctx: BuildContext) -> BaseChatModel:
-    """deepseek-* branch: ChatAnthropic on the anthropic-compatible
-    endpoint, pinned max_tokens. Reasoning effort rides
-    `output_config.effort` via extra_body; `none` maps onto thinking
-    disabled (the endpoint's effort vocabulary has no off level).
-    """
     from ava_builtins.plugins.lm_deepseek.chat import (
         DEEPSEEK_ANTHROPIC_API_BASE,
         DeepSeekChatModel,
     )
 
-    # Use DeepSeek's anthropic-compatible endpoint via ChatAnthropic client.
-    # Not langchain-deepseek (1.0.1 reasoning_content roundtrip bug).
-    # api_key comes from DEEPSEEK_API_KEY; if missing, RuntimeError fail-fast
-    # immediately — don't silently use the wrong key and only find out from a
-    # server 401.
     api_key = _require_deepseek_key()
 
     extra_kwargs: dict[str, Any] = {}
@@ -90,9 +57,6 @@ def build(ctx: BuildContext) -> BaseChatModel:
     if ctx.disable_streaming:
         extra_kwargs["disable_streaming"] = True
 
-    # Per-model output cap (ModelSpec.max_output_tokens). An unregistered
-    # deepseek model fails fast here rather than borrowing a wrong cap —
-    # the same fail-fast posture as the unknown-prefix raise at the end.
     if ctx.spec is None or ctx.spec.max_output_tokens is None:
         raise ValueError(
             f"Unknown deepseek model {ctx.model!r} — register it (with "
@@ -101,27 +65,6 @@ def build(ctx: BuildContext) -> BaseChatModel:
         )
     max_tokens = ctx.spec.max_output_tokens
 
-    # Reasoning effort: DeepSeek's anthropic-compat endpoint accepts
-    # `output_config.effort` to control reasoning depth (the official
-    # benchmark 80.6% Verified runs the max mode). Note: the standard
-    # anthropic `budget_tokens` is *ignored* on this endpoint (DeepSeek
-    # docs explicitly say so); must go through output_config.
-    # Passed via model_kwargs.extra_body to the underlying Anthropic SDK,
-    # which merges extra_body into the POST body without touching schema.
-    #
-    # thinking={"type":"disabled"} is mutually exclusive with reasoning_effort
-    # (server 400: "thinking options type cannot be disabled when
-    # reasoning_effort is set"). Caller explicitly disabling thinking →
-    # also skip effort injection; don't let global env sneakily push
-    # reasoning back (the labeler short-text path is exactly this case).
-    #
-    # The effort goes through the same exact per-model validation as Claude
-    # (`ModelSpec.effort_levels`), and "none" — the only cross-provider
-    # value that means off rather than a level — lands on the endpoint's
-    # own off-switch, `thinking={"type":"disabled"}` (the mimo branch makes
-    # the same mapping). DeepSeek's vocabulary has no `none` variant, so
-    # sending it as an effort value 400s the request: that is what took every
-    # `ava.web.fetch` down, since AVA_WEB_FETCH_REASONING ships as "none".
     deepseek_model_kwargs: dict[str, Any] = {}
     thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"
     effort = ctx.resolved_effort
@@ -134,21 +77,14 @@ def build(ctx: BuildContext) -> BaseChatModel:
         if wire_effort is not None:
             deepseek_model_kwargs["extra_body"] = {"output_config": {"effort": wire_effort}}
         elif ctx.thinking is None:
-            # A caller-passed `thinking` states its own intent and wins.
             extra_kwargs["thinking"] = {"type": "disabled"}
 
-    # type ignore same as claude branch: langchain-anthropic stub treats
-    # model / api_key / base_url / max_tokens as pydantic alias; signature
-    # only exposes canonical field names model_name / anthropic_api_key /
-    # anthropic_api_url / max_tokens_to_sample; runtime goes through
-    # alias. Each parameter line of a multi-line call needs its own
-    # ignore — pyright does not propagate from the opening paren line to
-    # subsequent keyword argument lines.
-    return DeepSeekChatModel(
-        model=ctx.model,  # type: ignore[call-arg]
+    model_cls: Any = DeepSeekChatModel
+    return model_cls(
+        model=ctx.model,
         api_key=api_key,
         base_url=DEEPSEEK_ANTHROPIC_API_BASE,
-        max_tokens=max_tokens,  # type: ignore[call-arg]
+        max_tokens=max_tokens,
         model_kwargs=deepseek_model_kwargs,
         timeout=ctx.timeout,
         **extra_kwargs,
@@ -171,11 +107,6 @@ PROVIDER = ProviderContribution(
         stop_spec=None,
     ),
     models={
-        # The provider's current canonical flash-tier name (user report
-        # 2026-09-17, task #3750: DeepSeek retired the V4 Flash name — the
-        # pricing page's footnote (1) now reads "Use `deepseek-flash` as the
-        # model name"). Same window, output cap, cutoff, effort vocabulary,
-        # tuning and price as the retired V4 Flash model.
         "deepseek-flash": ModelSpec(
             provider="deepseek",
             spawnable=True,
@@ -184,35 +115,16 @@ PROVIDER = ProviderContribution(
             knowledge_cutoff="2026-04",
             model_identity="You are running on DeepSeek Flash.",
             effort_levels=("high", "max"),
+            media_types=frozenset({"image"}),
             tuning=ModelTuning(
-                reasoning_effort="max",  # same as the retired v4 entries: Ava is not an auto-promoted harness
-                # Stall-wave tightening (2026-09-18, task #3884): the 600 that
-                # matched DeepSeek's documented up-to-10-minute queue was
-                # exactly the failure — in the 09-14/15 waves a request not
-                # served within minutes was not served inside 600s either (the
-                # queue served ONLY keep-alive comments), and each stall
-                # burned 600s (stream) + 600s (non-streaming fallback) per
-                # turn before crashing. 150 keeps generous queue headroom
-                # while cutting stall detection ~4x; the non-streaming
-                # fallback segment runs under this same bound.
+                reasoning_effort="max",
                 llm_stream_ttft_timeout_seconds=150.0,
-                # Same decision as every deepseek entry (2026-08-29): soft 374k /
-                # hard 512k on the 1M window — 0.512 / 0.374 exactly.
                 auto_compact_fraction=0.512,
                 compact_reminder_fraction=0.374,
             ),
         ),
-        # Removed 2026-09-23: deepseek-v4-pro, deepseek-v4-flash, and
-        # deepseek-v4-flash-vision-exp cannot be selected. Their complete price
-        # histories remain in base/lm/pricing/pricing_catalog_archive.json; configs
-        # naming them fail validation as unknown models.
     },
     pricing={
-        # New id, new ledger row: a single open period carrying the flash
-        # column's current rates (checked against the official page
-        # 2026-09-17) — usage under this id can only begin with the rename,
-        # and the pre-rename rate history stays in the retired
-        # `deepseek-v4-flash` entry it succeeds.
         "deepseek-flash": PriceRates(
             cache_miss=0.15,
             cache_hit=0.003,
@@ -257,5 +169,4 @@ PROVIDER = ProviderContribution(
 
 
 def contribute() -> PluginContributions:
-    """What this plugin declares: its model provider."""
     return PluginContributions(providers=(PROVIDER,))

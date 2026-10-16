@@ -1,11 +1,3 @@
-"""Direct-spawn tests for the exec child entry (`agent/execution/child.py`) —
-Child-only contracts include SIGTERM timeout envelopes, watchdog hard exit,
-state-slot injection, plugin-delta round trips, and lifecycle envelopes.
-
-Each test spawns a real child with a tmp AVA_HOME, so `import ava` + plugin
-load costs ~1s per spawn — keep the count low and each spawn meaningful.
-"""
-
 from __future__ import annotations
 
 import json
@@ -14,7 +6,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -32,7 +24,6 @@ from ava import boot
 from ava.sdk_surface.installation import Installation
 from ava.tests.fixtures.pin_agent import exec_context
 
-# Fixed test identity — the child never dials a real DB/Redis here.
 AGENT_ID = 424242
 
 
@@ -54,7 +45,6 @@ def child_env(
             "AVA_PROCESS_PROFILE": "agent",
             "AVA_EXEC_REQUEST_FILE": str(request_path),
             "AVA_EXEC_RESULT_FILE": str(result_path),
-            # Fast watchdog for the watchdog test (default margin is 5s).
             "AVA_EXEC_WATCHDOG_MARGIN_S": "0.5",
         }
     )
@@ -77,7 +67,6 @@ def spawn_real_child(
     launcher_env: dict[str, str] | None = None,
     context: dict[str, Any] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
-    """Write a request, run the real child, return (proc, request, result)."""
     exec_dir = tmp_path / "exec"
     request_path = make_request_path(exec_dir, agent_id=AGENT_ID)
     result_path = make_result_path(exec_dir, agent_id=AGENT_ID)
@@ -113,17 +102,15 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     proc, request, result = spawn_real_child(tmp_path, "print('hello exec child')")
     assert proc.returncode == 0, proc.stderr
     assert "hello exec child" in proc.stdout
-    assert request.exists()  # child leaves it; the parent machinery cleans up
+    assert request.exists()
     payload = read_result(result)
     assert payload.kind == "done"
-    assert payload.code_reached is True  # P0 #2100: the code really ran
+    assert payload.code_reached is True
     assert payload.state_update is None
-    assert payload.sdk_calls == []  # ran, executed no SDK calls
+    assert payload.sdk_calls == []
 
 
 def test_child_context_matches_the_hosts_context(tmp_path: Path) -> None:
-    """The child rebuilds the host's context from the envelope, and agent code (a thread pool
-    included) reads the identity the host's `AvaContext` carries as `ava.context`."""
     host = exec_context(AGENT_ID, actor="schedule:3")
     code = (
         "import json\nfrom concurrent.futures import ThreadPoolExecutor\nimport ava\n"
@@ -140,9 +127,6 @@ def test_child_context_matches_the_hosts_context(tmp_path: Path) -> None:
 
 
 def test_child_sdk_call_tally_reports_real_executions(tmp_path: Path) -> None:
-    """Acceptance: the envelope's `sdk_calls` is the REAL runtime tally — a loop
-    counts per execution, an unexecuted branch counts zero, and the counts come
-    from what ran, never from a scan of the source text."""
     sample = tmp_path / "sample.txt"
     sample.write_text("hello", encoding="utf-8")
     code = f"""
@@ -162,7 +146,6 @@ print('tally done')
 
 
 def test_child_sdk_call_tally_keeps_what_ran_before_a_crash(tmp_path: Path) -> None:
-    """A crash mid-block still reports the calls that really executed before it."""
     sample = tmp_path / "sample.txt"
     sample.write_text("hello", encoding="utf-8")
     code = f"""
@@ -180,16 +163,6 @@ raise ValueError('boom')
 def test_boot_config_failure_writes_crashed_envelope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An eager Settings failure while importing ava must reach the parent's result file.
-
-    Task #3621: a child boots boot-lite by default, so a broken NON-boot-path
-    field no longer crashes it at import (it would surface on first touch).
-    Pinning the child's boot to eager keeps this exercising the import-time
-    Settings crash; the lite boot's own fail-fast crash (a boot-path field) is
-    covered by test_lite_boot_config_failure_writes_crashed_envelope. The
-    suite process carries AVA_CONFIG_FETCH=skip, which wins over eager, so the
-    pin drops it too.
-    """
     monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
     monkeypatch.setenv("AVA_CONFIG_BOOT", "eager")
     home = tmp_path / "home"
@@ -202,10 +175,6 @@ def test_boot_config_failure_writes_crashed_envelope(
         encoding="utf-8",
     )
 
-    # The agent launcher injects the least-privilege `ava_runner` projection into
-    # every agent-profile process; the unit `.env` owner URL never replaces it.
-    # Without it the eager build fails earlier, on DataPlaneSettings refusing an
-    # owner URL with the cluster secret but no (agent-stripped) admin password.
     proc, _request, result = spawn_real_child(
         tmp_path,
         "pass",
@@ -220,18 +189,12 @@ def test_boot_config_failure_writes_crashed_envelope(
     assert "exec_timeout_seconds" in (payload.exc_msg or "")
     assert "child.py" in (payload.full_traceback or "")
     assert result.stat().st_mode & 0o777 == 0o600
-    assert payload.code_reached is False  # P0 #2100: boot crash, the code never ran
+    assert payload.code_reached is False
 
 
 def test_lite_boot_config_failure_writes_crashed_envelope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A boot-path config failure crashes a *lite* child at import (task #3621).
-
-    The child boots boot-lite by default: a bad value for a boot-path field
-    (timezone) makes `prepare()` fail fast while `import ava` runs, and the
-    crash envelope must still reach the parent's result file.
-    """
     monkeypatch.delenv("AVA_CONFIG_BOOT", raising=False)
     monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
     home = tmp_path / "home"
@@ -254,7 +217,6 @@ def test_lite_boot_config_failure_writes_crashed_envelope(
 
 
 def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Path) -> None:
-    """A healthy child keeps reporting request-read failures through its envelope."""
     proc, _request, result = spawn_real_child(tmp_path, "pass", write_request_file=False)
 
     assert proc.returncode == 0, proc.stderr
@@ -262,13 +224,12 @@ def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Pa
     assert payload.kind == "crashed"
     assert payload.exc_type == "FileNotFoundError"
     assert "child.py" in (payload.full_traceback or "")
-    assert payload.code_reached is False  # request-read failure precedes user code
+    assert payload.code_reached is False
 
 
 def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A failed protocol writer cannot erase an already-caught child crash."""
     from agent.execution import child as exec_child
     from agent.graph.exec import protocol
 
@@ -286,7 +247,7 @@ def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
     assert payload.exc_msg == "fallback boom"
     assert "ValueError: fallback boom" in (payload.full_traceback or "")
     assert result.stat().st_mode & 0o777 == 0o600
-    assert payload.code_reached is False  # the default: this writer is the boot path
+    assert payload.code_reached is False
 
 
 def test_child_builtin_help_routes_only_ava_targets(tmp_path: Path) -> None:
@@ -297,7 +258,6 @@ import io
 import json
 import os
 import sys
-
 import ava
 
 
@@ -405,8 +365,6 @@ def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> No
     proc, _request, result = spawn_real_child(
         tmp_path,
         f"import ava\nava.self.attach({str(image)!r}, label='render result')",
-        # attach is a media-capable-model feature (user ruling 2026-08-28):
-        # the child's default test model is text-only and rejects the call.
         config_overlay={"llm_model": "claude-sonnet-5"},
         state={"messages": [HumanMessage(content="attach it")], "halted": False},
     )
@@ -418,12 +376,10 @@ def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> No
 
 
 def test_child_attach_rejected_for_text_only_model(tmp_path: Path) -> None:
-    """A text-only-model child gets the model gate error, not a registration —
-    `ava.self.attach` is unavailable to it (user ruling 2026-08-28)."""
     proc, _request, result = spawn_real_child(
         tmp_path,
         "import ava\nava.self.attach('/tmp/render.png')",
-        config_overlay={"llm_model": "deepseek-flash"},
+        config_overlay={"llm_model": "glm-5.3"},
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -437,7 +393,6 @@ def test_child_attach_rejected_for_text_only_model(tmp_path: Path) -> None:
 def test_child_crash_writes_envelope_with_traceback(tmp_path: Path) -> None:
     proc, _request, result = spawn_real_child(tmp_path, "raise ValueError('boom')")
     assert proc.returncode == 0
-    # agent-facing traceback goes to the output pipe (framework logs do not)
     assert "ValueError: boom" in proc.stdout
     assert "Traceback" in proc.stdout
     payload = read_result(result)
@@ -448,8 +403,6 @@ def test_child_crash_writes_envelope_with_traceback(tmp_path: Path) -> None:
 
 
 def test_child_state_slot_and_plugin_delta_round_trip(tmp_path: Path) -> None:
-    """The snapshot is injected into ava.state; the plugin namespace reads it,
-    a plugin write lands in the delta, and both cross back to the parent."""
     state = {
         "messages": [HumanMessage(content="hi from snapshot")],
         "halted": False,
@@ -479,8 +432,6 @@ print("process cwd stable:", Path.cwd() == process_cwd)
 
 
 def test_child_lifecycle_envelope(tmp_path: Path) -> None:
-    """A `LifecycleExit` raised by agent code becomes a lifecycle outcome with
-    the class name — the parent reconstructs the exception from it."""
     proc, _request, result = spawn_real_child(
         tmp_path, "from base.agents.lifecycle import AgentRestart\nraise AgentRestart()"
     )
@@ -493,7 +444,6 @@ def test_child_lifecycle_envelope(tmp_path: Path) -> None:
 def test_child_boot_timing_emits_ready_duration(
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """The child emits its own ready boundary, separating bootstrap cost from user code."""
     from agent.execution import child as exec_child
 
     monkeypatch.setattr(exec_child.time, "perf_counter", lambda: 100.25)
@@ -505,24 +455,19 @@ def test_child_boot_timing_emits_ready_duration(
     [record] = [
         record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"
     ]
-    assert record["extra"]["duration_ms"] == pytest.approx(250.0)  # pyright: ignore[reportUnknownMemberType]
+    approx = cast(Any, pytest.approx)
+    assert record["extra"]["duration_ms"] == approx(250.0)
 
 
 def test_child_watchdog_hard_exits_124(tmp_path: Path) -> None:
-    """With no parent to signal it, the child's own watchdog os._exit(124)s
-    past (timeout + grace + margin) — an orphaned exec child cannot run long."""
     proc, _request, result = spawn_real_child(
         tmp_path, "import time\ntime.sleep(60)", timeout_s=0.2
     )
     assert proc.returncode == 124
-    assert not result.exists()  # hard exit skips the envelope — parent classifies
+    assert not result.exists()
 
 
 def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
-    """The re-emitted per-agent config maps reach the child's effective
-    settings — the child's SDK calls resolve the same configuration the agent
-    process booted with. The maps are also popped from the child's env so its
-    own children do not inherit them."""
     proc, _request, result = spawn_real_child(
         tmp_path,
         (
@@ -532,7 +477,6 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
             "import os\nprint(os.environ.get('AVA_AGENT_CONFIG_OVERLAY', 'GONE'))\n"
         ),
         config_overlay={"llm_model": "deepseek-v4-pro"},
-        # per_agent=True field (overlay validation rejects non-per_agent keys).
         birth_config={
             "llm_model": "deepseek-v4-flash-vision-exp",
             "llm_stream_ttft_timeout_seconds": 3.0,
@@ -543,20 +487,12 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
     assert payload.kind == "done"
     assert "deepseek-v4-pro" in proc.stdout
     assert "3.0" in proc.stdout
-    # The maps were popped: the agent's code no longer sees them in env.
     assert "GONE" in proc.stdout
 
 
 def test_child_overlay_phases_framework_then_plugin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
 ) -> None:
-    """`_run` applies the maps in the agent process's own boot order: framework
-    scope BEFORE plugins load, plugin scope after. A single framework-only pass
-    (the PR1 shape) silently dropped plugin-scope overlay fields — this locks the
-    sequencing. The per-agent sdk_disable additions apply additively on the
-    INSTALLED surface (after the load: the installation records its applied set),
-    right before the eval-isolation boundary, which works on the live surface for
-    the same reason."""
     from agent.execution import child as exec_child
     from agent.graph.exec import protocol
     from agent.graph.exec.protocol import RequestPayload, ResultPayload
@@ -600,7 +536,6 @@ def test_child_overlay_phases_framework_then_plugin(
         machine: object,
         validate_state: object = None,
     ) -> None:
-        # Stateless request (fake_read_request: state=None) -> the surface load.
         assert all(
             (
                 surface is True,
@@ -640,7 +575,6 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setenv("AVA_EXEC_REQUEST_FILE", str(tmp_path / "req.json"))
     monkeypatch.setenv("AVA_EXEC_RESULT_FILE", str(tmp_path / "res.json"))
 
-    # main() installs the child's SIGINT/SIGTERM handlers (they raise): put the originals back.
     old_sigint = signal.getsignal(signal.SIGINT)
     old_sigterm = signal.getsignal(signal.SIGTERM)
     try:
@@ -667,9 +601,6 @@ def test_child_overlay_phases_framework_then_plugin(
 
 
 def _declare_machine_name(tmp_path: Path) -> None:
-    """help(ava.self) renders MACHINE_SPEC, which needs a machine identity: the child's
-    bare $AVA_HOME must declare its own in `.env` (an inherited env identity is dropped
-    when the home's `.env` does not declare it)."""
     (tmp_path / "home").mkdir(exist_ok=True)
     (tmp_path / "home" / ".env").write_text("AVA_MACHINE_NAME=test-host\n", encoding="utf-8")
 
@@ -677,8 +608,6 @@ def _declare_machine_name(tmp_path: Path) -> None:
 def test_child_help_hides_attach_for_text_only_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Interactive help in a text-only child omits the attach contract — the
-    SDK docs gate matches the system prompt (user ruling 2026-08-28)."""
     _declare_machine_name(tmp_path)
     proc, _request, _result = spawn_real_child(
         tmp_path,
@@ -687,7 +616,7 @@ def test_child_help_hides_attach_for_text_only_model(
         "with contextlib.redirect_stdout(buf):\n"
         "    ava.help(ava.self)\n"
         "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
-        config_overlay={"llm_model": "deepseek-flash"},
+        config_overlay={"llm_model": "glm-5.3"},
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -697,8 +626,6 @@ def test_child_help_hides_attach_for_text_only_model(
 def test_child_help_keeps_attach_for_media_capable_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A media-capable child's interactive help keeps the attach contract
-    (user ruling 2026-08-28)."""
     _declare_machine_name(tmp_path)
     proc, _request, _result = spawn_real_child(
         tmp_path,
@@ -717,7 +644,6 @@ def test_child_help_keeps_attach_for_media_capable_model(
 def test_child_help_hides_attach_for_withdrawn_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A withdrawn vision model's child gates media on its text-only fallback."""
     _declare_machine_name(tmp_path)
     proc, _request, _result = spawn_real_child(
         tmp_path,
@@ -726,17 +652,17 @@ def test_child_help_hides_attach_for_withdrawn_model(
         "from ava.sdk_surface import process_context\n"
         "from ava.sdk_surface.settings import model_catalog\n"
         "catalog = model_catalog()\n"
-        "withdrawn = replace(catalog.models['deepseek-flash'], "
-        "spawnable=False, unavailable_fallback='deepseek-flash', "
+        "withdrawn = replace(catalog.models['glm-5.3'], "
+        "spawnable=False, unavailable_fallback='glm-5.3', "
         "media_types=frozenset({'image'}))\n"
-        "fixture = replace(catalog, models={**catalog.models, 'deepseek-vision-fixture': withdrawn})\n"
+        "fixture = replace(catalog, models={**catalog.models, 'glm-vision-fixture': withdrawn})\n"
         "ava.__plugin_installation__ = replace(ava.__plugin_installation__, catalog=fixture)\n"
         "process_context.bind_context(replace(ava.context, catalog=fixture))\n"
         "buf = io.StringIO()\n"
         "with contextlib.redirect_stdout(buf):\n"
         "    ava.help(ava.self)\n"
         "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
-        config_overlay={"llm_model": "deepseek-vision-fixture"},
+        config_overlay={"llm_model": "glm-vision-fixture"},
     )
 
     assert proc.returncode == 0, proc.stderr
