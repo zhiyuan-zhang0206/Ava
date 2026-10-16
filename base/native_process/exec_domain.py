@@ -16,6 +16,7 @@ import psutil
 from base.native_process import native_boot_id
 from base.native_process.group_closure import confirm_closure
 from base.native_process.ownership import OwnedProcess
+from base.native_process.process_control import ProcessControl
 
 KILL_GRACE_S = 2.0
 _POSIX_LAUNCH = object()
@@ -29,11 +30,11 @@ class ExecDomainBirthError(RuntimeError):
         self.proc = proc
 
 
-def process_group_has_live_member(pgid: int) -> bool:
+def process_group_has_live_member(pgid: int, *, process_control: ProcessControl) -> bool:
     """Read a still-pinned group; unreadable members are never absence."""
     for process in psutil.process_iter(["pid", "status"]):
         try:
-            if os.getpgid(process.info["pid"]) != pgid:
+            if process_control.getpgid(process.info["pid"]) != pgid:
                 continue
             if process.info["status"] in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}:
                 continue
@@ -50,6 +51,7 @@ class ExecProcessDomain:
     """Direct launch authority; a retained receipt alone cannot create it."""
 
     proc: subprocess.Popen[bytes]
+    process_control: ProcessControl
     _launch: InitVar[object | None] = None
     _birth: OwnedProcess | None = field(init=False, default=None)
     _boot: str | None = field(init=False, default=None)
@@ -65,7 +67,12 @@ class ExecProcessDomain:
 
     @classmethod
     def launch_posix(
-        cls, argv: list[str], *, new_session: bool = False, **options: Any
+        cls,
+        argv: list[str],
+        *,
+        process_control: ProcessControl,
+        new_session: bool = False,
+        **options: Any,
     ) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
         """Create the group and retain its direct child before any reap.
 
@@ -91,7 +98,7 @@ class ExecProcessDomain:
             ),
         )
         try:
-            return proc, cls(proc, _launch=_POSIX_LAUNCH)
+            return proc, cls(proc, process_control=process_control, _launch=_POSIX_LAUNCH)
         except BaseException as exc:
             raise ExecDomainBirthError(proc) from exc
 
@@ -115,7 +122,7 @@ class ExecProcessDomain:
     def members_live(self) -> bool:
         """Observe the pinned trusted-tool group; this is not a closure proof."""
         self._require_unreaped()
-        return process_group_has_live_member(self.proc.pid)
+        return process_group_has_live_member(self.proc.pid, process_control=self.process_control)
 
     def signal(self, signum: int) -> None:
         """Signal the launch-owned group while its direct child remains pinned."""
@@ -128,7 +135,7 @@ class ExecProcessDomain:
             # release of the direct child's PID; unknown custody never falls back.
             with cast("Any", self.proc)._waitpid_lock:
                 self._require_unreaped()
-                os.killpg(self.proc.pid, signum)
+                self.process_control.killpg(self.proc.pid, signum)
 
     def close_confirmed(self, deadline: float) -> None:
         """Prove the domain closed; the POSIX leader stays unreaped for its caller."""
@@ -158,7 +165,9 @@ class ExecProcessDomain:
                 or exc.errno != errno.EPERM
                 or self._birth is None
                 or self._birth.live()
-                or process_group_has_live_member(self.proc.pid)
+                or process_group_has_live_member(
+                    self.proc.pid, process_control=self.process_control
+                )
             ):
                 raise
 

@@ -39,8 +39,9 @@ from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import collect_child
 from ava.tests.fixtures.pin_agent import exec_context
 from base.db import Database
-from base.native_process import exec_domain
 from base.native_process.ownership import OwnedProcess
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
+from base.native_process.tests.fake_process_control import FakeProcessControl, Signalled
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty.tests.process_groups import kill_group_or_prove_already_gone
@@ -415,6 +416,7 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
     )
     proc, domain = ExecProcessDomain.launch_posix(
         [sys.executable, "-c", code],
+        process_control=SYSTEM_PROCESS_CONTROL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         new_session=True,
@@ -465,15 +467,15 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
             proc.wait(timeout=5.0)
 
 
-async def test_live_signal_refusal_returns_unresolved_without_reap(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_live_signal_refusal_returns_unresolved_without_reap() -> None:
     import errno
 
     from base.native_process.ownership import OwnedProcess
 
+    process_control = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
     proc, domain = ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"],
+        process_control=process_control,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -481,13 +483,9 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
     closer = DomainCloseOwner(domain)
     root_exit = closer.root_exit_task
     reap = start_reap(proc, closer)
-    original_signal = os.killpg
-
-    def denied(pgid: int, _signum: int) -> None:
-        assert pgid == proc.pid
-        raise PermissionError(errno.EPERM, "private live group signal refusal")
-
-    monkeypatch.setattr(exec_domain.os, "killpg", denied)
+    process_control.refuse(
+        proc.pid, PermissionError(errno.EPERM, "private live group signal refusal")
+    )
     try:
         failures = await asyncio.wait_for(
             settle_resources(root_exit, reap, closer, None, request_stop=True),
@@ -498,8 +496,9 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
         assert "private live group signal refusal" in str(failures[0].error)
         assert closer.task.done() and reap.done() and root_exit.cancelled()
         assert proc.returncode is None and native.live()
+        assert process_control.signals == [Signalled("killpg", proc.pid, signal.SIGKILL)]
     finally:
-        monkeypatch.setattr(exec_domain.os, "killpg", original_signal)
+        domain.process_control = SYSTEM_PROCESS_CONTROL
         domain.close_confirmed(time.monotonic() + 5)
         proc.wait(timeout=5)
         root_exit.cancel()
@@ -534,6 +533,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
     ) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
         owned = ExecProcessDomain.launch_posix(
             [sys.executable, "-I", "-B", "-c", code, str(pid_path)],
+            process_control=SYSTEM_PROCESS_CONTROL,
             new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
