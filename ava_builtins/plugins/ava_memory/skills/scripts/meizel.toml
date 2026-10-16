@@ -1,1 +1,4 @@
 exports = ["steward.py"]
+
+[uses]
+"tests" = ["rebuild_memory_index.py"]

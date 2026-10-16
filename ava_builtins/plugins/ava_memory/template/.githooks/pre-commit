@@ -2,7 +2,11 @@
 # Memory-pool commit guard: character caps + OKF format validation.
 set -euo pipefail
 
-memory_cap="${AVA_MEMORY_INDEX_CAP:-2000}"
+# Index cap: 16000 characters ≈ 200 pointer lines (the Claude Code auto-memory
+# scale family); a pool may raise it for itself via the environment override.
+memory_cap="${AVA_MEMORY_INDEX_CAP:-16000}"
+# Note cap: one atomic fact per note; oversized material moves to the Vault with
+# a pointer note left behind.
 note_cap="${AVA_MEMORY_NOTE_CAP:-8000}"
 
 fail=0
