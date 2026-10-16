@@ -1,9 +1,4 @@
-"""Pin the identity a test acts as: bind an `AvaContext` carrying it for the rest of the test.
-
-`identity_restore` (autouse) puts the previous context back afterwards. Kept apart from that plugin
-because tests import these helpers directly, and a pytest plugin module that is
-imported before pytest registers it cannot be assertion-rewritten.
-"""
+# ava:ref ava/tests/fixtures/docs/sdk-composition.ava.okf.md#fixture-clock-owner
 
 from __future__ import annotations
 
@@ -16,7 +11,8 @@ from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config.tests.configuration import snapshot_process_config
@@ -45,15 +41,11 @@ def pin_agent(
     clients: ClientSet | None = None,
     machine: MachineIdentity | None = None,
 ) -> None:
-    """Bind a context acting as `agent_id` for the rest of this test; the autouse fixture below
-    puts the previous one back."""
     bound = getattr(ava, "context", None)
     ava.context = AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=owns_loop, actor=actor, lease=lease),
         original_incarnation=incarnation,
         machine=machine if machine is not None else (None if bound is None else bound.machine),
-        # The identity changes, the connections stay: a test's `use_client` or fake SQL slot
-        # entered before it pins an agent keeps applying.
         clients=clients if clients is not None else (bound.clients if bound else process_clients()),
         clock_factory=(
             clock_factory
@@ -64,7 +56,6 @@ def pin_agent(
 
 
 def pin_no_identity() -> None:
-    """Leave this test with no bound context (a process that is no agent)."""
     del ava.context
 
 
@@ -75,7 +66,6 @@ def exec_context(
     incarnation: RuntimeIncarnation | None = None,
     resources: HostedTurnResources | None = None,
 ) -> AvaContext:
-    """The host-side context of a turn that runs as `agent_id`: what an exec request carries."""
     config = snapshot_process_config()
     machine = machine_from_boot(config)
     return AvaContext(

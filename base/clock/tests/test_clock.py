@@ -60,7 +60,7 @@ def test_boot_clock_reads_keep_two_owners_and_previous_handles_separate(
     import os
     import time
 
-    from base.clock import clock_config_from_boot
+    from base.clock.configuration import clock_config_from_boot
     from base.config import ConfigBoot
 
     with monkeypatch.context() as env:

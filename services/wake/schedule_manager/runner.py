@@ -1,4 +1,4 @@
-"""SDK composition and CLI entrypoint for an independent schedule process."""
+# ava:ref services/wake/schedule_manager/docs/runner-composition.ava.okf.md#runner-revision-admission
 
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -37,7 +38,6 @@ def _bind_schedule_actor(
     clock_factory: Callable[[], Clock],
     machine: MachineIdentity,
 ) -> None:
-    """Attribute SDK operations to this schedule using the process's client owner."""
     process_context.bind_context(
         AvaContext(
             identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
@@ -49,7 +49,6 @@ def _bind_schedule_actor(
 
 
 def run(schedule_id: int, revision: int | None = None) -> int:
-    """Run a schedule with the SDK policy inputs owned by this process."""
     config = ConfigBoot()
     config.read_process_environment()
     machine = machine_from_boot(config)
@@ -105,8 +104,7 @@ def main() -> None:
             "Usage: python -m services.wake.schedule_manager.runner <schedule_id> [revision]"
         )
         raise SystemExit(2)
-    # The runner's checkout anchors every subprocess it spawns. Refuse a dev
-    # checkout against the production home before reading or executing a script.
+
     refusal = prod_service_checkout_error(Path(__file__).resolve().parents[3])
     if refusal is not None:
         logger.error("schedule runner refused: {}", refusal)

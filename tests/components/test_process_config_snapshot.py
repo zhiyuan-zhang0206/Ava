@@ -1,6 +1,7 @@
 import pytest
 
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.config import field_names, get_field, settings
 from base.config.tests.configuration import snapshot_process_config
 from gateway.http.config import gateway_config_from_boot

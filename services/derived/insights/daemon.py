@@ -1,4 +1,5 @@
 # ava:ref services/derived/insights/docs/insights.ava.okf.md#insights-service-ownership
+# ava:ref services/derived/insights/docs/insights.ava.okf.md#daemon-live-clock-owner
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +14,8 @@ from pathlib import Path
 import uvicorn
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
