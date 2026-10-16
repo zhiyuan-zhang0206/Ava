@@ -51,6 +51,7 @@ Each declaration derives attribution records (`PluginContributions.as_records`):
 | ava_sdk_reminder | reminds agent to use more appropriate APIs after SDK calls |
 | ava_silent_idle | controls output behavior when idle |
 | ava_syntax_fix | deterministic syntax fixes for agent code |
+| ava_to_user | reminds the agent when its to_user panel grows past the soft word limit |
 
 ## Package Manifest (spec v2)
 The `ava-plugin.json` every plugin ships — identity, dependencies, declared

@@ -337,6 +337,7 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "history_dump_keep": _range_validator(ge=0),
     "memory_recall_inject_max": _range_validator(ge=0),
     "skill_recall_max": _range_validator(ge=0),
+    "to_user_soft_limit_words": _range_validator(gt=0),
 }
 
 

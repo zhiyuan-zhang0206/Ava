@@ -33,6 +33,7 @@ export const NOTE_SOURCES = new Set([
   "impersonation",
   "sdk_hint",
   "memory_write_check",
+  "to_user_soft_limit",
   "agent_reply",
   "task",
   "compact_reminder",
