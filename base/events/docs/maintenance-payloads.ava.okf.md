@@ -15,7 +15,7 @@ a field whose sample is missing stays absent rather than reporting zero.
 ```ava-contract
 id = "ci-usage-reconciliation"
 kind = "invariant"
-statement = """One ci_usage_daily event per reconciliation day (05:00-05:00 cluster time): the CI workflow's runs and ceil-billed minutes for the window, split by attribution (PR-title [Ava-<id>] convention) and OS. est_usd is the private-repo overage equivalent at the GitHub-hosted rates; the repo is currently public, so minutes are the billing fact. Per-agent detail lives in the attribution ledger, not here."""
+statement = """One ci_usage_daily event per reconciliation day (05:00-05:00 cluster time): the CI workflow's runs and ceil-billed minutes for the window, split by attribution and OS; the attribution source is the legacy [Ava-<id>] prefix, read from PR titles and commit subjects only when present (new PR titles carry none — user ruling 2026-10-16). est_usd is the private-repo overage equivalent at the GitHub-hosted rates; the repo is currently public, so minutes are the billing fact. Per-agent detail lives in the attribution ledger, not here."""
 code = ["base/events/declarations/maintenance.py:CiUsageDaily"]
 tests = ["schedules/tests/test_c9_daily_report.py::test_window_bounds_covers_the_slot_day_in_cluster_timezone", "schedules/tests/test_c9_daily_report.py::test_summarize_splits_attribution_and_meters_minutes"]
 ```
