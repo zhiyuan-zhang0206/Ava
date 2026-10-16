@@ -54,6 +54,19 @@ standalone, sometimes outside the cluster they were written on — so the knob m
 travel with the copy and be visible in the file, not live in cluster state the
 script would have to fetch.
 
+## Text-length budgets: one measurement, thresholds at their sites
+
+Text-length budgets (characters, CJK-aware words, lines) measure through one
+shared component, `base/packages/text_budget.py`; each threshold stays with the
+site that enforces it: runtime surfaces (the `to_user` panel, memory
+inheritance, the per-agent index) are config fields with the reason in their
+description; lint and CI gates (OKF nodes, `AGENTS.md`, skills, skill
+descriptions) are repo constants with the reason recorded in their node; the
+memory pool's caps live in the pool's own pre-commit hook — a standalone script
+whose comment states why (`AVA_MEMORY_INDEX_CAP`, 16000 characters ≈ 200
+pointer lines; `AVA_MEMORY_NOTE_CAP`, 8000 — one atomic fact per note). See
+[the component node](../../../base/packages/docs/text-budget.ava.okf.md).
+
 ## The review action
 
 A naked limit/cap/number in a diff — no config, no marker, no source — is a
