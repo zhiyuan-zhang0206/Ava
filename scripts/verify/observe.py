@@ -156,20 +156,32 @@ def check_frontend(home: Path, _source: Path) -> Detail:
     return {"url": url, "status": response.status_code}
 
 
+def human_secret(home: Path) -> str:
+    from dotenv import dotenv_values
+
+    secret = (dotenv_values(home / ".env").get("AVA_CLUSTER_SECRET") or "").strip()
+    if not secret:
+        raise RuntimeError(f"the home has no AVA_CLUSTER_SECRET in {home / '.env'}")
+    return secret
+
+
+def login(client: httpx.Client, home: Path) -> None:
+    opened = client.post("/api/auth/login", json={"password": human_secret(home)})
+    opened.raise_for_status()
+
+
 def check_cors(home: Path, _source: Path) -> Detail:
     ports = _ports(home)
     origin = f"http://127.0.0.1:{ports['app']}"
-    response = httpx.get(
-        f"http://127.0.0.1:{ports['gateway']}/api/auth/check",
-        headers={"Origin": origin},
-        timeout=10,
-    )
-    response.raise_for_status()
-    seen = {
-        "allow_origin": response.headers.get("access-control-allow-origin"),
-        "allow_credentials": response.headers.get("access-control-allow-credentials"),
-        "authenticated": response.json()["authenticated"],
-    }
+    with httpx.Client(base_url=f"http://127.0.0.1:{ports['gateway']}", timeout=10) as client:
+        login(client, home)
+        response = client.get("/api/auth/check", headers={"Origin": origin})
+        response.raise_for_status()
+        seen = {
+            "allow_origin": response.headers.get("access-control-allow-origin"),
+            "allow_credentials": response.headers.get("access-control-allow-credentials"),
+            "authenticated": response.json()["authenticated"],
+        }
     if seen != {"allow_origin": origin, "allow_credentials": "true", "authenticated": True}:
         raise RuntimeError(f"the gateway does not answer the frontend origin {origin}: {seen}")
     return {"origin": origin, **seen}
@@ -197,6 +209,7 @@ def check_scripted_agent(home: Path, _source: Path) -> Detail:
     from scripts.verify.scripted_reply import REPLY_TEXT
 
     with httpx.Client(base_url=f"http://127.0.0.1:{_ports(home)['gateway']}", timeout=30) as client:
+        login(client, home)
         created = client.post(
             "/api/keyed/v1/agents",
             json={"spawner": "user", "prompt": "Compute 1+2.", "prompt_source": "user"},
