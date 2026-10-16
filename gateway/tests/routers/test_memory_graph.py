@@ -50,6 +50,7 @@ def test_memory_root_rejects_missing_machine_roles() -> None:
         gateway_config_from_boot(owner)
 
 
+# ava:ref gateway/tests/routers/docs/memory-graph-fixture.ava.okf.md#memory-graph-repo-disables-auto-maintenance
 def _init_repo(root: Path) -> None:
     (root / "MEMORY.md").write_text("# index")
     (root / "notes").mkdir()
@@ -58,6 +59,8 @@ def _init_repo(root: Path) -> None:
     )
     for cmd in (
         ["git", "init", "-q", "-b", "main"],
+        ["git", "config", "maintenance.auto", "false"],
+        ["git", "config", "gc.auto", "0"],
         ["git", "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A"],
         ["git", "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "-m", "base"],
     ):
