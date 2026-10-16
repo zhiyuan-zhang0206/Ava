@@ -1,44 +1,22 @@
 #!/usr/bin/env python3
-"""Enforce a SKILL.md line-count ceiling to prevent progressive bloat.
-
-Run: `.venv/bin/python scripts/content_lint/lint_skill_md_size.py`.
-
-## Why
-
-SKILL.md files are loaded into agent context. A SKILL.md that grows too large
-forces the agent to spend context budget on content it may not need for the
-current task. The fix is the same as for AGENTS.md: progressive disclosure —
-a root SKILL.md serves as an index, and sub-skills carry the depth.
-
-## Thresholds
-
-- Hard ceiling: 300 lines — fails the commit.
-- Transitional zone: 250-300 lines — non-blocking note (reminder to split).
-
-The ceiling applies per-file, not per-skill-directory. A skill directory with
-sub-skills (each under 300 lines) is correctly structured.
-
-## Exemption
-
-Thresholds are repo-wide constants. If the ceiling genuinely needs to move,
-bump the constant in the same PR and justify it in the commit message.
-"""
-
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
+from base.host.env.dotenv_boot import enter_scratch_home
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
+from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
+# ava:ref scripts/content_lint/docs/content_lint.ava.okf.md#skill-md-size-ceiling
 _TRANSITIONAL_FLOOR = 250
 _HARD_CEILING = 300
 
-# Skill SKILL.md locations: repo-shipped + plugins + the repo's own git-tracked
-# `.agents/skills/` (project-local skills, e.g. `.agents/skills/review-contribution/`;
-# `.ava/skills` and `.claude/skills` link back to it). Every
-# family is globbed at both the root and the sub-skill level — a sub-skill is
-# where depth accumulates, so it is exactly where the ceiling has to reach.
 _SKILL_MD_GLOBS = [
     "ava_builtins/skills/*/*/SKILL.md",
     "ava_builtins/skills/*/*/*/SKILL.md",
@@ -49,24 +27,25 @@ _SKILL_MD_GLOBS = [
 ]
 
 
-def _skill_md_files() -> list[Path]:
+# ava:ref scripts/content_lint/docs/content_lint.ava.okf.md#skill-md-size-ceiling
+def _skill_md_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for pattern in _SKILL_MD_GLOBS:
-        files.extend(_REPO_ROOT.glob(pattern))
-    # Resolve links so a skill reachable through both `.agents/skills` and
-    # `ava_builtins/skills/` (linked built-ins) is reported once, at its real
-    # location.
+        files.extend(root.glob(pattern))
     return sorted({p.resolve() for p in files})
 
 
-def main(_argv: list[str] | None = None) -> int:
+# ava:ref scripts/content_lint/docs/content_lint.ava.okf.md#skill-md-size-ceiling
+def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+    root = repo_root or _REPO_ROOT
+    budget = LengthBudget(Unit.LINES, hard=_HARD_CEILING, soft=_TRANSITIONAL_FLOOR)
     exit_code = 0
-    for path in _skill_md_files():
-        rel = path.relative_to(_REPO_ROOT)
-        text = path.read_text(encoding="utf-8")
-        n_lines = len(text.splitlines())
+    for path in _skill_md_files(root):
+        rel = path.relative_to(root)
+        verdict = evaluate(path.read_text(encoding="utf-8"), budget)
+        n_lines = verdict.measured
 
-        if n_lines > _HARD_CEILING:
+        if verdict.level is Level.OVER:
             print(
                 f"{rel}:{n_lines}: error: {n_lines} lines exceeds the "
                 f"{_HARD_CEILING}-line hard ceiling — split into root + sub-skills "
@@ -75,7 +54,7 @@ def main(_argv: list[str] | None = None) -> int:
                 f"the same PR and justify it in the commit message.",
             )
             exit_code = 1
-        elif n_lines > _TRANSITIONAL_FLOOR:
+        elif verdict.level is Level.SOFT:
             print(
                 f"{rel}:{n_lines}: note: {n_lines} lines is in the "
                 f"{_TRANSITIONAL_FLOOR}-{_HARD_CEILING} transitional zone — "
