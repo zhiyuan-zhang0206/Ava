@@ -56,6 +56,26 @@ landing releases the capture, or the pending anchor would block every later pull
 scroll event, so it is never read as reader motion by paging or the header
 release.
 
+## Restore settling
+
+A bookmark applied on re-entry lands with whatever heights the window has
+measured so far; the rows around the anchor finish measuring afterwards, and
+each correction moves everything below it. The view therefore keeps re-asserting
+the anchor's saved viewport offset while the layout settles instead of trusting
+the one-shot landing, and it records no bookmark until a layout change observes
+the anchor at that offset -- a window that cannot show its anchor cannot save one
+faithfully, so a switch away inside the settle keeps the previous bookmark.
+Wheel, key, touch, scrollbar and send hand the position back to the reader and
+end the guard; recording then resumes immediately.
+
+```ava-contract
+id = "restore-settles-its-anchor"
+kind = "invariant"
+statement = """An applied reading bookmark keeps re-asserting its saved anchor offset while the rows around it settle, and no position is recorded while a restore is pending or unsettled. The guard releases when a layout change observes the anchor at its saved offset, when the entry shows different content, or when the reader takes over (wheel, key, touch, scrollbar, send); a switch away inside the settle therefore keeps the saved bookmark."""
+code = ["ui/web/src/components/timeline/model/restore-settle.ts:settleSavedTimelineScroll"]
+tests = ["ui/web/src/components/timeline/history-scroll.test.tsx::restored position settles::keeps a restored reading item at its saved offset while the rows above settle", "ui/web/src/components/timeline/history-scroll.test.tsx::restored position settles::keeps the saved bookmark while the restored window is still settling", "ui/web/src/components/timeline/history-scroll.test.tsx::restored position settles::keeps the bookmark through a switch away inside the settle"]
+```
+
 ## Relationship to Other Nodes
 
 - [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.ava.okf.md|Timeline View]] — the renderer whose segments and anchors this node owns.

@@ -27,6 +27,7 @@ import { LiveClockGate } from "./model/reasoning-clock";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { rememberTimelinePosition, readTimelineExpansion, rememberTimelineExpansion, watchReadingNavigation } from "./model/reading-position";
 import { materializeBeforeAnchor } from "./model/materialize-prefix";
+import { settleSavedTimelineScroll } from "./model/restore-settle";
 import { classifyItem } from "./model/runs";
 import { groupTimelineSegments } from "./model/segments";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
@@ -102,6 +103,8 @@ export const TimelineView = memo(function TimelineView({
   const pendingRestoreRef = useRef<SavedScroll | null>(scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
 
   const holdRestoredPositionRef = useRef(!!pendingRestoreRef.current && !pendingRestoreRef.current.followBottom);
+  const settledRestoreRef = useRef<SavedScroll | null>(null);
+  const restoreInFlight = useCallback(() => pendingRestoreRef.current !== null || (settledRestoreRef.current !== null && holdRestoredPositionRef.current), []);
   const initialRestorePassRef = useRef(true);
 
   const restoreRequestRef = useRef<number | null>(null);
@@ -127,8 +130,8 @@ export const TimelineView = memo(function TimelineView({
   useLayoutEffect(() => () => {
     const mem = scrollMemoryRef.current;
     const viewport = viewportRef.current;
-    if (mem && viewport && !pendingRestoreRef.current) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey);
-  }, []);
+    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey);
+  }, [restoreInFlight]);
 
   const pendingAnchorRef = useRef<{ id: string; rank: number; frontId: string | null; docTop: number } | null>(null);
 
@@ -355,15 +358,19 @@ export const TimelineView = memo(function TimelineView({
         controller.notifyRestored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
         return;
       }
-      controller.notifyRestored({
-        scrollTop: viewport.scrollTop,
-        scrollHeight: viewport.scrollHeight,
-        clientHeight: viewport.clientHeight,
-      });
+      controller.notifyRestored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
       pendingRestoreRef.current = null;
+      settledRestoreRef.current = saved.anchor ? saved : null;
     },
     [compactBuffer, controller, threadKey],
   );
+
+  const settleRestoredPosition = useCallback((viewport: HTMLElement | null, layoutChanged: boolean) => {
+    const saved = settledRestoreRef.current;
+    if (!saved || !viewport) return;
+    if (pendingRestoreRef.current !== null || !holdRestoredPositionRef.current || threadKey === undefined || saved.contentKey !== threadKey) { settledRestoreRef.current = null; return; }
+    if (layoutChanged && settleSavedTimelineScroll(viewport, saved, compactBuffer, canonicalItemsRef.current)) settledRestoreRef.current = null;
+  }, [compactBuffer, threadKey]);
 
   useEffect(() => {
     const viewport = wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
@@ -392,7 +399,7 @@ export const TimelineView = memo(function TimelineView({
       measureAtBottom();
       trimFollowing();
       const mem = scrollMemoryRef.current;
-      if (mem && !pendingRestoreRef.current) {
+      if (mem && !restoreInFlight()) {
         rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey);
       }
       stuckRafRef.current ??= requestAnimationFrame(() => {
@@ -438,6 +445,7 @@ export const TimelineView = memo(function TimelineView({
 
       prepareHistoryPull(viewport);
       applyPendingRestore(viewport);
+      settleRestoredPosition(viewport, true);
       if (!historyPullActive() && !holdRestoredPositionRef.current && controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
       measureAtBottom();
       maybeColdFill();
@@ -457,7 +465,7 @@ export const TimelineView = memo(function TimelineView({
       viewport.removeEventListener("touchcancel", onTouchCancel);
       ro.disconnect();
     };
-  }, [applyPendingRestore, controller, stickyThresholds, measureAtBottom, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader, trackHeaderScrollMotion, prepareHistoryPull, historyPullActive, pullScroll, pullScrollEnd, pullWheel, pullTouchStart, pullTouchMove, pullTouchEnd, cancelPullTouch]);
+  }, [applyPendingRestore, settleRestoredPosition, restoreInFlight, controller, stickyThresholds, measureAtBottom, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader, trackHeaderScrollMotion, prepareHistoryPull, historyPullActive, pullScroll, pullScrollEnd, pullWheel, pullTouchStart, pullTouchMove, pullTouchEnd, cancelPullTouch]);
 
   const scrollToBottomRequest = useTimelineStore((s) => s.scrollToBottomRequest);
   const lastForceRequest = useRef<{ request: number; thread: string | undefined } | null>(null);
@@ -488,6 +496,7 @@ export const TimelineView = memo(function TimelineView({
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
     initialRestorePassRef.current = false;
     applyPendingRestore(viewport);
+    settleRestoredPosition(viewport, false);
   });
 
   useLayoutEffect(() => {
