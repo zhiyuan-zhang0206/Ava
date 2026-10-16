@@ -1,7 +1,3 @@
-// The inspector panel's section chrome — icon + label + optional badge over
-// a stack of rows. Extracted (task #2909) so plugin-widget sections render
-// through the same header as the built-in ones; the panel and
-// `inspector-widgets.tsx` both import this.
 
 import type { ReactNode } from "react";
 
@@ -18,8 +14,6 @@ export function Section({
   icon: ReactNode;
   title: string;
   badge?: string;
-  /** Optional right-aligned control in the header (a jump link). It only
-   *  claims the header's free space that the badge does not already claim. */
   action?: ReactNode;
   children: ReactNode;
 }) {
@@ -44,7 +38,6 @@ export function Section({
   );
 }
 
-/** One labelled figure of a section's metric grid. */
 export function Metric({
   className,
   label,

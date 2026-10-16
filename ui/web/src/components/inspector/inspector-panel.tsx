@@ -52,9 +52,6 @@ import { useEventStream } from "@/lib/transport/useEventStream";
 import { cn } from "@/lib/format/utils";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 
-// Window options for the cost + activity sections. `null` = cumulative since
-// spawn (available as All); 0 = the last 5m and the positive values are a subset
-// of the backend whitelist (StatsWindowHours: 1/6/24/72/168 = hours).
 const WINDOWS: { labelKey: string; value: number | null }[] = [
   { labelKey: "windowAll", value: null },
   { labelKey: "window5m", value: 0 },
@@ -63,37 +60,6 @@ const WINDOWS: { labelKey: string; value: number | null }[] = [
   { labelKey: "window7d", value: 168 },
 ];
 
-/**
- * Right-side inspector panel for the active agent — the single-agent
- * counterpart to the sidebar's fleet-wide stats card. Sections include
- * persistent shells, the frozen config overlay, and LLM cost.
- *
- * Current state, statistics, and plugin widgets load and fail independently.
- * Only the selected agent is queried, only while open. Notice events refresh
- * current state; task events refresh widgets. Statistics reconcile on selection,
- * manual refresh, compact, and the 60-second interval, including after reconnect.
- * Each response is guarded by its agent/window identity before display.
- *
- * Switch caching (task #3894): the panel stays mounted across agent switches
- * (page.tsx resets its error boundary via `resetKey`, not `key=`) and each
- * agent's snapshot is retained for INSPECTOR_RETENTION_MS — a switch back
- * inside the window renders the cached sections immediately (no skeleton)
- * while the two live reads revalidate in the background. The widget set is
- * selection-invariant and never refetches from a switch alone.
- *
- * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
- * overlay ruling on desktop): at ≥ lg it fills a resizable right-side panel;
- * below lg it is a full-screen overlay with a backdrop, matching the mobile
- * sidebar drawer. At ≥ lg the top-bar InspectorToggle is the panel's one
- * close control (user ruling 2026-08-24 — a header X here duplicated its
- * "Close inspector" affordance, QA sweep 2026-09-18 F2); below lg the overlay
- * header X closes it (the overlay covers the toggle, so the X is the only
- * reachable close) and the backdrop closes it too. Escape deliberately does
- * not close either form (user ruling 2026-08-24).
- */
-// A subtle "live refresh is failing" marker for the inspector header. Shown only
-// when we already have a snapshot to display (stale-while-error) — a cold failure
-// gets the full error message in the body instead, so this never replaces content.
 function StaleDot() {
   const t = useTranslations("inspector");
   return (
@@ -146,11 +112,6 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     refetchInterval: open ? 60_000 : false,
     refetchOnMount: "always",
   });
-  // Plugin extensions have their own loading and error state. The widget set
-  // is selection-invariant for an agent (see switch-budget.ts): task events
-  // refresh it while open, the interval repairs across gaps, and a reconnect
-  // invalidates it — so no `refetchOnMount: "always"` here; staleTime at the
-  // retention window keeps a back-switch from firing a third read.
   const widgetsQuery = useQuery({
     queryKey: inspectWidgetsQueryKey(agentId),
     queryFn: ({ signal }) => api.getAgentInspectWidgets(agentId, signal),
@@ -163,12 +124,6 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     refetchInterval: open ? 60_000 : false,
   });
 
-  // Both query keys include the agent id, but keep explicit response identity
-  // guards: a malformed/misrouted response must never render under another
-  // agent. Statistics must also echo the requested window. Inactive entries
-  // are retained per agent for INSPECTOR_RETENTION_MS (switch-budget.ts) — a
-  // back-switch renders this cache immediately — and only the selected
-  // agent's keys are ever rendered, so retention cannot leak across agents.
   const liveData =
     liveQuery.data?.agent_id === agentId ? liveQuery.data : undefined;
   const windowedData = matchesInspectWindow(windowedQuery.data, agentId, hours)
@@ -187,9 +142,6 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     void widgetsQuery.refetch();
   }, [liveQuery, windowedQuery, widgetsQuery]);
 
-  // Disabling an observer does not itself guarantee transport cancellation.
-  // Abort the browser request on close. Shared gateway aggregate work retains
-  // its bounded admission/deadline independently of a cancelled HTTP waiter.
   useEffect(() => {
     if (!open) {
       void queryClient.cancelQueries({ queryKey: inspectLiveQueryKey(agentId) });
@@ -198,8 +150,6 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     }
   }, [agentId, open, queryClient]);
 
-  // The panel no longer remounts per agent switch (the batch-1 cache fix), so
-  // restore the scroll-to-top reset the remount used to give a new selection.
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const viewport = scrollRef.current?.querySelector<HTMLDivElement>(
@@ -208,16 +158,11 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     if (viewport) viewport.scrollTop = 0;
   }, [agentId]);
 
-  // Open pages: page events prompt a coalesced list read; see useAgentPages.
   const pages = useAgentPages(agentId);
 
-  // The global notices fold exclusively invalidates the live query. This
-  // subscriber owns only widget changes; statistics refresh independently.
   const onSystemEvent = useCallback(
     (ev: SystemEvent) => {
       if (!open || ev.agent_id !== agentId) return;
-      // Task movement can change the task a widget button points at; the
-      // widgets query is the only thing that needs to reconcile.
       if (ev.role === "task_created" || ev.role === "task_updated") {
         void queryClient.invalidateQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
       }
@@ -230,23 +175,13 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
         void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
         void queryClient.invalidateQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
       }
-      // The next 60-second statistics refresh repairs changes across a gap.
-      // Repeated network reconnects must not restart expensive historical work.
     },
     [agentId, open, queryClient],
   );
   useEventStream(onSystemEvent, onConnectionEvent);
 
-  // Renders nothing while closed, so desktop releases the flex-column width
-  // and mobile removes the overlay. All hooks run regardless (rules-of-hooks),
-  // but the query is disabled so a closed panel cannot produce inspect traffic.
   if (!open) return null;
 
-  // The panel's one ordered list (task #2909): built-in sections carry their
-  // documented keys (`INSPECT_SECTION_ORDER`), plugin widgets slot in by their
-  // own `order`, and the merged list is sorted here so DOM order is visual
-  // order. Ties stack built-in sections first, then widgets by (plugin, id) —
-  // deterministic regardless of registration order.
   const sections: { order: number; tie: number; key: string; node: ReactNode }[] = [
     { order: INSPECT_SECTION_ORDER.page, tie: 0, key: "page", node: <PageSection pages={pages} /> },
   ];
@@ -343,11 +278,6 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     <>
       <header className={cn("relative items-center gap-2 px-4", BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX)}>
         {!isLarge && !embedded ? (
-          // Mobile-only close (see the header note above): the full-screen
-          // overlay covers the page header, so the top-bar InspectorToggle is
-          // unreachable; on desktop that toggle IS the close control and a
-          // second same-named X here would duplicate it (QA sweep 2026-09-18
-          // F2).
           <button
             type="button"
             onClick={toggle}
@@ -418,8 +348,6 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     </>
   );
 
-  // Desktop: fill the parent resizable panel. The 2026-08-23 ruling supersedes
-  // the 2026-08-05 floating overlay for this breakpoint.
   if (isLarge || embedded) {
     return (
       <aside className={cn("h-full w-full bg-background", FLEX, FLEX_COL, MIN_H_0)}>
@@ -428,8 +356,6 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     );
   }
 
-  // Mobile: full-screen overlay with backdrop (Task #793 semantics restored
-  // by the 2026-08-23 ruling).
   return (
     <div className={cn("fixed inset-0 z-50", FLEX)}>
       <div
@@ -441,10 +367,6 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Sections
-// ---------------------------------------------------------------------------
 
 function InspectReadError({ message, retryLabel, pending, onRetry }: {
   message: string;
@@ -501,13 +423,6 @@ function PageSection({ pages }: { pages: PageRow[] }) {
   );
 }
 
-// The agent's single open notice, rendered at the bottom of the panel as an
-// interactive reply surface (mirrors the fleet "waiting on you" queue): a
-// require_response notice gets a reply box + Dismiss, an FYI gets Mark read.
-// Resolving invalidates the inspect query so the notice clears without waiting
-// out the slow background interval. The parent omits this section when no
-// notice exists, matching the Inspector's other empty-section rules.
-
 function NoticeReplySection({
   agentId,
   notice,
@@ -531,9 +446,6 @@ function NoticeReplySection({
         </Link>
       }
     >
-      {/* Key by notice id: OpenNoticeDetail keeps `pending` true after a resolve
-          (the notice is going away), so when a refetch swaps in the next notice
-          the keyed remount gives it a fresh, enabled reply surface. */}
       <OpenNoticeDetail
         key={notice.id}
         agentId={agentId}
@@ -572,14 +484,6 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   );
 }
 
-// A shell row links to its full-screen monitor page (live terminal tail).
-// Each row shows only the runtime value (launch → now, ticking live; falls
-// back to the probe-time uptime snapshot when created_at is missing) — the
-// user can infer the creation time from it, and the created/TTL detail lives
-// on the monitor page's title bar (user corrections 2026-08-28). Guards
-// against NaN / missing ids from a partial API response — if either agentId
-// or shell.id is not a valid finite integer, renders as plain text (no link)
-// to avoid navigating to /shell/NaN/NaN.
 function ShellRow({
   agentId,
   shell,
@@ -629,11 +533,6 @@ function ShellRow({
   );
 }
 
-// Config keys whose values are skill-name lists. The agent runtime stores
-// these in the underscore Python projection (example_skill); the UI
-// renders the canonical dash spelling (example-skill) — the same rule the
-// `# Capabilities` index and the skills panel follow
-// (base.packages.skills.names.display_name).
 const SKILL_LIST_KEYS = new Set([
   "skills_to_inject_into_system_prompt",
   "skills_to_expand_at_start",
@@ -647,10 +546,6 @@ function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
   const entries = Object.entries(inspect.config_overlay);
   const presetName = inspect.preset_name ?? null;
   const t = useTranslations("inspector");
-  // Shared with the spawn picker's ["presets"] query (TanStack dedupes) — the
-  // diff display compares the stored overlay against the preset's CURRENT
-  // config: fields the preset supplies verbatim are suppressed; only fields
-  // that differ (or the preset lacks) render next to the preset reference.
   const { data: presetsData } = useQuery({
     queryKey: ["presets"],
     queryFn: () => api.listPresets(),
@@ -658,7 +553,6 @@ function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
   });
   const preset = presetsData?.find((p) => p.name === presetName) ?? null;
   if (entries.length === 0 && presetName === null) return null;
-  // A preset deleted since spawn: no diff possible — show everything.
   const visibleEntries =
     presetName !== null && preset
       ? entries.filter(
@@ -694,9 +588,6 @@ function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
 
 function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
   const { cost } = inspect;
-  // Cost is the sum of stored usage-time price snapshots; calls without one
-  // (unpriced model) contribute 0 and surface as the sub-line so the figure
-  // is never silently partial.
   const t = useTranslations("inspector");
   const unpricedSub =
     cost && cost.unpriced_calls > 0
@@ -704,10 +595,6 @@ function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
       : undefined;
   return (
     <Section icon={<DollarSign className="size-3" />} title={t("sectionCost")}>
-      {/* The read model's coverage verdicts (availability, last-observed,
-          boundary) are NOT rendered — they are machinery, and they go to the
-          background log + alert episodes instead (user ruling 2026-09-17,
-          task #3869). The section renders the metrics, or nothing. */}
       {cost ? (
         <div className="grid grid-cols-2 gap-1">
           <Metric
@@ -730,11 +617,6 @@ function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
   );
 }
 
-/**
- * Activity — TPS plus absolute time spent in LLM reasoning,
- * code execution, and idle/blocked states. The duration cells follow the
- * header window.
- */
 function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
   const { activity, tps } = inspect;
   const hasLife = activity !== null && activity.alive_seconds > 0;
@@ -744,9 +626,6 @@ function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
   const t = useTranslations("inspector");
   return (
     <Section icon={<Timer className="size-3" />} title={t("sectionActivity")}>
-      {/* Coverage verdicts, duration precision, and retained-source notes are
-          NOT rendered — machinery goes to the background log + alert episodes
-          (user ruling 2026-09-17, task #3869). */}
       <div className="grid grid-cols-2 gap-1">
         <Metric
           label={t("metricTps")}
@@ -775,17 +654,6 @@ function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
   );
 }
 
-/**
- * Liveness — one merged section (Task #1195, user ruling 2026-08-12) with
- * five cells in display order: agent birth, next heartbeat, last pause, then
- * machine and lifecycle status (moved here from the tree row and the
- * conversation header by task #3904; ordered to trail the heartbeat cells
- * per the user's 2026-09-18 field-order report, task #3952). The
- * gateway-owned derived liveness state colors the HeartPulse icon when
- * offline. The "every N" badge and old "Last judged" cell remain omitted.
- */
-/** Agent status → its agentRow label. The conversation header used to
- *  capitalize the raw value; the status renders in Liveness now (task #3904). */
 const STATUS_LABEL_KEY: Record<string, string> = {
   running: "statusRunning",
   idling: "statusIdling",
@@ -804,8 +672,6 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
     due: t("due"),
   });
   const lastPause = heartbeat.last_pause;
-  // The native lifecycle stays idling during takeover. Reuse the fleet's
-  // active-lease projection and its SSE-repaired cache for the selected agent.
   const impersonated =
     inspect.status !== "terminated" &&
     roster?.agents.find((agent) => agent.agent_id === inspect.agent_id)?.status === "impersonated";
@@ -838,13 +704,6 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   );
 }
 
-// The "next heartbeat" cell — mirrors the backend's mutually-exclusive states:
-// an active pause renders a clock time; an idling agent
-// with a check-in already queued (the daemon won't send another while an
-// inbound is pending) renders "pending"; one with nothing queued renders its
-// projected next check-in, or "due" when the projection has passed (a past
-// "next" time must never render as "Xm ago"); a running or terminated agent
-// an em dash (never checked in on).
 function nextHeartbeatCell(
   hb: HeartbeatInfo,
   labels: { pending: string; due: string },
@@ -866,17 +725,11 @@ function nextHeartbeatCell(
   return { value: "—" };
 }
 
-// ---------------------------------------------------------------------------
-// Formatting
-// ---------------------------------------------------------------------------
-
 function formatTps(n: number): string {
   if (n === 0) return "—";
   return n.toFixed(1);
 }
 
-// A heartbeat interval / pause duration as a compact span: `45s` / `15m` /
-// `1h 30m` / `24d 3h` (day tier kicks in past 24h).
 function formatInterval(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const m = Math.round(seconds / 60);
