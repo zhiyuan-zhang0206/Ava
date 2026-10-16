@@ -71,7 +71,7 @@ id = "scratch-worktree-cleanup"
 kind = "invariant"
 statement = "Both revisions are checked out into one temporary worktree parent, and the judgment dismantles them — worktrees removed, pruned, parent deleted — so no registered worktree survives."
 code = ["scripts/host_ops/fleet_update_keep.py:decide", "scripts/host_ops/fleet_update_keep.py:_worktree", "scripts/host_ops/fleet_update_keep.py:_dismantle"]
-tests = ["scripts/host_ops/tests/test_fleet_update_keep.py::test_a_pty_change_restarts_only_pty"]
+tests = ["scripts/host_ops/tests/test_fleet_update_keep.py::test_a_pty_change_restarts_only_pty", "scripts/host_ops/tests/test_fleet_update_keep.py::test_a_mid_decision_failure_leaves_no_scratch_worktree"]
 ```
 
 Parent: [[scripts/docs/scripts.ava.okf.md]].

@@ -279,3 +279,14 @@ def test_roots_at_skips_tests_and_docs_and_watch_files() -> None:
     )
     component = keep.COMPONENTS[0]
     assert keep.roots_at(files, component) == ["base/sessions/pty/protocol.py"]
+
+
+def test_a_mid_decision_failure_leaves_no_scratch_worktree(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD")
+    (repo / "bad.py").write_bytes(b"X = \xff\xfe\n")
+    new = _commit(repo, "bad source", {})
+    assert keep.main(["--repo", str(repo), "--old", base, "--new", new]) == 1
+    assert "keep decision failed" in capsys.readouterr().err
+    assert _git(repo, "worktree", "list").count("\n") == 0
