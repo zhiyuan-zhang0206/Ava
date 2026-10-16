@@ -1,5 +1,3 @@
-"""Decision models are installed beside, never into, the chat catalog."""
-
 from __future__ import annotations
 
 import pytest
@@ -231,7 +229,7 @@ def test_repo_catalog_registers_both_decision_providers() -> None:
 def test_repo_decision_prices_are_input_only_with_provenance(model: str, rate: float) -> None:
     catalog = build_model_catalog()
 
-    rates = catalog.prices.rates_at(model, None, 1_000)  # pyright: ignore[reportArgumentType]
+    rates = catalog.prices.rates_at(model, None, 1_000)
     assert rates is not None
     assert rates.as_tuple() == (rate, rate, 0.0)
     provenance = catalog.prices.provenance(model)

@@ -91,3 +91,9 @@ context mid-call cannot redirect that event. Sampling precedes producer
 construction; durable capture precedes enqueue. An unbound Python caller uses
 the installation's retained producer as a system caller without creating an
 AvaContext, and reload preserves that producer.
+
+The Fleet launched-boot probe uses a fresh interpreter with environment and
+cluster configuration pinned before its first `import ava`. It checks one boot
+read, preserved context/installation identity on reload, and that the listed
+SQL, Redis, Gateway and event clients plus the sampler remain unstarted. This
+is a lazy-resource boundary, not a claim that imports have no side effects.

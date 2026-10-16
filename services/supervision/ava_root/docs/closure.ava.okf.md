@@ -63,3 +63,6 @@ Daemon shutdown attempts bounded child closure once and propagates failures. It
 does not wait indefinitely for another stop request or retain a cold-start lock
 for descendants. Native tests cover parentage, group TERM, direct-child timeouts
 and force, PID reuse, ordinary replacement, and explicitly cleaned late children.
+The reaped-first hook awaits `proc.wait()` before returning from spawn. Its
+native test checks that root still terminates on TERM when the unit has already
+exited and birth lookup yields no identity.

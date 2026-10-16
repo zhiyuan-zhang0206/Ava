@@ -9,6 +9,10 @@ tags:
 
 # Agent ops process composition
 
+The graceful-stop child substitutes the served body while calling the actual
+daemon `main()` entry. Its consumers cover normal cancellation and a wedged
+executor; this is a shutdown composition check, not a live ops request test.
+
 `services/agent_runner/agent_ops/daemon.py:main` rejects unknown argv, captures
 one `LoadedCommit`, and retains a `CodeVersion` and non-exempt `ProcessDbGate`
 for the `ops` process. Its database factory reads `db_config_from_boot(config)` at each

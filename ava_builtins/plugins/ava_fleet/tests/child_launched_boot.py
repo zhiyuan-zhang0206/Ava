@@ -1,16 +1,9 @@
-"""Child process: launched SDK imports share one boot and keep runtime resources cold.
-
-Usage: `child_launched_boot.py`. It needs a fresh interpreter because the order of the
-environment edits against the first `import ava` is part of what is tested, and it pins the
-fleet plugin's cluster config so `ava.tasks` / `ava.memory` resolve.
-"""
-
 from typing import Any, cast
 
 
 def _assert_runtime_resources_cold(context: Any, installation: Any) -> None:
     assert installation.producer is not None
-    bare = installation.producer.__self__  # pyright: ignore[reportFunctionMemberAccess]
+    bare = installation.producer.__self__
     assert bare is not context.clients
     for clients in (context.clients, bare):
         assert clients._sql is None
@@ -47,7 +40,7 @@ def _record_boot_reads() -> list[Any]:
         read(self)
         reads.append(self)
 
-    ConfigBoot.read_process_environment = capture  # pyright: ignore[reportAttributeAccessIssue]
+    ConfigBoot.read_process_environment = capture
     return reads
 
 
@@ -75,8 +68,6 @@ def launched_imports_share_boot() -> None:
     from ava.agents import spawn
     from ava.sdk_surface.installation import installed
 
-    # `ava.memory` and `ava.tasks` are plugin namespaces installed at run time, with no module
-    # file to import statically; this probe is the check that the installed names resolve.
     create = importlib.import_module("ava.tasks").create
     search = importlib.import_module("ava.memory").search
 

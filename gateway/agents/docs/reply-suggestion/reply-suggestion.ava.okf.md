@@ -83,6 +83,9 @@ agent message's identity (`source_message_id`), so several tabs share one genera
 
 The route races the work against `request.is_disconnected()` and cancels it when the client
 leaves, which stops the in-flight model call.
+The disconnect watcher also observes work completion: Starlette's anyio cancel
+scope can absorb cancellation during its disconnect poll, so cancellation alone
+must not leave the watcher running after failed work ends.
 
 ## Configuration
 

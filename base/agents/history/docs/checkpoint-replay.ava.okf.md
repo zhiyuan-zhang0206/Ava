@@ -32,3 +32,10 @@ retained-segment read exercises that older target, including its writes and seed
 Its serializer test also checks that instrumenting cold readers leaves a shared
 serializer's decode method unchanged; timing one read must not install
 process-wide instrumentation on other readers.
+
+`tests/test_checkpoint_trace.py` correlates a trace ID with checkpoint metadata
+and reconstructs the full stored message channel; spans do not hold that content.
+Its fixture gives distinct message payloads distinct channel versions, because
+the blob key includes channel/version and reusing a version reuses its blob.
+The async case exercises the production stamp function; synchronous read cases
+seed the metadata directly with SQL.

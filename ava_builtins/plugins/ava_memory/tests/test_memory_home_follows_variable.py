@@ -1,10 +1,3 @@
-"""The memory pool path follows `AVA_HOME` after the modules are imported.
-
-`pool_ops.pool_dir()` and `ava.memory.PATH` (a module-level `__getattr__` on the
-plugin's `sdk`) once bound the home when they were imported. Each now derives it
-when asked, so a process that changes the variable is followed.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -29,6 +22,6 @@ def test_sdk_path_follows_the_variable_after_import(
 ) -> None:
     first, second = tmp_path / "first", tmp_path / "second"
     monkeypatch.setenv("AVA_HOME", str(first))
-    assert first / "memory" == sdk.PATH  # pyright: ignore[reportAttributeAccessIssue]  # module __getattr__
+    assert first / "memory" == sdk.PATH
     monkeypatch.setenv("AVA_HOME", str(second))
-    assert second / "memory" == sdk.PATH  # pyright: ignore[reportAttributeAccessIssue]  # module __getattr__
+    assert second / "memory" == sdk.PATH

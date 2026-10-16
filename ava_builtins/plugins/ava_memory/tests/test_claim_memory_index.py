@@ -1,5 +1,3 @@
-"""The memory index note the claim node reads: present, or none when absent, empty or disabled."""
-
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +27,9 @@ def test_memory_index_note_present(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         )
     )
     assert note is not None
-    assert note.additional_kwargs["ava_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs["ava_note_tag"] == "memory"  # pyright: ignore[reportUnknownMemberType]
-    assert (
-        "prod=~/.ava/source" in note.content  # pyright: ignore[reportUnknownMemberType]
-    )  # raw file content carried through
+    assert note.additional_kwargs["ava_msg_type"] == "system_note"
+    assert note.additional_kwargs["ava_note_tag"] == "memory"
+    assert "prod=~/.ava/source" in note.content
 
 
 def test_memory_index_note_none_when_absent_empty_or_disabled(
@@ -51,7 +47,7 @@ def test_memory_index_note_none_when_absent_empty_or_disabled(
             )
         )
         is None
-    )  # absent
+    )
     (tmp_path / "MEMORY.md").write_text("   \n\t\n", encoding="utf-8")
     assert (
         _memory_inject.memory_index_note(
@@ -61,7 +57,7 @@ def test_memory_index_note_none_when_absent_empty_or_disabled(
             )
         )
         is None
-    )  # whitespace-only
+    )
     (tmp_path / "MEMORY.md").write_text("real content", encoding="utf-8")
     monkeypatch.setattr(settings.agent, "memory_index_inject_enabled", False)
     assert (
@@ -72,4 +68,4 @@ def test_memory_index_note_none_when_absent_empty_or_disabled(
             )
         )
         is None
-    )  # disabled
+    )

@@ -1,10 +1,3 @@
-"""Contracts for the independent Redis data-plane credential rotation.
-
-PostgreSQL has nothing to rotate here: the owner is NOLOGIN, the administrator
-is the OS user over the owner-only socket, and application logins are write
-generations that rotate with release transitions.
-"""
-
 from __future__ import annotations
 
 import json
@@ -62,7 +55,6 @@ def _patch_gateway_home(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
 def test_build_state_mints_fresh_redis_values_even_without_a_bearer(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Redis always authenticates, so a no-secret single box rotates too."""
     _patch_gateway_home(monkeypatch, tmp_path)
     (tmp_path / ".env").write_text(_ENV)
 
@@ -135,7 +127,7 @@ def test_admin_scope_changes_the_redis_default_user_only(monkeypatch: pytest.Mon
     monkeypatch.setattr(rotate.redis, "Redis", _Redis)
 
     rotate.apply_admin(state)
-    rotate.apply_runner(state)  # admin scope: no ACL effect
+    rotate.apply_runner(state)
 
     assert redis_commands == [("CONFIG", "SET", "requirepass", _NEW_REDIS_ADMIN)]
     assert state.redis_password == _OLD_REDIS_RUNTIME
@@ -154,9 +146,9 @@ def test_runner_scope_rotates_the_acl_user_of_the_redis_url(
         acl_calls.append((user, kwargs))
 
     monkeypatch.setattr(rotate, "working_redis_admin_password", _working_redis_admin_password)
-    monkeypatch.setattr(rotate, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(rotate, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)
 
-    rotate.apply_admin(state)  # runner scope: no requirepass effect
+    rotate.apply_admin(state)
     rotate.apply_runner(state)
 
     assert acl_calls == [
@@ -198,8 +190,6 @@ def test_write_env_syncs_the_redis_url_with_the_active_passwords(
 def test_preflight_and_verify_probe_the_state_host_as_the_url_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Probes dial the URL-derived host (asserted against a foreign host) as the
-    Redis `default` admin and as the redis_url ACL user, old then new values."""
     state = _state()
     state.redis_host = "10.0.0.7"
     probes: list[tuple[str, str, str]] = []
@@ -262,8 +252,6 @@ def test_a_postgres_era_journal_is_refused_by_name(tmp_path: Path) -> None:
 def test_main_refuses_remote_managed_data_plane(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Rotation is a local-instance operation; a remote/SaaS plane rotates at
-    the provider and the script must refuse to touch it (Task #1752)."""
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:pw@10.9.8.7:5432/ava")
     monkeypatch.setattr(settings.data_plane, "redis_url", "rediss://ava:pw@10.9.8.7:6380/0")
     assert rotate.main(["--scope", "admin"]) == 1
