@@ -98,6 +98,76 @@ def test_npm_findings_flatten_the_package_map() -> None:
     assert (nxt.fix, nxt.summary) == ("next@16.2.0 (major)", "via postcss")
 
 
+def _npm_findings(fix: object, nodes: list[str] | None = None) -> dict[str, object]:
+    return {
+        "vulnerabilities": {
+            "braces": {
+                "severity": "high",
+                "isDirect": False,
+                "range": "<=3.0.3",
+                "nodes": nodes if nodes is not None else ["node_modules/braces"],
+                "via": [{"title": "stack exhaustion"}],
+                "fixAvailable": fix,
+            }
+        }
+    }
+
+
+def _dev_packages() -> dict[str, object]:
+    return {
+        "node_modules/braces": {"version": "3.0.3", "dev": True},
+        "node_modules/shadcn": {"version": "4.21.1", "dev": True},
+    }
+
+
+@pytest.mark.parametrize(
+    "fix",
+    [False, {"name": "shadcn", "version": "1.0.0", "isSemVerMajor": True}],
+    ids=["no-fix", "downgrade"],
+)
+def test_a_dev_only_finding_without_a_forward_fix_is_listed_but_not_actionable(fix: object) -> None:
+    (found,) = audit.npm_vulnerabilities(_npm_findings(fix), _dev_packages())
+    assert found.dev_only_no_fix
+    assert not audit.is_actionable([found], [])
+    report = audit.render([found], [])
+    assert "| high | braces |" in report
+    assert "not actionable" in report
+
+
+def test_a_dev_only_suggestion_at_the_installed_version_is_not_a_forward_fix() -> None:
+    same_version = {"name": "braces", "version": "3.0.3", "isSemVerMajor": False}
+    (found,) = audit.npm_vulnerabilities(_npm_findings(same_version), _dev_packages())
+    assert found.dev_only_no_fix
+    assert not audit.is_actionable([found], [])
+
+
+def test_a_dev_only_finding_with_an_upgrade_stays_actionable() -> None:
+    upgrade = {"name": "shadcn", "version": "5.0.0", "isSemVerMajor": True}
+    (found,) = audit.npm_vulnerabilities(_npm_findings(upgrade), _dev_packages())
+    assert not found.dev_only_no_fix
+    assert audit.is_actionable([found], [])
+
+
+def test_a_production_finding_without_a_forward_fix_stays_actionable() -> None:
+    packages = {"node_modules/braces": {"version": "3.0.3"}}
+    downgrade = {"name": "shadcn", "version": "1.0.0", "isSemVerMajor": True}
+    (found,) = audit.npm_vulnerabilities(_npm_findings(downgrade), packages)
+    assert not found.dev_only_no_fix
+    assert audit.is_actionable([found], [])
+
+
+def test_a_mixed_dev_and_production_finding_stays_actionable() -> None:
+    nodes = ["node_modules/braces", "node_modules/next"]
+    packages = {
+        "node_modules/braces": {"version": "3.0.3", "dev": True},
+        "node_modules/next": {"version": "15.4.0", "dev": False},
+        "node_modules/shadcn": {"version": "4.21.1", "dev": True},
+    }
+    (found,) = audit.npm_vulnerabilities(_npm_findings(False, nodes=nodes), packages)
+    assert not found.dev_only_no_fix
+    assert audit.is_actionable([found], [])
+
+
 def test_every_pinned_binary_constant_is_found_in_the_tree() -> None:
     for name, path, pattern in audit.PINS:
         assert audit.pinned_version(path, pattern), name
