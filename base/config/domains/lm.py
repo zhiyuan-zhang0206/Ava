@@ -146,8 +146,10 @@ class LmSettings(EnvSettings):
         alias="AVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS",
         description=(
             "Token budget of the conversation excerpt (the user's latest message and the "
-            "agent's last-turn text) given to the gate and the draft model. The excerpt "
-            "is cut from the end backwards, so the newest text survives."
+            "agent's last-turn text) given to the gate and the draft model. The user's "
+            "message has the budget's first claim — a long agent turn cannot evict the "
+            "message the suggestion answers — and whichever part must be cut keeps its "
+            "newest words."
         ),
         json_schema_extra={
             "restart_required": "",

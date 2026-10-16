@@ -1,5 +1,3 @@
-"""The reply-suggestion pipeline against fake stores and models."""
-
 from __future__ import annotations
 
 import json
@@ -153,7 +151,7 @@ async def test_an_oversized_conversation_is_cut_to_the_input_budget(harness: Har
     harness.settings.max_input_tokens = 120
     harness.messages = [
         SystemMessage(content="system prompt"),
-        inbound("question " * 300),
+        inbound("question " * 300 + "the-last-message"),
         agent_text("filler " * 600 + "Shall I deploy?"),
     ]
 
@@ -161,7 +159,7 @@ async def test_an_oversized_conversation_is_cut_to_the_input_budget(harness: Har
 
     state = harness.decide.calls[0][1]
     assert estimate_tokens(state) <= 120
-    assert state.endswith("Shall I deploy?")
+    assert state.endswith("the-last-message")
     assert harness.chat.invocations[0][1].content == state
 
 
@@ -313,10 +311,10 @@ async def test_an_incomplete_document_repaired_by_langchain_is_rejected(harness:
     parsed = JsonOutputParser().invoke(raw)
     assert parsed == {"suggestions": ["Use A."]}
 
-    async def repaired_reply(_messages: Any) -> dict[str, Any]:
+    async def repaired_reply(messages: Any) -> dict[str, Any]:
         return {"raw": raw, "parsed": parsed, "parsing_error": None}
 
-    harness.chat.ainvoke = repaired_reply  # pyright: ignore[reportAttributeAccessIssue]
+    harness.chat.ainvoke = repaired_reply
 
     result = await harness.service.suggest(7)
 
