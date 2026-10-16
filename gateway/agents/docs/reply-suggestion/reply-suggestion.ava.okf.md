@@ -48,7 +48,9 @@ a 200. An unknown agent is 404 and an unreadable checkpoint is the history read'
    text of the last turn (everything after the newest inbound), cut to
    `reply_suggestion_max_input_tokens`. The user's message has the budget's first claim:
    a long agent turn cannot evict the message the suggestion answers, and whichever part
-   must be cut keeps its newest words.
+   must be cut keeps its newest words. `excerpt.py`'s `is_human_source` mirrors
+   `inboundKind` in `ui/web/src/components/timeline/model/runs.ts` (the `user` /
+   `ui:page:*` split); keep the pair in sync.
 3. Gate: `decide(reply_suggestion_gate_model, ...)` asks one `YesNo`, "would suggesting
    a reply help the user at this point in the conversation?". Below
    `reply_suggestion_gate_threshold` the answer is `not_useful`. This judges the value
