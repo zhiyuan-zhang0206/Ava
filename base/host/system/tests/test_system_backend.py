@@ -40,13 +40,6 @@ def test_backend_type_is_stable_across_calls() -> None:
     assert type(get_backend()) is type(get_backend())
 
 
-def test_venv_python_path() -> None:
-    backend = MacPlatformBackend()
-    path = backend.venv_python()
-    assert ".venv" in path
-    assert path.endswith("python3")
-
-
 def test_linux_autostart_has_one_native_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 

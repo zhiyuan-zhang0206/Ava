@@ -1,31 +1,6 @@
-"""Single source of truth for host platform probes: Chrome binary and display.
-
-The agent-runner has three pre-launch facts the rest of the system repeatedly
-needs to know about the local machine:
-
-- Where is a launchable Chrome binary (explicit override, else platform
-  default)?
-- Does this machine have a window server a headed browser can draw on?
-- On macOS: does this process chain run inside the user's GUI login session
-  (and which account owns the console)? The launchd management domain is
-  inherited down the spawning chain and decides whether the login Keychain is
-  reachable — a chain outside the GUI session can never reach it by relaunching
-  in place (task #3346).
-
-These probes lived in three places (the browser daemon, the MCP config loader,
-and the host-config validators) and had already drifted apart. They now live
-here, in ``base`` (the lowest import layer), so the browser daemon
-(``services``), the MCP loader (``ava``), and the host-config validators
-(``base``) all import the same logic.
-
-These probes never read Settings: a caller that has them passes the configured
-``AVA_CHROME_BINARY`` override as ``configured_chrome``.
-"""
-
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 from base.host.system.hostport import Host
@@ -97,50 +72,6 @@ def display_available(*, host: Host) -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
-# Both GUI-session probes below run local launchctl/stat calls; the bound only
-# exists so a wedged launchd can never stall a healthcheck round or a start.
-_GUI_PROBE_TIMEOUT_S = 5.0
-
-
-def bounded_stdout(argv: list[str], *, host: Host) -> str | None:
-    """Run a fixed read-only query, bounded; return its stripped stdout or None.
-
-    None is "no answer" — a missing binary, a timeout, a non-zero exit, or
-    empty output — never evidence about the fact being probed."""
-    try:
-        completed = host.run(argv, timeout=_GUI_PROBE_TIMEOUT_S, capture_output=True, text=True)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if completed.returncode != 0:
-        return None
-    return str(completed.stdout or "").strip() or None
-
-
-def gui_session_domain(*, host: Host) -> str | None:
-    """This process chain's launchd management domain (macOS), or None.
-
-    ``Aqua`` means the chain runs inside the user's GUI login session and can
-    reach the login Keychain. A daemon respawned from an agent/SSH/Background
-    chain answers e.g. ``Background``, and the domain is inherited from the
-    spawning chain — no in-place relaunch can move it, only launchd can cross
-    domains. None off macOS, and None when the answer is unavailable — never
-    evidence either way."""
-    if host.platform.system != "darwin":
-        return None
-    return bounded_stdout(["/bin/launchctl", "managername"], host=host)
-
-
-def gui_login_user(*, host: Host) -> str | None:
-    """The account owning the GUI console session (macOS), or None.
-
-    ``/dev/console`` belongs to the user physically attached to the GUI — the
-    same check ``services.desktop.browser.macos_readiness`` runs before trusting a
-    GUI-domain verdict. None off macOS and when the answer is unavailable."""
-    if host.platform.system != "darwin":
-        return None
-    return bounded_stdout(["/usr/bin/stat", "-f%Su", "/dev/console"], host=host)
-
-
 def browser_incapability(configured_chrome: str | None, *, host: Host) -> str | None:
     """Return why this host cannot run a headed Chrome, or None if it can.
 
@@ -163,23 +94,6 @@ def browser_incapability(configured_chrome: str | None, *, host: Host) -> str | 
     return None
 
 
-def browser_deps_incapability(*, host: Host) -> str | None:
-    """Settings-free capability check for converge-time use.
-
-    Same three prongs, same order, same reason strings as
-    ``browser_incapability()``, minus the AVA_CHROME_BINARY override — converge
-    may run on a fresh host before Settings can be built, so it cannot read the
-    override. Callers that have Settings use ``browser_incapability()``.
-    """
-    if not display_available(host=host):
-        return "no display (headless server)"
-    if platform_chrome_binary(host=host) is None:
-        return "no Chrome (install it or set AVA_CHROME_BINARY)"
-    if host.which("npx") is None:
-        return NPX_INCAPABILITY_REASON
-    return None
-
-
 def browser_capable(configured_chrome: str | None, *, host: Host) -> bool:
     """Return True if this host can run a headed Chrome (display + binary + npx).
 
@@ -191,16 +105,6 @@ def browser_capable(configured_chrome: str | None, *, host: Host) -> bool:
 
 
 def permissions_helper_incapability(*, host: Host) -> str | None:
-    """Return why this host cannot run the permissions helper, or None if it can.
-
-    The single source of truth for the capability check. macOS needs the Swift
-    toolchain + codesign to build and sign the launchd helper plus a window
-    server. Other platforms get no helper. The returned string is operator-facing -- it
-    surfaces in the converge preflight and the start skip logs.
-
-    ``permissions_helper_capable()`` (the bool gate) derives from this, so the
-    capability logic lives in exactly one place.
-    """
     if host.platform.system == "darwin":
         if host.which("swiftc") is None:
             return "no swiftc (install the Xcode command line tools)"
@@ -210,8 +114,3 @@ def permissions_helper_incapability(*, host: Host) -> str | None:
             return "no display (the permissions helper drives an on-screen desktop)"
         return None
     return "macOS only (permissions helper drives the desktop)"
-
-
-def permissions_helper_capable(*, host: Host) -> bool:
-    """Return True if this host can build, sign, and run the permissions helper."""
-    return permissions_helper_incapability(host=host) is None

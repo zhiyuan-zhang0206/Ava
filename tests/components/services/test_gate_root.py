@@ -7,13 +7,15 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import psutil
 import pytest
 
 from base.config import settings
 from base.daemon.health import DaemonProbe
-from base.native_process.root_control.client import owned_process
+from base.native_process.ownership import OwnedProcess
+from base.native_process.root_control.client import RootClient, native_identity
 from base.paths import root_run_dir
 from services.entrypoints.gate.tests.test_gate import FakeApp, FakeGateway, Servers, gate_request
 from services.entrypoints.gate.tests.test_gate import servers as servers
@@ -22,6 +24,20 @@ from services.supervision.ava_root.server import ControlServer
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.healthchecks import gate
 from services.supervision.roster import build_services
+
+
+def _gate_process(home: Path) -> OwnedProcess:
+    response = RootClient(root_run_dir(home) / "ava-root.sock", timeout=2.0).status()
+    body = response.get("result")
+    assert response.get("ok") is True and isinstance(body, dict)
+    units = cast("list[object]", cast("dict[str, object]", body).get("units"))
+    rows = [
+        cast("dict[str, object]", item)
+        for item in units
+        if isinstance(item, dict) and cast("dict[str, object]", item).get("id") == "gate"
+    ]
+    assert len(rows) == 1 and rows[0].get("state") == "running"
+    return native_identity(rows[0])
 
 
 async def _ready(probe: Callable[[], DaemonProbe]) -> DaemonProbe:
@@ -62,13 +78,12 @@ async def test_gate_native_child_readiness_restart_and_stop(
     try:
         await owner.start()
         await _ready(spec.identity_probe)
-        original = await asyncio.to_thread(owned_process, "gate", home=short_tmp)
-        assert original is not None
+        original = await asyncio.to_thread(_gate_process, short_tmp)
         assert psutil.Process(original.pid).ppid() == psutil.Process().pid
         await owner.restart("gate")
         await _ready(spec.identity_probe)
-        replacement = await asyncio.to_thread(owned_process, "gate", home=short_tmp)
-        assert replacement is not None and replacement != original
+        replacement = await asyncio.to_thread(_gate_process, short_tmp)
+        assert replacement != original
         assert not original.live()
         await owner.down("gate")
         assert not replacement.live()

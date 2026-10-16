@@ -19,12 +19,11 @@ service ([[services/supervision/ava_root/docs/ava_root.ava.okf.md]] is the serve
   `UnitState` (`running` / `stopped`); successful status replies require a unit
   roster with a valid id and known state on every row.
 - `client.py` — `RootClient`, one blocking connection per call. A `status`
-  reply must name the kernel-reported Unix-socket peer; `root_process` and
-  `owned_process` read captured
-  native births and never adopt a current PID occupant. A missing or unknown
-  unit state rejects the reply. An absent unit, a validated stopped state, or
-  a positively dead/reused native birth establishes that the recorded
-  generation is not running.
+  reply must name the kernel-reported Unix-socket peer; `root_process` reads
+  the captured native birth and never adopts a current PID occupant. A missing
+  or unknown unit state rejects the reply; consumers that read a unit roster
+  classify an absent unit, a stopped state, or a positively dead/reused native
+  birth as not running.
 
 Consumers below the service: the start-serving gate (`base/deploy/lifecycle/start_serving.py`)
 authenticates the live root generation through `RootClient.status()`.

@@ -39,7 +39,7 @@ def test_collector_health_uses_otlp_without_native_inspection(
         pytest.fail("collector protocol health must not inspect listeners")
 
     monkeypatch.setattr(port_preflight, "strict_listeners_on", forbidden)
-    monkeypatch.setattr(client, "owned_process", forbidden)
+    monkeypatch.setattr(client, "root_process", forbidden)
     monkeypatch.setattr(hc, "is_alive", lambda: ready)
     assert hc.probe_collector().alive is ready
 
