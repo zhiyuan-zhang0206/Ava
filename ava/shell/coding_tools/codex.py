@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ava.shell import sessions
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner
 
 from ._common import cancel as _cancel_generation
@@ -507,6 +508,7 @@ def _start_generation(
                 generation,
                 session_id=watcher_id,
                 session_name=watcher_name,
+                writer=AtomicWriter(SYSTEM_FS),
             )
         sid = sessions.new(name=expected_suffix, ttl=request.ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
@@ -515,6 +517,7 @@ def _start_generation(
             generation,
             session_id=sid,
             session_name=full_name,
+            writer=AtomicWriter(SYSTEM_FS),
         )
         remote, codex_session = start_codex(sid, key, owner, generation, request)
     except BaseException:

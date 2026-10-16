@@ -25,6 +25,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+from base.host.atomic_io import AtomicWriter
 from base.native_process.os_platform import file_lock, is_macos
 from base.sessions.coding_session_owner_record import (
     CodingSessionKey,
@@ -293,6 +294,7 @@ def launch_generation(
     tasks_file: Path | None,
     work_file: Path | None,
     ttl_seconds: float,
+    writer: AtomicWriter,
     now: dt.datetime | None = None,
     list_sessions: SessionLister = _default_list_sessions,
     session_live: SessionLiveness = _default_session_live,
@@ -330,7 +332,7 @@ def launch_generation(
             created_at=timestamp,
             expires_at=timestamp + dt.timedelta(seconds=ttl_seconds),
         )
-        write_unlocked(owner)
+        write_unlocked(owner, writer=writer)
         return owner
 
 
@@ -340,6 +342,7 @@ def attach_supervisor(
     *,
     session_id: int,
     session_name: str,
+    writer: AtomicWriter,
 ) -> CodingSessionOwner:
     """CAS-publish the supervisor handle before launching the coding PTY."""
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
@@ -361,7 +364,7 @@ def attach_supervisor(
             supervisor_session_id=session_id,
             supervisor_session_name=session_name,
         )
-        write_unlocked(updated)
+        write_unlocked(updated, writer=writer)
         return updated
 
 
@@ -371,6 +374,7 @@ def publish_active(
     *,
     session_id: int,
     session_name: str,
+    writer: AtomicWriter,
 ) -> CodingSessionOwner:
     """CAS-publish the ready PTY handle for one launching generation."""
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
@@ -395,7 +399,7 @@ def publish_active(
             session_id=session_id,
             session_name=session_name,
         )
-        write_unlocked(updated)
+        write_unlocked(updated, writer=writer)
         return updated
 
 
@@ -404,6 +408,7 @@ def terminate_generation(
     generation: str,
     *,
     reason: str,
+    writer: AtomicWriter,
     now: dt.datetime | None = None,
     list_sessions: SessionLister = _default_list_sessions,
     session_live: SessionLiveness = _default_session_live,
@@ -434,5 +439,5 @@ def terminate_generation(
             terminalized_at=(now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC),
             terminal_reason=reason,
         )
-        write_unlocked(terminal)
+        write_unlocked(terminal, writer=writer)
         return True

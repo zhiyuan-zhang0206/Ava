@@ -13,6 +13,7 @@ from ava import agents
 from ava.sdk_surface import agent_identity
 from ava.shell import sessions
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.log import logger
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
@@ -116,7 +117,9 @@ def terminate_generation_after_failed_launch(
 ) -> None:
     """Roll back the record of a launch that is already failing; the launch's own error stays primary."""
     try:
-        coding_session_owner.terminate_generation(key, generation, reason="launch-failed")
+        coding_session_owner.terminate_generation(
+            key, generation, reason="launch-failed", writer=AtomicWriter(SYSTEM_FS)
+        )
     except Exception:
         logger.opt(exception=True).warning(
             "rolling back coding-session generation {} after a failed launch failed; "
@@ -139,6 +142,7 @@ def new_generation(
         tasks_file=tasks_file,
         work_file=work_file,
         ttl_seconds=ttl_seconds,
+        writer=AtomicWriter(SYSTEM_FS),
         owner_terminated=owner_terminated,
     )
 
@@ -150,7 +154,9 @@ def cancel(
     key: coding_session_owner.CodingSessionKey, generation: str, print_owner: OwnerPrinter
 ) -> int:
     """Stop and terminalize exactly ``generation``; a stale token is refused."""
-    stopped = coding_session_owner.terminate_generation(key, generation, reason="explicit-cancel")
+    stopped = coding_session_owner.terminate_generation(
+        key, generation, reason="explicit-cancel", writer=AtomicWriter(SYSTEM_FS)
+    )
     if not stopped:
         print(f"cancel refused: no generation {generation} is recorded here", file=sys.stderr)
         return 1
