@@ -19,6 +19,7 @@ from ava.sdk_surface import agent_identity, settings
 from ava.sdk_surface.tests.agent_binding import BindAgent
 from ava.shell import sessions
 from ava.shell.coding_tools import _common, codex
+from base.host.atomic_io import AtomicWriter
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from base.sessions.pty.client import PtyClientConfig
@@ -229,6 +230,7 @@ def test_failed_early_publish_kills_codex_session_before_startup(
         *,
         session_id: int,
         session_name: str,
+        writer: AtomicWriter,
     ) -> coding_session_owner.CodingSessionOwner:
         assert session_id == 6
         assert session_name.endswith("-codex-owner-supervisor")
@@ -256,6 +258,7 @@ def test_failed_early_publish_kills_codex_session_before_startup(
         *,
         session_id: int,
         session_name: str,
+        writer: AtomicWriter,
     ) -> coding_session_owner.CodingSessionOwner:
         assert session_id == 7
         assert session_name.endswith("-codex-workspace-11111111")
@@ -270,6 +273,7 @@ def test_failed_early_publish_kills_codex_session_before_startup(
         _generation: str,
         *,
         reason: str,
+        writer: AtomicWriter,
     ) -> bool:
         assert reason == "launch-failed"
         return False
@@ -359,6 +363,7 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
         *,
         session_id: int,
         session_name: str,
+        writer: AtomicWriter,
     ) -> coding_session_owner.CodingSessionOwner:
         assert session_id == 7
         assert session_name.endswith("-codex-workspace-11111111")

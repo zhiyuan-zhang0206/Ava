@@ -11,8 +11,6 @@ import pytest
 
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.deploy.maintenance import pause_owner
-from base.sessions import coding_session_owner_record
-from base.sessions.coding_session_owner_record import CodingSessionStatus
 from cli.commands.observability import grafana_render, observatory_urls, otel_collector
 
 _START_GENERATION = "00000000-0000-4000-8000-000000000001"
@@ -24,15 +22,6 @@ def _marker_write(case: str, path: Path) -> None:
         start_serving.write_state(
             start_serving.ServingState(state="starting", generation=_START_GENERATION)
         )
-    elif case == "owner":
-        key = coding_session_owner_record.CodingSessionKey("cluster", "workspace", "codex")
-        coding_session_owner_record.write_unlocked(
-            coding_session_owner_record.CodingSessionOwner(
-                key=key,
-                status=CodingSessionStatus.LAUNCHING,
-                generation="11111111-2222-4333-8444-555555555555",
-            )
-        )
     elif case == "pause":
         pause_owner.write_atomic(path, payload)
     elif case == "locks":
@@ -41,20 +30,19 @@ def _marker_write(case: str, path: Path) -> None:
         raise AssertionError(case)
 
 
-@pytest.mark.parametrize("case", ["start", "owner", "pause", "locks"])
+@pytest.mark.parametrize("case", ["start", "pause", "locks"])
 def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     modules = {
         "start": start_serving,
-        "owner": coding_session_owner_record,
         "pause": pause_owner,
         "locks": home_lifecycle_locks,
     }
     module = modules[case]
     path = tmp_path / "state.json"
     path.write_bytes(b"old")
-    if case in ("start", "owner"):
+    if case == "start":
 
         def state_path(*_args: object) -> Path:
             return path
@@ -73,8 +61,6 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
             + _START_GENERATION.encode()
             + b'","birth":null}'
         )
-    elif case == "owner":
-        assert isinstance(json.loads(raw), dict)
     else:
         assert raw == b'{"a":"value","z":1}'
     assert sorted(tmp_path.iterdir()) == [path]

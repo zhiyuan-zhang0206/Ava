@@ -22,6 +22,7 @@ from uuid import uuid4
 
 import ava
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 
@@ -157,7 +158,9 @@ def _terminalize(
     reason: str,
 ) -> bool:
     try:
-        stopped = coding_session_owner.terminate_generation(key, generation, reason=reason)
+        stopped = coding_session_owner.terminate_generation(
+            key, generation, reason=reason, writer=AtomicWriter(SYSTEM_FS)
+        )
     except Exception as exc:
         print(f"terminalizing generation {generation} ({reason}) failed: {exc!r}", flush=True)
         if reason != "owner-terminated":
