@@ -1,11 +1,11 @@
 ---
 type: doc
-title: Reply Suggestion — Verification
-description: Unit, factory and live-probe verification scope for reply suggestions, and what it does not establish.
+title: Reply suggestion verification
+description: What reply-suggestion evidence covers — gating, validation, transports — and the protocol-probe limits it does not establish.
 tags: [gateway, agents, lm]
 ---
 
-# Reply Suggestion — Verification
+# Reply suggestion verification
 
 Unit tests inject fake decision and chat models. They verify gating, validation, candidate
 transport, caching and keyboard behaviour, including preserving model-returned counts
@@ -26,3 +26,7 @@ decoding guarantee. Boundary validation remains required. These are protocol pro
 generation-quality benchmark. Official contracts:
 [Responses schema output](https://api-docs.deepseek.com/api/create-response/),
 [strict tool calls](https://api-docs.deepseek.com/guides/tool_calls/#strict-mode-beta).
+
+## Relationship to Other Nodes
+
+- [[gateway/agents/docs/reply-suggestion/reply-suggestion.ava.okf.md|Reply Suggestion]] — the feature this verification belongs to.

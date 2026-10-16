@@ -1,5 +1,3 @@
-"""Exception-to-envelope adapters registered by the gateway application."""
-
 from __future__ import annotations
 
 import logging
@@ -17,8 +15,18 @@ from gateway.http.middleware.error_envelope import error_response
 _log = logging.getLogger(__name__)
 
 
+async def model_catalog_unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
+    return error_response(
+        request,
+        code="model_catalog_unavailable",
+        status=503,
+        detail=str(exc),
+        retryable=False,
+    )
+
+
 async def ava_agent_error_handler(request: Request, exc: AvaAgentError) -> JSONResponse:
-    """Map an SDK-compatible agent error to its stable reason-bearing envelope."""
+
     return error_response(
         request,
         code=exc.reason.value,
@@ -42,15 +50,9 @@ async def ava_agent_error_handler(request: Request, exc: AvaAgentError) -> JSONR
     )
 
 
+# ava:ref gateway/docs/error-responses-and-middleware-order.ava.okf.md#error-response-cors
 def cors_headers(request: Request) -> dict[str, str]:
-    """Return CORS headers for an allowlisted request origin, else no headers.
 
-    ServerErrorMiddleware — which answers unhandled exceptions — sits OUTSIDE
-    every user middleware (Starlette/FastAPI build order), so its response
-    never passes through CORSMiddleware and the catch-all handler below must
-    add the headers itself. Mirrors CORSMiddleware's simple-response behavior
-    for this gateway's exact-origin configuration (#187).
-    """
     origin = request.headers.get("origin")
     if origin is None:
         return {}
@@ -68,7 +70,7 @@ async def request_validation_error_handler(
     request: Request,
     exc: RequestValidationError,
 ) -> JSONResponse:
-    """Normalize FastAPI's structured 422 body without losing its field errors."""
+
     return error_response(
         request,
         code="validation_error",
@@ -83,7 +85,7 @@ async def http_exception_handler(
     request: Request,
     exc: StarletteHTTPException,
 ) -> JSONResponse:
-    """Map every router-raised HTTPException into the common error envelope."""
+
     detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
     return error_response(
         request,
@@ -96,7 +98,7 @@ async def http_exception_handler(
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Return a typed 500 and preserve CORS after an unhandled route exception."""
+
     _log.error("unhandled gateway exception", exc_info=exc)
     return error_response(
         request,

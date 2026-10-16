@@ -44,7 +44,6 @@
 "test_process_boot.py#monkeypatch.setattr base.config.ConfigBoot.get_field" = 1
 "test_process_boot.py#monkeypatch.setattr base.db.Database.__init__" = 1
 "test_process_boot.py#monkeypatch.setattr gateway.cluster.process_boot.GatewayProcess.database" = 1
-"test_provider_startup.py#monkeypatch.setattr gateway.app.build_model_catalog" = 1
 "test_server.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
 "test_server.py#monkeypatch.setattr base.config.settings.gateway.gateway_graceful_shutdown_timeout_seconds" = 1
 "test_server.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1

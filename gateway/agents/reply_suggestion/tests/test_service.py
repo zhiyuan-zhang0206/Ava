@@ -23,6 +23,7 @@ from gateway.agents.reply_suggestion.service import (
     DRAFT_INSTRUCTION,
     DRAFT_USAGE_KIND,
     GATE_USAGE_KIND,
+    ReplySuggestionConfigurationError,
 )
 from gateway.agents.reply_suggestion.tests.support import (
     Harness,
@@ -72,11 +73,35 @@ async def test_an_unknown_agent_fails_the_request(harness: Harness) -> None:
 
 async def test_the_cluster_switch_turns_the_pipeline_off(harness: Harness) -> None:
     harness.settings.enabled = False
+    harness.catalog_error = RuntimeError("disabled feature must not load providers")
 
     result = await harness.service.suggest(7)
 
     assert result.reason == "disabled"
     assert harness.decide.calls == []
+    assert harness.catalog_reads == 0
+
+
+async def test_catalog_failure_stays_explicit_and_does_not_call_models(harness: Harness) -> None:
+    failure = RuntimeError("catalog unavailable")
+    harness.catalog_error = failure
+    with pytest.raises(RuntimeError) as caught:
+        await harness.service.suggest(7)
+    assert caught.value is failure
+    assert harness.catalog_reads == 1
+    assert harness.decide.calls == []
+    assert harness.chat.invocations == []
+
+
+async def test_invalid_model_configuration_does_not_replay_a_cached_suggestion(
+    harness: Harness,
+) -> None:
+    await harness.service.suggest(7)
+    calls = len(harness.decide.calls)
+    harness.settings.gate_model = "not-a-registered-model"
+    with pytest.raises(ReplySuggestionConfigurationError):
+        await harness.service.suggest(7)
+    assert len(harness.decide.calls) == calls
 
 
 async def test_a_gate_below_the_threshold_returns_no_suggestion(harness: Harness) -> None:
@@ -103,13 +128,13 @@ async def test_the_gate_asks_its_question_about_the_excerpt_and_is_billed_to_the
     await harness.service.suggest(7)
 
     model, state, questions, kwargs = harness.decide.calls[0]
-    assert model == "gate-model"
+    assert model == "jev-1.13.0"
     assert state == "[User]\nPlease prepare the release.\n\n[Assistant]\nDeploy now?"
     assert list(questions) == ["useful_reply"]
     assert isinstance(questions["useful_reply"], YesNo)
     assert kwargs["usage_kind"] == GATE_USAGE_KIND == "reply_suggestion_gate"
     assert kwargs["for_agent_id"] == 7
-    assert kwargs["catalog"] is harness.service._catalog
+    assert kwargs["catalog"] is harness.catalog
 
 
 async def test_a_passing_gate_drafts_with_the_instruction_first(
@@ -123,7 +148,7 @@ async def test_a_passing_gate_drafts_with_the_instruction_first(
         ["Yes, deploy it.", "Wait, explain the plan first."],
         None,
     )
-    assert harness.chat.built == ["chat-model"]
+    assert harness.chat.built == ["deepseek-flash"]
     assert harness.chat.bindings == [
         (
             DraftReplies.model_json_schema(),
@@ -137,11 +162,11 @@ async def test_a_passing_gate_drafts_with_the_instruction_first(
     assert usage_rows == [
         {
             "message": harness.chat.raw,
-            "model": "chat-model",
+            "model": "deepseek-flash",
             "usage_kind": DRAFT_USAGE_KIND,
             "latency_ms": usage_rows[0]["latency_ms"],
             "for_agent_id": 7,
-            "catalog": harness.service._catalog,
+            "catalog": harness.catalog,
         }
     ]
     assert DRAFT_USAGE_KIND == "reply_suggestion"

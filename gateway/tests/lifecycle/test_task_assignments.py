@@ -1,5 +1,4 @@
-"""Guarded compound acceptance has one atomic pair and immutable receipt."""
-
+# ava:ref gateway/docs/error-responses-and-middleware-order.ava.okf.md#test-credential-isolation
 import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -17,12 +16,13 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import settings
 from gateway.agents import creation as agent_creation
 from gateway.agents.task_assignment import router as task_assignments
+from gateway.http.model_catalog import CatalogLoadFailure
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import GatewayTestClient, gateway_test_client
 
 PATH = "/api/keyed/v1/task-assignments"
 HEADERS = {"Idempotency-Key": "compound", "Idempotency-Scope": "principal-v1"}
-SECRET = "compound-test-secret"  # noqa: S105 -- isolated test authentication
+SECRET = "compound-test-secret"  # noqa: S105
 
 
 @pytest.fixture
@@ -93,6 +93,27 @@ def test_response_loss_and_concurrent_duplicates_return_original_pair(
     assert _counts(db_conn) == before
     changed = {**body, "task": {**body["task"], "description": "Different"}}
     assert client.post(PATH, json=changed, headers=HEADERS).status_code == 409
+
+
+def test_model_failure_preserves_accepted_pair_and_blocks_new_assignment(
+    client: GatewayTestClient, db_conn: psycopg.Connection, body: dict[str, Any]
+) -> None:
+    first = client.post(PATH, json=body, headers=HEADERS)
+    assert first.status_code == 201, first.text
+    before = _counts(db_conn)
+    client.app.state.catalog = CatalogLoadFailure(RuntimeError("provider failed after restart"))
+
+    replay = client.post(PATH, json=body, headers=HEADERS)
+    assert replay.status_code == 201, replay.text
+    for field in ("task", "agent_id", "launch_attempt_id"):
+        assert replay.json()[field] == first.json()[field]
+    assert "ModelCatalogUnavailableError" in replay.json()["launch_failure"]
+    assert _counts(db_conn) == before
+
+    blocked = client.post(PATH, json=body, headers={**HEADERS, "Idempotency-Key": "new-assignment"})
+    assert blocked.status_code == 503, blocked.text
+    assert blocked.json()["code"] == "model_catalog_unavailable"
+    assert _counts(db_conn) == before
 
 
 def test_producer_failure_rolls_back_entire_pair(
@@ -266,6 +287,7 @@ def test_missing_or_wrong_admission_headers_cannot_write(
     assert _counts(db_conn) == before
 
 
+# ava:ref gateway/docs/error-responses-and-middleware-order.ava.okf.md#test-credential-isolation
 def test_revoked_principals_cannot_replay(
     client: GatewayTestClient,
     db_conn: psycopg.Connection,
@@ -277,7 +299,7 @@ def test_revoked_principals_cannot_replay(
         process=client.app.state.gateway_process,
         config=replace(
             client.app.state.gateway_config,
-            cluster_secret="rotated-compound-secret",  # noqa: S106 -- isolated test credential
+            cluster_secret="rotated-compound-secret",  # noqa: S106
         ),
         headers={"Authorization": f"Bearer {SECRET}"},
     ) as rotated:

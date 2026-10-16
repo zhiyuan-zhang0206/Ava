@@ -1,32 +1,3 @@
-"""Gateway /mcp endpoint — the cluster control plane as an MCP server.
-
-Design task #1212 step 1: one Streamable HTTP MCP endpoint on the gateway that
-every MCP client dials (external tools like Claude Code / Codex today; Ava's
-own agents later). The seven tools are thin handlers over the SAME internal
-functions the REST routers call — no business logic of its own and no
-self-HTTP round-trip (2026-06-07 CLI↔gateway boundary decision: in-process
-import for co-located calls, HTTP only to cross a machine).
-
-Flag-gated and additive: `settings.gateway.mcp_endpoint_enabled`
-(AVA_MCP_ENDPOINT_ENABLED), default off. While off, /mcp answers 404 and
-nothing else changes — the existing mcp-daemon path is untouched either way.
-While on, /mcp always requires its own revocable client token; cluster cookies
-and the cluster-secret Bearer are deliberately not MCP credentials.
-
-Transport: stateless Streamable HTTP (2026-07-28 protocol revision) — one
-fresh transport per POST, no server-side session state, no idle reaping.
-Every `tools/call` is recorded as a `mcp_tool_call` audit event with the MCP
-client identity and argument schema / character size / SHA-256 only. Raw
-argument values never enter the audit stream; agent_id remains NULL because
-the client is a service-level identity rather than an Ava agent.
-
-Mounting: `mcp_gateway(app)` is mounted at /mcp (an ASGI wrapper, so the
-manager can be swapped per app lifespan); `build_manager(pool, db, bus)` creates the
-server + session manager and is entered (`manager.run()`) by the gateway
-lifespan only when the flag is on. The manager cannot run twice, so it is
-built fresh per lifespan entry.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -64,26 +35,26 @@ from gateway.agents.lifecycle import terminate_agent_with_open_tasks
 from gateway.agents.schemas import AgentRow
 from gateway.http.auth.request_principal import AuthPrincipal, PrincipalScopeError, principal_key
 from gateway.http.middleware.error_envelope import error_response
+from gateway.http.model_catalog import (
+    CatalogLoadFailure,
+    ModelCatalogUnavailableError,
+    catalog_for_observation,
+    require_catalog,
+)
 from gateway.mcp_server import clients
 from ops.agents import get_agent_status
 from ops.lifecycle.delivery import deliver_chat_inbound
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
 
-# Provenance of everything this surface creates. `spawner` groups the agents
-# an external tool created under their own root in the fleet views; `source` is
-# the default attribution (the user speaking through the tool). This is not
-# evidence that an MCP invocation came from a human: a client that wants to stay
-# distinguishable from the user asks for `as_external_agent`, and the server
-# derives that identity from the authenticated client row.
 _SPAWNER = "mcp"
 _MESSAGE_SOURCE = "user"
 
-# How many of an agent's most recent messages `get_messages` returns by default.
+
 _DEFAULT_MESSAGE_LIMIT = 20
 
 
 def _authenticated_client(request: Request | None) -> dict[str, Any]:
-    """Read the credential verified by the gateway, never client-supplied metadata."""
+
     if request is None:
         raise RuntimeError("authenticated MCP client request is missing")
     client = getattr(request.state, "ava_mcp_client", None)
@@ -142,8 +113,6 @@ def _validate_mcp_identity_arguments(tool: str, args: dict[str, Any]) -> None:
 
 
 class _AuditMiddleware:
-    """Record client identity, outcome, and redacted args for every tools/call."""
-
     def __init__(self, db: Database) -> None:
         self._db = db
 
@@ -164,9 +133,7 @@ class _AuditMiddleware:
         raw_args = params.get("arguments")
         args = cast(dict[str, Any], raw_args) if isinstance(raw_args, dict) else {}
         client = _authenticated_client(typed_ctx.request)
-        # The id comes from token lookup, never tool arguments or clientInfo.
-        # Caller display remains asserted; the authenticated credential binding
-        # is recorded separately and does not imply human/Ava agent identity.
+
         caller = CallerIdentity(kind="external_agent", subject="mcp", instance=str(client["id"]))
         payload: dict[str, Any] = {
             "tool": tool,
@@ -200,14 +167,7 @@ class _AuditMiddleware:
 
 
 async def record_tool_call(db: Database, caller: CallerIdentity, payload: dict[str, Any]) -> None:
-    """Record one MCP tool call in `audit_events`.
 
-    The tool has already run, so a failed audit write must not turn it into a
-    tool error (the client would retry and repeat the side effect): it is
-    reported (error log with traceback plus an `audit_write_failed` event)
-    instead of raised. The write is a short blocking transaction, so it runs off
-    the event loop.
-    """
     event = prepare_event_log(
         event_type="mcp_tool_call", agent_id=None, source=caller.source(), payload=payload
     )
@@ -217,7 +177,7 @@ async def record_tool_call(db: Database, caller: CallerIdentity, payload: dict[s
 def _select_directory_blocking(
     pool: Any,
     *,
-    catalog: ModelCatalog,
+    catalog: ModelCatalog | None,
     default_model_reader: Callable[[], str],
     scope: roster.AgentDirectoryScope,
     query: str,
@@ -237,7 +197,11 @@ def _select_directory_blocking(
 
 
 def _select_one_blocking(
-    pool: Any, agent_id: int, *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
+    pool: Any,
+    agent_id: int,
+    *,
+    catalog: ModelCatalog | None,
+    default_model_reader: Callable[[], str],
 ) -> Any:
     with pool.connection() as conn:
         return snapshot_module.select_one(
@@ -246,11 +210,20 @@ def _select_one_blocking(
 
 
 def _require_write_scope(tool: str, client: dict[str, Any]) -> None:
-    """Fail a mutating tool before it reaches any fleet side effect."""
+
     from mcp.server.mcpserver.exceptions import ToolError
 
     if clients.McpClientScope(client["scope"]) != clients.McpClientScope.WRITE:
         raise ToolError(f"tool {tool!r} requires write scope")
+
+
+def _require_tool_catalog(read: Callable[[], ModelCatalog | CatalogLoadFailure]) -> ModelCatalog:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    try:
+        return require_catalog(read())
+    except ModelCatalogUnavailableError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 def _register_read_tools(
@@ -258,12 +231,12 @@ def _register_read_tools(
     pool: Any,
     db: Database,
     *,
-    catalog: ModelCatalog,
+    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
     default_model_reader: Callable[[], str],
     image: LoadedCommit,
     local_machine: MachineIdentity,
 ) -> None:
-    """Read-side tools: list / inspect / cluster snapshot."""
+
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
 
@@ -280,7 +253,7 @@ def _register_read_tools(
             _select_directory_blocking,
             pool,
             default_model_reader=default_model_reader,
-            catalog=catalog,
+            catalog=catalog_for_observation(catalog_reader()),
             scope=scope,
             query=query,
             before_id=before_id,
@@ -294,7 +267,7 @@ def _register_read_tools(
             _select_one_blocking,
             pool,
             agent_id,
-            catalog=catalog,
+            catalog=catalog_for_observation(catalog_reader()),
             default_model_reader=default_model_reader,
         )
         if snap is None:
@@ -321,14 +294,7 @@ async def _mcp_deliver_send_message(
     idempotency_key: str | None,
     local_machine: str,
 ) -> dict[str, Any]:
-    """Deliver an MCP `send_message` call: as the user by default, as the
-    authenticated client's external-agent identity when asked, with
-    principal-scoped idempotency when a key is supplied.
 
-    Kept out of `_register_fleet_tools` so the tool registration function
-    stays under the PLR0915 statement budget; behavior is identical to an
-    inline body.
-    """
     from mcp.server.mcpserver.exceptions import ToolError
 
     source = _MESSAGE_SOURCE
@@ -347,8 +313,7 @@ async def _mcp_deliver_send_message(
             )
         except PrincipalScopeError as exc:
             raise ToolError(str(exc)) from exc
-    # Existence check first (raises AgentNotFound, like the REST route);
-    # deliver_chat_inbound then auto-resurrects a terminated target.
+
     try:
         await asyncio.to_thread(get_agent_status, db, agent_id)
         delivery = await deliver_chat_inbound(
@@ -379,11 +344,11 @@ def _register_spawn_tools(
     db: Database,
     bus: EventBus,
     *,
-    catalog: ModelCatalog,
+    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
     authority: ConfigAuthority,
     local_machine: MachineIdentity,
 ) -> None:
-    """Register keyed creation through the immutable native birth owner."""
+
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
 
@@ -418,9 +383,7 @@ def _register_spawn_tools(
             config=config_overlay,
         )
         target = body.machine if body.machine is not None else local_machine.name()
-        # Same path as the keyed REST spawn route: `create_and_launch_agent`
-        # (preflight + row creation off the event loop, then the launch op).
-        # Referenced through the creation module so tests patch the same seam.
+
         try:
             spawned = await _agents_creation.create_and_launch_agent(
                 body,
@@ -428,15 +391,13 @@ def _register_spawn_tools(
                 pool,
                 db,
                 bus,
-                catalog=catalog,
+                catalog=_require_tool_catalog(catalog_reader),
                 authority=authority,
                 creation_key=creation_key,
             )
         except HTTPException as exc:
             raise ToolError(str(exc.detail)) from exc
         except AvaAgentError as exc:
-            # Business errors are AvaAgentError instances — surface their
-            # message as a tool error, not a protocol error.
             from base.api_contracts.agent_contract import AgentLaunchFailed
 
             if isinstance(exc, AgentLaunchFailed):
@@ -454,11 +415,11 @@ def _register_fleet_tools(
     db: Database,
     bus: EventBus,
     *,
-    catalog: ModelCatalog,
+    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
     authority: ConfigAuthority,
     local_machine: MachineIdentity,
 ) -> None:
-    """Register fleet mutation and transcript tools with their native owners."""
+
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
 
@@ -468,7 +429,7 @@ def _register_fleet_tools(
         pool,
         db,
         bus,
-        catalog=catalog,
+        catalog_reader=catalog_reader,
         authority=authority,
         local_machine=local_machine,
     )
@@ -538,22 +499,18 @@ def _register_fleet_tools(
         return result.model_dump(mode="json")
 
 
-def _build_server(  # noqa: ANN202 — inferred from the lazy import
+# ava:ref gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.ava.okf.md#lazy-sdk-types
+def _build_server(  # noqa: ANN202
     pool: Any,
     db: Database,
     bus: EventBus,
     *,
-    catalog: ModelCatalog,
+    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
     authority: ConfigAuthority,
     image: LoadedCommit,
     local_machine: MachineIdentity,
 ):
-    """Assemble the MCP server: one tool per gateway control route.
 
-    Kept a builder so the manager (and its tool closures over the live
-    db_pool) is created per app lifespan — the session manager can only run
-    once per instance.
-    """
     from mcp.server.mcpserver import MCPServer
 
     server = MCPServer("ava", instructions=server_instructions(), middleware=[_AuditMiddleware(db)])
@@ -561,60 +518,54 @@ def _build_server(  # noqa: ANN202 — inferred from the lazy import
         server,
         pool,
         db,
-        catalog=catalog,
+        catalog_reader=catalog_reader,
         default_model_reader=lambda: cast(str, authority.service_field_value("llm_model")),
         image=image,
         local_machine=local_machine,
     )
     _register_fleet_tools(
-        server, pool, db, bus, catalog=catalog, authority=authority, local_machine=local_machine
+        server,
+        pool,
+        db,
+        bus,
+        catalog_reader=catalog_reader,
+        authority=authority,
+        local_machine=local_machine,
     )
     return server
 
 
-def build_manager(  # noqa: ANN201 — inferred from the lazy import
+# ava:ref gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.ava.okf.md#lazy-sdk-types
+def build_manager(  # noqa: ANN201
     pool: Any,
     db: Database,
     bus: EventBus,
     *,
-    catalog: ModelCatalog,
+    catalog_reader: Callable[[], ModelCatalog | CatalogLoadFailure],
     authority: ConfigAuthority,
     image: LoadedCommit,
     local_machine: MachineIdentity,
 ):
-    """Create the /mcp session manager (server + stateless HTTP transport).
 
-    Built fresh per gateway lifespan: `StreamableHTTPSessionManager.run()` can
-    only be entered once per instance, and the tools close over the live
-    db_pool, which is created by that same lifespan.
-    """
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
     server = _build_server(
         pool,
         db,
         bus,
-        catalog=catalog,
+        catalog_reader=catalog_reader,
         authority=authority,
         image=image,
         local_machine=local_machine,
     )
-    # The public path builds the manager too: streamable_http_app() constructs
-    # it and stores it on the server; session_manager then hands it over. The
-    # Starlette sub-app it returns is discarded — the gateway mounts the bare
-    # ASGI handler instead (see mcp_gateway).
-    # host="" skips the SDK's auto DNS-rebinding guard, which is for standalone
-    # loopback servers: this endpoint is embedded in the gateway, its wrapper
-    # enforces MCP client auth, and real clients dial it at the machine's
-    # reachable hostname (Host: <private-network ip>), which the loopback
-    # allowlist would reject with 421.
+
     server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, host="")
     manager: StreamableHTTPSessionManager = server.session_manager
     return manager
 
 
 def _bearer_token(scope: dict[str, Any]) -> str | None:
-    """Extract the exact Bearer credential from an ASGI HTTP scope."""
+
     authorization = None
     for name, value in scope.get("headers", []):
         if name.lower() == b"authorization":
@@ -628,13 +579,6 @@ def _bearer_token(scope: dict[str, Any]) -> str | None:
 
 
 def mcp_gateway(app: FastAPI) -> Callable[..., Awaitable[None]]:
-    """ASGI wrapper mounted at /mcp — 404 while the endpoint is disabled.
-
-    Reads the manager off app.state on every request so a disabled (or
-    shut-down) lifespan answers 404 exactly like the grafana proxy answers
-    while off, instead of the route being absent (two different "off"
-    behaviors for the same flag flip).
-    """
 
     async def _gateway(scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] != "http":

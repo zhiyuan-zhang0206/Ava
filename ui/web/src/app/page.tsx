@@ -380,6 +380,11 @@ function HomeContent({
           </HeaderBar>
           <div className="relative z-20 bg-background">
             <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />
+            {activeAgent?.supports_vision === null && (
+              <p role="status" className="px-3 py-2 text-sm text-muted-foreground">
+                {t("modelCapabilitiesUnavailable")}
+              </p>
+            )}
             <Composer
               maxWidthCss={composerMaxWidth}
               mode={composerMode}

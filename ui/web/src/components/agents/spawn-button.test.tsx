@@ -1214,3 +1214,24 @@ describe("SpawnButton model dropdown", () => {
     expect(screen.queryByText(/hidden — manage in Control > Display/)).toBeNull();
   });
 });
+
+
+describe("unavailable model catalog", () => {
+  it("hides stale model choices and disables spawn after a catalog failure", async () => {
+    const onSpawn = vi.fn();
+    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(api.getSystemStatus).mockResolvedValue(statusWith([{ name: "runner-a", online: true, paused: false, agentHostOnline: true }]));
+    render(<QueryClientProvider client={qc}><SpawnButton onSpawn={onSpawn} variant="sm" /></QueryClientProvider>);
+    await screen.findByRole("button", { name: "Model" });
+    vi.mocked(api.getModels).mockRejectedValue(new Error("Model catalog is unavailable"));
+    await act(async () => { await qc.invalidateQueries({ queryKey: ["models"] }); });
+    expect(await screen.findByText("Models unavailable")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Model" })).toBeNull();
+    const button = screen.getByTitle("Models unavailable");
+    expect(button.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(button);
+    expect(onSpawn).not.toHaveBeenCalled();
+    qc.clear();
+  });
+});

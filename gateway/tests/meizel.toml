@@ -2,7 +2,7 @@ exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency
 
 [uses]
 "agents" = ["test_agents_endpoints.py"]
-"bootstrap" = ["agents", "events"]
+"bootstrap" = ["agents", "events", "mcp_calls.py"]
 "events" = ["agents", "test_idempotency.py"]
 "extensions" = ["lifecycle", "mcp_calls.py"]
 "history" = ["agents"]

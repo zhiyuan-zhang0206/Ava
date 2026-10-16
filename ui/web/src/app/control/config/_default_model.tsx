@@ -1,18 +1,5 @@
 "use client";
 
-// The cluster's default model — the model a NEW agent is born on.
-//
-// Read: GET /api/config/default-model -> DefaultModelView { model, source }.
-// `source` is "cluster" when a choice has been made here and "config" when the
-// .env / code default is showing through.
-// Write: PUT /api/config/default-model -> DefaultModelView. Its own narrow
-// endpoint, deliberately not a field on the full-replace PUT /api/config.
-// Options: GET /api/models (the same spawnable roster the spawn picker renders).
-//
-// Editing this never moves an agent that already exists: each agent's model is
-// frozen onto its own row at birth. That is the whole reason this is safe to
-// expose as a one-click dropdown on a live cluster.
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
@@ -31,13 +18,13 @@ import { cn } from "@/lib/format/utils";
 const DEFAULT_MODEL_QUERY_KEY = ["default-model"] as const;
 const MODELS_QUERY_KEY = ["models"] as const;
 
+// ava:ref ui/web/src/app/control/config/docs/configuration.ava.okf.md#model-failure-keeps-config-editable
 export function DefaultModelPanel({ id }: { id: string }) {
   const t = useTranslations("config");
   const visible = useSectionVisible();
   const qc = useQueryClient();
   const showToast = useStore((s) => s.showToast);
-  // Null until the user touches the dropdown, so a refetch that changes the
-  // stored value is not silently overwritten by a stale local pick.
+
   const [picked, setPicked] = useState<string | null>(null);
 
   const current = useQuery({
@@ -68,9 +55,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
   const stored = current.data?.model ?? "";
   const value = picked ?? stored;
   const dirty = picked !== null && picked !== stored;
-  // Superseded models stay valid as a stored default (agents born before the
-  // swap keep running on them), but the dropdown offers only the current
-  // picker roster — same visibility rule as the spawn picker.
+
   const groups = groupedModels(models.data, (m) => !isSuperseded(models.data, m));
 
   return (
@@ -81,7 +66,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
         exist keep the model frozen at their own birth — changing this moves nobody.
       </p>
 
-      {current.error ? (
+      {current.error || models.error ? (
         <p className="text-sm text-muted-foreground">
           Couldn&apos;t load the default model — check the gateway and reload.
         </p>
@@ -101,8 +86,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
                 {t("loadingModels")}
               </option>
             )}
-            {/* Keep the stored value selectable even if it left the roster, so the
-                dropdown reports the truth instead of silently showing another model. */}
+
             {stored !== "" && !groups.some(([, ids]) => ids.includes(stored)) && (
               <option value={stored}>{stored}</option>
             )}

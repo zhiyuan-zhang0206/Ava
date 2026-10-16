@@ -1,17 +1,3 @@
-"""Schedule CRUD + control — /api/schedules.
-
-A schedule is a persistent, supervised session (a `script` + a `command`
-to run it); the schedule-manager service keeps one session per enabled row
-(services/wake/schedule_manager/manager.py) and this router reaches it through
-`session_control` (queued sync requests). This router is the management surface: list /
-create / get / update / delete, start / stop / restart, logs, run history, and a
-`draft` endpoint that hands a natural-language request to an ava-schedule-writer agent.
-
-The script is syntax-checked with `compile()` at the write boundary (400 on a
-SyntaxError) so a broken script never reaches the runner; every script/command
-change is snapshotted into `schedule_versions` for roll-back.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -30,19 +16,20 @@ from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
+from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import receipts, session_control
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
 
-# Summary (list) omits the potentially large `script`; the full view adds it.
+
 _SUMMARY_COLS = (
     "id, name, description, command, enabled, status, last_error, created_at, updated_at"
 )
 _FULL_COLS = _SUMMARY_COLS + ", script"
 
-# Fields a PUT may set, in the order they map to columns.
+
 _UPDATABLE = ("name", "description", "script", "command", "enabled")
 
 _DEFAULT_COMMAND = "python schedule.py"
@@ -89,9 +76,6 @@ class ScheduleRunView(BaseModel):
 
 
 class ScheduleLogsView(BaseModel):
-    # source: 'live' = live session capture; 'transcript' = the session's
-    # PTY transcript file (a dead session's output survives there);
-    # 'last_error' = the last crash traceback; 'none' = nothing to show yet.
     source: str
     lines: list[str]
 
@@ -158,10 +142,11 @@ def _edit_assignments(changed: dict[str, Any], *, code_changed: bool) -> list[sq
     return assignments
 
 
+# ava:ref gateway/schedules/docs/router-contracts.ava.okf.md#sql-returning-contract
 def update_blocking(
     pool: ConnectionPool[Any], schedule_id: int, fields: dict[str, Any], key: str | None = None
 ) -> tuple[tuple[Any, ...], bool]:
-    """Sync partial-update (syntax check + UPDATE + version snapshot) — via to_thread."""
+
     if "script" in fields:
         _validate_script(fields["script"])
 
@@ -190,7 +175,7 @@ def update_blocking(
                 (*changed.values(), schedule_id),
             )
             row = cur.fetchone()
-            assert row is not None  # noqa: S101 — locked row exists
+            assert row is not None  # noqa: S101
             if code_changed:
                 cur.execute(
                     "INSERT INTO schedule_versions (schedule_id, script, command, note) "
@@ -209,22 +194,26 @@ def update_blocking(
 
 
 def _list_blocking(pool: ConnectionPool[Any]) -> list[ScheduleSummary]:
-    """Sync list query — runs via asyncio.to_thread (sync psycopg)."""
+
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(f"SELECT {_SUMMARY_COLS} FROM schedules ORDER BY id DESC")  # noqa: S608
         return [_summary(r) for r in cur.fetchall()]
 
 
-@router.get("/api/schedules")
+@router.get(
+    "/api/schedules",
+    description="List all schedules (enabled and disabled), newest first. Omits `script`.",
+)
 async def list_schedules(request: Request) -> list[ScheduleSummary]:
-    """List all schedules (enabled and disabled), newest first. Omits `script`."""
+
     return await asyncio.to_thread(_list_blocking, request.app.state.db_pool)
 
 
+# ava:ref gateway/schedules/docs/router-contracts.ava.okf.md#sql-returning-contract
 def create_blocking(
     pool: ConnectionPool[Any], body: ScheduleCreate, key: str | None = None
 ) -> tuple[Any, ...]:
-    """Sync create (syntax check + INSERT + version snapshot) — via to_thread."""
+
     _validate_script(body.script)
     try:
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -250,7 +239,7 @@ def create_blocking(
                 (body.name, body.description, body.script, body.command, body.enabled),
             )
             row = cur.fetchone()
-            assert row is not None  # noqa: S101 — INSERT ... RETURNING always yields a row
+            assert row is not None  # noqa: S101
             cur.execute(
                 "INSERT INTO schedule_versions (schedule_id, script, command, note) "
                 "VALUES (%s, %s, %s, %s)",
@@ -264,33 +253,36 @@ def create_blocking(
     return row
 
 
-@router.post("/api/schedules", status_code=201)
+@router.post(
+    "/api/schedules",
+    status_code=201,
+    description="Create a schedule. 400 on a script syntax error, 409 on a name clash.",
+)
 async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleView:
-    """Create a schedule. 400 on a script syntax error, 409 on a name clash."""
+
     row = await asyncio.to_thread(
         create_blocking, request.app.state.db_pool, body, creation_receipts.operation_key(request)
     )
-    # A newly-created enabled schedule is launched by the reconcile loop within a
-    # poll interval; no explicit sync needed here.
+
     return _view(row)
 
 
-@router.get("/api/schedules/{schedule_id}")
+@router.get(
+    "/api/schedules/{schedule_id}",
+    description="Get one schedule (with its script). 404 if it does not exist.",
+)
 async def get_schedule(request: Request, schedule_id: int) -> ScheduleView:
-    """Get one schedule (with its script). 404 if it does not exist."""
+
     row = await asyncio.to_thread(fetch_full_blocking, request.app.state.db_pool, schedule_id)
     return _view(row)
 
 
-@router.put("/api/schedules/{schedule_id}")
+@router.put(
+    "/api/schedules/{schedule_id}",
+    description="Partial-update a schedule — only the fields present in the body change. A\nscript/command change is snapshotted into schedule_versions and, if the\nschedule is enabled, applied immediately (the session is relaunched on the new\nscript). An enabled-flag value change also converges immediately, so disable\nreaps the session and enable creates it; a same-value update leaves the\nsession intact. 400 on a script syntax error, 404 if missing, 409 on a name\nclash.",
+)
 async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpdate) -> ScheduleView:
-    """Partial-update a schedule — only the fields present in the body change. A
-    script/command change is snapshotted into schedule_versions and, if the
-    schedule is enabled, applied immediately (the session is relaunched on the new
-    script). An enabled-flag value change also converges immediately, so disable
-    reaps the session and enable creates it; a same-value update leaves the
-    session intact. 400 on a script syntax error, 404 if missing, 409 on a name
-    clash."""
+
     fields = body.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(status_code=400, detail="no fields to update")
@@ -308,7 +300,7 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
 
 
 def delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
-    """Sync delete (DELETE + 404 guard) — via to_thread."""
+
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM schedules WHERE id = %s RETURNING id", (schedule_id,))
         if cur.fetchone() is None:
@@ -317,14 +309,16 @@ def delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
 
 
 def _remove_schedule_dir(schedule_id: int) -> None:
-    """Sync work-dir removal — via to_thread (filesystem walk)."""
+
     shutil.rmtree(ava_home() / "schedules" / str(schedule_id), ignore_errors=True)
 
 
-@router.delete("/api/schedules/{schedule_id}")
+@router.delete(
+    "/api/schedules/{schedule_id}",
+    description="Delete a schedule. 404 if missing. The reconcile loop kills its (now\norphaned) session; its work dir is removed.",
+)
 async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
-    """Delete a schedule. 404 if missing. The reconcile loop kills its (now
-    orphaned) session; its work dir is removed."""
+
     pool = request.app.state.db_pool
     await asyncio.to_thread(delete_blocking, pool, schedule_id)
     await session_control.wait_consumed(pool, schedule_id)
@@ -332,48 +326,42 @@ async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
     return {"status": "deleted"}
 
 
-@router.post("/api/schedules/{schedule_id}/start")
+@router.post(
+    "/api/schedules/{schedule_id}/start",
+    description="Enable + launch the schedule now. 404 if missing.",
+)
 async def start_schedule(request: Request, schedule_id: int) -> ScheduleView:
-    """Enable + launch the schedule now. 404 if missing."""
+
     return await _control_and_sync(request, schedule_id, action="start")
 
 
-@router.post("/api/schedules/{schedule_id}/stop")
+@router.post(
+    "/api/schedules/{schedule_id}/stop",
+    description="Disable + kill the schedule's session now. 404 if missing.",
+)
 async def stop_schedule(request: Request, schedule_id: int) -> ScheduleView:
-    """Disable + kill the schedule's session now. 404 if missing."""
+
     return await _control_and_sync(request, schedule_id, action="stop")
 
 
-@router.post("/api/schedules/{schedule_id}/restart")
+@router.post(
+    "/api/schedules/{schedule_id}/restart",
+    description="Relaunch the schedule's session now (reloading its script), clearing crash\nbackoff. 404 if missing, 409 if the schedule is disabled.",
+)
 async def restart_schedule(request: Request, schedule_id: int) -> ScheduleView:
-    """Relaunch the schedule's session now (reloading its script), clearing crash
-    backoff. 404 if missing, 409 if the schedule is disabled."""
+
     return await _control_and_sync(request, schedule_id, action="restart")
 
 
 def _strip_trailing_blank(lines_list: list[str]) -> list[str]:
-    """Drop trailing blank rows from a captured/transcribed tail.
 
-    The PTY screen model pads the display to the terminal height, so the last
-    `lines` rows of a capture are blank once the runner's output has scrolled
-    above them — `logs --lines 10` then shows nothing even though the session
-    has output. The transcript file ends the same way (the login shell's final
-    newline). The tail the user asked for is the last N *content* rows.
-    """
     while lines_list and not lines_list[-1].strip():
         lines_list.pop()
     return lines_list
 
 
 def _read_transcript_blocking(schedule_id: int, lines: int) -> list[str] | None:
-    """Tail the schedule session's PTY transcript, or None when it has none.
 
-    The pty-sessions service writes a byte transcript of the session to
-    `$AVA_HOME/logs/ava-schedule-<id>.out.log` that survives the session being
-    reaped — a completed/crashed runner's output lives there after live
-    capture has nothing left to show (the backend keeps no such file, so this is the
-    PTY-era replacement for the lost scrollback).
-    """
     from base.sessions.backend import get_shell_backend
 
     log_path = get_shell_backend().session_log_path(session_name(f"schedule-{schedule_id}"))
@@ -386,18 +374,16 @@ def _read_transcript_blocking(schedule_id: int, lines: int) -> list[str] | None:
     return text.splitlines()[-lines:]
 
 
-@router.get("/api/schedules/{schedule_id}/logs")
+@router.get(
+    "/api/schedules/{schedule_id}/logs",
+    description="Recent output of the schedule. Live session -> its capture; a dead\nsession -> its PTY transcript file; otherwise the last crash traceback\n(`last_error`). 404 if the schedule is missing.",
+)
 async def get_schedule_logs(
     request: Request, schedule_id: int, lines: int = 200
 ) -> ScheduleLogsView:
-    """Recent output of the schedule. Live session -> its capture; a dead
-    session -> its PTY transcript file; otherwise the last crash traceback
-    (`last_error`). 404 if the schedule is missing."""
+
     row = await asyncio.to_thread(fetch_full_blocking, request.app.state.db_pool, schedule_id)
-    # Capture a window wide enough to cover the display padding: the PTY
-    # screen model pads to the terminal height, so a narrow `lines` window
-    # can be all blank rows even with the runner's output above it. Fetch a
-    # wider tail, strip the blank padding, then trim to the requested count.
+
     window = max(lines, 200)
     captured = await session_control.capture(schedule_id, window)
     if captured is not None:
@@ -416,7 +402,7 @@ async def get_schedule_logs(
 def _runs_blocking(
     pool: ConnectionPool[Any], schedule_id: int, limit: int
 ) -> list[ScheduleRunView]:
-    """Sync run-history query — via to_thread."""
+
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id, ran_at, ok, agent_id, note FROM schedule_runs "
@@ -429,28 +415,29 @@ def _runs_blocking(
         ]
 
 
-@router.get("/api/schedules/{schedule_id}/runs")
+@router.get(
+    "/api/schedules/{schedule_id}/runs",
+    description="Recent run-history rows (newest first). Omit `limit` for the configured\ndefault window (``display.schedules_runs_default_limit`` - 50 out of the\nbox). 404 if the schedule is missing.",
+)
 async def get_schedule_runs(
     request: Request, schedule_id: int, limit: int | None = None
 ) -> list[ScheduleRunView]:
-    """Recent run-history rows (newest first). Omit `limit` for the configured
-    default window (``display.schedules_runs_default_limit`` - 50 out of the
-    box). 404 if the schedule is missing."""
+
     if limit is None:
         limit = settings.display.schedules_runs_default_limit
     pool = request.app.state.db_pool
-    await asyncio.to_thread(fetch_full_blocking, pool, schedule_id)  # 404 guard
+    await asyncio.to_thread(fetch_full_blocking, pool, schedule_id)
     return await asyncio.to_thread(_runs_blocking, pool, schedule_id, limit)
 
 
-@router.post("/api/keyed/v1/schedules/draft")
+@router.post(
+    "/api/keyed/v1/schedules/draft",
+    description="Hand a natural-language request to an ava-schedule-writer agent. Spawns the\nagent (which loads ava-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.\nReplays one raw draft intent and its original birth.",
+)
 async def guarded_draft_schedule(
     body: ScheduleDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
 ) -> ScheduleDraftResponse:
-    """Hand a natural-language request to an ava-schedule-writer agent. Spawns the
-    agent (which loads ava-guide.schedules, clarifies, writes the script,
-    and POSTs it back) and returns its id so the UI can open the conversation.
-    Replays one raw draft intent and its original birth."""
+
     prompt = (
         "You are a schedule writer. Read and follow ava.skills.ava_guide.schedules to turn this "
         "request into a gateway-hosted schedule: clarify the trigger / skip / error-handling, "
@@ -468,7 +455,7 @@ async def guarded_draft_schedule(
         request.app.state.db_pool,
         request.app.state.db,
         request.app.state.bus,
-        catalog=request.app.state.catalog,
+        catalog=require_model_catalog(request),
         authority=request.app.state.config_authority,
         creation_key=key,
         creation_identity=body.model_dump(mode="json"),
@@ -476,11 +463,12 @@ async def guarded_draft_schedule(
     return ScheduleDraftResponse(agent_id=spawned.id)
 
 
+# ava:ref gateway/schedules/docs/router-contracts.ava.okf.md#sql-returning-contract
 def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[Any, ...]:
-    """Sync full-row fetch + 404 guard — via to_thread (used by every read path)."""
+
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_FULL_COLS} FROM schedules WHERE id = %s",  # noqa: S608 — _FULL_COLS is a fixed literal
+            f"SELECT {_FULL_COLS} FROM schedules WHERE id = %s",  # noqa: S608
             (schedule_id,),
         )
         row = cur.fetchone()
@@ -489,6 +477,7 @@ def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[An
     return row
 
 
+# ava:ref gateway/schedules/docs/router-contracts.ava.okf.md#sql-returning-contract
 def control_blocking(
     pool: ConnectionPool[Any], schedule_id: int, action: str, key: str | None
 ) -> tuple[tuple[Any, ...], bool]:
@@ -517,7 +506,7 @@ def control_blocking(
                 (enabled, schedule_id),
             )
             row = cur.fetchone()
-            assert row is not None  # noqa: S101 — locked row exists
+            assert row is not None  # noqa: S101
             session_control.enqueue_in_transaction(conn, schedule_id)
         receipts.finish(conn, key, row)
     return row, needs_sync

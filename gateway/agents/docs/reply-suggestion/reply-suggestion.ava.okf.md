@@ -15,26 +15,7 @@ the marker. Enter then sends the draft.
 
 ## Trigger (frontend)
 
-`ui/web/src/lib/composer/use-reply-suggestion.ts` is the only writer of the candidates.
-For the selected, visible agent it asks once per turn: the agent is idle, the last
-conversation item is the agent's own message, and nothing new started for one second.
-A new turn (busy again or a new last item), another agent, a hidden page, the user
-setting `behavior.replySuggestions` (default on) turned off, or unmount aborts the request and
-hides the suggestion. Opening an already-idle agent takes the same path. A settled turn is
-remembered by agent and last item; an aborted one is not.
-
-State ownership: the candidates are volatile, derived state, held in component state in
-`HomeContent` (not TanStack Query, not Zustand) with the hook as its only writer;
-`page.tsx` passes them to `Composer` as the `suggestions` prop. Because they are derived from the
-busy signal, agent status, last item and tab visibility, it needs no clearing event. The
-preference is read only after `useUserSettings` has loaded, so a stored "off" is never
-raced by the default "on". `Composer` shows the text as its placeholder (so typing hides
-them and clearing the input restores the selected candidate) and accepts on ArrowRight
-in the empty input. Candidate selection is local to `Composer`, scoped to the response
-array and agent. Accepting or editing does not consume candidates; only a successful
-send consumes them, so clearing a failed send's draft restores the same selection.
-A new response starts at the first candidate. Slash completion, IME composition,
-modified arrows and arrows in nonempty drafts keep their ordinary behaviour.
+[[gateway/agents/docs/reply-suggestion/trigger.ava.okf.md|Trigger (frontend)]] — the frontend hook and component state that request, own and render the candidates.
 
 ## Route
 
@@ -42,6 +23,10 @@ modified arrows and arrows in nonempty drafts keep their ordinary behaviour.
 is an empty array exactly when `reason` is set: `disabled`, `agent_not_idle`, `no_agent_text`,
 `not_useful`, `gate_failed`, `generation_failed`, `invalid_generation`. Every one is
 a 200. An unknown agent is 404 and an unreadable checkpoint is the history read's 503.
+An unavailable model catalog returns the gateway's `model_catalog_unavailable`
+503. Invalid enabled suggestion settings return `reply_suggestion_unavailable`
+503, without exposing configuration details or pretending the suggestion was
+simply not useful.
 
 1. The agent must exist and be idle; the cluster switch must be on.
 2. `load_current_messages` reads the checkpoint and the shared timeline renderer turns it
@@ -94,14 +79,27 @@ captured at its process start: `reply_suggestion_enabled`, `reply_suggestion_mod
 `reply_suggestion_gate_model`, `reply_suggestion_gate_threshold`,
 `reply_suggestion_max_input_tokens`. A changed value takes effect on the next gateway
 restart. The per-user `behavior.replySuggestions` preference is separate and takes effect
-without one. At boot, with the feature on, the draft model must be a
-registered chat model and the gate model a registered decision model
-(see [[base/lm/docs/decision-models.ava.okf.md]]); anything else stops the gateway.
+without one. Construction captures readers without reading models or policy. After the request
+passes the enabled, idle and excerpt checks, the draft model must be a registered
+chat model and the gate model a registered decision model
+(see [[base/lm/docs/decision-models.ava.okf.md]]). Validation runs before cache lookup:
+a changed invalid setting cannot replay a previously cached success. One catalog
+value serves the gate, draft and usage calculation for that request. Disabled
+suggestions and requests without usable agent text do not acquire the catalog.
+
+Only classified provider failures degrade to `gate_failed` or `generation_failed`.
+Unclassified programming/configuration errors remain errors. The native draft
+must be complete JSON before its parsed result is accepted; LangChain's parser
+can repair truncated JSON, which must not turn an unfinished reply into success.
+The per-call timeouts bound an enhancement whose late result is no longer useful.
+
 
 Code: `gateway/agents/reply_suggestion/` (`router.py`, `service.py`, `excerpt.py`,
 `configuration.py`).
 
-Verification scope: [[gateway/agents/docs/reply-suggestion/verification.ava.okf.md]].
+## Verification scope
+
+What the unit, factory and live-probe evidence covers — and the boundaries it does not establish — is owned by [[gateway/agents/docs/reply-suggestion/verification.ava.okf.md|Reply suggestion verification]].
 
 ```ava-contract
 id = "excerpt-budget-priority"

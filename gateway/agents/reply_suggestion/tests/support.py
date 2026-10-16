@@ -48,8 +48,8 @@ def useful_reply(probability: float) -> Mapping[str, Decision]:
 class Settings:
     def __init__(self) -> None:
         self.enabled = True
-        self.model = "chat-model"
-        self.gate_model = "gate-model"
+        self.model = "deepseek-flash"
+        self.gate_model = "jev-1.13.0"
         self.threshold = 0.5
         self.max_input_tokens = 1500
 
@@ -91,7 +91,7 @@ class FakeChat:
         self.raw = AIMessage(content=reply)
         self.metadata = {"model_provider": "anthropic", "stop_reason": "end_turn"}
 
-    def factory(self, model: str) -> FakeChat:
+    def factory(self, model: str, _catalog: ModelCatalog) -> FakeChat:
         self.built.append(model)
         return self
 
@@ -113,6 +113,9 @@ class FakeChat:
 
 class Harness:
     def __init__(self, catalog: ModelCatalog) -> None:
+        self.catalog = catalog
+        self.catalog_reads = 0
+        self.catalog_error: Exception | None = None
         self.settings = Settings()
         self.decide = FakeDecide()
         self.chat = FakeChat()
@@ -121,13 +124,19 @@ class Harness:
         self.loads: list[int] = []
         self.service = ReplySuggestionService(
             policy=self.settings.policy(),
-            catalog=catalog,
+            catalog_reader=self._read_catalog,
             rendering=TimelineReadInputs(_no_clock, lambda: False),
             load_messages=self._load,
             agent_status=lambda _agent_id: self.status,
             decide=self.decide,
             draft_model=self.chat.factory,
         )
+
+    def _read_catalog(self) -> ModelCatalog:
+        self.catalog_reads += 1
+        if self.catalog_error is not None:
+            raise self.catalog_error
+        return self.catalog
 
     def _load(self, agent_id: int) -> list[BaseMessage]:
         self.loads.append(agent_id)

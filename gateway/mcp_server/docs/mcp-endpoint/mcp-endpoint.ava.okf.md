@@ -85,10 +85,15 @@ rejected; JSON-RPC IDs and asserted metadata supply no authority. No automatic
 retries, client journal, receipt expiry or legacy-key conversion are added.
 
 Guarded credential creation and its one-time-token recovery exception are owned by
-[credential creation receipts](credential-creation.ava.okf.md).
+[credential creation receipts](../credential-creation.ava.okf.md).
 
 ## Why not a router
 
 `/mcp` is not a FastAPI router: the MCP protocol is JSON-RPC over HTTP with its
 own lifecycle (initialize handshake), served by the mcp SDK's ASGI app — so it
 mounts as a raw ASGI wrapper rather than joining the `/api/*` router set.
+
+
+## Model capability failures
+
+[[gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.ava.okf.md|MCP endpoint model capability failures]] — which tools keep working without the catalog, and the disabled endpoint's lazy-SDK-types invariant.

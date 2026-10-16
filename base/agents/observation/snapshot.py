@@ -163,7 +163,7 @@ class AgentSnapshot(BaseModel):
     last_inbound_at: datetime
     label: str | None
     machine: str
-    supports_vision: bool
+    supports_vision: bool | None
     # Gateway-owned liveness projection (Task #1174): 'online' = the machine is
     # reachable AND (for running/idling) the process lease is alive; 'offline'
     # = machine unreachable (2 consecutive failed status_probe) or lease
@@ -181,29 +181,30 @@ class AgentSnapshot(BaseModel):
     heartbeat_paused_until: datetime | None
 
 
-def _effective_model(
+# ava:ref base/agents/observation/docs/observation.ava.okf.md#agent-capability-projection
+def agent_supports_vision(
     config_overlay: Any,
     birth_config: Any,
     *,
-    catalog: ModelCatalog,
+    catalog: ModelCatalog | None,
     default_model_reader: Callable[[], str],
-) -> str:
-    """The model an agent's own calls run, withdrawal-resolved (task #3212).
+) -> bool | None:
+    from collections.abc import Mapping
 
-    The agent host's own resolution: `llm_model` is a birth-frozen field, so the
-    pin is `config_overlay` over `birth_config` (an agent born under an older
-    cluster default keeps its birth model), the caller's live default only when
-    neither pins it, and a withdrawn id is served by its registered fallback.
-    One resolution site for the snapshot's capability judgment and
-    `agent_model_target`, so the two cannot drift.
-    """
     from base.config.agent_pins import resolve_agent_config_pins
+    from base.lm.factory import model_supports_vision
 
-    return _model_of_pins(
-        resolve_agent_config_pins(config_overlay, birth_config),
-        catalog=catalog,
-        default_model_reader=default_model_reader,
-    )
+    for name, source in (("config_overlay", config_overlay), ("birth_config", birth_config)):
+        if source is not None:
+            if not isinstance(source, Mapping):
+                raise ValueError(f"{name} must be a configuration map")
+            if "llm_model" in source and not isinstance(source["llm_model"], str):
+                raise ValueError(f"{name}.llm_model must be a model name")
+    pins = resolve_agent_config_pins(config_overlay, birth_config)
+    if catalog is None:
+        return None
+    model = _model_of_pins(pins, catalog=catalog, default_model_reader=default_model_reader)
+    return model_supports_vision(model, catalog=catalog)
 
 
 def _model_of_pins(
@@ -217,14 +218,9 @@ def _model_of_pins(
 
 
 def _row_to_snapshot(
-    row: tuple[Any, ...], *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
+    row: tuple[Any, ...], *, catalog: ModelCatalog | None, default_model_reader: Callable[[], str]
 ) -> AgentSnapshot:
-    from base.lm.factory import model_supports_vision
-
-    # Pydantic does the per-field type coercion / validation; the tuple
-    # positions match the SELECT column order above. Capability judgments
-    # answer for the model that will run (task #3212).
-    effective_model = _effective_model(
+    supports_vision = agent_supports_vision(
         row[17], row[25], catalog=catalog, default_model_reader=default_model_reader
     )
     return AgentSnapshot.model_validate(
@@ -247,7 +243,7 @@ def _row_to_snapshot(
             "last_probe_at": row[14],
             "notices_awaiting_response": row[15],
             "unread_notice_count": row[16],
-            "supports_vision": model_supports_vision(effective_model, catalog=catalog),
+            "supports_vision": supports_vision,
             "observation": observation(row[18], row[19]),
             "availability": availability(
                 status=row[4],
@@ -266,7 +262,7 @@ def select_one(
     conn: psycopg.Connection,
     agent_id: int,
     *,
-    catalog: ModelCatalog,
+    catalog: ModelCatalog | None,
     default_model_reader: Callable[[], str],
 ) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
