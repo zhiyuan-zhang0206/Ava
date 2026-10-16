@@ -4,7 +4,7 @@ import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem, TimelineResponse } from "@/lib/contracts/types";
-import { saveScrollMemory } from "@/lib/layout/scroll-memory";
+import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { TimelineView } from ".";
@@ -21,8 +21,6 @@ vi.mock("@/lib/layout/content-toggle-store", () => ({
   useContentToggleReset: (selector: (state: { resetToken: number }) => unknown) => selector({ resetToken: 0 }),
 }));
 vi.mock("../content/markdown", () => ({ ChatMarkdown: ({ content }: { content: string }) => <div>{content}</div> }));
-// happy-dom does not lay out the scroll area. Keep its DOM contract and model
-// browser geometry below; the real useTimeline/store/view effects stay intact.
 vi.mock("../ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children: ReactNode }) => (
     <div><div data-testid="history-viewport" data-slot="scroll-area-viewport">{children}</div></div>
@@ -36,6 +34,7 @@ const items: BackendTimelineItem[] = Array.from({ length: 16 }, (_, index) => ({
 const response: TimelineResponse = { items, msg_count: 17, has_more: false };
 let top = 0;
 let height = 5000;
+let aboveSettle = 0;
 let client: QueryClient;
 let resizeCallbacks: Set<() => void>;
 
@@ -47,6 +46,10 @@ function conversation(agentId: number | null, entry: string) {
   return <QueryClientProvider client={client}><Conversation agentId={agentId} entry={entry} key={entry} /></QueryClientProvider>;
 }
 function viewport() { return screen.getByTestId("history-viewport"); }
+function readingOffset(id: string) {
+  const node = viewport().querySelector(`.timeline-item[data-item-id="${id}"]`);
+  return node ? Math.round(node.getBoundingClientRect().top - viewport().getBoundingClientRect().top) : null;
+}
 function resize() { act(() => { resizeCallbacks.forEach((deliver) => deliver()); }); }
 
 beforeEach(() => {
@@ -57,6 +60,7 @@ beforeEach(() => {
   useTimelineStore.getState().switchThread(null, null, false);
   top = 0;
   height = 5000;
+  aboveSettle = 0;
   resizeCallbacks = new Set();
   vi.stubGlobal("ResizeObserver", class {
     private readonly deliver: () => void;
@@ -78,7 +82,7 @@ beforeEach(() => {
     top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
   });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const y = this.dataset.itemId ? (Number.parseInt(this.dataset.itemId) - 1) * 300 - top : 0;
+    const y = this.dataset.itemId ? (Number.parseInt(this.dataset.itemId) - 1) * 300 - top + aboveSettle : 0;
     return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
   });
 });
@@ -282,6 +286,46 @@ describe("agent switch reading positions", () => {
     expect(button.querySelector(".animate-spin")).toBeNull();
     expect(screen.getByTestId("scroll-to-bottom-arrow")).toBe(arrow);
     expect(viewport().scrollTop).toBe(position);
+  });
+});
+
+
+describe("restored position settles", () => {
+  it("keeps a restored reading item at its saved offset while the rows above settle", () => {
+    const entry = "history-settle";
+    saveScrollMemory(entry, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
+    render(conversation(42, entry));
+    expect(viewport().scrollTop).toBe(700);
+    act(() => { aboveSettle = -50; resize(); });
+    expect(viewport().scrollTop).toBe(650);
+    expect(readingOffset("3.0")).toBe(-100);
+    act(() => { aboveSettle = -80; resize(); });
+    expect(viewport().scrollTop).toBe(620);
+    expect(readingOffset("3.0")).toBe(-100);
+  });
+
+  it("keeps the saved bookmark while the restored window is still settling", () => {
+    const entry = "history-settle-bookmark";
+    saveScrollMemory(entry, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
+    render(conversation(42, entry));
+    act(() => { aboveSettle = -50; resize(); });
+    act(() => { fireEvent.scroll(viewport()); });
+    expect(readScrollMemory(entry)).toEqual({ contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
+    act(() => { resize(); });
+    act(() => { fireEvent.scroll(viewport()); });
+    expect(readScrollMemory(entry)).toEqual({ contentKey: "42", scrollTop: 650, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
+  });
+
+  it("keeps the bookmark through a switch away inside the settle", () => {
+    const entry = "history-settle-switch";
+    saveScrollMemory(entry, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
+    const { rerender } = render(conversation(42, entry));
+    act(() => { aboveSettle = -50; resize(); });
+    act(() => { fireEvent.scroll(viewport()); });
+    rerender(conversation(43, "history-settle-other"));
+    rerender(conversation(42, entry));
+    expect(viewport().scrollTop).toBe(650);
+    expect(readingOffset("3.0")).toBe(-100);
   });
 });
 
