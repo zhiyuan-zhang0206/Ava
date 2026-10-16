@@ -114,3 +114,9 @@ def test_a_zero_soft_threshold_disables_only_the_soft_band():
     budget = LengthBudget(Unit.CHARS, hard=5)
     assert evaluate("abcde", budget).level is Level.OK
     assert evaluate("abcdef", budget).level is Level.OVER
+
+
+def test_evaluate_prefers_over_when_both_thresholds_are_exceeded():
+    budget = LengthBudget(Unit.CHARS, hard=3, soft=2)
+    verdict = evaluate("abcd", budget)
+    assert (verdict.measured, verdict.level, verdict.remaining) == (4, Level.OVER, -1)
