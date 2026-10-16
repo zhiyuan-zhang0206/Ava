@@ -1,18 +1,17 @@
-// ChatMarkdown: render + link safety (urlTransform blocks javascript:) +
-// external links open new tab + fenced python block routes to PythonCode +
-// inline code does not enter PythonCode.
-
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-// PythonCode mock — avoid running Prism syntax highlighting in tests
 vi.mock("./python-code", () => ({
   PythonCode: ({ code }: { code: string }) => (
     <pre data-testid="python-code">{code}</pre>
   ),
 }));
 
-import { ChatMarkdown } from "./markdown";
+import { ChatMarkdown, preloadChatMarkdown } from "./markdown";
+
+beforeAll(async () => {
+  await preloadChatMarkdown();
+});
 
 afterEach(cleanup);
 
@@ -140,7 +139,6 @@ describe("ChatMarkdown", () => {
   it("inline `code` does not route to PythonCode (no language-* className)", () => {
     render(<ChatMarkdown content="some `inline` code" />);
     expect(screen.queryByTestId("python-code")).toBeNull();
-    // inline <code> in the DOM
     const codes = document.querySelectorAll("code");
     expect(codes.length).toBeGreaterThan(0);
   });
@@ -153,16 +151,11 @@ describe("ChatMarkdown", () => {
     expect(pre?.textContent).toBe("echo hi");
   });
 
-  // Regression: a bare ``` fence with no language carries no language-*
-  // className, so the old "language-* ? block : inline" rule rendered it as
-  // inline <code> — collapsing newlines and mangling multi-line content
-  // (e.g. an ASCII diagram). It must render as a <pre> block.
   it("no-language fence renders as a <pre> block, not inline (newlines kept)", () => {
     render(<ChatMarkdown content={"```\nline1\nline2\n```"} />);
     expect(screen.queryByTestId("python-code")).toBeNull();
     const pre = document.querySelector("pre");
     expect(pre).toBeTruthy();
-    // textContent keeps the newline between lines (pre preserves whitespace)
     expect(pre?.textContent).toBe("line1\nline2");
   });
 
@@ -177,21 +170,12 @@ describe("ChatMarkdown", () => {
 
   it("inline `code` with no newline still renders inline (not a <pre>)", () => {
     render(<ChatMarkdown content="some `inline` code" />);
-    // The only <code> is inline — no <pre> wrapper around it.
     const inlineCode = screen.getByText("inline");
     expect(inlineCode.tagName).toBe("CODE");
     expect(inlineCode.closest("pre")).toBeNull();
   });
 });
 
-
-// CJK emphasis regression (task #3314): CommonMark's flanking rule treats a
-// punctuation run right after the opening `**` as blocking left-flanking
-// when it follows a CJK letter, so `**"..."**` stayed plain text. remark-
-// cjk-friendly (+ the gfm-strikethrough companion, required while remark-gfm
-// is in the pipeline) restores emphasis for CJK-adjacent delimiters. Keep
-// the reported case, its quote variants, the strikethrough family, and the
-// plain/ASCII controls together — this file is the markdown contract.
 describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
   it("renders bold for the reported sentence (curly quotes)", () => {
     const { container } = render(
@@ -243,10 +227,6 @@ describe("CJK emphasis (remark-cjk-friendly, task #3314)", () => {
   });
 });
 
-// Single-tilde safety (task #3653): GFM strikethrough with the default
-// singleTilde paired the `~61G` and `~/work` of one sentence and struck the
-// text between them (user report). A lone `~` must stay literal; only the
-// double form may strike.
 describe("single tilde stays literal (task #3653)", () => {
   it("renders the reported sentence without strikethrough", () => {
     const { container } = render(
