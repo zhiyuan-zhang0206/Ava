@@ -551,7 +551,6 @@ def build_system_prompt(
         _file_driven_work_section,
         temporal_awareness_section,
         invest_in_the_future_section,
-        capabilities_section,
     )
     for section_fn in framework_sections:
         from functools import partial

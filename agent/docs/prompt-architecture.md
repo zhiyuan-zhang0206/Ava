@@ -115,13 +115,11 @@ Capabilities rather than standing as its own section.
   folders keep their leaf entries visible. Bodies remain on demand. An
   explicit list narrows one agent's index — hiding entries from this listing
   only, which is why the header says so and points at `ava.help(ava.skills)`.
-  The section first tells the agent to match every task against the index before
-  rebuilding something it already has. It then, by default, tells the agent to
-  name the matching skill or skills and why before starting, and to include that
-  reasoning in its final output. `AVA_SYSTEM_PROMPT_CAPABILITIES_MATCH_FIRST`
-  can explicitly disable only that latter instruction for rollback. The
-  delegation check still makes consultation mandatory as its first step and
-  drops that step when this section renders nothing.
+  The section tells the agent to match every task against the index before
+  rebuilding something it already has. It does not ask for a skill-selection
+  report in the final answer. The delegation check still makes consultation
+  mandatory as its first step and drops that step when this section renders
+  nothing.
 - **Core communication policy** — `agent/graph/prompt/conversation.py:user_reply_section`,
   always present: answer directly, or give a substantive reply in the same dialog
   before investigating or calling tools. `off` and `silent` do not suppress it.
@@ -467,12 +465,10 @@ Landed so far:
   irreversible ops.
 - Expanded SDK reference (`AVA_SDK_EXPAND`, default `shell,files,agents,tasks`) —
   full contracts after the overview.
-- One skill index, a default-on match-first instruction, and a mandatory step
-  that reads it: `# Capabilities` lists the whole catalog
-  (`skills_to_inject_into_system_prompt` default `*`), the expanded SDK
-  reference no longer renders a second copy, and
-  `AVA_SYSTEM_PROMPT_CAPABILITIES_MATCH_FIRST` tells the agent to name the
-  matching skills and why before acting. The first step of the delegation check
+- One skill index and a mandatory step that reads it: `# Capabilities` lists
+  the whole catalog (`skills_to_inject_into_system_prompt` default `*`), and
+  the expanded SDK reference no longer renders a second copy. The first step of
+  the delegation check
   (`AVA_SYSTEM_PROMPT_DELEGATION_CHECK`, default on) still requires matching the
   task against that index and loading the covering skill before acting.
 

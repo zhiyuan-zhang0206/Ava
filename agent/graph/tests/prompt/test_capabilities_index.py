@@ -1,27 +1,8 @@
-"""The system prompt carries exactly ONE skill index.
-
-`# Capabilities` (`capabilities.capabilities_section`) is it: every loaded skill, name +
-one-line description + `ava.skills.<path>`, bodies on demand. `# Expanded SDK
-reference` must not carry a second one — `"*"` skips the capability surfaces,
-which is pinned in agent/graph/tests/prompt/test_system_prompt.py.
-
-Also pinned here: the delegation check names the index (an agent that never
-consults it cannot know it is reinventing one of its own skills), and building
-the prompt records NO skill attribution — exposure is not use, and `loaded`,
-the only depth ava_self_evolution scores, is written only when the agent
-actually opens a skill body. The index itself tells an agent to match against
-its capabilities first by default; that instruction is independently toggled,
-ordered after the rebuild nudge, and absent with an empty index.
-
-Skills are faked by running in a per-test unit home (`unit_home`), same shape as
-agent/graph/tests/prompt/test_preloaded_skills.py.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -69,17 +50,12 @@ def _write_skill(root: Path, dirname: str, name: str, desc: str, body: str = "")
 
 
 def test_inject_default_is_the_full_catalog() -> None:
-    """The shipped default is `["*"]`. An agent cannot decide against rebuilding
-    a capability it was never told it has, so completeness is the baseline and a
-    shorter list is a deliberate per-agent narrowing."""
     factory = FIELD_INFOS["skills_to_inject_into_system_prompt"].default_factory
     assert factory is not None
-    assert factory() == ["*"]  # type: ignore[call-arg]
+    assert cast(Callable[[], list[str]], factory)() == ["*"]
 
 
 def test_default_index_lists_every_loaded_skill(fake_skills_dir: Path) -> None:
-    """Under the default, every loaded skill gets a line — nested paths included
-    — and nothing but the one-line description travels with it."""
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc", body="ALPHA_BODY\n")
     _write_skill(fake_skills_dir / "grp", "beta", "beta", "Beta desc", body="BETA_BODY\n")
 
@@ -87,7 +63,6 @@ def test_default_index_lists_every_loaded_skill(fake_skills_dir: Path) -> None:
         AgentSlices.resolve(
             default_reader=defaults(agent__skills_to_inject_into_system_prompt=["*"])
         ),
-        catalog=build_model_catalog(),
     )
     assert "- `ava.skills.alpha` — Alpha desc" in text
     assert "- `ava.skills.grp.beta` — Beta desc" in text
@@ -96,8 +71,6 @@ def test_default_index_lists_every_loaded_skill(fake_skills_dir: Path) -> None:
 
 
 def test_explicit_list_narrows_the_index(fake_skills_dir: Path) -> None:
-    """The per-agent field still works, and under a `*` default its only
-    remaining job is narrowing."""
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
     _write_skill(fake_skills_dir, "gamma", "gamma", "Gamma desc")
 
@@ -105,7 +78,6 @@ def test_explicit_list_narrows_the_index(fake_skills_dir: Path) -> None:
         AgentSlices.resolve(
             default_reader=defaults(agent__skills_to_inject_into_system_prompt=["alpha"])
         ),
-        catalog=build_model_catalog(),
     )
     assert "ava.skills.alpha" in text
     assert "ava.skills.gamma" not in text
@@ -123,7 +95,6 @@ def test_wildcard_groups_descendants_under_real_entry_skills(
         AgentSlices.resolve(
             default_reader=defaults(agent__skills_to_inject_into_system_prompt=["*"])
         ),
-        catalog=build_model_catalog(),
     )
 
     assert "- `ava.skills.work_flow`" in text
@@ -154,7 +125,6 @@ def test_explicit_parent_and_child_both_remain_visible(fake_skills_dir: Path) ->
                 agent__skills_to_inject_into_system_prompt=["workflow", "workflow:align"]
             )
         ),
-        catalog=build_model_catalog(),
     )
 
     assert "- `ava.skills.workflow`" in text
@@ -163,10 +133,6 @@ def test_explicit_parent_and_child_both_remain_visible(fake_skills_dir: Path) ->
 
 
 def test_index_line_is_one_line_however_the_description_was_written(fake_skills_dir: Path) -> None:
-    """A description is free-form frontmatter from whoever wrote the SKILL.md —
-    including a drop-in under `~/.agents/skills/`. A YAML block scalar carrying
-    newlines would otherwise let one entry inject headings and instructions into
-    the index that lists it, so the render flattens and truncates."""
     (fake_skills_dir / "sneaky").mkdir()
     (fake_skills_dir / "sneaky" / "SKILL.md").write_text(
         "---\nname: sneaky\ndescription: |\n"
@@ -184,11 +150,10 @@ def test_index_line_is_one_line_however_the_description_was_written(fake_skills_
             AgentSlices.resolve(
                 default_reader=defaults(agent__skills_to_inject_into_system_prompt=["*"])
             ),
-            catalog=build_model_catalog(),
         ).splitlines()
         if ln.startswith("- `ava.skills.")
     ]
-    assert lines == sorted(lines)  # nothing smuggled its own bullet in
+    assert lines == sorted(lines)
     assert "- `ava.skills.sneaky` — Innocent summary # Capabilities" in lines[0]
     assert len(max(lines, key=len)) < 400
 
@@ -196,10 +161,6 @@ def test_index_line_is_one_line_however_the_description_was_written(fake_skills_
 def test_header_only_promises_the_halves_that_rendered(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With skills but no MCP servers the header must not tell the agent about
-    `ava.mcps.servers()`, and it must carry the subset escape hatch: a narrowed
-    index hides entries from this listing only, and `ava.help(ava.skills)` still
-    enumerates the whole catalog."""
     monkeypatch.setattr(mcps, "servers", list)
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
     _write_skill(fake_skills_dir, "gamma", "gamma", "Gamma desc")
@@ -208,80 +169,39 @@ def test_header_only_promises_the_halves_that_rendered(
         AgentSlices.resolve(
             default_reader=defaults(agent__skills_to_inject_into_system_prompt=["alpha"])
         ),
-        catalog=build_model_catalog(),
     )
     assert "MCP" not in text
     assert "ava.help(ava.skills)" in text
     assert "subset" in text
 
 
-_MATCH_FIRST_PARAGRAPH = (
-    "Before starting any task, first match it against this index: name the skill(s) "
-    "you plan to use and why, and write that reasoning into your final output."
-)
-_MATCH_EVERY_TASK_PARAGRAPH = "This is your index of what you can already do."
-
-
-def test_default_index_instructs_matching_capabilities_first(fake_skills_dir: Path) -> None:
-    """The shared tuning floor gives every rendered index the match-first instruction."""
-    _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
-
-    assert _MATCH_FIRST_PARAGRAPH in capabilities_section(
-        AgentSlices.resolve(
-            default_reader=defaults(agent__skills_to_inject_into_system_prompt=["*"])
-        ),
-        catalog=build_model_catalog(),
-    )
-
-
-def test_match_first_instruction_can_be_disabled(fake_skills_dir: Path) -> None:
-    """An explicit false override removes only the rollbackable match-first paragraph."""
-    _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
-
-    text = capabilities_section(
-        AgentSlices.resolve(
-            default_reader=defaults(
-                agent__skills_to_inject_into_system_prompt=["*"],
-                agent__prompt_capabilities_match_first_enabled=False,
-            )
-        ),
-        catalog=build_model_catalog(),
-    )
-
-    assert _MATCH_FIRST_PARAGRAPH not in text
-    assert _MATCH_EVERY_TASK_PARAGRAPH in text
-    assert "- `ava.skills.alpha` — Alpha desc" in text
-
-
-def test_match_first_instruction_follows_the_rebuild_nudge(fake_skills_dir: Path) -> None:
-    """The action-planning instruction follows the standing index framing."""
+def test_default_index_does_not_request_a_capability_report(fake_skills_dir: Path) -> None:
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
 
     text = capabilities_section(
         AgentSlices.resolve(
             default_reader=defaults(agent__skills_to_inject_into_system_prompt=["*"])
         ),
-        catalog=build_model_catalog(),
     )
 
-    assert text.index(_MATCH_EVERY_TASK_PARAGRAPH) < text.index(_MATCH_FIRST_PARAGRAPH)
+    paragraphs = text.split("\n\n")
+    assert paragraphs[2].startswith("This is your index of what you can already do.")
+    assert paragraphs[3].startswith("**Skills**")
+    for phrase in ("Before starting any task", "name the skill", "final output"):
+        assert phrase not in text
 
 
-def test_empty_index_omits_the_match_first_instruction(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No standalone task instruction remains when neither capabilities half renders."""
+def test_empty_index_renders_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mcps, "servers", list)
 
     text = capabilities_section(
         AgentSlices.resolve(default_reader=defaults(agent__skills_to_inject_into_system_prompt=[])),
-        catalog=build_model_catalog(),
     )
 
     assert text == ""
-    assert _MATCH_FIRST_PARAGRAPH not in text
 
 
 def test_delegation_check_makes_consulting_the_index_mandatory(fake_skills_dir: Path) -> None:
-    """The capability check names both the index and the skill-loading call."""
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
 
     text = delegation_check_section(
@@ -331,11 +251,6 @@ def test_delegation_check_routes_nontrivial_work_without_forcing_methods(
 def test_delegation_check_drops_the_index_step_when_there_is_no_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`_capabilities_section` renders nothing for an agent with no skills and no
-    MCP servers (AVA_SDK_DISABLE=skills, an empty inject list, a cluster with
-    nothing converged). Ordering that agent to read `# Capabilities` points it at
-    a section that is not in its prompt — so the step is dropped and the rest
-    renumbered."""
     monkeypatch.setattr(mcps, "servers", list)
 
     text = delegation_check_section(
@@ -358,12 +273,7 @@ def test_building_the_prompt_records_no_skill_attribution(
     monkeypatch: pytest.MonkeyPatch,
     set_machine_identity: Callable[..., None],
 ) -> None:
-    """An agent whose prompt was built but which never touched a skill must own
-    zero `skill_invoked` rows. Prompt assembly is exposure, not use,
-    and only the `loaded` depth is recorded."""
-    set_machine_identity(
-        role="agent-runner", name="test-machine"
-    )  # the built prompt names its machine
+    set_machine_identity(role="agent-runner", name="test-machine")
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc", body="# A\n")
     _write_skill(fake_skills_dir / "grp", "beta", "beta", "Beta desc", body="# B\n")
 
@@ -372,9 +282,6 @@ def test_building_the_prompt_records_no_skill_attribution(
     def _record(_db: object, event: Any) -> None:
         writes.append({"event": event})
 
-    # Stub the ONE write path — every skill_invoked row goes through the
-    # audit-event writer — so any regression that routes prompt assembly (or an
-    # index render) into a skill_invoked write fails this test.
     monkeypatch.setattr(audit_events, "record_audit_reported", _record)
     monkeypatch.setattr(agent_identity, "require_agent_id", lambda: 1)
 
@@ -387,20 +294,12 @@ def test_building_the_prompt_records_no_skill_attribution(
         catalog=build_model_catalog(),
     )
 
-    assert writes == []  # prompt assembly records nothing
-    # And the prompt carries the index once — the expanded SDK reference does
-    # not re-render the skills namespace.
+    assert writes == []
     assert "## ava.skills" not in prompt
     assert prompt.count("- `ava.skills.alpha` — Alpha desc") == 1
 
 
 def test_flagged_description_withheld_from_index(fake_skills_dir: Path) -> None:
-    """Audit round-2 up-security-trust P0-1/P0-2 (merged-main behavior): a skill
-    description carrying an injection imperative is refused at MOUNT by the
-    supply-chain gate (scan_text_critical, P0-1) — it never reaches the
-    namespace or the index, not even as a marker line. The index-level marker
-    (P0-2, _index_line) stays as the fallback for descriptions that pass the
-    mount gate but trip the in-depth check."""
     _write_skill(
         fake_skills_dir,
         "evil",
@@ -409,17 +308,15 @@ def test_flagged_description_withheld_from_index(fake_skills_dir: Path) -> None:
     )
     section = capabilities_section(
         AgentSlices.resolve(default_reader=defaults()),
-        catalog=build_model_catalog(),
     )
     assert "ignore previous instructions" not in section
-    assert "`ava.skills.evil`" not in section  # refused at mount: no marker, no entry
+    assert "`ava.skills.evil`" not in section
 
 
 def test_clean_description_still_indexed(fake_skills_dir: Path) -> None:
     _write_skill(fake_skills_dir, "ok", "ok", "a perfectly normal description")
     section = capabilities_section(
         AgentSlices.resolve(default_reader=defaults()),
-        catalog=build_model_catalog(),
     )
     assert "ok" in section
     assert "security-flagged" not in section
@@ -428,12 +325,6 @@ def test_clean_description_still_indexed(fake_skills_dir: Path) -> None:
 def test_runtime_removed_surface_renders_nothing(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The eval-isolation boundary removes SDK surfaces at runtime via
-    `sdk_disable.apply_sdk_disable` (mcps, ui, tasks, ...) without touching
-    `settings.agent.sdk_disable` — the boot of an isolated eval agent crashed
-    in `_mcp_index_lines` when `ava.mcps` was gone but the config check could
-    not see it. The applied-disable registry records the removal, so a removed
-    surface renders no MCP lines and must not raise."""
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
     monkeypatch.delattr(ava, "mcps", raising=False)
 
@@ -446,7 +337,6 @@ def test_runtime_removed_surface_renders_nothing(
         AgentSlices.resolve(
             default_reader=defaults(agent__skills_to_inject_into_system_prompt=["*"])
         ),
-        catalog=build_model_catalog(),
     )
     assert "- `ava.skills.alpha` — Alpha desc" in text
     assert "MCP" not in text
@@ -455,7 +345,6 @@ def test_runtime_removed_surface_renders_nothing(
 def test_applied_disable_registry_marks_runtime_removed_path(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A registry-recorded runtime removal disables the exact dotted path."""
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
 
     monkeypatch.delattr(ava.agents, "get_last_message", raising=False)
@@ -476,7 +365,6 @@ def test_applied_disable_registry_marks_runtime_removed_path(
 
 
 def test_unregistered_missing_path_is_not_sdk_disabled(**changes: Any) -> None:
-    """A path that never existed must remain eligible for expansion diagnostics."""
     assert (
         disabled_by_sdk_config(
             "missing_sdk_namespace",
