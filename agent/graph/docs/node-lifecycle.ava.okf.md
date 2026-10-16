@@ -19,7 +19,7 @@ boundary (claim) or at the safety cap; an exception exits immediately, with
 `logger.opt(exception=True)` inside the `except` block so the record carries the
 traceback while the exception is still active (the sink injects the traceback
 fields). The `BaseException` catch is why `SystemExit` / `KeyboardInterrupt`
-also write an exit record; every path re-raises. Every record names its owning
+also write an exit record; every path re-raises. Every `node_exit` record names its owning
 agent explicitly — the process-wide log binding is the no-agent `-` sentinel
 since the explicit-ownership change — because the Inspector activity projection
 keys node durations by the record's `agent_id` and drops unattributed records.
