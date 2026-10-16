@@ -1,29 +1,3 @@
-"""Layout invariants — real-engine layer of the two-layer defense (I1–I6).
-
-Task #1024 (R4, layer 3): every named layout invariant (lib/layout.ts
-LAYOUT_INVARIANTS) gets a Playwright assertion at the three viewport tiers
-(320/390/768). The jsdom half lives in page.test.tsx + layout.test.ts.
-
-Why fake EventSource: the timeline page is SSE-fed, and a fresh browser
-context cannot open the SSE stream against a cookie-gated deployed cluster,
-so without a stream the surface never grows past viewport width and every
-invariant false-passes (the #979 test comment's self-admitted gap).
-`page.route` cannot stream to an EventSource (evaluation finding #1), so
-the suite injects a deterministic fake via `add_init_script`: open →
-snapshot → delta → reconnect. The same mock stream doubles as the fold
-layer's e2e scenario in the R4 layer-1 PR.
-
-Target selection: `AVA_MOBILE_TEST_BASE_URL` set → that URL with real data
-(cookie via AVA_TEST_SESSION_COOKIE); the fake stream is ALWAYS injected.
-Unset → session-scoped `frontend_proc` build with stubbed /api/** — CI mode.
-It also locks the shell's on-screen-keyboard contract (task #4779): with a
-controllable fake `window.visualViewport` the composer must stay inside the
-visible band the keyboard leaves (see the keyboard section at the end).
-
-Engine: chromium (CI installs chromium only; webkit is reserved for the
-iOS-Chrome popover test).
-"""
-
 from __future__ import annotations
 
 import os
@@ -47,21 +21,18 @@ from tests.e2e.visual.stubbed_home import (
     wait_layout_settled,
 )
 
-# The three tiers from LAYOUT_VIEWPORT_TIERS (lib/layout.ts): 320 (small
-# phone) / 390 (the #979 precedent) / 768 (md breakpoint edge).
+# ava:ref tests/e2e/visual/docs/layout-invariants.ava.okf.md#layout-invariant-tiers
 VIEWPORTS = [320, 390, 768]
 
 
 @pytest.fixture(scope="session")
 def frontend_target(request: pytest.FixtureRequest) -> str:
-    """Base URL: override env var, else the session frontend_proc build."""
     if OVERRIDE_BASE_URL:
         return OVERRIDE_BASE_URL
     request.getfixturevalue("frontend_proc")
     return FRONTEND_URL
 
 
-# ── Measurements (I1–I6) ────────────────────────────────────────────────
 def _no_page_scroll(page: Page) -> bool:
     return no_document_horizontal_overflow(page)
 
@@ -75,9 +46,6 @@ def _composer_within_viewport(page: Page) -> bool:
 
 
 def _no_page_vertical_scroll(page: Page) -> bool:
-    """I6: the page must not scroll as a whole — the min-h-0 flex chain
-    routes scrolling into the timeline surface. True when the document has
-    no vertical overflow (the surface's own scroll region carries it)."""
     return page.evaluate(
         "() => document.scrollingElement.scrollHeight <= document.scrollingElement.clientHeight + 1"
     )
@@ -91,7 +59,6 @@ def _inbox_rows_within_container(page: Page) -> bool:
 def test_timeline_layout_invariants(
     width: int, playwright_browser: Browser, frontend_target: str
 ) -> None:
-    """The #874/#979 flex-contract regressions, with real content loaded."""
     ctx = new_context(playwright_browser, width)
     try:
         page = open_page(ctx, frontend_target, "/", stub_api=not OVERRIDE_BASE_URL)
@@ -139,7 +106,6 @@ def _content_hover_point(viewport: Locator) -> tuple[float, float]:
 
 
 def _capture_inspector_states(page: Page, panel: Locator, prefix: str) -> None:
-    """Optional full-viewport evidence with the timeline visible beside the panel."""
     evidence = Path(__file__).resolve().parents[3] / "tmp" / "evidence"
     evidence.mkdir(parents=True, exist_ok=True)
     scroller = panel.locator('[data-slot="scroll-area-viewport"], .overflow-y-auto').last
@@ -164,11 +130,10 @@ def _capture_inspector_states(page: Page, panel: Locator, prefix: str) -> None:
     page.screenshot(path=str(evidence / f"{prefix}-scroll.png"))
 
 
+# ava:ref tests/e2e/visual/docs/layout-invariants.ava.okf.md#scroll-surface-reveal
 def test_timeline_scrollbar_hover_reveal(playwright_browser: Browser, frontend_target: str) -> None:
-    """The shared ScrollArea track stays hit-testable without taking layout space."""
     ctx = new_context(playwright_browser, 1280)
     try:
-        # Repeated snapshots cause scroll events that keep resetting the idle timer.
         page = open_page(
             ctx, frontend_target, "/", stub_api=not OVERRIDE_BASE_URL, reconnect_sse=False
         )
@@ -198,7 +163,7 @@ def test_timeline_scrollbar_hover_reveal(playwright_browser: Browser, frontend_t
 
         content_x, content_y = _content_hover_point(viewport)
         page.mouse.move(content_x, content_y)
-        page.wait_for_timeout(350)  # Let an accidental 300 ms hover fade become observable.
+        page.wait_for_timeout(350)
         _assert_scrollbar_state(page, track, "0", "content hover")
 
         scroll_top = viewport.evaluate("el => el.scrollTop")
@@ -222,7 +187,6 @@ def test_timeline_scrollbar_hover_reveal(playwright_browser: Browser, frontend_t
 def test_inspector_scrollbar_hover_reveal(
     playwright_browser: Browser, frontend_target: str
 ) -> None:
-    """The inspector has the same overlay scroll surface as the timeline."""
     if OVERRIDE_BASE_URL:
         pytest.skip("the inspector scroll matrix requires deterministic stubbed sections")
     ctx = new_context(playwright_browser, 1280)
@@ -237,7 +201,7 @@ def test_inspector_scrollbar_hover_reveal(
         )
         wait_layout_settled(page)
         assert page.evaluate("matchMedia('(hover: hover)').matches")
-        panel = page.get_by_role("tabpanel", name="Inspector", exact=True)
+        panel = page.locator('[data-testid="shared-inspector"]')
         expect(panel).to_be_visible()
         expect(page.locator('[data-testid="timeline-surface"]')).to_be_visible()
         prefix = os.environ.get("AVA_SCROLLBAR_EVIDENCE_PREFIX")
@@ -299,29 +263,21 @@ def test_inspector_scrollbar_hover_reveal(
 def test_fleet_layout_invariants(
     width: int, playwright_browser: Browser, frontend_target: str
 ) -> None:
-    """The fleet page keeps I1 (no page scroll), I4 (Tasks toolbar never
-    widens the page) and I5 (inbox rows never overflow) at every tier."""
     ctx = new_context(playwright_browser, width)
     try:
         page = open_page(ctx, frontend_target, "/fleet", stub_api=not OVERRIDE_BASE_URL)
         wait_layout_settled(page)
         assert _no_page_scroll(page), "I1: page-level horizontal scroll (fleet)"
 
-        # Tasks toolbar — the non-wrapping shrink-0 chips row (#979 fleet half).
-        # TaskGraph defaults to graph mode: "Kanban" is the mode-switch button,
-        # the chips (time window / Done / Canceled) sit at the row's right end.
         page.locator('[role="tab"]', has_text="Tasks").click()
         page.wait_for_selector('button:has-text("Kanban")', timeout=15_000)
         page.wait_for_timeout(800)
         assert _no_page_scroll(page), "I4: Tasks toolbar widens the page"
 
-        # Inbox rows — the notice queue rows must fit their container.
         page.locator('[role="tab"]', has_text="Inbox").click()
         page.wait_for_timeout(1200)
         assert _no_page_scroll(page), "I1: long-title inbox row widens the page"
         if OVERRIDE_BASE_URL:
-            # Deployed target: real data; rows exist in practice but don't
-            # gate on them (an empty queue is legitimate state).
             if page.locator('[data-testid="inbox-row"]').count() > 0:
                 assert _inbox_rows_within_container(page), "I5: inbox row overflows"
         else:
@@ -330,30 +286,11 @@ def test_fleet_layout_invariants(
         ctx.close()
 
 
-# ── On-screen keyboard (task #4779) ────────────────────────────────────
-# The shell sizes itself from the LAYOUT viewport and takes its height from
-# it; a phone keyboard shrinks only the VISUAL viewport. Android is covered by
-# the viewport meta (`interactive-widget=resizes-content`, asserted here), iOS
-# by `VisualViewportHeightSync` pinning <html> to visualViewport.height. No
-# local engine shrinks only the visual viewport, so the suite installs a
-# controllable fake before the app loads and leaves window.innerHeight in
-# place — the iOS contract (keyboard open => visual viewport shorter, layout
-# viewport untouched). The assertion that matters to users is the composer's
-# bottom edge staying inside the visible band; without the fix it sits
-# ~keyboard-height below it, under the keyboard.
-
-# The iPhone tier of this suite (390x664); innerHeight (the layout viewport,
-# which a phone keyboard leaves alone) is this height.
+# ava:ref tests/e2e/visual/docs/layout-invariants.ava.okf.md#on-screen-keyboard-contract
 VIEWPORT_HEIGHT = 664
-# A mid-keyboard visual viewport: the 184px shortfall clears the 150px
-# keyboard threshold in visual-viewport-height-sync.tsx the way every phone
-# keyboard does (even the smallest are ~200px).
 KEYBOARD_HEIGHT = 480
 
 
-# Shadows the native VisualViewport with a controllable stub: `set()` moves the
-# height (and optionally the pinch scale) and dispatches the same `resize` the
-# app listens for, so the shell sees a keyboard without a real one.
 _FAKE_VISUAL_VIEWPORT_JS = """
 (() => {
   const listeners = { resize: new Set(), scroll: new Set() };
@@ -387,7 +324,6 @@ _FAKE_VISUAL_VIEWPORT_JS = """
 
 
 def _set_visual_viewport(page: Page, height: int, *, scale: float = 1) -> None:
-    """Move the fake visual viewport; the app's listeners run synchronously."""
     page.evaluate(
         "([height, scale]) => window.__visualViewport.set(height, scale)", [height, scale]
     )
@@ -414,9 +350,6 @@ def _open_keyboard_page(playwright_browser: Browser, base_url: str) -> Page:
 def test_viewport_meta_asks_chrome_to_resize_content(
     playwright_browser: Browser, frontend_target: str
 ) -> None:
-    """Android half of the contract: Chrome shrinks the layout viewport for the
-    keyboard only when the viewport meta asks it to (Safari ignores the meta —
-    the iOS half is the shell pin test below)."""
     page = _open_keyboard_page(playwright_browser, frontend_target)
     ctx = page.context
     try:
@@ -427,7 +360,6 @@ def test_viewport_meta_asks_chrome_to_resize_content(
 
 
 def test_composer_follows_the_keyboard(playwright_browser: Browser, frontend_target: str) -> None:
-    """The visible band shrinks by the keyboard; composer and shell follow it."""
     page = _open_keyboard_page(playwright_browser, frontend_target)
     ctx = page.context
     try:
@@ -447,25 +379,17 @@ def test_composer_follows_the_keyboard(playwright_browser: Browser, frontend_tar
 def test_keyboard_edges_leave_the_shell_intact(
     playwright_browser: Browser, frontend_target: str
 ) -> None:
-    """Chrome-sized shrinks and pinch-zoom leave the shell alone; closing the
-    keyboard restores the layout height."""
     page = _open_keyboard_page(playwright_browser, frontend_target)
     ctx = page.context
     try:
-        # A toolbar-sized shortfall (100px, below the 150px keyboard threshold)
-        # must not pin the shell — Safari's URL bar moves by tens of pixels.
         _set_visual_viewport(page, VIEWPORT_HEIGHT - 100)
         assert _shell_height_style(page) == ""
 
-        # Keyboard up: pinned, then the user pinch-zooms: the pin is dropped
-        # rather than fighting a viewport the user is scaling.
         _set_visual_viewport(page, KEYBOARD_HEIGHT)
         assert _shell_height_style(page) == f"{KEYBOARD_HEIGHT}px"
         _set_visual_viewport(page, KEYBOARD_HEIGHT, scale=2)
         assert _shell_height_style(page) == ""
 
-        # Back to 1x with the keyboard still up: the pin returns (the real
-        # resize fires again), and closing the keyboard restores the shell.
         _set_visual_viewport(page, KEYBOARD_HEIGHT)
         assert _shell_height_style(page) == f"{KEYBOARD_HEIGHT}px"
         _set_visual_viewport(page, VIEWPORT_HEIGHT)
@@ -474,7 +398,6 @@ def test_keyboard_edges_leave_the_shell_intact(
         ctx.close()
 
 
-# Pinned message masking and edge continuity.
 _STICKY_SURFACE = """el => {
   const style = getComputedStyle(el);
   const top = getComputedStyle(el, '::before');
@@ -509,34 +432,7 @@ _PANE_BEFORE_TRANSITION_MS = (
 
 
 def _wait_for_pane_settled(page: Page, header_selector: str, *, poll_ms: int = 20) -> None:
-    """Wait for the frosted pane's ``::before`` background-color transition to finish.
-
-    `STUCK_HEADER_CLS` / `UNSTUCK_HEADER_CLS` (card.tsx) put a
-    `before:transition-[background-color,backdrop-filter]` on the pane so the
-    frosted look fades in/out instead of snapping between stuck and unstuck
-    (and between resting and hovered). `_assert_sticky_sealed` reads that
-    background color right after triggering the flip (a `data-stuck` change
-    or a hover), which can land mid-transition — the CI flake behind #3464
-    (run 36331070328: dark-390 read `abs(130-242)=112`, a value straight out
-    of the fade rather than the settled one).
-
-    Two phases, both timed off the element's own live `transition-duration`
-    (read here, never hardcoded):
-
-    1. A mandatory wait of one full transition duration. This has to come
-       first and unconditionally: a poll-for-stability loop that starts
-       comparing reads immediately after the trigger races the *start* of the
-       transition too, not just its end — on a hover trigger, back-to-back
-       reads taken before the browser has repainted even once still agree
-       (both still show the pre-hover color), so a naive "two reads match"
-       check can return before the color has moved at all.
-    2. A short poll-for-stability tail, bounded by a further safety margin
-       for CI paint lag, confirming the color has actually landed rather than
-       trusting the nominal duration alone.
-
-    A genuine product regression that never settles still fails fast at the
-    phase-2 deadline instead of hanging the suite.
-    """
+    # ava:ref tests/e2e/visual/docs/layout-invariants.ava.okf.md#sticky-pane-settle
     locator = page.locator(header_selector)
     duration_ms = locator.evaluate(_PANE_BEFORE_TRANSITION_MS)
     page.wait_for_timeout(duration_ms)
@@ -580,7 +476,6 @@ def test_pinned_work_detail_seal(
             reconnect_sse=False,
         )
         wait_layout_settled(page)
-        # A transient DOM theme for CSS coverage, without changing stored preferences.
         page.evaluate(
             "theme => document.documentElement.classList.toggle('dark', theme === 'dark')", theme
         )
@@ -594,7 +489,6 @@ def test_pinned_work_detail_seal(
         header = page.locator(header_selector)
         if header.get_attribute("aria-expanded") == "false":
             header.click()
-        # A detail needs enough body height for its sticky header to stay in range.
         row.locator("pre").evaluate("el => { el.style.minHeight = '1200px'; }")
         row.evaluate("""el => {
           const viewport = el.closest('[data-radix-scroll-area-viewport]');

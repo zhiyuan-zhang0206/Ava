@@ -10,12 +10,19 @@ tags:
 
 The home page displays the selected agent's workspace document beside its message
 stream. Desktop gives the narrow agent tree 16% by default, then divides messages
-and shared context 4:3. To user / Inspector tabs sit at the top of the entire
-right panel. To user contains notifications above the shared document; Inspector
-replaces that entire body with the Inspector's own queries and its ordered section list.
-The To user body stays mounted while hidden so switching tabs preserves reply
-drafts and the document reading position. Below the desktop breakpoint the shared
-context opens as a full-screen reading view with a return-to-messages control.
+and the shared-context panel 4:3. The document is the panel's body — notifications
+tuck in above it — and it stays present for every selected agent: a missing or
+empty document shows the empty state and a legacy `to_user.html` shows the
+migration placeholder, never a collapsed panel. The panel itself is a lazy
+boundary, loaded when the right panel first renders.
+
+The inspector is the panel's secondary view, not a peer tab: the top-bar
+Inspector toggle swaps the body to it (its own queries and ordered section list) and
+the same toggle swaps back. The document body stays mounted while hidden, so the
+switch preserves reply drafts and the document reading position. Below the
+desktop breakpoint the shared context opens as a full-screen reading view from
+the header's To user action — available whenever an agent is selected — with a
+return-to-messages control.
 
 `["to-user", agentId]` owns the root document snapshot. Linked Markdown uses
 that query-key prefix followed by its reference chain. The home-machine ops
@@ -56,8 +63,9 @@ query prefix and includes it in reconnect repair. It does not recursively watch
 linked directories. Refresh/focus rechecks referenced file stamps, so same-name
 attachment replacements receive new versioned URLs even without a body edit.
 
-A missing or empty document does not open a desktop panel; notices and an explicit
-Inspector selection still can. An existing legacy `to_user.html` is preserved and
+Agent workspaces seed an empty `to_user.md` at boot, so the panel surface exists
+from the agent's first turn; until the agent writes, the document area shows its
+empty state (or the legacy placeholder), never nothing. An existing legacy `to_user.html` is preserved and
 reported as awaiting conversion, never rendered. Agent workspace guidance tells
 agents to rewrite their current shared context into Markdown. Removed stored
 format pins are ignored by the existing config-pin resolver.
@@ -65,6 +73,18 @@ format pins are ignored by the existing config-pin resolver.
 A failed read retains an already-cached snapshot and marks it stale; it never
 turns a machine failure into an empty file. Files must remain available on their
 source machine. This is not an offline document store or an archival snapshot.
+
+On desktop the home page mounts the panel for every selected agent (the document
+area owns its empty and legacy states); on narrow viewports the header's To user
+action opens the same panel as the reading view.
+
+```ava-contract
+id = "panel-composition"
+kind = "invariant"
+statement = "The panel's body is the agent's document with the notice area inside it; the inspector is a secondary view that replaces the body while open — the document body stays mounted while hidden so reply drafts and reading position survive — and the document shows again when the inspector closes; the home shell mounts the panel for every selected agent, so a missing document shows its empty state instead of collapsing the panel."
+code = ["ui/web/src/components/context/shared-context-panel.tsx:SharedContextPanel", "ui/web/src/app/page.tsx:HomeShell"]
+tests = ["ui/web/src/components/context/shared-context-panel.test.tsx::shows the document as the panel's body without a view switcher", "ui/web/src/components/context/shared-context-panel.test.tsx::swaps to the inspector view and keeps the mounted document hidden", "ui/web/src/components/context/shared-context-panel.test.tsx::keeps the notice area inside the document body"]
+```
 
 ```ava-contract
 id = "refresh-ownership"
