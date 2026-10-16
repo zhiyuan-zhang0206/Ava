@@ -1,42 +1,18 @@
-"""The agent run timeline — ``GET /api/agents/{agent_id}/run-timeline``.
-
-The data is the two things the agent persists about its own run: its message
-history (the checkpoint) and the understanding tree (``understanding_nodes``).
-The response is a window over both: every level of the tree intersecting the
-window, and below them layer 0, the message units (`base.agents.history.hierarchy.units`).
-No window means the agent's whole lifetime — from the earliest message or node to
-the latest; drilling a node is asking for its span as the window.
-"""
-
+# ava:ref services/derived/insights/run_timeline/docs/range-projection.ava.okf.md#indexed-history-windows
 from __future__ import annotations
 
-from bisect import bisect_right
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from base.agents.history.hierarchy.serve import ServedNode, serve_nodes
-from base.agents.history.hierarchy.store import load_generation_costs, load_nodes
-from base.agents.history.hierarchy.units import DisplayBlock
-from base.db import Database
-from base.lm.content import message_addl_kwargs
 from services.derived.insights.run_timeline.context import router as context_router
-from services.derived.insights.run_timeline.history import HistoryView, HistoryViewCache
 from services.derived.insights.run_timeline.links import router as links_router
 from services.derived.insights.run_timeline.messages import router as messages_router
+from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.schemas import (
-    RunTimelineGeneration,
-    RunTimelineNode,
     RunTimelineResponse,
-    RunTimelineUnit,
-    RunTimelineUsage,
     RunTimelineWindow,
-)
-from services.derived.insights.run_timeline.tokens import (
-    BlockContexts,
-    block_tokens,
-    span_tokens,
 )
 
 router = APIRouter()
@@ -44,88 +20,8 @@ router.include_router(messages_router)
 router.include_router(context_router)
 router.include_router(links_router)
 
-# What the window is when the agent has neither a message nor a node.
+
 _EMPTY_WINDOW = timedelta(hours=24)
-
-
-def _lifetime(view: HistoryView, nodes: list[ServedNode]) -> tuple[datetime, datetime] | None:
-    """The earliest and latest of the agent's messages and understanding nodes (read times)."""
-    nodes_extent = (min(n.start for n in nodes), max(n.end for n in nodes)) if nodes else None
-    extents = [extent for extent in (view.extent, nodes_extent) if extent is not None]
-    if not extents:
-        return None
-    start = min(extent[0] for extent in extents)
-    end = max(extent[1] for extent in extents)
-    return start, end if end > start else start + timedelta(seconds=1)
-
-
-def _covering_leaf(leaves: list[ServedNode], firsts: list[int], index: int) -> str | None:
-    """The id of the level-1 node (`leaves` in message order, `firsts` their first messages) whose span holds `index`."""
-    at = bisect_right(firsts, index) - 1
-    return leaves[at].id if at >= 0 and index <= leaves[at].span_end else None
-
-
-def _inbound_id(view: HistoryView, unit: DisplayBlock) -> int | None:
-    """The inbound row an inbound or note block was made from; the checkpoint stamps it on the message."""
-    if unit.kind not in ("inbound", "note"):
-        return None
-    stamped = message_addl_kwargs(view.history.messages[unit.i0]).get("ava_inbound_id")
-    return stamped if isinstance(stamped, int) else None
-
-
-def _units(
-    view: HistoryView, served: list[ServedNode], start: datetime, end: datetime
-) -> list[RunTimelineUnit]:
-    """The view's blocks intersecting the window, each naming the level-1 node that covers it."""
-    leaves = [node for node in served if node.level == 1]
-    firsts = [leaf.span_start for leaf in leaves]
-    contexts = BlockContexts(view)
-    out: list[RunTimelineUnit] = []
-    for unit in view.units:
-        if unit.start > end or unit.end < start:
-            continue
-        tokens = block_tokens(view, unit)
-        context = contexts.of(unit)
-        out.append(
-            RunTimelineUnit(
-                kind=unit.kind,
-                i0=unit.i0,
-                i1=unit.i1,
-                start=unit.start,
-                end=unit.end,
-                source=unit.source,
-                inbound_id=_inbound_id(view, unit),
-                preview=unit.preview,
-                parent=_covering_leaf(leaves, firsts, unit.i0),
-                context_tokens=tokens.context_tokens,
-                generation_tokens=tokens.generation_tokens,
-                estimated=tokens.estimated,
-                session=context.session,
-                context_total=context.context_total,
-                request=RunTimelineUsage(**vars(context.request))
-                if context.request is not None
-                else None,
-            )
-        )
-    return out
-
-
-def _node(view: HistoryView, node: ServedNode) -> RunTimelineNode:
-    tokens = span_tokens(view, node.span_start, node.span_end)
-    return RunTimelineNode(
-        id=node.id,
-        level=node.level,
-        parent=node.parent,
-        start=node.start,
-        end=node.end,
-        span_start=node.span_start,
-        span_end=node.span_end,
-        summary=node.summary,
-        usage=RunTimelineUsage(**vars(node.usage)),
-        generation=RunTimelineGeneration(**vars(node.generation)) if node.generation else None,
-        context_tokens=tokens.context_tokens,
-        estimated=tokens.estimated,
-    )
 
 
 def _window(
@@ -133,44 +29,55 @@ def _window(
     from_: datetime | None,
     to: datetime | None,
     now: datetime,
+    recent_hours: int | None = None,
 ) -> tuple[datetime, datetime]:
     for name, value in (("from", from_), ("to", to)):
         if value is not None and value.tzinfo is None:
             raise HTTPException(status_code=422, detail=f"{name} must include a timezone offset")
     default = lifetime or (now - _EMPTY_WINDOW, now)
-    start, end = from_ or default[0], to or default[1]
+    end = to or default[1]
+    start = from_ or (
+        max(default[0], end - timedelta(hours=recent_hours))
+        if recent_hours is not None
+        else default[0]
+    )
     if start >= end:
         raise HTTPException(status_code=422, detail="from must be earlier than to")
     return start, end
 
 
-@router.get("/api/agents/{agent_id}/run-timeline")
+@router.get(
+    "/api/agents/{agent_id}/run-timeline",
+    description="A time window; bounded reads omit dense message detail and name its snapshot.",
+)
 def get_run_timeline(
     request: Request,
     agent_id: int,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: Annotated[datetime | None, Query()] = None,
+    recent_hours: Annotated[int | None, Query(ge=1, le=168)] = None,
+    max_units: Annotated[int | None, Query(ge=1, le=10000)] = None,
+    snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
 ) -> RunTimelineResponse:
-    """The understanding tree and the message units in a window; no window means the agent's whole lifetime."""
-    db: Database = request.app.state.db
-    views: HistoryViewCache = request.app.state.run_timeline_views
-    view = views.get(db, agent_id)
-    stored = load_nodes(db, agent_id)
-    reach = max((node.span_end + 1 for node in stored), default=0)
-    if reach > len(view.history.messages):
-        # A node written after the cached view was built (or an orphan, which serve_nodes skips).
-        view = views.get(db, agent_id, needs=reach)
-    job_costs, check_costs = load_generation_costs(db, agent_id)
-    served = serve_nodes(stored, view.usage, job_costs, check_costs, view.read, view.units)
-    lifetime = _lifetime(view, served)
-    start, end = _window(lifetime, from_, to, datetime.now(UTC))
-    nodes = [node for node in served if node.start <= end and node.end >= start]
+    reader: TimelineReader = request.app.state.run_timeline_reader
+    if recent_hours is not None and (from_ is not None or to is not None):
+        raise HTTPException(status_code=422, detail="recent_hours cannot be combined with from/to")
+    for name, value in (("from", from_), ("to", to)):
+        if value is not None and value.tzinfo is None:
+            raise HTTPException(422, f"{name} must include a timezone offset")
+    if from_ is not None and to is not None and from_ >= to:
+        raise HTTPException(422, "from must be earlier than to")
+    cut = reader.get(agent_id, snapshot)
+    start, end = _window(cut.lifetime, from_, to, datetime.now(UTC), recent_hours)
+    nodes, units, omitted = reader.window(cut, start, end, max_units)
     return RunTimelineResponse(
         agent_id=agent_id,
         window=RunTimelineWindow(from_=start, to=end),
-        lifetime=(
-            RunTimelineWindow(from_=lifetime[0], to=lifetime[1]) if lifetime is not None else None
-        ),
-        nodes=[_node(view, node) for node in nodes],
-        units=_units(view, served, start, end),
+        lifetime=RunTimelineWindow(from_=cut.lifetime[0], to=cut.lifetime[1])
+        if cut.lifetime
+        else None,
+        nodes=nodes,
+        units=units,
+        units_omitted=omitted,
+        snapshot=cut.id,
     )
