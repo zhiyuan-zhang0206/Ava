@@ -13,8 +13,11 @@ tags:
 
 `ava_memory` owns every memory context note; disabling the plugin removes the
 stores, the SDK surface, the notes, and the write-discipline section together
-(`notes.py` builds the two index notes, `inherit.py` the inherited one,
-`plugin.py` registers all three). All are laid down by `init_context` behind
+(`notes.py` builds the two index notes —
+[[ava_builtins/plugins/ava_memory/docs/memory-index-notes.ava.okf.md]] — `inherit.py` the
+inherited one —
+[[ava_builtins/plugins/ava_memory/docs/memory-inheritance.ava.okf.md]] — and `plugin.py`
+registers all three). All are laid down by `init_context` behind
 the SystemMessage; see [[agent/graph/docs/context-notes/context-notes.ava.okf.md|Standing
 Context]] for the registry itself.
 
@@ -56,3 +59,8 @@ The discipline both stores share (criteria, mandatory-write triggers, the
 `type/*` vocabulary, weighing a memory against self-verifying vs asserted
 sources) is a **system prompt section** owned by the same plugin — fixed text,
 where an index is not.
+It states the one `type/*` list the linter enforces and search exposes; the
+shared pool stays restrained where the personal store may be verbose
+(user rulings 2026-08-28), and a correction is due the same turn it is
+noticed — a stale note is fixed before the task continues (user ruling
+2026-08-09).
