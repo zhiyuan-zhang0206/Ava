@@ -1002,6 +1002,17 @@ jobs:
       - name: Vendored Postgres runtime (production's server build)
         uses: ./.github/actions/vendor-pg-runtime
 
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps (TypeScript source parser)
+        working-directory: ui/web
+        run: npm ci
+
       - name: Run pytest shard
         id: pytest-shard
         shell: bash
@@ -1203,6 +1214,17 @@ jobs:
 
       - name: Vendored Postgres runtime (production's server build)
         uses: ./.github/actions/vendor-pg-runtime
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps (TypeScript source parser)
+        working-directory: ui/web
+        run: npm ci
 
       - name: Prepare selected-test Postgres scratch
         id: prepare-pg-scratch
