@@ -290,7 +290,7 @@ class TestMultimodalMessage:
     def test_image_to_non_vision_model_422(
         self, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
     ) -> None:
-        tid = _seed_agent(db_conn, local_machine=machine_identity)
+        tid = _seed_vision_agent(db_conn, model="glm-5.3", local_machine=machine_identity)
         with gateway_test_client(machine=machine_identity) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
@@ -366,15 +366,15 @@ class TestMultimodalMessage:
 
         from base.packages.plugin_providers import build_model_catalog
 
-        model = "deepseek-vision-fixture"
-        base = build_model_catalog().models["deepseek-flash"]
+        model = "glm-vision-fixture"
+        base = build_model_catalog().models["glm-5.3"]
         catalog = add_models(
             model_catalog,
             {
                 model: replace(
                     base,
                     spawnable=False,
-                    unavailable_fallback="deepseek-flash",
+                    unavailable_fallback="glm-5.3",
                     media_types=frozenset({"image"}),
                 )
             },

@@ -282,8 +282,11 @@ class TestModelSupportsVision:
     def test_registered_vision_model_passes(self, *, model_catalog: ModelCatalog) -> None:
         assert model_supports_vision("glm-5.3-flash", catalog=model_catalog) is True
 
-    def test_registered_text_only_deepseek_fails(self, *, model_catalog: ModelCatalog) -> None:
-        assert model_supports_vision("deepseek-flash", catalog=model_catalog) is False
+    def test_registered_deepseek_flash_passes(self, *, model_catalog: ModelCatalog) -> None:
+        assert model_supports_vision("deepseek-flash", catalog=model_catalog) is True
+
+    def test_registered_text_only_model_fails(self, *, model_catalog: ModelCatalog) -> None:
+        assert model_supports_vision("glm-5.3", catalog=model_catalog) is False
 
     def test_unregistered_id_falls_back_to_prefix(self, *, model_catalog: ModelCatalog) -> None:
         assert model_supports_vision("claude-unknown-id", catalog=model_catalog) is True

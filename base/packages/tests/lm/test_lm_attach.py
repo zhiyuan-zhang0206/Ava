@@ -1,9 +1,6 @@
-"""Contract tests for turn-boundary attachment packing."""
-
 from __future__ import annotations
 
 import base64
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -22,20 +19,7 @@ from base.lm.attach.packing import (
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import media_types_for_model
 from base.lm.provider_api import AttachPolicy, ProviderBinding
-from base.packages.tests.model_catalog import AddBindings, AddModels
-
-
-@pytest.fixture
-def deepseek_vision_model(
-    add_models: AddModels, model_catalog: ModelCatalog
-) -> tuple[str, ModelCatalog]:
-    """Exercise DeepSeek's attachment policy in a test-owned replacement catalog."""
-    model = "deepseek-vision-fixture"
-    catalog = add_models(
-        model_catalog,
-        {model: replace(model_catalog.models["deepseek-flash"], media_types=frozenset({"image"}))},
-    )
-    return model, catalog
+from base.packages.tests.model_catalog import AddBindings
 
 
 def _entry(path: Path, label: str | None = None) -> AttachEntry:
@@ -54,9 +38,9 @@ def _padded_png(path: Path, file_size: int, *, dimensions: tuple[int, int] = (2,
 
 
 def test_deepseek_image_uses_a_data_uri_block(
-    tmp_path: Path, deepseek_vision_model: tuple[str, ModelCatalog], *, model_catalog: ModelCatalog
+    tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    model_name, model_catalog = deepseek_vision_model
+    model_name = "deepseek-flash"
     image_path = tmp_path / "example.png"
     image_bytes = _png(image_path)
 
@@ -73,10 +57,6 @@ def test_deepseek_image_uses_a_data_uri_block(
 def test_blocks_interleave_each_caption_line_with_its_media(
     tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    # One delivered image, one skipped file: the content blocks must read
-    # [text(notice), text(line1), image1, text(line2)] — every media block
-    # immediately preceded by its own caption line (frontend pairing contract),
-    # the skipped entry's line present without a media block.
     image_path = tmp_path / "example.png"
     image_bytes = _png(image_path)
     unknown = tmp_path / "notes.txt"
@@ -150,8 +130,6 @@ def test_bad_files_are_skipped_without_aborting_the_pack(
     )
 
     assert pack is not None
-    # Skipped entries carry their caption line as a text block but never a
-    # media block — the pack stays text-only.
     assert [b.get("type") for b in pack.blocks] == ["text", "text", "text", "text"]
     assert [reason for _, reason in pack.skipped] == [
         "file does not exist",
@@ -195,14 +173,14 @@ def test_claude_attach_policy_size_limits(tmp_path: Path, *, model_catalog: Mode
     assert pack.delivered == [str(delivered_image.resolve())]
     assert [reason for _, reason in pack.skipped] == [
         "file exceeds 10 MiB limit",
-        "file exceeds 20 MiB limit",  # core ceiling beats the 32 MiB provider rule
+        "file exceeds 20 MiB limit",
     ]
 
 
 def test_core_size_ceiling_precedes_provider_policy_limits(
-    tmp_path: Path, deepseek_vision_model: tuple[str, ModelCatalog], *, model_catalog: ModelCatalog
+    tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    model_name, model_catalog = deepseek_vision_model
+    model_name = "deepseek-flash"
     oversized_image = tmp_path / "oversized.png"
     delivered_image = tmp_path / "delivered.png"
     _padded_png(oversized_image, 21 * 1024 * 1024)
@@ -216,8 +194,6 @@ def test_core_size_ceiling_precedes_provider_policy_limits(
 
     assert pack is not None
     assert pack.delivered == [str(delivered_image.resolve())]
-    # The core 20 MiB ceiling is checked first; the deepseek binding's 32 MiB
-    # rule cannot raise the effective cap (same precedence as before plugins).
     assert [reason for _, reason in pack.skipped] == ["file exceeds 20 MiB limit"]
 
 
@@ -241,11 +217,10 @@ def test_provider_without_attach_policy_uses_core_size_and_dimension_defaults(
 def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    deepseek_vision_model: tuple[str, ModelCatalog],
     *,
     model_catalog: ModelCatalog,
 ) -> None:
-    model_name, model_catalog = deepseek_vision_model
+    model_name = "deepseek-flash"
     from base.lm.attach import packing as attach
 
     monkeypatch.setattr(attach, "ATTACH_MAX_FILES_PER_TURN", 15)
@@ -269,7 +244,6 @@ def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
 
 
 def test_builtin_provider_bindings_own_attach_policy(*, model_catalog: ModelCatalog) -> None:
-
     assert model_catalog.bindings["claude-"].attach == AttachPolicy(
         file_size_limits={"image": 10 * 1024 * 1024, "pdf": 32 * 1024 * 1024},
         image_dimension_tiers=((1, 8000),),
@@ -298,7 +272,7 @@ def test_per_turn_file_count_and_total_byte_caps_keep_first_entries(
     assert count_pack.skipped[-1][1] == "turn already has 8 delivered files"
 
     size_entries: list[AttachEntry] = []
-    file_size = ATTACH_MAX_TOTAL_BYTES // 3 + 1  # below 20 MiB; 3 files exceed 48 MiB total
+    file_size = ATTACH_MAX_TOTAL_BYTES // 3 + 1
     for index in range(3):
         path = tmp_path / f"large-{index}.mp4"
         path.write_bytes(b"x" * file_size)
@@ -312,9 +286,9 @@ def test_per_turn_file_count_and_total_byte_caps_keep_first_entries(
 
 
 def test_image_dimensions_and_model_capabilities_are_enforced(
-    tmp_path: Path, deepseek_vision_model: tuple[str, ModelCatalog], *, model_catalog: ModelCatalog
+    tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    model_name, model_catalog = deepseek_vision_model
+    model_name = "deepseek-flash"
     huge_image = tmp_path / "huge.png"
     Image.new("1", (9000, 9000)).save(huge_image)
     ordinary_image = tmp_path / "ordinary.png"
@@ -324,9 +298,7 @@ def test_image_dimensions_and_model_capabilities_are_enforced(
 
     deepseek_pack = pack_attachments(model_name, [_entry(huge_image)], catalog=model_catalog)
     claude_pack = pack_attachments("claude-sonnet-5", [_entry(huge_image)], catalog=model_catalog)
-    text_only_pack = pack_attachments(
-        "deepseek-flash", [_entry(ordinary_image)], catalog=model_catalog
-    )
+    text_only_pack = pack_attachments("glm-5.3", [_entry(ordinary_image)], catalog=model_catalog)
     claude_video_pack = pack_attachments("claude-sonnet-5", [_entry(video)], catalog=model_catalog)
 
     assert deepseek_pack is not None
@@ -387,10 +359,9 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(
 
     assert pack_attachments("gemini-3.8-flash", [], catalog=model_catalog) is None
 
-    pack = pack_attachments("deepseek-flash", [_entry(image_path)], catalog=model_catalog)
+    pack = pack_attachments("glm-5.3", [_entry(image_path)], catalog=model_catalog)
 
     assert pack is not None
-    # The skipped entry's caption line is a text block; no media block.
     assert [b.get("type") for b in pack.blocks] == ["text", "text"]
     assert pack.delivered == []
     assert pack.skipped == [(str(image_path.resolve()), "your model cannot receive image")]

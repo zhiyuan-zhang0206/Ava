@@ -11,6 +11,30 @@ These packages ship with Ava. The generic registration, contribution surfaces,
 loading and manifest contracts belong to [[docs/plugins/plugins.ava.okf.md]].
 Each implementation below owns its behavior and component documentation.
 
+## DeepSeek provider plugin
+
+```ava-contract
+id = "lm-deepseek-provider"
+kind = "invariant"
+statement = "The DeepSeek provider (`ava_builtins/plugins/lm_deepseek/provider.py`) talks to DeepSeek's Anthropic-compatible endpoint via `DeepSeekChatModel`, reads `DEEPSEEK_API_KEY` from process environment or `.env` aliases (so gateway draft models work after capability-key stripping), maps graded reasoning effort onto `output_config.effort` via `extra_body` and `none` onto `thinking={\"type\": \"disabled\"}`, and declares native image attachment support (`media_types=frozenset({\"image\"})`, 32 MiB inline limit, 8192 px up to 14 images / 4096 px from 15 images) on `deepseek-flash` while keeping the prefix fallback `vision=False`."
+code = [
+  "ava_builtins/plugins/lm_deepseek/provider.py:<module>",
+  "ava_builtins/plugins/lm_deepseek/provider.py:deepseek_wire_effort",
+  "ava_builtins/plugins/lm_deepseek/provider.py:_require_deepseek_key",
+  "ava_builtins/plugins/lm_deepseek/provider.py:build",
+  "ava_builtins/plugins/lm_deepseek/provider.py:PROVIDER",
+]
+tests = [
+  "base/packages/tests/lm/test_lm_attach.py::test_deepseek_image_uses_a_data_uri_block",
+  "base/packages/tests/lm/test_lm_attach.py::test_deepseek_attach_policy_switches_dimension_tier_at_image_15",
+]
+```
+
+`deepseek-flash` (DeepSeek V4.1-Flash) accepts Anthropic-format `image` blocks
+on `/anthropic` (`document` blocks are unsupported, so PDF remains out), pins a
+150s stream TTFT timeout to bound queue stalls, and uses 0.374 / 0.512
+compaction thresholds on its 1M context window.
+
 | Plugin | Responsibility |
 |---|---|
 | [[ava_builtins/plugins/ava_code/docs/ava_code.ava.okf.md]] | Coding workspace and context |

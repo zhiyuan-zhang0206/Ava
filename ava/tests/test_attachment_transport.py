@@ -1,10 +1,8 @@
-"""Contract tests for `ava.self.attach`: a registration goes into the exec turn's state update."""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -19,7 +17,6 @@ from base.packages.tests.model_catalog import AddModels
 
 
 def take_attachments() -> list[dict[str, object]]:
-    """The registrations in the bound turn's state update, drained as the exec node drains them."""
     update = ava.state_update
     assert isinstance(update, dict)
     return cast("list[dict[str, object]]", update.pop("attach", []))
@@ -27,7 +24,6 @@ def take_attachments() -> list[dict[str, object]]:
 
 @pytest.fixture(autouse=True)
 def _exec_turn() -> Iterator[None]:
-    """Run as an exec turn: the state slot is bound, as the exec child binds it."""
     ava.state = object()
     ava.state_update = {}
     yield
@@ -36,9 +32,6 @@ def _exec_turn() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _media_capable_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The attach transport is a media-capable-model feature: a text-only
-    model's attach call is rejected at the model gate (user ruling 2026-08-28),
-    so the buffer contract tests run as a media-capable agent."""
     from base.config import settings
 
     monkeypatch.setattr(settings.lm, "llm_model", "gpt-5.6-sol")
@@ -92,7 +85,7 @@ def test_validates_path_suffix_size_and_label(
     with pytest.raises(ValueError, match="20 MiB"):
         attach(oversized)
     with pytest.raises(TypeError, match="label"):
-        attach(image, label=1)  # type: ignore[arg-type]
+        attach(image, label=cast(Any, 1))
     with pytest.raises(ValueError, match="120"):
         attach(image, label="x" * (ATTACH_MAX_LABEL_CHARS + 1))
 
@@ -114,9 +107,6 @@ def test_uses_workspace_relative_path_semantics(
 def test_rejects_text_only_model(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
-    """A text-only model's attach call fails at the model gate with a clear
-    error and registers nothing — the member is hidden from its SDK docs, so
-    the call is the only path that can reach it (user ruling 2026-08-28)."""
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     from base.config import settings
 
@@ -138,20 +128,19 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
     *,
     model_installation: Installation,
 ) -> None:
-    """A withdrawn vision pin is gated as its text-only fallback (task #3212)."""
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     from dataclasses import replace
 
     from base.config import settings
 
-    model = "deepseek-vision-fixture"
+    model = "glm-vision-fixture"
     model_catalog = add_models(
         model_catalog,
         {
             model: replace(
-                model_catalog.models["deepseek-flash"],
+                model_catalog.models["glm-5.3"],
                 spawnable=False,
-                unavailable_fallback="deepseek-flash",
+                unavailable_fallback="glm-5.3",
                 media_types=frozenset({"image"}),
             )
         },
@@ -172,13 +161,9 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
 def test_rejects_modality_not_supported_by_model(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
-    """A file whose modality the model's attach set excludes is rejected at
-    registration with the allowed set in the error — never a silent pack-time
-    skip (user ruling 2026-08-28)."""
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     from base.config import settings
 
-    # gpt-5.6-sol is image-only.
     monkeypatch.setattr(settings.lm, "llm_model", "gpt-5.6-sol")
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"mp4")
@@ -192,10 +177,6 @@ def test_rejects_modality_not_supported_by_model(
 def test_attach_modality_matrix_follows_registry(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
-    """The per-model attach-modality matrix drives validation: Gemini accepts
-    video (image/pdf/audio/video), Claude rejects it (image/pdf) — the
-    registry's declared media matrix is the attach contract (user ruling
-    2026-08-28)."""
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     from base.config import settings
 
