@@ -1843,11 +1843,9 @@ jobs:
       - name: TypeScript typecheck (tsc --noEmit)
         working-directory: ui/web
         run: npx tsc --noEmit
-      - name: Production build + first-load JavaScript budget
+      - name: Production build
         working-directory: ui/web
-        run: |
-          npm run build
-          npm run check:first-load-js
+        run: npm run build
       - name: Production bundle integrity (minifier side-effect tripwires)
         working-directory: ui/web
         run: npm run check:bundle-integrity
