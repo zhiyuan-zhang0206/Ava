@@ -9,13 +9,8 @@ from urllib.parse import unquote, urlsplit
 from markdown_it import MarkdownIt
 from mdit_py_plugins.footnote import footnote_plugin
 
-from base.agents.to_user.models import (
-    DOCUMENT_FILENAME,
-    MAX_DOCUMENT_BYTES,
-    MAX_REFERENCES,
-    MAX_RESOURCE_BYTES,
-    ToUserResource,
-)
+from base.agents.to_user.models import DOCUMENT_FILENAME, ToUserResource
+from base.config import settings
 
 
 class DocumentMarkdown(MarkdownIt):
@@ -56,6 +51,7 @@ class _RawHtmlReferences(HTMLParser):
 def referenced_files(document: Path, content: str) -> dict[str, Path]:
 
     parser = DocumentMarkdown("commonmark", {"html": True}).enable("table").use(footnote_plugin)
+    max_references = settings.to_user.max_references
     pending = list(parser.parse(content))
     references: dict[str, Path] = {}
 
@@ -64,8 +60,8 @@ def referenced_files(document: Path, content: str) -> dict[str, Path]:
         if path is None:
             return
         references[href] = path
-        if len(references) > MAX_REFERENCES:
-            raise ValueError("To user exceeds the 256 local reference limit")
+        if len(references) > max_references:
+            raise ValueError(f"To user exceeds the {max_references} local reference limit")
 
     while pending:
         token = pending.pop()
@@ -129,13 +125,14 @@ def resolve_reference(workspace: Path, references: list[str]) -> Path:
 
     if workspace.is_symlink():
         raise ValueError("To user workspace must not be a symlink")
-    if not references or len(references) > 8:
-        raise ValueError("A resource requires between one and eight reference IDs")
+    max_depth = settings.to_user.max_chain_depth
+    if not references or len(references) > max_depth:
+        raise ValueError(f"A resource requires between one and {max_depth} reference IDs")
     path = workspace / DOCUMENT_FILENAME
     for resource_id in references:
         if path.suffix.lower() not in (".md", ".markdown"):
             raise ValueError("Only Markdown documents can link further resources")
-        raw, _ = read_regular_file(path, MAX_DOCUMENT_BYTES)
+        raw, _ = read_regular_file(path, settings.to_user.max_document_bytes)
         targets = referenced_files(path, raw.decode("utf-8"))
         matches = [target for href, target in targets.items() if reference_id(href) == resource_id]
         if not matches:
@@ -146,4 +143,4 @@ def resolve_reference(workspace: Path, references: list[str]) -> Path:
 
 def read_resource(workspace: Path, references: list[str]) -> bytes:
     path = resolve_reference(workspace, references)
-    return read_regular_file(path, MAX_RESOURCE_BYTES)[0]
+    return read_regular_file(path, settings.to_user.max_resource_bytes)[0]

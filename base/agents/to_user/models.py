@@ -4,9 +4,6 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 DOCUMENT_FILENAME = "to_user.md"
-MAX_DOCUMENT_BYTES = 256 * 1024
-MAX_RESOURCE_BYTES = 20 * 1024 * 1024
-MAX_REFERENCES = 256
 ResourceId = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
@@ -30,4 +27,4 @@ class ToUserDocument(BaseModel):
 class ToUserReadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     agent_id: int = Field(gt=0)
-    references: list[ResourceId] = Field(default_factory=list, max_length=8)
+    references: list[ResourceId] = Field(default_factory=list)
