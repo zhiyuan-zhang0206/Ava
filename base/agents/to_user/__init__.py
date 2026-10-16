@@ -1,4 +1,4 @@
-from base.agents.to_user.document import read_document
+from base.agents.to_user.document import ensure_document, read_document
 from base.agents.to_user.models import (
     DOCUMENT_FILENAME,
     MAX_DOCUMENT_BYTES,
@@ -14,6 +14,7 @@ __all__ = [
     "MAX_RESOURCE_BYTES",
     "ToUserDocument",
     "ToUserReadRequest",
+    "ensure_document",
     "read_document",
     "read_resource",
     "resolve_reference",

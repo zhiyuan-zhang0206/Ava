@@ -22,17 +22,17 @@ const Inspector = dynamic(() => import("@/components/inspector/inspector-panel")
   loading: () => <InspectorPanelSkeleton />,
 });
 
-export function SharedContextPanel({ agentId, document, notices, noticesFailed, mobile, onClose, onShowDocument }: {
+// ava:ref ui/web/src/docs/frontend-state/shared-context.ava.okf.md#panel-composition
+export function SharedContextPanel({ agentId, document, notices, noticesFailed, mobile, onClose }: {
   agentId: number;
   document: ReturnType<typeof useToUser>;
   notices: NoticeItem[];
   noticesFailed: boolean;
   mobile: boolean;
   onClose: () => void;
-  onShowDocument: () => void;
 }) {
   const t = useTranslations("toUser");
-  const { open: inspecting, toggle } = useInspectorOpen();
+  const { open: inspecting } = useInspectorOpen();
   const queryClient = useQueryClient();
   const [noticeCollapsed, setNoticeCollapsed] = useState(false);
   const notice = notices.at(0);
@@ -41,11 +41,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
       {mobile && <header className={cn("h-11 shrink-0 items-center justify-between border-b px-4 text-sm", FLEX)}>
         <span>{t("sharedContext")}</span><button aria-label={t("backToMessages")} onClick={onClose} className="rounded p-1 hover:bg-accent"><X className="size-4" /></button>
       </header>}
-      <div className={cn("h-11 shrink-0 items-center gap-5 border-b px-4", FLEX)} role="tablist" aria-label={t("views")}>
-        <button role="tab" aria-selected={!inspecting} aria-controls="shared-document" id="shared-document-tab" onClick={() => { onShowDocument(); if (inspecting) toggle(); }} className={cn("h-full border-b-2 px-1 text-xs", !inspecting ? "border-foreground text-foreground" : "border-transparent text-muted-foreground")}>{t("title")}</button>
-        <button role="tab" aria-selected={inspecting} aria-controls="shared-inspector" id="shared-inspector-tab" onClick={() => { if (!inspecting) toggle(); }} className={cn("h-full border-b-2 px-1 text-xs", inspecting ? "border-foreground text-foreground" : "border-transparent text-muted-foreground")}>{t("inspector")}</button>
-      </div>
-      <div id="shared-document" role="tabpanel" aria-labelledby="shared-document-tab" hidden={inspecting} className={cn(MIN_H_0, FLEX_1, FLEX_COL, inspecting ? "hidden" : FLEX)}>
+      <div data-testid="shared-document" hidden={inspecting} className={cn(MIN_H_0, FLEX_1, FLEX_COL, inspecting ? "hidden" : FLEX)}>
         {noticesFailed && <p role="status" className="px-4 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
         {notice && <section className="shrink-0 border-b" aria-label={t("notification")}>
           <div className={cn("h-11 items-center gap-2 px-4 text-xs", FLEX)}>
@@ -63,7 +59,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
         <ToUserDocumentView key={agentId} agentId={agentId} document={document.data} failed={document.isError} pending={document.isFetching} refresh={() => void document.refetch()} />
       </div>
       {inspecting && (
-        <div id="shared-inspector" role="tabpanel" aria-labelledby="shared-inspector-tab" className={cn(FLEX, MIN_H_0, FLEX_1)}><Inspector agentId={agentId} embedded /></div>
+        <div data-testid="shared-inspector" className={cn(FLEX, MIN_H_0, FLEX_1)}><Inspector agentId={agentId} embedded /></div>
       )}
     </aside>
   );
