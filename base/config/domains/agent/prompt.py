@@ -138,6 +138,48 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
+    to_user_soft_limit_words: int = Field(
+        default=1500,
+        gt=0,
+        alias="AVA_TO_USER_SOFT_LIMIT_WORDS",
+        description=(
+            "Soft word limit of the workspace `to_user.md` panel displayed next to the "
+            "agent's messages. Counted CJK-aware: every CJK character counts one word and "
+            "every run of letters/digits counts one, so English reads roughly as words. "
+            "When a panel written through `ava.files` exceeds the limit, a reminder "
+            "note points the agent at keeping the panel easy to scan and carrying detail "
+            "in linked files. The limit never blocks or truncates a write."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    to_user_limit_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
+        default="once_per_compaction",
+        alias="AVA_TO_USER_LIMIT_REMINDER_CADENCE",
+        description=(
+            "How often the to_user soft-limit reminder fires after a panel write that "
+            "leaves the panel over `to_user_soft_limit_words`. 'once_per_compaction': at "
+            "most once per context window, re-armed by a compaction and by the panel "
+            "coming back within its limit (default). 'every_time': on every over-limit "
+            "write."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
     commands_enabled: bool = Field(
         default=True,
         alias="AVA_COMMANDS_ENABLED",

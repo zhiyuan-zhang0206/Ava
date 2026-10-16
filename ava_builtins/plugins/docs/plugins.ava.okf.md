@@ -43,6 +43,7 @@ compaction thresholds on its 1M context window.
 | [[ava_builtins/plugins/ava_sdk_reminder/docs/ava_sdk_reminder.ava.okf.md]] | SDK usage reminders |
 | [[ava_builtins/plugins/ava_silent_idle/docs/ava_silent_idle.ava.okf.md]] | Silent-turn continuation |
 | [[ava_builtins/plugins/ava_syntax_fix/docs/ava_syntax_fix.ava.okf.md]] | Deterministic code corrections |
+| [[ava_builtins/plugins/ava_to_user/docs/ava_to_user.ava.okf.md]] | To-user panel soft-limit reminder |
 
 Skills and MCP packages have separate catalogs under Built-ins; plugin-owned
 skills remain under their plugin's component tree.

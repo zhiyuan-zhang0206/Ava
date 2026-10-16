@@ -427,7 +427,9 @@ def _reminder_content(
         parts.append(
             f"Update your workspace's `{DOCUMENT_FILENAME}` shared with the user if it is stale: "
             "preserve current results, decisions, open questions and next steps; "
-            "remove outdated status. Edit in place, without a separate notification."
+            "remove outdated status, within the panel's soft word limit — links and images "
+            "render for the user, so detail can live in linked files. Edit in place, "
+            "without a separate notification."
         )
     for plugin, section in extensions.compact_reminder_sections():
         contribution = section(agent, catalog=catalog)

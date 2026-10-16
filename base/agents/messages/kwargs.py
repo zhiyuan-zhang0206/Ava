@@ -1,22 +1,3 @@
-"""Typed contract for the `ava_*` metadata carried on a LangChain message's
-`additional_kwargs`.
-
-LangChain forces `additional_kwargs` to be a plain `dict`, so the bag cannot be
-a pydantic model; a `TypedDict` (total=False — every key is contextual to the
-message kind) is the contract. `AvaMsgType` is the discriminator the read side
-dispatches on, and `read_ava_kwargs` is the single convergence point that gives
-a message's kwargs the typed view.
-
-Writers live in `agent/messages/__init__.py` (+ `agent/graph/claim/node.py`, `agent/graph/llm/node.py`);
-readers in `base/agents/history/timeline.py`, `base/agents/history/context_breakdown.py`,
-`agent/graph/recall/memory_recall.py`. It sits in `base/` (leaf) so both the agent
-and the gateway import it without an agent <-> gateway package cycle.
-
-Not exhaustive of `additional_kwargs`: third-party keys ride there too — e.g.
-the community `ChatMoonshot` package writes `reasoning_content` — and is
-deliberately outside this contract.
-"""
-
 from __future__ import annotations
 
 from enum import StrEnum
@@ -25,26 +6,10 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 from base.lm.content import message_addl_kwargs
 
 if TYPE_CHECKING:
-    # Annotation-only on the read helpers; callers always pass real LangChain
-    # messages, but this leaf module sits on the provider-registration import
-    # path, which must stay off the message stack (exec-child boot, task
-    # #3633; `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.messages import BaseMessage
 
 
 class AvaMsgType(StrEnum):
-    """The `ava_msg_type` discriminator on a framework-authored message's
-    `additional_kwargs`. The read side (timeline / context breakdown / memory
-    recall) dispatches on it. A message with no `ava_msg_type` is a plain
-    conversational message (or pre-tag historical data) and falls to each
-    reader's catch-all.
-
-    This is the *vocabulary*, not the stored type: writers persist `<member>.value`
-    (a plain `str`) and readers compare `== AvaMsgType.X`. The value must stay a
-    plain string because LangGraph's checkpoint msgpack serializes an Enum member
-    as a custom type (a persisted-format change plus a deprecation warning on
-    load), so `AvaMessageKwargs` types the field as `str`, mirroring storage."""
-
     ATTACH = "attach"
     INBOUND = "inbound"
     SYSTEM_NOTE = "system_note"
@@ -54,14 +19,6 @@ class AvaMsgType(StrEnum):
 
 
 class ExecStatus(StrEnum):
-    """How one `execute_code` call ended, stored as `ava_exec_status` (`<member>.value`).
-
-    COMPLETED: the code returned. FAILED: it raised, crashed, or was rejected before
-    running (syntax error). TIMED_OUT / CANCELLED: stopped at the sandbox limit / by an
-    interrupt. HALTED: it ended the run by lifecycle request (compact, restart,
-    terminate, impersonation). NOT_RUN: the call never executed (unknown tool, skipped
-    behind an earlier halt). UNKNOWN: the call was interrupted and its result is unconfirmed."""
-
     COMPLETED = "completed"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
@@ -71,23 +28,8 @@ class ExecStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+# ava:ref base/agents/messages/docs/metadata-contracts.ava.okf.md#notetag-closed-set
 class NoteTag(StrEnum):
-    """Category of a framework-injected system note, carried in
-    additional_kwargs['ava_note_tag'] beside ava_msg_type='system_note'.
-
-    The timeline read side passes the tag through as the system_marker
-    `source`, which the UI maps to a chip. A closed set: a new note kind adds a
-    member here AND a matching UI branch — an unmapped tag renders as a loud
-    'unrecognized' marker rather than silently as a generic note.
-
-    The lifecycle_* members are process-lifecycle transitions (terminate /
-    restart-complete / resurrect / fork identity); the rest are one-time
-    guidance notes surfaced before the agent's next turn. `task` marks a
-    task-system notification (assign / update / reminder) delivered through
-    the inbound queue and claimed into a note, like `heartbeat`.
-    `heartbeat_pause` is retained to render historical heartbeat-pause notes.
-    """
-
     IMPERSONATION = "impersonation"
     SDK_HINT = "sdk_hint"
     AGENT_REPLY = "agent_reply"
@@ -97,6 +39,7 @@ class NoteTag(StrEnum):
     SILENT_IDLE_CONTINUE = "silent_idle_continue"
     MEMORY = "memory"
     MEMORY_WRITE_CHECK = "memory_write_check"
+    TO_USER_SOFT_LIMIT = "to_user_soft_limit"
     LIFECYCLE_TERMINATE = "lifecycle_terminate"
     LIFECYCLE_RESTART = "lifecycle_restart"
     LIFECYCLE_RESURRECT = "lifecycle_resurrect"
@@ -117,15 +60,6 @@ class NoteTag(StrEnum):
 
 
 class AvaUsage(TypedDict, total=False):
-    """`ava_usage` on an agent turn's final AIMessage: the figures of the `llm_usage` event
-    emitted at the same moment, from the same `quote`.
-
-    `cost_usd` and the `price_*` rates (USD per 1M tokens) are the usage-time snapshot; an
-    unpriced call carries `unpriced: 1` and none of them. `in_total` includes `cache_read`
-    and the cache writes. A message without this key predates it: its cost is unknown,
-    never estimated.
-    """
-
     model: str
     in_total: int
     out_total: int
@@ -143,23 +77,6 @@ class AvaUsage(TypedDict, total=False):
 
 
 class AvaMessageKwargs(TypedDict, total=False):
-    """The `ava_*` metadata bag on a message's `additional_kwargs`. Every key is
-    contextual to the message kind (total=False): an `inbound` carries source /
-    inbound_id / image_urls, an `exec_output` carries exec_ms / exec_status /
-    exec_started_at / exec_body_start / sdk_calls, a `system_note` carries note_tag, a compact summary carries
-    `ava_compact_id`, an AIMessage carries the reasoning timings. `sdk_calls`
-    is the one framework key without the `ava_` prefix — the frozen wire name
-    for the exec_output's runtime SDK-call tally (`agent/graph/exec/node.py` writes
-    it; the timeline projection reads it back).
-
-    `ava_msg_type` / `ava_note_tag` are typed `str` (not `AvaMsgType` / `NoteTag`)
-    to mirror what is persisted: the value is a plain string (`<member>.value`),
-    because a raw Enum member would take LangGraph's checkpoint msgpack custom-type
-    path. The enums are the write/compare vocabulary, not the storage type — so
-    the contract cannot invite a future write of a member that would break
-    serialization.
-    """
-
     ava_ephemeral_message_id: bool
     ava_impersonation: dict[str, Any]
     ava_msg_type: str
@@ -183,51 +100,18 @@ class AvaMessageKwargs(TypedDict, total=False):
 
 
 def read_ava_kwargs(msg: BaseMessage) -> AvaMessageKwargs:
-    """The typed `ava_*` view of a message's `additional_kwargs`.
-
-    `additional_kwargs` has default_factory=dict, so it is always a dict; this
-    is a typed reinterpretation (no copy, no runtime validation) — the single
-    place the read side trades a raw `dict[str, Any]` for `AvaMessageKwargs`.
-    Third-party keys sharing the dict are simply not surfaced by the type.
-    """
     return cast("AvaMessageKwargs", message_addl_kwargs(msg))
 
 
 def kwargs_read_time(kwargs: AvaMessageKwargs) -> str | None:
-    """`message_read_time` over an already-read kwargs view."""
     return kwargs.get("ava_picked_up_at") or kwargs.get("ava_created_at")
 
 
 def message_read_time(msg: BaseMessage) -> str | None:
-    """ISO wall-clock the message entered the LLM context, or None for legacy.
-
-    `ava_picked_up_at` when present (injected messages: inbound, notes,
-    attachments), else `ava_created_at` (AIMessage and tool output are produced
-    inside the context, so their creation IS their read time; messages
-    persisted before `ava_picked_up_at` existed fall back to it too). Readers
-    that order or display by when the model read a message use this, never
-    `ava_created_at` directly.
-    """
     return kwargs_read_time(read_ava_kwargs(msg))
 
 
-# The header prepended to every replacement compact summary (forced / command /
-# spontaneous) — written by `agent.graph.hooks.compact.compose_summary_message`, and
-# the one invariant the read side (base/agents/history/context_breakdown.py) classifies the
-# untagged summary HumanMessage by. It lives here, in the leaf message-contract
-# module, so the gateway and the insights service can import it without pulling in
-# agent.graph.hooks.compact (whose agent.graph imports do not resolve outside the agent).
-# Two jobs:
-#   1. "just compacted" — the compaction is the one event the post-compact context
-#      has no surviving record of: REMOVE_ALL wipes the turn that ran it, including
-#      the `[system halt] You just called ava.self.compact` ack that announced it.
-#      Without this line the agent re-reads a /compact still sitting in the
-#      summary's verbatim tail as a pending order and runs it again, every turn
-#      (the agent-17 self-compact loop). Stating it happened is the standing signal
-#      the wiped ack cannot be.
-#   2. "your own prior context" — frames the first-person "I" in the body as the
-#      agent's own memory, not the user speaking (the summary lands as a user-role
-#      message).
+# ava:ref base/agents/messages/docs/metadata-contracts.ava.okf.md#compact-summary-header-roles
 COMPACT_SUMMARY_HEADER = (
     "[system] Your context was just compacted. The following is the summary of "
     "your own prior context:"

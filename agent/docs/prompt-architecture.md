@@ -522,3 +522,13 @@ It imposes no document schema. The agent-ID context note includes the current fi
 contents when a context is created or compacted; forks read their own workspace.
 Invalid or unreadable documents produce a repair note rather than preventing the
 agent from starting. The workspace-section switch gates both guidance and loading.
+
+A soft limit nudges maintenance without a schema: the `ava_to_user` plugin's after-exec
+check measures a written panel in CJK-aware words (one per CJK character, one per
+Latin/digit run) against `to_user_soft_limit_words` (1500 by default) and adds one
+reminder note when it is over — throttled by `to_user_limit_reminder_cadence`
+(`once_per_compaction` by default, re-armed by a compaction and by the panel coming
+back within the limit; or `every_time`). The reminder points at carrying detail in
+linked files: links and images in the panel render for the user like a normal Markdown
+editor, so a report or an image can live in its own file. Nothing is blocked,
+rewritten or truncated.

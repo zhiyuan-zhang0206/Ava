@@ -1,17 +1,5 @@
 "use client";
 
-// system_marker classification + rendering. A framework system note carries its
-// category as `source` (a NoteTag): lifecycle transitions, memory recall, and
-// guidance notes each map to a MessageCard (icon + title header + collapsible
-// payload body) through classifyMarker + markerVisual. The payload-identified
-// ephemeral markers (compact_done / cancelled / compact_request / error) and the
-// unrecognized-marker red alarm render bare (no card) through EphemeralSystemMarker.
-//
-// LifecycleTag mirrors the backend base/agents/messages/kwargs.py NoteTag lifecycle_* members.
-// When the backend adds a new lifecycle tag without updating here, classifyMarker
-// routes it to the ephemeral path and it surfaces as the red UnknownMarkerChip —
-// fail-loud instead of a silent fallback.
-
 import { GitFork, Info, NotebookText, PowerOff, RotateCw, type LucideIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -32,13 +20,9 @@ export function isLifecycleTag(s: string): s is LifecycleTag {
   return (LIFECYCLE_TAGS as readonly string[]).includes(s);
 }
 
-// Card-rendered marker families. Exported so the marker-contract test can
-// iterate the exact dispatch sets the renderer uses — the backend NoteTag
-// enum (base/agents/messages/kwargs.py) is asserted to be a subset of
-// LIFECYCLE_TAGS ∪ MEMORY_SOURCES ∪ NOTE_SOURCES by tests/contracts/test_lint_marker_contract.py.
+// ava:ref ui/web/src/docs/frontend-components/timeline-view/markers.ava.okf.md#marker-dispatch-sets
 export const MEMORY_SOURCES = new Set(["memory", "agent_memory", "inherited_memory"]);
 
-// The three card-rendered marker families + the bare-rendered ephemeral catch-all.
 export type MarkerClass =
   | { readonly kind: "lifecycle"; readonly tag: LifecycleTag }
   | { readonly kind: "memory" }
@@ -49,6 +33,7 @@ export const NOTE_SOURCES = new Set([
   "impersonation",
   "sdk_hint",
   "memory_write_check",
+  "to_user_soft_limit",
   "agent_reply",
   "task",
   "compact_reminder",
@@ -67,9 +52,6 @@ export const NOTE_SOURCES = new Set([
   "skill_recall",
 ]);
 
-// Classify a system_marker by its source. The backend tag set is closed — a
-// source matching none is treated as not-a-note (ephemeral), which then falls to
-// the payload-based markers and finally the red alarm.
 export function classifyMarker(source: string | null): MarkerClass {
   if (source !== null && isLifecycleTag(source)) return { kind: "lifecycle", tag: source };
   if (source !== null && MEMORY_SOURCES.has(source)) return { kind: "memory" };
@@ -80,22 +62,15 @@ export function classifyMarker(source: string | null): MarkerClass {
 export interface MarkerVisual {
   readonly icon: LucideIcon;
   readonly title: string;
-  /** i18n key under the "markers" namespace — the card header renders the
-   *  translated title when present, falling back to `title` (English). */
   readonly titleKey?: string;
-  // Header title color + style (uppercase tracking, to read as an event label).
   readonly titleClass: string;
   readonly border: string;
   readonly bg: string;
-  // Card-wide text color the payload body inherits.
   readonly text: string;
 }
 
 const LABEL_CLS = "uppercase tracking-widest";
 
-// Icon/title metadata per marker family — the color classes come from the
-// resolved timeline-colors slot (Display-settings configurable), composed at
-// call time so one family swap restyles the whole marker.
 const LIFECYCLE_META: Record<
   LifecycleTag,
   { icon: LucideIcon; title: string; titleKey: string; slot: ColorSlotId }
@@ -125,8 +100,6 @@ function slotVisual(
   };
 }
 
-// Visual mapping for a card-rendered marker. Only called for lifecycle / memory /
-// note (the ephemeral class has no card and never reaches here).
 export function markerVisual(
   cls: MarkerClass,
   colors: TimelineColors = DEFAULT_TIMELINE_COLORS,
@@ -138,15 +111,11 @@ export function markerVisual(
       return slotVisual(MEMORY_META, colors);
     case "note":
       return slotVisual(NOTE_META, colors);
-    /* v8 ignore next 2 */
     case "ephemeral":
       throw new Error("markerVisual called on an ephemeral marker");
   }
 }
 
-// The collapsible body of a card-rendered marker — the raw payload text, or, for
-// the memory family (framing + the Markdown MEMORY.md index), rendered Markdown.
-// Color is inherited from the card (markerVisual.text).
 export function MarkerBody({ payload, markdown = false }: { payload: string; markdown?: boolean }) {
   if (markdown) {
     return (
@@ -160,19 +129,10 @@ export function MarkerBody({ payload, markdown = false }: { payload: string; mar
   );
 }
 
-// Unrecognized system_marker source / payload renders as a visual alarm — red +
-// "frontend has not been adapted" copy, replacing silent plain-text fallback with
-// fail-loud. The raw source / payload are shown so the user can immediately see
-// which case to add.
 function UnknownMarkerChip({ source, payload }: { source: string | null; payload: string }) {
   const t = useTranslations("markers");
-  // Also log to dev console so DevTools can capture it directly. No typeof window
-  // guard — the timeline is "use client" CSR-only and window always exists.
   console.warn("[timeline] unrecognized system_marker, frontend not adapted", { source, payload });
   return (
-    // data-testid="marker-unrecognized": the stable hook the panoramic e2e
-    // cases assert against (tests/e2e/flow/test_*_flow.py) — absence of this node
-    // = the #1017 alarm class did not render.
     <div
       data-testid="marker-unrecognized"
       className="border-l-2 border-destructive/60 bg-destructive/10 text-destructive rounded-r-sm px-3 py-2"
@@ -199,15 +159,7 @@ function EphemeralMarker({ label, isError = false }: { label: string; isError?: 
   );
 }
 
-// The bare (no-card) render for an ephemeral system_marker — identified by
-// payload string once classifyMarker has ruled out a card family:
-//   "compact_done"                -> filtered upstream; render nothing
-//   "compact_request:<content>"   -> filtered upstream; render nothing
-//   "cancelled"                   -> silent (stop button has no UI noise)
-//   "error:<content>"             -> [error] <content>
-//   anything else                 -> UnknownMarkerChip red alarm
-// compact_done / compact_request are normally filtered at the SSE event layer
-// (applySystemEvent), so these branches only catch stale rows.
+// ava:ref ui/web/src/docs/frontend-components/timeline-view/markers.ava.okf.md#ephemeral-marker-testids
 export function EphemeralSystemMarker({
   source,
   payload,
