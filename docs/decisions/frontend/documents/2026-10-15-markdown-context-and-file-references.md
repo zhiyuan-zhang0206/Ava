@@ -3,6 +3,10 @@
 > references and bounds clauses stand. See
 > [`2026-10-17-markdown-safe-subset-math-anchors.md`](2026-10-17-markdown-safe-subset-math-anchors.md).
 
+> **Revised 2026-10-17** — the numeric bounds move to config with widened
+> defaults (`settings.to_user`); see
+> [`2026-10-17-to-user-panel-limits-configurable.md`](2026-10-17-to-user-panel-limits-configurable.md).
+
 # Markdown shared context with source-machine file references
 
 ## Context

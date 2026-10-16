@@ -20,6 +20,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "feishu",
             "observability",
             "display",
+            "to_user",
         }
     ),
     "agent": frozenset(
@@ -35,6 +36,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "gateway",
             "services",
             "daemon",
+            "to_user",
         }
     ),
     "runner": frozenset(
@@ -47,6 +49,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "lm",
             "sandbox",
             "observability",
+            "to_user",
         }
     ),
 }
