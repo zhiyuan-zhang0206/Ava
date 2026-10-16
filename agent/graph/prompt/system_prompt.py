@@ -211,8 +211,8 @@ def _output_conciseness_section(slices: AgentSlices, *, catalog: ModelCatalog) -
         "Don't paste file or command output back into your reply when a pointer "
         "will do — reference a path and line (`foo.py:42`) and let the user open "
         "it. Don't re-explain what the code or a diff already shows. Skip "
-        "filler — empty openers and wrap-up restatements that just repeat what "
-        "you did. Say the thing and stop."
+        "filler — empty praise or courtesy openers and wrap-up restatements "
+        "that just repeat what you did. Say the thing and stop."
     )
 
 
