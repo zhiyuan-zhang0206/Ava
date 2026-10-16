@@ -2,6 +2,7 @@ exports = ["fake_process_control.py"]
 
 [uses]
 "test_evidence.py" = ["_evidence_import_child.py"]
+"test_exec_domain_confirmation.py" = ["fake_process_control.py"]
 "test_os_platform.py" = ["_os_platform_child.py"]
 "test_process_control.py" = ["fake_process_control.py"]
 
@@ -15,7 +16,6 @@ exports = ["fake_process_control.py"]
 "test_exec_domain_confirmation.py#monkeypatch.setattr base.native_process.group_closure.group_members" = 3
 "test_exec_domain_confirmation.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.capture" = 1
 "test_group_closure.py#monkeypatch.setattr base.native_process.group_closure.group_members" = 1
-"test_hosted_force_quiescence_native_process.py#monkeypatch.setattr base.native_process.exec_domain.os.getpgid" = 1
 "test_loaded_commit.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_os_platform.py#monkeypatch.setattr base.native_process.os_platform.is_macos" = 5
 "test_os_platform.py#monkeypatch.setattr base.native_process.os_platform.os.getpid" = 1
@@ -37,7 +37,6 @@ exports = ["fake_process_control.py"]
 
 [debt.stdlib-patch]
 "_os_platform_child.py#assignment platform.uname" = 1
-"test_exec_domain_confirmation.py#monkeypatch.setattr os.killpg" = 6
 "test_group_closure.py#monkeypatch.setattr os.killpg" = 2
 "test_loaded_commit.py#monkeypatch.setattr subprocess.run" = 5
 "test_os_platform.py#monkeypatch.setattr sys.stdout" = 1
