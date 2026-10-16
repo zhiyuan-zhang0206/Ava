@@ -13,6 +13,9 @@ class NoteKind(StrEnum):
     COMMENT = "comment"
     DOCSTRING = "docstring"
     UNUSED_STRING = "unused-string"
+    LINT_DIRECTIVE = "lint-directive"
+    MACHINE = "machine"
+    FIXTURE_HELP = "fixture-help"
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,7 @@ class Symbol:
     parameters: tuple[str, ...] = ()
     ambiguous: bool = False
     callable: bool = False
+    lexical_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,8 @@ class Note:
     end_line: int
     text: str
     owner: str
+    lexical_owner: str = ""
+    raw_text: str = ""
 
 
 @dataclass(frozen=True)

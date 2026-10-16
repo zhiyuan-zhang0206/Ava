@@ -2,5 +2,8 @@
 "test_api.py" = ["cases.py"]
 "test_check.py" = ["cases.py"]
 "test_cli.py" = ["cases.py"]
+"test_directives.py" = ["cases.py"]
+"test_fixtures.py" = ["cases.py"]
+"test_incremental.py" = ["cases.py"]
 "test_records.py" = ["cases.py"]
 "test_typescript_index.py" = ["cases.py"]

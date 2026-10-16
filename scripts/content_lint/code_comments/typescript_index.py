@@ -23,11 +23,13 @@ class ParserSymbol(ParserRecord):
 
 
 class ParserNote(ParserRecord):
-    kind: NoteKind
+    kind: Literal[NoteKind.COMMENT, NoteKind.DOCSTRING, NoteKind.UNUSED_STRING]
     line: int = Field(ge=1)
     end_line: int = Field(ge=1)
     text: str
     owner: str
+    lexical_owner: str = Field(min_length=1)
+    raw_text: str = Field(min_length=1)
 
 
 class ParserSource(ParserRecord):
@@ -38,7 +40,7 @@ class ParserSource(ParserRecord):
 
 
 class ParserOutput(ParserRecord):
-    version: Literal[1]
+    version: Literal[2]
     sources: list[ParserSource]
 
 
@@ -62,22 +64,37 @@ def parse_source(item: ParserSource) -> Source:
     for value in item.notes:
         if value.owner not in symbols or value.end_line < value.line:
             raise ValueError(f"invalid TypeScript note: {path}:{value.line}")
-        notes.append(Note(value.kind, value.line, value.end_line, value.text, value.owner))
+        notes.append(
+            Note(
+                value.kind,
+                value.line,
+                value.end_line,
+                value.text,
+                value.owner,
+                value.lexical_owner,
+                value.raw_text,
+            )
+        )
     return Source(path, symbols, tuple(notes))
 
 
-def load_index(repo: Repository, text: str) -> None:
+def parsed_sources(text: str, contents: dict[str, str]) -> dict[str, Source]:
     payload = ParserOutput.model_validate_json(text)
-    expected = {path for path in repo.files if path.endswith(SUFFIXES)}
+    expected = set(contents)
     found: dict[str, Source] = {}
     for item in payload.sources:
         path = item.path
         if path not in expected or path in found:
             raise ValueError(f"unexpected or duplicate TypeScript source: {path}")
-        digest = hashlib.sha256(repo.text(path).encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(contents[path].encode("utf-8")).hexdigest()
         if item.sha256 != digest:
             raise ValueError(f"stale TypeScript parser output: {path}")
         found[path] = parse_source(item)
     if set(found) != expected:
         raise ValueError(f"TypeScript parser omitted: {', '.join(sorted(expected - found.keys()))}")
-    repo.sources.update(found)
+    return found
+
+
+def load_index(repo: Repository, text: str) -> None:
+    contents = {path: repo.text(path) for path in repo.files if path.endswith(SUFFIXES)}
+    repo.sources.update(parsed_sources(text, contents))
