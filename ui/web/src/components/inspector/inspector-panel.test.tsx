@@ -1,7 +1,3 @@
-// InspectorPanel render + window-selector tests — verify the sections
-// (shells / heartbeat / config overlay / cost) render from a mocked /inspect
-// response, empty-section visibility, and that the header window selector re-queries
-// with the chosen `hours`. Also covers mobile overlay rendering.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -25,9 +21,6 @@ import { AGENTS_QUERY_KEY } from "@/lib/fold/agents";
 import { projectAgentStatus } from "@/lib/contracts/types";
 import type { AgentInspectStatistics, AgentInspectLive, AgentRoster, InspectWidget, PageRow, SystemEvent, WireAgentCard } from "@/lib/contracts/types";
 
-// vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
-// runs (the factory fires during the InspectorPanel import, before module-body
-// consts would otherwise initialize).
 const {
   getAgentInspectStatistics,
   getAgentInspectLive,
@@ -48,20 +41,11 @@ const {
     getAgentInspectLive:
       vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>(),
     getAgentRoster: vi.fn<(signal?: AbortSignal) => Promise<AgentRoster>>(),
-    // Plugin widgets (task #2909): default to none so the render tests stay
-    // focused; the widget tests drive it.
     getAgentInspectWidgets: vi.fn<(agentId: number, signal?: AbortSignal) => Promise<InspectWidget[]>>(
       () => Promise.resolve([]),
     ),
-    // useAgentPages fetches the open-pages list; default to none so the Page
-    // section stays hidden and these render tests stay focused on the
-    // Inspector sections. The dedicated use-agent-pages.test.ts covers the fetch +
-    // SSE fold.
     listPages: vi.fn<(agentId: number) => Promise<PageRow[]>>(() => Promise.resolve([])),
-    // Presets — the config-overlay diff display compares against them; default
-    // to an empty catalog (no preset used, plain overlay list).
     listPresets: vi.fn(() => Promise.resolve([] as { id: number; name: string; label: string; description: string | null; config: Record<string, unknown>; created_at: string; updated_at: string }[])),
-    // Notice resolve — default to success; the notice-reply tests drive it.
     resolveNotice: vi.fn(() => Promise.resolve({ status: "ok" })),
   }));
 vi.mock("@/lib/transport/api", () => ({
@@ -76,9 +60,6 @@ vi.mock("@/lib/transport/api", () => ({
   },
 }));
 
-// useAgentPages subscribes to the global SSE stream; stub it to a no-op so the
-// panel renders without an <EventStreamProvider> (its page invalidation behavior is
-// covered in use-agent-pages.test.ts).
 const streamHandlers = vi.hoisted(() => ({
   system: undefined as ((event: unknown) => void) | undefined,
   connection: undefined as ((event: { type: string }) => void) | undefined,
@@ -118,8 +99,6 @@ vi.mock("@/lib/inspector/inspector-panel-store", async () => {
   };
 });
 
-// Breakpoint: tests default to desktop (isLarge = true). R4 layer 4: the
-// panel's breakpoint awareness goes through useBreakpoint.
 const isLargeMock = vi.fn<() => boolean>(() => true);
 vi.mock("@/lib/layout/breakpoint", () => ({
   useBreakpoint: () => ({
@@ -128,7 +107,6 @@ vi.mock("@/lib/layout/breakpoint", () => ({
     isLarge: isLargeMock(),
   }),
 }));
-
 
 beforeEach(() => {
   getAgentInspectStatistics.mockResolvedValue(fixture());
@@ -223,11 +201,6 @@ function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLiv
     last_probe_at: null,
     shells_available: true,
     shells: [
-      // created_at is offset from fixture-build time so the tick-computed
-      // runtime lands on the same formatted span as uptime_seconds (8040s /
-      // 660s) no matter when the test runs. The duration-asserting test
-      // freezes Date via vi.setSystemTime for exact determinism. (created_at
-      // itself is not rendered in the panel — runtime only.)
       {
         id: 0,
         name: "dev-server",
@@ -244,11 +217,7 @@ function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLiv
     ],
     config_overlay: { llm_model: "claude-opus-4-8", auto_compact_fraction: 0.7 },
     preset_name: null,
-    // Default heartbeat: a running agent that never paused — time-independent,
-    // so the broad render tests stay deterministic. The dedicated heartbeat
-    // describe drives the idle / paused / last-pause states with live offsets.
     heartbeat: { interval_s: 300, next_at: null, paused_until: null, heartbeat_pending: false, last_pause: null },
-    // Default: no open notice.
     notice: null,
     spawned_at: "2026-06-14T12:00:00Z",
     started_at: "2026-06-14T12:00:05Z",
@@ -333,9 +302,6 @@ describe("InspectorPanel", () => {
       expect(getAgentInspectLive).toHaveBeenCalledWith(2, expect.any(AbortSignal)),
     );
 
-    // B has not answered yet. React Query may supply A through
-    // keepPreviousData, but no A-owned shell/notice/reply surface may render
-    // under B's selected identity.
     expect(screen.queryByText("agent-a-private-shell")).toBeNull();
     expect(screen.queryByText("Agent A private notice")).toBeNull();
     expect(screen.queryByText("Only Agent A may answer this")).toBeNull();
@@ -348,48 +314,33 @@ describe("InspectorPanel", () => {
   });
 
   it("renders sections from their current-state and statistics responses", async () => {
-    // Freeze Date so the tick-computed runtime values are exact (created_at
-    // offsets are relative to Date.now() at fixture build).
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
-    // Rebuild BOTH fixtures on the frozen clock — beforeEach built them on
-    // the real one, whose created_at offsets would render negative runtimes.
     getAgentInspectStatistics.mockResolvedValue(fixture());
     getAgentInspectLive.mockResolvedValue(liveFixture());
     render(<InspectorPanel agentId={1} />);
 
-    // shells: count badge + named / unnamed / watcher rows with formatted uptime
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     expect(screen.getByText("3")).toBeTruthy();
     expect(screen.getByText("dev-server")).toBeTruthy();
     expect(screen.getByText("(unnamed)")).toBeTruthy();
     expect(screen.getByText("watcher")).toBeTruthy();
-    // runtime: bare value (no label), tick-computed from created_at (8040s /
-    // 660s), probe snapshot when created_at is missing (45s)
-    expect(screen.getByText("2h 14m")).toBeTruthy(); // 8040s
+    expect(screen.getByText("2h 14m")).toBeTruthy();
     expect(screen.getByText("45s")).toBeTruthy();
-    expect(screen.getByText("11m")).toBeTruthy(); // 660s
-    // created time is deliberately not shown in the panel (user correction
-    // 2026-08-28) — runtime alone; the created/TTL detail lives on the
-    // monitor page title bar.
+    expect(screen.getByText("11m")).toBeTruthy();
     expect(screen.queryByText(/^\[\d{4}-\d{2}-\d{2} /)).toBeNull();
-    // each shell row links to its monitor page /shell/{agentId}/{shellId}
     expect(screen.getByText("dev-server").closest("a")?.getAttribute("href")).toBe("/shell/1/0");
     expect(screen.getByText("watcher").closest("a")?.getAttribute("href")).toBe("/shell/1/2");
 
-    // config overlay: string passthrough + JSON.stringify of a number
     expect(screen.getByText("llm_model")).toBeTruthy();
     expect(screen.getByText("claude-opus-4-8")).toBeTruthy();
     expect(screen.getByText("0.7")).toBeTruthy();
 
-    // cost: 2×2 grid (the "Since spawn · N LLM calls" subtitle line was
-    // removed — the grid already carries cost / calls / tokens / cache-hit)
     expect(screen.getByText("$0.4213")).toBeTruthy();
-    expect(screen.getByText("1.20M / 84.0k")).toBeTruthy(); // tokens in/out combined
-    expect(screen.getByText("142")).toBeTruthy(); // LLM calls
-    expect(screen.getByText("91.70%")).toBeTruthy(); // cache hit
+    expect(screen.getByText("1.20M / 84.0k")).toBeTruthy();
+    expect(screen.getByText("142")).toBeTruthy();
+    expect(screen.getByText("91.70%")).toBeTruthy();
 
-    // activity: TPS leads the grid, followed by LM / exec / idle
     const activitySection = screen.getByText("Activity").closest("section");
     expect(activitySection).not.toBeNull();
     expect(within(activitySection!).getByText("TPS")).toBeTruthy();
@@ -397,14 +348,11 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("Active rate")).toBeNull();
     expect(screen.queryByText("50%")).toBeNull();
     expect(screen.queryByText("LLM stage")).toBeNull();
-    expect(screen.getByText("20m")).toBeTruthy(); // 1200s LM
-    expect(screen.getByText("8m")).toBeTruthy(); // 450s exec
+    expect(screen.getByText("20m")).toBeTruthy();
+    expect(screen.getByText("8m")).toBeTruthy();
     expect(screen.getByText("Idle")).toBeTruthy();
-    expect(screen.getByText("30m")).toBeTruthy(); // 3600 - 1800 idle seconds
+    expect(screen.getByText("30m")).toBeTruthy();
 
-    // liveness (merged section, Task #1195): heartbeat icon + "Liveness"
-    // title; the "every 5m" interval badge and the old "Last judged" cell are
-    // dropped; the heartbeat cells stay
     expect(screen.getByText("Liveness")).toBeTruthy();
     expect(screen.queryByText("State")).toBeNull();
     expect(screen.queryByText("every 5m")).toBeNull();
@@ -421,8 +369,6 @@ describe("InspectorPanel", () => {
   });
 
   it("renders no Alerts section (user ruling 2026-08-29)", async () => {
-    // The full total / resolved / net split lives on the Grafana tiles; the
-    // inspector no longer renders the fleet Alerts block.
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     expect(screen.queryByText("Alerts")).toBeNull();
@@ -470,8 +416,6 @@ describe("InspectorPanel", () => {
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
     expect(screen.getByLabelText("Cost loading")).toBeTruthy();
     expect(screen.getByLabelText("Activity loading")).toBeTruthy();
-    // Sections that may not exist (notice / widgets) are not promised by the
-    // loading skeleton; plugins have their own generic placeholder.
     expect(screen.queryByLabelText("Notice loading")).toBeNull();
     expect(screen.queryByText("Loading…")).toBeNull();
   });
@@ -573,7 +517,6 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    // ≥1000M rolls to B, <1000M stays M — the user-reported exact case.
     expect(screen.getByText("2.18B / 3.42M")).toBeTruthy();
   });
 
@@ -599,8 +542,6 @@ describe("InspectorPanel", () => {
   });
 
   it("marks snapshot-less calls as N unpriced under the cost", async () => {
-    // Calls without a stored usage-time price snapshot contribute 0 cost;
-    // the Cost cell's sub-line surfaces the count instead of hiding it.
     getAgentInspectStatistics.mockResolvedValue(
       fixture({
         cost: {
@@ -639,7 +580,6 @@ describe("InspectorPanel", () => {
   });
 
   it("formats durations past 24h as Xd Yh (task #824): idle 24d 3h", async () => {
-    // 24d 3h = 24*86400 + 3*3600 seconds of idle (alive − active).
     getAgentInspectStatistics.mockResolvedValue(
       fixture({
         activity: {
@@ -654,9 +594,7 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
-    // Idle cell shows the day tier; the sub-day cells keep hour/minute form.
     expect(screen.getByText("24d 3h")).toBeTruthy();
-    // "1h" appears twice: the window-selector option AND the llm_seconds cell.
     expect(screen.getAllByText("1h").length).toBeGreaterThanOrEqual(2);
   });
 
@@ -702,19 +640,13 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Notice")).toBeTruthy());
-    // Priority badge
     expect(screen.getByText("P0")).toBeTruthy();
-    // Blocking tag
     expect(screen.getByText("Blocking")).toBeTruthy();
-    // Type label
     expect(screen.getByText("Needs your answer")).toBeTruthy();
-    // Created time
     expect(
       screen.getByText(`${formatRelative(createdAt)}, ${formatAbsolute(createdAt)}`),
     ).toBeTruthy();
-    // Title
     expect(screen.getByText("Approve deploy?")).toBeTruthy();
-    // Content preview
     expect(screen.getByText("Can we push to prod?")).toBeTruthy();
   });
 
@@ -808,10 +740,8 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Notice")).toBeTruthy());
-    // Interactive mirror (not the old read-only card): a reply box + Dismiss.
     expect(screen.getByRole("textbox")).toBeTruthy();
     expect(screen.getByText("Dismiss")).toBeTruthy();
-    // The Notice section follows the timeline link at the bottom of panel content.
     const notice = screen.getByText("Notice");
     const timelineLink = screen.getByText("Open run timeline");
     expect(
@@ -823,8 +753,6 @@ describe("InspectorPanel", () => {
   });
 
   it("resolving a notice re-enables the reply box when a new notice takes its place", async () => {
-    // A require_response notice, then — after the resolve's refetch — a DIFFERENT
-    // open notice (the agent, woken by the reply, immediately raised another).
     const mk = (id: number, title: string) => ({
       id,
       title,
@@ -843,12 +771,8 @@ describe("InspectorPanel", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "done" } });
     fireEvent.click(screen.getByLabelText("Send answer"));
 
-    // onResolved invalidates the inspect query → refetch swaps in the new notice.
     await waitFor(() => expect(screen.getByText("Second?")).toBeTruthy());
 
-    // The keyed remount gives the new notice a fresh reply surface: Send is
-    // disabled while empty and ENABLES on input. Without key={notice.id} the
-    // prior instance's sticky `pending` would keep it disabled forever.
     const send = screen.getByLabelText("Send answer");
     expect(send.hasAttribute("disabled")).toBe(true);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "next" } });
@@ -901,9 +825,6 @@ describe("InspectorPanel", () => {
   });
 
   it("renders skill-list config keys in canonical dash spelling (display_name)", async () => {
-    // The runtime stores skill lists in the underscore Python projection
-    // (example_skill); the overlay must present the canonical dash form
-    // (example-skill) while non-skill values stay untouched.
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         config_overlay: {
@@ -914,18 +835,12 @@ describe("InspectorPanel", () => {
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
-    // The dd renders the JSON-serialized array; the underscore projection must
-    // be gone and the canonical dash spelling present.
     expect(screen.getByText('["example-skill","*"]')).toBeTruthy();
     expect(screen.queryByText(/example_skill/)).toBeNull();
     expect(screen.getByText("claude-opus-4-8")).toBeTruthy();
   });
 
-
   it("shows the preset reference and only the overlay fields that differ (diff display)", async () => {
-    // Task #2694: with a preset used, the panel shows the preset reference and
-    // the overlay fields the preset does not supply verbatim — preset-carried
-    // values are NOT duplicated.
     listPresets.mockResolvedValue([
       {
         id: 1,
@@ -941,18 +856,15 @@ describe("InspectorPanel", () => {
       liveFixture({
         preset_name: "coder",
         config_overlay: {
-          llm_model: "claude-opus-4-8", // equals the preset's value → suppressed
-          auto_compact_fraction: 0.7, // not in the preset → shown
+          llm_model: "claude-opus-4-8",
+          auto_compact_fraction: 0.7,
         },
       }),
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
-    // preset reference row
     expect(screen.getByText("Preset")).toBeTruthy();
     expect(screen.getByText("coder")).toBeTruthy();
-    // The diff applies once the presets query lands: the field that matches
-    // the preset is suppressed, the novel one renders.
     await waitFor(() => expect(screen.queryByText("llm_model")).toBeNull());
     expect(screen.getByText("auto_compact_fraction")).toBeTruthy();
     expect(screen.getByText("0.7")).toBeTruthy();
@@ -998,7 +910,6 @@ describe("InspectorPanel", () => {
   });
 
   it("window selector re-queries with the chosen hours", async () => {
-    // First load defaults to 24h. Switching to 1h re-scopes the request.
     getAgentInspectStatistics.mockResolvedValueOnce(fixture({ window_hours: 24 }));
     getAgentInspectStatistics.mockResolvedValue(fixture({ window_hours: 1 }));
     render(<InspectorPanel agentId={1} />);
@@ -1012,7 +923,6 @@ describe("InspectorPanel", () => {
     await waitFor(() =>
       expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, 1, expect.any(AbortSignal)),
     );
-    // The select reflects the chosen window (the cost scope line was removed).
     await waitFor(() =>
       expect(screen.getByLabelText<HTMLSelectElement>("Cost + activity window").value).toBe("1"),
     );
@@ -1049,10 +959,6 @@ describe("InspectorPanel", () => {
   });
 
   it("stale refresh: a failed background poll keeps the sections and shows the stale dot (no cold-error swap)", async () => {
-    // First load succeeds; a later same-query poll fails. React Query keeps the
-    // last data on a refetch error, so the panel must keep the sections + flag the
-    // failure with the stale dot, never replace everything with the error text
-    // (that is reserved for a cold miss with no data at all).
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     getAgentInspectStatistics.mockResolvedValueOnce(fixture());
     rtlRender(
@@ -1062,7 +968,6 @@ describe("InspectorPanel", () => {
     );
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
 
-    // The next poll of the SAME query fails — data is retained, error is set.
     getAgentInspectStatistics.mockRejectedValue(new Error("refresh failed"));
     await act(async () => {
       await qc.refetchQueries({ queryKey: ["agent-inspect", 1, 24] });
@@ -1074,9 +979,6 @@ describe("InspectorPanel", () => {
   });
 
   it("refuses an inspect payload whose agent_id does not match the selection", async () => {
-    // A malformed/misrouted response must obey the same identity boundary as
-    // keepPreviousData. Rendering it as plain text would still disclose one
-    // agent's inspector under another selection.
     getAgentInspectLive.mockResolvedValue(
       liveFixture({ agent_id: Number.NaN }),
     );
@@ -1098,14 +1000,12 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("bad-shell")).toBeTruthy());
-    // The row should NOT be wrapped in an anchor
     expect(screen.getByText("bad-shell").closest("a")).toBeNull();
   });
 });
 
 describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", () => {
   it("shows the projected next check-in when idle and un-paused", async () => {
-    // ~4.5m ahead → "in 4m" (floor of a 4.5m delta), independent of timezone.
     const nextAt = new Date(Date.now() + 270_000).toISOString();
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
@@ -1118,9 +1018,8 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
-
   it("shows the active pause window when paused", async () => {
-    const pausedUntil = new Date(Date.now() + 720_000).toISOString(); // 12m
+    const pausedUntil = new Date(Date.now() + 720_000).toISOString();
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         heartbeat: { interval_s: 900, next_at: null, paused_until: pausedUntil, heartbeat_pending: false, last_pause: null },
@@ -1128,14 +1027,10 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText(/^\d{1,2}:\d{2}/)).toBeTruthy());
-    // the "every N" interval badge is gone from the merged section
     expect(screen.queryByText("every 15m")).toBeNull();
   });
 
   it("shows 'pending' when a check-in is already queued but unprocessed", async () => {
-    // idle, un-paused, but a check-in inbound is already pending (the daemon
-    // won't send another) — the panel surfaces "pending" rather than projecting a stale
-    // past next_at, which is the reported "one hour ago" bug.
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         heartbeat: { interval_s: 300, next_at: null, paused_until: null, heartbeat_pending: true, last_pause: null },
@@ -1147,12 +1042,8 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
-
   it("shows 'due' when the projected check-in is in the past", async () => {
-    // The daemon dispatches at its next poll tick, so a projected next_at can
-    // land in the past — the cell must render "due",
-    // never "4m ago" for a *next* heartbeat (the "one hour ago" bug family).
-    const nextAt = new Date(Date.now() - 240_000).toISOString(); // 4m overdue
+    const nextAt = new Date(Date.now() - 240_000).toISOString();
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         heartbeat: { interval_s: 300, next_at: nextAt, paused_until: null, heartbeat_pending: false, last_pause: null },
@@ -1164,7 +1055,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
   });
 
   it("shows an em dash for a running agent plus the last pause from history", async () => {
-    const at = new Date(Date.now() - 330_000).toISOString(); // ~5.5m ago → "5m ago"
+    const at = new Date(Date.now() - 330_000).toISOString();
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         heartbeat: {
@@ -1187,11 +1078,6 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
 
 describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)", () => {
   it("birth cell shows relative + absolute, anchored to spawned_at", async () => {
-    // spawned_at is the agent's true birth (written once at spawn); started_at
-    // is the per-process boot time refreshed on every restart. The birth cell
-    // must display the former, so a restart / cluster update leaves it
-    // unchanged. The two instants are a day apart so their absolute strings
-    // can never collide in any runner timezone.
     const spawned = "2026-06-14T12:00:00Z";
     for (const started of ["2026-06-14T12:00:05Z", "2026-07-30T09:00:00Z"]) {
       cleanup();
@@ -1200,24 +1086,15 @@ describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)
       );
       render(<InspectorPanel agentId={1} />);
       await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
-      // One line inside the cell: "relative, absolute" (user ruling 2026-08-24:
-      // relative + absolute joined by a comma on a single line, e.g.
-      // "3d ago, 2026-08-21 17:02:31 GMT+8"). Assert against the shared
-      // helper's own output — not a reimplementation of it (tz audit, 2026-08:
-      // the prior version of this test re-derived the formatting and asserted
-      // against itself, so a regression in the component's actual formatting
-      // call would never fail it).
       expect(
         screen.getByText(`${formatRelative(spawned)}, ${formatAbsolute(spawned)}`),
       ).toBeTruthy();
-      // …anchored to the spawn time, not the (possibly refreshed) started_at.
       expect(
         screen.queryByText(`${formatRelative(started)}, ${formatAbsolute(started)}`),
       ).toBeNull();
     }
   });
 });
-
 
 describe("InspectorPanel desktop", () => {
   beforeEach(() => {
@@ -1272,9 +1149,6 @@ describe("InspectorPanel desktop", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    // One "Close inspector" affordance per view: on desktop that is the
-    // InspectorToggle chip (its own describe block covers the click → toggle),
-    // so the shared header must not render a second same-named close button.
     expect(screen.queryByRole("button", { name: "Close inspector" })).toBeNull();
   });
 
@@ -1328,7 +1202,6 @@ describe("InspectorPanel mobile", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    // Click the backdrop (the div with aria-hidden="true" inside the overlay)
     const backdrop = document.querySelector('[aria-hidden="true"]');
     expect(backdrop).toBeTruthy();
     fireEvent.click(backdrop!);
@@ -1340,9 +1213,6 @@ describe("InspectorPanel mobile", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    // The X in the mobile header is the only always-reachable way back to the
-    // timeline: the overlay covers the page header (InspectorToggle) and the
-    // backdrop sits behind the full-width panel.
     const btn = screen.getByRole("button", { name: "Close inspector" });
     fireEvent.click(btn);
     expect(toggle).toHaveBeenCalled();
@@ -1500,7 +1370,6 @@ describe("InspectorPanel manual refresh", () => {
   });
 });
 
-
 function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRoster {
   return {
     agents: [projectAgentStatus({
@@ -1621,7 +1490,6 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
     expect(screen.queryByText("online")).toBeNull();
     expect(container.querySelector(".text-destructive")).toBeNull();
-    // "Last judged" deleted (user ruling 2026-08-12, Task #1195)
     expect(screen.queryByText("Last judged")).toBeNull();
   });
 
@@ -1667,7 +1535,6 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
     const labels = ["Birth", "Next heartbeat", "Last pause", "Machine", "Status"];
     const idx = labels.map((label) => text.indexOf(label));
     expect(idx.every((i) => i >= 0)).toBe(true);
-    // Non-decreasing document order = the user's field order (task #3952).
     expect(idx).toEqual([...idx].sort((a, b) => a - b));
   });
 });
@@ -1676,9 +1543,6 @@ describe("InspectorPanel agent switch (task #1939)", () => {
   it("refetches inspect data on hot switch-back while open", async () => {
     getAgentInspectLive.mockImplementation((id) => Promise.resolve(liveFixture({ agent_id: id })));
     getAgentInspectStatistics.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
-    // Mirror the app's global 5min staleTime: with the default 0 every key
-    // change would refetch anyway and the regression (a hot switch-back
-    // serves the previous visit's cache with no refetch) would be invisible.
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 5 * 60_000 } },
     });
@@ -1690,7 +1554,6 @@ describe("InspectorPanel agent switch (task #1939)", () => {
     await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalledTimes(1));
 
-    // Switch to a cold agent: the new key fetches on its own.
     rerender(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={2} />
@@ -1699,10 +1562,6 @@ describe("InspectorPanel agent switch (task #1939)", () => {
     await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalledTimes(2));
 
-    // Hot switch-back (agent 1's cache is not yet stale): without the
-    // invalidate-on-transition the mounted observer would keep the previous
-    // visit's cached snapshot and never refetch until the next 60s interval
-    // tick.
     rerender(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
@@ -1713,9 +1572,6 @@ describe("InspectorPanel agent switch (task #1939)", () => {
   });
 });
 
-
-// Plugin widgets (task #2909; taskList reshaped in #3216): the panel renders
-// what the enabled plugins embed, slotted into the documented section order.
 function widgetFixture(over: Partial<InspectWidget> = {}): InspectWidget {
   return {
     plugin: "ava_fleet",
@@ -1746,7 +1602,6 @@ describe("InspectorPanel plugin widgets", () => {
     getAgentInspectWidgets.mockResolvedValue([widgetFixture()]);
     render(<InspectorPanel agentId={1} />);
 
-    // The console titles a taskList by default (localized copy).
     expect(await screen.findByText("Tasks")).toBeTruthy();
     const first = await screen.findByRole("link", { name: /Ship the inspector fix/ });
     expect(first.getAttribute("href")).toBe("/fleet?task=42");
@@ -1763,8 +1618,6 @@ describe("InspectorPanel plugin widgets", () => {
     const runLink = await screen.findByRole("link", { name: "Open run timeline" });
     const widgetLink = await screen.findByRole("link", { name: /Ship the inspector fix/ });
     const reply = screen.getByRole("textbox");
-    // Document order follows the order keys: 700 (run link) < 750 (widget) <
-    // 800 (notice).
     expect(
       runLink.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -1791,14 +1644,12 @@ describe("InspectorPanel plugin widgets", () => {
     getAgentInspectWidgets.mockRejectedValue(new Error("HTTP 500: widgets unavailable"));
     render(<InspectorPanel agentId={1} />);
 
-    // The panel's own sections still render.
     await screen.findByRole("link", { name: "Open run timeline" });
     await screen.findAllByText("Cost");
     expect(screen.getAllByText("Activity").length).toBeGreaterThan(0);
     expect(screen.queryByText("Tasks")).toBeNull();
   });
 });
-
 
 describe("Inspector read ownership", () => {
   it("reconnect storms do not restart statistics, and the scheduled refresh repairs them", async () => {
@@ -1831,15 +1682,12 @@ describe("Inspector read ownership", () => {
     await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledWith(2, expect.any(AbortSignal)));
 
     const inspectorEntries = () => client.getQueryCache().getAll().filter((query) => String(query.queryKey[0]).startsWith("agent-inspect"));
-    // Both agents' entries coexist — retention (switch-budget.ts), not discard.
     await waitFor(() => expect(inspectorEntries()).toHaveLength(6));
     expect(new Set(inspectorEntries().map((query) => query.queryKey[1]))).toEqual(new Set([1, 2]));
 
-    // A back-switch inside the window renders the retained cache synchronously.
     view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
     expect(screen.getByText("dev-server")).toBeTruthy();
 
-    // Unmount keeps entries for the retention window instead of dropping them.
     view.unmount();
     expect(inspectorEntries()).toHaveLength(6);
   });
@@ -1866,15 +1714,12 @@ describe("Inspector read ownership", () => {
     const statsBefore = statsCalls(1);
 
     view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
-    // Cached snapshot renders synchronously — a back-visit never cold-skeletons.
     expect(screen.getByText("dev-server")).toBeTruthy();
     expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
 
-    // The background revalidations are the two live reads, within budget.
     await waitFor(() => expect(liveCalls(1)).toBe(liveBefore + 1));
     const revalidated = liveCalls(1) - liveBefore + (statsCalls(1) - statsBefore);
     expect(revalidated).toBeLessThanOrEqual(BACK_VISIT_REVALIDATE_MAX);
-    // The widget set is selection-invariant: no third read.
     expect(widgetCalls(1)).toBe(1);
   });
 });
@@ -1894,8 +1739,6 @@ describe("persisted metric evidence is internal (task #3869)", () => {
     render(<InspectorPanel agentId={1} />);
     await screen.findByText("Activity");
     await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
-    // No fabricated zeros, and no internal coverage copy on screen (user
-    // ruling 2026-09-17: the panel stays silent; the backend logs/alerts).
     expect(screen.queryByText("$0.0000")).toBeNull();
     expect(screen.queryByText("0.00 tok/s")).toBeNull();
     expect(screen.queryByText("No recorded data is available for this window.")).toBeNull();
