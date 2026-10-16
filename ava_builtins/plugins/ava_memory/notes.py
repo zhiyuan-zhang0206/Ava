@@ -1,27 +1,3 @@
-"""The two memory index context notes this plugin registers, plus their framings.
-
-Both stores put an index in front of the agent at the start of every context
-window, and only the index — each memory is one file beside it, read on demand
-(the plugin's third memory note — the `inheritable` blocks read off the
-ancestor chain — lives in `inherit.py`; these two remain the index notes):
-
-- Shared MEMORY.md (memory pool root): a pointer index into the pool, visible
-  to every agent.
-- Per-agent memory (workspace `memory/` directory): the agent's own store.
-
-Neither is core. Disabling `ava_memory` removes the stores, the SDK surface,
-and these notes together — the agent is then not told about a capability it
-does not have. The write discipline both stores share is a system-prompt
-section (`plugin.py`), not a note: it is fixed text, where an index is not.
-
-This module only defines the builders; `plugin.py` registers them into the
-framework's ordered context-note registry (`agent.graph.prompt.context_notes`), which
-`init_context` lays down whenever a window is established. Registration lives
-there because `plugin.py` is re-executed on every plugin (re)load, while an
-import of this module hits the sys.modules cache — decorators here would not
-re-run on a reload.
-"""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -31,18 +7,18 @@ from langchain_core.messages import HumanMessage
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import AvaContext
 from base.log import logger
+from base.packages.text_budget import LengthBudget, Level, Unit, evaluate, measure
 from base.paths import memory_dir, workspace_dir
 
 _MEMORY_INDEX_FILE = "MEMORY.md"
 
-# Per-agent memory root, under the agent's workspace. `MEMORY.md` inside is the
-# index; every other .md file there is one memory entry, read on demand.
+# ava:ref ava_builtins/plugins/ava_memory/docs/memory-index-notes.ava.okf.md#per-agent-memory-index
 _PER_AGENT_MEMORY_DIRNAME = "memory"
 
+# ava:ref ava_builtins/plugins/ava_memory/docs/memory-index-notes.ava.okf.md#per-agent-memory-index
 _NO_CONTENT = "(no content)"
 
-# Agent-visible framing for the shared MEMORY.md — location and mechanics only;
-# the write discipline is the system-prompt section.
+# ava:ref ava_builtins/plugins/ava_memory/docs/memory-index-notes.ava.okf.md#memory-index-note
 _FRAMING = (
     "The shared memory pool index — visible to every agent. Below is MEMORY.md "
     "at ava.memory.PATH: a Setup section carrying inline the few facts every "
@@ -55,9 +31,8 @@ _FRAMING = (
 )
 
 
+# ava:ref ava_builtins/plugins/ava_memory/docs/memory-index-notes.ava.okf.md#memory-index-note
 def memory_index_note(ctx: AvaContext) -> HumanMessage | None:
-    """The shared `MEMORY.md` pointer index, or `None` when there is nothing to
-    inject (the layer is off, or the pool has no index yet)."""
     slices = ctx.require_agent()
     if slices.sandbox.eval_isolation or not slices.read("agent", "memory_index_inject_enabled"):
         return None
@@ -67,12 +42,6 @@ def memory_index_note(ctx: AvaContext) -> HumanMessage | None:
     text = path.read_text(encoding="utf-8").strip()
     if not text:
         return None
-    # Injection guard (audit round-2 up-security-trust P0-2): the pool is a
-    # git repo any agent can push to, and this index lands in EVERY agent's
-    # cold-start context — a payload written by a compromised peer would be
-    # re-injected fleet-wide. scan_content records the finding for the
-    # after-exec note delivery; the visible prefix arms the agent at cold
-    # start, before any exec has run.
     from ava.security import is_flagged, scan_content
 
     scan_content(text, source="memory.index")
@@ -87,8 +56,7 @@ def memory_index_note(ctx: AvaContext) -> HumanMessage | None:
     )
 
 
-# Agent-visible framing for the per-agent memory index — location and mechanics
-# only; the write discipline is the system-prompt section.
+# ava:ref ava_builtins/plugins/ava_memory/docs/memory-index-notes.ava.okf.md#per-agent-memory-index
 PER_AGENT_FRAMING = (
     "Your personal memory index. Where a compact summary records what happened "
     "in one conversation round, this persists across compactions and sessions.\n\n"
@@ -107,9 +75,7 @@ PER_AGENT_FRAMING = (
     "shared pool (ava.memory)."
 )
 
-# Appended to the injected per-agent memory index when it exceeds the soft line
-# cap. The index is still injected in full above this — the note only nudges;
-# it never truncates. Kept minimal: the model knows how to prune.
+# ava:ref ava_builtins/plugins/ava_memory/docs/memory-index-notes.ava.okf.md#per-agent-index-soft-cap
 _OVER_CAP_NOTE = (
     "\n\n---\n[maintenance] This index is {lines} lines, over the "
     "{cap}-line soft cap — move detail into entry files and prune stale "
@@ -117,31 +83,16 @@ _OVER_CAP_NOTE = (
 )
 
 
-def _per_agent_maintenance_suffix(lines: int, *, cap: int) -> str:
-    """The over-cap maintenance nudge for a per-agent memory index of `lines`
-    lines, or "" when it is within the soft cap. The cap is
-    `settings.agent.memory_per_agent_index_max_lines`; a cap of 0 (or less)
-    disables the check."""
-    if cap <= 0 or lines <= cap:
+# ava:ref ava_builtins/plugins/ava_memory/docs/memory-index-notes.ava.okf.md#per-agent-index-soft-cap
+def _per_agent_maintenance_suffix(text: str, *, cap: int) -> str:
+    verdict = evaluate(text, LengthBudget(Unit.LINES, soft=max(cap, 0)))
+    if verdict.level is Level.OK:
         return ""
-    return _OVER_CAP_NOTE.format(lines=lines, cap=cap)
+    return _OVER_CAP_NOTE.format(lines=verdict.measured, cap=cap)
 
 
+# ava:ref ava_builtins/plugins/ava_memory/docs/memory-index-notes.ava.okf.md#per-agent-memory-index
 def per_agent_memory_note(ctx: AvaContext) -> HumanMessage | None:
-    """The agent's own memory index (`<workspace>/memory/MEMORY.md`).
-
-    Returns a note even when the index is absent or empty — the framing plus
-    "(no content)" reminds the agent to maintain its memory. Entry files beside
-    the index are NOT injected; the agent reads them on demand
-    (`ava.files.read` — relative paths default to the workspace).
-
-    When the index exceeds `settings.agent.memory_per_agent_index_max_lines`, a
-    short maintenance note is appended (below the index, which is still injected
-    in full) nudging the agent to prune it — establishing a window is exactly
-    when the agent re-reads its memory and can act on the nudge.
-
-    Returns ``None`` only when the layer is disabled or the agent id is not yet
-    established."""
     if not ctx.require_agent().read("agent", "memory_per_agent_inject_enabled"):
         logger.debug("[per-agent-memory] disabled by settings")
         return None
@@ -157,20 +108,20 @@ def per_agent_memory_note(ctx: AvaContext) -> HumanMessage | None:
     path = mem_dir / _MEMORY_INDEX_FILE
 
     if not path.is_file():
-        # Create an empty index so the agent knows it exists.
         logger.info("[per-agent-memory] agent={} path={} — creating empty index", aid, path)
         path.write_text("", encoding="utf-8")
     text = path.read_text(encoding="utf-8").strip()
     body = text if text else _NO_CONTENT
+    lines = measure(text, Unit.LINES)
     suffix = _per_agent_maintenance_suffix(
-        len(text.splitlines()),
+        text,
         cap=ctx.require_agent().read("agent", "memory_per_agent_index_max_lines"),
     )
     logger.info(
         "[per-agent-memory] agent={} path={} lines={} {} over_cap={}",
         aid,
         path,
-        len(text.splitlines()),
+        lines,
         "injected" if text else "empty",
         bool(suffix),
     )

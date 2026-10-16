@@ -1,11 +1,3 @@
-"""`ava_memory` owns both memory stores — their context notes and the write
-discipline that governs them.
-
-Disabling the plugin has to remove all three together: an agent with no memory
-stores must not be told how to write to them, and `init_context` must lay down a
-window with no memory notes in it.
-"""
-
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -19,6 +11,7 @@ from ava.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.agents.messages.kwargs import read_ava_kwargs
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -34,27 +27,24 @@ def _default_reader(domain: str, field: str) -> Any:
 
 @pytest.fixture(autouse=True)
 def memory_plugin() -> Any:
-    """The ava_memory agent-runtime face; its `contribute()` declares the notes.
-
-    Importing the face registers nothing — the tests build the registry value from
-    `contribute()` exactly as the full plugin load does.
-    """
     from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
 
     return _plugin
 
 
-def _context(machine: MachineIdentity, agent_id: int | None = 1) -> AvaContext:
+def _context(
+    machine: MachineIdentity, agent_id: int | None = 1, *, cap: int | None = None
+) -> AvaContext:
+    overrides = {} if cap is None else {"memory_per_agent_index_max_lines": cap}
     return AvaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         machine=machine,
-        agent=AgentSlices.resolve(default_reader=_default_reader),
+        agent=AgentSlices.resolve(overrides, default_reader=_default_reader),
         clock_factory=Clock.from_settings,
     )
 
 
 def _registry(memory_plugin: Any) -> ExtensionRegistry:
-    """The registry the loader would build with only this plugin enabled."""
     return ExtensionRegistry((("ava_memory", memory_plugin.contribute()),))
 
 
@@ -67,31 +57,16 @@ def _framework_only() -> list[str]:
 
 
 def test_plugin_registers_every_memory_note(memory_plugin: Any) -> None:
-    """The plugin declares its three notes past the framework's."""
     names = [e.build.__name__ for e in _all_notes(memory_plugin)]
     assert "memory_index_note" in names
     assert "per_agent_memory_note" in names
     assert "inherited_memory_note" in names
-    # ...and they are plugin-contributed, not framework notes, so a reload that drops the plugin
-    # drops them.
     assert "memory_index_note" not in _framework_only()
     assert "per_agent_memory_note" not in _framework_only()
     assert "inherited_memory_note" not in _framework_only()
 
 
 def test_notes_render_in_the_documented_rank_order(memory_plugin: Any) -> None:
-    """The reading order the user pinned — exec timeout, cluster timezone,
-    shared memory index, agent id, per-agent memory index, inherited memory,
-    preloaded skills — holds across the framework/plugin registration
-    boundary: the three memory notes are plugin-registered, the other four are
-    framework-registered, and the registry alone (registration order) cannot
-    express the interleave.
-
-    The two stable-band notes lead for prompt-cache reasons, not taste: they
-    are cluster-identical and change only on a restart-forcing config edit,
-    while the shared memory index behind them is re-read at every window
-    establishment. A note placed after it re-caches on another agent's memory
-    write."""
     notes = _all_notes(memory_plugin)
     names = [e.build.__name__ for e in notes]
     ranks = [e.rank for e in notes]
@@ -105,34 +80,18 @@ def test_notes_render_in_the_documented_rank_order(memory_plugin: Any) -> None:
         "inherited_memory_note",
         "preloaded_skills_note",
     ]
-    # Every note pins a distinct rank today, so the rendered order is total —
-    # no note needs a registration-order tie-breaker (the sort stays stable
-    # anyway for future registrations that share a rank).
     assert len(ranks) == len(set(ranks))
 
 
 def test_only_the_shared_index_is_grafted_onto_a_fork(memory_plugin: Any) -> None:
-    """Issue #1320 flipped the fork contract for the two memory notes:
-
-    - The shared index is cluster-wide, so the copy a fork inherits IS the
-      content a graft would add — grafting it duplicated the index in the
-      forked window. Not `on_fork` (the timezone rule).
-    - Per-agent memory names the SOURCE agent's store, so the inherited copy
-      renders the new agent wrong: `on_fork` — `_handle_fork` strips the
-      inherited note and grafts the new agent's own index."""
     on_fork = {e.build.__name__ for e in _all_notes(memory_plugin) if e.on_fork}
     assert "memory_index_note" not in on_fork
     assert "per_agent_memory_note" in on_fork
-    # The inherited note carries the SOURCE chain's blocks — also regrafted.
     assert "inherited_memory_note" in on_fork
-    # Nor the cluster timezone: a fork stays in the cluster it forked from, so
-    # the declaration it inherited is still true.
     assert "timezone_note" not in on_fork
 
 
 def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> None:
-    """The type tags the linter enforces and search results expose are the ones
-    the agent is told to write — one list, stated here."""
     section = memory_plugin.memory_discipline_section(
         AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()
     )
@@ -148,22 +107,18 @@ def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> No
 
 
 def test_discipline_carries_the_criteria_triggers_and_source_ranking(memory_plugin: Any) -> None:
-    """The four parts that were missing or split across the index framings."""
     section = memory_plugin.memory_discipline_section(
         AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()
     )
     assert "applicable, durable, legible" in section
-    assert "answering is not saving" in section  # a correction is due that same turn
-    assert "not a source of truth" in section  # a memory is a claim to check
-    assert "self-verifying" in section  # ...against sources that differ in kind
-    assert "verification point" in section  # repo facts name how they were checked
-    assert "unverified" in section  # ...or say so instead of looking plausible
+    assert "answering is not saving" in section
+    assert "not a source of truth" in section
+    assert "self-verifying" in section
+    assert "verification point" in section
+    assert "unverified" in section
 
 
 def test_discipline_prioritizes_memory_maintenance_over_current_work(memory_plugin: Any) -> None:
-    """User ruling 2026-08-09: memory maintenance is an important standing duty —
-    a stale or wrong note is corrected FIRST, before the agent continues the task
-    it was on; "noticed but ignored" and waiting for consolidation are both wrong."""
     section = memory_plugin.memory_discipline_section(
         AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()
     )
@@ -171,19 +126,14 @@ def test_discipline_prioritizes_memory_maintenance_over_current_work(memory_plug
     assert "update it first, before continuing" in section
     assert "Don't \"notice and" in section
     assert "wait for consolidation" in section
-    assert "possibly stale" in section  # unsure still means act, not leave alone
-    assert "replaces the stale note" in section  # correction edits in place
-    assert "second note beside it" in section  # ...not a contradicting new note
+    assert "possibly stale" in section
+    assert "replaces the stale note" in section
+    assert "second note beside it" in section
 
 
 def test_discipline_keeps_the_shared_pool_restrained_and_personal_verbose(
     memory_plugin: Any,
 ) -> None:
-    """User ruling 2026-08-28: the shared pool takes only reusable rules (with
-    Why + How to apply), facts many agents reach for, and user rulings; events
-    stay out by default (git history carries them); the personal store is
-    allowed to be verbose — process details and half-formed understanding live
-    there until they earn the pool."""
     section = memory_plugin.memory_discipline_section(
         AgentSlices.resolve(default_reader=_default_reader), catalog=build_model_catalog()
     )
@@ -194,7 +144,7 @@ def test_discipline_keeps_the_shared_pool_restrained_and_personal_verbose(
     assert "behave differently" in section
     assert "Verbose is fine here" in section
     assert "until they earn a place" in section
-    assert "Unsure which store" in section  # tiebreak: uncertain goes personal
+    assert "Unsure which store" in section
 
 
 @pytest.mark.parametrize(
@@ -208,8 +158,6 @@ def test_discipline_empty_only_when_both_stores_are_off(
     per_agent: bool,
     expected: bool,
 ) -> None:
-    """Either store is enough to warrant the discipline; with both off it would
-    describe a capability the agent does not have."""
     monkeypatch.setattr(settings.agent, "memory_index_inject_enabled", index)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", per_agent)
     assert (
@@ -225,29 +173,19 @@ def test_discipline_empty_only_when_both_stores_are_off(
 def test_context_notes_skips_the_stores_that_are_off(
     memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
 ) -> None:
-    """A disabled store contributes nothing to the window — the note opts out by
-    returning None, which the registry drops."""
     monkeypatch.setattr(settings.agent, "memory_index_inject_enabled", False)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", False)
     sql = MagicMock()
     sql.cursor.return_value.__enter__.return_value.fetchone.return_value = None
     ctx = replace(_context(machine_identity), clients=MagicMock(spec=ClientSet, sql=sql))
     tags = [
-        n.additional_kwargs.get("ava_note_tag")
-        for n in context_notes(_registry(memory_plugin), ctx)
-    ]  # pyright: ignore[reportUnknownMemberType]
+        read_ava_kwargs(n).get("ava_note_tag") for n in context_notes(_registry(memory_plugin), ctx)
+    ]
     assert "memory" not in tags
     assert "agent_memory" not in tags
 
 
-# ── ops service ownership ──
-# The indexer is the pool's search side; it is declared by this plugin rather
-# than the core roster because the pool is the plugin's, end to end.
-
-
 def test_indexer_is_declared_by_the_plugin_not_the_core_roster() -> None:
-    """It still reaches the assembled roster — via plugin discovery, not a
-    hardcoded entry in services/supervision/roster/spec.py."""
     from pathlib import Path as _Path
 
     from ava_builtins.plugins.ava_memory.services import services
@@ -260,11 +198,6 @@ def test_indexer_is_declared_by_the_plugin_not_the_core_roster() -> None:
 
 
 def test_per_agent_framing_makes_no_path_resolution_claim(memory_plugin: Any) -> None:
-    """The per-agent memory framing must not claim how relative paths resolve:
-    the old "relative paths resolve to your workspace" line misled agents into
-    writing memory beside the tracked cwd (leaks 7/13 and 8/1, audit #577). The
-    SDK core's statement — file ops default to the workspace — is the only
-    source of truth for path resolution."""
     from ava_builtins.plugins.ava_memory.notes import PER_AGENT_FRAMING
 
     assert "resolve" not in PER_AGENT_FRAMING
@@ -277,10 +210,6 @@ def test_memory_index_injection_guard(
     sdk_model_owner: None,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Audit round-2 up-security-trust P0-2: a MEMORY.md carrying an injection
-    imperative (any peer can push to the pool; the index lands in every
-    agent's cold-start context) is prefixed with a visible security warning
-    before injection."""
     from ava_builtins.plugins.ava_memory.notes import memory_index_note
     from base.config import settings
 
@@ -295,8 +224,8 @@ def test_memory_index_injection_guard(
     )
     note = memory_index_note(_context(machine_identity))
     assert note is not None
-    assert "may contain prompt injection" in note.content  # pyright: ignore[reportUnknownMemberType]
-    assert "ignore previous instructions" in note.content  # pyright: ignore[reportUnknownMemberType]  # content kept, warning prefixed
+    assert "may contain prompt injection" in note.text
+    assert "ignore previous instructions" in note.text
 
 
 def test_memory_index_note_is_suppressed_for_eval_isolation(
@@ -305,7 +234,6 @@ def test_memory_index_note_is_suppressed_for_eval_isolation(
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An eval agent never receives the shared pool index in its context."""
     from ava_builtins.plugins.ava_memory import notes
     from base.config import settings
 
@@ -390,3 +318,64 @@ def test_memory_index_notes_keep_two_live_roots_separate(
         second.set_field("memory_index_inject_enabled", False)
         assert notes.memory_index_note(first_ctx) is not None
         assert notes.memory_index_note(second_ctx) is None
+
+
+NUDGE = (
+    "\n\n---\n[maintenance] This index is {lines} lines, over the {cap}-line soft cap — "
+    "move detail into entry files and prune stale pointers to keep it lean."
+)
+
+
+def _write_index(agent_id: int, text: str) -> None:
+    from base.paths import workspace_dir
+
+    mem_dir = workspace_dir(agent_id) / "memory"
+    mem_dir.mkdir(parents=True, exist_ok=True)
+    (mem_dir / "MEMORY.md").write_text(text, encoding="utf-8")
+
+
+def _per_agent_text(machine: MachineIdentity, *, cap: int | None = None) -> str:
+    from ava_builtins.plugins.ava_memory import notes
+
+    note = notes.per_agent_memory_note(_context(machine, 17, cap=cap))
+    assert note is not None
+    return note.text
+
+
+def test_the_over_cap_index_keeps_the_full_body_and_gets_the_nudge(
+    unit_home: Path, machine_identity: MachineIdentity
+) -> None:
+    _write_index(17, "q\n" * 201)
+
+    text = _per_agent_text(machine_identity)
+
+    assert len([line for line in text.splitlines() if line.strip() == "q"]) == 201
+    assert text.endswith(NUDGE.format(lines=201, cap=200))
+
+
+def test_the_index_at_the_cap_gets_no_nudge(
+    unit_home: Path, machine_identity: MachineIdentity
+) -> None:
+    _write_index(17, "q\n" * 200)
+
+    assert "[maintenance]" not in _per_agent_text(machine_identity)
+
+
+def test_a_cap_of_zero_disables_the_nudge(
+    unit_home: Path, machine_identity: MachineIdentity
+) -> None:
+    _write_index(17, "q\n" * 201)
+
+    assert "[maintenance]" not in _per_agent_text(machine_identity, cap=0)
+
+
+def test_the_cap_counts_lines_not_characters(
+    unit_home: Path, machine_identity: MachineIdentity
+) -> None:
+    _write_index(17, "q" * 5000)
+    assert "[maintenance]" not in _per_agent_text(machine_identity, cap=5)
+
+    _write_index(17, "q\nq\nq\nq\nq\nq\n")
+    assert "This index is 6 lines, over the 5-line soft cap" in _per_agent_text(
+        machine_identity, cap=5
+    )
