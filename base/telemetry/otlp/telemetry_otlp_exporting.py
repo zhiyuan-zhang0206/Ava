@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 
@@ -30,6 +31,8 @@ class ExportingEventPipeline(EventPipeline):
 
     def stop(self, timeout: float = 5.0) -> DrainResult:
         # ava:ref base/telemetry/otlp/docs/telemetry-otlp/exit-flush.ava.okf.md#two-wait-classes-one-deadline
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("event drain timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout
         result = super().stop(max(0.0, deadline - time.monotonic()))
         if result.status is DrainStatus.UNFINISHED:

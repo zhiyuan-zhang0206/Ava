@@ -547,6 +547,21 @@ def test_empty_exporting_pipeline_stops_without_reading_identity() -> None:
     assert pipeline._exporter._export_decision is None
 
 
+def test_stop_refuses_non_finite_and_negative_timeout() -> None:
+    def reject() -> bool:
+        raise AssertionError("a refused budget must not read identity")
+
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        writer=lambda _events, _exporter: None, export_allowed=reject
+    )
+    for bad in (float("nan"), -1.0):
+        with pytest.raises(ValueError, match="finite and non-negative"):
+            pipeline.stop(timeout=bad)
+        assert not pipeline.stopped
+    assert pipeline.stop(timeout=1).status is DrainStatus.COMPLETED
+    assert pipeline.stopped
+
+
 def test_unfinished_ordinary_writer_keeps_its_exporter_alive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
