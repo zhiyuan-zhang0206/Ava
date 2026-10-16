@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineMessages, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
 import { api } from "@/lib/transport/api";
@@ -9,11 +9,16 @@ vi.mock("@/lib/transport/api", () => ({
   api: { getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)), getRunTimelineLinkContent: vi.fn() },
 }));
 
+import { preloadChatMarkdown } from "@/components/content/markdown";
 import { NodeDetail, UnitDetail } from "./run-timeline-detail";
 import { LinkDetail } from "./run-timeline-link-detail";
 import type { ResolvedLink } from "./model/timeline-links";
 
 afterEach(cleanup);
+
+beforeAll(async () => {
+  await preloadChatMarkdown();
+});
 
 const node = (summary: string): RunTimelineNode => ({
   id: "n1",
@@ -137,7 +142,6 @@ describe("the details of an arrow and of the block it ends on", () => {
     const shown = await messagesOf(<LinkDetail resolved={none} onAddAgent={() => undefined} />);
     expect(shown).toHaveLength(1);
     expect(shown[0]).toContain("<strong");
-    // The whole text goes to the row, not a cut of it; the row folds what is long.
     expect(shown[0]).toContain("long long long");
     expect(api.getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 3 });
     expect(api.getRunTimelineMessages).not.toHaveBeenCalled();

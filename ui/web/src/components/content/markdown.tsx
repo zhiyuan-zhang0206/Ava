@@ -1,89 +1,80 @@
-// ava:ref ui/web/src/docs/frontend-components/markdown-surfaces.ava.okf.md#markdown-rendering
+// ava:ref ui/web/src/docs/frontend-components/markdown-surfaces.ava.okf.md#markdown-lazy-loading
 "use client";
 
-import { memo } from "react";
-import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
-import remarkCjkFriendly from "remark-cjk-friendly";
-import remarkCjkFriendlyGfmStrikethrough from "remark-cjk-friendly-gfm-strikethrough";
-import remarkGfm from "remark-gfm";
+import { memo, useEffect, useState } from "react";
 
-import { CopyButton } from "@/components/content/copy-button";
-import { PythonCode } from "@/components/content/python-code";
-import { MIN_W_0 } from "@/lib/layout/layout";
-import remarkAutolinkDelimiter from "@/lib/markdown/remark-autolink-delimiter";
-import remarkCjkLinkBoundary from "@/lib/markdown/remark-cjk-link-boundary";
+import type { ChatMarkdownProps, ChatMarkdownRenderer } from "@/components/content/markdown-renderer";
 import { cn } from "@/lib/format/utils";
+import { MIN_W_0 } from "@/lib/layout/layout";
 
-const urlTransform = (url: string): string => {
-  return /^(https?:|mailto:|#)/i.test(url) ? url : "about:blank";
-};
+type Renderer = typeof ChatMarkdownRenderer;
 
-const components: Components = {
+let importRenderer: () => Promise<Renderer> = () =>
+  import("@/components/content/markdown-renderer").then((module) => module.ChatMarkdownRenderer);
+let rendererPromise: Promise<Renderer> | null = null;
+let resolvedRenderer: Renderer | null = null;
 
-  pre: ({ node: _node, children }) => <>{children}</>,
-  a: ({ node: _node, href, ...props }) => {
-    const external = /^https?:/i.test(href ?? "");
-    return external ? (
-      <a href={href} {...props} target="_blank" rel="noopener noreferrer" />
-    ) : (
-      <a href={href} {...props} />
-    );
-  },
-  code: ({ node: _node, className, children, ...props }) => {
-
-    const lang = /language-(\w+)/.exec(className ?? "")?.[1];
-
-    const text = typeof children === "string" ? children : "";
-    if (lang === undefined && !text.includes("\n")) {
-
-      return (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      );
-    }
-    const codeStr = text.replace(/\n$/, "");
-    if (lang === "python") {
-      return <PythonCode code={codeStr} />;
-    }
-
-    return (
-      <div className="group relative">
-        <CopyButton text={codeStr} label={lang ? `${lang} code` : "code"} />
-        <pre>
-          <code className={className}>{codeStr}</code>
-        </pre>
-      </div>
-    );
-  },
-};
-
-interface Props {
-  content: string;
-  components?: Components;
-  resolveUrl?: UrlTransform;
-  skipHtml?: boolean;
+function loadChatMarkdownRenderer(): Promise<Renderer> {
+  if (rendererPromise !== null) return rendererPromise;
+  const promise = importRenderer()
+    .then((Renderer) => {
+      if (rendererPromise === promise) resolvedRenderer = Renderer;
+      return Renderer;
+    })
+    .catch((error: unknown) => {
+      if (rendererPromise === promise) rendererPromise = null;
+      throw error;
+    });
+  rendererPromise = promise;
+  return promise;
 }
 
-export const ChatMarkdown = memo(function ChatMarkdown({ content, components: overrides, resolveUrl, skipHtml }: Props) {
+export function preloadChatMarkdown(): Promise<void> {
+  return loadChatMarkdownRenderer().then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+if (typeof window !== "undefined") {
+  void preloadChatMarkdown();
+}
+
+export const ChatMarkdown = memo(function ChatMarkdown(props: ChatMarkdownProps) {
+  const [Renderer, setRenderer] = useState<Renderer | null>(() => resolvedRenderer);
+
+  useEffect(() => {
+    if (Renderer !== null) return;
+    let active = true;
+    void loadChatMarkdownRenderer().then(
+      (Renderer) => {
+        if (active) setRenderer(() => Renderer);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [Renderer]);
+
+  if (Renderer === null) return <PlainChatMarkdown content={props.content} />;
+  return <Renderer {...props} />;
+});
+
+function PlainChatMarkdown({ content }: { content: string }) {
   return (
-    <div className={cn("chat-md font-sans", MIN_W_0)}>
-      <ReactMarkdown
-        remarkPlugins={[
-
-          [remarkGfm, { singleTilde: false }],
-
-          remarkCjkFriendly,
-          [remarkCjkFriendlyGfmStrikethrough, { singleTilde: false }],
-          remarkCjkLinkBoundary,
-          remarkAutolinkDelimiter,
-        ]}
-        urlTransform={resolveUrl ?? urlTransform}
-        components={overrides ? { ...components, ...overrides } : components}
-        skipHtml={skipHtml}
-      >
-        {content}
-      </ReactMarkdown>
+    <div className={cn("chat-md font-sans", MIN_W_0)} data-testid="chat-markdown-plain">
+      <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{content}</p>
     </div>
   );
-});
+}
+
+export function __resetMarkdownCacheForTests(): void {
+  rendererPromise = null;
+  resolvedRenderer = null;
+}
+
+export function __setMarkdownImportForTests(loader: (() => Promise<Renderer>) | null): void {
+  importRenderer =
+    loader ?? (() => import("@/components/content/markdown-renderer").then((module) => module.ChatMarkdownRenderer));
+}
