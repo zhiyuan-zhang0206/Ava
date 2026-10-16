@@ -35,9 +35,11 @@ from string import Template
 from urllib.parse import unquote, urlsplit
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.release import collector_artifact
 from base.host.atomic_io import write_text_atomic
+from base.host.net.ports import SYSTEM_URL_OPENER
 from base.paths import otel_collector_config, otel_collector_dir
 from base.telemetry.observability import collector_allowed_for_home
 from cli.commands.converge.rendered_file import write_rendered_guarded
@@ -529,7 +531,9 @@ def ensure_otel_collector(
         binary.exists()
         and marker.read_text(encoding="utf-8").strip() == collector_artifact.OTELCOL_CONTRIB_VERSION
     ):
-        collector_artifact.download_and_verify(tag, dest_dir)
+        collector_artifact.download_and_verify(
+            tag, dest_dir, open_url=SYSTEM_URL_OPENER, timers=SYSTEM_TIMERS
+        )
         print(
             f"  · otel-collector: installed otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} ({tag})"
         )

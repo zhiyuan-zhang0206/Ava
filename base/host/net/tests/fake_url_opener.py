@@ -36,6 +36,9 @@ class FakeResponse:
     def read(self, amount: int = -1) -> bytes:
         return self._body.read(amount)
 
+    def read1(self, amount: int = -1) -> bytes:
+        return self._body.read1(amount)
+
     def getcode(self) -> int:
         return self.status
 
