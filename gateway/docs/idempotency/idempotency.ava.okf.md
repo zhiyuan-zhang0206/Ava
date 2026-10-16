@@ -40,7 +40,7 @@ Every request that carries an `Idempotency-Key` also carries
 `Idempotency-Scope: principal-v1`; a key without it, an unknown scope value, or
 `principal-v1` without a bound principal fails with 422 before any durable
 write. Supplied keys contain 1 to 128 characters; malformed keys fail the same
-way. A route whose key is optional (chat messages, schedule and preset
+way. A route whose key is optional (chat messages and schedule
 mutations) keeps its one-shot behavior when the key is absent and gives no
 ambiguous-retry promise; a required-key route rejects a missing key. New
 handlers must distinguish a missing key from an explicitly empty one.

@@ -49,7 +49,6 @@ def client(
 @pytest.fixture
 def body(db_conn: psycopg.Connection) -> dict[str, Any]:
     db_conn.execute("INSERT INTO machines(name,role) VALUES ('local-test',ARRAY['agent-runner'])")
-    db_conn.execute("INSERT INTO agent_presets(name,label,config) VALUES ('coder','Coder','{}')")
     actor = db_conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
     assert actor is not None
     db_conn.execute(
@@ -173,7 +172,7 @@ def test_snapshot_replays_after_task_and_birth_metadata_deleted(
     assert replay.json()["launch"]["execution_observed"] is False
 
 
-def test_replay_skips_preset_and_changed_default_policy(
+def test_replay_skips_changed_default_policy(
     client: TestClient,
     db_conn: psycopg.Connection,
     body: dict[str, Any],
@@ -181,15 +180,10 @@ def test_replay_skips_preset_and_changed_default_policy(
 ) -> None:
     from base.agents.tasks.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority
 
-    db_conn.execute(
-        "INSERT INTO agent_presets(name,label,config) VALUES ('compound-policy','Policy','{}')"
-    )
-    db_conn.commit()
-    body["agent"]["config"] = {"preset": "compound-policy"}
+    body["agent"]["config"] = {"reasoning_effort": "high"}
     first = client.post(PATH, json=body, headers=HEADERS)
     assert first.status_code == 201, first.text
     original = first.json()
-    db_conn.execute("DELETE FROM agent_presets WHERE name='compound-policy'")
     db_conn.execute(
         "UPDATE agent_tasks SET title='Renamed',status='done' WHERE id=%s",
         (original["task"]["id"],),
@@ -247,6 +241,7 @@ def test_changed_placement_returns_historical_acceptance_without_launch(
     original = first.json()
     history = db_conn.execute("SELECT birth_snapshot FROM task_assignment_receipts").fetchone()
     assert history is not None
+    assert history[0]["preset_name"] is None
     db_conn.execute(
         "UPDATE agents_meta SET machine='operator-new-machine',config_overlay='{}' WHERE id=%s",
         (original["agent_id"],),

@@ -75,7 +75,7 @@ async def test_unqualified_provider_ids_do_not_claim_stable_chat_identity(
     assert await inbound_key(provider_id) is None
 
 
-@pytest.mark.parametrize("text", ["/help", "/unknown", "spawn:preset:test", "notice:read:1:2"])
+@pytest.mark.parametrize("text", ["/help", "/unknown", "spawn:model:test", "notice:read:1:2"])
 async def test_commands_and_notice_paths_do_not_receive_ordinary_chat_keys(
     env: Path, text: str
 ) -> None:

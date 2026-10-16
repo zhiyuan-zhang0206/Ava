@@ -4,11 +4,6 @@
 // anchor-nav and its section wrappers on the right. `id` is the element id
 // (URL hash + scroll target); `subs` are second-level anchors within a section.
 //
-// Config / Display carry static sub-anchors (each sub id must have a
-// matching element id in that section's page). Presets' subs are dynamic — one
-// per preset, derived from the presets query cache in _nav.tsx via
-// `presetAnchorId` — so they are NOT listed here.
-//
 // The two lists never overlap: Status + Ops + Alerts live only in Insights, the
 // remaining sections only in Control — see CONTROL_SECTIONS / INSIGHTS_SECTIONS
 // below.
@@ -18,10 +13,6 @@
 // the (identical) nav component targets the right container per page.
 export const CONTROL_SCROLL_ID = "control-scroll";
 export const INSIGHTS_SCROLL_ID = "insights-scroll";
-
-// Query key of the presets list — shared by the Presets section (which fetches
-// it) and the nav (which only reads the cache to build Presets' sub-links).
-export const PRESETS_QUERY_KEY = ["presets"] as const;
 
 export interface ControlSubSection {
   id: string;
@@ -37,12 +28,6 @@ export interface ControlSectionDef {
   /** i18n key under the "control.sections" namespace (same fallback rule). */
   labelKey?: string;
   subs?: ControlSubSection[];
-}
-
-/** Anchor id for one preset's card — shared by the nav's dynamic sub-links and
- *  the card elements on the Presets page so they can never drift apart. */
-export function presetAnchorId(name: string): string {
-  return `preset-${name}`;
 }
 
 // Render + nav order for Control (the write/manage surface). Guide leads —
@@ -80,7 +65,6 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
       { id: "config-health", label: "Health probes", labelKey: "config-health" },
     ],
   },
-  { id: "presets", label: "Presets", labelKey: "presets" },
   {
     id: "display",
     label: "Display",
@@ -138,10 +122,6 @@ export const INSIGHTS_SECTIONS: ControlSectionDef[] = [
   },
 ];
 
-/** Document-ordered anchor ids (sections and their subs interleaved) for a
- *  (possibly dynamically-augmented) section list — drives scroll-spy's "which
- *  anchor is active" pick. The nav calls this on CONTROL_SECTIONS with
- *  Presets' dynamic subs merged in. */
 export function controlAnchorIds(sections: readonly ControlSectionDef[]): string[] {
   return sections.flatMap((s) => [s.id, ...(s.subs?.map((sub) => sub.id) ?? [])]);
 }

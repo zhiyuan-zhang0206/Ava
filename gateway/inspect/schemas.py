@@ -189,7 +189,6 @@ class AgentInspectLive(BaseModel):
     started_at: datetime | None = None
     shells: list[ShellInfo]
     config_overlay: dict[str, Any]
-    preset_name: str | None = None
     notice: OpenNotice | None = None
     heartbeat: HeartbeatInfo
 

@@ -22,7 +22,6 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 - [[shell.ava.okf.md]] — shell commands and persistent sessions
 - [[ava/agents/docs/agents.ava.okf.md]] — agent interop
 - [[ava_builtins/plugins/ava_fleet/docs/tasks/tasks.ava.okf.md|Tasks]] — task registry `ava.tasks` (injected by ava_fleet plugin)
-- [[presets.ava.okf.md]] — configuration presets
 - [[ava/mcps/docs/mcps.ava.okf.md]] — MCP tool servers
 - [[ava/web/docs/web.ava.okf.md]] — network access
 - [[ava/understand/docs/understand.ava.okf.md]] — multimodal understanding primitives

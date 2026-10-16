@@ -1,13 +1,13 @@
 ---
 type: doc
-title: Preset and schedule creation acceptance identities
+title: Schedule creation acceptance identities
 description: Transactional recoverable creation without archived request/config copies.
 tags: []
 ---
 
-# Preset and schedule creation acceptance identities
+# Schedule creation acceptance identities
 
-`POST /api/presets` and `POST /api/schedules` accept an optional
+`POST /api/schedules` accepts an optional
 `Idempotency-Key`. Shared `gateway.http.auth.request_principal.optional_request_key`
 validates the 1–128 character key and its required `Idempotency-Scope:
 principal-v1` using the existing verified credential binding. A key without that
@@ -16,7 +16,7 @@ CLI/browser mint one key per invocation and send it with the scope. Names remain
 unique business constraints, separate from creation identity.
 
 Shared `gateway/routers/receipts/creation.py` owns the validated request fingerprint
-and original resource identity for both callers. Each caller owns its transaction.
+and original resource identity. The caller owns its transaction.
 
 The resource INSERT, initial schedule version, and receipt complete in one
 transaction. Concurrent identical keys serialize before insertion. Changed
@@ -29,13 +29,13 @@ after deletion does not promise that resource still exists; current GET returns
 
 `resource_creation_receipts` stores only SHA-256 of the canonical validated
 request, resource ID and original timestamps, plus the operation key/acceptance
-time. It stores no raw request, response, preset plugin config, script or token.
+time. It stores no raw request, response, plugin config, script or token.
 The retry supplies the same immutable body, verified against its fingerprint,
 so the original creation view can be reconstructed without retaining a second
 copy of potentially sensitive opaque plugin configuration. Receipts have no
 expiry that could turn an old retry into a fresh duplicate creation.
 
-This owner covers preset and schedule resource creation only. Agent/fork creation
+This owner covers schedule resource creation only. Agent/fork creation
 and launch-attempt recovery have separate business ownership. One-time MCP
 credential creation is deliberately excluded; its token cannot be stored or
 replayed through this table. No client outbox is involved.

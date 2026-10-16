@@ -124,17 +124,7 @@ class GatewayClient:
             f"send to agent {agent_id} failed after {len(self._config.im_send_retry_delays)} attempts"
         )
 
-    async def list_presets(self) -> list[dict[str, Any]]:
-        """GET /api/presets — spawn menu layer 1: [{id, name, label,
-        description, config}], ordered by name."""
-        client = await self._http()
-        resp = await client.get("/api/presets", headers=self._headers())
-        if resp.status_code != 200:
-            raise_http_failure(resp.status_code, f"list presets failed: HTTP {resp.status_code}")
-        return resp.json()
-
     async def list_models(self) -> dict[str, Any]:
-        """GET /api/models — spawn menu layer 2: {providers, models, default}."""
         client = await self._http()
         resp = await client.get("/api/models", headers=self._headers())
         if resp.status_code != 200:
@@ -144,20 +134,14 @@ class GatewayClient:
     async def spawn_agent(
         self,
         *,
-        preset: str | None,
         config: dict[str, object] | None,
         idempotency_key: str | None = None,
     ) -> int:
-        """POST /api/keyed/v1/agents — create an agent, return its id. A named preset
-        rides config_overlay["preset"]; the gateway folds it into config, the runner never sees it."""
         key = uuid.uuid4().hex if idempotency_key is None else idempotency_key
         client = await self._http()
-        overlay = dict(config) if config else {}
-        if preset is not None:
-            overlay["preset"] = preset
         payload: dict[str, object] = {"spawner": "user"}
-        if overlay:
-            payload["config"] = overlay
+        if config:
+            payload["config"] = dict(config)
         resp = await client.post(
             "/api/keyed/v1/agents",
             headers={**self._headers(), **keyed_headers(key)},

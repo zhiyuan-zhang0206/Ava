@@ -69,7 +69,6 @@ tags:
   ([[ava/mcps/docs/mcps.ava.okf.md|MCP]]).
 - `ava plugins ...`
 - `ava skill install/update/upgrade/enable/disable/register/scan/trust`
-- `ava presets ls/get/create/update/delete`
 - `ava schedules ls/get/create/update/delete/provision/start/stop/restart/logs/runs`:
   provision creates the built-in schedules from `schedules/manifest.json` and
   also runs at every schedule-manager start;

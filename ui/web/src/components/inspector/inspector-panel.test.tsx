@@ -26,7 +26,6 @@ const {
   getAgentInspectWidgets,
   getAgentRoster,
   listPages,
-  listPresets,
   resolveNotice,
 } = vi.hoisted(() => ({
     getAgentInspectStatistics:
@@ -44,7 +43,6 @@ const {
       () => Promise.resolve([]),
     ),
     listPages: vi.fn<(agentId: number) => Promise<PageRow[]>>(() => Promise.resolve([])),
-    listPresets: vi.fn(() => Promise.resolve([] as { id: number; name: string; label: string; description: string | null; config: Record<string, unknown>; created_at: string; updated_at: string }[])),
     resolveNotice: vi.fn(() => Promise.resolve({ status: "ok" })),
   }));
 vi.mock("@/lib/transport/api", () => ({
@@ -54,7 +52,6 @@ vi.mock("@/lib/transport/api", () => ({
     getAgentInspectWidgets,
     getAgentRoster,
     listPages,
-    listPresets,
     resolveNotice,
   },
 }));
@@ -215,7 +212,6 @@ function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLiv
       },
     ],
     config_overlay: { llm_model: "claude-opus-4-8", auto_compact_fraction: 0.7 },
-    preset_name: null,
     heartbeat: { interval_s: 300, next_at: null, paused_until: null, heartbeat_pending: false, last_pause: null },
     notice: null,
     spawned_at: "2026-06-14T12:00:00Z",
@@ -837,75 +833,6 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
     expect(screen.getByText('["example-skill","*"]')).toBeTruthy();
     expect(screen.queryByText(/example_skill/)).toBeNull();
-    expect(screen.getByText("claude-opus-4-8")).toBeTruthy();
-  });
-
-  it("shows the preset reference and only the overlay fields that differ (diff display)", async () => {
-    listPresets.mockResolvedValue([
-      {
-        id: 1,
-        name: "coder",
-        label: "Coder",
-        description: null,
-        config: { llm_model: "claude-opus-4-8", skills_to_inject_into_system_prompt: ["a"] },
-        created_at: "2026-09-01T00:00:00Z",
-        updated_at: "2026-09-01T00:00:00Z",
-      },
-    ]);
-    getAgentInspectLive.mockResolvedValue(
-      liveFixture({
-        preset_name: "coder",
-        config_overlay: {
-          llm_model: "claude-opus-4-8",
-          auto_compact_fraction: 0.7,
-        },
-      }),
-    );
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
-    expect(screen.getByText("Preset")).toBeTruthy();
-    expect(screen.getByText("coder")).toBeTruthy();
-    await waitFor(() => expect(screen.queryByText("llm_model")).toBeNull());
-    expect(screen.getByText("auto_compact_fraction")).toBeTruthy();
-    expect(screen.getByText("0.7")).toBeTruthy();
-  });
-
-  it("shows a field that differs from the preset even when the key exists there", async () => {
-    listPresets.mockResolvedValue([
-      {
-        id: 1,
-        name: "coder",
-        label: "Coder",
-        description: null,
-        config: { llm_model: "claude-opus-4-8" },
-        created_at: "2026-09-01T00:00:00Z",
-        updated_at: "2026-09-01T00:00:00Z",
-      },
-    ]);
-    getAgentInspectLive.mockResolvedValue(
-      liveFixture({
-        preset_name: "coder",
-        config_overlay: { llm_model: "deepseek-v4-pro" },
-      }),
-    );
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
-    expect(screen.getByText("llm_model")).toBeTruthy();
-    expect(screen.getByText("deepseek-v4-pro")).toBeTruthy();
-  });
-
-  it("falls back to the full overlay list when the preset no longer exists", async () => {
-    listPresets.mockResolvedValue([]);
-    getAgentInspectLive.mockResolvedValue(
-      liveFixture({
-        preset_name: "ghost",
-        config_overlay: { llm_model: "claude-opus-4-8" },
-      }),
-    );
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
-    expect(screen.getByText("ghost")).toBeTruthy();
-    expect(screen.getByText("llm_model")).toBeTruthy();
     expect(screen.getByText("claude-opus-4-8")).toBeTruthy();
   });
 

@@ -25,7 +25,6 @@
     "bootstrap/test_start_identity.py",
     "extensions/test_memory_cmd.py",
     "extensions/test_mirror_profile.py",
-    "extensions/test_presets_cmd.py",
     "extensions/test_settings_failure.py",
     "extensions/test_skill_install.py",
     "test_cli_groups.py",

@@ -9,11 +9,14 @@ tags:
 
 # Spawn menu identity
 
-The menu progresses through preset, model and effort choices, skipping presets
-when none exist. A summary button permits submission at each stage with the
-current selections. Effort choices use the selected model's published options
-or the generic fallback when unavailable; choosing provider default leaves the
-effort override unset.
+`/spawn` is a pure menu (design locked with the user, 2026-08-03): text
+arguments are ignored, and the menu progresses through model and effort
+choices. Every layer carries a summary [Spawn] button ("Spawn: <model> /
+<effort>", "Default" for anything unselected) so any layer completes. There is
+no confirm step: tapping Spawn creates the agent immediately, and the receipt
+offers a "Switch to #id" button. Effort choices use the selected model's
+published options or the generic fallback when unavailable; choosing provider
+default leaves the effort override unset.
 
 `spawn_menu.py` forwards the inbound event key to `GatewayClient.spawn_agent`.
 Telegram taps use `callback_query.id`, never the menu message ID shared by

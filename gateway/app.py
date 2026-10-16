@@ -108,9 +108,6 @@ from gateway.routers import (
     pages as pages_router,
 )
 from gateway.routers import (
-    presets as presets_router,
-)
-from gateway.routers import (
     settings as settings_router,
 )
 from gateway.routers import (
@@ -497,7 +494,6 @@ def create_app(
         default_model_router.router,
         settings_router.router,
         schedules_router.router,
-        presets_router.router,
         guide_router.router,
         inventory_router.router,
         skills_router.router,

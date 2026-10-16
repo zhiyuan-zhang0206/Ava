@@ -14,7 +14,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
 
 | Hermes | Ava | Notes |
 |---|---|---|
-| Profiles (`hermes profile`) | Presets (`ava presets`) + per-spawn `config_overlay` | |
+| Profiles (`hermes profile`) | Per-spawn `config_overlay` fields | |
 | Sessions (`hermes sessions`, FTS5 cross-session recall) | Agent conversations + memory-pool semantic search (`ava.memory.search`) | |
 | Memory (agent-curated, periodic nudges) | Shared memory pool + per-agent `memory/`; daily consolidation job (`ava memory`) | Ava has no runtime "nudge to persist" loop — memory hygiene is a standing duty written into agent prompts, enforced by scheduled consolidation. |
 | Skills — autonomous creation, self-improvement, Skills Hub (`hermes skills` / `curator`) | Skills are files installed via `ava skill install`; changing a skill is a PR, not a runtime loop | Honest gap: no autonomous skill creation or in-use self-improvement. The closest relative is the weekly self-evolution pass that mines agent traces and proposes skill edits — reviewed, not autonomous. |
@@ -25,7 +25,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
 | Terminal backends (local, Docker, SSH, Daytona, Modal) | Multi-machine agents (`ava.agents.spawn(machine=...)`), `ava.shell.sessions`, containers via shell | Daytona/Modal serverless hibernation has no Ava equivalent. |
 | `hermes cron` | `ava schedules` + `ava.watcher` | |
 | MCP (`hermes mcp`) | `ava mcp` | |
-| Model flexibility (`hermes model`, `hermes moa`, `hermes fallback`) | Presets + `config_overlay` pick one model per agent | No Mixture-of-Agents, no provider failover chain. The workaround is delegation: different agents on different models. |
+| Model flexibility (`hermes model`, `hermes moa`, `hermes fallback`) | `config_overlay` picks one model per agent | No Mixture-of-Agents, no provider failover chain. The workaround is delegation: different agents on different models. |
 | `hermes import-agent` (imports a `~/.claude` or `~/.codex` setup) | This page set — same job, done by hand | |
 | `hermes claw` (OpenClaw migration helpers) | See [openclaw.md](openclaw.md) | |
 
@@ -35,14 +35,13 @@ provider, Mixture-of-Agents presets, and fallback chains.
    with `ava skill install`. Skills Hermes learned on its own exist only in
    its memory; recreate the ones worth keeping as hand-written skills.
 2. **Write the persona as a role card.** SOUL.md → a `be-a-<role>` skill (see
-   the presets sub-skill), plus a preset that names it in
-   `skills_to_expand_at_start`.
+   `skill-creator`), loaded through the spawn's `skills_to_expand_at_start`.
 3. **Seed the memory pool.** Hermes's learned user model does not transfer;
    let onboarding write the `type/user` and `type/feedback` notes from the
    interview — the pool is the replacement for Honcho-style user modeling.
 4. **Recreate schedules** (`hermes cron` → `ava schedules` / `ava.watcher`).
 5. **Choose models per role.** `hermes model` / MoA presets → one model per
-   agent via presets; no multi-model aggregation.
+   agent via `config_overlay`; no multi-model aggregation.
 6. **Move channel habits.** Pick the platform dialog as the primary surface;
    there is no WhatsApp/Discord/Slack bot (Telegram via the IM Bridge only,
    where configured).

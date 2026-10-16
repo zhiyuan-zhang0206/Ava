@@ -30,7 +30,7 @@ async def guarded_draft_guide(
         "You are an Ava operations assistant. Read and follow ava.skills.ava_guide "
         "to help with this request — operate the cluster via the `ava` CLI (run / "
         "update / switch tracks, manage MCP servers, install skills or plugins, "
-        "manage presets and schedules). Request:\n\n" + body.nl
+        "manage schedules). Request:\n\n" + body.nl
     )
     body_obj = SpawnAgentRequest(
         spawner="user",

@@ -20,8 +20,8 @@ first and ask "what changed that made it worth doing".
   model for you is the same "plugin babysits the model" indirection already rejected in the item
   above for model-fallback / model-retry-budget plugins — opaque, hard to audit turn-to-turn, and
   today a single operator is present and can just swap config instead; (c) the right decision-maker
-  already has the context — `ava.agents.spawn(config_overlay={"llm_model": ...})`, saved presets
-  (`ava/agents/presets.py`), and the `ava-guide/models` skill's standing policy put the model choice
+  already has the context — `ava.agents.spawn(config_overlay={"llm_model": ...})` and the
+  `ava-guide/models` skill's standing policy put the model choice
   in the hands of whoever is deciding the sub-task, once, at spawn, not a framework router with none
   of that context. **This is not a rejection of multi-model support**: the registry
   (`base/lm/registry.py`) backs 9 providers side by side, each with its own per-model tuning

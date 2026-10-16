@@ -23,7 +23,6 @@ import nav from "./interface/nav.json";
 import noticeDetail from "./interface/noticeDetail.json";
 import openTasksNotice from "./interface/openTasksNotice.json";
 import pendingStrip from "./agents/pendingStrip.json";
-import presets from "./agents/presets.json";
 import runTimeline from "./agents/runTimeline.json";
 import schedules from "./operations/schedules.json";
 import sidebar from "./agents/sidebar.json";
@@ -54,7 +53,6 @@ const messages = {
   noticeDetail,
   openTasksNotice,
   pendingStrip,
-  presets,
   runTimeline,
   schedules,
   sidebar,

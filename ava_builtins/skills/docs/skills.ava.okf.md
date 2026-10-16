@@ -84,7 +84,7 @@ calibration belongs to `ava-workflow`; deployment, incident operations,
 modification layers, installation, plugin development, schedules, and external
 agent execution and page composition belong to `ava-guide`. Temporary waiting
 contracts belong to `ava.watcher`; waiting and recovery methods belong to
-`ava-being-a-long-running-agent`. Model speed and feedback settings belong to presets.
+`ava-being-a-long-running-agent`. Model speed and feedback settings belong to `ava-guide`'s models skill.
 
 ## Key dependencies
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — skill mechanism and core-vs-instance origin axis

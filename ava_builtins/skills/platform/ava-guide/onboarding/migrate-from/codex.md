@@ -16,7 +16,7 @@ one-shot `codex exec` runs, cloud tasks, and a GitHub Action. It reads
 | `codex exec "<task>"` | `ava.shell.run` / `run_background` for command one-shots; spawn an agent for multi-step reasoning tasks | |
 | `codex resume` | Hand off via files + the task registry; spawn a fresh agent with the handoff file's path | No conversation resume — the file is the memory. |
 | `AGENTS.md` (also reads `.cursorrules`, `CLAUDE.md`) | Same file — Ava surfaces AGENTS.md / CLAUDE.md along resolved paths | |
-| `~/.codex/config.toml`, `.codex/config.toml` (`CODEX_HOME`) | `ava config get/set/unset` (cluster + host `.env`) for deployment settings; `ava presets` + `config_overlay` for per-agent model / effort | |
+| `~/.codex/config.toml`, `.codex/config.toml` (`CODEX_HOME`) | `ava config get/set/unset` (cluster + host `.env`) for deployment settings; per-agent `config_overlay` for model / effort | |
 | `approval_policy` (`untrusted` / `on-request` / `never`) | No approval-policy engine. Onboarding records the user's gates as `type/feedback` memory; irreversible actions raise `ava.ui.notify(require_response=True, idempotency_key=notice_key)` | |
 | `sandbox_mode` (`read-only` / `workspace-write` / `danger-full-access`) | No sandbox modes. `execute_code` runs in the agent's process and `ava.shell` on the bare host — for untrusted work, delegate to an agent on a disposable machine or a container you stand up | Choose the machine, not the sandbox mode. |
 | MCP (`[mcp_servers]` in config.toml) | Same MCP standard; `ava mcp` per machine | |
@@ -38,8 +38,8 @@ token setup: `docs/conventions/extensions/mcp-client-access.md`).
 2. **Move AGENTS.md as-is** — Ava reads the same file. Project-agnostic rules
    (how to work with you) go to the memory pool as `type/feedback`.
 3. **Translate config.toml.** Deployment-level settings → `ava config`;
-   per-agent `model` / `model_reasoning_effort` / provider choices → `ava
-   presets` (+ `config_overlay` at spawn). There is no `approval_policy` or
+   per-agent `model` / `model_reasoning_effort` / provider choices →
+   `config_overlay` at spawn. There is no `approval_policy` or
    `sandbox_mode` — record the intended behavior as onboarding gates instead.
 4. **Rewrite one-shots.** `codex exec` calls become `ava.shell.run` (plain
    commands) or a spawned agent (tasks that need judgment).
@@ -60,9 +60,10 @@ token setup: `docs/conventions/extensions/mcp-client-access.md`).
   is a fleet — one agent per task, tracked in the task registry, with a
   delegator who gathers results.
 - **`config.toml` has no single equivalent.** Settings split across `ava
-  config` (deployment), presets (agent shape), and memory (behavioral rules).
-  When in doubt where a setting goes, ask what it changes: the machine →
-  `ava config`, the agent → preset, the behavior → memory.
+  config` (deployment), per-agent `config_overlay` (agent shape), and memory
+  (behavioral rules). When in doubt where a setting goes, ask what it changes:
+  the machine → `ava config`, the agent → `config_overlay`, the behavior →
+  memory.
 
 ## Sources
 

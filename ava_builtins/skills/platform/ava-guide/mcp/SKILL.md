@@ -52,7 +52,7 @@ ava mcp add vendor --json '{"url":"https://vendor.example/mcp"}'
 `url` and `command` are mutually exclusive. A remote entry can use static
 `headers` or `"oauth": true`, not both. Follow the vendor's auth instructions
 and the supported browser authorization flow; never put credentials into a
-preset or a source repository. Check the running deployment's support and make
+config overlay or a source repository. Check the running deployment's support and make
 a real read-only tool call to verify access. An SSE-only endpoint is not a
 Streamable HTTP endpoint.
 

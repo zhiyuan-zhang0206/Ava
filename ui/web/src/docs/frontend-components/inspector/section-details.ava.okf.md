@@ -48,15 +48,11 @@ bar, not here (user corrections 2026-08-28). A row whose agent or shell id is
 not a valid finite integer renders as plain text, so the panel never navigates
 to `/shell/NaN/NaN`.
 
-**Configuration overlay.** Rows render the overlay's values — strings pass
-through, everything else is JSON-stringified. Skill-list keys
+**Configuration overlay.** Rows render every overlay entry's value — strings
+pass through, everything else is JSON-stringified. Skill-list keys
 (`skills_to_inject_into_system_prompt`, `skills_to_expand_at_start`) are stored
 in the runtime's underscore Python projection and render in the canonical dash
-spelling (the same rule as the `# Capabilities` index); `*` stays `*`. With a
-preset in force the section shows the preset reference plus only the fields the
-preset does not supply verbatim — a field equal to the preset's current config is
-suppressed, and a preset deleted since spawn falls back to the full overlay list.
-The preset catalog comes from the shared `["presets"]` query.
+spelling (the same rule as the `# Capabilities` index); `*` stays `*`.
 
 **Liveness** (one merged section, user rulings Task #1195 / 2026-08-12 and
 2026-09-18 field order, Task #3952 / #3904). Cells in display order: agent birth

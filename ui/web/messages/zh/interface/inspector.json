@@ -25,7 +25,6 @@
   "sectionShells": "持久 Shell",
   "unnamed": "（未命名）",
   "sectionConfigOverlay": "配置覆盖",
-  "preset": "预设",
   "sectionCostActivity": "成本 + 活动",
   "metricCost": "成本",
   "metricLlmCalls": "LLM 调用",

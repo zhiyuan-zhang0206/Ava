@@ -108,7 +108,7 @@ async def create_and_launch_agent(
             catalog=catalog,
             default_model_reader=default_model_reader,
         )
-    preset_name, tail_skills, model_receipt = await asyncio.to_thread(
+    tail_skills, model_receipt = await asyncio.to_thread(
         spawn_preflight_blocking,
         db,
         target,
@@ -136,7 +136,6 @@ async def create_and_launch_agent(
             machine=target,
             config=body.config,
             label=body.label,
-            preset_name=preset_name,
             fork_tail_skills=tail_skills,
             prompt=body.prompt,
             prompt_source=body.prompt_source,
@@ -262,14 +261,7 @@ def spawn_preflight_blocking(
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
-) -> tuple[str | None, list[str] | None, tuple[str, str] | None]:
-    """Sync spawn preflight — via to_thread: registry capability check, preset
-    fold, fork config rule + tail-skills delta, model-config settlement and
-    validation (may read provider API keys). Returns ``(preset_name,
-    tail_skills, model_receipt)`` for the agent row / fork inbound; the receipt
-    is ``(requested, resolved)`` when a withdrawn ``llm_model`` was rewritten,
-    else None.
-    """
+) -> tuple[list[str] | None, tuple[str, str] | None]:
     from base.api_contracts.agent_contract import MachinePaused
     from base.cluster.machines import is_paused, lookup_role
 
@@ -300,9 +292,9 @@ def spawn_preflight_blocking(
             "cluster); resume it first with `ava cluster resume <name>` on the "
             "gateway, then spawn."
         )
-    preset_name, tail_skills = _normalize_and_resolve_preset(pool, body)
+    tail_skills: list[str] | None = None
     if body.fork_from is not None:
-        preset_name, tail_skills = _validate_fork_config(pool, body, preset_name)
+        tail_skills = _validate_fork_config(pool, body)
     # Settle a withdrawn llm_model BEFORE the overlay is stored or forwarded —
     # the row, fork copies and the launch op all carry the registered fallback,
     # and the spawner gets a receipt (response field + log line) instead of the
@@ -334,50 +326,10 @@ def spawn_preflight_blocking(
             requested=model_receipt[0],
             resolved=model_receipt[1],
         )
-    return preset_name, tail_skills, model_receipt
+    return tail_skills, model_receipt
 
 
-# The overlay key naming a preset, and the only overlay keys a fork may change
-# (additions only — see _validate_fork_config).
-_PRESET_KEY = "preset"
 _FORK_SKILL_KEYS = ("skills_to_inject_into_system_prompt", "skills_to_expand_at_start")
-
-
-def _normalize_and_resolve_preset(
-    pool: ConnectionPool, body: SpawnAgentRequest
-) -> tuple[str | None, list[str] | None]:
-    """Resolve `config_overlay.preset` into the effective overlay, returning the
-    preset name.
-
-    The preset's stored config is the base; the explicit `body.config` fields
-    win per-key (explicit beats template). The resolved map is written back to
-    `body.config` WITHOUT the preset key, so the forwarded spawn carries only a
-    plain config — the runner never sees the preset. The name is returned
-    separately: it is stored on the agent row (`agents_meta.preset_name`) purely
-    for display, next to the resolved overlay.
-
-    400 when the overlay key is not a non-empty string, or when the named preset
-    does not exist (a spawn referencing a missing preset is a caller error,
-    surfaced up front rather than silently ignored).
-    """
-    explicit = body.config or {}
-    preset_name = explicit.get(_PRESET_KEY)
-    if preset_name is None:
-        return None, None
-    if not isinstance(preset_name, str) or not preset_name.strip():
-        raise HTTPException(
-            status_code=400,
-            detail=f"config_overlay.preset must be a non-empty string, got {preset_name!r}",
-        )
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT config FROM agent_presets WHERE name = %s", (preset_name,))
-        row = cur.fetchone()
-    if row is None:
-        raise HTTPException(status_code=400, detail=f"preset {preset_name!r} not found")
-    preset_config: dict[str, object] = row[0]
-    explicit_fields = {k: v for k, v in explicit.items() if k != _PRESET_KEY}
-    body.config = {**preset_config, **explicit_fields}
-    return preset_name, None
 
 
 def _as_str_list(value: object) -> list[str] | None:
@@ -389,17 +341,16 @@ def _as_str_list(value: object) -> list[str] | None:
 
 def _fork_source(
     pool: ConnectionPool, source_id: int | None
-) -> tuple[dict[str, object], str | None, dict[str, object]]:
-    """`(config_overlay, preset_name, birth_config)` of the fork source agent."""
+) -> tuple[dict[str, object], dict[str, object]]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT config_overlay, preset_name, birth_config FROM agents_meta WHERE id = %s",
+            "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s",
             (source_id,),
         )
         row = cur.fetchone()
     if row is None:
         raise AgentNotFound(f"fork source agent {source_id} does not exist")
-    return row[0] or {}, row[1], row[2] or {}
+    return row[0] or {}, row[1] or {}
 
 
 def _offending_fork_keys(
@@ -423,31 +374,8 @@ def _offending_fork_keys(
     return offending
 
 
-def _validate_fork_config(
-    pool: ConnectionPool, body: SpawnAgentRequest, preset_name: str | None
-) -> tuple[str | None, list[str] | None]:
-    """Enforce the fork config rule and compute the tail-graft skill delta.
-
-    A fork must keep the source agent's effective config
-    (`{**birth_config, **config_overlay}`) so the inherited context stays
-    truthful and its cached prefix survives. The only sanctioned change:
-    ADDING skills to `skills_to_inject_into_system_prompt` /
-    `skills_to_expand_at_start` (superset of the source's lists) — those load
-    at the context tail, never in the cached prefix.
-
-    - fork without config: `body.config` becomes a copy of the source's
-      resolved `config_overlay` (the fork runs exactly what the source ran);
-      the effective preset name is the source's when the fork named none.
-    - fork with config: the stored overlay becomes source overlay + delta;
-      any non-skill-list difference or a skill-list reduction raises
-      ForkConfigChangeNotAllowed (400).
-
-    Returns `(preset_name, tail_skills)` where `tail_skills` lists the
-    inject-list skills the fork added that its preloaded (expand) set does not
-    already graft — carried in the fork inbound's payload for the claim node
-    to append at the tail. Raises AgentNotFound when the source row is gone.
-    """
-    source_overlay, source_preset, source_birth = _fork_source(pool, body.fork_from)
+def _validate_fork_config(pool: ConnectionPool, body: SpawnAgentRequest) -> list[str] | None:
+    source_overlay, source_birth = _fork_source(pool, body.fork_from)
 
     fork_overlay = body.config
     if fork_overlay is None:
@@ -455,7 +383,7 @@ def _validate_fork_config(
         # the fork's effective config equals the source's (the pre-2026-09-10
         # behavior dropped the source's overlay, silently re-braining the fork).
         body.config = dict(source_overlay) if source_overlay else None
-        return (preset_name or source_preset), None
+        return None
 
     # The fork's stored overlay is the SOURCE's overlay plus the fork's own
     # fields; the diff runs on that merged map (fields the fork names that
@@ -478,7 +406,7 @@ def _validate_fork_config(
     fork_inject = set(_as_str_list(fork_effective.get(inject_key)) or [])
     fork_expand = set(_as_str_list(fork_effective.get(expand_key)) or [])
     delta = sorted(s for s in fork_inject - source_inject if s not in fork_expand)
-    return (preset_name or source_preset), (delta or None)
+    return delta or None
 
 
 async def _accepted_launch_receipt(

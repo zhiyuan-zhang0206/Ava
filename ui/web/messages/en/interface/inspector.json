@@ -25,7 +25,6 @@
   "sectionShells": "Persistent shells",
   "unnamed": "(unnamed)",
   "sectionConfigOverlay": "Configuration overlay",
-  "preset": "Preset",
   "sectionCostActivity": "Cost + Activity",
   "metricCost": "Cost",
   "metricLlmCalls": "LLM calls",

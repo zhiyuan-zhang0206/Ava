@@ -677,11 +677,6 @@ export type GuideDraftResponse = Schemas["GuideDraftResponse"];
 export type PackageKind = Schemas["PackageDraftRequest"]["kind"];
 export type PackageDraftResponse = Schemas["PackageDraftResponse"];
 
-// --- Presets (config templates for spawning agents; GET /api/presets) ---
-
-export type PresetView = Schemas["PresetView"];
-export type PresetUpdate = Schemas["PresetUpdate"];
-
 // --- Composer commands (registered prompt templates) ---
 
 export type CommandItem = Schemas["CommandItem"];
@@ -877,10 +872,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // text, accepted with the right arrow). Default ON (user ruling 2026-10-11): it is a
   // static-placement hint inside the input the user is already looking at.
   "behavior.replySuggestions": true,
-  // Sticky spawn-composer picker defaults. null = "no override" (use the cluster
-  // default model / no preset / provider-default effort).
   "behavior.spawn_model": null,
-  "behavior.spawn_preset": null,
   "behavior.spawn_reasoning_effort": null,
   "notification.awaiting_reply": false,
   // Model picker visibility: model names the user has hidden from the spawn

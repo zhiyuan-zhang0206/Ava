@@ -27,8 +27,7 @@ UUID. The request digest still uses the existing parsed `SpawnAgentRequest`;
 this does not change the namespace or adopt guarded drafts' raw semantic identity.
 Acceptance does not prove native execution.
 
-Replay reads this retained birth before mutable placement, preset and model
-checks. Only the original attempt, still idling, never admitted and on its
+Replay reads this retained birth before mutable placement and model checks. Only the original attempt, still idling, never admitted and on its
 original machine, can receive the existing launch wake. A deliberate launch
 retry, changed placement, admission, termination or deleted metadata returns
 the original historical acceptance without forwarding a launch. Replay never

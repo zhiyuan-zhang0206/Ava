@@ -41,7 +41,6 @@ checkout, not the installed skill copy. For a deployment, that source is
 | Add, inspect, or remove MCP servers | [mcp](mcp/SKILL.md) |
 | Understand Ava plugins or develop a native plugin | [plugins](plugins/SKILL.md), then [plugins.develop](plugins/develop/SKILL.md) |
 | Create or manage agents, commands, and config overlays | [agents](agents/SKILL.md) |
-| Make or improve a preset from role instructions, prompts, skills, and MCP tools | [presets](presets/SKILL.md) |
 | Choose a model for an agent | [models](models/SKILL.md) |
 | Write, create, inspect, or change persistent scheduled work | [schedules](schedules/SKILL.md) |
 | Publish an artifact or collect user input through a page | [pages](pages/SKILL.md) |

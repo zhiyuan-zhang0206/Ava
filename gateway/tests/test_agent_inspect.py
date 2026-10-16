@@ -128,7 +128,6 @@ def test_inspect_live_returns_only_window_independent_fields(
         "started_at",
         "shells",
         "config_overlay",
-        "preset_name",
         "notice",
         "heartbeat",
     }

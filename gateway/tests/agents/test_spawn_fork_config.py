@@ -16,14 +16,12 @@ def _checkpoint(conn: psycopg.Connection, agent_id: int) -> str:
     return "ckpt-1"
 
 
-def _row(conn: psycopg.Connection, agent_id: int) -> tuple[dict, str | None]:
+def _row(conn: psycopg.Connection, agent_id: int) -> dict:
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT config_overlay, preset_name FROM agents_meta WHERE id = %s", (agent_id,)
-        )
+        cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
         r = cur.fetchone()
     assert r is not None
-    return (r[0] or {}), r[1]
+    return r[0] or {}
 
 
 def _fork_inbound(conn: psycopg.Connection, agent_id: int) -> dict | None:
@@ -38,29 +36,15 @@ def _fork_inbound(conn: psycopg.Connection, agent_id: int) -> dict | None:
 
 
 class TestForkConfigStability:
-    def test_fork_without_config_inherits_source_overlay_and_preset(
-        self, db_conn: psycopg.Connection
-    ) -> None:
+    def test_fork_without_config_inherits_source_overlay(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            client.post(
-                "/api/presets",
-                json={
-                    "name": "coder",
-                    "label": "Coder",
-                    "config": {"llm_model": "claude-sonnet-5"},
-                },
-            )
             src = spawn_via_http(
                 client,
-                {
-                    "spawner": "user",
-                    "config": {"preset": "coder", "llm_model": "deepseek-flash"},
-                },
+                {"spawner": "user", "config": {"llm_model": "deepseek-flash"}},
             ).json()["id"]
             _checkpoint(db_conn, src)
             fork = spawn_via_http(client, {"spawner": "user", "fork_from": src}).json()["id"]
-        overlay, preset_name = _row(db_conn, fork)
-        assert preset_name == "coder"
+        overlay = _row(db_conn, fork)
         assert overlay == {"llm_model": "deepseek-flash"}
         assert _fork_inbound(db_conn, fork) is None
 
@@ -82,8 +66,7 @@ class TestForkConfigStability:
             )
             assert r.status_code == 201, r.text
             fork = r.json()["id"]
-        overlay, preset_name = _row(db_conn, fork)
-        assert preset_name is None
+        overlay = _row(db_conn, fork)
         assert overlay == {"llm_model": "claude-sonnet-5"}
 
     def test_fork_model_change_is_rejected(self, db_conn: psycopg.Connection) -> None:
@@ -154,8 +137,7 @@ class TestForkConfigStability:
             )
             assert r.status_code == 201, r.text
             fork = r.json()["id"]
-        overlay, preset_name = _row(db_conn, fork)
-        assert preset_name is None
+        overlay = _row(db_conn, fork)
         assert overlay == {
             "skills_to_inject_into_system_prompt": ["a", "b"],
             "skills_to_expand_at_start": ["e", "b"],
@@ -182,62 +164,6 @@ class TestForkConfigStability:
             assert r.status_code == 201, r.text
             fork = r.json()["id"]
         assert _fork_inbound(db_conn, fork) == {"tail_skills": ["b"]}
-
-    def test_fork_preset_adding_a_skill_is_allowed_and_carries_delta(
-        self, db_conn: psycopg.Connection
-    ) -> None:
-        with gateway_test_client() as client:
-            client.post(
-                "/api/presets",
-                json={
-                    "name": "extra",
-                    "label": "Extra",
-                    "config": {"skills_to_inject_into_system_prompt": ["b"]},
-                },
-            )
-            src = spawn_via_http(
-                client,
-                {
-                    "spawner": "user",
-                    "config": {
-                        "llm_model": "claude-sonnet-5",
-                        "skills_to_inject_into_system_prompt": [],
-                    },
-                },
-            ).json()["id"]
-            _checkpoint(db_conn, src)
-            r = spawn_via_http(
-                client, {"spawner": "user", "fork_from": src, "config": {"preset": "extra"}}
-            )
-            assert r.status_code == 201, r.text
-            fork = r.json()["id"]
-        overlay, preset_name = _row(db_conn, fork)
-        assert preset_name == "extra"
-        assert overlay == {
-            "llm_model": "claude-sonnet-5",
-            "skills_to_inject_into_system_prompt": ["b"],
-        }
-        assert _fork_inbound(db_conn, fork) == {"tail_skills": ["b"]}
-
-    def test_fork_preset_with_model_change_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
-            client.post(
-                "/api/presets",
-                json={
-                    "name": "other",
-                    "label": "Other",
-                    "config": {"llm_model": "deepseek-v4-pro"},
-                },
-            )
-            src = spawn_via_http(
-                client, {"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}}
-            ).json()["id"]
-            _checkpoint(db_conn, src)
-            r = spawn_via_http(
-                client, {"spawner": "user", "fork_from": src, "config": {"preset": "other"}}
-            )
-        assert r.status_code == 400
-        assert r.json()["reason"] == "fork_config_change_not_allowed"
 
     def test_fork_source_row_missing_is_404(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:

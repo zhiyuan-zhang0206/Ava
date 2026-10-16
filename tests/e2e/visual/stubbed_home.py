@@ -175,7 +175,6 @@ API_STUBS: dict[str, object] = {
         "shells_available": True,
         "shells": [{"id": 1, "name": "dev-server", "created_at": None, "uptime_seconds": 120}],
         "config_overlay": {f"setting_{i}": f"value_{i}" for i in range(24)},
-        "preset_name": None,
         "heartbeat": {
             "interval_s": 300,
             "next_at": None,

@@ -82,3 +82,5 @@ explicit pick equals the cluster default, the picker now ALWAYS sends a stored
 model selection (previously the default-model selection was omitted as
 equivalent — with a preset pinning a different model, omitting let the preset's
 model silently win over what the user visibly picked).
+
+Superseded in part by: [decisions/runtime/config/2026-10-17-preset-removal.md](../../runtime/config/2026-10-17-preset-removal.md) — the preset picker is removed, so Decision 3 no longer applies; Decisions 1–2 remain.

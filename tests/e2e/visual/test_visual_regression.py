@@ -278,7 +278,6 @@ def _stub_quota_sidebar_dependencies(page: Page) -> None:
         "**/api/models",
         lambda route: route.fulfill(json={"providers": {}, "models": {}, "default": ""}),
     )
-    page.route("**/api/presets", lambda route: route.fulfill(json=[]))
     settings: dict[str, object] = {"display.sidebar_collapsed": True}
 
     def _settings(route: Route) -> None:

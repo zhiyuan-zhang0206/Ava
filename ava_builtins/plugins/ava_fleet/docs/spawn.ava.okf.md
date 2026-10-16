@@ -1,12 +1,11 @@
 ---
 type: doc
 title: Spawn — Agent Lifecycle Management
-description: "All operations of the agent lifecycle in ava.agents: spawn (create a new agent), fork (create by copying conversation state), terminate (terminate), restart (restart process), resurrect (resurrect a terminated agent), presets (named configuration templates)."
+description: "All operations of the agent lifecycle in ava.agents: spawn (create a new agent), fork (create by copying conversation state), terminate (terminate), restart (restart process), resurrect (resurrect a terminated agent)."
 tags:
 - fleet
 - lifecycle
 - spawn
-- presets
 ---
 
 # Spawn — Agent Lifecycle Management
@@ -26,7 +25,7 @@ Creates a new agent, returns its agent_id.
 | `prompt` | First message; omit = agent idle after creation |
 | `fork_from` | Copy that agent's conversation state to the new agent |
 | `machine` | Target machine; omit = current machine (`ava.self.MACHINE_SPEC.name`) |
-| `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}`; a preset template is named inside it as `{"preset": "name"}` (explicit fields win per-key) |
+| `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}` |
 | `label` | Initial role/name; omit = auto-named. **fleet-only**: provided by fleet's spawn wrap; unavailable when fleet is disabled |
 
 ### `ava.agents.fork_from` (parameter of spawn, not a standalone function)
@@ -54,29 +53,6 @@ Resurrect a terminated agent. The agent retains its previous conversation state 
 - `prompt` is required — lets the agent know the context
 - Returns `ALREADY_ALIVE` for an already alive agent
 - Raises `AgentNotFound` for a nonexistent agent_id
-
-### `ava.agents.presets` — Configuration Templates
-
-```python
-# List all presets
-ava.agents.presets.list() -> list[Preset]
-
-# Get by name
-ava.agents.presets.get(name: str) -> Preset
-```
-
-```python
-class Preset:
-    id: int
-    name: str
-    label: str
-    description: str | None
-    config: dict[str, object]   # config overrides
-    created_at: datetime
-    updated_at: datetime
-```
-
-Presets are used to reuse common configurations — for example, a "gmail-agent" preset pre-configures gmail skill, a specific model, and machine. `spawn(config_overlay={"preset": "gmail-agent"})` creates an email processing agent.
 
 ## Lifecycle States
 

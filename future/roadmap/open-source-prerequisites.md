@@ -33,7 +33,7 @@ down, the agent's view errors and a human swaps config. This is correct for
 single-user (the operator is present to swap). "Single model" here describes
 the default *operating* choice, not a capability ceiling — the registry
 (`base/lm/registry.py`) already backs 9 providers side by side, and any
-agent can be spawned on any of them today via `config_overlay`/presets.
+agent can be spawned on any of them today via `config_overlay`.
 
 At open-source time: a public deployment cannot hard-fail when one upstream
 provider has an outage or rate-limits. An ordered fallback chain
