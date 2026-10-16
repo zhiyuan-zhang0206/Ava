@@ -20,6 +20,10 @@ and `script`, `style`, `iframe` and `template` are stripped with their content.
 sanitizer judges them, so a scheme the allowlist does not name can still become
 its final authenticated URL; anything unresolved falls back to `about:blank`,
 which the sanitizer then drops — an unsafe URL never renders as a live link.
+react-markdown repeats the resolver after the sanitizer (its own `post()` pass),
+so the resolver must return an already-resolved absolute `http(s)` URL
+unchanged — a relative result would be rewritten to `about:blank` by that
+second pass.
 Ids render as authored: GFM footnote ids and rehype-slug headings author their
 own, and the sanitizer's clobber prefix would desynchronize every id/anchor
 pair, so it is disabled (scripts and styles are stripped, and nothing resolves
