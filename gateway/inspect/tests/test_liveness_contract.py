@@ -11,7 +11,7 @@ def test_inspector_parses_liveness_at_db_boundary(state: str) -> None:
     pool = MagicMock()
     cur = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
     cur.fetchone.side_effect = [
-        ({}, None, "machine", "idling", None, None, None, None, None, state, None, None, None),
+        ({}, "machine", "idling", None, None, None, None, None, state, None, None, None),
         (False,),
     ]
     result = db_rows_blocking(pool, 1)
@@ -27,7 +27,7 @@ def test_inspector_rejects_missing_or_unknown_liveness(state: str | None) -> Non
     pool = MagicMock()
     cur = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
     cur.fetchone.side_effect = [
-        ({}, None, "machine", "idling", None, None, None, None, None, state, None, None, None),
+        ({}, "machine", "idling", None, None, None, None, None, state, None, None, None),
         (False,),
     ]
     with pytest.raises(ValueError):
