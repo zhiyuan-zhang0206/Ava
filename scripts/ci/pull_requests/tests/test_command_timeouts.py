@@ -1,5 +1,3 @@
-"""Bounded command failures preserve CI evidence and owner-operation outcomes."""
-
 from __future__ import annotations
 
 import json
@@ -106,6 +104,7 @@ def test_limbo_timeout_remains_missing_evidence(probe: str) -> None:
 
 @pytest.mark.parametrize("probe", ["gh", "git"])
 def test_freshness_timeout_still_submits_the_green_pr(probe: str) -> None:
+    # ava:ref scripts/ci/pull_requests/docs/command-timeouts.ava.okf.md#queue-fixture-token
     runner = FakeCommands()
     error = subprocess.TimeoutExpired(probe, 30)
     runner.on(["gh", "api", "repos/o/r/issues/42/timeline"], Reply(stdout="null"))
@@ -126,7 +125,7 @@ def test_freshness_timeout_still_submits_the_green_pr(probe: str) -> None:
         "medium",
         every=1,
         timeout=100,
-        token="fixture",  # noqa: S106 — test fixture
+        token="fixture",  # noqa: S106
         require_fresh_base=True,
         host=fake_host(runner),
         clock=_clock(),
@@ -241,9 +240,8 @@ def test_best_effort_reads_keep_their_timeout_outcomes() -> None:
     runner = FakeCommands()
     runner.on("gh", subprocess.TimeoutExpired("gh", 60), repeat=True)
     host = fake_host(runner)
-    assert (
-        accounting.collect("o/r", "2026-10-01T00:00:00Z", "2026-10-01T01:00:00Z", host=host) == []
-    )
+    with pytest.raises(accounting.CiUsageReadError, match="timed out"):
+        accounting.collect("o/r", "2026-10-01T00:00:00Z", "2026-10-01T01:00:00Z", host=host)
     assert owner_operations.last_head_update("42", "o/r", host=host) is None
     result = diagnose.diagnose_pr("42", "o/r", token=None, host=host, open_url=FakeUrlOpener())
     assert result["gh_error"] == "gh pr view failed"

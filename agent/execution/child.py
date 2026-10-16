@@ -1,47 +1,4 @@
-"""Exec subprocess entry — `python -I -X utf8 -m agent.execution.child`.
-
-Each execute_code call runs here, in a fresh process the exec node spawns, so
-a stuck native call (numpy / ctypes / an `except BaseException` swallow loop)
-can be SIGKILLed without touching the agent process — issue #184. The agent
-process stays alive; this child is disposable.
-
-Contract with the parent (`agent/graph/exec/_subprocess.py`), all through
-files + signals:
-
-- Request envelope: `AVA_EXEC_REQUEST_FILE` — the code, the agent id, the
-  timeout, and the typed state snapshot (`agent/graph/exec/protocol.py`).
-- Output: fd 1/2, merged into one pipe by the parent (`stderr=STDOUT`). Only
-  the agent's own output goes there: framework logs use the file sink
-  (`init_subprocess_logger` adds no stderr handler), and stdout/stderr are
-  reconfigured to line buffering so `print(..., end="")` still streams.
-- Result envelope: `AVA_EXEC_RESULT_FILE` — outcome kind, plugin state-update
-  delta (plugin fields, security findings, attachment registrations), the run's SDK-call
-  tally, and (for a crash) the full traceback text. Written on every exit path except `os._exit`
-  (watchdog / the agent's own call) and SIGKILL — the parent classifies those
-  from its own cancel/timeout flags.
-- POSIX signals: SIGINT -> KeyboardInterrupt, SIGTERM -> TimeoutError, both raised
-  at the next bytecode boundary (the same semantics the old in-thread ctypes
-  injection had). The parent allows a grace period before closing the
-  process group;
-  a watchdog `os._exit(124)` bounds this child's life if the parent dies first.
-
-Context: the request envelope carries the description of the host's `AvaContext`
-(`AvaContext.describe`); the child builds its own instance from it
-(`AvaContext.from_description`) and installs it in the child-local `ava.context`, so
-agent code reads it as `ava.context`. The identity carries owns_loop=True, so
-`ava.self.terminate/restart/compact` keep working exactly as they do
-in the agent process (their inbound INSERTs go to the same database over
-`ava.DB`); the resulting `LifecycleExit` is caught here and reported as a
-lifecycle outcome. The parent reconstructs the exception from the name
-(`agent.graph.exec._result.lifecycle_exception_from_name`).
-
-Per-agent config: the host exports its bound framework and plugin pins through
-`AVA_AGENT_CONFIG_OVERLAY`. Direct embedding callers may also pass
-`AVA_AGENT_BIRTH_CONFIG`; overlay values take precedence. The child removes
-both carriers from its environment before applying framework configuration,
-then applies plugin configuration after plugin loading. SDK calls made from
-exec code see their owning turn's effective settings.
-"""
+# ava:ref agent/execution/docs/child-boundaries.ava.okf.md#exec-child-result-boundary
 
 from __future__ import annotations
 
@@ -58,22 +15,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
-# isort: split
-# The logger is lightweight and import preserves caller sinks. The executable
-# branch prepares logging before main loads SDK/configuration; embedded main
-# leaves its caller's logging intact.
-# isort: split
-# Envelope types the boot path references: a leaf module (stdlib + small shared
-# helpers, no serde — `loads_typed` stays deferred), so importing it here keeps
-# the child's early-import order intact.
 from agent.graph.exec.protocol import RequestPayload
 from base.log import logger
 
-# Watchdog margin beyond (timeout + parent's kill grace) before the child
-# hard-exits — overridable so tests do not wait for the 5s default.
 WATCHDOG_MARGIN_S = 5.0
 
-# Exit code the watchdog uses (the `timeout(1)` convention, same as watchers).
+
 WATCHDOG_EXIT_CODE = 124
 
 _RESULT_KIND: dict[type[BaseException], Literal["cancelled", "timed_out"]] = {
@@ -83,9 +30,6 @@ _RESULT_KIND: dict[type[BaseException], Literal["cancelled", "timed_out"]] = {
 
 
 class _Sdk(Protocol):
-    """The slice of the `ava` module the child drives: the framework-internal state slots and
-    the plugin load."""
-
     state: Any
     state_update: dict[str, Any] | None
 
@@ -102,29 +46,17 @@ class _Sdk(Protocol):
 
 @dataclass(frozen=True)
 class ChildContext:
-    """What this one exec child holds for the run: the SDK modules it bound after boot, and
-    when boot began.
-
-    `boot_started_at` covers child runtime setup after the initial module imports, ending
-    immediately before agent-authored code begins; the parent-owned exec duration includes
-    this interval but cannot isolate it from user code.
-    """
-
     ava: _Sdk
     boot_started_at: float
 
 
 def import_runtime(boot_started_at: float) -> ChildContext:
-    """Load the SDK only after `main` can turn a boot failure into a result."""
     import ava
 
     return ChildContext(ava=ava, boot_started_at=boot_started_at)
 
 
 def line_buffered_output() -> None:
-    """stdout/stderr are pipes; default buffering would hold output until the
-    buffer fills. Line buffering restores the live-streaming the old
-    in-thread capture gave (a print with no newline still shows up)."""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
@@ -132,15 +64,6 @@ def line_buffered_output() -> None:
 
 
 def _install_signal_handlers() -> None:
-    """SIGINT -> KeyboardInterrupt, SIGTERM -> TimeoutError.
-
-    The parent signals cancel with SIGINT and timeout with SIGTERM; both must
-    surface as catchable exceptions inside the agent's code so `finally`
-    blocks run and the result envelope is still written. If the agent
-    overwrites the handlers or is stuck in native code, the parent escalates
-    to SIGKILL after the grace period — that is the guarantee this whole
-    design exists for.
-    """
 
     def _raise_keyboard_interrupt(_signum: int, _frame: object) -> None:
         raise KeyboardInterrupt
@@ -153,9 +76,6 @@ def _install_signal_handlers() -> None:
 
 
 def _arm_watchdog(timeout_s: float) -> None:
-    """Hard-exit past (timeout + parent kill grace + margin) — the belt to the
-    parent's braces. Only fires when the parent itself died (or its signals
-    were lost); a parent that is alive SIGKILLs this child first."""
     from base.native_process.exec_domain import KILL_GRACE_S
 
     margin = float(os.environ.get("AVA_EXEC_WATCHDOG_MARGIN_S", WATCHDOG_MARGIN_S))
@@ -165,17 +85,12 @@ def _arm_watchdog(timeout_s: float) -> None:
         os._exit(WATCHDOG_EXIT_CODE)
 
     timer = threading.Timer(delay, _timeout)
-    # Daemon: a pending watchdog must never keep the interpreter alive after
-    # the exec finished (the child would otherwise sit idle until the timer
-    # fires — the first version of this module did exactly that).
+
     timer.daemon = True
     timer.start()
 
 
 def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | None]:
-    """Pop + JSON-decode the re-emitted per-agent config maps, exactly once —
-    applying them in two phases (framework now, plugin after plugins load)
-    must not re-read the env."""
     import json as _json
 
     from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
@@ -203,9 +118,6 @@ def apply_overlay_scope(
     scope: Literal["framework", "plugin"],
     set_framework_field: Callable[[str, object], None] | None = None,
 ) -> bool:
-    """Apply both maps at one scope — birth first, overlay on top (the same
-    precedence the host uses when it resolves stored configuration).
-    Returns True when at least one map applied."""
     applied = False
     for value in (birth, overlay):
         if value:
@@ -227,15 +139,6 @@ def init_logger(
     producer: Callable[[], Any],
     machine_reader: Callable[[], str],
 ) -> None:
-    """File sink only, plus a best-effort event-pipeline sink for sdk_call
-    events. The pipeline open is best-effort here — a DB outage must not stop
-    agent code from running (unlike the agent process, which fails loud at
-    boot). A failure degrades to the file sink with a warning.
-
-    With the sink in place, the boot timing line becomes the child's first
-    event-pipeline record, so the OTLP side is armed for deferred export here,
-    before any record can flow (task #3816 M4b; see
-    `base.telemetry.otlp.telemetry_otlp_defer`). A failed sink registration skips the arm."""
     if agent_id is None:
         return
     from base.log.process import init_subprocess_logger
@@ -261,7 +164,6 @@ def init_logger(
 
 
 def emit_child_boot_timing(child: ChildContext, *, clients: Any) -> None:
-    """Record the child-ready boundary before executing agent-authored code."""
     duration_ms = (time.perf_counter() - child.boot_started_at) * 1000
     extra: dict[str, object] = {}
     deferred = clients.exports_deferred()
@@ -276,29 +178,15 @@ def emit_child_boot_timing(child: ChildContext, *, clients: Any) -> None:
 
 
 class _LazyStateSlot:
-    """State slot for a stateful request — materializes on first use.
-
-    Holds the request's raw snapshot; `materialize()` loads the plugin faces
-    (state-field registrations), decodes the typed blob, rebuilds and validates
-    the dynamic AgentState, then swaps itself out of `ava.state`. Attribute
-    access before and after goes through (materialize-then-forward), so plugin
-    handles (`PluginStateHandle.read/update`) and `ava.state.<x>` reads work
-    unchanged — to the outside the slot behaves like the state object (task
-    #3633 leg-2: the child start must not pay the serde + `agent.state` +
-    graph/LM stack for a snapshot the turn may never touch).
-    """
-
     def __init__(self, payload: RequestPayload, ava: _Sdk) -> None:
         object.__setattr__(self, "_payload", payload)
         object.__setattr__(self, "_ava", ava)
         object.__setattr__(self, "_real", None)
 
     def materialize(self) -> None:
-        """Resolve the slot once: faces, then decode + validate, then swap."""
         if object.__getattribute__(self, "_real") is not None:
             return
-        # The faces declare the plugins' state fields — loaded before the registry is built, and the
-        # dynamic class is built before the blob is decoded: the decode's allowlist is the class's.
+
         ava: _Sdk = object.__getattribute__(self, "_ava")
         from agent.state import build_agent_state, plugin_state_schema
 
@@ -322,13 +210,6 @@ class _LazyStateSlot:
 
 
 def build_state_slot(child: ChildContext, payload: RequestPayload) -> None:
-    """Arm the dynamic AgentState slot from the request snapshot.
-
-    A stateless request binds no slot, so `ava.state` does not exist in that child. A
-    stateful request binds a lazy slot (task #3633 leg-2): the decode, the plugin faces,
-    and the dynamic-class build/validation happen on first use — a handle call or an
-    `ava.state.<x>` read (`_LazyStateSlot.materialize`).
-    """
     if payload.state_raw is None:
         return
     child.ava.state = _LazyStateSlot(payload, child.ava)
@@ -336,13 +217,6 @@ def build_state_slot(child: ChildContext, payload: RequestPayload) -> None:
 
 
 def _take_result_state_update(child: ChildContext, payload: Any, *, state_injected: bool) -> None:
-    """Serialize this turn's plugin delta into the result envelope.
-
-    A tampered slot (agent replaced ava.state_update with a non-dict) is reported as
-    an error string rather than a delta; the parent raises the same TypeError
-    the old in-process path raised. A request without a snapshot (container/eval
-    mode) bound no slot, so there is nothing to read and no delta to carry.
-    """
     if not state_injected:
         return
     update = child.ava.state_update
@@ -351,14 +225,11 @@ def _take_result_state_update(child: ChildContext, payload: Any, *, state_inject
             f"plugin tampered with ava.state_update: expected dict, got {type(update).__name__}"
         )
         return
-    # `{}` = the slot was armed but never touched: no delta to send, and the
-    # exit path must not pay the serde for it (task #3633 leg-2).
+
     payload.state_update = update or None
 
 
 def run_code(code: str, payload: Any) -> None:
-    """Execute the agent's code with stdout/stderr on the pipe; capture
-    lifecycle / crash outcomes into the payload."""
     from agent.graph.agent_traceback import (
         format_agent_traceback,
         format_full_traceback,
@@ -369,15 +240,13 @@ def run_code(code: str, payload: Any) -> None:
     from ava.sdk_surface.installation import installed
     from base.agents.sdk import telemetry as sdk_usage_telemetry
 
-    # Register the source so `<agent_code>` frames resolve their offending
-    # line in tracebacks (exec'd code is invisible to linecache).
     register_agent_source(code)
     builtins_source = (
         cast(dict[str, Any], __builtins__)
         if isinstance(__builtins__, dict)
         else cast(dict[str, Any], vars(__builtins__))
     )
-    # The module is process-global; only this exec's copied binding may change.
+
     builtins_map = dict(builtins_source)
     original_help = builtins_map["help"]
     builtins_map["help"] = HelpRouter(original_help)
@@ -393,31 +262,18 @@ def run_code(code: str, payload: Any) -> None:
     )
     process_context.bind_context(replace(execution_context, sdk_calls=tally))
     try:
-        # From here on the agent-authored code has run (or is about to) — the
-        # envelope flag the parent uses to tell "the code never executed" from
-        # "it executed and printed nothing" (P0 #2100).
         payload.code_reached = True
-        # Each child owns one execution tally. Its context shares that owner with
-        # all public SDK entries, including ordinary threads; boot calls occurred
-        # before this binding and do not enter the execution's result.
+
         with sampling:
             exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:
         from base.agents.lifecycle import LifecycleExit
 
         if isinstance(exc, LifecycleExit):
-            # Lifecycle (terminate/restart/compact): SDK already INSERTed the
-            # inbound; no traceback (not an error).
             payload.kind = "lifecycle"
             payload.lifecycle_type = type(exc).__name__
             return
-        # Ordinary exceptions / SystemExit / KeyboardInterrupt (cancel signal)
-        # / TimeoutError (timeout signal). Only the agent's own `<agent_code>`
-        # frames go to the pipe (agent-facing surface); the full traceback
-        # rides the envelope for the parent's logs. The exc details are
-        # recorded for the signal kinds too: when the parent's flags do not
-        # confirm (the agent raised KeyboardInterrupt itself), the parent
-        # maps the envelope back to a crash, not a clean done.
+
         payload.kind = _RESULT_KIND.get(type(exc), "crashed")
         payload.exc_type = type(exc).__name__
         payload.exc_msg = str(exc)[:2000]
@@ -430,14 +286,6 @@ def run_code(code: str, payload: Any) -> None:
 
 
 def finalize_telemetry(*, clients: Any = None) -> None:
-    """Attempt finite ordinary delivery in life, then flush the available OTLP tail.
-
-    A completed barrier observes writer processing, not durable capture. An
-    unfinished barrier may lose ordinary queued records or deliver them later;
-    the result envelope and independent durable journals retain their contracts.
-    A zero-record child avoids importing telemetry and OTel entirely. Deferred
-    OTLP startup must still be attempted before interpreter finalization.
-    """
     if "base.telemetry" not in sys.modules:
         return
     from base import telemetry
@@ -463,11 +311,6 @@ def finalize_telemetry(*, clients: Any = None) -> None:
 
 
 def deliver_envelope_telemetry(*, clients: Any = None) -> None:
-    """Best-effort last-mile delivery for the crash-envelope writers (task #4312).
-
-    Never raises and never rewrites the envelope: the crash must stay the
-    reported failure. Ordinary observation delivery can remain unfinished.
-    """
     try:
         finalize_telemetry(clients=clients)
     except BaseException:
@@ -478,13 +321,6 @@ def deliver_envelope_telemetry(*, clients: Any = None) -> None:
 
 
 def deliver_run_telemetry(result_path: str, payload: Any) -> None:
-    """Attempt ordinary observation delivery after writing this run's envelope.
-
-    Known unfinished delivery is best effort and preserves the business result.
-    Unknown sync/flush failures retain the existing crash boundary for successful
-    runs; an existing crash stays primary. Timed-out or cancelled children skip
-    delivery because their parent is already stopping them.
-    """
     if payload.kind not in ("done", "lifecycle", "crashed"):
         return
     try:
@@ -495,9 +331,7 @@ def deliver_run_telemetry(result_path: str, payload: Any) -> None:
             "ordinary observation delivery is unfinished; queued records may be lost or land later",
             payload.kind,
         )
-        # A post-run telemetry sync/flush failure must not read as a clean
-        # outcome: report it with the REAL code_reached flag (P0 #2100). A
-        # crashed envelope already carries its own failure.
+
         if payload.kind in ("done", "lifecycle"):
             write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
@@ -505,7 +339,6 @@ def deliver_run_telemetry(result_path: str, payload: Any) -> None:
 def _bind_identity(
     request: RequestPayload, *, context: Any, clock_factory: Callable[[], Any]
 ) -> None:
-    """Bind this child's `AvaContext` and the incarnation from its validated request."""
     from ava.sdk_surface import process_context
     from base.agents.context import AvaContext
 
@@ -520,16 +353,11 @@ def _bind_identity(
             clock_factory=clock_factory,
         )
     )
-    # No eager OTLP warmup: the backend comes up lazily on the first export
-    # (`_ensure()` in base/telemetry/otlp/telemetry_otlp.py), so a zero-record
-    # child never imports the OTel SDK at all (task #3816 M3).
 
 
 def _run(
     request_path: str, result_path: str, boot_started_at: float, *, config: Any, context: Any
 ) -> None:
-    """Child body: read the request, set up identity + plugins + state, run the
-    code, write the result envelope."""
     child = import_runtime(boot_started_at)
     from agent.graph.exec.protocol import ResultPayload, read_request, write_result
 
@@ -545,16 +373,14 @@ def _run(
     payload = ResultPayload(kind="done")
 
     birth, overlay = pop_overlay_env()
-    from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+    from base.clock import SYSTEM_TIMERS, Clock
+    from base.clock.configuration import clock_config_from_boot
 
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
 
     _bind_identity(request, context=context, clock_factory=clock_factory)
 
-    # Two-phase overlay application, mirroring the agent process's own boot:
-    # framework fields early (before any settings read), plugin fields after
-    # plugins load (the SDK installation owns the bound plugin config image).
     framework_overlay_applied = apply_overlay_scope(
         birth, overlay, scope="framework", set_framework_field=config.set_field
     )
@@ -567,12 +393,6 @@ def _run(
     )
     from ava.boot import initialize_context
 
-    # Load plugin namespaces (ava.tasks etc.) + wraps into this process — the
-    # same explicit load a watcher child runs. Idempotent, surface-only: a
-    # request carrying a state snapshot arms a lazy slot whose first use
-    # upgrades to the agent-runtime faces (state fields feed the state schema)
-    # — the child start stays off the agent runtime either way (task #3633).
-    # The install applies the env baseline AVA_SDK_DISABLE as part of the load.
     initialize_context(
         ava.context,
         config=config,
@@ -587,14 +407,10 @@ def _run(
         return sdk_settings.config_authority().service_field_value(field)
 
     if framework_overlay_applied:
-        # Per-agent sdk_disable additions ride the overlay; they apply additively
-        # on top of the installed surface (delta — only new entries take effect).
         from agent.process_boot import apply_per_agent_sdk_disable
 
         apply_per_agent_sdk_disable(default_reader=read_agent_default)
-    # A text-only agent gets no attach contract anywhere in its SDK docs,
-    # including interactive `ava.help(ava.self)` (user ruling 2026-08-28): the
-    # renderer computes the child's media gating itself, per call.
+
     from agent.process_boot import apply_per_agent_eval_isolation
 
     apply_per_agent_eval_isolation(default_reader=read_agent_default)
@@ -606,39 +422,27 @@ def _run(
     try:
         emit_child_boot_timing(child, clients=context.clients)
     except BaseException as exc:
-        # Boot-timing failure: the code never ran.
         write_crashed_result(result_path, exc, code_reached=False)
         deliver_envelope_telemetry()
         return
     try:
         run_code(request.code, payload)
     except BaseException as exc:
-        # run_code catches everything itself — an escape here is a framework
-        # failure, not a user-code crash. Report it with the REAL code_reached
-        # flag so main() never stamps it as a boot crash (P0 #2100).
         write_crashed_result(result_path, exc, code_reached=payload.code_reached)
         deliver_envelope_telemetry()
         return
     finally:
         _take_result_state_update(child, payload, state_injected=request.state_raw is not None)
-    # Outside the try: a boot-phase exception (config fetch, request read,
-    # plugin load) propagates to main(), which writes the crash envelope with
-    # code_reached=False. A write failure here falls back to the best-effort
-    # crash envelope carrying the REAL code_reached, and is swallowed so
-    # main() does not overwrite it with the boot-crash reading (P0 #2100).
+
     try:
         write_result(Path(result_path), payload)
     except BaseException as write_exc:
         write_crashed_result(result_path, write_exc, code_reached=payload.code_reached)
-    # Deliver queued records after the envelope write (task #4312).
+
     deliver_run_telemetry(result_path, payload)
 
 
 def main() -> None:
-    """Entry: run one exec and exit 0 — the result envelope carries the
-    semantics, not the exit code (a non-zero exit would add nothing the
-    envelope does not already say, and the parent treats a missing envelope
-    as the crash path anyway)."""
     boot_started_at = time.perf_counter()
     request_path = os.environ.get("AVA_EXEC_REQUEST_FILE")
     result_path = os.environ.get("AVA_EXEC_RESULT_FILE")
@@ -665,11 +469,9 @@ def main() -> None:
         _run(request_path, result_path, boot_started_at, config=config, context=context)
     except BaseException as exc:
         write_crashed_result(result_path, exc)
-        # The crash envelope's record needs the same last-mile delivery (task
-        # #4312).
+
         deliver_envelope_telemetry(clients=clients)
     finally:
-        # The connections this child opened (SQL, Redis, gateway, MCP) end with it.
         slot = sys.modules.get("ava.sdk_surface.process_context")
         context = None if slot is None else slot.unbind_context()
         if context is not None and context.clients is not clients:
@@ -681,11 +483,6 @@ def main() -> None:
 def write_crashed_result(
     result_path: str, exc: BaseException, *, code_reached: bool | None = False
 ) -> None:
-    """Best-effort crash envelope that cannot itself hide the original failure.
-
-    `code_reached` defaults to False: this is the boot-crash writer (main()'s
-    handler) — the code never ran. `_run`'s envelope-write failure passes the
-    payload's own value, which is True after the code reached exec."""
     exc_type = type(exc).__name__
     exc_msg = str(exc)[:2000]
     full_traceback = _format_current_traceback(exc)
@@ -716,7 +513,6 @@ def write_crashed_result(
         )
         return
     except BaseException:
-        # The fallback writes first: the envelope must land even if logging is what is broken.
         try:
             _write_crashed_result_stdlib(result_path, envelope)
         finally:
@@ -726,7 +522,6 @@ def write_crashed_result(
 
 
 def _write_crashed_result_stdlib(result_path: str, envelope: dict[str, object]) -> None:
-    """Write the minimal result shape without importing application modules."""
     path = Path(result_path)
     fd: int | None = None
     try:
@@ -744,7 +539,7 @@ def _write_crashed_result_stdlib(result_path: str, envelope: dict[str, object]) 
                 os.close(fd)
         with contextlib.suppress(OSError):
             path.unlink()
-        # A closed or broken stderr (OSError / ValueError) leaves only the log line below.
+
         with contextlib.suppress(OSError, ValueError):
             sys.stderr.write(
                 "exec child could not write crash result envelope: "
@@ -761,7 +556,6 @@ def _format_current_traceback(exc: BaseException) -> str:
 
 
 def run_as_entry() -> None:
-    """The `python -m agent.execution.child` body, also the gated owner entry's hand-off."""
     from base.log import prepare_process_logging
 
     prepare_process_logging()

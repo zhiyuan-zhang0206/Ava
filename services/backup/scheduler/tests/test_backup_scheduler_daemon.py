@@ -1,5 +1,3 @@
-"""Behaviour locks for the gateway-owned Postgres backup scheduler."""
-
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
-from base.clock import Clock, ClockConfig, clock_config_from_boot
+from base.clock import Clock, ClockConfig
+from base.clock.configuration import clock_config_from_boot
 from base.clock.tests.manual_timers import ManualTimers
 from base.config import ConfigBoot, settings
 from base.daemon import health, health_schema
@@ -31,7 +30,6 @@ from services.backup.scheduler import daemon
 
 @pytest.fixture(autouse=True)
 def config_boot_environment() -> Generator[None]:
-    """Restore process delivery from each independent operation's boot."""
     with patch.dict(os.environ):
         yield
 
@@ -45,13 +43,10 @@ def _always_due(_now: datetime, **_inputs: object) -> bool:
 
 
 def _clock(timers: ManualTimers) -> Clock:
-    """A UTC cluster clock that reads the same virtual time as `timers`."""
     return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
 
 
 class _StopAfterSleeping(ManualTimers):
-    """Virtual timers that cancel the loop once it has waited `budget` seconds in all."""
-
     def __init__(self, budget: float, *, wall_start: datetime) -> None:
         super().__init__(wall_start=wall_start)
         self._budget = budget
@@ -73,14 +68,6 @@ def _find_free_port() -> int:
 
 
 def test_module_entrypoint_runs_the_scheduler(tmp_path: Path) -> None:
-    """The exact ``python -m`` ServiceSpec path must enter ``main``.
-
-    Point schema startup at a deliberate connection refusal: a missing module
-    guard would silently exit 0, while a real entrypoint reaches the schema
-    assertion and reports its traceback. The scheduler is a gateway process: its
-    home ``.env`` is the authority for cluster-pinned keys, so that file carries
-    the data-plane URLs instead of the inherited environment.
-    """
     (tmp_path / ".env").write_text(
         "AVA_DB_URL=postgresql://ava:test@127.0.0.1:1/ava\n"
         "AVA_REDIS_URL=redis://ava:test@127.0.0.1:1/0\n"
@@ -235,7 +222,7 @@ def test_due_backup_runs_once_then_waits_for_tomorrow(monkeypatch: pytest.Monkey
     assert len(ran) == 1
     assert state.running is False
     assert state.last_success == ran[0].timestamp()
-    assert timers.sleeps == [60.0]  # it went to sleep until tomorrow, in chunks
+    assert timers.sleeps == [60.0]
 
 
 def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,7 +278,7 @@ def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(daemon.backup_loop(state, config=config, clock=_clock(timers)))
 
-    assert ran == ["dump"]  # no shorter retry ran the dump again before the next backup hour
+    assert ran == ["dump"]
     assert sum(timers.sleeps) == until_next_hour
     assert state.running is False
     assert state.last_error == "temporary failure"
@@ -305,8 +292,6 @@ def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
 
 
 def test_failed_dump_does_not_make_healthz_ask_the_supervisor_for_a_restart() -> None:
-    """A degraded component is a 503, which root answers with a restart, and a restarted
-    daemon dumps again at once. The failure is reported in the detail and the event."""
     timers = ManualTimers()
     state = daemon.BackupState(started_at=timers.monotonic())
     state.record_error("disk full")
@@ -445,7 +430,6 @@ def _staged_dump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
 def test_cross_filesystem_commit_publishes_a_verified_private_copy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A backup directory on another mount gets the same exclusive publication."""
     from services.backup.scheduler import worker
 
     staged, published, digest = _staged_dump(tmp_path, monkeypatch)
@@ -461,7 +445,7 @@ def test_cross_filesystem_commit_publishes_a_verified_private_copy(
     assert target.read_bytes() == b"encrypted" and target.stat().st_mode & 0o777 == 0o600
     assert not staged.exists() and [path.name for path in published.iterdir()] == [target.name]
     staged.write_bytes(b"encrypted")
-    with pytest.raises(FileExistsError):  # a prior artifact is never replaced
+    with pytest.raises(FileExistsError):
         worker.commit_scheduled_backup(staged, digest, keep_reader=lambda: 7)
     assert staged.exists() and [path.name for path in published.iterdir()] == [target.name]
 
@@ -469,7 +453,6 @@ def test_cross_filesystem_commit_publishes_a_verified_private_copy(
 def test_commit_defers_pruning_while_another_backup_holds_the_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A weekly base capture can hold the lock for hours; the commit never waits."""
     from services.backup import dump as backup
     from services.backup.scheduler import worker
 
@@ -497,8 +480,6 @@ def test_commit_defers_pruning_while_another_backup_holds_the_lock(
 def test_cross_filesystem_copy_survives_a_concurrent_sweep_until_linked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The private copy stays open until it is linked: a backup run sweeping the
-    directory at that moment never takes it, and nothing is left behind."""
     from services.backup.artifact.intermediates import sweep_closed_partials
     from services.backup.scheduler import worker
 
@@ -508,7 +489,7 @@ def test_cross_filesystem_copy_survives_a_concurrent_sweep_until_linked(
     def cross_device_with_sweep(source: Path, target: Path) -> None:
         if Path(source) == staged:
             raise OSError(errno.EXDEV, "Invalid cross-device link")
-        sweep_closed_partials(published)  # another run holds the backup lock now
+        sweep_closed_partials(published)
         link(source, target)
 
     monkeypatch.setattr(worker.os, "link", cross_device_with_sweep)

@@ -27,26 +27,82 @@ _TASK_RE = re.compile(r"\(task #(\d+)\)")
 _TRUNK_PR_RE = re.compile(r"trunk-merge/pr-(\d+)/")
 _BRANCH_AGENT_RE = re.compile(r"^ava-(\d+)-")
 
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#github-page-limit
 _WINDOW_CHUNK_SECONDS = 4 * 3600
 
 
-def _gh_api(path: str, *, jq: str, host: Host) -> list[dict]:
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+class CiUsageReadError(RuntimeError):
+    pass
+
+
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+def _gh_output(argv: list[str], *, operation: str, host: Host) -> str:
     try:
-        result = host.run(
-            ["gh", "api", path, "--jq", jq],
-            capture_output=True,
-            text=True,
-            timeout=_GH_TIMEOUT_S,
-        )
-    except subprocess.TimeoutExpired:
-        return []
+        result = host.run(argv, capture_output=True, text=True, timeout=_GH_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        raise CiUsageReadError(f"{operation}: GitHub query timed out") from exc
     if result.returncode != 0:
-        return []
+        raise CiUsageReadError(f"{operation}: GitHub query failed (exit {result.returncode})")
+    return result.stdout
+
+
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+def _gh_api(path: str, *, host: Host) -> Any:
+    output = _gh_output(["gh", "api", path], operation=path, host=host)
     try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
+        return json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise CiUsageReadError(f"{path}: GitHub response is not JSON") from exc
+
+
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, Any]]]:
+    payload = _gh_api(path, host=host)
+    if not isinstance(payload, dict):
+        raise CiUsageReadError(f"{path}: expected a GitHub page object")
+    total, rows = payload.get("total_count"), payload.get(key)
+    if type(total) is not int or total < 0 or not isinstance(rows, list):
+        raise CiUsageReadError(f"{path}: missing or invalid page fields")
+    if len(rows) > 100:
+        raise CiUsageReadError(f"{path}: inconsistent page count")
+    for row in rows:
+        if not isinstance(row, dict) or type(row.get("id")) is not int:
+            raise CiUsageReadError(f"{path}: invalid row identity")
+    return total, rows
+
+
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
+def _pages(
+    path: str, key: str, *, host: Host, max_items: int | None = None
+) -> list[dict[str, Any]]:
+    found: dict[int, dict[str, Any]] = {}
+    expected: int | None = None
+    page = 1
+    endpoint, _, query = path.partition("?")
+    while True:
+        total, rows = _read_page(
+            f"{endpoint}?per_page=100&page={page}" + (f"&{query}" if query else ""), key, host=host
+        )
+        if expected is not None and total != expected:
+            raise CiUsageReadError(f"{path}: incomplete read; total_count changed while paging")
+        # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#github-page-limit
+        if max_items is not None and total >= max_items:
+            raise CiUsageReadError(
+                f"{path}: incomplete read; narrow the window below {max_items} runs"
+            )
+        expected = total
+        for row in rows:
+            if row["id"] in found:
+                raise CiUsageReadError(f"{path}: incomplete read; duplicate row across pages")
+            found[row["id"]] = row
+        if len(found) > total:
+            raise CiUsageReadError(f"{path}: inconsistent page count")
+        if len(found) == total:
+            return list(found.values())
+        if len(rows) < 100:
+            raise CiUsageReadError(f"{path}: incomplete page ({len(found)} of {total} rows)")
+        page += 1
 
 
 def parse_identity(text: str) -> tuple[int | None, int | None]:
@@ -60,27 +116,11 @@ def parse_identity(text: str) -> tuple[int | None, int | None]:
 def _pr_title(repo: str, pr_number: int | None, *, host: Host) -> str:
     if pr_number is None:
         return ""
-    try:
-        result = host.run(
-            [
-                "gh",
-                "pr",
-                "view",
-                str(pr_number),
-                "--repo",
-                repo,
-                "--json",
-                "title",
-                "--jq",
-                ".title",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=_GH_TIMEOUT_S,
-        )
-    except subprocess.TimeoutExpired:
-        return ""
-    return result.stdout.strip() if result.returncode == 0 else ""
+    return _gh_output(
+        ["gh", "pr", "view", str(pr_number), "--repo", repo, "--json", "title", "--jq", ".title"],
+        operation=f"PR {pr_number} title",
+        host=host,
+    ).strip()
 
 
 def _real_pr_of_trunk_branch(head_ref: str) -> int | None:
@@ -90,20 +130,27 @@ def _real_pr_of_trunk_branch(head_ref: str) -> int | None:
 
 # ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#minute-billing
 def job_minutes(started: str | None, completed: str | None) -> int:
-    if not started or not completed:
+    # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#completed-job-minutes
+    if started is None or completed is None:
         return 0
     start = datetime.fromisoformat(started.replace("Z", "+00:00"))
     end = datetime.fromisoformat(completed.replace("Z", "+00:00"))
-    return max(0, math.ceil((end - start).total_seconds() / 60.0))
+    if start.utcoffset() is None or end.utcoffset() is None or end < start:
+        raise ValueError("job timestamps must be timezone-aware and ordered")
+    return math.ceil((end - start).total_seconds() / 60.0)
 
 
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#attribution-sources
 def _identity_from_prs(
-    run: dict, repo: str, real_pr: int | None, *, host: Host
+    run: dict[str, Any], repo: str, real_pr: int | None, *, host: Host
 ) -> tuple[int | None, int | None, int | None]:
-    pull_requests = [p for p in run.get("pull_requests", []) if isinstance(p, dict)]
+    pull_requests = run.get("pull_requests")
+    if not isinstance(pull_requests, list) or any(
+        not isinstance(pr, dict) or type(pr.get("number")) is not int for pr in pull_requests
+    ):
+        raise CiUsageReadError("workflow run: invalid pull_requests")
     if pull_requests:
-        raw_number = pull_requests[0].get("number")
-        pr_number = int(raw_number) if isinstance(raw_number, (int, str)) else None
+        pr_number = pull_requests[0]["number"]
         title = _pr_title(repo, real_pr if real_pr else pr_number, host=host)
         agent_id, task_id = parse_identity(title)
         return (real_pr or pr_number), agent_id, task_id
@@ -113,18 +160,26 @@ def _identity_from_prs(
     return None, None, None
 
 
-def _merged_pr_of(run: dict, repo: str, *, host: Host) -> int | None:
+def _merged_pr_of(run: dict[str, Any], repo: str, *, host: Host) -> int | None:
     head_sha = str(run.get("head_sha") or "")
     if not head_sha:
         return None
-    merged_prs = _gh_api(
-        f"repos/{repo}/commits/{head_sha}/pulls", jq="[.[] | .number] | @json", host=host
-    )
-    return merged_prs[0] if merged_prs and isinstance(merged_prs[0], int) else None
+    merged_prs = _gh_api(f"repos/{repo}/commits/{head_sha}/pulls", host=host)
+    if not isinstance(merged_prs, list) or any(
+        not isinstance(pr, dict) or type(pr.get("number")) is not int for pr in merged_prs
+    ):
+        raise CiUsageReadError(f"commit {head_sha}: invalid pull request associations")
+    return merged_prs[0]["number"] if merged_prs else None
 
 
 # ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#attribution-fallback-chain
-def _run_identity(run: dict, repo: str, *, host: Host) -> tuple[int | None, int | None, int | None]:
+def _run_identity(
+    # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#attribution-sources
+    run: dict[str, Any],
+    repo: str,
+    *,
+    host: Host,
+) -> tuple[int | None, int | None, int | None]:
     real_pr = _real_pr_of_trunk_branch(str(run.get("head_branch") or ""))
     pr_number, agent_id, task_id = _identity_from_prs(run, repo, real_pr, host=host)
     if agent_id is None and str(run.get("head_branch") or "") == "main":
@@ -133,7 +188,7 @@ def _run_identity(run: dict, repo: str, *, host: Host) -> tuple[int | None, int 
             pr_number = merged
             agent_id, task_id = parse_identity(_pr_title(repo, pr_number, host=host))
     if agent_id is None:
-        agent_id, task_id = parse_identity(str(run.get("head_commit_msg") or ""))
+        agent_id, task_id = parse_identity(str((run.get("head_commit") or {}).get("message") or ""))
     if agent_id is None:
         branch_match = _BRANCH_AGENT_RE.match(str(run.get("head_branch") or ""))
         if branch_match:
@@ -141,7 +196,7 @@ def _run_identity(run: dict, repo: str, *, host: Host) -> tuple[int | None, int 
     return pr_number, agent_id, task_id
 
 
-def _run_entry(run: dict, repo: str, *, host: Host) -> dict:
+def _run_entry(run: dict[str, Any], repo: str, *, host: Host) -> dict[str, Any]:
     pr_number, agent_id, task_id = _run_identity(run, repo, host=host)
     day = (run.get("created_at") or "")[:10]
     return {
@@ -159,20 +214,30 @@ def _run_entry(run: dict, repo: str, *, host: Host) -> dict:
     }
 
 
-def _fill_job_minutes(entry: dict, repo: str, *, host: Host) -> None:
-    jobs = _gh_api(
-        f"repos/{repo}/actions/runs/{entry['run_id']}/jobs?per_page=100",
-        jq="[.jobs[] | {name: .name, started: .started_at, completed: .completed_at}] | @json",
-        host=host,
-    )
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#completed-job-minutes
+def _completed_job_minutes(job: dict[str, Any]) -> int:
+    if job.get("status") != "completed" or not isinstance(job.get("conclusion"), str):
+        raise CiUsageReadError(f"job {job['id']}: incomplete; job is not completed")
+    if "started_at" not in job or "completed_at" not in job:
+        raise CiUsageReadError(f"job {job['id']}: missing completed-job timestamps")
+    started, completed = job["started_at"], job["completed_at"]
+    if started is None and job["conclusion"] in {"cancelled", "skipped"}:
+        return 0
+    if not isinstance(started, str) or not isinstance(completed, str):
+        raise CiUsageReadError(f"job {job['id']}: incomplete completed-job timestamps")
+    try:
+        return job_minutes(started, completed)
+    except ValueError as exc:
+        raise CiUsageReadError(f"job {job['id']}: invalid completed-job timestamps") from exc
+
+
+def _fill_job_minutes(entry: dict[str, Any], repo: str, *, host: Host) -> None:
+    jobs = _pages(f"repos/{repo}/actions/runs/{entry['run_id']}/jobs", "jobs", host=host)
     for job in jobs:
-        started = job.get("started")
-        completed = job.get("completed")
-        minutes = job_minutes(
-            started if isinstance(started, str) else None,
-            completed if isinstance(completed, str) else None,
-        )
-        name = str(job.get("name") or "")
+        minutes = _completed_job_minutes(job)
+        name = job.get("name")
+        if not isinstance(name, str):
+            raise CiUsageReadError(f"job {job['id']}: missing job name")
         if "macos" in name.lower():
             entry["macos_minutes"] += minutes
         else:
@@ -180,8 +245,9 @@ def _fill_job_minutes(entry: dict, repo: str, *, host: Host) -> None:
         entry["jobs"] += 1
 
 
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
 def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, Any]]:
-    entries: dict[int, dict] = {}
+    entries: dict[int, dict[str, Any]] = {}
     since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
     until_dt = datetime.fromisoformat(until.replace("Z", "+00:00"))
     cursor = since_dt
@@ -192,24 +258,29 @@ def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, 
             + ".."
             + datetime.fromtimestamp(chunk_end, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         )
-        for page in range(1, 11):
-            runs = _gh_api(
-                f"repos/{repo}/actions/runs?per_page=100&page={page}&created={window}",
-                jq='[.workflow_runs[] | select(.name == "CI") | '
-                "{id: .id, name: .name, conclusion: .conclusion, created_at: .created_at, "
-                "head_branch: .head_branch, head_sha: .head_sha, "
-                "head_commit_msg: .head_commit.message, "
-                "pull_requests: [.pull_requests[]?.number]}] | @json",
-                host=host,
-            )
-            if not runs:
-                break
-            for run in runs:
-                entries[int(run["id"])] = run
-            if len(runs) < 100:
-                break
+        runs = _pages(
+            f"repos/{repo}/actions/runs?created={window}",
+            "workflow_runs",
+            host=host,
+            max_items=1000,
+        )
+        for run in runs:
+            name = run.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise CiUsageReadError(f"run {run['id']}: invalid workflow name")
+            if name != "CI":
+                continue
+            try:
+                created = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+            except (KeyError, AttributeError, ValueError) as exc:
+                raise CiUsageReadError(f"run {run['id']}: invalid created_at") from exc
+            if not since_dt <= created < until_dt:
+                continue
+            if run.get("status") != "completed" or not isinstance(run.get("conclusion"), str):
+                raise CiUsageReadError(f"run {run['id']}: incomplete; workflow is not completed")
+            entries[run["id"]] = run
         cursor = datetime.fromtimestamp(chunk_end, tz=UTC)
-    out = []
+    out: list[dict[str, Any]] = []
     for run in entries.values():
         entry = _run_entry(run, repo, host=host)
         _fill_job_minutes(entry, repo, host=host)
@@ -217,10 +288,10 @@ def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, 
     return out
 
 
-def load_ledger(path: Path) -> dict[int, dict]:
+def load_ledger(path: Path) -> dict[int, dict[str, Any]]:
     if not path.exists():
         return {}
-    ledger: dict[int, dict] = {}
+    ledger: dict[int, dict[str, Any]] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -234,7 +305,8 @@ def load_ledger(path: Path) -> dict[int, dict]:
 
 
 # ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#ledger-idempotence
-def append_ledger(path: Path, entries: list[dict]) -> int:
+def append_ledger(path: Path, entries: list[dict[str, Any]]) -> int:
+    # ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#preserve-ledger-history
     ledger = load_ledger(path)
     fresh = [e for e in entries if e["run_id"] not in ledger]
     if not fresh:
@@ -247,9 +319,11 @@ def append_ledger(path: Path, entries: list[dict]) -> int:
 
 
 # ava:ref scripts/ci/pull_requests/docs/accounting.ava.okf.md#overage-equivalent-cost
-def report_rows(ledger: dict[int, dict], *, days: int, agent: int | None) -> list[dict]:
+def report_rows(
+    ledger: dict[int, dict[str, Any]], *, days: int, agent: int | None
+) -> list[dict[str, Any]]:
     cutoff = datetime.now(UTC).timestamp() - days * 86400
-    per_agent: dict[int | None, dict] = {}
+    per_agent: dict[int | None, dict[str, Any]] = {}
     for entry in ledger.values():
         if agent is not None and entry.get("agent_id") != agent:
             continue
@@ -282,7 +356,7 @@ def report_rows(ledger: dict[int, dict], *, days: int, agent: int | None) -> lis
     return sorted(rows, key=lambda r: -(r["est_usd"] or 0))
 
 
-def _print_report(rows: list[dict], days: int) -> None:
+def _print_report(rows: list[dict[str, Any]], days: int) -> None:
     print(
         f"CI usage, last {days} days (minutes primary; est. private-repo overage at "
         f"Linux ${LINUX_MINUTE_USD}/min, macOS ${MACOS_MINUTE_USD}/min):"
@@ -306,7 +380,7 @@ def _report(days: int, agent: int | None, *, as_json: bool) -> None:
         _print_report(rows, days)
 
 
-def _print_entries(entries: list[dict]) -> None:
+def _print_entries(entries: list[dict[str, Any]]) -> None:
     if not entries:
         print("No CI runs in the window.")
         return
@@ -321,6 +395,7 @@ def _print_entries(entries: list[dict]) -> None:
         )
 
 
+# ava:ref scripts/ci/pull_requests/docs/ci-usage.ava.okf.md#complete-github-evidence
 def main(argv: list[str] | None = None, *, host: Host) -> int:
     parser = argparse.ArgumentParser(description="CI usage attribution and ledger")
     parser.add_argument(
@@ -345,7 +420,11 @@ def main(argv: list[str] | None = None, *, host: Host) -> int:
 
     if not args.since or not args.until:
         parser.error("--since and --until are required without --report")
-    entries = collect(args.repo, args.since, args.until, host=host)
+    try:
+        entries = collect(args.repo, args.since, args.until, host=host)
+    except CiUsageReadError as exc:
+        print(f"CI usage collection failed: {exc}", file=sys.stderr)
+        return 1
     if args.append_ledger:
         appended = append_ledger(Path(args.append_ledger), entries)
         print(f"appended {appended} entry(s) to {args.append_ledger} (of {len(entries)} collected)")

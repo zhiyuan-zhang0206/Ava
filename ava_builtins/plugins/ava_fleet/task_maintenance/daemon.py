@@ -139,15 +139,14 @@ def _reminder_digest_message(tasks: list[tuple[int, str, int, int, str]]) -> str
     stay on the line so the owner sees the silence it is being asked to
     break."""
     lines = [
-        f"Task reminders — you have {len(tasks)} overdue task(s). "
-        "Report status and push each forward now:"
+        f"Task check-in — {len(tasks)} task(s) reached their reminder interval; "
+        "check whether each needs a progress update or should be pushed forward:"
     ]
     for task_id, title, remind_interval_seconds, elapsed, _priority in tasks:
         lines.append(
-            f'- #{task_id} "{title}" — idle {elapsed / 3600:.1f}h '
-            f"(reminder interval: {remind_interval_seconds // 60}min): report your "
-            "current status and advance the next step; if you cannot advance, state "
-            "why and raise the reminder interval to wait explicitly"
+            f'- #{task_id} "{title}" — no update for {elapsed / 3600:.1f}h '
+            f"(reminder interval: {remind_interval_seconds // 60}min): if you cannot "
+            "advance it, state why and adjust the reminder interval"
         )
     return "\n".join(lines)
 

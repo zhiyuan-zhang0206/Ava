@@ -1,11 +1,4 @@
-"""Boot this process's SDK entry: its lazy client set, a launched script's context, plugin loading.
-
-`ava/__init__.py` calls `ensure_plugins_loaded` once a launched process has imported the SDK; the
-execution child, the schedule runner and an external attachment call it (or `initialize_context`)
-with the inputs they own. The slots a context is published into live in
-`ava.sdk_surface.process_context`. This module sits above the namespaces whose clients it
-configures (`ava.mcps`, `ava.gateway_client`) and below the namespaces and roots that boot a process.
-"""
+# ava:ref ava/docs/boot-contracts.ava.okf.md#cold-sdk-entry
 
 from __future__ import annotations
 
@@ -20,7 +13,8 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
-from base.clock import SYSTEM_TIMERS, Clock, clock_config_from_boot
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -70,15 +64,13 @@ def _gateway(url: str, *, config: ConfigBoot, timeout_reader: Callable[[], float
 
 
 def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> DatabaseFactory:
-    """Retain one lazy database gate on this client set, without importing its dial stack."""
     from threading import Lock
 
     from base.native_process.code_version import CodeVersion
 
     version = CodeVersion(process_context.loaded_code_image())
     lock = Lock()
-    # The dial stack stays cold until the first database request. The factory,
-    # not a module slot or an independently returned handle, owns this gate.
+
     gate: Any = None
 
     def database() -> Any:
@@ -114,11 +106,6 @@ def process_clients(
     config: ConfigBoot | None = None,
     machine: MachineIdentity | None = None,
 ) -> ClientSet:
-    """Build lazy process clients without reading their configuration or credentials.
-
-    Explicit startup owners retain their live views. Omission captures the already
-    delivered environment at the first resource read; SDK use never redelivers it.
-    """
     owner = config if config is not None else ConfigBoot()
     identity = machine if machine is not None else machine_from_boot(owner)
 
@@ -181,7 +168,6 @@ def context_from_description(
     original_incarnation: RuntimeIncarnation | None = None,
     config: ConfigBoot | None = None,
 ) -> AvaContext:
-    """Rebuild an execution context without copying its host's live clients or secrets."""
     owner = config if config is not None else ConfigBoot()
     if config is None:
         owner.read_process_environment()
@@ -197,19 +183,11 @@ def context_from_description(
 
 
 def has_launched_identity() -> bool:
-    """Inspect the launched identity channel without constructing a context."""
-    return "AVA_AGENT_ID" in os.environ  # env-ok: launched script identity channel
+    return "AVA_AGENT_ID" in os.environ
 
 
 def launched_context(*, config: ConfigBoot | None = None) -> AvaContext | None:
-    """Construct a launched script's context from its explicit environment channel.
-
-    The SDK entry rejects shared-host startup posture before calling this.
-    This function never infers identity from a native turn.
-    Identity binding precedes plugin installation; the execution root attaches
-    its catalog after that installation completes.
-    """
-    raw = os.environ.get("AVA_AGENT_ID")  # env-ok: launched script identity channel
+    raw = os.environ.get("AVA_AGENT_ID")
     if raw is None:
         return None
     if config is None:
@@ -225,14 +203,6 @@ def launched_context(*, config: ConfigBoot | None = None) -> AvaContext | None:
 
 
 def _door_import_complete() -> bool:
-    """Whether `ava/__init__.py` has finished importing (it sets `_init_complete` last).
-
-    The lazy plugin load must stay dormant during `import ava`: a `from . import agents` there
-    triggers `__getattr__('agents')` through importlib's fromlist probe, and in a launched child
-    (AVA_AGENT_ID already in the env) that would run `load_extensions()` against a
-    half-initialized `ava` singleton - the reverse `ava -> agent` import on an incomplete module
-    the history doc rejected. Gating on the flag keeps `import ava` byte-identical to before; the
-    lazy path only arms once the module is whole."""
     return bool(ava_module().__dict__.get("_init_complete", False))
 
 
@@ -246,41 +216,6 @@ def ensure_plugins_loaded(
     context: AvaContext | None = None,
     validate_state: StateGate | None = None,
 ) -> None:
-    """Idempotently load plugin namespaces (`ava.tasks` etc.) into *this* process.
-
-    The entry point for a process an agent launched: a watcher / schedule
-    bootstrap calls it explicitly before running agent code. A persistent-shell
-    child completes the same composition before its first parent import returns;
-    `__getattr__` remains the backstop for a deferred plugin load.
-    `surface=True` (the default) loads the plugin *surfaces* only — the child
-    contract (task #3633). `surface=False` loads the full agent-runtime faces
-    too (state fields / hooks / prompt sections), called when a stateful
-    child's lazy state slot resolves: the state schema needs the plugins'
-    field registrations. Each stage runs at most once per process — the load state
-    is the installation slot (`ava.sdk_surface.install`): `installed()` answers
-    "loaded", `faces` "and the faces", `load_attempted()` "in flight, or attempted
-    and failed (no retry)"; the failed state preserves the original exception.
-
-    The loader is `ava.sdk_surface.extensions.load_extensions` over `base.packages.plugins.loading`; neither imports `agent`. A load
-    that imports agent-runtime faces (`surface=False`) validates the state they declare with
-    `validate_state` (`agent.state.plugin_state_schema`), which only a caller that runs agent
-    code can supply.
-
-    Expected typed declaration refusals are isolated by the installer after a
-    successful rollback. Unknown inventory, configuration, programming or I/O
-    failures propagate unchanged; a later call re-raises the same failure without
-    retrying the load. The loader's earlier per-module import containment is a
-    separate boundary in `ava.sdk_surface.extensions`.
-
-    A supplied context binds before loading and receives the installed catalog.
-    A launched process with no context first constructs one from the same boot
-    owner used for its installation. Startup identity inspection does not invoke
-    the ambient context getter. An explicit composition root supplies its
-    configuration, clock and optional machine owner. If no producer is supplied, the installation retains its own
-    cold clients with those inputs until process exit; it never borrows an
-    attachment's shorter-lived clients. Bound SDK calls use their own context's
-    producer instead.
-    """
     if context is not None:
         process_context.bind_context(context)
     else:
@@ -295,14 +230,13 @@ def ensure_plugins_loaded(
         _bind_installed_catalog(context)
         return
     if _sdk_install.load_attempted():
-        return  # An actual re-entrant miss while a load is in flight.
+        return
     if installation is None and config is None and context is None and is_launched_process():
         context, config = _prepare_launched_context()
     if context is not None:
         clock_factory = clock_factory or context.clock_factory
         machine = machine if machine is not None else context.machine
     if installation is None:
-        # Operator errors in AVA_SDK_DISABLE are fatal, before plugin admission.
         sdk_disable.apply_entries(sdk_disable.env_entries())
     _sdk_install.mark_load_attempt()
     _load_plugin_stages(
@@ -327,7 +261,6 @@ def _load_plugin_stages(
     producer: Callable[[], Any] | None,
     validate_state: StateGate | None,
 ) -> None:
-    """Run the existing installation stage and retain its original load failure."""
     from ava.sdk_surface import install as _sdk_install
     from ava.sdk_surface.extensions import load_extensions
     from base.packages.plugins.loading.faces import load_agent_faces
@@ -346,8 +279,6 @@ def _load_plugin_stages(
                 config.read_process_environment()
             import atexit
 
-            # The installation outlives attachments. Bound calls capture their
-            # own context's producer; bare calls keep this distinct cold owner.
             if producer is None:
                 clients = process_clients(config=config, machine=machine)
                 atexit.register(clients.close)
@@ -382,12 +313,6 @@ def initialize_context(
     producer: Callable[[], Any] | None = None,
     validate_state: StateGate | None = None,
 ) -> None:
-    """Bind a root-supplied context and complete its SDK installation.
-
-    Framework-internal: callers validate their request or lease first and own
-    context-client cleanup and prior-context restoration. Installation producers
-    keep their separate lifetime. Shared hosts cannot bind an ambient context.
-    """
     ensure_plugins_loaded(
         context=context,
         surface=surface,
@@ -400,13 +325,11 @@ def initialize_context(
 
 
 def _bind_installed_catalog(context: AvaContext | None) -> None:
-    """Complete a bound context only after its installation is actually ready."""
     if context is None:
         return
     from ava.sdk_surface import settings as _settings
     from ava.sdk_surface.installation import installed
 
-    # A loader still being imported deferred its work; it is not ready yet.
     if installed() is not None:
         catalog = _settings.model_catalog()
         if context.catalog is not catalog:
@@ -414,7 +337,6 @@ def _bind_installed_catalog(context: AvaContext | None) -> None:
 
 
 def _prepare_launched_context() -> tuple[AvaContext, ConfigBoot]:
-    """Capture one boot owner and publish its cold launched context."""
     config = ConfigBoot()
     context = launched_context(config=config)
     if context is None:
@@ -427,7 +349,6 @@ def _prepare_launched_context() -> tuple[AvaContext, ConfigBoot]:
 
 
 def is_launched_process() -> bool:
-    """Inspect startup identity without triggering the ambient context getter."""
     if process_context.is_host_process():
         return False
     bound = process_context.bound_context()
@@ -438,24 +359,6 @@ def is_launched_process() -> bool:
 
 
 def maybe_load_plugins_for_missing(name: str) -> bool:
-    """Env-gated lazy plugin load, shared by `ava.__getattr__` and the framework
-    namespace modules that plugins extend (`ava.self`, `ava.ui`).
-
-    A persistent-shell child an agent launched runs a bare `python x.py`
-    (no bootstrap to hook), so a plugin namespace
-    (`ava.tasks`) or a plugin member on an existing namespace (`ava.ui.notify`,
-    `ava.self.set_label` from ava_fleet) would AttributeError. On the first such miss,
-    load plugins once — then the caller retries the lookup.
-
-    Returns True iff this call loaded plugins (caller should re-attempt
-    `getattr`); a deferral — the loader module is still importing — returns
-    False so the caller fails fast now and a later miss retries. Fires only in
-    an agent-launched child (`agent_identity.is_launched_child`), only after `import ava`
-    is complete (`_init_complete`), only while no load is installed, in flight or
-    failed, and never for underscore names — so gateway / cli / the agent process
-    keep fail-fast on a genuinely-unknown attribute, `import ava` is untouched,
-    and a dunder probe never triggers a load.
-    """
     if name.startswith("_") or not _door_import_complete():
         return False
     from ava.sdk_surface import install as _sdk_install
@@ -473,11 +376,6 @@ def maybe_load_plugins_for_missing(name: str) -> bool:
 
 
 def bind_launched_context() -> AvaContext | None:
-    """Build and bind a launched script's context from its environment, or None without one.
-
-    The first read of `ava.context` in a launched process whose import did not already bind it.
-    The context's clients close with the interpreter.
-    """
     import atexit
 
     launched = launched_context()

@@ -35,7 +35,7 @@ id = "minute-billing"
 kind = "invariant"
 statement = """A job's billable minutes are the ceiling of its wall duration. The jobs API reports null started/completed for in-progress and cancelled-before-start jobs; those pass through as absent and bill 0 minutes rather than crashing the timestamp parse."""
 code = ["scripts/ci/pull_requests/accounting.py:job_minutes"]
-tests = ["scripts/ci/pull_requests/tests/test_ci_accounting.py::test_job_minutes_null_contract", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_null_timestamps_bill_zero_and_do_not_crash"]
+tests = ["scripts/ci/pull_requests/tests/test_ci_accounting.py::test_job_minutes_null_contract", "scripts/ci/pull_requests/tests/test_ci_accounting.py::test_cancelled_before_start_jobs_bill_zero"]
 ```
 
 ```ava-contract
