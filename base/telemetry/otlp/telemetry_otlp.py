@@ -63,7 +63,6 @@ from base.cluster.derive import production_identity
 from base.cluster.machine import MachineIdentity
 from base.telemetry.delivery.loss import report_loss
 from base.telemetry.delivery.mirror import append_jsonl
-from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
 from base.telemetry.delivery.reporting import (
     failure_isolated,
@@ -106,7 +105,6 @@ from base.telemetry.otlp.telemetry_otlp_worker import OtlpWorker
 
 __all__ = [
     "COLLECTOR_RETRY_INTERVAL_S",
-    "ExportingEventPipeline",
     "OtlpBackend",
     "endpoint_reachable",
     "observability_export_allowed",
@@ -752,49 +750,3 @@ def metrics_resource() -> Any:
         return telemetry_otlp_metrics.metrics_resource()
     finally:
         telemetry_otlp_metrics.cluster_label = original_cluster_label
-
-
-class ExportingEventPipeline(EventPipeline):
-    """One ordinary writer and its downstream exporter share an explicit owner."""
-
-    def __init__(
-        self,
-        *,
-        writer: Callable[[list[Event], OtlpBackend], None],
-        export_allowed: Callable[[], bool],
-        flush_interval_s: float = 0.5,
-    ) -> None:
-        self._exporter = OtlpBackend(export_allowed=export_allowed)
-        self._exports_finished = False
-        super().__init__(
-            writer=lambda events: writer(events, self._exporter), flush_interval_s=flush_interval_s
-        )
-
-    @property
-    def stopped(self) -> bool:
-        return super().stopped and self._exports_finished
-
-    def stop(self, timeout: float = 5.0) -> DrainResult:
-        # ava:ref base/telemetry/otlp/docs/telemetry-otlp/exit-flush.ava.okf.md#two-wait-classes-one-deadline
-        deadline = time.monotonic() + timeout
-        result = super().stop(max(0.0, deadline - time.monotonic()))
-        if result.status is DrainStatus.UNFINISHED:
-            return result
-        result = self._exporter.shutdown(timeout=max(0.0, deadline - time.monotonic()))
-        self._exports_finished = result.status is DrainStatus.COMPLETED
-        return result
-
-    def defer_exports(self) -> None:
-        self._exporter.defer_until_exit()
-
-    def finalize_exports(self) -> None:
-        self._exporter.finalize()
-
-    def warmup_exports(self) -> None:
-        self._exporter.warmup()
-
-    def exports_deferred(self) -> bool:
-        return self._exporter.deferred_state()
-
-    def record_export_loss(self, report: Event) -> None:
-        self._exporter.record_loss(report)

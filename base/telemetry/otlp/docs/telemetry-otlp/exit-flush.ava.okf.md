@@ -29,7 +29,7 @@ kind = "invariant"
 statement = "A stop takes one real deadline: the writer observation completes or expires before the exporter observation starts, and each native stage receives only the deadline's remaining real time — never the original allowance, and zero once it is spent. A virtualized clock may drive a cancellable cooldown, but never a native stop observation or its budget."
 code = [
   "base/telemetry/otlp/telemetry_otlp.py:OtlpBackend.shutdown",
-  "base/telemetry/otlp/telemetry_otlp.py:ExportingEventPipeline.stop",
+  "base/telemetry/otlp/telemetry_otlp_exporting.py:ExportingEventPipeline.stop",
 ]
 tests = [
   "base/telemetry/tests/otlp/test_otlp_worker_lifecycle.py::test_two_stage_stop_hands_stage_two_the_real_remaining_time",

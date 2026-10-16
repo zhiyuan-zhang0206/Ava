@@ -1,7 +1,7 @@
 exports = ["external_flush.py"]
 
 [debt.first-party-patch]
-"external_flush.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.OtlpBackend" = 1
+"external_flush.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_exporting.OtlpBackend" = 1
 
 [debt.unresolved-patch]
 "external_flush.py#monkeypatch.setattr backend._emit_log" = 1

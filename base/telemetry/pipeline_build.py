@@ -58,10 +58,8 @@ def build_pipeline(
 
     `flush_interval_s` is how long the drain thread holds a partial batch before it writes it.
     """
-    from base.telemetry.otlp.telemetry_otlp import (
-        ExportingEventPipeline,
-        observability_export_allowed,
-    )
+    from base.telemetry.otlp.telemetry_otlp import observability_export_allowed
+    from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
 
     return ExportingEventPipeline(
         writer=lambda events, exporter: write_batch(
