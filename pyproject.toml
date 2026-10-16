@@ -275,6 +275,10 @@ check-typed-exception = true
 "ava_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
 "ava_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
 "scripts/**" = ["ANN", "T20"]
+# The weekly dependency audit calls fixed https upstream URLs and fixed audit-tool
+# argv (uvx / npm / gh) — every site is a literal with static arguments, so the
+# bandit heuristics would only restate those two lines.
+"scripts/ci/dependency_audit.py" = ["S310", "S603"]
 "meizel/**" = ["ANN", "T20"]
 # The typed S110 findings in scripts/tests were outside the retired lint's
 # production scan; preserve that boundary.
